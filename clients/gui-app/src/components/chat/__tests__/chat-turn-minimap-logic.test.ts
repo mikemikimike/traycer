@@ -11,6 +11,7 @@ import {
   resolveChatTurnMinimapCurrentIndex,
   resolveChatTurnMinimapHitStripWidth,
   resolveChatTurnMinimapTopStyle,
+  shouldRunChatTurnMinimapRail,
 } from "@/components/chat/chat-turn-minimap-logic";
 import { MINIMAP_TRACK_END_HIT_PADDING } from "@/components/minimap/minimap-track-geometry";
 import { transcriptListRows } from "@/stores/chats/transcript-list-rows";
@@ -296,5 +297,53 @@ describe("chatTurnMinimapItems caching", () => {
     const second = chatTurnMinimapItems({ rows: suppressed, window });
 
     expect(second).not.toBe(first);
+  });
+});
+
+/**
+ * The rail's geometry effect measures the transcript container, which forces a
+ * layout while the virtualized list is measuring its own rows - so the gate
+ * that decides whether it runs at all is worth pinning on its own. It lost its
+ * only direct coverage when the old overlay suite went.
+ */
+describe("shouldRunChatTurnMinimapRail", () => {
+  it("runs only where the rail can actually paint", () => {
+    expect(
+      shouldRunChatTurnMinimapRail({
+        shown: true,
+        coarsePointer: false,
+        mobileViewport: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("stands down for a touch pointer, which never hovers it", () => {
+    expect(
+      shouldRunChatTurnMinimapRail({
+        shown: true,
+        coarsePointer: true,
+        mobileViewport: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("stands down below the breakpoint that hides it", () => {
+    expect(
+      shouldRunChatTurnMinimapRail({
+        shown: true,
+        coarsePointer: false,
+        mobileViewport: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stands down when the layout hides the minimap", () => {
+    expect(
+      shouldRunChatTurnMinimapRail({
+        shown: false,
+        coarsePointer: false,
+        mobileViewport: false,
+      }),
+    ).toBe(false);
   });
 });
