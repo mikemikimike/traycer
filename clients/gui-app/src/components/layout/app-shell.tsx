@@ -1,5 +1,6 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
+import { LayoutEditor } from "@/components/layout-editor/layout-editor";
 import { RootDndProvider } from "@/components/epic-canvas/dnd/root-dnd-provider";
 import { TileFindOwnerBridge } from "@/components/epic-canvas/tile-find/tile-find-owner-bridge";
 import { TileSelectAllBridge } from "@/components/epic-canvas/tile-select-all-bridge";
@@ -80,18 +81,28 @@ export function AppShell(props: AppShellProps) {
   // would be a second episode, and the two could disagree about whether a bar
   // is on screen.
   const sessionConnectivity = useHostSessionConnectivity();
+  // The app column, handed to the layout editor: the element it decorates, puts
+  // the edit firewall on, and docks BESIDE (4.5). State rather than a ref
+  // because the editor has to re-run its effects when the node arrives.
+  const [appColumn, setAppColumn] = useState<HTMLDivElement | null>(null);
 
   return (
     <PrimaryFocusCoordinatorProvider>
       <DiffWorkerPoolProvider>
-        <div className="min-h-safe-dvh bg-canvas text-canvas-foreground">
+        {/* A flex ROW, and the only structural change the editor asks of the
+          shell: a side dock is the inspector taking its share of this row, so
+          the app reflows beside it in one frame and is never scaled (L-02).
+          No new wrapper - `aria-hidden` and the firewall go on the column
+          below, which must never be an ancestor of the inspector (C-06). */}
+        <div className="flex min-h-safe-dvh bg-canvas text-canvas-foreground">
           <RootDndProvider>
             {/* The screen, as a history swipe understands one: the header and
               the content viewport travel together, because a transition that
               moved only the content would leave the title of the screen you
               are leaving sitting above the screen you are arriving at. */}
             <div
-              className="relative flex h-safe-dvh w-full flex-col"
+              ref={setAppColumn}
+              className="relative flex h-safe-dvh min-w-0 flex-1 flex-col"
               {...{ [SWIPE_NAV_SCREEN_ATTRIBUTE]: "" }}
             >
               <AppHeader variant="app" />
@@ -180,6 +191,11 @@ export function AppShell(props: AppShellProps) {
               {historySwipeTransition}
             </div>
           </RootDndProvider>
+          {/* The app column's SIBLING, so nothing the firewall does to the
+            column reaches the inspector. Mounted unconditionally: it renders
+            nothing until a session opens, and the canvas controllers it holds
+            need the column whether or not one is. */}
+          <LayoutEditor column={appColumn} />
         </div>
       </DiffWorkerPoolProvider>
     </PrimaryFocusCoordinatorProvider>

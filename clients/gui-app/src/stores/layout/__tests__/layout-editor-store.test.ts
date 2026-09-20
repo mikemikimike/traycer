@@ -51,6 +51,7 @@ beforeEach(() => {
   useLayoutEditorStore.setState({
     instances: new Map(),
     dockMode: "right",
+    floatPosition: null,
     lockedBy: "none",
   });
 });
@@ -252,28 +253,38 @@ describe("instances", () => {
   });
 });
 
-describe("the dock mode is the one persisted field (L-38)", () => {
-  it("writes only the dock mode to its own leaf", async () => {
+describe("where the panel sits is the only persisted state (L-38)", () => {
+  it("writes only the dock mode and the float position to its own leaf", async () => {
     session(null);
     editorState().select("minimap");
     editorState().setDockMode("float");
+    editorState().setFloatPosition({ x: 120, y: 64 });
     await useLayoutEditorStore.persist.rehydrate();
 
     // The whole record, byte for byte: nothing about the open session is in
     // it, which is the point of the partialize.
     expect(
       window.localStorage.getItem(persistKey(STORE_KEYS.layoutEditorDock)),
-    ).toBe(JSON.stringify({ state: { dockMode: "float" }, version: 1 }));
+    ).toBe(
+      JSON.stringify({
+        state: { dockMode: "float", floatPosition: { x: 120, y: 64 } },
+        version: 1,
+      }),
+    );
   });
 
   it("falls back to the right dock when the record is unusable", async () => {
     window.localStorage.setItem(
       persistKey(STORE_KEYS.layoutEditorDock),
-      JSON.stringify({ state: { dockMode: "bottom" }, version: 1 }),
+      JSON.stringify({
+        state: { dockMode: "bottom", floatPosition: { x: "left", y: 4 } },
+        version: 1,
+      }),
     );
     await useLayoutEditorStore.persist.rehydrate();
 
     expect(editorState().dockMode).toBe("right");
+    expect(editorState().floatPosition).toBeNull();
   });
 });
 

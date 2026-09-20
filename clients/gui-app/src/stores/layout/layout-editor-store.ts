@@ -27,8 +27,9 @@ import {
  * a gesture touched, and what lets a write from another window arrive without
  * this store having an opinion about it.
  *
- * One field is persisted - the dock mode, which is a preference about the
- * instrument panel rather than about a session (L-38).
+ * Two fields are persisted - where the instrument panel sits and, when it
+ * floats, where the user left it. Both are preferences about the panel rather
+ * than about a session (L-38).
  */
 
 /** Whether the editor is decorating the user's own chat or the sample workspace (L-15). */
@@ -36,6 +37,16 @@ export type LayoutEditorScene = "in-place" | "sample";
 
 /** Where the inspector sits (L-38). `float` is the one mode allowed to overlap. */
 export type LayoutDockMode = "right" | "left" | "float";
+
+/**
+ * A floating inspector's top-left corner, in viewport pixels. `null` until the
+ * user has dragged it somewhere, which is what lets the default corner follow
+ * the window rather than being frozen at whatever the first window was.
+ */
+export interface LayoutDockPosition {
+  readonly x: number;
+  readonly y: number;
+}
 
 export interface LayoutEditorSession {
   readonly scene: LayoutEditorScene;
@@ -86,6 +97,7 @@ export interface LayoutEditorState {
   readonly keyboardNav: boolean;
   readonly filter: string;
   readonly dockMode: LayoutDockMode;
+  readonly floatPosition: LayoutDockPosition | null;
   readonly history: LayoutHistory;
   /** The state Discard restores, rebased on every external write (L-18). */
   readonly entrySnapshot: LayoutSnapshot | null;
@@ -112,6 +124,7 @@ export interface LayoutEditorState {
   readonly setKeyboardNav: (keyboardNav: boolean) => void;
   readonly setFilter: (filter: string) => void;
   readonly setDockMode: (dockMode: LayoutDockMode) => void;
+  readonly setFloatPosition: (floatPosition: LayoutDockPosition) => void;
   readonly setRelayRaised: (relayRaised: boolean) => void;
   readonly setLockedBy: (lockedBy: LayoutEditorLock) => void;
   /** One gesture: whatever `mutate` writes to the layout store is one undo step. */
@@ -139,6 +152,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
     (set, get) => ({
       ...SESSION_DEFAULTS,
       dockMode: "right",
+      floatPosition: null,
       lockedBy: "none",
       beginSession: (session) => {
         set({
@@ -189,6 +203,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       setKeyboardNav: (keyboardNav) => set({ keyboardNav }),
       setFilter: (filter) => set({ filter }),
       setDockMode: (dockMode) => set({ dockMode }),
+      setFloatPosition: (floatPosition) => set({ floatPosition }),
       setRelayRaised: (relayRaised) => set({ relayRaised }),
       setLockedBy: (lockedBy) => set({ lockedBy }),
       recordGesture: (mutate) => {
@@ -229,10 +244,14 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       storage: createJSONStorage(() => localStorage),
       // The dock is a preference about the instrument panel; everything else
       // in this store describes one session and dies with it.
-      partialize: (state) => ({ dockMode: state.dockMode }),
+      partialize: (state) => ({
+        dockMode: state.dockMode,
+        floatPosition: state.floatPosition,
+      }),
       merge: (persistedState, currentState) => ({
         ...currentState,
         dockMode: persistedDockMode(persistedState),
+        floatPosition: persistedFloatPosition(persistedState),
       }),
     },
   ),
@@ -343,4 +362,23 @@ function persistedDockMode(persistedState: unknown): LayoutDockMode {
   return dockMode === "left" || dockMode === "float" || dockMode === "right"
     ? dockMode
     : "right";
+}
+
+/**
+ * A position off another window's viewport is still resolved here; the dock
+ * clamps what it reads against the CURRENT viewport, which is the only place
+ * that knows how big the panel is.
+ */
+function persistedFloatPosition(
+  persistedState: unknown,
+): LayoutDockPosition | null {
+  if (persistedState === null || typeof persistedState !== "object")
+    return null;
+  const floatPosition: unknown = Reflect.get(persistedState, "floatPosition");
+  if (floatPosition === null || typeof floatPosition !== "object") return null;
+  const x: unknown = Reflect.get(floatPosition, "x");
+  const y: unknown = Reflect.get(floatPosition, "y");
+  if (typeof x !== "number" || !Number.isFinite(x)) return null;
+  if (typeof y !== "number" || !Number.isFinite(y)) return null;
+  return { x, y };
 }

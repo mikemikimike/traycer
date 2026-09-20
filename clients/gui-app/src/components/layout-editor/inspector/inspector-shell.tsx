@@ -16,10 +16,13 @@ import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 
 interface InspectorShellProps {
   /**
-   * Leaving the editor. Session exit (`editor-session.ts`) is ticket 07's;
-   * this component is unwired, so its caller decides what "Done" does.
+   * Leaving the editor, and how (5.3): the Done button, an Escape that walked
+   * off the bottom rung of the ladder, or Discard changes - which restores the
+   * entry snapshot on the way out rather than leaving the user in an editor
+   * they just emptied. The caller owns all three, because ending a session is
+   * the door's job and this shell also renders without one.
    */
-  readonly onDone: () => void;
+  readonly onExit: (reason: "done" | "escape" | "discard") => void;
   readonly children: ReactNode;
 }
 
@@ -43,7 +46,7 @@ const DOCK_MODES: ReadonlyArray<{
  * `Settings > Layout` host's card without carrying a dock-only width (L-03).
  */
 export function InspectorShell(props: InspectorShellProps): ReactNode {
-  const { onDone } = props;
+  const { onExit } = props;
   const dockMode = useLayoutEditorStore((state) => state.dockMode);
   const canUndo = useLayoutEditorStore(
     (state) => state.history.past.length > 0,
@@ -71,20 +74,30 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
       if (event.key !== "Escape") return;
       event.preventDefault();
       const wentBack = useLayoutEditorStore.getState().popInspectorLevel();
-      if (!wentBack) onDone();
+      if (!wentBack) onExit("escape");
     }
     node.addEventListener("keydown", handleKeyDown);
     return () => {
       node.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onDone]);
+  }, [onExit]);
 
   return (
     <div
       ref={rootRef}
-      className="flex h-full min-h-0 max-w-full flex-col bg-background"
+      // Focusable but not a tab stop: the firewall bounces focus that lands on
+      // the app column back to here, and Escape is listened for on this node,
+      // so the bounce has to land ON it rather than above it (4.4).
+      tabIndex={-1}
+      data-layout-inspector-shell
+      className="flex h-full min-h-0 max-w-full flex-col bg-background outline-none"
     >
-      <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border pr-2.5 pl-3.5">
+      {/* The float mode's drag handle (L-38): `dock-modes.ts` picks a drag up
+        here and nowhere else, so the body scrolls rather than moves. */}
+      <div
+        data-layout-inspector-header
+        className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border pr-2.5 pl-3.5"
+      >
         <span className="text-ui-sm font-medium tracking-[0.01em]">Layout</span>
         <span className="flex-1" />
         <div
@@ -140,11 +153,21 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
         >
           <Redo2 />
         </Button>
-        <Button type="button" size="sm" onClick={props.onDone}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            onExit("done");
+          }}
+        >
           Done
         </Button>
       </div>
-      <RelayRow />
+      <RelayRow
+        onDone={() => {
+          onExit("done");
+        }}
+      />
       <div className={cn("min-h-0 flex-1 overflow-auto")}>{props.children}</div>
       <div className="flex shrink-0 items-center border-t border-border px-2.5 py-1.5">
         <Button
@@ -153,7 +176,7 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
           size="sm"
           disabled={!canDiscard}
           onClick={() => {
-            useLayoutEditorStore.getState().discard();
+            onExit("discard");
           }}
         >
           Discard changes

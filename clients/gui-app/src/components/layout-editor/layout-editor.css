@@ -19,6 +19,9 @@
   /* Above the app column, below a toast, which still has to reach the user. */
   --layout-editor-ring-z: 40;
   --layout-editor-chip-z: 41;
+  /* Above both, because a floating panel the user placed there is the one
+     thing that is allowed to cover the canvas it decorates (L-38). */
+  --layout-editor-float-z: 42;
 }
 
 /* ---------------------------------------------------------------
@@ -27,6 +30,114 @@
 
 [data-layout-editing="1"] {
   user-select: none;
+}
+
+/* ---------------------------------------------------------------
+   The inspector's dock (L-38, 5.4, 5.5)
+
+   `right` and `left` are flex children of the shell row, so the app column
+   reflows beside them in a single frame - deliberately with no width
+   transition, because an app whose text reflows over 220ms is the thing P2
+   forbids. What animates is the panel arriving over its own slot.
+
+   320px is the plan's one frozen inspector width: this is an instrument
+   panel like DevTools, and a fluid width would change the measured width of
+   the specimen stage, which is the thing the user is judging.
+   --------------------------------------------------------------- */
+
+[data-layout-inspector] {
+  display: flex;
+  width: 320px;
+  max-width: 100%;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  background: var(--background);
+  animation: layout-inspector-in 220ms var(--layout-editor-ease) both;
+}
+
+[data-layout-inspector][data-dock-mode="right"] {
+  border-left: 1px solid var(--border);
+}
+
+[data-layout-inspector][data-dock-mode="left"] {
+  order: -1;
+  border-right: 1px solid var(--border);
+}
+
+/* The one mode allowed to overlap the canvas, because the user chose it and
+   can move it again (scoped exception to P3). Positioned by `transform` so a
+   drag and a snap animate the only property L-29 allows. */
+[data-layout-inspector][data-dock-mode="float"] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--layout-editor-float-z);
+  height: min(560px, calc(100vh - 92px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(20px) saturate(160%);
+  transition: transform 180ms var(--layout-editor-ease);
+}
+
+[data-layout-inspector][data-dock-mode="float"] [data-layout-inspector-shell] {
+  background: transparent;
+}
+
+/* The header is the handle; the pointer says so before the drag starts. */
+[data-layout-inspector][data-dock-mode="float"] [data-layout-inspector-header] {
+  cursor: grab;
+}
+
+[data-layout-inspector][data-dragging="1"] {
+  transition: none;
+}
+
+[data-layout-inspector][data-dragging="1"] [data-layout-inspector-header] {
+  cursor: grabbing;
+}
+
+@keyframes layout-inspector-in {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes layout-inspector-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+[data-layout-inspector][data-dock-mode="left"] {
+  animation-name: layout-inspector-in-left;
+}
+
+/* A floating panel carries its position in the same `transform` the slide
+   would animate, so it arrives by fading rather than by moving. */
+[data-layout-inspector][data-dock-mode="float"] {
+  animation-name: layout-inspector-appear;
+}
+
+@keyframes layout-inspector-appear {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* ---------------------------------------------------------------
@@ -224,6 +335,14 @@
    --------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
+  [data-layout-inspector] {
+    animation: none;
+  }
+
+  [data-layout-inspector][data-dock-mode="float"] {
+    transition: none;
+  }
+
   [data-layout-passive] {
     transition: opacity var(--layout-editor-dim-duration) linear;
   }
@@ -241,6 +360,15 @@
   [data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
     animation: none;
   }
+}
+
+:root[data-reduce-panel-motion] [data-layout-inspector] {
+  animation: none;
+}
+
+:root[data-reduce-panel-motion]
+  [data-layout-inspector][data-dock-mode="float"] {
+  transition: none;
 }
 
 :root[data-reduce-panel-motion] [data-layout-passive] {
@@ -273,6 +401,14 @@
 @media (prefers-reduced-transparency: reduce) {
   [data-layout-selection-ring] {
     box-shadow: 0 0 0 2px var(--ring);
+  }
+
+  /* The floating panel's translucent material is the one place the editor
+     puts the canvas behind a surface; asked for opacity, it becomes an
+     ordinary card and nothing else changes. */
+  [data-layout-inspector][data-dock-mode="float"] {
+    background: var(--card);
+    backdrop-filter: none;
   }
 }
 

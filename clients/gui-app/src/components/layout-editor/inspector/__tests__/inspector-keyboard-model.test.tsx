@@ -24,7 +24,7 @@ function isUsageProviderId(id: string): id is RateLimitProviderId {
  * documented to work. Nothing here belongs in the components under test -
  * this harness only proves they compose the way the later tickets will.
  */
-function Harness(props: { readonly onDone: () => void }): ReactNode {
+function Harness(props: { readonly onExit: () => void }): ReactNode {
   const selected = useLayoutEditorStore((state) => state.selected);
   const level = useLayoutEditorStore((state) => state.level);
 
@@ -62,7 +62,7 @@ function Harness(props: { readonly onDone: () => void }): ReactNode {
     );
   }
 
-  return <InspectorShell onDone={props.onDone}>{body}</InspectorShell>;
+  return <InspectorShell onExit={props.onExit}>{body}</InspectorShell>;
 }
 
 beforeEach(() => {
@@ -75,6 +75,7 @@ beforeEach(() => {
   useLayoutEditorStore.setState({
     instances: new Map(),
     dockMode: "right",
+    floatPosition: null,
     lockedBy: "none",
   });
 });
@@ -89,7 +90,7 @@ describe("inspector keyboard model (L-31)", () => {
     let doneCount = 0;
     render(
       <Harness
-        onDone={() => {
+        onExit={() => {
           doneCount += 1;
         }}
       />,
@@ -148,7 +149,7 @@ describe("inspector keyboard model (L-31)", () => {
   });
 
   it("returns focus to the filter on ArrowUp from the first row", () => {
-    render(<Harness onDone={() => {}} />);
+    render(<Harness onExit={() => {}} />);
     const filterInput = screen.getByRole("textbox", { name: "Filter regions" });
 
     fireEvent.keyDown(filterInput, { key: "ArrowDown" });

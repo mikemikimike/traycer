@@ -1,0 +1,187 @@
+import { useEffect, useState } from "react";
+import {
+  useLayoutEditorStore,
+  type LayoutDockMode,
+  type LayoutDockPosition,
+} from "@/stores/layout/layout-editor-store";
+
+/**
+ * DevTools-style docking for the inspector (L-38, 5.4).
+ *
+ * `right` and `left` are flex order in the shell and need nothing here. This
+ * module is the third mode: a panel the user picked up and put somewhere,
+ * which is the one thing allowed to overlap the canvas because they chose it
+ * and can move it again (the scoped exception to P3).
+ *
+ * The drag is the prototype's physical one (L-29): 1:1 from the grab point
+ * with pointer capture, clamped to the window, and a release near either side
+ * docks the panel to that side instead of leaving it floating over the thing
+ * it is editing.
+ */
+
+/** Section 6's frozen float geometry. */
+export const FLOAT_DOCK_WIDTH = 320;
+const FLOAT_DOCK_MAX_HEIGHT = 560;
+const FLOAT_DOCK_VIEWPORT_MARGIN = 92;
+/** How close to a side edge a release has to land to dock there. */
+export const DOCK_EDGE_SNAP_PX = 24;
+/** Where the panel opens before it has ever been dragged. */
+const FLOAT_DOCK_DEFAULT_INSET = 48;
+
+export interface DockViewport {
+  readonly width: number;
+  readonly height: number;
+}
+
+export function floatDockHeight(viewportHeight: number): number {
+  return Math.min(
+    FLOAT_DOCK_MAX_HEIGHT,
+    Math.max(0, viewportHeight - FLOAT_DOCK_VIEWPORT_MARGIN),
+  );
+}
+
+/** Never off-screen, whatever window the position was remembered on. */
+export function clampFloatPosition(
+  position: LayoutDockPosition,
+  viewport: DockViewport,
+): LayoutDockPosition {
+  const maxX = Math.max(0, viewport.width - FLOAT_DOCK_WIDTH);
+  const maxY = Math.max(0, viewport.height - floatDockHeight(viewport.height));
+  return {
+    x: Math.min(Math.max(position.x, 0), maxX),
+    y: Math.min(Math.max(position.y, 0), maxY),
+  };
+}
+
+export function defaultFloatPosition(
+  viewport: DockViewport,
+): LayoutDockPosition {
+  return clampFloatPosition(
+    {
+      x: viewport.width - FLOAT_DOCK_WIDTH - FLOAT_DOCK_DEFAULT_INSET,
+      y: FLOAT_DOCK_DEFAULT_INSET,
+    },
+    viewport,
+  );
+}
+
+/**
+ * The side a release docks to, or `null` to stay floating. Measured from the
+ * panel's own edges, so a panel clamped flush against a side always snaps.
+ */
+export function edgeSnapDockMode(
+  position: LayoutDockPosition,
+  viewport: DockViewport,
+): LayoutDockMode | null {
+  if (position.x <= DOCK_EDGE_SNAP_PX) return "left";
+  if (position.x + FLOAT_DOCK_WIDTH >= viewport.width - DOCK_EDGE_SNAP_PX)
+    return "right";
+  return null;
+}
+
+function readViewport(): DockViewport {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+/**
+ * Drives a floating inspector: the resting position React renders, and the
+ * header drag that moves it.
+ *
+ * During a drag the transform is written straight onto the node and the store
+ * is left alone - a panel that re-rendered its whole tree on every pointer
+ * move would not track the pointer, and the position only becomes a
+ * preference once the user lets go.
+ */
+export function useFloatingDock(root: HTMLElement | null): LayoutDockPosition {
+  const floating = useLayoutEditorStore((state) => state.dockMode === "float");
+  const stored = useLayoutEditorStore((state) => state.floatPosition);
+  const [viewport, setViewport] = useState<DockViewport>(readViewport);
+
+  useEffect(() => {
+    const onResize = (): void => {
+      setViewport(readViewport());
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+
+  const position =
+    stored === null
+      ? defaultFloatPosition(viewport)
+      : clampFloatPosition(stored, viewport);
+
+  useEffect(() => {
+    if (!floating || root === null) return;
+    // Both are read off the node at grab time, never off the render above: a
+    // re-render mid-drag must not move the panel under the pointer.
+    let grab: { readonly x: number; readonly y: number } | null = null;
+    let origin: LayoutDockPosition = { x: 0, y: 0 };
+    let latest: LayoutDockPosition = { x: 0, y: 0 };
+
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (
+        !(target instanceof Element) ||
+        target.closest("[data-layout-inspector-header]") === null
+      )
+        return;
+      // A control in the header is a control, not a handle.
+      if (target.closest("button, input, a") !== null) return;
+      grab = { x: event.clientX, y: event.clientY };
+      origin = readTransform(root);
+      latest = origin;
+      root.setPointerCapture(event.pointerId);
+      root.setAttribute("data-dragging", "1");
+      event.preventDefault();
+    };
+
+    const onPointerMove = (event: PointerEvent): void => {
+      if (grab === null) return;
+      latest = clampFloatPosition(
+        {
+          x: origin.x + (event.clientX - grab.x),
+          y: origin.y + (event.clientY - grab.y),
+        },
+        readViewport(),
+      );
+      writeTransform(root, latest);
+    };
+
+    const onPointerUp = (event: PointerEvent): void => {
+      if (grab === null) return;
+      grab = null;
+      root.removeAttribute("data-dragging");
+      if (root.hasPointerCapture(event.pointerId))
+        root.releasePointerCapture(event.pointerId);
+      const side = edgeSnapDockMode(latest, readViewport());
+      if (side === null)
+        useLayoutEditorStore.getState().setFloatPosition(latest);
+      else useLayoutEditorStore.getState().setDockMode(side);
+    };
+
+    root.addEventListener("pointerdown", onPointerDown);
+    root.addEventListener("pointermove", onPointerMove);
+    root.addEventListener("pointerup", onPointerUp);
+    root.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      root.removeEventListener("pointerdown", onPointerDown);
+      root.removeEventListener("pointermove", onPointerMove);
+      root.removeEventListener("pointerup", onPointerUp);
+      root.removeEventListener("pointercancel", onPointerUp);
+      root.removeAttribute("data-dragging");
+    };
+  }, [floating, root]);
+
+  return position;
+}
+
+function writeTransform(node: HTMLElement, position: LayoutDockPosition): void {
+  node.style.transform = `translate3d(${position.x}px, ${position.y}px, 0)`;
+}
+
+function readTransform(node: HTMLElement): LayoutDockPosition {
+  const rect = node.getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
+}
