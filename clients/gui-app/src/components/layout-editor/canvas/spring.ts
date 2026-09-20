@@ -1,0 +1,84 @@
+/**
+ * The one spring stepper the editor's motion runs on (L-29, section 6).
+ *
+ * Critically damped by default: the ring, the reflowing siblings and the
+ * release all want "arrives and stops", not "arrives and wobbles". A spring
+ * rather than a duration because these targets move WHILE the animation runs -
+ * a selection that travels to a region whose row is still reflowing, a sibling
+ * that is being dragged past - and a tween restarted every frame reads as
+ * stutter.
+ */
+
+/** How far and how slow a value may be and still count as arrived. */
+const SETTLED_DISTANCE = 0.05;
+const SETTLED_VELOCITY = 0.2;
+
+/**
+ * A dropped frame must not launch the value across the screen: at 1/30 the
+ * integrator stays stable and a long stall reads as a slower arrival rather
+ * than an overshoot.
+ */
+export const MAX_SPRING_STEP_SECONDS = 1 / 30;
+
+/** The travelling selection ring (section 6). */
+export const RING_SPRING = { response: 0.35, zeta: 1 } as const;
+
+export class Spring {
+  private current: number;
+  private target: number;
+  private velocity = 0;
+
+  constructor(
+    value: number,
+    private readonly response: number,
+    private readonly zeta: number,
+  ) {
+    this.current = value;
+    this.target = value;
+  }
+
+  get value(): number {
+    return this.current;
+  }
+
+  setTarget(target: number): void {
+    this.target = target;
+  }
+
+  /** Arrive instantly, with no momentum left over. Reduced motion, and first paint. */
+  snap(target: number): void {
+    this.current = target;
+    this.target = target;
+    this.velocity = 0;
+  }
+
+  step(deltaSeconds: number): number {
+    const frequency = (2 * Math.PI) / this.response;
+    const stiffness = frequency * frequency;
+    const damping = 2 * this.zeta * frequency;
+    const acceleration =
+      -stiffness * (this.current - this.target) - damping * this.velocity;
+    this.velocity += acceleration * deltaSeconds;
+    this.current += this.velocity * deltaSeconds;
+    return this.current;
+  }
+
+  settled(): boolean {
+    return (
+      Math.abs(this.current - this.target) < SETTLED_DISTANCE &&
+      Math.abs(this.velocity) < SETTLED_VELOCITY
+    );
+  }
+}
+
+/**
+ * Both reduced-motion gates, which the editor honours together (section 6):
+ * the OS media query, and the app's own "Panel animations" switch, which
+ * `theme-applier.ts` mirrors onto `<html data-reduce-panel-motion>`.
+ */
+export function prefersReducedMotion(): boolean {
+  return (
+    document.documentElement.hasAttribute("data-reduce-panel-motion") ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}

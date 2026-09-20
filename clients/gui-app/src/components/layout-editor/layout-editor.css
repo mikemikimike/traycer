@@ -1,0 +1,248 @@
+/*
+ * Canvas decoration for the layout editor (L-12, L-13).
+ *
+ * Everything here styles the app's OWN elements through data attributes that
+ * `use-layout-region.ts` writes onto them, plus the two overlay elements the
+ * canvas controllers create. There is no scrim, no proxy layer and no
+ * duplicate of the app: what the user points at is the real thing (P3, P4).
+ *
+ * The motion values are frozen in the plan's section 6 and only `transform`,
+ * `opacity` and `filter` animate (L-29). Both reduced-motion gates are
+ * honoured: the OS media query, and the app's own Panel animations switch,
+ * which `theme-applier.ts` mirrors onto `<html data-reduce-panel-motion>`.
+ */
+
+:root {
+  --layout-editor-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --layout-editor-dim-duration: 200ms;
+  --layout-editor-ring-duration: 160ms;
+  /* Above the app column, below a toast, which still has to reach the user. */
+  --layout-editor-ring-z: 40;
+  --layout-editor-chip-z: 41;
+}
+
+/* ---------------------------------------------------------------
+   The app column while a session is live
+   --------------------------------------------------------------- */
+
+[data-layout-editing="1"] {
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------
+   The passive dim (4.2)
+
+   The marker sits on individual LEAVES, never on an ancestor of a region:
+   `filter` on an ancestor would dim the region it contains, and the whole
+   point is that editable chrome reads as lit against calm content.
+   --------------------------------------------------------------- */
+
+[data-layout-passive] {
+  transition:
+    opacity var(--layout-editor-dim-duration) var(--layout-editor-ease),
+    filter var(--layout-editor-dim-duration) var(--layout-editor-ease);
+}
+
+[data-layout-editing="1"] [data-layout-passive] {
+  opacity: 0.45;
+  filter: saturate(0.45);
+}
+
+/* ---------------------------------------------------------------
+   Hover and selection
+
+   Both attributes land on EVERY instance of a region, so a setting that
+   exists in two chat tiles lights up in both (L-23). Hover has no
+   transition: pointing at a thing is not an animation.
+   --------------------------------------------------------------- */
+
+[data-layout-editing="1"] [data-layout-region][data-hover="1"] {
+  outline: 1px solid var(--foreground);
+  outline-offset: 3px;
+}
+
+[data-layout-editing="1"]
+  [data-layout-region][data-selected="1"]:not(
+    [data-layout-anchor~="selected"]
+  ) {
+  outline: 1px solid var(--ring);
+  outline-offset: 3px;
+}
+
+/* The instance the travelling ring is drawn around draws nothing itself. */
+[data-layout-editing="1"]
+  [data-layout-region][data-selected="1"][data-layout-anchor~="selected"] {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------
+   Anchors (4.3)
+
+   Two names rather than one, because the chip follows the pointer while the
+   pinned card stays on the open section, and one shared name would make the
+   card jump to whatever is hovered. Each name is on exactly one element:
+   elements sharing an `anchor-name` resolve to the last in tree order, which
+   would anchor an overlay to a background tile (C-12).
+   --------------------------------------------------------------- */
+
+[data-layout-editing="1"] [data-layout-region][data-layout-anchor~="selected"] {
+  anchor-name: --layout-region;
+}
+
+[data-layout-editing="1"] [data-layout-region][data-layout-anchor~="hover"] {
+  anchor-name: --layout-hover-region;
+}
+
+[data-layout-editing="1"]
+  [data-layout-region][data-layout-anchor~="hover"][data-layout-anchor~="selected"] {
+  anchor-name: --layout-region, --layout-hover-region;
+}
+
+/* ---------------------------------------------------------------
+   The hover chip
+
+   Portalled to <body> so no `filter`, `transform` or `contain` in the app
+   tree can become its containing block - measured: a filtered ancestor of
+   the chip drops it to the bottom-left of that ancestor's box.
+   --------------------------------------------------------------- */
+
+[data-layout-hover-chip] {
+  position: fixed;
+  z-index: var(--layout-editor-chip-z);
+  pointer-events: none;
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+[data-layout-hover-chip][hidden] {
+  display: none;
+}
+
+[data-layout-hover-chip][data-anchored="1"] {
+  position-anchor: --layout-hover-region;
+  position-area: block-start center;
+  position-try-fallbacks: flip-block, flip-inline;
+  margin: 6px;
+  inset: auto;
+}
+
+[data-layout-hover-chip][data-anchored="1"][data-placement="below"] {
+  position-area: block-end center;
+  position-try-fallbacks: flip-inline;
+}
+
+/* ---------------------------------------------------------------
+   The travelling selection ring
+
+   Sized and moved by `selection-ring.ts`; everything static is here. The
+   fade-in is the one property it does not drive per frame.
+   --------------------------------------------------------------- */
+
+[data-layout-selection-ring] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--layout-editor-ring-z);
+  pointer-events: none;
+  border-radius: 7px;
+  box-shadow:
+    0 0 0 2px var(--ring),
+    0 0 0 5px color-mix(in srgb, var(--ring) 22%, transparent);
+  opacity: 0;
+  transition: opacity var(--layout-editor-ring-duration)
+    var(--layout-editor-ease);
+}
+
+[data-layout-selection-ring][data-on="1"] {
+  opacity: 1;
+}
+
+[data-layout-selection-ring][hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------------------
+   Reduced motion
+
+   The dim still happens - it is the state, not an effect - but it crossfades
+   linearly and drops the `filter`, which is the expensive half and the part
+   that reads as an effect.
+   --------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  [data-layout-passive] {
+    transition: opacity var(--layout-editor-dim-duration) linear;
+  }
+
+  [data-layout-editing="1"] [data-layout-passive] {
+    filter: none;
+  }
+
+  [data-layout-selection-ring] {
+    transition: none;
+  }
+}
+
+:root[data-reduce-panel-motion] [data-layout-passive] {
+  transition: opacity var(--layout-editor-dim-duration) linear;
+}
+
+:root[data-reduce-panel-motion]
+  [data-layout-editing="1"]
+  [data-layout-passive] {
+  filter: none;
+}
+
+:root[data-reduce-panel-motion] [data-layout-selection-ring] {
+  transition: none;
+}
+
+/* ---------------------------------------------------------------
+   Reduced transparency
+
+   The ring's outer halo is the only translucent thing on the canvas; without
+   it the ring is still a ring.
+   --------------------------------------------------------------- */
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-layout-selection-ring] {
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+}
+
+/* ---------------------------------------------------------------
+   Forced colors
+
+   `opacity` and `filter` survive a forced-colors palette, so the dim would
+   quietly make half the app unreadable rather than merely calm. Everything
+   that carried meaning through colour is restated with a system colour.
+   --------------------------------------------------------------- */
+
+@media (forced-colors: active) {
+  [data-layout-editing="1"] [data-layout-passive] {
+    opacity: 1;
+    filter: none;
+  }
+
+  [data-layout-editing="1"] [data-layout-region][data-hover="1"],
+  [data-layout-editing="1"] [data-layout-region][data-selected="1"] {
+    outline: 2px solid Highlight;
+  }
+
+  [data-layout-hover-chip] {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  [data-layout-selection-ring] {
+    box-shadow: none;
+    outline: 2px solid Highlight;
+    outline-offset: 0;
+  }
+}
