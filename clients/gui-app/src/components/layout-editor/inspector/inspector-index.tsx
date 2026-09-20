@@ -16,7 +16,10 @@ import type { LayoutPresetId } from "@/lib/layout/layout-values";
 import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { useLayoutStore, type LayoutSnapshot } from "@/stores/layout/layout-store";
+import {
+  useLayoutStore,
+  type LayoutSnapshot,
+} from "@/stores/layout/layout-store";
 
 interface InspectorIndexProps {
   /** Nothing selected (L-06): presets, then the region index. */
@@ -137,9 +140,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                   }}
                 >
                   <region.icon
-                    className={cn(
-                      "size-3.5 shrink-0 text-muted-foreground",
-                    )}
+                    className={cn("size-3.5 shrink-0 text-muted-foreground")}
                   />
                   <span className="min-w-0 flex-1 truncate">{region.name}</span>
                   {changed ? (
@@ -152,7 +153,10 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                   <span className="shrink-0 text-ui-xs text-muted-foreground">
                     {regionStateWord(
                       region.id,
-                      effectiveLayoutValues(snapshot.basePreset, snapshot.overrides),
+                      effectiveLayoutValues(
+                        snapshot.basePreset,
+                        snapshot.overrides,
+                      ),
                       snapshot.arrangement,
                     )}
                   </span>

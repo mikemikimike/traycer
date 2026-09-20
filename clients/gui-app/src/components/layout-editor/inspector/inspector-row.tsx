@@ -39,7 +39,9 @@ export function InspectorRow(props: InspectorRowProps): ReactNode {
         stacked && "block",
       )}
     >
-      <div className={cn("min-w-0 flex-1", stacked && "flex items-center gap-1.5")}>
+      <div
+        className={cn("min-w-0 flex-1", stacked && "flex items-center gap-1.5")}
+      >
         <span className="text-ui-sm">{label}</span>
         {onRevert ? (
           <RevertButton

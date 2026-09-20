@@ -1,5 +1,11 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { PanelLeft, PanelRight, PictureInPicture2, Redo2, Undo2 } from "lucide-react";
+import {
+  PanelLeft,
+  PanelRight,
+  PictureInPicture2,
+  Redo2,
+  Undo2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { cn } from "@/lib/utils";
@@ -39,14 +45,17 @@ const DOCK_MODES: ReadonlyArray<{
 export function InspectorShell(props: InspectorShellProps): ReactNode {
   const { onDone } = props;
   const dockMode = useLayoutEditorStore((state) => state.dockMode);
-  const canUndo = useLayoutEditorStore((state) => state.history.past.length > 0);
+  const canUndo = useLayoutEditorStore(
+    (state) => state.history.past.length > 0,
+  );
   const canRedo = useLayoutEditorStore(
     (state) => state.history.future.length > 0,
   );
   const canDiscard = useLayoutEditorStore(
     (state) =>
       state.entrySnapshot !== null &&
-      JSON.stringify(state.entrySnapshot) !== JSON.stringify(getLayoutSnapshot()),
+      JSON.stringify(state.entrySnapshot) !==
+        JSON.stringify(getLayoutSnapshot()),
   );
   const rootRef = useRef<HTMLDivElement | null>(null);
 

@@ -8,7 +8,10 @@ import { RegionSection } from "@/components/layout-editor/inspector/region-secti
 import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { DEFAULT_LAYOUT_SNAPSHOT, useLayoutStore } from "@/stores/layout/layout-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 function isUsageProviderId(id: string): id is RateLimitProviderId {
   return USAGE_PROVIDER_IDS.some((candidate) => candidate === id);
@@ -64,7 +67,10 @@ function Harness(props: { readonly onDone: () => void }): ReactNode {
 
 beforeEach(() => {
   window.localStorage.clear();
-  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT, layoutCarryDone: true });
+  useLayoutStore.setState({
+    ...DEFAULT_LAYOUT_SNAPSHOT,
+    layoutCarryDone: true,
+  });
   useLayoutEditorStore.getState().endSession();
   useLayoutEditorStore.setState({
     instances: new Map(),
@@ -120,7 +126,9 @@ describe("inspector keyboard model (L-31)", () => {
     // `@testing-library/jest-dom` is not wired into this repo's vitest
     // setup, so presence is read via `query*` + a plain null check.
     expect(screen.queryByText("Home tab")).not.toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Filter regions" })).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Filter regions" }),
+    ).toBeNull();
 
     // First Escape (inside the open section) walks back to the index -
     // `popInspectorLevel` pops `selected`, not the whole editor.
@@ -133,10 +141,9 @@ describe("inspector keyboard model (L-31)", () => {
     ).not.toBeNull();
 
     // Second Escape (already at the index) exits the editor.
-    fireEvent.keyDown(
-      screen.getByRole("textbox", { name: "Filter regions" }),
-      { key: "Escape" },
-    );
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Filter regions" }), {
+      key: "Escape",
+    });
     expect(doneCount).toBe(1);
   });
 

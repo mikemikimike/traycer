@@ -3,11 +3,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { regionFacts } from "@/lib/layout/layout-regions";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { DEFAULT_LAYOUT_SNAPSHOT, useLayoutStore } from "@/stores/layout/layout-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 beforeEach(() => {
   window.localStorage.clear();
-  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT, layoutCarryDone: true });
+  useLayoutStore.setState({
+    ...DEFAULT_LAYOUT_SNAPSHOT,
+    layoutCarryDone: true,
+  });
   useLayoutEditorStore.getState().endSession();
   useLayoutEditorStore.setState({
     instances: new Map(),
@@ -59,7 +65,11 @@ describe("rail region tri-state header (L-47)", () => {
     expect(facts.hint).toBeNull();
 
     render(
-      <RegionSection regionId="railAgents" host="inspector" onOpenProvider={null} />,
+      <RegionSection
+        regionId="railAgents"
+        host="inspector"
+        onOpenProvider={null}
+      />,
     );
 
     expect(

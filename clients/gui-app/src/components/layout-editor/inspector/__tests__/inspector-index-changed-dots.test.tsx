@@ -25,7 +25,10 @@ function rowRegionId(dot: HTMLElement): RegionId {
 
 beforeEach(() => {
   window.localStorage.clear();
-  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT, layoutCarryDone: true });
+  useLayoutStore.setState({
+    ...DEFAULT_LAYOUT_SNAPSHOT,
+    layoutCarryDone: true,
+  });
   useLayoutEditorStore.getState().endSession();
   useLayoutEditorStore.setState({
     instances: new Map(),

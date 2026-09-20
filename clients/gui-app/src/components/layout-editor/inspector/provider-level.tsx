@@ -47,7 +47,8 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
   const values = effectiveLayoutValues(basePreset, overrides);
   const providerName = providerDisplayName(providerId);
   const shown = !arrangement.hiddenProviders.includes(providerId);
-  const selection = arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
+  const selection =
+    arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
 
   return (
     <div className="flex flex-col">
@@ -93,7 +94,11 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
               options={USAGE_PROVIDER_LEVEL.limitsOptions}
               value={selection.automatic ? "automatic" : "choose"}
               onChange={(next) => {
-                setProviderLimitAutomatic(providerId, arrangement, next === "automatic");
+                setProviderLimitAutomatic(
+                  providerId,
+                  arrangement,
+                  next === "automatic",
+                );
               }}
             />
           }
@@ -112,7 +117,9 @@ function toggleHiddenProvider(
     const hidden = shown
       ? arrangement.hiddenProviders.filter((entry) => entry !== providerId)
       : [...arrangement.hiddenProviders, providerId];
-    useLayoutStore.getState().setArrangement({ ...arrangement, hiddenProviders: hidden });
+    useLayoutStore
+      .getState()
+      .setArrangement({ ...arrangement, hiddenProviders: hidden });
   });
 }
 
@@ -122,7 +129,8 @@ function setProviderLimitAutomatic(
   automatic: boolean,
 ): void {
   useLayoutEditorStore.getState().recordGesture(() => {
-    const current = arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
+    const current =
+      arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
     useLayoutStore.getState().setArrangement({
       ...arrangement,
       providerLimits: {

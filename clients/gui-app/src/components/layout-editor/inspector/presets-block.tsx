@@ -76,9 +76,7 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
                     LAYOUT_PRESET_IDS.length - 1,
                   )
                 ];
-              document
-                .getElementById(`layout-preset-${next}`)
-                ?.focus();
+              document.getElementById(`layout-preset-${next}`)?.focus();
             }}
           />
         ))}
@@ -183,7 +181,9 @@ const MINIATURE_FRAME_HEIGHT = 620;
  * `depictRegion` for every rail icon - a preset card compares density, and
  * density is entirely in the composer, the chat edge and the status bar.
  */
-function PresetMiniature(props: { readonly presetId: LayoutPresetId }): ReactNode {
+function PresetMiniature(props: {
+  readonly presetId: LayoutPresetId;
+}): ReactNode {
   const arrangement = useLayoutStore((state) => state.arrangement);
   const values = PRESET_VALUES[props.presetId];
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -207,7 +207,9 @@ function PresetMiniature(props: { readonly presetId: LayoutPresetId }): ReactNod
       ref={boxRef}
       aria-hidden
       className="relative w-full overflow-hidden rounded border border-border bg-background"
-      style={{ aspectRatio: `${MINIATURE_FRAME_WIDTH} / ${MINIATURE_FRAME_HEIGHT}` }}
+      style={{
+        aspectRatio: `${MINIATURE_FRAME_WIDTH} / ${MINIATURE_FRAME_HEIGHT}`,
+      }}
     >
       <div
         className="pointer-events-none absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-background"
@@ -235,7 +237,12 @@ function PresetMiniature(props: { readonly presetId: LayoutPresetId }): ReactNod
               {arrangement.dock.map((regionId) =>
                 values[regionId].shown === "shown" ? (
                   <div key={regionId}>
-                    {depictRegion(regionId, values[regionId], arrangement, null)}
+                    {depictRegion(
+                      regionId,
+                      values[regionId],
+                      arrangement,
+                      null,
+                    )}
                   </div>
                 ) : null,
               )}
@@ -245,7 +252,12 @@ function PresetMiniature(props: { readonly presetId: LayoutPresetId }): ReactNod
                 {arrangement.toolbarLeft.map((regionId) =>
                   values[regionId].shown === "shown" ? (
                     <span key={regionId}>
-                      {depictRegion(regionId, values[regionId], arrangement, null)}
+                      {depictRegion(
+                        regionId,
+                        values[regionId],
+                        arrangement,
+                        null,
+                      )}
                     </span>
                   ) : null,
                 )}
@@ -254,7 +266,12 @@ function PresetMiniature(props: { readonly presetId: LayoutPresetId }): ReactNod
                 {arrangement.toolbarRight.map((regionId) =>
                   values[regionId].shown === "shown" ? (
                     <span key={regionId}>
-                      {depictRegion(regionId, values[regionId], arrangement, null)}
+                      {depictRegion(
+                        regionId,
+                        values[regionId],
+                        arrangement,
+                        null,
+                      )}
                     </span>
                   ) : null,
                 )}

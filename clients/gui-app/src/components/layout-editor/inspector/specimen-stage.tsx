@@ -30,10 +30,7 @@ export function SpecimenStage(props: SpecimenStageProps): ReactNode {
         Specimen
       </span>
       <div
-        className={cn(
-          "min-w-0 transition-opacity",
-          props.off && "opacity-30",
-        )}
+        className={cn("min-w-0 transition-opacity", props.off && "opacity-30")}
       >
         {props.children}
       </div>

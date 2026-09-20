@@ -37,12 +37,18 @@ import {
   type LayoutArrangement,
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
-import { effectiveLayoutValues, type LayoutValues } from "@/lib/layout/layout-values";
+import {
+  effectiveLayoutValues,
+  type LayoutValues,
+} from "@/lib/layout/layout-values";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { useLayoutStore, type LayoutSnapshot } from "@/stores/layout/layout-store";
+import {
+  useLayoutStore,
+  type LayoutSnapshot,
+} from "@/stores/layout/layout-store";
 
 interface RegionSectionProps {
   readonly regionId: RegionId;
@@ -186,8 +192,16 @@ function GrammarRowView(props: {
   readonly filter: string;
   readonly onOpenProvider: ((providerId: string) => void) | null;
 }): ReactNode {
-  const { row, regionId, host, values, arrangement, snapshot, filter, onOpenProvider } =
-    props;
+  const {
+    row,
+    regionId,
+    host,
+    values,
+    arrangement,
+    snapshot,
+    filter,
+    onOpenProvider,
+  } = props;
   const regionValues = values[regionId];
 
   switch (row.kind) {
@@ -493,7 +507,9 @@ function setOrderGroup(
       return {
         ...arrangement,
         rail: nextIds.flatMap((id) => {
-          const entry = arrangement.rail.find((candidate) => candidate.id === id);
+          const entry = arrangement.rail.find(
+            (candidate) => candidate.id === id,
+          );
           return entry === undefined ? [] : [entry];
         }),
       };
@@ -554,7 +570,9 @@ function StyleRow(props: {
             )}
             onClick={() => {
               useLayoutEditorStore.getState().recordGesture(() => {
-                useLayoutStore.getState().setRegionValues(regionId, example.patch);
+                useLayoutStore
+                  .getState()
+                  .setRegionValues(regionId, example.patch);
               });
             }}
           >
@@ -621,17 +639,26 @@ function FineTuneDisclosure(props: {
       | {
           readonly kind: "segment";
           readonly key: string;
-          readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+          readonly options: ReadonlyArray<{
+            readonly value: string;
+            readonly label: string;
+          }>;
         }
       | {
           readonly kind: "checks";
           readonly keys: ReadonlyArray<string>;
-          readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+          readonly options: ReadonlyArray<{
+            readonly value: string;
+            readonly label: string;
+          }>;
         }
       | {
           readonly kind: "field-checks";
           readonly key: string;
-          readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+          readonly options: ReadonlyArray<{
+            readonly value: string;
+            readonly label: string;
+          }>;
         };
   }>;
   readonly regionId: RegionId;
@@ -679,17 +706,26 @@ function FineTuneRowView(props: {
       | {
           readonly kind: "segment";
           readonly key: string;
-          readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+          readonly options: ReadonlyArray<{
+            readonly value: string;
+            readonly label: string;
+          }>;
         }
       | {
           readonly kind: "checks";
           readonly keys: ReadonlyArray<string>;
-          readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+          readonly options: ReadonlyArray<{
+            readonly value: string;
+            readonly label: string;
+          }>;
         }
       | {
           readonly kind: "field-checks";
           readonly key: string;
-          readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+          readonly options: ReadonlyArray<{
+            readonly value: string;
+            readonly label: string;
+          }>;
         };
   };
   readonly regionId: RegionId;
@@ -718,7 +754,8 @@ function FineTuneRowView(props: {
             checked={checked}
             onCheckedChange={(next) => {
               const current = readControlValue(regionValues, control.key);
-              const value = typeof current === "boolean" ? next : visibilityWord(next);
+              const value =
+                typeof current === "boolean" ? next : visibilityWord(next);
               writeControlValue(regionId, control.key, value);
             }}
           />
@@ -824,7 +861,9 @@ function FineTuneRowView(props: {
                     const nextList = control.options
                       .map((entry) => entry.value)
                       .filter((value) =>
-                        value === option.value ? next === true : selected.includes(value),
+                        value === option.value
+                          ? next === true
+                          : selected.includes(value),
                       );
                     writeControlValue(regionId, control.key, nextList);
                   }}
