@@ -352,7 +352,7 @@ describe("SampleWorkspaceBody - passivity", () => {
       expect(queryClient.getQueryCache().getAll(), step).toHaveLength(0);
       expect(getActiveModelPicker(), step).toBeNull();
       expect(getFocusedComposerControls(), step).toBeNull();
-      expect(openActiveDraftsControl(), step).toBe(false);
+      expect(openActiveDraftsControl("shortcut"), step).toBe(false);
     };
     assertPassive("mounted");
 
@@ -395,7 +395,7 @@ describe("SampleWorkspaceBody - passivity", () => {
 
     expect(getActiveModelPicker()).toBeNull();
     expect(getFocusedComposerControls()).toBeNull();
-    expect(openActiveDraftsControl()).toBe(false);
+    expect(openActiveDraftsControl("shortcut")).toBe(false);
   });
 });
 
