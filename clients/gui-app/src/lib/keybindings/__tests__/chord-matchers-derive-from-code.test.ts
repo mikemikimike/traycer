@@ -135,11 +135,19 @@ const KEYBOARD_KEY_READS: Readonly<Record<string, number>> = {
   // Enter/Space on a row's overlay link, plus the search box's Escape (clears a
   // non-empty query; not a registered chord).
   "gui-app/src/components/epics/epics-list-panel.tsx": 3,
+  // The layout editor's index and its sortable list: arrows walk the rows and
+  // Enter/Space opens a section, Alt+arrows reorder a list item (L-31). All
+  // named keys, none of them a registered chord.
+  "gui-app/src/components/layout-editor/inspector/inspector-index.tsx": 4,
+  "gui-app/src/components/layout-editor/inspector/sortable-list.tsx": 3,
   "gui-app/src/components/layout/find-in-page-bar.tsx": 2,
   "gui-app/src/components/layout/header/desktop-menu-buttons.tsx": 3,
   "gui-app/src/components/layout/tabs/tab-group-chip.tsx": 4,
   // The guided tour's card answers arrows, Enter and Escape by name; none is
   // a registered chord.
+  // Arrows, Home and End walking the minimap's own list - named keys inside an
+  // open card, not chords.
+  "gui-app/src/components/minimap/minimap-list-card.tsx": 4,
   "gui-app/src/components/onboarding/onboarding-coachmark.tsx": 4,
   "gui-app/src/components/onboarding/onboarding-page.tsx": 4,
   "gui-app/src/components/providers/profile-dropdown.tsx": 4,
@@ -152,11 +160,6 @@ const KEYBOARD_KEY_READS: Readonly<Record<string, number>> = {
   "gui-app/src/hooks/use-primary-action-shortcut.ts": 1,
   "gui-app/src/lib/browser-view/sessions/screencast-controller.ts": 2,
   "gui-app/src/lib/browser-view/sessions/screencast-input-encoding.ts": 4,
-  // The Customize editor's own key handling: arrows, Home, End and Escape by
-  // name (navigation inside the proxy layer, none of them a registered chord),
-  // plus Mod+Z undo, which is the platform history convention - the key
-  // LABELLED Z - and so is deliberately read by character.
-  "gui-app/src/lib/customize/keyboard.ts": 7,
   "gui-app/src/lib/keybindings/bare-key-owner.ts": 1,
   "gui-app/src/lib/keybindings/chord.ts": 4,
   "gui-app/src/lib/notifications/notification-feed-keyboard-navigation.ts": 1,
@@ -205,10 +208,6 @@ const PRINTABLE_CHARACTER_MATCHES: Readonly<
   "gui-app/src/lib/browser-view/sessions/screencast-input-encoding.ts": {
     chars: ["v", "y"],
     why: "the clipboard paste convention (see isScreencastPasteChord), plus the non-mac Ctrl+Y redo spelling - screencastHistoryKey re-derives the viewer's history gesture by character so it can translate it across a mac/non-mac viewer-host pair, the same deliberate character-matching exception as isTextHistoryShortcut",
-  },
-  "gui-app/src/lib/customize/keyboard.ts": {
-    chars: ["z"],
-    why: "platform mod+Z undo convention, matched where the letter is - the named keys beside it (arrows, Home, End, Escape) are not characters",
   },
   "gui-app/src/components/chat/composer/profile-rate-limit-switch-banner.tsx": {
     chars: ["r"],

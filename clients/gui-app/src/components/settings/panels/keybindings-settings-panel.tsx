@@ -13,7 +13,7 @@ import {
 import { formatModifierChordForDisplay } from "@/lib/keybindings/chord";
 import { findConflict } from "@/lib/keybindings/conflicts";
 import { useKeybindingStore } from "@/stores/settings/keybinding-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useRegionShown } from "@/lib/layout-overrides";
 import { Kbd } from "@/components/ui/kbd";
 import { useSummonHotkey } from "@/hooks/runner/use-summon-hotkey";
 import { GLOBAL_SHORTCUT_DEFAULT_CHORDS } from "@traycer-clients/shared/keybindings/global-shortcuts";
@@ -44,7 +44,7 @@ export function KeybindingsSettingsPanel() {
   const clearBinding = useKeybindingStore((s) => s.clearBinding);
   const resetAll = useKeybindingStore((s) => s.resetAll);
 
-  const homeTabEnabled = useSettingsStore((s) => s.homeTabEnabled);
+  const homeTabEnabled = useRegionShown("homeTab");
   // A row here is a promise that the chord does something. `app.home.open`
   // dispatches to nothing while the Home tab is off, so it would be a bindable
   // row for a surface this build has not got - the same reason the command

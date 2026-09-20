@@ -40,9 +40,9 @@ import { createHostQueryInvalidator } from "@/lib/host/query-invalidator";
 import { createAppQueryClient } from "@/lib/query-client";
 import { createQueryClientWrapper } from "@/lib/rate-limits/__tests__/provider-rate-limit-sharing-harness";
 import {
-  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 
 // Filled in by each test before render; read lazily inside the `@/lib/host`
 // mock closure below, so the mock module never needs its own state.
@@ -169,7 +169,7 @@ describe("status bar rate-limit lane isolation (real query stack)", () => {
     cleanup();
     harnessClient = null;
     configuredProviders = [];
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   });
 
   it("reads the eligible httpFetch provider but never spawns a read for the ephemeralProcess provider beside it", async () => {
@@ -242,26 +242,21 @@ describe("status bar rate-limit editor-only segments never fetch (review w3, sho
     cleanup();
     harnessClient = null;
     configuredProviders = [];
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   });
 
   it("keeps a HIDDEN httpFetch provider from polling or enqueueing while entering an editing session, and reads it once unhidden", async () => {
     const harness = createLaneHarness();
     harnessClient = harness.client;
     configuredProviders = [configuredProvider("opencode", "httpFetch")];
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          hiddenProviders: ["opencode"],
-        },
-      },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      hiddenProviders: ["opencode"],
     });
 
     const wrapper = createQueryClientWrapper(harness.queryClient);
-    // `editing: true` is exactly what a Customize session passes so the
-    // hidden provider's ghost can still register a hotspot - the bug this
+    // `editing: true` is exactly what the layout editor's session passes so
+    // the hidden provider's ghost can still register a hotspot - the bug this
     // guards is that doing so used to also admit it into the fetch-eligible
     // batch.
     const editing = renderHook(() => useLaneProbe("live", true), { wrapper });
@@ -279,14 +274,9 @@ describe("status bar rate-limit editor-only segments never fetch (review w3, sho
     // changes. This proves the empty list above is specifically the hidden
     // provider being suppressed, not "editing mode never fetches anything".
     editing.unmount();
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          hiddenProviders: [],
-        },
-      },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      hiddenProviders: [],
     });
     renderHook(() => useLaneProbe("live", true), { wrapper });
     await waitFor(() =>
@@ -298,14 +288,9 @@ describe("status bar rate-limit editor-only segments never fetch (review w3, sho
     const harness = createLaneHarness();
     harnessClient = harness.client;
     configuredProviders = [configuredProvider("codex", "ephemeralProcess")];
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          hiddenProviders: ["codex"],
-        },
-      },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      hiddenProviders: ["codex"],
     });
 
     const editing = renderHook(() => useLaneProbe("live", true), {

@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import {
   DEFAULT_ARRANGEMENT,
   normalizeArrangement,
   railFromPanelIdGroups,
   resolvePersistedArrangement,
+  statusBarShown,
   type LayoutArrangement,
   type RailEntry,
 } from "@/lib/layout/layout-arrangement";
@@ -162,6 +164,17 @@ export function getLayoutSnapshot(): LayoutSnapshot {
     overrides: state.overrides,
     arrangement: state.arrangement,
   };
+}
+
+/**
+ * `statusBarShown` over the live store and the live viewport - the mount
+ * decision the shell and the strip's own controls share.
+ */
+export function useStatusBarShown(): boolean {
+  const isMobileViewport = useIsMobileViewport();
+  return useLayoutStore((state) =>
+    statusBarShown(state.arrangement, isMobileViewport),
+  );
 }
 
 /**

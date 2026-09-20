@@ -28,7 +28,7 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import type { DockSection } from "@/stores/settings/layout-store";
+import type { ChatDockSection } from "@/components/chat/chat-dock-compact-strip";
 import { ChatTimeline } from "@/components/chat/chat-timeline";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import { TabHostProvider } from "@/components/epic-canvas/tab-host-provider";
@@ -512,21 +512,28 @@ function emptyQueue(): ChatSessionState["queue"] {
   return { status: "idle", items: [] };
 }
 
-const DEFAULT_DOCK_ORDER: ReadonlyArray<DockSection> = [
+const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
   "filesChanged",
   "activeAgents",
   "background",
 ];
 
 function dockHotspot(ghost: boolean): DockRowHotspot {
-  return { hotspotRef: () => undefined, ghost, condition: "", editing: false };
+  return {
+    hotspotRef: () => undefined,
+    // Every dock region in this suite is shown; only `ghost` is under test.
+    shown: true,
+    ghost,
+    condition: "",
+    editing: false,
+  };
 }
 
 /** Fixture for a dock rendered with an empty restore/agents and one
  *  background item present - matches every `<ChatLowerDock>` call in this
  *  file. */
 const ONE_BACKGROUND_ITEM_DOCK_HOTSPOTS: Readonly<
-  Record<DockSection, DockRowHotspot>
+  Record<ChatDockSection, DockRowHotspot>
 > = {
   filesChanged: dockHotspot(true),
   activeAgents: dockHotspot(true),

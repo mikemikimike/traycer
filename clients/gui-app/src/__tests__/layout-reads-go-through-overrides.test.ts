@@ -6,95 +6,75 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Every layout preference a component DRAWS from must be read through
- * `lib/layout-overrides.ts`, never selected straight out of the store.
+ * Every layout value a component DRAWS from must be read through
+ * `lib/layout-overrides.ts`, never selected straight out of the layout store.
  *
- * The seam is what lets a Customize popover or a preset thumbnail wrap the
- * real component and get the real drawing under a different value. A file that
- * reads the store directly is invisible to that wrapper, so its element keeps
- * showing the user's live setting inside a picture of an alternative - the
- * failure is silent, looks like "that option does nothing", and is exactly the
- * kind of thing a reviewer stops noticing once ten call sites are converted and
- * the eleventh is added months later.
+ * The seam is what lets the inspector's specimen stage draw a REAL leaf under
+ * a different value (L-11): it wraps the leaf in an override context, and the
+ * hooks layer that context over the stored triple. A file that selects the
+ * store directly is invisible to that wrapper, so its element keeps showing
+ * the user's live value inside a picture of an alternative - the failure is
+ * silent, looks like "that option does nothing", and is exactly the kind of
+ * thing a reviewer stops noticing once ten call sites are converted and the
+ * eleventh is added months later.
  *
  * Statically decidable, so it is a test rather than a convention.
  *
  * ## What is deliberately NOT converted
  *
  * A read that decides whether an element EXISTS is an ancestor seam, and D11
- * says an override must not reach one: wrapping it would make a preview mount
+ * says an override must not reach one: wrapping it would make a specimen mount
  * real chrome - a strip that registers keyboard slots, a stream that starts
  * polling. Those stay on the store, and each is listed in
  * {@link DIRECT_READ_EXEMPTIONS} with the reason. A read by a CONTROL that
- * writes the setting (the Layout page, the strip's own right-click menu) is
- * exempt for the mirror-image reason: a control must show and write the real
- * value, never a previewed one.
+ * writes the value (the inspector, the Layout page, the strip's own right-click
+ * menu) is exempt for the mirror-image reason: a control must show and write
+ * the real value, never a previewed one.
+ *
+ * Writes are not reads: selecting `setArrangement` / `setRegionValues` names an
+ * action, and there is nothing for an override to layer over it.
  */
 const SRC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/**
- * The preference names the seam serves, as they appear inside a selector.
- *
- * `composer` and `statusBar` name the SLICES, because selecting a whole slice
- * (`(state) => state.composer`) reaches every leaf under it - which is what the
- * chat tile's dock chrome used to do.
- */
+/** The three fields the seam serves, as they appear inside a selector. */
 const MIGRATED_READS: ReadonlyArray<{
   readonly selector: RegExp;
   readonly hook: string;
 }> = [
   {
-    selector: /\bstate\s*\.\s*composer\b|\bs\s*\.\s*composer\b/,
-    hook: "useComposerLayoutValue(key), or useComposerLayout() for a whole-slice reader",
+    selector: /\b(?:state|s)\s*\.\s*(?:overrides|basePreset)\b/,
+    hook: "useRegionValues(regionId) / useRegionValue(regionId, key) / useRegionShown(regionId) / useRailVisibility(regionId)",
   },
   {
-    selector:
-      /\bstate\s*\.\s*statusBar\s*\.\s*(?:rateLimits\s*\.\s*(?:percentMode|showModeWord|showBar|showTimer)|resources\s*\.\s*(?:scope|metrics))\b/,
-    hook: "useStatusBarRateLimitValue(key) / useStatusBarResourceValue(key)",
-  },
-  {
-    selector:
-      /\b(?:state|s)\s*\.\s*(pinContextUsageBreakdown|pinnedContextBreakdownFields|pinnedContextBreakdownOrder|contextIndicatorStyle|chatTurnMinimapSide|navigatorResourceMetrics|homeTabEnabled)\b/,
-    hook: "useLayoutSetting(...)",
+    selector: /\b(?:state|s)\s*\.\s*arrangement\b/,
+    hook: "useLayoutArrangement() / useArrangementValue(key)",
   },
 ];
 
 /**
- * Files allowed to keep reading the store directly, each with the reason.
+ * Files allowed to read the layout store directly, each with the reason.
  *
  * Two kinds only. An ANCESTOR decides whether an element is rendered at all,
- * and an override above one would make a preview mount live chrome. A CONTROL
+ * and an override above one would make a specimen mount live chrome. A CONTROL
  * shows and writes the real value, so a previewed one would be a switch that
  * lies about what it is about to do.
  */
 const DIRECT_READ_EXEMPTIONS: Readonly<Record<string, string>> = {
   // The seam itself.
   "lib/layout-overrides.ts": "the seam",
-  // Presets read and write whole slices; a bundle is about the stored values.
-  "lib/layout-presets.ts": "reads and writes the stored values by definition",
-  // ANCESTORS: mount decisions. `app-status-bar` belongs here in spirit and is
-  // absent on purpose - the keys it reads (`rateLimits.enabled`,
-  // `resources.enabled`) are not ones the seam serves, so it needs no waiver.
-  "components/layout/top-level-tab-host.tsx":
-    "ancestor - decides the Home tab's route host exists",
-  "components/layout/shell/mobile-nav-drawer.tsx":
-    "ancestor - decides the drawer's Home entry exists; phone only",
-  "components/layout/header/mobile-app-header.tsx":
-    "ancestor - decides the mobile header's Home affordance exists",
-  "providers/resources-stream-mount.tsx":
-    "ancestor - subscribing starts a resource stream, which a preview must never do",
-  "lib/commands/sources/actions.source.ts":
-    "ancestor - decides whether a palette command exists, not how one draws",
 };
 
 /**
- * The Layout settings page and its groups are controls, all of them: a control
- * shows and writes the real value, so a previewed one would be a switch that
- * lies about what it is about to do. The strip's own right-click menu and the
- * usage popover are controls in the same sense, and are absent from the waiver
- * list only because the keys they write are not ones the seam serves.
+ * The inspector and the Layout page are controls, all of them: a control shows
+ * and writes the real value, so a previewed one would be a switch that lies
+ * about what it is about to do. The strip's own right-click menu and the usage
+ * popover are controls in the same sense, and are absent from this list only
+ * because they select ACTIONS rather than values.
  */
-const SETTINGS_PANEL_PREFIX = "components/settings/";
+const CONTROL_PREFIXES: ReadonlyArray<string> = [
+  "components/layout-editor/",
+  "components/settings/",
+];
 
 /** Stores own their own state. */
 const STORES_PREFIX = "stores/";
@@ -120,7 +100,7 @@ function collectSourceFiles(dir: string): ReadonlyArray<string> {
  */
 function selectorBodies(source: string): ReadonlyArray<string> {
   const bodies: string[] = [];
-  const call = /use(?:Layout|Settings)Store\(/g;
+  const call = /useLayoutStore\(/g;
   let match = call.exec(source);
   while (match !== null) {
     const start = match.index + match[0].length;
@@ -134,13 +114,13 @@ function selectorBodies(source: string): ReadonlyArray<string> {
 function isExempt(relative: string): boolean {
   return (
     relative in DIRECT_READ_EXEMPTIONS ||
-    relative.startsWith(SETTINGS_PANEL_PREFIX) ||
+    CONTROL_PREFIXES.some((prefix) => relative.startsWith(prefix)) ||
     relative.startsWith(STORES_PREFIX)
   );
 }
 
-describe("layout preference reads go through the override seam", () => {
-  it("finds no direct store read of a migrated preference", () => {
+describe("layout value reads go through the override seam", () => {
+  it("finds no direct store read of a layout value", () => {
     const offenders: string[] = [];
     for (const file of collectSourceFiles(SRC_DIR)) {
       const relative = path.relative(SRC_DIR, file).split(path.sep).join("/");
@@ -166,7 +146,7 @@ describe("layout preference reads go through the override seam", () => {
       const reads = selectorBodies(source).some((body) =>
         MIGRATED_READS.some((migrated) => migrated.selector.test(body)),
       );
-      // The seam reads the slices itself, by definition.
+      // The seam reads the triple itself, by definition.
       if (!reads && relative !== "lib/layout-overrides.ts") {
         stale.push(relative);
       }

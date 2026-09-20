@@ -1,6 +1,5 @@
 import { SettingsSidebar } from "@/components/settings/settings-sidebar";
 import { setMobileApp } from "@/lib/mobile-app";
-import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -8,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The sidebar's host group is headed by the one host switcher, which composes
@@ -94,27 +93,23 @@ async function renderRail(): Promise<void> {
   await screen.findByTestId("settings-sidebar-item-general");
 }
 
+/**
+ * The Customize editor switch, and the gate that used to drop this entry once
+ * the editor took the Layout page's rows over, are both gone: the Layout
+ * sidebar entry is offered unconditionally now.
+ */
 describe("<SettingsSidebar /> Layout entry", () => {
   afterEach(() => {
     cleanup();
     setMobileApp(false);
     setWidth(1024);
     scopeOverrides.current = { client: null };
-    useSettingsStore.setState({ visualLayoutEditorEnabled: false });
   });
 
-  it("lists Layout with the editor off", async () => {
+  it("always lists Layout, alongside its neighbours", async () => {
     await renderRail();
 
     expect(screen.getByTestId("settings-sidebar-item-layout")).toBeTruthy();
-  });
-
-  it("drops Layout, and only Layout, once the editor takes its rows over", async () => {
-    useSettingsStore.setState({ visualLayoutEditorEnabled: true });
-
-    await renderRail();
-
-    expect(screen.queryByTestId("settings-sidebar-item-layout")).toBeNull();
     for (const neighbour of ["appearance", "app-diagnostics", "devices"]) {
       expect(
         screen.getByTestId(`settings-sidebar-item-${neighbour}`),
@@ -122,8 +117,7 @@ describe("<SettingsSidebar /> Layout entry", () => {
     }
   });
 
-  it("keeps Layout at a narrow window even with the switch on", async () => {
-    useSettingsStore.setState({ visualLayoutEditorEnabled: true });
+  it("keeps Layout at a narrow window", async () => {
     setWidth(500);
 
     await renderRail();
@@ -131,14 +125,11 @@ describe("<SettingsSidebar /> Layout entry", () => {
     expect(screen.getByTestId("settings-sidebar-item-layout")).toBeTruthy();
   });
 
-  it("follows the switch live", async () => {
+  it("keeps Layout in the installed mobile app", async () => {
+    setMobileApp(true);
+
     await renderRail();
+
     expect(screen.getByTestId("settings-sidebar-item-layout")).toBeTruthy();
-
-    useSettingsStore.setState({ visualLayoutEditorEnabled: true });
-
-    await waitFor(() =>
-      expect(screen.queryByTestId("settings-sidebar-item-layout")).toBeNull(),
-    );
   });
 });

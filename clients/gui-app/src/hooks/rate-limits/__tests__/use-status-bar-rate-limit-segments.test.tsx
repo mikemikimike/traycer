@@ -18,9 +18,9 @@ import type {
   ProviderRateLimitEnvelope,
 } from "@/lib/rate-limits/rate-limit-envelope";
 import {
-  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 
 interface MockQueryResult {
   readonly data: ProviderRateLimitEnvelope | undefined;
@@ -376,13 +376,13 @@ beforeEach(() => {
   mocks.results = new Map();
   mocks.batches = [];
   mocks.windowedProviders = [];
-  useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
 
 describe("useStatusBarRateLimitSegments", () => {
@@ -391,14 +391,9 @@ describe("useStatusBarRateLimitSegments", () => {
       readonly automatic: boolean;
       readonly limitKeys: ReadonlyArray<string>;
     }): void {
-      useLayoutStore.setState({
-        statusBar: {
-          ...DEFAULT_STATUS_BAR_LAYOUT,
-          rateLimits: {
-            ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-            providers: { codex: selection },
-          },
-        },
+      useLayoutStore.getState().setArrangement({
+        ...useLayoutStore.getState().arrangement,
+        providerLimits: { codex: selection },
       });
     }
 
@@ -542,14 +537,9 @@ describe("useStatusBarRateLimitSegments", () => {
       ),
       isError: false,
     });
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          hiddenProviders: ["codex"],
-        },
-      },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      hiddenProviders: ["codex"],
     });
 
     const { result } = renderSegments([
@@ -1327,14 +1317,9 @@ describe("useStatusBarRateLimitSegments", () => {
         ),
         isError: false,
       });
-      useLayoutStore.setState({
-        statusBar: {
-          ...DEFAULT_STATUS_BAR_LAYOUT,
-          rateLimits: {
-            ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-            hiddenProviders: ["codex"],
-          },
-        },
+      useLayoutStore.getState().setArrangement({
+        ...useLayoutStore.getState().arrangement,
+        hiddenProviders: ["codex"],
       });
 
       const { result } = renderSegments([

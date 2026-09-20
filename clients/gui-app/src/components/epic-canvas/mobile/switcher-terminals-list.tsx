@@ -21,7 +21,7 @@ import { epicTerminalUiIdentityKey } from "@/lib/terminals/pending-create-identi
 import { terminalSessionLabel } from "@/lib/terminals/terminal-title";
 import type { TerminalSidebarSessionRow } from "@/lib/terminals/reconcile-terminal-sidebar-sessions";
 import { useIsActiveTile } from "@/stores/epics/canvas/store";
-import { useLayoutSetting } from "@/lib/layout-overrides";
+import { DEFAULT_NAVIGATOR_RESOURCE_METRICS } from "@/stores/settings/settings-store";
 
 /** Every test id this list's shared states and rows are grabbed by. */
 const TERMINALS_TEST_ID_PREFIX = "switcher-terminal";
@@ -153,7 +153,7 @@ function SwitcherTerminalRow(props: {
   // Host-scoped, like desktop: two fleet terminals sharing a terminalId must
   // not both read as the current tile.
   const isActive = useIsActiveTile(tabId, session.sessionId, hostId);
-  const navigatorResourceMetrics = useLayoutSetting("navigatorResourceMetrics");
+  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
   const label = terminalSessionLabel(session);
 
   return (

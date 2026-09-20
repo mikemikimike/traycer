@@ -1,10 +1,3 @@
-import { CustomizeOverlay } from "@/components/customize/customize-overlay";
-import { undo } from "@/lib/customize/history";
-import { trackLayoutSetting } from "@/components/settings/panels/layout/track-layout-setting";
-vi.mock("@/components/settings/panels/layout/track-layout-setting", () => ({
-  trackLayoutSetting: vi.fn(),
-}));
-import { useCustomizeStore } from "@/stores/customize/customize-store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -12,8 +5,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
-  within,
 } from "@testing-library/react";
 import type { HostScope } from "@/components/settings/host-scope/use-host-scope";
 import type { GlobalResourceProjection } from "@/stores/resources/resources-registry";
@@ -25,10 +16,9 @@ import type { StatusBarRateLimitCluster as StatusBarRateLimitClusterModel } from
 import type { ConfiguredRateLimitProvider } from "@/hooks/rate-limits/use-configured-rate-limit-providers";
 import { useWatchHostStore } from "@/stores/host-scope/watch-host-store";
 import {
-  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+} from "@/stores/layout/layout-store";
 import {
   dispatchAction,
   type KeybindingRouter,
@@ -274,7 +264,7 @@ describe("<AppStatusBar />", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -282,7 +272,7 @@ describe("<AppStatusBar />", () => {
   afterEach(() => {
     cleanup();
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -445,12 +435,9 @@ describe("<AppStatusBar />", () => {
   });
 
   it("hides the resource segment when the preference is off", () => {
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        resources: { ...DEFAULT_STATUS_BAR_LAYOUT.resources, enabled: false },
-      },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("resourceMonitor", { shown: "hidden" });
 
     render(<AppStatusBar />);
 
@@ -487,12 +474,9 @@ describe("<AppStatusBar />", () => {
         },
       ],
     };
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: { ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits, enabled: false },
-      },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("usageLimits", { shown: "hidden" });
 
     render(<AppStatusBar />);
 
@@ -505,7 +489,7 @@ describe("<AppStatusBar /> usage panel chord", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -513,7 +497,7 @@ describe("<AppStatusBar /> usage panel chord", () => {
   afterEach(() => {
     cleanup();
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -522,13 +506,10 @@ describe("<AppStatusBar /> usage panel chord", () => {
   // it stays reachable in every state the segments themselves do not survive
   // - usage switched off in Settings, or a pick that cannot be reached.
 
-  it("opens the panel through the chord while statusBar.rateLimits.enabled is false, with the cluster absent", () => {
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: { ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits, enabled: false },
-      },
-    });
+  it("opens the panel through the chord while usageLimits.shown is hidden, with the cluster absent", () => {
+    useLayoutStore
+      .getState()
+      .setRegionValues("usageLimits", { shown: "hidden" });
 
     render(<AppStatusBar />);
 
@@ -613,7 +594,7 @@ describe("<AppStatusBar /> host controls", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -621,7 +602,7 @@ describe("<AppStatusBar /> host controls", () => {
   afterEach(() => {
     cleanup();
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -656,7 +637,7 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -664,7 +645,7 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
   afterEach(() => {
     cleanup();
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -757,12 +738,9 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
     // With usage switched off there is no segment for a per-provider checkbox
     // to govern - it would toggle a preference with no visible effect.
     windowedProviders = twoWindowedProviders();
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: { ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits, enabled: false },
-      },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("usageLimits", { shown: "hidden" });
 
     render(<AppStatusBar />);
 
@@ -824,7 +802,7 @@ describe("<AppStatusBar /> on a mobile viewport", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -833,7 +811,7 @@ describe("<AppStatusBar /> on a mobile viewport", () => {
     cleanup();
     setViewportWidth(DESKTOP_VIEWPORT_WIDTH);
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -1002,8 +980,7 @@ describe("<AppStatusBar /> resource action ownership", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
-    useSettingsStore.setState({ showGlobalResourceMonitor: true });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -1012,8 +989,7 @@ describe("<AppStatusBar /> resource action ownership", () => {
     cleanup();
     setViewportWidth(DESKTOP_VIEWPORT_WIDTH);
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
-    useSettingsStore.setState(useSettingsStore.getInitialState(), true);
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
@@ -1030,7 +1006,9 @@ describe("<AppStatusBar /> resource action ownership", () => {
     // Both are on screen there - the header keeps its monitor whatever the
     // footer does - and the header is the one that survives an open keyboard
     // or nav drawer, so the strip must not displace its handler and then
-    // delete the slot on the way out.
+    // delete the slot on the way out. `resourceMonitor.shown` is one switch
+    // now (L-48): the default "shown" is what both mounts read, so no
+    // explicit set is needed to put the header's monitor on screen.
     setViewportWidth(MOBILE_VIEWPORT_WIDTH);
 
     render(<AppStatusBar />);
@@ -1038,16 +1016,10 @@ describe("<AppStatusBar /> resource action ownership", () => {
     expect(claimsOpenAction()).toBe("false");
   });
 
-  it("takes it on a mobile viewport when the header draws no monitor", () => {
-    // Nothing to collide with: standing down here would leave the action with
-    // no owner at all.
-    setViewportWidth(MOBILE_VIEWPORT_WIDTH);
-    useSettingsStore.setState({ showGlobalResourceMonitor: false });
-
-    render(<AppStatusBar />);
-
-    expect(claimsOpenAction()).toBe("true");
-  });
+  // The old "header off, strip on" case is gone with it: `resourceMonitor` is
+  // ONE switch (L-48) now, so turning the header's monitor off also drops the
+  // strip's own segment - there is no longer a state where the strip has a
+  // popover to claim ownership of while the header draws none.
 
   it("takes it back when the window is no longer narrow", () => {
     setViewportWidth(MOBILE_VIEWPORT_WIDTH);
@@ -1063,56 +1035,35 @@ describe("<AppStatusBar /> resource action ownership", () => {
   });
 });
 
-describe("<AppStatusBar /> Customize editing (review w3 fixups)", () => {
+// The rest of the old "Customize editing" / "disabled-usage provider ghosts
+// follow segmentOrder" suites were about the overlay/ghost/proxy technique
+// (`useCustomizeStore`, `CustomizeOverlay`, `trackLayoutSetting`, per-ghost
+// popover Move) - ticket 05 deletes that whole technique outright, with no
+// replacement in this ticket (the successor session store,
+// `useLayoutEditorStore`, is unwired until ticket 07). This ordering
+// assertion is the one survivor: it never touched the ghost machinery, only
+// `resourceSide` and plain DOM position.
+describe("<AppStatusBar /> resource segment placement", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
 
   afterEach(() => {
     cleanup();
-    useCustomizeStore.setState({ session: null, instances: new Map() });
     useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
 
-  function startEditingSession(): void {
-    useCustomizeStore.setState({
-      session: { scene: "in-place", opener: { kind: "none" }, startedAt: 0 },
-      instances: new Map(),
-      history: { past: [], future: [] },
-      announcement: "",
-    });
-  }
-
-  it("draws a resource ghost while editing with resources off, and nothing outside a session", () => {
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        resources: { ...DEFAULT_STATUS_BAR_LAYOUT.resources, enabled: false },
-      },
-    });
-    startEditingSession();
-
-    render(<AppStatusBar />);
-    expect(screen.getByTestId("status-bar-resources-ghost")).not.toBeNull();
-    expect(screen.queryByTestId("status-bar-resource-segment")).toBeNull();
-    expect(screen.queryByTestId("resource-monitor-popover")).toBeNull();
-
-    cleanup();
-    useCustomizeStore.setState({ session: null });
-    render(<AppStatusBar />);
-    expect(screen.queryByTestId("status-bar-resources-ghost")).toBeNull();
-  });
-
   it("renders the resource segment before the usage slot when resourceSide is left, and after it when right", () => {
-    useLayoutStore.setState({
-      statusBar: { ...DEFAULT_STATUS_BAR_LAYOUT, resourceSide: "left" },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      resourceSide: "left",
     });
     const { unmount } = render(<AppStatusBar />);
     const resourceSegmentLeft = screen.getByTestId(
@@ -1128,8 +1079,9 @@ describe("<AppStatusBar /> Customize editing (review w3 fixups)", () => {
     ).toBe(true);
     unmount();
 
-    useLayoutStore.setState({
-      statusBar: { ...DEFAULT_STATUS_BAR_LAYOUT, resourceSide: "right" },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      resourceSide: "right",
     });
     render(<AppStatusBar />);
     const resourceSegmentRight = screen.getByTestId(
@@ -1143,248 +1095,5 @@ describe("<AppStatusBar /> Customize editing (review w3 fixups)", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-  });
-
-  it("keeps the usage handle registered and rendered while the watched host's pick is unresolved", () => {
-    useWatchHostStore.setState({ scopedHostId: "host-b" });
-    scope = hostScopeFixture({
-      hosts: [HOST_A, HOST_B],
-      host: HOST_B,
-      activeHostId: "host-a",
-      activeHost: HOST_A,
-      isViewingActive: false,
-      status: "unreachable",
-    });
-    startEditingSession();
-
-    render(<AppStatusBar />);
-
-    // The strip is showing the host-unavailable notice instead of the
-    // cluster ...
-    expect(screen.getByTestId("status-bar-host-unavailable")).not.toBeNull();
-    // ... but the handle above that gate is still there and still a real
-    // hotspot, not silently dropped along with the cluster it opens.
-    const handle = screen.getByTestId("status-bar-usage-handle");
-    expect(handle).not.toBeNull();
-    const instance = [...useCustomizeStore.getState().instances.values()].find(
-      (candidate) => candidate.settingId === "statusBar.usage",
-    );
-    expect(instance).toBeDefined();
-    expect(instance?.ghost).toBe(true);
-    expect(instance?.condition).toBe("The selected host is unavailable");
-  });
-
-  it("shows a passive ghost placeholder per configured provider when usage limits are switched off", () => {
-    windowedProviders = [
-      {
-        providerId: "codex",
-        lane: "ephemeralProcess",
-        profiles: [],
-        fetchEligibility: { ambient: true, managedProfiles: true },
-      },
-      {
-        providerId: "opencode",
-        lane: "httpFetch",
-        profiles: [],
-        fetchEligibility: { ambient: true, managedProfiles: true },
-      },
-    ];
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          enabled: false,
-        },
-      },
-    });
-    startEditingSession();
-
-    render(<AppStatusBar />);
-
-    const providerInstances = [
-      ...useCustomizeStore.getState().instances.values(),
-    ].filter((candidate) => candidate.settingId === "statusBar.provider");
-    expect(providerInstances).toHaveLength(2);
-    expect(providerInstances.every((instance) => instance.ghost)).toBe(true);
-    expect(
-      new Set(providerInstances.map((instance) => instance.tileId)),
-    ).toEqual(new Set(["codex:", "opencode:"]));
-
-    // Outside a session there is nothing to restore, so no ghosts mount.
-    cleanup();
-    useCustomizeStore.setState({ session: null, instances: new Map() });
-    render(<AppStatusBar />);
-    expect(
-      [...useCustomizeStore.getState().instances.values()].filter(
-        (candidate) => candidate.settingId === "statusBar.provider",
-      ),
-    ).toHaveLength(0);
-  });
-});
-
-describe("<AppStatusBar /> disabled-usage provider ghosts follow segmentOrder (R2)", () => {
-  beforeEach(() => {
-    scope = hostScopeFixture({});
-    useWatchHostStore.setState({ scopedHostId: null });
-    resetRateLimitMocks();
-    resourceProjection.value = null;
-    windowedProviders = [
-      {
-        providerId: "codex",
-        lane: "ephemeralProcess",
-        profiles: [],
-        fetchEligibility: { ambient: true, managedProfiles: true },
-      },
-      {
-        providerId: "opencode",
-        lane: "httpFetch",
-        profiles: [],
-        fetchEligibility: { ambient: true, managedProfiles: true },
-      },
-    ];
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          enabled: false,
-        },
-        // Nondefault: the REVERSE of windowedProviders' own order, so the
-        // "before" assertion actually proves the ghost list is reading
-        // segmentOrder rather than just replaying registration/canonical
-        // order (which would coincidentally also pass a same-order fixture).
-        segmentOrder: ["opencode", "codex"],
-      },
-    });
-    useCustomizeStore.setState({
-      session: {
-        scene: "in-place",
-        opener: { kind: "none" },
-        startedAt: Date.now(),
-      },
-      instances: new Map(),
-      activeKey: null,
-      popoverKey: null,
-      invoker: null,
-      disclosure: null,
-      pendingTarget: null,
-      history: { past: [], future: [] },
-    });
-    vi.mocked(trackLayoutSetting).mockClear();
-  });
-
-  afterEach(() => {
-    act(() => {
-      useCustomizeStore.setState({ session: null });
-    });
-    cleanup();
-    useWatchHostStore.setState({ scopedHostId: null });
-    useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
-    resetRateLimitMocks();
-    resourceProjection.value = null;
-    vi.clearAllMocks();
-  });
-
-  // jsdom does no layout - stub the same two DOM reads
-  // `composer-mic-hotspot-geometry-customize.test.tsx` / the footer-ghost
-  // suite already stub, reused verbatim.
-  function stubRect(
-    node: HTMLElement,
-    rect: { x: number; y: number; width: number; height: number },
-  ): void {
-    node.getBoundingClientRect = () =>
-      new DOMRect(rect.x, rect.y, rect.width, rect.height);
-    node.getClientRects = () => {
-      const measured = new DOMRect(rect.x, rect.y, rect.width, rect.height);
-      return Object.assign([measured], {
-        item: (index: number) => (index === 0 ? measured : null),
-      });
-    };
-  }
-
-  function proxyFor(key: string): HTMLButtonElement | null {
-    return document.querySelector<HTMLButtonElement>(
-      `[data-customize-proxy="${key}"]`,
-    );
-  }
-
-  /** The two provider ghosts are plain `<span>`s (no testid) inside the
-   *  reserved usage slot - read them by their own display-name text. */
-  function ghostSpans(): ReadonlyArray<HTMLElement> {
-    const slot = screen.getByTestId("status-bar-rate-limit-slot");
-    const names = new Set(["Codex", "OpenCode"]);
-    return Array.from(slot.querySelectorAll("span")).filter((span) =>
-      names.has(span.textContent.trim()),
-    );
-  }
-  function ghostOrder(): ReadonlyArray<string> {
-    return ghostSpans().map((span) => span.textContent.trim());
-  }
-
-  it("orders the ghosts by the saved segmentOrder, and a real per-ghost popover Move (not a direct write) updates it live, with one history entry, the segmentOrder analytics id, and Undo", async () => {
-    render(
-      <>
-        <AppStatusBar />
-        <CustomizeOverlay />
-      </>,
-    );
-
-    // segmentOrder is ["opencode", "codex"] - proves the list follows the
-    // SAVED order, not registration/canonical order (which would render
-    // codex first, matching windowedProviders' own order).
-    expect(ghostOrder()).toEqual(["OpenCode", "Codex"]);
-
-    // Lay the two ghosts out left-to-right matching what's actually
-    // rendered, so `orderedTileIds`'s live-rect sort (which the Move
-    // button's "next position" is computed from) agrees with the DOM.
-    ghostSpans().forEach((span, index) => {
-      stubRect(span, { x: index * 100, y: 0, width: 80, height: 16 });
-    });
-    act(() => {
-      window.dispatchEvent(new Event("resize"));
-    });
-
-    const openCodeInstance = [
-      ...useCustomizeStore.getState().instances.values(),
-    ].find(
-      (instance) =>
-        instance.settingId === "statusBar.provider" &&
-        instance.tileId === "opencode:",
-    );
-    if (!openCodeInstance) throw new Error("opencode ghost did not register");
-    await waitFor(() => expect(proxyFor(openCodeInstance.key)).not.toBeNull());
-    const proxy = proxyFor(openCodeInstance.key);
-    if (!proxy) throw new Error("opencode proxy missing");
-    fireEvent.click(proxy);
-    expect(useCustomizeStore.getState().popoverKey).toBe(openCodeInstance.key);
-
-    // OpenCode is leftmost after the stub above, so its "Move left" is
-    // disabled and "Move right" is the one real swap available.
-    const moveGroup = screen.getByRole("group", { name: "Move" });
-    fireEvent.click(
-      within(moveGroup).getByRole("button", { name: "Move right" }),
-    );
-
-    expect(useLayoutStore.getState().statusBar.segmentOrder).toEqual([
-      "codex",
-      "opencode",
-    ]);
-    expect(useCustomizeStore.getState().history.past).toHaveLength(1);
-    expect(vi.mocked(trackLayoutSetting)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(trackLayoutSetting)).toHaveBeenCalledWith(
-      "layout.statusBar.segmentOrder",
-    );
-
-    // The same mounted strip reacts to the new saved order.
-    expect(ghostOrder()).toEqual(["Codex", "OpenCode"]);
-
-    act(() => undo());
-    expect(useLayoutStore.getState().statusBar.segmentOrder).toEqual([
-      "opencode",
-      "codex",
-    ]);
-    expect(useCustomizeStore.getState().history.past).toHaveLength(0);
-    expect(ghostOrder()).toEqual(["OpenCode", "Codex"]);
   });
 });

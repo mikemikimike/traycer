@@ -1,5 +1,5 @@
 import type { AutoJudgeBilling } from "@/lib/auto-mode/auto-judge-billing";
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo } from "react";
 import { useStore } from "zustand";
 
 import {
@@ -16,16 +16,6 @@ import type { DictationPreparingStatus } from "@/hooks/composer/use-dictation-av
 import type { ChatActiveTurn } from "@traycer/protocol/host/agent/gui/subscribe";
 import type { ComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
 import type { ProviderTerminalLoginSurface } from "@/lib/providers/provider-terminal-login-surface";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
-import { customizeLayoutAction } from "@/lib/commands/actions/customize-layout";
-import { useSettingsStore } from "@/stores/settings/settings-store";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
 
 interface ComposerToolbarProps {
   /** Passive sample chrome: no host hooks, activation slots or send action. */
@@ -161,14 +151,6 @@ function ComposerToolbarView(
       ? dictation
       : null;
 
-  const editing = useCustomizeStore((state) => state.session !== null);
-  const narrowViewport = useIsMobileViewport();
-  const featureEnabled = useSettingsStore(
-    (state) => state.visualLayoutEditorEnabled,
-  );
-  const showCustomizeEntry =
-    featureEnabled && !editing && !narrowViewport && !props.presentation;
-
   // Both clusters render through the same `renderToolbarItem` map now that an
   // item may move between them, so both need the full prop set - what used to
   // be split into "left's props" and "right's props" is one shared object.
@@ -197,64 +179,36 @@ function ComposerToolbarView(
   };
 
   return (
-    <ComposerToolbarContextMenu enabled={showCustomizeEntry}>
-      <div
-        inert={props.presentation}
-        className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2.5 pb-2.5 pt-1"
-      >
-        {recordingDictation !== null ? (
-          <div className="col-span-2 min-w-0">
-            <DictationRecordingBar
-              state={recordingDictation.state}
-              getStream={recordingDictation.getStream}
-              onStop={recordingDictation.onStop}
-              onCancel={recordingDictation.onCancel}
-            />
-          </div>
-        ) : (
-          <>
-            <ComposerToolbarLeft {...itemProps} />
-            <ComposerToolbarRight
-              {...itemProps}
-              canSubmit={props.presentation ? false : canSubmit}
-              attachmentPending={attachmentPending}
-              onSubmit={onSubmit}
-              activeTurnStatus={props.presentation ? null : activeTurnStatus}
-              stopDisabled={stopDisabled}
-              onStopTurn={props.presentation ? null : onStopTurn}
-              composerDisabledHint={composerDisabledHint}
-            />
-          </>
-        )}
-      </div>
-    </ComposerToolbarContextMenu>
+    <div
+      inert={props.presentation}
+      className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2.5 pb-2.5 pt-1"
+    >
+      {recordingDictation !== null ? (
+        <div className="col-span-2 min-w-0">
+          <DictationRecordingBar
+            state={recordingDictation.state}
+            getStream={recordingDictation.getStream}
+            onStop={recordingDictation.onStop}
+            onCancel={recordingDictation.onCancel}
+          />
+        </div>
+      ) : (
+        <>
+          <ComposerToolbarLeft {...itemProps} />
+          <ComposerToolbarRight
+            {...itemProps}
+            canSubmit={props.presentation ? false : canSubmit}
+            attachmentPending={attachmentPending}
+            onSubmit={onSubmit}
+            activeTurnStatus={props.presentation ? null : activeTurnStatus}
+            stopDisabled={stopDisabled}
+            onStopTurn={props.presentation ? null : onStopTurn}
+            composerDisabledHint={composerDisabledHint}
+          />
+        </>
+      )}
+    </div>
   );
 }
 
 export const ComposerToolbar = memo(ComposerToolbarImpl);
-
-/**
- * The composer toolbar's own right-click entry into Customize - the toolbar
- * has no context menu of its own to append to, so this adds a minimal one,
- * outside a session and only when the switch is on.
- */
-function ComposerToolbarContextMenu(props: {
-  readonly enabled: boolean;
-  readonly children: ReactNode;
-}): ReactNode {
-  // Gate interaction, not ancestors: switching Customize must retain live leaves.
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild disabled={!props.enabled}>
-        {props.children}
-      </ContextMenuTrigger>
-      {props.enabled ? (
-        <ContextMenuContent>
-          <ContextMenuItem onSelect={() => customizeLayoutAction("direct_ui")}>
-            Customize layout…
-          </ContextMenuItem>
-        </ContextMenuContent>
-      ) : null}
-    </ContextMenu>
-  );
-}

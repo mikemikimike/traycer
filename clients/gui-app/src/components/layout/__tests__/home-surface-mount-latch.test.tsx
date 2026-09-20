@@ -21,7 +21,10 @@ import type { NavigateOptions } from "@tanstack/react-router";
 import { TopLevelTabHost } from "@/components/layout/top-level-tab-host";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { useLandingDraftStore } from "@/stores/home/landing-draft-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 import { emptyTabStripLayout } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { __resetTabNavigationControllerForTesting } from "@/lib/tab-navigation";
@@ -78,7 +81,10 @@ function resetStores(): void {
   useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
   useLandingDraftStore.setState({ drafts: [], activeDraftId: null });
   useTabsStore.setState({ ...emptyTabStripLayout(), stripOrder: [] });
-  useSettingsStore.setState({ homeTabEnabled: true });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+  // The Home tab is opt-in in the shipped defaults, and this suite is about
+  // what happens once it is on.
+  useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
   focusModel.calls = 0;
 }
 
@@ -153,7 +159,7 @@ describe("the Home surface's mount", () => {
     });
 
     act(() => {
-      useSettingsStore.setState({ homeTabEnabled: false });
+      useLayoutStore.getState().setRegionValues("homeTab", { shown: "hidden" });
     });
     expect(screen.queryByTestId(HOME_SURFACE)).toBeNull();
   });

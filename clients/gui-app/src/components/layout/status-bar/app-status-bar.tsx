@@ -1,8 +1,5 @@
-import { mergeOrder } from "@/lib/order-merge";
-import { CustomizeDropSlot } from "@/components/customize/customize-drop-slot";
 import { use, useEffect, useState, type ReactNode } from "react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { isHostScopeUsable } from "@/components/settings/host-scope/host-scope-status";
 import { useScopedHostBinding } from "@/components/settings/host-scope/use-scoped-host-binding";
 import { useScopedStreamBinding } from "@/components/settings/host-scope/use-scoped-stream-binding";
@@ -22,7 +19,6 @@ import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import type { ConfiguredRateLimitProvider } from "@/hooks/rate-limits/use-configured-rate-limit-providers";
 import {
   useRateLimitProfileSelection,
-  resolveStatusBarProfileIds,
   type RateLimitProfileSelection,
 } from "@/hooks/rate-limits/use-rate-limit-profile-selection";
 import { useStatusBarWindowedProviders } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
@@ -31,8 +27,7 @@ import { StreamRuntimeContext } from "@/lib/host/stream-runtime-context";
 import { registerDynamicActionHandler } from "@/lib/keybindings/dispatch";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store";
-import { useLayoutStore } from "@/stores/settings/layout-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 
 /** Stable identity, so a strip with no list to offer never re-renders on one. */
 const NO_MENU_PROVIDERS: ReadonlyArray<StatusBarMenuProvider> = [];
@@ -88,14 +83,10 @@ function ScopedAppStatusBar(props: {
   // them under a finger, so the viewport decides who holds a shortcut and
   // nothing about what is on screen.
   const narrowViewport = useIsMobileViewport();
-  const rateLimitsEnabled = useLayoutStore(
-    (state) => state.statusBar.rateLimits.enabled,
-  );
-  const resourcesEnabled = useLayoutStore(
-    (state) => state.statusBar.resources.enabled,
-  );
-  const editing = useCustomizeStore((state) => state.session !== null);
-  const resourceSide = useLayoutStore((state) => state.statusBar.resourceSide);
+  const rateLimitsEnabled = useRegionShown("usageLimits");
+  const resourcesEnabled = useRegionShown("resourceMonitor");
+  const editing = useLayoutEditorStore((state) => state.session !== null);
+  const resourceSide = useArrangementValue("resourceSide");
   // Resolved here rather than in the cluster because it has two readers on
   // opposite sides of the gate below: the segments, and the right-click menu
   // that wraps the whole strip. One resolution is what keeps the menu's list
@@ -134,18 +125,15 @@ function ScopedAppStatusBar(props: {
       setUsageOpen(true);
     });
   }, [narrowViewport]);
-  // The resource panel's half of the same question, and it needs one more fact
-  // because the popover is mounted by the HEADER too rather than only beside
-  // the button it replaces. On desktop `placement` keeps the two mounts
-  // mutually exclusive, so the strip always owns the action. On a mobile
-  // viewport both can be on screen, and the header's monitor is the survivor -
-  // it is still there with the keyboard up - so the strip owns the action only
-  // when the header is drawing no monitor to own it. With both off nobody
-  // registers, which is correct: there is no panel to open.
-  const headerResourceMonitor = useSettingsStore(
-    (state) => state.showGlobalResourceMonitor,
-  );
-  const claimsResourcesAction = !narrowViewport || !headerResourceMonitor;
+  // The resource panel's half of the same question. The popover is mounted by
+  // the HEADER too rather than only beside the button it replaces, and one
+  // switch now decides both (L-48), so wherever this strip draws the monitor
+  // the header is drawing one as well. On a mobile viewport both are on screen
+  // and the header's is the survivor - it is still there with the keyboard up -
+  // so the strip stands down there and owns the action everywhere else. With
+  // the monitor hidden nothing below mounts, so nobody registers, which is
+  // correct: there is no panel to open.
+  const claimsResourcesAction = !narrowViewport;
   // While the panel is open, let the header drop its title-bar drag regions so
   // a click on the (otherwise event-swallowing) drag area dismisses it. The id
   // is the header trigger's own: the two are mutually exclusive by placement
@@ -166,8 +154,7 @@ function ScopedAppStatusBar(props: {
   const scopedToOwnHost =
     !props.hasExplicitPick || isHostScopeUsable(scope.status);
 
-  const resourceGhost = editing ? <StatusBarResourceGhost /> : null;
-  const resources = resourcesEnabled ? (
+  const resources = !resourcesEnabled ? null : (
     <ResourceMonitorPopover
       trigger="custom"
       contentSide="top"
@@ -182,8 +169,6 @@ function ScopedAppStatusBar(props: {
         />
       }
     />
-  ) : (
-    resourceGhost
   );
 
   return (
@@ -218,12 +203,6 @@ function ScopedAppStatusBar(props: {
         className="shrink-0 border-t border-border/90 bg-canvas pb-safe-bottom text-canvas-foreground"
       >
         <div className="flex h-6 items-center gap-2 px-2 text-ui-xs tabular-nums">
-          <CustomizeDropSlot
-            id="resources:left"
-            group="status-bar-resources"
-            tileId={null}
-            className="inline-flex size-5 shrink-0"
-          />
           {resourceSide === "left" ? resources : null}
           {/*
             The panel and its chord live HERE, above everything that can hide
@@ -291,12 +270,6 @@ function ScopedAppStatusBar(props: {
             rather than as the ambient host's figures.
           */}
           {resourceSide === "right" ? resources : null}
-          <CustomizeDropSlot
-            id="resources:right"
-            group="status-bar-resources"
-            tileId={null}
-            className="inline-flex size-5 shrink-0"
-          />
         </div>
       </div>
     </StatusBarVisibilityMenu>
@@ -318,53 +291,8 @@ function StatusBarUsageSlot(props: {
   readonly scope: HostScope;
   readonly editing: boolean;
 }): ReactNode {
-  // Registered unconditionally (before the early returns below) so the handle
-  // is a hotspot whether or not the cluster it opens is currently on screen -
-  // the whole point of a handle that "stays" while its segments ghost.
-  const disabledCondition = props.rateLimitsEnabled
-    ? null
-    : "Usage limits are turned off";
-  const { ref: handleRef } = useLayoutHotspot({
-    settingId: "statusBar.usage",
-    tileId: null,
-    ghost: !props.rateLimitsEnabled || !props.scopedToOwnHost,
-    condition: props.scopedToOwnHost
-      ? disabledCondition
-      : "The selected host is unavailable",
-  });
-
-  const segmentOrder = useLayoutStore((state) => state.statusBar.segmentOrder);
-  const orderedProviders = mergeOrder(
-    segmentOrder,
-    props.providers.map((provider) => provider.providerId),
-  ).flatMap((id) =>
-    props.providers.filter((provider) => provider.providerId === id),
-  );
-  const providerGhosts =
-    props.editing && props.scopedToOwnHost
-      ? orderedProviders.flatMap((provider) =>
-          resolveStatusBarProfileIds(
-            props.profileSelection,
-            provider.providerId,
-            provider.profiles,
-          ).map((profileId) => (
-            <StatusBarProviderGhost
-              key={`${provider.providerId}:${profileId ?? ""}`}
-              provider={provider}
-              profileId={profileId}
-            />
-          )),
-        )
-      : null;
   return (
     <>
-      {props.editing ? (
-        <span
-          ref={handleRef}
-          data-testid="status-bar-usage-handle"
-          className="mr-1 inline-flex size-6 shrink-0 rounded-xs border border-dashed border-border/60"
-        />
-      ) : null}
       {!props.scopedToOwnHost ? (
         <StatusBarHostNotice scope={props.scope} />
       ) : null}
@@ -375,9 +303,7 @@ function StatusBarUsageSlot(props: {
           profileSelection={props.profileSelection}
           editing={props.editing}
         />
-      ) : (
-        providerGhosts
-      )}
+      ) : null}
     </>
   );
 }
@@ -440,46 +366,6 @@ function StatusBarHostNotice(props: { readonly scope: HostScope }): ReactNode {
       >
         Show the active host
       </button>
-    </span>
-  );
-}
-
-function StatusBarResourceGhost() {
-  const { ref } = useLayoutHotspot({
-    settingId: "statusBar.resources",
-    tileId: null,
-    ghost: true,
-    condition: "Resources are turned off",
-  });
-  return (
-    <span
-      ref={ref}
-      data-testid="status-bar-resources-ghost"
-      className="inline-flex shrink-0 rounded-sm border border-dashed border-border/60 px-2 text-muted-foreground"
-    >
-      Resources
-    </span>
-  );
-}
-function StatusBarProviderGhost({
-  provider,
-  profileId,
-}: {
-  provider: ConfiguredRateLimitProvider;
-  profileId: string | null;
-}) {
-  const { ref } = useLayoutHotspot({
-    settingId: "statusBar.provider",
-    tileId: `${provider.providerId}:${profileId ?? ""}`,
-    ghost: true,
-    condition: "Usage is unavailable or turned off",
-  });
-  return (
-    <span
-      ref={ref}
-      className="inline-flex shrink-0 rounded-sm border border-dashed border-border/60 px-1 text-muted-foreground"
-    >
-      {providerDisplayName(provider.providerId)}
     </span>
   );
 }

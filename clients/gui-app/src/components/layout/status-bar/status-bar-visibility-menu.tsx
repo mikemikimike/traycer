@@ -9,12 +9,10 @@ import {
 } from "@/components/ui/context-menu";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { trackSettingChanged } from "@/lib/analytics";
-import { customizeLayoutAction } from "@/lib/commands/actions/customize-layout";
+import { useLayoutArrangement, useRegionShown } from "@/lib/layout-overrides";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { navigateToSettingsSection } from "@/lib/settings-navigation";
-import { useSettingsStore } from "@/stores/settings/settings-store";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
-import { useLayoutStore } from "@/stores/settings/layout-store";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
  * Marks a subtree the status bar's own right-click menu must not claim. The bar
@@ -45,37 +43,23 @@ interface StatusBarVisibilityMenuProps {
  * The status bar's quick-visibility menu: what each segment shows, without a
  * trip to Settings, plus the way to that page for everything else.
  *
- * Every item writes the same `layout-store` fields the Layout page writes, so
- * the two can never disagree - this is a second view onto those preferences,
- * never a second place they live.
+ * Every item writes the same layout store the editor writes, so the two can
+ * never disagree - this is a second view onto those values, never a second
+ * place they live.
  */
 export function StatusBarVisibilityMenu(
   props: StatusBarVisibilityMenuProps,
 ): ReactNode {
-  const hiddenProviders = useLayoutStore(
-    (state) => state.statusBar.rateLimits.hiddenProviders,
-  );
-  const resourcesEnabled = useLayoutStore(
-    (state) => state.statusBar.resources.enabled,
-  );
-  const toggleProvider = useLayoutStore(
-    (state) => state.toggleStatusBarProvider,
-  );
-  const setResourcesEnabled = useLayoutStore(
-    (state) => state.setStatusBarResourcesEnabled,
-  );
-  const setPlacement = useLayoutStore((state) => state.setStatusBarPlacement);
-  // The same gate `StatusBarLayoutGroupContent` puts on the placement row, and
-  // for the same reason: below `md` the shell answers with `mobileFooter` and
-  // ignores `placement` entirely, while `MobileAppHeader` draws its usage
-  // controls whatever `placement` says. So the item would write a preference
-  // that moves nothing, and leave it waiting for the next desktop window.
+  const arrangement = useLayoutArrangement();
+  const hiddenProviders = arrangement.hiddenProviders;
+  const resourcesShown = useRegionShown("resourceMonitor");
+  const setArrangement = useLayoutStore((state) => state.setArrangement);
+  const setRegionValues = useLayoutStore((state) => state.setRegionValues);
+  // Below `md` the shell answers with `mobileFooter` and ignores `usageHost`
+  // entirely, while `MobileAppHeader` draws its usage controls whatever
+  // `usageHost` says. So the item would write a value that moves nothing, and
+  // leave it waiting for the next desktop window.
   const narrowViewport = useIsMobileViewport();
-  const editing = useCustomizeStore((state) => state.session !== null);
-  const featureEnabled = useSettingsStore(
-    (state) => state.visualLayoutEditorEnabled,
-  );
-  const showCustomizeEntry = featureEnabled && !narrowViewport && !editing;
 
   return (
     <ContextMenu>
@@ -106,17 +90,24 @@ export function StatusBarVisibilityMenu(
                 "layout",
                 "layout.statusBar.rateLimits.provider",
               );
-              toggleProvider(provider.providerId);
+              setArrangement({
+                ...arrangement,
+                hiddenProviders: hiddenProviders.includes(provider.providerId)
+                  ? hiddenProviders.filter((id) => id !== provider.providerId)
+                  : [...hiddenProviders, provider.providerId],
+              });
             }}
           >
             {provider.label}
           </ContextMenuCheckboxItem>
         ))}
         <ContextMenuCheckboxItem
-          checked={resourcesEnabled}
+          checked={resourcesShown}
           onCheckedChange={(checked) => {
             trackSettingChanged("layout", "layout.statusBar.resources.enabled");
-            setResourcesEnabled(checked);
+            setRegionValues("resourceMonitor", {
+              shown: checked ? "shown" : "hidden",
+            });
           }}
         >
           Resource monitor
@@ -133,22 +124,12 @@ export function StatusBarVisibilityMenu(
           <ContextMenuItem
             onSelect={() => {
               trackSettingChanged("layout", "layout.statusBar.placement");
-              setPlacement("header");
+              setArrangement({ ...arrangement, usageHost: "header" });
             }}
           >
             Move to header
           </ContextMenuItem>
         )}
-        {showCustomizeEntry ? (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              onSelect={() => customizeLayoutAction("direct_ui")}
-            >
-              Customize layout…
-            </ContextMenuItem>
-          </>
-        ) : null}
       </ContextMenuContent>
     </ContextMenu>
   );

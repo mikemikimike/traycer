@@ -15,7 +15,7 @@ import type { ChatDockSection } from "@/components/chat/chat-dock-compact-contex
 import type { AgentRow } from "@/hooks/agent/use-agent-stop-controls";
 import { QueuedMessagePanel } from "@/components/chat/queued-message-surface";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
-import type { DockSection } from "@/stores/settings/layout-store";
+
 import { cn } from "@/lib/utils";
 import type { ChatPinnedStackTopSpacing } from "@/components/chat/chat-pinned-stack";
 
@@ -24,8 +24,10 @@ import type { ChatPinnedStackTopSpacing } from "@/components/chat/chat-pinned-st
  *  composer strip) currently carries it. */
 export interface DockRowHotspot {
   readonly hotspotRef: (node: HTMLElement | null) => void;
-  /** No content at all - the setting has nothing to anchor to but this row's
-   *  own ghost placeholder, regardless of the Visible/Compact preference. */
+  /** The region's own Shown value - a hidden row draws neither row nor chip. */
+  readonly shown: boolean;
+  /** No content at all - the region has nothing to anchor to but this row's
+   *  own ghost placeholder, regardless of the Row/Chip preference. */
   readonly ghost: boolean;
   readonly condition: string;
   readonly editing: boolean;
@@ -54,9 +56,9 @@ interface LiveChatLowerDockProps {
    */
   readonly folded: ReadonlySet<ChatDockSection>;
   /** The vertical order of the three reorderable rows below Todo. */
-  readonly dockOrder: ReadonlyArray<DockSection>;
+  readonly dockOrder: ReadonlyArray<ChatDockSection>;
   /** This tile's Customize hotspot for each of the three reorderable rows. */
-  readonly hotspots: Readonly<Record<DockSection, DockRowHotspot>>;
+  readonly hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>>;
   readonly backgroundItems: ReadonlyArray<BackgroundItem> | undefined;
   /**
    * This chat's running managed commands, counted by the parent because the
@@ -99,17 +101,17 @@ interface LiveChatLowerDockProps {
 }
 
 interface DockRowPlan {
-  readonly section: DockSection;
+  readonly section: ChatDockSection;
   readonly hotspot: DockRowHotspot;
   readonly showGhost: boolean;
   readonly showRow: boolean;
 }
 
 interface PresentationChatLowerDockProps {
-  readonly presentationRows: Readonly<Record<DockSection, ReactNode>>;
+  readonly presentationRows: Readonly<Record<ChatDockSection, ReactNode>>;
   readonly folded: ReadonlySet<ChatDockSection>;
-  readonly dockOrder: ReadonlyArray<DockSection>;
-  readonly hotspots: Readonly<Record<DockSection, DockRowHotspot>>;
+  readonly dockOrder: ReadonlyArray<ChatDockSection>;
+  readonly hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>>;
   readonly topSpacing: ChatPinnedStackTopSpacing;
 }
 export type ChatLowerDockProps =
@@ -117,15 +119,15 @@ export type ChatLowerDockProps =
   | PresentationChatLowerDockProps;
 
 function planDockRow(
-  section: DockSection,
+  section: ChatDockSection,
   hotspot: DockRowHotspot,
   folded: ReadonlySet<ChatDockSection>,
 ): DockRowPlan {
   return {
     section,
     hotspot,
-    showGhost: hotspot.ghost && hotspot.editing,
-    showRow: !hotspot.ghost && !folded.has(section),
+    showGhost: (hotspot.ghost || !hotspot.shown) && hotspot.editing,
+    showRow: hotspot.shown && !hotspot.ghost && !folded.has(section),
   };
 }
 
@@ -244,7 +246,7 @@ function dockGhostRow(props: {
 
 function dockRow(props: {
   readonly key: string;
-  readonly section: DockSection;
+  readonly section: ChatDockSection;
   readonly editing: boolean;
   readonly hotspotRef: (node: HTMLElement | null) => void;
   readonly separated: boolean;

@@ -1,4 +1,4 @@
-import { isHomeTabEnabled } from "@/stores/settings/settings-store";
+import { isHomeTabEnabled } from "@/stores/layout/layout-store";
 import { withoutSampleWorkspace } from "./layout";
 import type {
   DesktopJsonValue,

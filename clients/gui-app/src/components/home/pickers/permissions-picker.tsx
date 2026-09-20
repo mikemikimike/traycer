@@ -12,8 +12,8 @@ import { ToolbarPillButton } from "@/components/home/toolbar/toolbar-buttons";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { focusActiveComposer } from "@/lib/composer/composer-focus-registry";
 import { cn } from "@/lib/utils";
-import { useComposerLayoutValue } from "@/lib/layout-overrides";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useRegionValue } from "@/lib/layout-overrides";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import {
   AUTO_MID_TURN_NOTICE,
@@ -127,13 +127,11 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
   // the permission the next send will run under, so `compact` takes it to the
   // shape a narrow composer already puts it in - icon alone, name on hover -
   // and no further.
-  const compact = useComposerLayoutValue("access") === "compact";
+  const compact = useRegionValue("access", "size") === "chip";
   const tileId = useComposerTileId();
-  const { ref: hotspotRef } = useLayoutHotspot({
-    settingId: "composer.access",
-    tileId,
-    ghost: false,
-    condition: null,
+  const { ref: hotspotRef } = useLayoutRegion({
+    regionId: "access",
+    instanceId: tileId,
   });
 
   // No tooltip of its own: the wrapper below already renders one (both branches

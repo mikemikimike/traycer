@@ -29,7 +29,6 @@ const GROUP_TITLES = [
   "Themes",
   "Start page",
   "Interface",
-  "Layout",
   "Fonts and text",
   "Motion and readability",
   "Terminal",
@@ -41,7 +40,6 @@ function resetAppearanceSettings(): void {
     artifactIconColorMode: "byType",
     artifactIconColors: DEFAULT_EPIC_NODE_ICON_COLORS,
     pointerCursors: true,
-    chatTurnMinimapSide: "right",
     codeFontFamily: null,
     codeFontSize: DEFAULT_CODE_FONT_SIZE,
     terminalFontFamily: null,
@@ -76,7 +74,6 @@ describe("<AppearanceSettingsPanel /> groups", () => {
       level: 2,
       name: "Interface",
     });
-    const layout = screen.getByRole("heading", { level: 2, name: "Layout" });
     const fontsAndText = screen.getByRole("heading", {
       level: 2,
       name: "Fonts and text",
@@ -97,8 +94,6 @@ describe("<AppearanceSettingsPanel /> groups", () => {
     expect(documentPosition(themes, iface)).toBe("before");
     expect(documentPosition(themes, startPage)).toBe("before");
     expect(documentPosition(startPage, iface)).toBe("before");
-    expect(documentPosition(iface, layout)).toBe("before");
-    expect(documentPosition(layout, fontsAndText)).toBe("before");
     expect(documentPosition(iface, fontsAndText)).toBe("before");
     expect(documentPosition(fontsAndText, motion)).toBe("before");
     expect(documentPosition(motion, terminal)).toBe("before");

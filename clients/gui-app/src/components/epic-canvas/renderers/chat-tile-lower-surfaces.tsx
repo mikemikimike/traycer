@@ -26,8 +26,7 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
-import type { DockSection } from "@/stores/settings/layout-store";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import {
   ChatDockCompactStrip,
   ChatDockCompactStripProvider,
@@ -35,6 +34,7 @@ import {
   type ChatDockCompactStripValue,
   type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
+import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
 import { isReceivedAgentResponse } from "@/components/chat/chat-queue-utils";
 import {
   type ChatLowerSurfaceTopSpacing,
@@ -73,7 +73,7 @@ import {
   useHeldManagedCommandsForChat,
   useRunningManagedCommandsForChat,
 } from "@/stores/managed-commands/managed-commands-for-chat";
-import { useComposerLayout } from "@/lib/layout-overrides";
+import { useArrangementValue, useRegionValues } from "@/lib/layout-overrides";
 import { cn } from "@/lib/utils";
 import type {
   PendingInterviewView,
@@ -602,9 +602,9 @@ interface ChatDockChrome {
   readonly dockQueue: ChatSessionState["queue"];
   readonly strip: ChatDockCompactStripValue;
   /** The vertical order of the three reorderable dock rows. */
-  readonly dockOrder: ReadonlyArray<DockSection>;
-  /** This tile's Customize hotspot for each of the three reorderable rows. */
-  readonly hotspots: Readonly<Record<DockSection, DockRowHotspot>>;
+  readonly dockOrder: ReadonlyArray<ChatDockSection>;
+  /** This tile's layout region for each of the three reorderable rows. */
+  readonly hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>>;
 }
 
 interface ChatDockChromeInput {
@@ -633,7 +633,14 @@ const NO_BACKGROUND_ITEMS: ReadonlyArray<BackgroundItem> = [];
  * per-tile reveal exists to avoid.
  */
 function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
-  const composer = useComposerLayout();
+  const dockRegionOrder = useArrangementValue("dock");
+  const changedFilesValues = useRegionValues("changedFiles");
+  const runningAgentsValues = useRegionValues("runningAgents");
+  const backgroundValues = useRegionValues("background");
+  const dockOrder = useMemo(
+    () => dockRegionOrder.map(chatDockSection),
+    [dockRegionOrder],
+  );
   const [expanded, setExpanded] = useState<ReadonlySet<ChatDockSection>>(
     () => new Set<ChatDockSection>(),
   );
@@ -655,23 +662,17 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // (see `agentsChip` below) but the panel this hotspot anchors has nothing of
   // its own to draw, so it is not what "ghost" is asking about here.
   const activeAgentsHasContent = input.activeAgentsVisible;
-  const filesChangedHotspot = useLayoutHotspot({
-    settingId: "composer.filesChanged",
-    tileId: input.chatId,
-    ghost: !changesPresent,
-    condition: changesPresent ? null : "nothing changed in this chat",
+  const filesChangedHotspot = useLayoutRegion({
+    regionId: "changedFiles",
+    instanceId: input.chatId,
   });
-  const activeAgentsHotspot = useLayoutHotspot({
-    settingId: "composer.activeAgents",
-    tileId: input.chatId,
-    ghost: !activeAgentsHasContent,
-    condition: activeAgentsHasContent ? null : "no agents running",
+  const activeAgentsHotspot = useLayoutRegion({
+    regionId: "runningAgents",
+    instanceId: input.chatId,
   });
-  const backgroundHotspot = useLayoutHotspot({
-    settingId: "composer.background",
-    tileId: input.chatId,
-    ghost: !input.backgroundVisible,
-    condition: input.backgroundVisible ? null : "nothing in the background",
+  const backgroundHotspot = useLayoutRegion({
+    regionId: "background",
+    instanceId: input.chatId,
   });
   // The root agent counts as running too when it is itself active, exactly as
   // `ActiveAgentsPanel`'s own header counts it.
@@ -748,14 +749,20 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // A chip exists for every compact section that HAS something to show, whether
   // or not its row is currently revealed - the chip is the way back, so it
   // cannot be the thing that disappears when the row appears.
-  const filesChip = composer.filesChanged === "compact" && changesPresent;
+  const filesChip =
+    changedFilesValues.shown === "shown" &&
+    changedFilesValues.size === "chip" &&
+    changesPresent;
   // Received A2A rows follow this mode, so the chip is also owed when they are
   // the only thing folded: without it, folding would make them unreachable.
   const agentsChip =
-    composer.activeAgents === "compact" &&
+    runningAgentsValues.shown === "shown" &&
+    runningAgentsValues.size === "chip" &&
     (input.activeAgentsVisible || receivedAgentCount > 0);
   const backgroundChip =
-    composer.background === "compact" && input.backgroundVisible;
+    backgroundValues.shown === "shown" &&
+    backgroundValues.size === "chip" &&
+    input.backgroundVisible;
 
   // A reveal belongs to a chip, so it dies with one. Per-tile stickiness is the
   // point - a revealed row stays revealed for as long as the tile lives - but
@@ -864,11 +871,11 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         pulseToken: backgroundRunning > 0 ? "running" : null,
       });
     }
-    return composer.dockOrder.flatMap((section) =>
+    return dockOrder.flatMap((section) =>
       models.filter((model) => model.section === section),
     );
   }, [
-    composer.dockOrder,
+    dockOrder,
     revealed,
     filesChip,
     agentsChip,
@@ -891,28 +898,31 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     [chips, revealed, onToggle],
   );
 
-  const hotspots: Readonly<Record<DockSection, DockRowHotspot>> = {
+  const hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>> = {
     filesChanged: {
       hotspotRef: filesChangedHotspot.ref,
+      shown: changedFilesValues.shown === "shown",
       ghost: !changesPresent,
       condition: "nothing changed in this chat",
       editing: filesChangedHotspot.editing,
     },
     activeAgents: {
       hotspotRef: activeAgentsHotspot.ref,
+      shown: runningAgentsValues.shown === "shown",
       ghost: !activeAgentsHasContent,
       condition: "no agents running",
       editing: activeAgentsHotspot.editing,
     },
     background: {
       hotspotRef: backgroundHotspot.ref,
+      shown: backgroundValues.shown === "shown",
       ghost: !input.backgroundVisible,
       condition: "nothing in the background",
       editing: backgroundHotspot.editing,
     },
   };
 
-  return { folded, dockQueue, strip, dockOrder: composer.dockOrder, hotspots };
+  return { folded, dockQueue, strip, dockOrder, hotspots };
 }
 
 /** How many agents the chip's sentence names before it starts counting. */

@@ -66,7 +66,7 @@ import {
   useEpicLeftPanelStore,
   useLeftPanelSectionCollapsed,
 } from "@/stores/epics/left-panel-store";
-import { useLayoutSetting } from "@/lib/layout-overrides";
+import { DEFAULT_NAVIGATOR_RESOURCE_METRICS } from "@/stores/settings/settings-store";
 import {
   SidebarContextMenuItems,
   SidebarDropdownMenuItems,
@@ -202,7 +202,7 @@ interface TerminalSidebarBodyProps {
 function TerminalSidebarBody(props: TerminalSidebarBodyProps) {
   const { panel } = props;
   const listRef = useRef<HTMLUListElement>(null);
-  const navigatorResourceMetrics = useLayoutSetting("navigatorResourceMetrics");
+  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
   const revealRequest = useSidebarNodeRevealRequest(props.tabId);
   useLayoutEffect(() => {
     if (revealRequest === null || listRef.current === null) return;
@@ -238,7 +238,6 @@ function TerminalSidebarBody(props: TerminalSidebarBodyProps) {
           owner={null}
           metrics={navigatorResourceMetrics}
           className={undefined}
-          registersHotspot
         />
       </>
     );
@@ -250,7 +249,7 @@ function TerminalSidebarBody(props: TerminalSidebarBodyProps) {
       className="space-y-0.5"
       data-testid="epic-terminal-sidebar-list"
     >
-      {panel.rows.map((row, index) => (
+      {panel.rows.map((row) => (
         <TerminalRow
           key={epicTerminalUiIdentityKey(
             "session",
@@ -265,7 +264,6 @@ function TerminalSidebarBody(props: TerminalSidebarBodyProps) {
           durable={row.durable}
           onOpen={(event) => props.onOpen(row, event)}
           authority={panel}
-          registersResourceHotspot={index === 0}
         />
       ))}
       {panel.failedCreates.map((job) => (
@@ -295,8 +293,6 @@ interface TerminalRowProps {
   readonly durable: boolean;
   readonly onOpen: (event: MouseEvent<HTMLElement>) => void;
   readonly authority: EpicTerminalRowAuthority;
-  /** See `ChatNodeProps.registersResourceHotspot` in the chat tree. */
-  readonly registersResourceHotspot: boolean;
 }
 
 function TerminalRow(props: TerminalRowProps) {
@@ -309,7 +305,6 @@ function TerminalRow(props: TerminalRowProps) {
     runtimeStatus,
     session,
     tabId,
-    registersResourceHotspot,
   } = props;
   // Per-row boolean subscription so selecting a session re-renders only the two
   // rows whose active state flips, not every row.
@@ -322,7 +317,7 @@ function TerminalRow(props: TerminalRowProps) {
     durable,
     authority,
   });
-  const navigatorResourceMetrics = useLayoutSetting("navigatorResourceMetrics");
+  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
   const label = actions.label;
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -497,7 +492,6 @@ function TerminalRow(props: TerminalRowProps) {
                     }}
                     metrics={navigatorResourceMetrics}
                     className={undefined}
-                    registersHotspot={registersResourceHotspot}
                   />
                 </button>
                 <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/term-row:opacity-100">

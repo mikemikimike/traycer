@@ -5,7 +5,7 @@ import {
   type Ref,
 } from "react";
 import { Cpu } from "lucide-react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { UNAVAILABLE_DASH } from "@/lib/resources/memory-metric";
 import type { StatusBarResourceMetricView } from "@/lib/resources/status-bar-resource-reading";
@@ -62,23 +62,21 @@ export function StatusBarResourceSegment(props: StatusBarResourceSegmentProps) {
     hasExplicitPick,
   });
   const noMetrics = views.length === 0;
-  const { ref: hotspotRef, editing } = useLayoutHotspot({
-    settingId: "statusBar.resources",
-    tileId: null,
-    ghost: noMetrics,
-    condition: noMetrics ? "No metrics selected" : null,
+  const { ref: regionRef } = useLayoutRegion({
+    regionId: "resourceMonitor",
+    instanceId: null,
   });
   const icon = <Cpu className="size-3 shrink-0" aria-hidden />;
   const setMergedRef = useCallback(
     (node: HTMLButtonElement | null) => {
-      hotspotRef(node);
+      regionRef(node);
       if (typeof ref === "function") {
         ref(node);
       } else if (ref) {
         ref.current = node;
       }
     },
-    [ref, hotspotRef],
+    [ref, regionRef],
   );
 
   return (
@@ -101,10 +99,6 @@ export function StatusBarResourceSegment(props: StatusBarResourceSegmentProps) {
       className={cn(
         "inline-flex h-6 max-w-full shrink-0 items-center gap-1.5 px-2 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground",
         "focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-        interactive &&
-          editing &&
-          noMetrics &&
-          "rounded-sm border border-dashed border-border/60 opacity-70",
         className,
       )}
     >

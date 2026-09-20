@@ -14,7 +14,7 @@ import {
   RUNNING_LOW_TEXT_CLASS_NAME,
 } from "@/lib/rate-limits/window-severity";
 import type { RateLimitWindowSeverity } from "@/lib/rate-limits/window-severity";
-import type { PercentMode } from "@/stores/settings/layout-store";
+import type { AmountMode } from "@/lib/layout/layout-values";
 
 /**
  * A reset instant `hours:minutes` out, sampled when the TEST runs.
@@ -101,7 +101,7 @@ function segmentFixture(overrides: {
 
 function renderSegment(props: {
   readonly segment: StatusBarProviderSegmentModel;
-  readonly percentMode?: PercentMode;
+  readonly percentMode?: AmountMode;
   readonly showModeWord?: boolean;
   readonly showTimer?: boolean;
   readonly showBar?: boolean;
@@ -110,6 +110,7 @@ function renderSegment(props: {
     modeWord: props.showModeWord ?? true,
     timer: props.showTimer ?? false,
     bar: props.showBar ?? true,
+    percent: true,
   };
   return render(
     <TooltipProvider>

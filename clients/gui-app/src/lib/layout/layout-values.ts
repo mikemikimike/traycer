@@ -82,6 +82,26 @@ export interface ResourceMonitorValues extends ShownValues {
   readonly ramShare: boolean;
 }
 
+/** The four readings the monitor can print, in the order it prints them. */
+export type ResourceMetric = "cpu" | "memory" | "processes" | "ramShare";
+
+export const RESOURCE_METRIC_IDS: ReadonlyArray<ResourceMetric> = [
+  "cpu",
+  "memory",
+  "processes",
+  "ramShare",
+];
+
+/**
+ * Which readings are on, in canonical order rather than in toggle order, so
+ * the segment reads the same whichever order they were switched on in.
+ */
+export function shownResourceMetrics(
+  values: ResourceMonitorValues,
+): ReadonlyArray<ResourceMetric> {
+  return RESOURCE_METRIC_IDS.filter((metric) => values[metric]);
+}
+
 export interface ContextUsageValues extends ShownValues {
   readonly style: ContextStyle;
   readonly pinBreakdown: boolean;

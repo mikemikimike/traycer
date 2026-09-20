@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
-  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 
 const viewport = vi.hoisted(() => ({ mobile: false }));
 vi.mock("@/hooks/ui/use-mobile-viewport", () => ({
@@ -22,7 +22,7 @@ import {
 } from "@/components/layout/status-bar/status-bar-visibility-menu";
 
 function resetStore(): void {
-  useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   window.localStorage.clear();
   viewport.mobile = false;
 }
@@ -71,14 +71,9 @@ describe("<StatusBarVisibilityMenu />", () => {
   });
 
   it("unchecks a provider already in the hidden deny-list", () => {
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        rateLimits: {
-          ...DEFAULT_STATUS_BAR_LAYOUT.rateLimits,
-          hiddenProviders: ["codex"],
-        },
-      },
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      hiddenProviders: ["codex"],
     });
     renderMenu(PROVIDERS);
     openMenu();
@@ -96,12 +91,9 @@ describe("<StatusBarVisibilityMenu />", () => {
   });
 
   it("unchecks the resource-monitor item when resources are disabled", () => {
-    useLayoutStore.setState({
-      statusBar: {
-        ...DEFAULT_STATUS_BAR_LAYOUT,
-        resources: { ...DEFAULT_STATUS_BAR_LAYOUT.resources, enabled: false },
-      },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("resourceMonitor", { shown: "hidden" });
     renderMenu(PROVIDERS);
     openMenu();
 
@@ -118,9 +110,9 @@ describe("<StatusBarVisibilityMenu />", () => {
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Codex" }));
 
-    expect(
-      useLayoutStore.getState().statusBar.rateLimits.hiddenProviders,
-    ).toEqual(["codex"]);
+    expect(useLayoutStore.getState().arrangement.hiddenProviders).toEqual([
+      "codex",
+    ]);
   });
 
   it("navigates to the layout settings section from 'Status bar settings…'", () => {
@@ -135,13 +127,16 @@ describe("<StatusBarVisibilityMenu />", () => {
   });
 
   it("'Move to header' sets placement to header", () => {
-    useLayoutStore.getState().setStatusBarPlacement("status-bar");
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      usageHost: "status-bar",
+    });
     renderMenu(PROVIDERS);
     openMenu();
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Move to header" }));
 
-    expect(useLayoutStore.getState().statusBar.placement).toBe("header");
+    expect(useLayoutStore.getState().arrangement.usageHost).toBe("header");
   });
 
   it("drops 'Move to header' on a narrow viewport, where it would move nothing", () => {

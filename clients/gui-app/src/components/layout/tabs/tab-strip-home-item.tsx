@@ -1,6 +1,6 @@
 import { type ReactNode, type Ref } from "react";
 import { House } from "lucide-react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
 import { headerTabClassName } from "@/components/layout/tabs/tab-chrome-tokens";
@@ -35,12 +35,7 @@ interface TabStripHomeItemProps {
  * task tab.
  */
 export function TabStripHomeItem(props: TabStripHomeItemProps): ReactNode {
-  const { ref } = useLayoutHotspot({
-    settingId: "tabs.home",
-    tileId: null,
-    ghost: false,
-    condition: null,
-  });
+  const { ref } = useLayoutRegion({ regionId: "homeTab", instanceId: null });
 
   return <TabStripHomeItemView {...props} ref={ref} />;
 }

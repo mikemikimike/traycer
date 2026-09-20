@@ -195,7 +195,7 @@ import {
 import { AgentRoleBadges } from "./agent-role-badges";
 import { AgentHoverTooltip } from "@/components/epic-canvas/sidebar/agent-hover-tooltip";
 import { isEditableRole } from "@/lib/epic-permissions";
-import { useLayoutSetting } from "@/lib/layout-overrides";
+import { DEFAULT_NAVIGATOR_RESOURCE_METRICS } from "@/stores/settings/settings-store";
 import {
   Archive,
   ArchiveRestore,
@@ -1200,14 +1200,6 @@ export function ChatTreePanelBody(props: ChatTreePanelBodyProps) {
       }),
     [rootIds, tree.nodeById, visibleCloudChats, comparator, lastActiveAtByKey],
   );
-  // The `sidebar.resourceChips` hotspot needs exactly one row to carry it - a
-  // cloud row never can (no live process), so this is the first LOCAL entry's
-  // index rather than a raw list index, which would otherwise miss the
-  // setting entirely whenever a cloud row sorts first.
-  const firstLocalEntryIndex = useMemo(
-    () => listEntries.findIndex((entry) => entry.kind === "local"),
-    [listEntries],
-  );
   // What the live region announces. Counted from the MATCHES, not `listEntries`:
   // that list holds only local roots (nested matches render recursively beneath
   // them, so two siblings under one parent would announce as one) and it counts
@@ -1357,7 +1349,7 @@ export function ChatTreePanelBody(props: ChatTreePanelBodyProps) {
               Rows come from the UNIFIED list (chat-sync-v2): local tree nodes
               and cloud-only rows interleave under one comparator. */}
               <AnimatePresence initial={false}>
-                {listEntries.map((entry, index) =>
+                {listEntries.map((entry) =>
                   entry.kind === "local" ? (
                     <ChatNode
                       key={entry.key}
@@ -1373,7 +1365,6 @@ export function ChatTreePanelBody(props: ChatTreePanelBodyProps) {
                       selectionMode={selectionMode}
                       selectedIds={selectedIds}
                       onToggleSelection={toggleSelection}
-                      registersResourceHotspot={index === firstLocalEntryIndex}
                     />
                   ) : (
                     <EpicSidebarCloudChatRow
@@ -1516,7 +1507,6 @@ interface ChatNodeProps {
   /** Only the navigator's first root row carries the `sidebar.resourceChips`
    *  hotspot - see `ChatRowButton`. Every recursive child render passes
    *  `false`, so exactly one instance ever registers per navigator. */
-  registersResourceHotspot: boolean;
 }
 
 /**
@@ -1583,7 +1573,6 @@ const ChatNode = memo(function ChatNode(props: ChatNodeProps) {
     selectionMode,
     selectedIds,
     onToggleSelection,
-    registersResourceHotspot,
   } = props;
   const { expandedIds, toggleExpanded } = expansion;
   const node = useChatRowNode(nodeId);
@@ -2095,7 +2084,6 @@ const ChatNode = memo(function ChatNode(props: ChatNodeProps) {
       isSelected={selectedIds.has(nodeId)}
       selectedIds={selectedIds}
       onToggleSelection={onToggleSelection}
-      registersResourceHotspot={registersResourceHotspot}
     />
   );
 });
@@ -2147,7 +2135,6 @@ interface ChatNodeShellProps {
   readonly isSelected: boolean;
   readonly selectedIds: ReadonlySet<string>;
   readonly onToggleSelection: (id: string) => void;
-  readonly registersResourceHotspot: boolean;
 }
 
 /**
@@ -2249,7 +2236,6 @@ function ChatNodeShellBody(
     isSelected,
     selectedIds,
     onToggleSelection,
-    registersResourceHotspot,
   } = props;
 
   // "New child agent" opens the shared New Conversation modal seeded with this
@@ -2374,7 +2360,6 @@ function ChatNodeShellBody(
             isArchived={archiveRow.isArchived}
             reserveArchiveSlot={decision.showButton || archiveRow.pending}
             showSharedIndicator={sharing.showIndicator}
-            registersResourceHotspot={registersResourceHotspot}
           />
         )}
 
@@ -2505,7 +2490,6 @@ function ChatNodeChildren(props: ChatNodeChildrenProps) {
             selectionMode={props.selectionMode}
             selectedIds={props.selectedIds}
             onToggleSelection={props.onToggleSelection}
-            registersResourceHotspot={false}
           />
         ))}
       </AnimatePresence>
@@ -2962,8 +2946,6 @@ interface ChatRowButtonProps {
    */
   readonly reserveArchiveSlot: boolean;
   readonly showSharedIndicator: boolean;
-  /** See `ChatNodeProps.registersResourceHotspot`. */
-  readonly registersResourceHotspot: boolean;
 }
 
 /**
@@ -3264,7 +3246,6 @@ function ChatRowButton(props: ChatRowButtonProps) {
     isArchived,
     reserveArchiveSlot,
     showSharedIndicator,
-    registersResourceHotspot,
   } = props;
   const resourceOwnerKind = resourceOwnerKindForNode(artifactType);
   const roleClaims = useEpicAgentRoleClaims(nodeId);
@@ -3361,7 +3342,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
     },
     [onToggle],
   );
-  const navigatorResourceMetrics = useLayoutSetting("navigatorResourceMetrics");
+  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
   const ownerKind = useEpicNodeOwnerKind(nodeId);
 
   const showRowControls = !selectionMode;
@@ -3546,7 +3527,6 @@ function ChatRowButton(props: ChatRowButtonProps) {
             }
             metrics={navigatorResourceMetrics}
             className={undefined}
-            registersHotspot={registersResourceHotspot}
           />
           {/* Completes the control SWAP: while the archive button is mounted,
               revealing the controls removes the idle-time slot from layout so

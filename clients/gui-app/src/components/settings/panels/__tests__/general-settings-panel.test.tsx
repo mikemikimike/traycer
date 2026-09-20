@@ -261,11 +261,7 @@ describe("GeneralSettingsPanel", () => {
     });
     useLocalSnapshotClearStore.setState({ clearedAtByScope: {} });
     useSettingsStore.setState({
-      showGlobalResourceMonitor: true,
-      navigatorResourceMetrics: [],
-      pinContextUsageBreakdown: false,
       quoteReplyEnabled: true,
-      homeTabEnabled: false,
       linkOpen: {
         default: "in-app",
         markdown: "in-app",
@@ -283,7 +279,6 @@ describe("GeneralSettingsPanel", () => {
     setMobileApp(false);
     useAuthStore.getState().setSignedOut();
     useLocalSnapshotClearStore.setState({ clearedAtByScope: {} });
-    useSettingsStore.setState({ homeTabEnabled: false });
     delete (globalThis as { runnerHost?: unknown }).runnerHost;
   });
 
@@ -720,8 +715,6 @@ describe("GeneralSettingsPanel", () => {
         runnerHost: null,
         featureSettings: null,
         mobileApp: false,
-        mobileFooter: false,
-        customizeEditor: false,
       };
       expect(isExperimentalGroupAvailable(context)).toBe(false);
       const { container } = render(panelTree());
@@ -743,8 +736,6 @@ describe("GeneralSettingsPanel", () => {
         runnerHost: null,
         featureSettings,
         mobileApp: false,
-        mobileFooter: false,
-        customizeEditor: false,
       };
       expect(isExperimentalGroupAvailable(context)).toBe(true);
       const { container } = render(panelTree());
@@ -758,8 +749,6 @@ describe("GeneralSettingsPanel", () => {
         runnerHost: null,
         featureSettings: null,
         mobileApp: true,
-        mobileFooter: false,
-        customizeEditor: false,
       };
       expect(isVoiceInputRowAvailable(context)).toBe(false);
       expect(isPreventSleepRowAvailable(context)).toBe(false);

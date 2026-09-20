@@ -1,0 +1,42 @@
+import {
+  LAYOUT_REGION_LIST,
+  SURFACE_GROUPS,
+} from "@/lib/layout/layout-regions";
+import type { SettingsSearchEntry } from "@/lib/settings-search/settings-definitions";
+import { alwaysAvailable } from "@/lib/settings/settings-availability";
+
+/**
+ * One settings-search result per layout region, generated from the registry.
+ *
+ * Generated rather than written out, because the registry already IS the one
+ * description of a region's name, the surface it lives on and the words a
+ * reader reaches for - a second copy in a `*.definitions.ts` collection could
+ * only drift from it, and a region added without one would be unfindable.
+ *
+ * Every entry has `anchor: null` and carries the region in `launch`. It is not
+ * an anchor result: there is no per-region element on the page to scroll to,
+ * and `launch` is what the result acts on (today, the Layout page; from the
+ * entry-points ticket, the editor opened on that region).
+ *
+ * `alwaysAvailable`, unlike the page rows that preceded them: the Layout host
+ * renders every region in every shell, and a region that the current window is
+ * too narrow to SHOW is still a region whose value this page can set.
+ */
+export const LAYOUT_LAUNCH_ENTRIES: ReadonlyArray<SettingsSearchEntry> =
+  LAYOUT_REGION_LIST.map((region) => ({
+    section: "layout",
+    anchor: null,
+    launch: region.id,
+    kind: "setting",
+    availableWhen: alwaysAvailable,
+    label: region.name,
+    description: region.where,
+    group: surfaceLabel(region.surface),
+    keywords: [...region.keywords],
+  }));
+
+function surfaceLabel(surface: string): string {
+  return (
+    SURFACE_GROUPS.find((group) => group.id === surface)?.label ?? "Layout"
+  );
+}

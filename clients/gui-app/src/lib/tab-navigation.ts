@@ -45,7 +45,7 @@ import {
 } from "@/stores/home/landing-draft-store";
 import { tabRouteOptions } from "@/stores/tabs/registry";
 import { HOME_TAB_REF, isHomePath } from "@/stores/tabs/kinds/home";
-import { isHomeTabEnabled } from "@/stores/settings/settings-store";
+import { isHomeTabEnabled } from "@/stores/layout/layout-store";
 import {
   tabCommandCoordinator,
   type CoordinatedTabActivation,

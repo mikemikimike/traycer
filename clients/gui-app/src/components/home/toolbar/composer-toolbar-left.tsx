@@ -1,15 +1,12 @@
-import { CustomizeDropSlot } from "@/components/customize/customize-drop-slot";
-import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import { memo } from "react";
-import { useComposerLayout } from "@/lib/layout-overrides";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import {
   renderToolbarItem,
   type ComposerToolbarItemsProps,
 } from "@/components/home/toolbar/composer-toolbar-item";
 
 function ComposerToolbarLeftImpl(props: ComposerToolbarItemsProps) {
-  const tileId = useComposerTileId();
-  const order = useComposerLayout().toolbar.left;
+  const order = useArrangementValue("toolbarLeft");
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -20,12 +17,6 @@ function ComposerToolbarLeftImpl(props: ComposerToolbarItemsProps) {
           {renderToolbarItem(id, props)}
         </span>
       ))}
-      <CustomizeDropSlot
-        id="toolbar:left"
-        group="composer-toolbar"
-        tileId={tileId}
-        className="inline-flex size-6 shrink-0"
-      />
     </div>
   );
 }

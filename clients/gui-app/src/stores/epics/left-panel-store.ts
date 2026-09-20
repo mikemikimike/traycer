@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
@@ -7,6 +8,15 @@ import {
   STORE_KEYS,
 } from "@/lib/persist";
 import type { EpicArtifactKind } from "@traycer/protocol/common/registry";
+import {
+  leftPanelGroupsFromRail,
+  panelVisibilityOverridesFromValues,
+  railFromLeftPanelGroups,
+  railRegionForLeftPanelId,
+  railVisibilityFor,
+} from "@/lib/layout/layout-arrangement";
+import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 import {
   DEFAULT_SORT_MODE,
   isDefaultSort,
@@ -241,25 +251,11 @@ type PanelSectionWeightsByPanelId = Readonly<
 
 interface LeftPanelStore {
   readonly activePanelIdByTabId: Readonly<Record<string, LeftPanelId>>;
-  readonly panelGroups: ReadonlyArray<LeftPanelGroup>;
   readonly mainCollapsedByTabId: Readonly<Record<string, boolean>>;
   readonly sidebarWidthPx: number;
   readonly panelSectionCollapsedByPanelId: PanelSectionCollapsedByPanelId;
   readonly panelSectionWeightsByPanelId: PanelSectionWeightsByPanelId;
   readonly commentsPanelRevealedByTabId: Readonly<Record<string, boolean>>;
-  /**
-   * Explicit show/hide chosen from the rail context menu, keyed by panel. An
-   * entry wins over the panel's own availability rule: `true` keeps the icon in
-   * the rail even when the rule would drop it (a PR-less epic, an artifact with
-   * no comments), `false` hides a panel that would otherwise be there. An
-   * absent entry means "follow the rule", which is why the map is sparse rather
-   * than a full record - see `isLeftPanelVisible`.
-   *
-   * Global (not per tab or per epic) because it expresses a durable preference
-   * about the rail's shape, the same way `panelGroups` does: hiding a panel in
-   * one epic should not have to be repeated in the next.
-   */
-  readonly panelVisibilityOverrideById: PanelVisibilityOverrideById;
   readonly localRootCreatePendingByEpicPanel: RootCreatePendingByPanel<LeftPanelRootCreatePending>;
   readonly acknowledgedRootCreatePendingByEpicPanel: RootCreatePendingByPanel<LeftPanelAcknowledgedRootCreatePending>;
   readonly chatFilterByEpicId: Readonly<Record<string, ChatFilter>>;
@@ -461,34 +457,6 @@ export function migrateLeftPanelPersistedState(persisted: unknown): unknown {
   return migrated;
 }
 
-function isPersistedPanelGroupShape(
-  value: unknown,
-): value is { readonly panelIds: ReadonlyArray<unknown> } {
-  if (!isRecord(value)) return false;
-  return Array.isArray(value.panelIds);
-}
-
-/**
- * Sidebar grouping as some build of the app wrote it. Only structure is
- * rejected here; an id this build does not know is dropped, and the group with
- * it once nothing is left in it.
- *
- * Removing a panel has to be as gentle as adding one. Rejecting the whole
- * value over one unknown id sends a user who had ever rearranged their sidebar
- * straight back to defaults on the release that retires a panel - and every
- * such user carries the retired id, because it shipped in the defaults.
- */
-function readPersistedPanelGroups(
-  value: unknown,
-): ReadonlyArray<LeftPanelGroup> | null {
-  if (!Array.isArray(value)) return null;
-  if (!value.every(isPersistedPanelGroupShape)) return null;
-  return value.flatMap((group) => {
-    const panelIds = group.panelIds.filter(isLeftPanelId);
-    return panelIds.length === 0 ? [] : [{ panelIds }];
-  });
-}
-
 function getPersistedPanelSectionCollapsedByPanelId(
   panelSectionCollapsedByPanelId: PanelSectionCollapsedByPanelId,
 ): PanelSectionCollapsedByPanelId {
@@ -500,71 +468,6 @@ function getPersistedPanelSectionCollapsedByPanelId(
     }
     return nextPanelState;
   }, {});
-}
-
-/**
- * Drop entries a newer/older build (or a hand-edited localStorage) could have
- * left behind: an unknown panel id, or a non-boolean where the override map
- * only ever holds `true`/`false`.
- */
-function getPersistedPanelVisibilityOverrides(
-  panelVisibilityOverrideById: PanelVisibilityOverrideById,
-): PanelVisibilityOverrideById {
-  return Object.entries(panelVisibilityOverrideById).reduce<
-    Partial<Record<LeftPanelId, boolean>>
-  >((nextOverrides, [panelId, visible]) => {
-    if (isLeftPanelId(panelId) && typeof visible === "boolean") {
-      nextOverrides[panelId] = visible;
-    }
-    return nextOverrides;
-  }, {});
-}
-
-// `normalizeLeftPanelGroups` returns its input untouched only when the stored
-// value is ALREADY normalized; otherwise it builds a new array. Persisted
-// groups written before a panel id existed can never be already-normalized -
-// the missing group is appended on every call - so the uncached function
-// returns a different reference each time it runs.
-//
-// `useLeftPanelGroups` feeds that value straight into `useSyncExternalStore`,
-// and zustand v5 calls `getSnapshot` as `() => selector(getState())` with no
-// memoization of its own. An unstable reference therefore reads as "the store
-// changed" on every commit, so React re-renders forever and throws "Maximum
-// update depth exceeded" (minified error #185) - which is what every user
-// carrying pre-Pull-Requests sidebar state hit on opening an epic.
-//
-// Keyed by the stored array's identity rather than held as ONE last-input
-// slot: a single slot only guarantees stability while every reader passes the
-// same input, so two readers alternating between two identities (a rehydrated
-// persisted array and the live slice, say) would each miss and hand
-// `useSyncExternalStore` a fresh array on every commit again - the exact
-// condition above. A WeakMap keeps every observed input stable and lets the
-// entry die with the array it belongs to.
-const storedPanelGroupsCache = new WeakMap<
-  object,
-  ReadonlyArray<LeftPanelGroup>
->();
-
-function normalizeStoredPanelGroups(
-  groups: unknown,
-): ReadonlyArray<LeftPanelGroup> {
-  const storedGroups = readPersistedPanelGroups(groups);
-  return storedGroups === null
-    ? DEFAULT_LEFT_PANEL_GROUPS
-    : normalizeLeftPanelGroups(storedGroups);
-}
-
-function getStoredPanelGroups(groups: unknown): ReadonlyArray<LeftPanelGroup> {
-  // A non-object input cannot key a WeakMap, but it also cannot be normalized
-  // to anything but the default constant, which is already a stable reference.
-  if (typeof groups !== "object" || groups === null) {
-    return normalizeStoredPanelGroups(groups);
-  }
-  const cached = storedPanelGroupsCache.get(groups);
-  if (cached !== undefined) return cached;
-  const normalizedGroups = normalizeStoredPanelGroups(groups);
-  storedPanelGroupsCache.set(groups, normalizedGroups);
-  return normalizedGroups;
 }
 
 function getPersistedActivePanelIds(
@@ -631,12 +534,6 @@ function getPersistedMainCollapsedByTabId(
   );
 }
 
-function getPersistedPanelGroups(
-  groups: ReadonlyArray<LeftPanelGroup>,
-): ReadonlyArray<LeftPanelGroup> {
-  return normalizeLeftPanelGroups(groups);
-}
-
 // Persist only active filters so localStorage doesn't accumulate empty entries.
 function filterActiveByEpic<T>(
   byEpicId: Readonly<Record<string, T>>,
@@ -687,22 +584,22 @@ export function areLeftPanelGroupsEqual(
   );
 }
 
-export function updateLeftPanelGroups(
-  currentGroups: ReadonlyArray<LeftPanelGroup>,
-  nextGroups: ReadonlyArray<LeftPanelGroup>,
-): ReadonlyArray<LeftPanelGroup> {
-  if (nextGroups === currentGroups) return currentGroups;
-  if (areLeftPanelGroupsEqual(nextGroups, currentGroups)) return currentGroups;
-  return nextGroups;
+/**
+ * The rail as the sidebar's group view, off the ONE place it lives now
+ * (`arrangement.rail`). The store's own accessors read through here, so a
+ * caller that holds `useLeftPanelStore.getState()` still asks one question and
+ * gets one answer.
+ */
+function currentPanelGroups(): ReadonlyArray<LeftPanelGroup> {
+  return leftPanelGroupsFromRail(useLayoutStore.getState().arrangement.rail);
 }
 
-function setPanelGroupsState(
-  currentGroups: ReadonlyArray<LeftPanelGroup>,
-  nextGroups: ReadonlyArray<LeftPanelGroup>,
-): Pick<LeftPanelStore, "panelGroups"> | null {
-  const updatedGroups = updateLeftPanelGroups(currentGroups, nextGroups);
-  if (updatedGroups === currentGroups) return null;
-  return { panelGroups: updatedGroups };
+/** The nine rail regions' show/hide, as the sparse map the render paths read. */
+function currentPanelVisibilityOverrides(): PanelVisibilityOverrideById {
+  const state = useLayoutStore.getState();
+  return panelVisibilityOverridesFromValues(
+    effectiveLayoutValues(state.basePreset, state.overrides),
+  );
 }
 
 function normalizeLeftPanelGroups(
@@ -1003,13 +900,11 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
   persist(
     (set, get) => ({
       activePanelIdByTabId: {},
-      panelGroups: DEFAULT_LEFT_PANEL_GROUPS,
       mainCollapsedByTabId: {},
       sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
       panelSectionCollapsedByPanelId: {},
       panelSectionWeightsByPanelId: {},
       commentsPanelRevealedByTabId: {},
-      panelVisibilityOverrideById: {},
       localRootCreatePendingByEpicPanel: {},
       acknowledgedRootCreatePendingByEpicPanel: {},
       chatFilterByEpicId: {},
@@ -1045,7 +940,7 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           // Only an explicit `false` blocks: a presence-gated panel that is
           // merely absent is not a user decision, and its own reveal path
           // (`revealCommentsPanel`) makes it visible in the same turn.
-          if (state.panelVisibilityOverrideById[panelId] === false) {
+          if (currentPanelVisibilityOverrides()[panelId] === false) {
             return state;
           }
           const currentPanelId =
@@ -1127,15 +1022,15 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
         });
       },
 
-      getPanelGroups: () => getStoredPanelGroups(get().panelGroups),
+      getPanelGroups: () => currentPanelGroups(),
 
       applyPanelGroups: (nextGroups) => {
-        set((state) => {
-          const currentGroups = getStoredPanelGroups(state.panelGroups);
-          const normalizedNextGroups = normalizeLeftPanelGroups(nextGroups);
-          return (
-            setPanelGroupsState(currentGroups, normalizedNextGroups) ?? state
-          );
+        const arrangement = useLayoutStore.getState().arrangement;
+        const normalized = normalizeLeftPanelGroups(nextGroups);
+        if (areLeftPanelGroupsEqual(currentPanelGroups(), normalized)) return;
+        useLayoutStore.getState().setArrangement({
+          ...arrangement,
+          rail: railFromLeftPanelGroups(normalized, arrangement.dividerSeq),
         });
       },
 
@@ -1232,31 +1127,31 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
       },
 
       setPanelVisibilityOverride: (panelId, override) => {
-        set((state) => {
-          const current = state.panelVisibilityOverrideById;
-          if (override === null) {
-            if (!Object.hasOwn(current, panelId)) return state;
-            const next = { ...current };
-            delete next[panelId];
-            return { panelVisibilityOverrideById: next };
-          }
-          if (current[panelId] === override) return state;
-          return {
-            panelVisibilityOverrideById: { ...current, [panelId]: override },
-          };
-        });
+        useLayoutStore
+          .getState()
+          .setRegionValues(railRegionForLeftPanelId(panelId), {
+            shown: railVisibilityFor(override),
+          });
       },
 
       setPanelVisibilityOverrides: (overrides) => {
-        set({ panelVisibilityOverrideById: { ...overrides } });
+        for (const panelId of LEFT_PANEL_IDS) {
+          useLayoutStore
+            .getState()
+            .setRegionValues(railRegionForLeftPanelId(panelId), {
+              shown: railVisibilityFor(overrides[panelId] ?? null),
+            });
+        }
       },
 
       clearPanelVisibilityOverrides: () => {
-        set((state) =>
-          Object.keys(state.panelVisibilityOverrideById).length === 0
-            ? state
-            : { panelVisibilityOverrideById: {} },
-        );
+        for (const panelId of LEFT_PANEL_IDS) {
+          useLayoutStore
+            .getState()
+            .setRegionValues(railRegionForLeftPanelId(panelId), {
+              shown: "auto",
+            });
+        }
       },
 
       getLocalRootCreatePending: (epicId, panelId) =>
@@ -1591,7 +1486,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
         activePanelIdByTabId: getPersistedActivePanelIds(
           state.activePanelIdByTabId,
         ),
-        panelGroups: getPersistedPanelGroups(state.panelGroups),
         mainCollapsedByTabId: getPersistedMainCollapsedByTabId(
           state.mainCollapsedByTabId,
         ),
@@ -1601,9 +1495,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
             state.panelSectionCollapsedByPanelId,
           ),
         panelSectionWeightsByPanelId: state.panelSectionWeightsByPanelId,
-        panelVisibilityOverrideById: getPersistedPanelVisibilityOverrides(
-          state.panelVisibilityOverrideById,
-        ),
         chatFilterByEpicId: filterActiveByEpic(
           state.chatFilterByEpicId,
           isChatFilterActive,
@@ -1684,7 +1575,8 @@ export function useActiveLeftPanelId(tabId: string): LeftPanelId {
 }
 
 export function useLeftPanelGroups(): ReadonlyArray<LeftPanelGroup> {
-  return useLeftPanelStore((s) => getStoredPanelGroups(s.panelGroups));
+  const rail = useLayoutStore((state) => state.arrangement.rail);
+  return useMemo(() => leftPanelGroupsFromRail(rail), [rail]);
 }
 
 export function useMainPanelCollapsed(tabId: string): boolean {
@@ -1708,7 +1600,15 @@ export function useCommentsPanelRevealed(tabId: string): boolean {
 }
 
 export function usePanelVisibilityOverrides(): PanelVisibilityOverrideById {
-  return useLeftPanelStore((s) => s.panelVisibilityOverrideById);
+  const basePreset = useLayoutStore((state) => state.basePreset);
+  const overrides = useLayoutStore((state) => state.overrides);
+  return useMemo(
+    () =>
+      panelVisibilityOverridesFromValues(
+        effectiveLayoutValues(basePreset, overrides),
+      ),
+    [basePreset, overrides],
+  );
 }
 
 export function useLocalRootCreatePending(

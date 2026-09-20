@@ -399,7 +399,6 @@ export type AnalyticsSetting =
   | "themePreset"
   | "uiFontFamily"
   | "uiFontSize"
-  | "visualLayoutEditorEnabled"
   | "voiceInputEnabled"
   | "voiceLanguage";
 
@@ -1395,7 +1394,6 @@ const ANALYTICS_SETTINGS = new Set<string>(
     tilePlacement: true,
     uiFontFamily: true,
     uiFontSize: true,
-    visualLayoutEditorEnabled: true,
     voiceInputEnabled: true,
     voiceLanguage: true,
   } satisfies Record<AnalyticsSetting, true>),

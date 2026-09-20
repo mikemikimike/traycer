@@ -137,9 +137,14 @@ import {
   type RateLimitPopoverTab,
 } from "@/stores/rate-limits/rate-limit-popover-store";
 import {
+  statusBarShownProfileIds,
+  type StatusBarShownProfiles,
+} from "@/lib/layout/layout-arrangement";
+import { useLayoutArrangement } from "@/lib/layout-overrides";
+import {
   useLayoutStore,
   useStatusBarShown,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 import { useRegisteredHostsPollLiveness } from "@/hooks/auth/use-registered-hosts-query";
 import { carryViewedHostIntoSettingsScope } from "@/components/settings/host-scope/carry-viewed-host-into-settings";
 import { useProvidersFocusStore } from "@/stores/settings/providers-focus-store";
@@ -1834,15 +1839,13 @@ function ProfileRateLimitProviderBlock({
   const checkedProfileIds = profileSelection.shownProfiles[providerId] ?? [];
   // A provider hidden from the strip has no segment for the eye to govern;
   // the eye goes with it rather than toggling a preference nothing shows.
-  const providerHiddenFromStrip = useLayoutStore((state) =>
-    state.statusBar.rateLimits.hiddenProviders.includes(providerId),
-  );
+  const arrangement = useLayoutArrangement();
+  const providerHiddenFromStrip =
+    arrangement.hiddenProviders.includes(providerId);
   // The host the eye writes for, or `null` when there is no eye to draw.
   const eyeHostId =
     stripShown && !providerHiddenFromStrip ? displayedHostId : null;
-  const setProfileShown = useLayoutStore(
-    (state) => state.setStatusBarProfileShown,
-  );
+  const setArrangement = useLayoutStore((state) => state.setArrangement);
   const targets = profiles.map((profile) => ({
     profile,
     profileId: rateLimitProfileId(profile),
@@ -1974,12 +1977,16 @@ function ProfileRateLimitProviderBlock({
                         "layout",
                         "layout.statusBar.shownProfiles",
                       );
-                      setProfileShown(
-                        eyeHostId,
-                        providerId,
-                        target.profileId,
-                        shown,
-                      );
+                      setArrangement({
+                        ...arrangement,
+                        shownProfiles: withProfileShown({
+                          shownProfiles: arrangement.shownProfiles,
+                          hostId: eyeHostId,
+                          providerId,
+                          profileId: target.profileId,
+                          shown,
+                        }),
+                      });
                     }
               }
               variant={variant}
@@ -3081,4 +3088,37 @@ function RateLimitZeroState({
       </button>
     </div>
   );
+}
+
+/**
+ * One account checked or unchecked for the strip, on one host.
+ *
+ * An emptied entry is REMOVED rather than left as `[]`, matching what the
+ * arrangement's resolver does on rehydration: one shape for "nothing checked",
+ * so the same selection can never read as two different arrangements.
+ */
+function withProfileShown(input: {
+  readonly shownProfiles: StatusBarShownProfiles;
+  readonly hostId: string;
+  readonly providerId: RateLimitProviderId;
+  readonly profileId: string | null;
+  readonly shown: boolean;
+}): StatusBarShownProfiles {
+  const { shownProfiles, hostId, providerId, profileId, shown } = input;
+  const current = statusBarShownProfileIds(shownProfiles, hostId, providerId);
+  if (current.includes(profileId) === shown) return shownProfiles;
+  const next = shown
+    ? [...current, profileId]
+    : current.filter((candidate) => candidate !== profileId);
+  const hostShown: Record<string, ReadonlyArray<string | null>> = {
+    ...shownProfiles[hostId],
+  };
+  if (next.length === 0) delete hostShown[providerId];
+  else hostShown[providerId] = next;
+  const nextShownProfiles: Record<string, StatusBarShownProfiles[string]> = {
+    ...shownProfiles,
+  };
+  if (Object.keys(hostShown).length === 0) delete nextShownProfiles[hostId];
+  else nextShownProfiles[hostId] = hostShown;
+  return nextShownProfiles;
 }

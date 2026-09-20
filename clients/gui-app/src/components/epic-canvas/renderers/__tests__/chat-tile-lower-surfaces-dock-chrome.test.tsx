@@ -141,9 +141,9 @@ import type {
   AgentStopControls,
 } from "@/hooks/agent/use-agent-stop-controls";
 import {
-  DEFAULT_COMPOSER_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 import { ChatDockCompactStrip } from "@/components/chat/chat-dock-compact-strip";
 import { NO_PROVIDER_FALLBACK } from "@/components/chat/fallback/fallback-state";
 import {
@@ -474,7 +474,7 @@ beforeEach(() => {
     openTabOrder: [TAB_ID],
     activeTabId: TAB_ID,
   });
-  useLayoutStore.setState({ composer: DEFAULT_COMPOSER_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   setAgentStopControls({ self: null, descendants: [] });
 });
 
@@ -483,15 +483,13 @@ afterEach(() => {
   disposeManagedCommandChatSessions();
   epicHandle.dispose();
   useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
-  useLayoutStore.setState({ composer: DEFAULT_COMPOSER_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   setAgentStopControls({ self: null, descendants: [] });
 });
 
 describe("useChatDockChrome via ChatDockCompactStrip", () => {
   it("prints the files-changed chip from the accumulated line counts and names the file count in its label", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, filesChanged: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -521,9 +519,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // chip drops the side it has nothing to say about rather than printing a
   // zero, and falls back to the count alone when it has neither.
   it("omits a zero side of the files-changed chip, and its label with it", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, filesChanged: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
     const addedOnly = surfacesProps({
       restoreContext: {
         ...EMPTY_RESTORE,
@@ -574,9 +570,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
 
   // One line each way: the sentence has to say "line", not "1 lines".
   it("names a single added or removed line in the singular", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, filesChanged: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
     const oneEachWay = surfacesProps({
       restoreContext: {
         ...EMPTY_RESTORE,
@@ -609,9 +603,9 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   });
 
   it("prints the active-agents chip from the same arithmetic ActiveAgentsPanel uses for its own running count", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, activeAgents: "compact" },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("runningAgents", { size: "chip" });
     const self = agentRow("chat-1", "This chat", "turn");
     const descendants = [
       agentRow("child-1", "Child one", "turn"),
@@ -639,9 +633,9 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   });
 
   it("lights the active-agents icon while any agent is mid-turn, and rests it when every one is background-only", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, activeAgents: "compact" },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("runningAgents", { size: "chip" });
     setAgentStopControls({
       self: agentRow("chat-1", "This chat", "background"),
       descendants: [agentRow("child-1", "Child one", "turn")],
@@ -678,9 +672,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   });
 
   it("prints the background chip from the running row count and the shared header summary sentence", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, background: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -708,9 +700,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // blink rides on it. The two axes are independent, and this is the case that
   // would have been hidden while a working chip swapped its icon out.
   it("keeps the section's mark on a background chip whose mixed rows are running", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, background: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -739,9 +729,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // rows' kinds are the panel's to draw; the chip never borrowed the wake's
   // clock for one kind or a neutral stack for two.
   it("rests the background chip on the section's mark, one kind or mixed", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, background: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
     renderSurfaces(
       surfacesProps({
         restoreContext: EMPTY_RESTORE,
@@ -782,9 +770,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // `monitoring: true` is the case that was reported, and it must be
   // indistinguishable from any other live shell here.
   it("draws a running monitor shell as the lit section mark that says it is running", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, background: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -820,9 +806,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // and it is told apart by the sentence and the tone - never by a second
   // glyph, which is what made a live watcher read as paused.
   it("rests a shells-only background chip on the same mark, and says held", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, background: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -854,9 +838,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // item atomically at its terminal, so the duplicate is transient rather than
   // expected; it is the asymmetry that is the defect, not the input.
   it("counts a duplicated wakeup task once in the background chip, as the panel header does", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, background: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -876,7 +858,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // The most important case: no self agent, no descendants, but the queue
   // holds prompts *received* from other agents. `agentsChip` in
   // `chat-tile-lower-surfaces.tsx` reads
-  // `composer.activeAgents === "compact" && (input.activeAgentsVisible || receivedAgentCount > 0)`.
+  // `runningAgentsValues.shown === "shown" && runningAgentsValues.size === "chip" && (input.activeAgentsVisible || receivedAgentCount > 0)`.
   // Delete the `receivedAgentCount > 0` half of that clause and two things
   // happen at once: the chip stops existing (this suite's first assertion
   // below fails), AND `folded` never gains "activeAgents" - so
@@ -884,9 +866,9 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // in the dock (the second assertion fails too). Both are needed to pin the
   // clause; neither alone would catch every way of dropping it.
   it("folds received A2A prompts into a '0 · N' chip and keeps only the user-typed item in the dock", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, activeAgents: "compact" },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("runningAgents", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -917,9 +899,9 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // The roster is bounded by fleet size, so an uncapped join would read a
   // paragraph out before the count a listener actually wanted.
   it("names at most three agents in the chip's label and counts the rest", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, activeAgents: "compact" },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("runningAgents", { size: "chip" });
     setAgentStopControls({
       self: agentRow("chat-1", "This chat", "turn"),
       descendants: [
@@ -949,9 +931,9 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // count is 0 and the panel renders nothing, so the chip must not spin or
   // name working agents over that zero.
   it("keeps the spinner and the roster off a chip standing for received prompts alone", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, activeAgents: "compact" },
-    });
+    useLayoutStore
+      .getState()
+      .setRegionValues("runningAgents", { size: "chip" });
     setAgentStopControls({
       self: null,
       descendants: [agentRow("child-1", "Child one", "turn")],
@@ -975,9 +957,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   });
 
   it("reveals a folded row already expanded on chip click, and folds it back to a chip on the second click", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, filesChanged: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
 
     renderSurfaces(
       surfacesProps({
@@ -1014,9 +994,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
   // as a chip - the exact per-tile stickiness the reveal is supposed to grant
   // only while the chip that earned it is still there.
   it("prunes a stale reveal when its chip's predicate goes false, so the row comes back as a chip, not revealed", () => {
-    useLayoutStore.setState({
-      composer: { ...DEFAULT_COMPOSER_LAYOUT, filesChanged: "compact" },
-    });
+    useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
     const withChanges = surfacesProps({
       restoreContext: {
         ...EMPTY_RESTORE,

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import { UNAVAILABLE_DASH } from "@/lib/resources/memory-metric";
 
@@ -14,12 +14,7 @@ export function ComposerHarnessLabel(props: {
   readonly label: string | null;
 }): ReactNode {
   const tileId = useComposerTileId();
-  const { ref } = useLayoutHotspot({
-    settingId: "composer.harness",
-    tileId,
-    ghost: false,
-    condition: null,
-  });
+  const { ref } = useLayoutRegion({ regionId: "agent", instanceId: tileId });
   return (
     <span
       ref={ref}

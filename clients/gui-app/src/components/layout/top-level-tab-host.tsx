@@ -27,7 +27,7 @@ import {
 import { tabSurfaceDescriptor } from "@/stores/tabs/registry";
 import { useHeaderTabs } from "@/stores/tabs/use-header-tabs";
 import { useTabsStore } from "@/stores/tabs/store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useRegionShown } from "@/lib/layout-overrides";
 import { homeHeaderTab } from "@/stores/tabs/kinds/home";
 import { openNewEpicIntent } from "@/lib/commands/actions/new-epic";
 import { draftTabIntent, navigateToTabIntent } from "@/lib/tab-navigation";
@@ -102,7 +102,7 @@ export function TopLevelTabHost() {
     })),
   );
   const headerTabs = useHeaderTabs();
-  const homeTabEnabled = useSettingsStore((state) => state.homeTabEnabled);
+  const homeTabEnabled = useRegionShown("homeTab");
   // Home holds the selection as `activeItemId === null`, so it is the one
   // surface whose visibility is not a question about `items`.
   const homeIsActive = homeTabEnabled && activeItemId === null;

@@ -4,8 +4,8 @@ import type {
 } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import { formatUnavailableReason } from "@/lib/provider-rate-limit-content";
-import { useStatusBarRateLimitValue } from "@/lib/layout-overrides";
-import type { PercentMode } from "@/stores/settings/layout-store";
+import { useRegionValues } from "@/lib/layout-overrides";
+import type { AmountMode } from "@/lib/layout/layout-values";
 
 /**
  * The box the readings sit in, at its NATURAL width.
@@ -80,9 +80,10 @@ const NO_SEGMENTS: ReadonlyArray<StatusBarProviderSegmentModel> = [];
  * model itself, so a segment already carries the windows it should draw.
  */
 export interface StatusBarUsageDisplay {
-  readonly percentMode: PercentMode;
+  readonly percentMode: AmountMode;
   readonly showModeWord: boolean;
   readonly showBar: boolean;
+  readonly showPercent: boolean;
   readonly showTimer: boolean;
 }
 
@@ -99,6 +100,7 @@ export interface StatusBarUsageDisplay {
 export interface StatusBarUsageParts {
   readonly modeWord: boolean;
   readonly bar: boolean;
+  readonly percent: boolean;
   readonly timer: boolean;
 }
 
@@ -108,28 +110,28 @@ export function statusBarUsageParts(
   return {
     modeWord: display.showModeWord,
     bar: display.showBar,
+    percent: display.showPercent,
     timer: display.showTimer,
   };
 }
 
 /**
- * Field by field, through the override seam (`lib/layout-overrides.ts`) so a
- * Customize popover can draw the real readings under a different answer.
+ * Through the override seam (`lib/layout-overrides.ts`), so a style example or
+ * a specimen stage can draw the real readings under a different answer.
  *
- * Four leaf hooks rather than one slice read, for two independent reasons that
- * both point the same way. A selector that BUILDS an object each call makes
- * `useSyncExternalStore` see a new snapshot on every read and re-render
- * forever - the original reason these were four selectors. And a hook that
- * subscribes to the whole slice re-renders every reading whenever an unrelated
- * status-bar preference changes, which is what briefly happened when this moved
- * onto `useStatusBarLayout()`.
+ * One region read rather than five: every one of these leaves lives in the
+ * `usageLimits` bag, so a reader of one is a reader of the region, and the
+ * delta's identity changes only when that region does.
  */
 export function useStatusBarUsageDisplay(): StatusBarUsageDisplay {
-  const percentMode = useStatusBarRateLimitValue("percentMode");
-  const showModeWord = useStatusBarRateLimitValue("showModeWord");
-  const showBar = useStatusBarRateLimitValue("showBar");
-  const showTimer = useStatusBarRateLimitValue("showTimer");
-  return { percentMode, showModeWord, showBar, showTimer };
+  const values = useRegionValues("usageLimits");
+  return {
+    percentMode: values.amount,
+    showModeWord: values.word,
+    showBar: values.bar,
+    showPercent: values.percent,
+    showTimer: values.reset,
+  };
 }
 
 /** The segments a cluster is drawing, or one shared empty list for the rest. */

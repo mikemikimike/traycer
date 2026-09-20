@@ -176,14 +176,9 @@ export function depictUsageProviderSegment(
         percentMode: values.amount,
         showModeWord: values.word,
         showBar: values.bar,
+        showPercent: values.percent,
         showTimer: values.reset,
       }}
-      // `values.percent` has no counterpart here yet: the strip prints the
-      // percentage unconditionally, so `StatusBarUsageDisplay` carries no
-      // `showPercent` for it to switch. Dropping the window instead would
-      // leave the segment drawing its cold track, which is a different state
-      // rather than a shorter reading - so the reading is drawn whole and the
-      // switch-over adds the part (see this ticket's report).
       cluster={{
         kind: "segments",
         segments: [

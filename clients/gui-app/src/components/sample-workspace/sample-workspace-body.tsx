@@ -2,8 +2,7 @@ import { useCoarsePointer } from "@/hooks/ui/use-coarse-pointer";
 import { resolveMinimapVisibleItemCapacity } from "@/components/minimap/minimap-track-geometry";
 import { useEffect, useRef, useState } from "react";
 import { Wrench } from "lucide-react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
-import { CustomizeDropSlot } from "@/components/customize/customize-drop-slot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import {
   ChatLowerDock,
   type DockRowHotspot,
@@ -31,7 +30,12 @@ import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
 import { createComposerPickerStore } from "@/components/chat/composer/picker/composer-picker-store";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
 import { Collapsible } from "@/components/ui/collapsible";
-import { useComposerLayout, useLayoutSetting } from "@/lib/layout-overrides";
+import {
+  useArrangementValue,
+  useRegionShown,
+  useRegionValues,
+} from "@/lib/layout-overrides";
+import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
 import { SampleWorkspaceRail } from "./sample-workspace-rail";
 import {
   CONTEXT_USAGE_PREVIEW_SAMPLE,
@@ -59,49 +63,56 @@ export function SampleWorkspaceBody() {
       hostId: null,
     }),
   );
-  const composer = useComposerLayout();
-  const files = useLayoutHotspot({
-    settingId: "composer.filesChanged",
-    tileId: SAMPLE_TILE_ID,
-    ghost: false,
-    condition: null,
+  const dockOrder = useArrangementValue("dock").map(chatDockSection);
+  const changedFiles = useRegionValues("changedFiles");
+  const runningAgents = useRegionValues("runningAgents");
+  const backgroundValues = useRegionValues("background");
+  const files = useLayoutRegion({
+    regionId: "changedFiles",
+    instanceId: SAMPLE_TILE_ID,
   });
-  const agents = useLayoutHotspot({
-    settingId: "composer.activeAgents",
-    tileId: SAMPLE_TILE_ID,
-    ghost: false,
-    condition: null,
+  const agents = useLayoutRegion({
+    regionId: "runningAgents",
+    instanceId: SAMPLE_TILE_ID,
   });
-  const background = useLayoutHotspot({
-    settingId: "composer.background",
-    tileId: SAMPLE_TILE_ID,
-    ghost: false,
-    condition: null,
+  const background = useLayoutRegion({
+    regionId: "background",
+    instanceId: SAMPLE_TILE_ID,
   });
   const hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>> = {
     filesChanged: {
       hotspotRef: files.ref,
       editing: files.editing,
+      shown: changedFiles.shown === "shown",
       ghost: false,
       condition: "",
     },
     activeAgents: {
       hotspotRef: agents.ref,
       editing: agents.editing,
+      shown: runningAgents.shown === "shown",
       ghost: false,
       condition: "",
     },
     background: {
       hotspotRef: background.ref,
       editing: background.editing,
+      shown: backgroundValues.shown === "shown",
       ghost: false,
       condition: "",
     },
   };
-  const folded = new Set(
-    composer.dockOrder.filter((section) => composer[section] === "compact"),
+  const chipSizes: Readonly<Record<ChatDockSection, boolean>> = {
+    filesChanged: changedFiles.size === "chip",
+    activeAgents: runningAgents.size === "chip",
+    background: backgroundValues.size === "chip",
+  };
+  const folded = new Set<ChatDockSection>(
+    dockOrder.filter(
+      (section) => chipSizes[section] && hotspots[section].shown,
+    ),
   );
-  const chips = composer.dockOrder.flatMap((section) => {
+  const chips = dockOrder.flatMap((section) => {
     const sample = SAMPLE_DOCK.find((item) => item.section === section);
     return folded.has(section) && sample
       ? [{ ...sample, hotspotRef: hotspots[section].hotspotRef }]
@@ -119,7 +130,7 @@ export function SampleWorkspaceBody() {
             >
               <ChatLowerDock
                 folded={folded}
-                dockOrder={composer.dockOrder}
+                dockOrder={dockOrder}
                 hotspots={hotspots}
                 topSpacing="compact"
                 presentationRows={{
@@ -231,17 +242,16 @@ function SampleTranscript() {
   const content = useRef<HTMLDivElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [capacity, setCapacity] = useState(12);
-  const side = useLayoutSetting("chatTurnMinimapSide");
+  const shown = useRegionShown("minimap");
+  const side = useArrangementValue("minimapSide");
   const coarsePointer = useCoarsePointer();
   let minimapCondition: string | null = null;
   if (coarsePointer)
     minimapCondition = "Minimap is unavailable with a coarse pointer";
-  if (side === "hide") minimapCondition = "Hidden";
-  const { ref: minimapRef } = useLayoutHotspot({
-    settingId: "chat.minimapSide",
-    tileId: SAMPLE_TILE_ID,
-    ghost: minimapCondition !== null,
-    condition: minimapCondition,
+  if (!shown) minimapCondition = "Hidden";
+  const { ref: minimapRef } = useLayoutRegion({
+    regionId: "minimap",
+    instanceId: SAMPLE_TILE_ID,
   });
   useEffect(() => {
     const scroller = viewport.current;
@@ -318,7 +328,7 @@ function SampleTranscript() {
         </div>
       </div>
       <div inert className="contents">
-        {side === "hide" || coarsePointer ? (
+        {minimapCondition !== null ? (
           <div
             ref={minimapRef}
             className={cn(
@@ -348,18 +358,6 @@ function SampleTranscript() {
           />
         )}
       </div>
-      {(["left", "right"] as const).map((edge) => (
-        <CustomizeDropSlot
-          key={edge}
-          id={`minimap:${edge}`}
-          group="chat-minimap"
-          tileId={SAMPLE_TILE_ID}
-          className={cn(
-            "absolute top-1/2 h-12 w-6",
-            edge === "left" ? "left-0" : "right-0",
-          )}
-        />
-      ))}
     </div>
   );
 }

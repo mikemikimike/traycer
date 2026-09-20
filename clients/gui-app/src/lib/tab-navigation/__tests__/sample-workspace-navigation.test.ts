@@ -12,7 +12,6 @@ import {
   type TabNavigationEnvelope,
 } from "@/lib/tab-navigation";
 import { existingEpicTabIntent } from "@/lib/tab-navigation/intents";
-import { ensureSampleWorkspaceTab } from "@/lib/customize/enter-exit";
 import { epicPathname } from "@/lib/routes";
 import {
   __resetTabSyncCoordinatorForTesting,
@@ -27,9 +26,11 @@ import {
   type PersistedTabStripLayout,
 } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
+import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 import type { TabRef } from "@/stores/tabs/types";
 
 const SAMPLE_REF: TabRef = { kind: "sample-workspace", id: "sample-workspace" };
+const SAMPLE_TAB_INTENT = { kind: "sample-workspace" } as const;
 const SAMPLE_PATH = "/sample-workspace";
 const HISTORY_ENVELOPE_KEY = "__traycerTabNavigation";
 
@@ -198,15 +199,11 @@ afterEach(() => {
 });
 
 describe("sample workspace tab navigation", () => {
-  it("ensure + activate selects the sample tab and routes to /sample-workspace, not Settings", async () => {
+  it("activating the sample intent selects the tab and routes to /sample-workspace, not Settings", async () => {
     const epic = seedEpicActive();
     const nav = makeDeferredNavigate();
 
-    activateTabIntent(
-      nav.asNavigate,
-      ensureSampleWorkspaceTab({ kind: "none" }),
-      undefined,
-    );
+    activateTabIntent(nav.asNavigate, SAMPLE_TAB_INTENT, undefined);
 
     expect(focusedRefKey()).toBe(tabRefKey(SAMPLE_REF));
     expect(nav.calls).toHaveLength(1);
@@ -242,11 +239,7 @@ describe("sample workspace tab navigation", () => {
     const nav = makeDeferredNavigate();
     const repairs = getTabNavigationDiagnostics().repairCount;
 
-    activateTabIntent(
-      nav.asNavigate,
-      ensureSampleWorkspaceTab({ kind: "none" }),
-      undefined,
-    );
+    activateTabIntent(nav.asNavigate, SAMPLE_TAB_INTENT, undefined);
     commitInternal(nav.asNavigate, SAMPLE_PATH, nav.envelopeAt(0), 1);
     await nav.resolve(0);
 
@@ -271,11 +264,7 @@ describe("sample workspace tab navigation", () => {
         ),
     ).toBe(true);
 
-    activateTabIntent(
-      nav.asNavigate,
-      ensureSampleWorkspaceTab({ kind: "none" }),
-      undefined,
-    );
+    activateTabIntent(nav.asNavigate, SAMPLE_TAB_INTENT, undefined);
     expect(focusedRefKey()).toBe(tabRefKey(SAMPLE_REF));
     commitInternal(nav.asNavigate, SAMPLE_PATH, nav.envelopeAt(2), 3);
     await nav.resolve(2);
@@ -295,7 +284,7 @@ describe("sample workspace tab navigation", () => {
 
   it("an external visit to /sample-workspace selects the existing tab", () => {
     seedEpicActive();
-    ensureSampleWorkspaceTab({ kind: "none" });
+    tabCommandCoordinator.activateTab({ kind: "ref", ref: SAMPLE_REF });
     const nav = makeDeferredNavigate();
 
     tabNavigationController.observeLocation(

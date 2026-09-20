@@ -1,6 +1,10 @@
 import { rateLimitCapableProviderIdSchema } from "@traycer/protocol/host/rate-limit";
 import { CONTEXT_USAGE_ROW_KEYS } from "@/components/chat/context-usage";
-import type { ContextBreakdownField } from "@/lib/layout/layout-values";
+import type {
+  ContextBreakdownField,
+  LayoutValues,
+  RailVisibility,
+} from "@/lib/layout/layout-values";
 import type {
   DockRegionId,
   RailRegionId,
@@ -59,15 +63,21 @@ export interface StatusBarProviderLimitSelection {
 }
 
 /**
- * The accounts one provider's segments describe, on one host: profile ids,
- * with `null` standing for the provider's ambient login. Keyed by `hostId`
- * because a profile id names a credential on ONE machine.
+ * The accounts one provider's segments describe, on one host: profile ids, with
+ * `null` standing for the provider's ambient login. A provider with no entry
+ * has nothing checked.
+ */
+export type StatusBarHostShownProfiles = Readonly<
+  Partial<Record<RateLimitProviderId, ReadonlyArray<string | null>>>
+>;
+
+/**
+ * Per host, then per provider. Keyed by `hostId` because a profile id names a
+ * credential on ONE machine - the same id on another host is a different
+ * account, or nothing at all.
  */
 export type StatusBarShownProfiles = Readonly<
-  Record<
-    string,
-    Readonly<Partial<Record<RateLimitProviderId, ReadonlyArray<string | null>>>>
-  >
+  Record<string, StatusBarHostShownProfiles>
 >;
 
 /**
@@ -194,6 +204,35 @@ export function leftPanelIdForRailRegion(regionId: RailRegionId): LeftPanelId {
   return PANEL_BY_RAIL_REGION[regionId];
 }
 
+/** The inverse, for the rail's own writers, which speak in panel ids. */
+export function railRegionForLeftPanelId(panelId: LeftPanelId): RailRegionId {
+  return RAIL_REGION_BY_PANEL[panelId];
+}
+
+/**
+ * The nine rail regions' three-state `shown` as the sparse show/hide map every
+ * sidebar render path already reads (`isLeftPanelVisible`): `auto` leaves the
+ * panel absent from the map and therefore on its own rule, `shown` writes
+ * `true` and `hidden` writes `false`.
+ */
+export function panelVisibilityOverridesFromValues(
+  values: Pick<LayoutValues, RailRegionId>,
+): Readonly<Partial<Record<LeftPanelId, boolean>>> {
+  const overrides: Partial<Record<LeftPanelId, boolean>> = {};
+  for (const regionId of RAIL_REGION_IDS) {
+    const shown = values[regionId].shown;
+    if (shown === "auto") continue;
+    overrides[PANEL_BY_RAIL_REGION[regionId]] = shown === "shown";
+  }
+  return overrides;
+}
+
+/** The other direction, for a writer holding one panel's show/hide/follow. */
+export function railVisibilityFor(override: boolean | null): RailVisibility {
+  if (override === null) return "auto";
+  return override ? "shown" : "hidden";
+}
+
 /** A divider id is always this shape, so it can never collide with a panel id. */
 const DIVIDER_ID_PREFIX = "divider:";
 
@@ -246,6 +285,54 @@ export const AUTOMATIC_LIMIT_SELECTION: StatusBarProviderLimitSelection = {
   automatic: true,
   limitKeys: [],
 };
+
+/**
+ * The selection one provider is on, with the default standing in for a provider
+ * that has never been configured - which is how a provider connected later
+ * shows its tightest limit without a visit to the editor.
+ */
+export function statusBarProviderLimitSelection(
+  arrangement: LayoutArrangement,
+  providerId: RateLimitProviderId,
+): StatusBarProviderLimitSelection {
+  return arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
+}
+
+/** One shared empty list, so an unchecked provider never allocates. */
+const NO_SHOWN_PROFILE_IDS: ReadonlyArray<string | null> = [];
+
+/**
+ * The checked accounts one provider has on one host, or the empty list. The one
+ * read path, so nothing else has to know the map is two levels deep.
+ */
+export function statusBarShownProfileIds(
+  shownProfiles: StatusBarShownProfiles,
+  hostId: string | null,
+  providerId: RateLimitProviderId,
+): ReadonlyArray<string | null> {
+  if (hostId === null) return NO_SHOWN_PROFILE_IDS;
+  return shownProfiles[hostId]?.[providerId] ?? NO_SHOWN_PROFILE_IDS;
+}
+
+/**
+ * Whether the status bar strip is on screen: the ONE answer to that question,
+ * read by the shell that mounts it and by every control that only makes sense
+ * while it is mounted.
+ *
+ * A mobile VIEWPORT, not a mobile build: a narrow desktop window behaves the
+ * same way. Mobile ignores `usageHost` entirely and answers with `mobileFooter`
+ * (L-51), which is off by default - `usageHost` names which of two surfaces
+ * hosts the usage reading, and on a phone that question has no second answer,
+ * since the mobile header keeps both controls whatever the strip does.
+ */
+export function statusBarShown(
+  arrangement: LayoutArrangement,
+  isMobileViewport: boolean,
+): boolean {
+  return isMobileViewport
+    ? arrangement.mobileFooter
+    : arrangement.usageHost === "status-bar";
+}
 
 // ── The rail ────────────────────────────────────────────────────────────────
 

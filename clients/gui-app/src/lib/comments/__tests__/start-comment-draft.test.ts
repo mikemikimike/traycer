@@ -3,10 +3,11 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { startCommentDraft } from "@/lib/comments/start-comment-draft";
 import type { DraftRange } from "@/stores/comments/comment-threads-store";
+import { useLeftPanelStore } from "@/stores/epics/left-panel-store";
 import {
-  DEFAULT_LEFT_PANEL_GROUPS,
-  useLeftPanelStore,
-} from "@/stores/epics/left-panel-store";
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 const editors: Editor[] = [];
 
@@ -20,9 +21,9 @@ function makeEditor(content: string): Editor {
 }
 
 function resetLeftPanelStore(): void {
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
-    panelGroups: DEFAULT_LEFT_PANEL_GROUPS,
     mainCollapsedByTabId: {},
     panelSectionCollapsedByPanelId: {},
     panelSectionWeightsByPanelId: {},

@@ -1,8 +1,23 @@
 import { createContext, useContext } from "react";
 import type { DiffLineCounts } from "@/lib/file-change-diff-hunks";
+import type { DockRegionId } from "@/lib/layout/region-id";
 
 /** The three dock rows Layout ▸ Composer can fold into a chip. */
 export type ChatDockSection = "filesChanged" | "activeAgents" | "background";
+
+/**
+ * The dock's own name for one of the three dock regions.
+ *
+ * Two vocabularies, deliberately: the registry words a region for someone
+ * reading the layout form ("Running agents"), while the dock names its rows
+ * after the panels they mount. This is the one place they meet, so the order
+ * the arrangement holds can be read as a list of sections.
+ */
+export function chatDockSection(regionId: DockRegionId): ChatDockSection {
+  if (regionId === "changedFiles") return "filesChanged";
+  if (regionId === "runningAgents") return "activeAgents";
+  return "background";
+}
 
 /**
  * What a chip draws ahead of its number - what the section IS, never what it

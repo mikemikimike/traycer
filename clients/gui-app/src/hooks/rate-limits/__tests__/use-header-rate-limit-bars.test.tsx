@@ -104,10 +104,10 @@ vi.mock("@/hooks/host/use-host-queries", () => ({
 
 import { useHeaderRateLimitBars } from "@/hooks/rate-limits/use-header-rate-limit-bars";
 import {
-  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-  type UsageControlsPlacement,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
+import type { UsageHost } from "@/lib/layout/layout-arrangement";
 
 const PROFILE_SELECTION: RateLimitProfileSelection = {
   shownProfiles: {},
@@ -120,9 +120,10 @@ function renderHeaderRateLimitBars(
   return renderHook(() => useHeaderRateLimitBars(profileSelection));
 }
 
-function selectPlacement(placement: UsageControlsPlacement): void {
-  useLayoutStore.setState({
-    statusBar: { ...DEFAULT_STATUS_BAR_LAYOUT, placement },
+function selectPlacement(placement: UsageHost): void {
+  useLayoutStore.getState().setArrangement({
+    ...useLayoutStore.getState().arrangement,
+    usageHost: placement,
   });
 }
 
@@ -267,7 +268,7 @@ beforeEach(() => {
   mocks.results = new Map();
   mocks.profileIds = new Map();
   mocks.requests = [];
-  useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
 
 afterEach(() => {

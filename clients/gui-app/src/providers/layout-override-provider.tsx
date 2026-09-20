@@ -7,8 +7,8 @@ import {
 
 /**
  * Draws this subtree under different layout preferences than the store holds -
- * how a Customize popover shows what an option WOULD look like, using the real
- * component rather than a second, drifting copy of it.
+ * how an inspector section shows what an option WOULD look like, using the
+ * real component rather than a second, drifting copy of it.
  *
  * Nests: an inner provider wins LEAF BY LEAF over the one around it, so an
  * option picture inside a preset thumbnail inherits the preset's values and

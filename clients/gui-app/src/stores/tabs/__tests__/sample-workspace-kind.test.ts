@@ -11,7 +11,6 @@ import {
   tabSurfaceDescriptor,
 } from "@/stores/tabs/registry";
 import { sampleWorkspaceTabModule } from "@/stores/tabs/kinds/sample-workspace";
-import { ensureSampleWorkspaceTab } from "@/lib/customize/enter-exit";
 import {
   emptySystemTabs,
   emptyTabStripLayout,
@@ -34,7 +33,10 @@ import {
 } from "@/stores/tabs/desktop-tabs-persistence";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { useLandingDraftStore } from "@/stores/home/landing-draft-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 import type { TabRef } from "@/stores/tabs/types";
 import type {
@@ -96,7 +98,11 @@ function resetStores(): void {
   useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
   useLandingDraftStore.setState({ drafts: [], activeDraftId: null });
   useTabsStore.setState({ ...emptyTabStripLayout(), stripOrder: [] });
-  useSettingsStore.setState({ homeTabEnabled: false });
+  // Home tab off by default (SHIPPED_DEFAULT_VALUES.homeTab.shown = "hidden").
+  useLayoutStore.setState({
+    ...DEFAULT_LAYOUT_SNAPSHOT,
+    layoutCarryDone: true,
+  });
   tabCommandCoordinator.resetReconciliationForTesting();
 }
 
@@ -171,7 +177,7 @@ describe("sample-workspace kind - registration and descriptor", () => {
   });
 
   it("tabRequestClose is a plain close of the strip item", () => {
-    ensureSampleWorkspaceTab({ kind: "none" });
+    useTabsStore.getState().ensurePresent(SAMPLE_REF);
     expect(sampleItems(useTabsStore.getState())).toHaveLength(1);
 
     tabRequestClose(sampleWorkspaceTabModule.build(null));
@@ -180,15 +186,9 @@ describe("sample-workspace kind - registration and descriptor", () => {
   });
 });
 
-describe("sample-workspace kind - singleton open", () => {
-  it("returns the sample-workspace intent", () => {
-    expect(ensureSampleWorkspaceTab({ kind: "none" })).toEqual({
-      kind: "sample-workspace",
-    });
-  });
-
-  it("creates a strip item with the fixed ref/id", () => {
-    ensureSampleWorkspaceTab({ kind: "none" });
+describe("sample-workspace kind - singleton presence", () => {
+  it("ensurePresent creates a strip item with the fixed ref/id", () => {
+    useTabsStore.getState().ensurePresent(SAMPLE_REF);
     const items = sampleItems(useTabsStore.getState());
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
@@ -197,27 +197,22 @@ describe("sample-workspace kind - singleton open", () => {
     });
   });
 
-  it("opening twice yields one tab and the same intent", () => {
-    const first = ensureSampleWorkspaceTab({ kind: "none" });
-    const second = ensureSampleWorkspaceTab({
-      kind: "settings-modal",
-      section: "layout",
-      scrollTop: 0,
-    });
-    expect(second).toEqual(first);
+  it("ensuring presence twice yields one tab", () => {
+    useTabsStore.getState().ensurePresent(SAMPLE_REF);
+    useTabsStore.getState().ensurePresent(SAMPLE_REF);
     expect(sampleItems(useTabsStore.getState())).toHaveLength(1);
   });
 
-  it("only ensures presence - activation is a separate step", () => {
+  it("re-ensuring presence of an already-materialized tab does not steal focus", () => {
+    // Creating a tab activates it, so the second tab has to be created through
+    // the store too - the focus this asserts is the one the store actually
+    // arrived at, not one written over its layout from outside.
+    useTabsStore.getState().ensurePresent(SAMPLE_REF);
     const epicRef: TabRef = { kind: "epic", id: "epic-tab" };
-    useTabsStore.setState({
-      ...emptyTabStripLayout(),
-      items: [{ kind: "tab", id: tabItemId(epicRef), ref: epicRef }],
-      activeItemId: tabItemId(epicRef),
-      stripOrder: [epicRef],
-    });
+    useTabsStore.getState().ensurePresent(epicRef);
+    expect(useTabsStore.getState().activeItemId).toBe(tabItemId(epicRef));
 
-    ensureSampleWorkspaceTab({ kind: "none" });
+    useTabsStore.getState().ensurePresent(SAMPLE_REF);
 
     expect(useTabsStore.getState().activeItemId).toBe(tabItemId(epicRef));
   });

@@ -1,10 +1,8 @@
-import { CustomizeDropSlot } from "@/components/customize/customize-drop-slot";
-import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import { memo } from "react";
 import { useStore } from "zustand";
 
 import { ComposerSendButton } from "@/components/home/composer/composer-send-button";
-import { useComposerLayout } from "@/lib/layout-overrides";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import {
   renderToolbarItem,
   type ComposerToolbarItemsProps,
@@ -22,8 +20,7 @@ interface ComposerToolbarRightProps extends ComposerToolbarItemsProps {
 }
 
 function ComposerToolbarRightImpl(props: ComposerToolbarRightProps) {
-  const tileId = useComposerTileId();
-  const order = useComposerLayout().toolbar.right;
+  const order = useArrangementValue("toolbarRight");
   // Block sending until the model slug resolves to a concrete value - an
   // empty slug is the transient "catalog still loading" marker and must never
   // reach the wire as `model: ""`. Gating HERE (instead of in the host
@@ -42,12 +39,6 @@ function ComposerToolbarRightImpl(props: ComposerToolbarRightProps) {
           {renderToolbarItem(id, props)}
         </span>
       ))}
-      <CustomizeDropSlot
-        id="toolbar:right"
-        group="composer-toolbar"
-        tileId={tileId}
-        className="inline-flex size-6 shrink-0"
-      />
       <span className="contents" data-testid="toolbar-item-send">
         <ComposerSendButton
           canSubmit={canSubmitResolved}

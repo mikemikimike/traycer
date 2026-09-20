@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SETTINGS_SEARCH_FIXTURES } from "@/components/settings/__tests__/settings-search-fixture-registry";
-import { CUSTOMIZE_LAUNCH_ENTRIES } from "@/lib/customize/customize-search.definitions";
+import { LAYOUT_LAUNCH_ENTRIES } from "@/lib/layout/layout-search.definitions";
 import type {
   AnySettingsSectionCollection,
   SettingsDefinition,
@@ -146,14 +146,15 @@ describe("settings search assembly", () => {
     expect(unassembled).toEqual([]);
   });
 
-  it("is exactly its collections' entries, then the Customize launch results", () => {
+  it("is exactly its collections' entries, then the Layout launch results", () => {
     // The launch results belong to no collection (there is no panel to render
-    // them from); they are the catalog's, appended after every section's.
+    // them from); they are generated from the region registry, appended after
+    // every section's.
     expect(SETTINGS_SEARCH_ENTRIES).toEqual([
       ...SETTINGS_SEARCH_COLLECTIONS.flatMap(
         (collection) => collection.entries,
       ),
-      ...CUSTOMIZE_LAUNCH_ENTRIES,
+      ...LAYOUT_LAUNCH_ENTRIES,
     ]);
   });
 });

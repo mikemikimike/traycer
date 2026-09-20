@@ -18,7 +18,6 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import type { DockSection } from "@/stores/settings/layout-store";
 import type { ChatDockSection } from "@/components/chat/chat-dock-compact-strip";
 import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
@@ -430,7 +429,7 @@ interface DockInput {
   readonly onBackgroundItemsStopAll: () => string | null;
 }
 
-const DEFAULT_DOCK_ORDER: ReadonlyArray<DockSection> = [
+const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
   "filesChanged",
   "activeAgents",
   "background",
@@ -439,6 +438,9 @@ const DEFAULT_DOCK_ORDER: ReadonlyArray<DockSection> = [
 function dockHotspot(ghost: boolean): DockRowHotspot {
   return {
     hotspotRef: () => undefined,
+    // Every dock region in this suite is shown; only `folded` and `ghost`
+    // are what these tests are about.
+    shown: true,
     ghost,
     condition: "",
     editing: false,
@@ -450,7 +452,7 @@ function dockHotspot(ghost: boolean): DockRowHotspot {
  *  drift from what the row would actually decide in the app. */
 function dockHotspotsFor(
   input: DockInput,
-): Readonly<Record<DockSection, DockRowHotspot>> {
+): Readonly<Record<ChatDockSection, DockRowHotspot>> {
   return {
     filesChanged: dockHotspot(input.changes.length === 0),
     activeAgents: dockHotspot(

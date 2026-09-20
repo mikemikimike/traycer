@@ -1,10 +1,4 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
@@ -12,11 +6,10 @@ import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getActiveModelPicker } from "@/lib/commands/active-model-picker-registry";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
 import {
-  DEFAULT_COMPOSER_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 
 const hostHooks = vi.hoisted(() => ({
   schemaVersion: vi.fn((_hostId: string | null, _method: string) => null),
@@ -123,8 +116,7 @@ function sendButton(): HTMLButtonElement {
 beforeEach(() => {
   hostHooks.schemaVersion.mockClear();
   hostHooks.judgeBilling.mockClear();
-  useLayoutStore.setState({ composer: DEFAULT_COMPOSER_LAYOUT });
-  useCustomizeStore.setState({ session: null, instances: new Map() });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
 afterEach(cleanup);
 
@@ -216,30 +208,5 @@ describe("ComposerToolbar presentation mode", () => {
     expect(send.disabled).toBe(false);
     fireEvent.click(send);
     expect(onSubmit).toHaveBeenCalledTimes(1);
-  });
-
-  it("still registers the toolbar hotspots (model included) while a session is live", () => {
-    act(() => {
-      useCustomizeStore.setState({
-        session: { scene: "sample", opener: { kind: "none" }, startedAt: 0 },
-        instances: new Map(),
-        history: { past: [], future: [] },
-        announcement: "",
-      });
-    });
-    renderToolbar({
-      presentation: true,
-      runTargetHostId: null,
-      onSubmit: vi.fn(),
-    });
-
-    const keys = [...useCustomizeStore.getState().instances.keys()];
-    expect(keys).toEqual(
-      expect.arrayContaining([
-        `composer.model@shell:${TILE}`,
-        `composer.access@shell:${TILE}`,
-        `composer.attachImage@shell:${TILE}`,
-      ]),
-    );
   });
 });

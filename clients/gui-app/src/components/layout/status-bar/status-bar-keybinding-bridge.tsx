@@ -3,7 +3,7 @@ import { trackSettingChanged } from "@/lib/analytics";
 import { ACTION_META } from "@/lib/keybindings/actions";
 import { registerDynamicActionHandler } from "@/lib/keybindings/dispatch";
 import { isMobileApp } from "@/lib/mobile-app";
-import { useLayoutStore } from "@/stores/settings/layout-store";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
  * Registers the placement toggle with the keybinding registry.
@@ -20,18 +20,22 @@ import { useLayoutStore } from "@/stores/settings/layout-store";
  * registering handlers for the next `desktopOnly` action someone adds.
  */
 export function StatusBarKeybindingBridge(): ReactNode {
-  const setPlacement = useLayoutStore((state) => state.setStatusBarPlacement);
+  const setArrangement = useLayoutStore((state) => state.setArrangement);
   useEffect(() => {
     if (ACTION_META["app.status-bar.toggle"].desktopOnly && isMobileApp()) {
       return undefined;
     }
     return registerDynamicActionHandler("app.status-bar.toggle", () => {
       // Read at invocation, not at registration: the handler is registered
-      // once and the placement changes underneath it.
-      const placement = useLayoutStore.getState().statusBar.placement;
+      // once and the arrangement changes underneath it.
+      const arrangement = useLayoutStore.getState().arrangement;
       trackSettingChanged("layout", "layout.statusBar.placement");
-      setPlacement(placement === "status-bar" ? "header" : "status-bar");
+      setArrangement({
+        ...arrangement,
+        usageHost:
+          arrangement.usageHost === "status-bar" ? "header" : "status-bar",
+      });
     });
-  }, [setPlacement]);
+  }, [setArrangement]);
   return null;
 }

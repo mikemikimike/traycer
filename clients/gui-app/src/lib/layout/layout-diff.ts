@@ -52,20 +52,21 @@ export function regionChanged(
 
 /**
  * The number the header reads out beside the preset name ("Compact + 3
- * changes"): one per changed value, one per reordered group, one per hidden
- * provider.
+ * changes"): one per changed VALUE, and nothing else (L-57).
+ *
+ * Values only, because the count has to agree with the button beside it:
+ * "Reset to Compact" reverts exactly the delta this counts, and a count that
+ * also carried the arrangement would leave changes behind after a reset that
+ * claimed to clear them. An arrangement change is still a change a person
+ * made - it earns a dot in the index and a revert on its own Position row
+ * (`positionRowChanged`), and "Reset everything" clears it.
  */
 export function changeCount(snapshot: LayoutSnapshot): number {
   const minimal = minimizeOverrides(snapshot.overrides, snapshot.basePreset);
-  const valueChanges = Object.values(minimal).reduce(
+  return Object.values(minimal).reduce(
     (total: number, patch: object | undefined) =>
       total + (patch === undefined ? 0 : Object.keys(patch).length),
     0,
-  );
-  return (
-    valueChanges +
-    reorderedGroups(snapshot.arrangement).length +
-    snapshot.arrangement.hiddenProviders.length
   );
 }
 

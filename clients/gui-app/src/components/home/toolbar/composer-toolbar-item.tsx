@@ -10,7 +10,7 @@ import type { AutoJudgeBilling } from "@/lib/auto-mode/auto-judge-billing";
 import type { DictationPreparingStatus } from "@/hooks/composer/use-dictation-availability";
 import type { ComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
 import type { ProviderTerminalLoginSurface } from "@/lib/providers/provider-terminal-login-surface";
-import type { ToolbarItemId } from "@/stores/settings/layout-store";
+import type { ToolbarRegionId } from "@/lib/layout/region-id";
 
 /**
  * Every prop any of the five toolbar items could need, in one shape: since an
@@ -40,7 +40,7 @@ export interface ComposerToolbarItemsProps {
 }
 
 export function renderToolbarItem(
-  id: ToolbarItemId,
+  id: ToolbarRegionId,
   props: ComposerToolbarItemsProps,
 ): ReactNode {
   switch (id) {
@@ -64,7 +64,7 @@ export function renderToolbarItem(
           interactive
         />
       );
-    case "harness":
+    case "agent":
       return <ComposerHarnessLabel label={props.harnessLabel} />;
     case "model":
       return (

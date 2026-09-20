@@ -35,10 +35,8 @@ import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
 import type { TranscriptListRow } from "@/stores/chats/transcript-list-rows";
 import type { TranscriptWindow } from "@/stores/chats/transcript-window";
-import {
-  useSettingsStore,
-  type MinimapPlacement,
-} from "@/stores/settings/settings-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
+import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 
 export interface ChatTurnMinimapProps {
   readonly ref?: Ref<HTMLDivElement>;
@@ -58,8 +56,9 @@ export interface ChatTurnMinimapProps {
   readonly bottomInset: number;
   readonly inViewRefreshRef: RefObject<() => void>;
   readonly onSelect: (messageId: string) => void;
-  /** `hide` keeps the turn model published for the tile bar, rail and all. */
-  readonly side: MinimapPlacement;
+  /** False keeps the turn model published for the tile bar, rail and all. */
+  readonly shown: boolean;
+  readonly side: EdgeSide;
 }
 
 function clampIndex(index: number, itemCount: number): number {
@@ -75,6 +74,7 @@ export function ChatTurnMinimap(props: ChatTurnMinimapProps) {
     listRef,
     rows,
     onSelect,
+    shown,
     side,
     topOffsetAdjustmentRef,
     transcriptWindow,
@@ -103,7 +103,7 @@ export function ChatTurnMinimap(props: ChatTurnMinimapProps) {
   const railActive = shouldRunChatTurnMinimapRail({
     coarsePointer,
     mobileViewport,
-    side,
+    shown,
   });
   const [currentIndex, setCurrentIndex] = useState(0);
   const [cursorIndex, setCursorIndex] = useState(0);
@@ -188,9 +188,6 @@ export function ChatTurnMinimap(props: ChatTurnMinimapProps) {
   }, [bottomInset, railActive, uiFontSize, viewportRef]);
 
   const visible = items.length > 0;
-  // Subsumed by `railActive`; kept as its own condition so the early return
-  // below narrows the placement the rail renders with.
-  const railHidden = side === "hide";
   const isInert = hitStripWidth === null || hitStripWidth <= 0;
   const resolvedCurrentIndex = clampIndex(currentIndex, items.length);
   const resolvedCursorIndex = clampIndex(cursorIndex, items.length);
@@ -294,7 +291,7 @@ export function ChatTurnMinimap(props: ChatTurnMinimapProps) {
     ],
   );
 
-  if (railHidden || !railActive || !visible || isInert) return null;
+  if (!railActive || !visible || isInert) return null;
 
   return (
     <ChatTurnMinimapView

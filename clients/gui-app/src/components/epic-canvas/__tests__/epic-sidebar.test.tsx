@@ -23,7 +23,14 @@ import {
   DEFAULT_LEFT_PANEL_ID,
   moveLeftPanelGroup,
   useLeftPanelStore,
+  type PanelVisibilityOverrideById,
 } from "@/stores/epics/left-panel-store";
+import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
+import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 import {
   prPresenceScopeKey,
   usePrPresenceStore,
@@ -180,16 +187,23 @@ const HOST_ID = "epic-sidebar-host";
 function resetLeftPanelStore(): void {
   window.localStorage.clear();
   useSurfaceHostSelectionStore.setState({ selections: {} });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
-    panelGroups: DEFAULT_LEFT_PANEL_GROUPS,
     mainCollapsedByTabId: {},
     panelSectionCollapsedByPanelId: {},
     commentsPanelRevealedByTabId: {},
-    panelVisibilityOverrideById: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},
   });
+}
+
+/** The rail's show/hide, which lives in the layout store now (one region each). */
+function visibilityOverrides(): PanelVisibilityOverrideById {
+  const state = useLayoutStore.getState();
+  return panelVisibilityOverridesFromValues(
+    effectiveLayoutValues(state.basePreset, state.overrides),
+  );
 }
 
 /**
@@ -808,7 +822,7 @@ describe("<EpicLeftPanelRail />", () => {
 
       fireEvent.click(screen.getByTestId("epic-rail-toggle-terminals"));
 
-      expect(useLeftPanelStore.getState().panelVisibilityOverrideById).toEqual({
+      expect(visibilityOverrides()).toEqual({
         terminals: false,
       });
       expect(screen.queryByTestId("epic-rail-terminals")).toBeNull();
@@ -836,9 +850,7 @@ describe("<EpicLeftPanelRail />", () => {
       openRailMenu();
       fireEvent.click(screen.getByTestId("epic-rail-toggle-pull-requests"));
 
-      expect(useLeftPanelStore.getState().panelVisibilityOverrideById).toEqual(
-        {},
-      );
+      expect(visibilityOverrides()).toEqual({});
     });
 
     it("offers a direct hide for the icon that was right-clicked", () => {
@@ -847,7 +859,7 @@ describe("<EpicLeftPanelRail />", () => {
       fireEvent.contextMenu(screen.getByTestId("epic-rail-terminals"));
       fireEvent.click(screen.getByTestId("epic-rail-hide-pointed-panel"));
 
-      expect(useLeftPanelStore.getState().panelVisibilityOverrideById).toEqual({
+      expect(visibilityOverrides()).toEqual({
         terminals: false,
       });
     });
@@ -881,9 +893,7 @@ describe("<EpicLeftPanelRail />", () => {
 
       fireEvent.click(screen.getByTestId("epic-rail-reset-panel-visibility"));
 
-      expect(useLeftPanelStore.getState().panelVisibilityOverrideById).toEqual(
-        {},
-      );
+      expect(visibilityOverrides()).toEqual({});
     });
 
     it("omits the reset item while nothing is overridden", () => {
@@ -917,9 +927,7 @@ describe("<EpicLeftPanelRail />", () => {
       expect(screen.queryByTestId("epic-rail-hide-pointed-panel")).toBeNull();
 
       fireEvent.click(lastItem);
-      expect(
-        useLeftPanelStore.getState().panelVisibilityOverrideById.chats,
-      ).toBeUndefined();
+      expect(visibilityOverrides().chats).toBeUndefined();
     });
 
     it("highlights the fallback icon when the active panel is hidden", () => {
@@ -1024,7 +1032,7 @@ describe("Browsers panel registration", () => {
         .getState()
         .applyPanelGroups(
           moveLeftPanelGroup(
-            useLeftPanelStore.getState().getPanelGroups(),
+            DEFAULT_LEFT_PANEL_GROUPS,
             "terminals",
             "browsers",
             "combine",

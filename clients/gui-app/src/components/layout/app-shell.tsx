@@ -18,7 +18,6 @@ import { useMobileHistorySwipes } from "@/components/layout/shell/use-mobile-his
 import { useSystemBack } from "@/components/layout/shell/use-system-back";
 import { AppStatusBar } from "@/components/layout/status-bar/app-status-bar";
 import { MobileAppStatusBar } from "@/components/layout/status-bar/mobile-app-status-bar";
-import { StatusBarGhost } from "@/components/layout/status-bar/status-bar-ghost";
 import { TopLevelTabHost } from "@/components/layout/top-level-tab-host";
 import { TopLevelSurfaceActivationProvider } from "@/components/layout/top-level-surface-activation-provider";
 import { HostScopeReady } from "@/components/layout/host-readiness-controller";
@@ -30,10 +29,7 @@ import { useChatForkEventQuery } from "@/hooks/chats/use-chat-fork-queries";
 import { useAddressableHostId } from "@/hooks/host/use-addressable-host-id";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { PrimaryFocusCoordinatorProvider } from "@/lib/focus/primary-focus-coordinator-provider";
-import {
-  selectStatusBarShown,
-  useLayoutStore,
-} from "@/stores/settings/layout-store";
+import { useStatusBarShown } from "@/stores/layout/layout-store";
 
 interface AppShellProps {
   children: ReactNode;
@@ -53,11 +49,9 @@ export function AppShell(props: AppShellProps) {
   // The shared answer, not an inline read of the store: the usage panel's
   // per-account eye and the header glyph gate on the same question, and a
   // strip that one of them thought was mounted while this shell did not would
-  // offer a control for a surface that is not there. `selectStatusBarShown`
-  // explains why a mobile viewport ignores `placement`.
-  const showStatusBar = useLayoutStore((state) =>
-    selectStatusBarShown(state, isMobile),
-  );
+  // offer a control for a surface that is not there. `statusBarShown` explains
+  // why a mobile viewport ignores `usageHost`.
+  const showStatusBar = useStatusBarShown();
   // Observed, never rendered. A publication fork resolves itself now - the
   // banner and the dialog that used to read this query are gone - but the
   // per-chat `pendingFork` indicator is derived from an open fork episode and
@@ -104,14 +98,9 @@ export function AppShell(props: AppShellProps) {
               {/* Above the session strip: a wrong clock is the CAUSE of the
                 interruption the strip reports, so if both are showing the
                 actionable one has to be read first. */}
-              <div data-customize-inert className="contents">
-                <ClockSkewBanner />
-                <SessionConnectivityStrip connectivity={sessionConnectivity} />
-              </div>
-              <main
-                data-customize-inert
-                className="relative flex min-h-0 flex-1 flex-col"
-              >
+              <ClockSkewBanner />
+              <SessionConnectivityStrip connectivity={sessionConnectivity} />
+              <main className="relative flex min-h-0 flex-1 flex-col">
                 {/* The app's edge-to-edge content viewport. Individual surfaces
                   own their internal overflow, including the landing terminal.
 
@@ -163,12 +152,7 @@ export function AppShell(props: AppShellProps) {
                 further gates that only exist there (the software keyboard and
                 the nav drawer) so their subscriptions stay out of this root. */}
               {showStatusBar && isMobile ? <MobileAppStatusBar /> : null}
-              {showStatusBar && !isMobile ? (
-                <div data-customize-inert>
-                  <AppStatusBar />
-                </div>
-              ) : null}
-              {!showStatusBar && !isMobile ? <StatusBarGhost /> : null}
+              {showStatusBar && !isMobile ? <AppStatusBar /> : null}
               <OpenFolderDialog />
               <RemoteFolderPickerDialog />
               <QuitInterceptBridge />

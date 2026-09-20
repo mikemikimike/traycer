@@ -8,8 +8,8 @@ import {
 import { ImagePlus } from "lucide-react";
 import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
-import { useComposerLayoutValue } from "@/lib/layout-overrides";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useRegionShown } from "@/lib/layout-overrides";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 
 interface ComposerAttachImageButtonProps {
@@ -35,14 +35,11 @@ export function ComposerAttachImageButton(
 ) {
   const { onAttachImages } = props;
   const inputRef = useRef<HTMLInputElement>(null);
-  const attachImage = useComposerLayoutValue("attachImage");
+  const shown = useRegionShown("attachImage");
   const tileId = useComposerTileId();
-  const ghost = attachImage === "hidden";
-  const { ref: hotspotRef, editing } = useLayoutHotspot({
-    settingId: "composer.attachImage",
-    tileId,
-    ghost,
-    condition: ghost ? "Hidden from the toolbar" : null,
+  const { ref: hotspotRef } = useLayoutRegion({
+    regionId: "attachImage",
+    instanceId: tileId,
   });
 
   const handleOpenImagePicker = useCallback(() => {
@@ -62,18 +59,7 @@ export function ComposerAttachImageButton(
     [onAttachImages],
   );
 
-  if (ghost) {
-    if (!editing) return null;
-    return (
-      <span
-        ref={hotspotRef}
-        data-testid="composer-attach-image-ghost"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-dashed border-border/60 text-muted-foreground/60 opacity-70"
-      >
-        <ImagePlus className="size-4" />
-      </span>
-    );
-  }
+  if (!shown) return null;
 
   return (
     <>

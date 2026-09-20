@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { shortcutHintsVisible } from "@/lib/keybindings/shortcut-hints";
 import { useBindingForAction } from "@/stores/settings/keybinding-store";
-import { useComposerLayoutValue } from "@/lib/layout-overrides";
+import { useRegionShown } from "@/lib/layout-overrides";
 import { DICTATION_ACTION_ID } from "@/hooks/composer/use-dictation-hotkey";
 import type { DictationPreparingStatus } from "@/hooks/composer/use-dictation-availability";
 import type { VoiceDictationState } from "@/hooks/composer/use-voice-dictation";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
@@ -60,7 +60,7 @@ export function ComposerMicButton({
   const isBusy = state === "requesting" || state === "transcribing";
   const isRecording = state === "recording";
   const label = labelFor(state);
-  const mic = useComposerLayoutValue("mic");
+  const micShown = useRegionShown("mic");
   // Surface the (live, rebindable) shortcut in the tooltip when idle so it's
   // discoverable; omit it where the action is unbound, or where shortcut hints
   // are suppressed - the tooltip then carries the plain action label.
@@ -74,7 +74,7 @@ export function ComposerMicButton({
       ? `${label} (${hint})`
       : label;
 
-  if (mic === "hidden") return null;
+  if (!micShown) return null;
 
   return (
     <TooltipWrapper
@@ -177,8 +177,8 @@ export function ComposerMicPreparing({
     status.downloadState === "downloading" ? status.progress : null;
   // Holds the mic's slot, so it follows the mic's own visibility: a toolbar
   // configured without a mic must not sprout one for the length of a download.
-  const mic = useComposerLayoutValue("mic");
-  if (mic === "hidden") return null;
+  const micShown = useRegionShown("mic");
+  if (!micShown) return null;
   // A native `title` on a `disabled` button doesn't show on hover (the button
   // gets no pointer events). Put the tooltip on a wrapping span and make the
   // button `pointer-events-none` so the hover lands on the span.
@@ -203,50 +203,23 @@ export function ComposerMicPreparing({
   );
 }
 
-function micGhostCondition(
-  hiddenByLayout: boolean,
-  unsupported: boolean,
-): string | null {
-  if (hiddenByLayout) return "Hidden from the toolbar";
-  if (unsupported) return "voice input is not available on this host";
-  return null;
-}
-
 /**
- * The mic's toolbar slot, as a `composer.mic` hotspot: `ComposerMicButton`
- * while dictation is available, `ComposerMicPreparing` while the on-device
- * model downloads, and - the one case the desktop toolbar previously rendered
- * nothing for - a dashed ghost while editing when this host cannot offer
- * voice input at all, or the layout preference hides it.
+ * The mic's toolbar slot, as the `mic` region: `ComposerMicButton` while
+ * dictation is available, `ComposerMicPreparing` while the on-device model
+ * downloads, and nothing when the layout preference hides it or this host
+ * cannot offer voice input at all.
  */
 export function ComposerMicSlot(props: {
   readonly dictation: ComposerDictationControl | null;
   readonly dictationPreparing: DictationPreparingStatus | null;
 }): ReactNode {
-  const mic = useComposerLayoutValue("mic");
+  const micShown = useRegionShown("mic");
   const tileId = useComposerTileId();
-  const hiddenByLayout = mic === "hidden";
-  const unsupported =
-    props.dictation === null && props.dictationPreparing === null;
-  const ghost = hiddenByLayout || unsupported;
-  const { ref, editing } = useLayoutHotspot({
-    settingId: "composer.mic",
-    tileId,
-    ghost,
-    condition: micGhostCondition(hiddenByLayout, unsupported),
+  const { ref, editing } = useLayoutRegion({
+    regionId: "mic",
+    instanceId: tileId,
   });
-  if (ghost) {
-    if (!editing) return null;
-    return (
-      <span
-        ref={ref}
-        data-testid="composer-mic-ghost"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-dashed border-border/60 text-muted-foreground/60 opacity-70"
-      >
-        <Mic className="size-4" />
-      </span>
-    );
-  }
+  if (!micShown) return null;
   if (props.dictation !== null) {
     return (
       <span

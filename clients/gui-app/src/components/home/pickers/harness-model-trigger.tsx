@@ -11,7 +11,7 @@ import {
 } from "@/components/home/pickers/harness-model-picker-presentation";
 import { ReasoningBarsGlyph } from "@/components/home/pickers/reasoning-bars-glyph";
 import type { ProfileAccentDotInput } from "@/components/providers/provider-profile-model";
-import type { ComposerReasoningIndicator } from "@/stores/settings/layout-store";
+import type { ModelStyle } from "@/lib/layout/layout-values";
 import { cn } from "@/lib/utils";
 
 interface HarnessModelTriggerProps extends Omit<
@@ -30,7 +30,7 @@ interface HarnessModelTriggerProps extends Omit<
    * the glyph cannot draw (the value names none of the model's levels) shows
    * the name in every mode, so the chip never reads as "no effort".
    */
-  reasoningIndicator: ComposerReasoningIndicator;
+  reasoningIndicator: ModelStyle;
   serviceTierLabel: string | null;
   serviceTierActive: boolean;
   profileLabel: string | null;
@@ -188,7 +188,7 @@ interface ReasoningChipParts {
  */
 function reasoningChipParts(
   showsReasoning: boolean,
-  reasoningIndicator: ComposerReasoningIndicator,
+  reasoningIndicator: ModelStyle,
   reasoningLabel: string | null,
   reasoningStep: ReasoningStep | null,
 ): ReasoningChipParts {

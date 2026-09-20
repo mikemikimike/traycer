@@ -1,4 +1,4 @@
-import { useCustomizeStore } from "@/stores/customize/customize-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { cn } from "@/lib/utils";
 import { useCallback, useRef, type ReactNode } from "react";
 import { Bot, FileDiff, type LucideIcon } from "lucide-react";
@@ -151,7 +151,7 @@ function ChipGlyph(props: {
  * is either on screen or empty.
  */
 export function ChatDockCompactStrip(): ReactNode {
-  const editing = useCustomizeStore((state) => state.session !== null);
+  const editing = useLayoutEditorStore((state) => state.session !== null);
   const value = useChatDockCompactStrip();
   if (value === null || value.chips.length === 0) return null;
   return (

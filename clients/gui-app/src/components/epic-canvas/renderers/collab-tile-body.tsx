@@ -59,7 +59,7 @@ import {
 } from "@/stores/comments/comment-threads-store";
 import type { EpicNodeRef } from "@/stores/epics/canvas/types";
 import { WORKSPACE_FILE_TAB_KIND } from "@/stores/epics/canvas/types";
-import { useLayoutSetting } from "@/lib/layout-overrides";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import type { EpicArtifactRoomAvailability } from "@/stores/epics/open-epic/types";
 import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
@@ -792,10 +792,11 @@ function CollabTileBodyEditor(props: CollabTileBodyEditorProps) {
  * artifact kinds get an outline - a workspace file tile shares this body but
  * is not a document with a heading skeleton.
  *
- * `hide` unmounts it on a desktop viewport, exactly as before the phone tile
- * bar existed - the rail is the only consumer there. On a phone viewport it
- * stays mounted and suppresses only its own rail, because the tile bar's
- * button reads the outline it registers and does not obey `hide`.
+ * A hidden minimap unmounts on a desktop viewport, exactly as before the phone
+ * tile bar existed - the rail is the only consumer there. On a phone viewport
+ * it stays mounted and suppresses only its own rail, because the tile bar's
+ * button reads the outline it registers and ignores the region's `shown`
+ * value.
  */
 function ArtifactHeadingMinimapMount(props: {
   readonly editor: Editor | null;
@@ -803,12 +804,13 @@ function ArtifactHeadingMinimapMount(props: {
   readonly refreshRef: RefObject<() => void>;
   readonly scroller: HTMLElement | null;
 }) {
-  const side = useLayoutSetting("chatTurnMinimapSide");
+  const minimapShown = useRegionShown("minimap");
+  const minimapSide = useArrangementValue("minimapSide");
   const isMobileViewport = useIsMobileViewport();
   if (
     props.editor === null ||
     !isEpicArtifactKind(props.node.type) ||
-    (side === "hide" && !isMobileViewport)
+    (!minimapShown && !isMobileViewport)
   ) {
     return null;
   }
@@ -817,7 +819,8 @@ function ArtifactHeadingMinimapMount(props: {
       editor={props.editor}
       refreshRef={props.refreshRef}
       scroller={props.scroller}
-      side={side}
+      shown={minimapShown}
+      side={minimapSide}
     />
   );
 }

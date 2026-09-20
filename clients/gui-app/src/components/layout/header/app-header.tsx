@@ -1,13 +1,5 @@
 import { type CSSProperties, type ReactNode } from "react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
 import { UserMenu } from "@/components/auth/user-menu";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { customizeLayoutAction } from "@/lib/commands/actions/customize-layout";
 import { MobileAppHeader } from "@/components/layout/header/mobile-app-header";
 import { TabStrip } from "@/components/layout/tabs/tab-strip";
 import { AppUpdateHeaderButton } from "@/components/layout/header/app-update-button";
@@ -23,9 +15,8 @@ import { NotificationsBell } from "@/components/notifications/notifications-bell
 import { cn } from "@/lib/utils";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { admitsLocalPlane, useAuthStore } from "@/stores/auth/auth-store";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
-import { useLayoutStore } from "@/stores/settings/layout-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
 
 // Frameless-desktop detection: Electron's preload bridge exposes
@@ -115,14 +106,8 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
           : "px-3",
       )}
     >
-      <div data-customize-inert className="contents">
-        <DesktopMenuBar />
-      </div>
-      {showTabStrip ? (
-        <div data-customize-inert className="contents">
-          <HistoryNavButtons />
-        </div>
-      ) : null}
+      <DesktopMenuBar />
+      {showTabStrip ? <HistoryNavButtons /> : null}
       {/* Left drag handle: breathing room beside the traffic lights +
           back/forward arrows so the window can be grabbed from the left end
           too. Desktop-only (the browser app has neither traffic lights nor
@@ -161,7 +146,6 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
         style={spacerDragStyle}
       />
       <div
-        data-customize-inert
         className="relative z-10 flex shrink-0 items-center gap-2"
         style={framelessDesktop ? NO_DRAG_STYLE : undefined}
       >
@@ -182,101 +166,39 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
  *
  * The DESKTOP header's half only: `MobileAppHeader` keeps both controls
  * unconditionally, because a mobile viewport does not answer this question
- * with `placement` at all - the footer there is its own opt-in switch, and a
+ * with `usageHost` at all - the footer there is its own opt-in switch, and a
  * header that respected `status-bar` would leave a phone with neither control
  * until someone found that switch.
  *
- * `showGlobalResourceMonitor` still gates the resource button on top of this —
- * the two settings answer different questions ("do I want a resource monitor
- * at all" vs "where do the usage controls live"), so under the footer the
- * segment is governed by the status bar's own `resources.enabled` instead.
+ * The resource monitor's own `shown` gates its button on top of this: the two
+ * answer different questions ("do I want a resource monitor at all" vs "where
+ * do the usage controls live"), and one switch owns the first everywhere the
+ * monitor is drawn (L-48).
  */
 function HeaderUsageControls(): ReactNode {
-  const showGlobalResourceMonitor = useSettingsStore(
-    (state) => state.showGlobalResourceMonitor,
-  );
-  const inHeader = useLayoutStore(
-    (state) => state.statusBar.placement === "header",
-  );
-  const usageEnabled = useLayoutStore(
-    (state) => state.statusBar.rateLimits.enabled,
-  );
-  const { ref, editing } = useLayoutHotspot({
-    settingId: "header.usage",
-    tileId: null,
-    ghost: !inHeader || (!usageEnabled && !showGlobalResourceMonitor),
-    condition: inHeader ? null : "Usage is placed in the status bar",
+  const showGlobalResourceMonitor = useRegionShown("resourceMonitor");
+  const inHeader = useArrangementValue("usageHost") === "header";
+  const usageEnabled = useRegionShown("usageLimits");
+  const { ref } = useLayoutRegion({
+    regionId: "usageLimits",
+    instanceId: null,
   });
-  if (!inHeader) {
-    // While `placement` is `status-bar`, the header shows a ghost drop slot
-    // instead of nothing, so the cluster can still be dragged (or moved by
-    // its popover) back to the header.
-    if (!editing) return null;
-    return (
-      <HeaderClusterContextMenu>
-        <span
-          ref={ref}
-          data-testid="header-usage-ghost"
-          className="mr-1 inline-flex h-5 w-16 shrink-0 rounded-md border border-dashed border-border/60"
+  if (!inHeader) return null;
+  if (!usageEnabled && !showGlobalResourceMonitor) return null;
+  return (
+    <span ref={ref} className="contents">
+      {usageEnabled ? <RateLimitIconButton /> : null}
+      {showGlobalResourceMonitor ? (
+        // Unconditionally the owner of `app.resources.open`: this whole
+        // component is behind `inHeader`, so the strip's own popover is not
+        // mounted while this one is.
+        <ResourceMonitorPopover
+          trigger="header-button"
+          className={undefined}
+          claimsOpenAction
         />
-      </HeaderClusterContextMenu>
-    );
-  }
-  if (!editing && !usageEnabled && !showGlobalResourceMonitor) return null;
-  return (
-    <HeaderClusterContextMenu>
-      <span
-        ref={ref}
-        className={cn(editing ? "inline-flex items-center gap-2" : "contents")}
-      >
-        {usageEnabled ? <RateLimitIconButton /> : null}
-        {editing && !usageEnabled && !showGlobalResourceMonitor ? (
-          <span className="inline-flex size-6 rounded-sm border border-dashed border-border/60" />
-        ) : null}
-        {showGlobalResourceMonitor ? (
-          // Unconditionally the owner of `app.resources.open`: this whole
-          // component is behind `inHeader`, so the strip's own popover is not
-          // mounted while this one is.
-          <ResourceMonitorPopover
-            trigger="header-button"
-            className={undefined}
-            claimsOpenAction
-          />
-        ) : null}
-      </span>
-    </HeaderClusterContextMenu>
-  );
-}
-
-/**
- * The header cluster's own right-click entry into Customize - it has no menu
- * of its own to append to (unlike the status bar strip's
- * `StatusBarVisibilityMenu`), so a minimal one is added here, outside a
- * session and only at desktop width.
- */
-function HeaderClusterContextMenu(props: {
-  readonly children: ReactNode;
-}): ReactNode {
-  const editing = useCustomizeStore((state) => state.session !== null);
-  const narrowViewport = useIsMobileViewport();
-  const featureEnabled = useSettingsStore(
-    (state) => state.visualLayoutEditorEnabled,
-  );
-  const enabled = featureEnabled && !narrowViewport && !editing;
-  // Gate interaction, not ancestors: switching Customize must retain live leaves.
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild disabled={!enabled}>
-        {props.children}
-      </ContextMenuTrigger>
-      {enabled ? (
-        <ContextMenuContent>
-          <ContextMenuItem onSelect={() => customizeLayoutAction("direct_ui")}>
-            Customize layout…
-          </ContextMenuItem>
-        </ContextMenuContent>
       ) : null}
-    </ContextMenu>
+    </span>
   );
 }
 

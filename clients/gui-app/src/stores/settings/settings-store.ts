@@ -48,15 +48,8 @@ import {
   type NotificationChimeSound,
   type NotificationChimeSoundsByEvent,
 } from "@/lib/notifications/notification-chime";
-import { mergeOrder } from "@/lib/order-merge";
 import type { DefaultOpenTarget } from "@/lib/editor/editor-menu-catalog";
 import type { TilePlacementCategory } from "@/lib/canvas/tile-open/intent";
-import {
-  CONTEXT_USAGE_ROW_KEYS,
-  isContextUsageRowKey,
-  type ContextUsageRowKey,
-} from "@/components/chat/context-usage";
-
 export type ThemeMode = "system" | "light" | "dark";
 export type EpicNodeIconColorMode = "byType" | "none";
 export type LinkOpenMode = "in-app" | "external";
@@ -111,16 +104,12 @@ export const DEFAULT_TILE_PLACEMENT_SETTINGS: TilePlacementSettings = {
   sideChat: "split",
 };
 const DEFAULT_AGENT_TAB_SURFACING: AgentTabSurfacing = "off";
-export type MinimapSide = "left" | "right";
-export type MinimapPlacement = MinimapSide | "hide";
 // Mirrors xterm's `cursorStyle` union; kept as our own type so the settings
 // surface doesn't take a value import from `@xterm/xterm`.
 export type TerminalCursorStyle = "block" | "bar" | "underline";
 
 export const DEFAULT_TERMINAL_CURSOR_STYLE: TerminalCursorStyle = "block";
 export const DEFAULT_TERMINAL_CURSOR_BLINK = true;
-export const DEFAULT_MINIMAP_SIDE: MinimapPlacement = "right";
-
 /**
  * Auto, so a first-ever office opens on the view that actually fits the tile
  * it is in rather than on whichever one this build happens to list first.
@@ -147,17 +136,9 @@ export function inactiveCursorStyleFor(
  * chip prints them; the stored list is always a subsequence of this one.
  */
 export type NavigatorResourceMetric = "cpu" | "memory" | "processes";
-export const NAVIGATOR_RESOURCE_METRICS: ReadonlyArray<NavigatorResourceMetric> =
-  ["cpu", "memory", "processes"];
-/** Chips are opt-in: a fresh install draws none until a reading is picked. */
+/** Chips draw every reading; nothing selects a subset any more (L-28). */
 export const DEFAULT_NAVIGATOR_RESOURCE_METRICS: ReadonlyArray<NavigatorResourceMetric> =
-  [];
-
-export function isNavigatorResourceMetric(
-  value: unknown,
-): value is NavigatorResourceMetric {
-  return value === "cpu" || value === "memory" || value === "processes";
-}
+  ["cpu", "memory", "processes"];
 
 // Default font sizes, shared with the Appearance panel so its reset-to-default
 // affordance and the store's initial state stay a single source of truth.
@@ -210,38 +191,6 @@ export interface StartPageWallpaper {
    */
   readonly curatedId: string | null;
 }
-/**
- * One field of the pinned context breakdown - the same keys the breakdown
- * rows carry, so the picker can only ever name a row the strip knows how to
- * draw.
- */
-export type ContextBreakdownField = ContextUsageRowKey;
-export const DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS: ReadonlyArray<ContextBreakdownField> =
-  CONTEXT_USAGE_ROW_KEYS;
-
-/**
- * The canonical row order, which is the breakdown's own. Same list as the
- * default SELECTION above and not the same thing: that one is which rows are
- * on, this one is the sequence they are drawn in whether or not they are.
- */
-export const DEFAULT_PINNED_CONTEXT_BREAKDOWN_ORDER: ReadonlyArray<ContextBreakdownField> =
-  CONTEXT_USAGE_ROW_KEYS;
-
-/**
- * How the unpinned context chip draws the remaining percentage: the sentence
- * (`75% context left`), a circular gauge with the number inside, or the gauge
- * on its own with the number left to the label.
- */
-export type ContextIndicatorStyle = "text" | "ring" | "ring-only";
-export const DEFAULT_CONTEXT_INDICATOR_STYLE: ContextIndicatorStyle = "text";
-
-/**
- * The pin is off until asked for. A constant rather than a literal in the
- * initial state, so Layout's Default preset can BE the default rather than a
- * copy of it (`lib/layout-presets.ts`).
- */
-export const DEFAULT_PIN_CONTEXT_USAGE_BREAKDOWN = false;
-
 export interface SettingsState {
   startPageWallpaper: StartPageWallpaper | null;
   showGreeting: boolean;
@@ -261,21 +210,6 @@ export interface SettingsState {
    */
   composerMode: ComposerMode;
   preventSleepWhileRunning: boolean;
-  /** Show the app-global resource monitor button in the header. */
-  showGlobalResourceMonitor: boolean;
-  /**
-   * Which readings the inline resource chip in task navigator/sidebar rows
-   * prints, in chip order. An empty list draws no chip at all.
-   */
-  navigatorResourceMetrics: ReadonlyArray<NavigatorResourceMetric>;
-  /**
-   * Keep the chat context-window breakdown pinned near the composer instead of
-   * the compact-only chip. Global preference, default off; chats without
-   * reliable context-window data still render nothing.
-   */
-  pinContextUsageBreakdown: boolean;
-  /** Shared edge used by chat and artifact minimaps, or `hide` for both. */
-  chatTurnMinimapSide: MinimapPlacement;
   /**
    * Which office view an epic's agent office opens on when nobody has picked
    * one for that tile.
@@ -381,45 +315,6 @@ export interface SettingsState {
   workspaceFileWordWrap: boolean | null;
   /** App-wide audible cues selected for each notification event type. */
   notificationChimeSounds: NotificationChimeSoundsByEvent;
-  /**
-   * The fixed Home tab and its focus view. Opt-in while the view is still
-   * filling out: with this off the strip, the routes, the chord and the mobile
-   * drawer behave exactly as they did before Home existed.
-   */
-  homeTabEnabled: boolean;
-  /**
-   * Which breakdown rows the pinned context strip draws, in the strip's own
-   * order. Never empty: the strip with no fields is what unpinning is for, so
-   * the toggle refuses to remove the last one. Only read while
-   * `pinContextUsageBreakdown` is on.
-   */
-  pinnedContextBreakdownFields: ReadonlyArray<ContextBreakdownField>;
-  /**
-   * The order those rows are drawn in - a COMPLETE order over every field,
-   * including the ones not currently selected, which is what makes it survive
-   * unchecking a field and checking it again.
-   *
-   * Deliberately separate from `pinnedContextBreakdownFields`, which is the
-   * selected SET and stays canonically ordered on every write. One list cannot
-   * be both: a set that also carried order would lose an unselected field's
-   * place the moment it left, and the strip prints
-   * `order.filter((field) => fields.includes(field))`.
-   *
-   * Structural like the layout store's four order fields: no density preset
-   * writes it, and `resetLayoutToDefaults` is what puts it back.
-   */
-  pinnedContextBreakdownOrder: ReadonlyArray<ContextBreakdownField>;
-  /** Shape of the unpinned context chip. */
-  contextIndicatorStyle: ContextIndicatorStyle;
-  /**
-   * The in-place "Customize" layout editor, while both it and the Layout page
-   * exist side by side. Device-local and opt-in: with it off nothing about
-   * Settings › Layout changes, and with it on the desktop-width Layout rows
-   * fold into Appearance. Narrow windows keep the full Layout page either way,
-   * which is why the availability fact derived from this - not the flag
-   * itself - is what a panel or the search index gates on.
-   */
-  visualLayoutEditorEnabled: boolean;
   setTheme: (theme: ThemeMode) => void;
   setThemePreset: (preset: ThemePreset) => void;
   /**
@@ -441,20 +336,6 @@ export interface SettingsState {
   setDefaultPermission: (mode: PermissionMode) => void;
   setComposerMode: (mode: ComposerMode) => void;
   setPreventSleepWhileRunning: (value: boolean) => void;
-  setShowGlobalResourceMonitor: (value: boolean) => void;
-  /** Adds or removes one reading; the list keeps chip order either way. */
-  toggleNavigatorResourceMetric: (metric: NavigatorResourceMetric) => void;
-  /**
-   * The whole list at once, for a caller holding a complete answer rather than
-   * one chip's - Layout's presets and its reset. Normalized to chip order like
-   * the toggle, so the two writers cannot leave the list in two different
-   * shapes.
-   */
-  setNavigatorResourceMetrics: (
-    metrics: ReadonlyArray<NavigatorResourceMetric>,
-  ) => void;
-  setPinContextUsageBreakdown: (value: boolean) => void;
-  setMinimapSide: (value: MinimapPlacement) => void;
   setAgentOfficeDefaultView: (value: OfficeViewChoice) => void;
   setPointerCursors: (value: boolean) => void;
   setUiFontSize: (value: number) => void;
@@ -487,27 +368,6 @@ export interface SettingsState {
     eventType: NotificationChimeEventType,
     value: NotificationChimeSound,
   ) => void;
-  setHomeTabEnabled: (value: boolean) => void;
-  togglePinnedContextBreakdownField: (field: ContextBreakdownField) => void;
-  /**
-   * The whole field list at once, same caller as
-   * `setNavigatorResourceMetrics`. Keeps both of the toggle's guarantees - the
-   * strip's own order, and never empty - so a preset cannot write a shape the
-   * row below it could not produce.
-   */
-  setPinnedContextBreakdownFields: (
-    fields: ReadonlyArray<ContextBreakdownField>,
-  ) => void;
-  /**
-   * The complete row order. Repaired through `mergeOrder` on the way in, the
-   * same as on rehydration, so a drag that names a stale field or omits a new
-   * one still leaves a complete order behind.
-   */
-  setPinnedContextBreakdownOrder: (
-    order: ReadonlyArray<ContextBreakdownField>,
-  ) => void;
-  setContextIndicatorStyle: (style: ContextIndicatorStyle) => void;
-  setVisualLayoutEditorEnabled: (value: boolean) => void;
 }
 
 type PersistedSettingsState = Pick<
@@ -523,10 +383,6 @@ type PersistedSettingsState = Pick<
   | "defaultPermission"
   | "composerMode"
   | "preventSleepWhileRunning"
-  | "showGlobalResourceMonitor"
-  | "navigatorResourceMetrics"
-  | "pinContextUsageBreakdown"
-  | "chatTurnMinimapSide"
   | "agentOfficeDefaultView"
   | "agentOfficeDefaultViewGeneration"
   | "pointerCursors"
@@ -554,11 +410,6 @@ type PersistedSettingsState = Pick<
   | "diffViewerPreferences"
   | "workspaceFileWordWrap"
   | "notificationChimeSounds"
-  | "homeTabEnabled"
-  | "pinnedContextBreakdownFields"
-  | "pinnedContextBreakdownOrder"
-  | "contextIndicatorStyle"
-  | "visualLayoutEditorEnabled"
 >;
 
 type SetFn = (
@@ -608,10 +459,6 @@ function partializeSettingsState(state: SettingsState): PersistedSettingsState {
     defaultPermission: state.defaultPermission,
     composerMode: state.composerMode,
     preventSleepWhileRunning: state.preventSleepWhileRunning,
-    showGlobalResourceMonitor: state.showGlobalResourceMonitor,
-    navigatorResourceMetrics: state.navigatorResourceMetrics,
-    pinContextUsageBreakdown: state.pinContextUsageBreakdown,
-    chatTurnMinimapSide: state.chatTurnMinimapSide,
     agentOfficeDefaultView: state.agentOfficeDefaultView,
     agentOfficeDefaultViewGeneration: state.agentOfficeDefaultViewGeneration,
     pointerCursors: state.pointerCursors,
@@ -639,11 +486,6 @@ function partializeSettingsState(state: SettingsState): PersistedSettingsState {
     diffViewerPreferences: state.diffViewerPreferences,
     workspaceFileWordWrap: state.workspaceFileWordWrap,
     notificationChimeSounds: state.notificationChimeSounds,
-    homeTabEnabled: state.homeTabEnabled,
-    pinnedContextBreakdownFields: state.pinnedContextBreakdownFields,
-    pinnedContextBreakdownOrder: state.pinnedContextBreakdownOrder,
-    contextIndicatorStyle: state.contextIndicatorStyle,
-    visualLayoutEditorEnabled: state.visualLayoutEditorEnabled,
   };
 }
 
@@ -664,10 +506,6 @@ export const useSettingsStore = create<SettingsState>()(
       defaultPermission: DEFAULT_PERMISSION,
       composerMode: DEFAULT_COMPOSER_MODE,
       preventSleepWhileRunning: false,
-      showGlobalResourceMonitor: true,
-      navigatorResourceMetrics: DEFAULT_NAVIGATOR_RESOURCE_METRICS,
-      pinContextUsageBreakdown: DEFAULT_PIN_CONTEXT_USAGE_BREAKDOWN,
-      chatTurnMinimapSide: DEFAULT_MINIMAP_SIDE,
       agentOfficeDefaultView: DEFAULT_AGENT_OFFICE_VIEW,
       agentOfficeDefaultViewGeneration: 0,
       pointerCursors: true,
@@ -695,11 +533,6 @@ export const useSettingsStore = create<SettingsState>()(
       diffViewerPreferences: DEFAULT_DIFF_VIEWER_PREFERENCES,
       workspaceFileWordWrap: null,
       notificationChimeSounds: DEFAULT_NOTIFICATION_CHIME_SOUNDS,
-      homeTabEnabled: false,
-      pinnedContextBreakdownFields: DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS,
-      pinnedContextBreakdownOrder: DEFAULT_PINNED_CONTEXT_BREAKDOWN_ORDER,
-      contextIndicatorStyle: DEFAULT_CONTEXT_INDICATOR_STYLE,
-      visualLayoutEditorEnabled: false,
       setTheme: makeSetter(set, "theme"),
       setThemePreset: (themePreset) => {
         if (useThemeLibraryStore.getState().clearSelection())
@@ -708,35 +541,6 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultPermission: makeSetter(set, "defaultPermission"),
       setComposerMode: makeSetter(set, "composerMode"),
       setPreventSleepWhileRunning: makeSetter(set, "preventSleepWhileRunning"),
-      setShowGlobalResourceMonitor: makeSetter(
-        set,
-        "showGlobalResourceMonitor",
-      ),
-      toggleNavigatorResourceMetric: (metric) => {
-        set((s) => {
-          const selected = new Set(s.navigatorResourceMetrics);
-          if (selected.has(metric)) {
-            selected.delete(metric);
-          } else {
-            selected.add(metric);
-          }
-          return {
-            navigatorResourceMetrics: NAVIGATOR_RESOURCE_METRICS.filter(
-              (candidate) => selected.has(candidate),
-            ),
-          };
-        });
-      },
-      setNavigatorResourceMetrics: (metrics) => {
-        const selected = new Set(metrics);
-        set({
-          navigatorResourceMetrics: NAVIGATOR_RESOURCE_METRICS.filter(
-            (candidate) => selected.has(candidate),
-          ),
-        });
-      },
-      setPinContextUsageBreakdown: makeSetter(set, "pinContextUsageBreakdown"),
-      setMinimapSide: makeSetter(set, "chatTurnMinimapSide"),
       // Not `makeSetter`: a real change also rolls the generation to a fresh
       // collision-free stamp, so a tile closed across the change can tell a
       // stale Auto outcome from a current one on remount - even against another
@@ -852,55 +656,6 @@ export const useSettingsStore = create<SettingsState>()(
               },
         );
       },
-      setHomeTabEnabled: makeSetter(set, "homeTabEnabled"),
-      togglePinnedContextBreakdownField: (field) => {
-        set((s) => {
-          const selected = new Set(s.pinnedContextBreakdownFields);
-          if (selected.has(field)) {
-            // The last field stays: an empty strip is what unpinning is for.
-            if (selected.size === 1) return s;
-            selected.delete(field);
-          } else {
-            selected.add(field);
-          }
-          // Re-inserted in canonical order rather than appended, so the strip
-          // reads the same whatever order the fields were switched on in.
-          return {
-            pinnedContextBreakdownFields: CONTEXT_USAGE_ROW_KEYS.filter(
-              (candidate) => selected.has(candidate),
-            ),
-          };
-        });
-      },
-      setPinnedContextBreakdownFields: (fields) => {
-        const selected = new Set(fields);
-        const next = CONTEXT_USAGE_ROW_KEYS.filter((candidate) =>
-          selected.has(candidate),
-        );
-        // An empty list is not a shape the strip has: unpinning is what hides
-        // it, so a caller that names no field gets the full set rather than a
-        // strip that draws its label and nothing else.
-        set({
-          pinnedContextBreakdownFields:
-            next.length === 0 ? DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS : next,
-        });
-      },
-      setPinnedContextBreakdownOrder: (order) => {
-        const next = mergeOrder(order, CONTEXT_USAGE_ROW_KEYS);
-        set((s) =>
-          s.pinnedContextBreakdownOrder.length === next.length &&
-          s.pinnedContextBreakdownOrder.every(
-            (field, index) => field === next[index],
-          )
-            ? s
-            : { pinnedContextBreakdownOrder: next },
-        );
-      },
-      setContextIndicatorStyle: makeSetter(set, "contextIndicatorStyle"),
-      setVisualLayoutEditorEnabled: makeSetter(
-        set,
-        "visualLayoutEditorEnabled",
-      ),
     }),
     {
       ...basePersistOptions(persistKey(STORE_KEYS.settings)),
@@ -928,7 +683,6 @@ export const useSettingsStore = create<SettingsState>()(
         const persisted: Record<string, unknown> = isRecord(persistedState)
           ? persistedState
           : {};
-        const persistedMinimapSide = persisted.chatTurnMinimapSide;
         const merged: SettingsState = { ...currentState, ...persisted };
         return {
           ...merged,
@@ -948,12 +702,6 @@ export const useSettingsStore = create<SettingsState>()(
             worktreeBranchPrefixError(merged.worktreeBranchPrefix) === null
               ? merged.worktreeBranchPrefix
               : DEFAULT_WORKTREE_BRANCH_PREFIX,
-          chatTurnMinimapSide:
-            persistedMinimapSide === "left" ||
-            persistedMinimapSide === "right" ||
-            persistedMinimapSide === "hide"
-              ? persistedMinimapSide
-              : DEFAULT_MINIMAP_SIDE,
           agentOfficeDefaultView: resolvePersistedAgentOfficeView(
             persisted.agentOfficeDefaultView,
           ),
@@ -982,68 +730,11 @@ export const useSettingsStore = create<SettingsState>()(
             persisted.notificationChimeSounds,
             persisted.notificationChimeSound,
           ),
-          navigatorResourceMetrics: resolvePersistedNavigatorResourceMetrics(
-            persisted.navigatorResourceMetrics,
-            persisted.showNavigatorResourceStats,
-          ),
-          // Narrowed rather than merged verbatim, for the same reason
-          // `workspaceFileWordWrap` is: this flag gates a tab kind, a route
-          // guard and a chord, so a truthy non-boolean rehydrating as-is would
-          // switch Home on for a user who never asked for it.
-          homeTabEnabled:
-            typeof merged.homeTabEnabled === "boolean"
-              ? merged.homeTabEnabled
-              : false,
-          pinnedContextBreakdownFields:
-            resolvePersistedPinnedContextBreakdownFields(
-              persisted.pinnedContextBreakdownFields,
-            ),
-          // Always a COMPLETE order, so a build that adds a breakdown row
-          // merges it in beside its neighbours rather than leaving the strip
-          // unable to place it.
-          pinnedContextBreakdownOrder: mergeOrder(
-            Array.isArray(persisted.pinnedContextBreakdownOrder)
-              ? persisted.pinnedContextBreakdownOrder
-              : [],
-            CONTEXT_USAGE_ROW_KEYS,
-          ),
-          contextIndicatorStyle: isContextIndicatorStyle(
-            persisted.contextIndicatorStyle,
-          )
-            ? persisted.contextIndicatorStyle
-            : DEFAULT_CONTEXT_INDICATOR_STYLE,
-          // Narrowed for `homeTabEnabled`'s reason: this flag swaps a whole
-          // settings page for an editor, so a truthy non-boolean rehydrating
-          // as-is would hand the editor to someone who never asked for it.
-          visualLayoutEditorEnabled:
-            typeof merged.visualLayoutEditorEnabled === "boolean"
-              ? merged.visualLayoutEditorEnabled
-              : false,
         };
       },
     },
   ),
 );
-
-/**
- * Non-hook read of the Home-tab flag, for the framework-free seams that gate on
- * it (route guards, the tab command coordinator, the navigation controller and
- * the keybinding dispatcher). Components read `homeTabEnabled` reactively.
- */
-export function isHomeTabEnabled(): boolean {
-  return useSettingsStore.getState().homeTabEnabled;
-}
-
-/**
- * Non-hook read of the Customize switch, for the framework-free seams that
- * gate on it (the tab store's kind registry and the keybinding dispatcher).
- * Components read it reactively - through
- * `useSettingsAvailabilityContext().customizeEditor` where the viewport also
- * has a say, which is everywhere a settings row is drawn or indexed.
- */
-export function isVisualLayoutEditorEnabled(): boolean {
-  return useSettingsStore.getState().visualLayoutEditorEnabled;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -1103,31 +794,6 @@ function resolvePersistedNotificationChimeSounds(
   return resolved;
 }
 
-/**
- * Rehydration for the sidebar resource chip's metric list, doubling as the
- * one-shot migration off the retired `showNavigatorResourceStats` switch: a
- * persisted `true` becomes every metric, `false` becomes none. The list wins
- * whenever it is present, so a user who has since picked a subset keeps it
- * even while the old key is still readable; `partialize` does not list the old
- * key, so the next write drops it. Unknown ids are dropped and the survivors
- * are put back in chip order, so a hand-edited record cannot draw a chip the
- * settings row has no button for.
- */
-function resolvePersistedNavigatorResourceMetrics(
-  value: unknown,
-  legacy: unknown,
-): ReadonlyArray<NavigatorResourceMetric> {
-  if (Array.isArray(value)) {
-    const entries: ReadonlyArray<unknown> = value;
-    const selected = new Set(entries.filter(isNavigatorResourceMetric));
-    return NAVIGATOR_RESOURCE_METRICS.filter((metric) => selected.has(metric));
-  }
-  if (typeof legacy === "boolean") {
-    return legacy ? [...NAVIGATOR_RESOURCE_METRICS] : [];
-  }
-  return DEFAULT_NAVIGATOR_RESOURCE_METRICS;
-}
-
 export function isLinkOpenMode(value: unknown): value is LinkOpenMode {
   return value === "in-app" || value === "external";
 }
@@ -1158,27 +824,6 @@ export function isAgentTabSurfacing(
   value: unknown,
 ): value is AgentTabSurfacing {
   return value === "off" || value === "surface";
-}
-
-export function isContextIndicatorStyle(
-  value: unknown,
-): value is ContextIndicatorStyle {
-  return value === "text" || value === "ring" || value === "ring-only";
-}
-
-/**
- * Unknown ids are dropped (a row renamed or retired since the value was
- * written), duplicates collapse, and the survivors take canonical order. A
- * list left empty by that - or anything that is not a list - falls back to
- * every field, since the strip is never drawn with none.
- */
-function resolvePersistedPinnedContextBreakdownFields(
-  value: unknown,
-): ReadonlyArray<ContextBreakdownField> {
-  if (!Array.isArray(value)) return DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS;
-  const selected = new Set(value.filter(isContextUsageRowKey));
-  if (selected.size === 0) return DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS;
-  return CONTEXT_USAGE_ROW_KEYS.filter((candidate) => selected.has(candidate));
 }
 
 /** The configured mode for one link kind; the global default wins unless it

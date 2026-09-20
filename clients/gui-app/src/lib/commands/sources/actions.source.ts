@@ -28,7 +28,7 @@ import {
 } from "@/lib/keybindings/actions";
 import { isMobileApp } from "@/lib/mobile-app";
 import { useKeybindingStore } from "@/stores/settings/keybinding-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { isHomeTabEnabled } from "@/stores/layout/layout-store";
 import type { CommandItem, ReactCommandSource } from "@/lib/commands/types";
 
 export const actionsSource: ReactCommandSource = {
@@ -38,7 +38,7 @@ export const actionsSource: ReactCommandSource = {
     const canRecover = useTabRecoveryHistory(
       (state) => state.ready && state.entries.length > 0,
     );
-    const homeTabEnabled = useSettingsStore((state) => state.homeTabEnabled);
+    const homeTabEnabled = isHomeTabEnabled();
     return useMemo<ReadonlyArray<CommandItem>>(() => {
       const items: Array<CommandItem> = [];
       for (const id of ACTION_IDS) {

@@ -160,7 +160,7 @@ describe("useLayoutStore", () => {
   });
 
   describe("counting and reverting", () => {
-    it("counts values, reordered groups and hidden providers", () => {
+    it("counts VALUES only, never the arrangement (L-57)", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("model", { style: "bars" });
       store.setRegionValues("usageLimits", { bar: false, word: false });
@@ -170,8 +170,9 @@ describe("useLayoutStore", () => {
         hiddenProviders: ["codex"],
       });
 
-      // Three values, one reordered group, one hidden provider.
-      expect(changeCount(getLayoutSnapshot())).toBe(5);
+      // Three values. The reorder and the hidden provider are POSITION, which
+      // the header's count deliberately leaves to the per-row dots.
+      expect(changeCount(getLayoutSnapshot())).toBe(3);
     });
 
     it("names the changed keys of one region and leaves the others alone", () => {

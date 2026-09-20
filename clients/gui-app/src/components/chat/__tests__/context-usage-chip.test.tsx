@@ -22,11 +22,11 @@ import {
 } from "@/components/chat/context-usage";
 import { ContextUsageChip } from "@/components/chat/context-usage-chip";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import {
-  DEFAULT_CONTEXT_INDICATOR_STYLE,
-  DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS,
-  useSettingsStore,
-} from "@/stores/settings/settings-store";
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 import type { TokenUsage } from "@traycer/protocol/persistence/epic/foundation";
 
 const RELIABLE_USAGE: TokenUsage = {
@@ -140,13 +140,15 @@ function installReducedMotionPreference(matches: boolean): void {
 
 function resetContextUsageSettings(): void {
   window.localStorage.clear();
-  useSettingsStore.setState({
-    pinContextUsageBreakdown: false,
-    pinnedContextBreakdownFields: DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS,
-    contextIndicatorStyle: DEFAULT_CONTEXT_INDICATOR_STYLE,
-  });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   restoreDefaultMatchMedia();
   resetMotionReducedMotionPreference();
+}
+
+/** The effective `contextUsage` value bag, base preset plus the override delta. */
+function contextUsageValues() {
+  const state = useLayoutStore.getState();
+  return effectiveLayoutValues(state.basePreset, state.overrides).contextUsage;
 }
 
 beforeEach(resetContextUsageSettings);
@@ -412,7 +414,7 @@ describe("ContextUsageChip", () => {
     });
     pinButton.focus();
     fireEvent.click(pinButton);
-    expect(useSettingsStore.getState().pinContextUsageBreakdown).toBe(true);
+    expect(contextUsageValues().pinBreakdown).toBe(true);
     expect(queryCompactContextTrigger()).toBeNull();
     expect(screen.getByTestId("context-usage-pinned-strip")).toBeTruthy();
 
@@ -422,7 +424,7 @@ describe("ContextUsageChip", () => {
     expect(document.activeElement).toBe(unpinButton);
 
     fireEvent.click(unpinButton);
-    expect(useSettingsStore.getState().pinContextUsageBreakdown).toBe(false);
+    expect(contextUsageValues().pinBreakdown).toBe(false);
     expect(
       screen.getByRole("button", {
         name: /Context window 75% left/,
@@ -463,7 +465,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("renders the pinned strip when the setting is enabled and reliable usage exists", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     expect(
@@ -511,7 +515,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("keeps the pinned strip hidden when the setting is enabled without reliable usage", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     const { container } = render(
       <ContextUsageChip
         usage={{
@@ -529,7 +535,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("unpins from the inline pinned strip action", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     fireEvent.click(
@@ -538,7 +546,7 @@ describe("ContextUsageChip", () => {
       }),
     );
 
-    expect(useSettingsStore.getState().pinContextUsageBreakdown).toBe(false);
+    expect(contextUsageValues().pinBreakdown).toBe(false);
     expect(screen.queryByTestId("context-usage-pinned-strip")).toBeNull();
     expect(
       screen.getByRole("button", {
@@ -548,7 +556,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("moves focus to the restored compact trigger after focused inline unpin", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     const unpinButton = screen.getByRole("button", {
@@ -564,7 +574,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("omits noisy cache rows from the pinned strip when cache values are absent", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     const strip = screen.getByTestId("context-usage-pinned-strip");
@@ -576,7 +588,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("updates the pinned strip from the same usage value", async () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     const { rerender } = render(
       <ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />,
     );
@@ -609,7 +623,9 @@ describe("ContextUsageChip", () => {
 
   it("updates the pinned percent instantly when reduced motion is requested", () => {
     installReducedMotionPreference(true);
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     const { rerender } = render(
       <ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />,
     );
@@ -637,7 +653,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("marks the pinned strip summary and details with container-query collapse classes", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     expect(
@@ -672,7 +690,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("prints every breakdown field in the pinned strip by default", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     render(<ContextUsageChip usage={CACHED_USAGE} onCompact={null} />);
 
     const details = screen.getByTestId("context-usage-pinned-details");
@@ -686,9 +706,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("prints only the selected fields in the pinned strip, in strip order", () => {
-    useSettingsStore.setState({
-      pinContextUsageBreakdown: true,
-      pinnedContextBreakdownFields: ["cacheRead", "used"],
+    useLayoutStore.getState().setRegionValues("contextUsage", {
+      pinBreakdown: true,
+      pinnedFields: ["cacheRead", "used"],
     });
     render(<ContextUsageChip usage={CACHED_USAGE} onCompact={null} />);
 
@@ -706,9 +726,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("drops the narrow-width used summary when Used is not a selected field", () => {
-    useSettingsStore.setState({
-      pinContextUsageBreakdown: true,
-      pinnedContextBreakdownFields: ["output"],
+    useLayoutStore.getState().setRegionValues("contextUsage", {
+      pinBreakdown: true,
+      pinnedFields: ["output"],
     });
     render(<ContextUsageChip usage={CACHED_USAGE} onCompact={null} />);
 
@@ -724,8 +744,8 @@ describe("ContextUsageChip", () => {
   });
 
   it("leaves the popover breakdown untouched by the pinned field picker", async () => {
-    useSettingsStore.setState({
-      pinnedContextBreakdownFields: ["output"],
+    useLayoutStore.getState().setRegionValues("contextUsage", {
+      pinnedFields: ["output"],
     });
     render(<ContextUsageChip usage={CACHED_USAGE} onCompact={null} />);
 
@@ -740,7 +760,9 @@ describe("ContextUsageChip", () => {
   });
 
   it("trails the usage figures with the compact action in the pinned strip", () => {
-    useSettingsStore.getState().setPinContextUsageBreakdown(true);
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
     const onCompact = vi.fn();
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={onCompact} />);
 
@@ -770,7 +792,9 @@ describe("ContextUsageChip indicator styles", () => {
   });
 
   it("renders a gauge with the number inside in the ring style", () => {
-    useSettingsStore.getState().setContextIndicatorStyle("ring");
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring" });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     const trigger = screen.getByRole("button", {
@@ -803,7 +827,9 @@ describe("ContextUsageChip indicator styles", () => {
   });
 
   it("keeps a visible arc at 0% left and prints the full reading at 100%", () => {
-    useSettingsStore.getState().setContextIndicatorStyle("ring");
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring" });
     const { rerender } = render(
       <ContextUsageChip usage={EXHAUSTED_USAGE} onCompact={null} />,
     );
@@ -846,7 +872,9 @@ describe("ContextUsageChip indicator styles", () => {
     ).toBe(false);
     cleanup();
 
-    useSettingsStore.getState().setContextIndicatorStyle("ring");
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring" });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
     expect(
       screen.getByTestId("context-usage-chip").classList.contains("opacity-70"),
@@ -854,7 +882,9 @@ describe("ContextUsageChip indicator styles", () => {
   });
 
   it("renders the gauge alone in the ring-only style, keeping the percentage in the label", () => {
-    useSettingsStore.getState().setContextIndicatorStyle("ring-only");
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring-only" });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     const trigger = screen.getByRole("button", {
@@ -875,7 +905,9 @@ describe("ContextUsageChip indicator styles", () => {
   });
 
   it("puts the percentage in the ring-only tooltip, where the gauge cannot print it", async () => {
-    useSettingsStore.getState().setContextIndicatorStyle("ring-only");
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring-only" });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     fireEvent.focus(screen.getByTestId("context-usage-chip"));
@@ -888,9 +920,9 @@ describe("ContextUsageChip indicator styles", () => {
   it("restores focus to the ring-only trigger after a focused inline unpin", () => {
     // `ring-only` nests `TooltipWrapper` between `PopoverTrigger asChild` and
     // the button holding the trigger ref, so the ref travels two Radix slots.
-    useSettingsStore.setState({
-      contextIndicatorStyle: "ring-only",
-      pinContextUsageBreakdown: true,
+    useLayoutStore.getState().setRegionValues("contextUsage", {
+      style: "ring-only",
+      pinBreakdown: true,
     });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
@@ -906,9 +938,9 @@ describe("ContextUsageChip indicator styles", () => {
   });
 
   it("ignores the indicator style while the breakdown is pinned", () => {
-    useSettingsStore.setState({
-      contextIndicatorStyle: "ring",
-      pinContextUsageBreakdown: true,
+    useLayoutStore.getState().setRegionValues("contextUsage", {
+      style: "ring",
+      pinBreakdown: true,
     });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
@@ -920,7 +952,7 @@ describe("ContextUsageChip indicator styles", () => {
   it.each(["text", "ring", "ring-only"] as const)(
     "carries the severity tone on the trigger and keeps compaction reachable in the %s style",
     (style) => {
-      useSettingsStore.getState().setContextIndicatorStyle(style);
+      useLayoutStore.getState().setRegionValues("contextUsage", { style });
       const onCompact = vi.fn();
       render(
         <ContextUsageChip
@@ -940,7 +972,9 @@ describe("ContextUsageChip indicator styles", () => {
   );
 
   it("opens the breakdown popover from the ring trigger", async () => {
-    useSettingsStore.getState().setContextIndicatorStyle("ring-only");
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring-only" });
     render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
 
     fireEvent.click(screen.getByTestId("context-usage-chip"));

@@ -33,7 +33,7 @@ import {
 } from "@/stores/rate-limits/rate-limit-popover-store";
 import { enqueueRateLimitFetchBatchForScope } from "@/lib/rate-limits/ephemeral-fetch-queue";
 import { windowPercentText } from "@/lib/rate-limits/status-bar-window-text";
-import type { PercentMode } from "@/stores/settings/layout-store";
+import type { AmountMode } from "@/lib/layout/layout-values";
 
 /**
  * The strip's left cluster: every visible provider's usage, the one control
@@ -246,7 +246,7 @@ function statusBarSegmentAtClick(
  */
 function triggerAccessibleName(
   cluster: StatusBarRateLimitClusterModel,
-  percentMode: PercentMode,
+  percentMode: AmountMode,
 ): string {
   if (cluster.kind !== "segments") return "Usage limits";
   const readings = cluster.segments.flatMap((segment) =>

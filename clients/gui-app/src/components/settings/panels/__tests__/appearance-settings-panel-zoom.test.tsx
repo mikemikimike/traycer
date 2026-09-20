@@ -147,8 +147,6 @@ function currentAvailabilityContext(): SettingsAvailabilityContext {
     runnerHost: mountedRunnerHost,
     featureSettings: null,
     mobileApp: false,
-    mobileFooter: false,
-    customizeEditor: false,
   };
 }
 

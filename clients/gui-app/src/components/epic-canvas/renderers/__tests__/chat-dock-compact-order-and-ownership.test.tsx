@@ -14,14 +14,14 @@ import type { ChatQueuedItem } from "@traycer/protocol/host/agent/gui/subscribe"
  *
  * - Should-fix 5 ("compact dock chips ignore dockOrder"): the compact chip
  *   row used to build chips in a fixed Files -> Agents -> Background order and
- *   only the EXPANDED dock read `composer.dockOrder`. Reordering rows then
+ *   only the EXPANDED dock read the dock's order. Reordering rows then
  *   folding them changed the order back. `chips` in `useChatDockChrome` is now
- *   sorted through the same `composer.dockOrder`.
+ *   sorted through the same `arrangement.dock` (`useArrangementValue("dock")`).
  *
  * - Blocking 8 ("a temporarily expanded compact section attaches one callback
  *   ref to two nodes"): the chip and the revealed row shared ONE ref
  *   callback (`xHotspot.ref`) across two different DOM nodes at once, so
- *   whichever attached last silently won the Customize registration, and
+ *   whichever attached last silently won the layout-editor registration, and
  *   detaching the row could clear it while the chip stayed on screen. Fixed
  *   state (re-verified against the current worktree, since an earlier pass
  *   here briefly nulled both sides mid-edit): the ROW's `hotspots[section]`
@@ -159,10 +159,10 @@ import {
   type ChatLowerInteractionSurfacesProps,
 } from "@/components/epic-canvas/renderers/chat-tile-lower-surfaces";
 import {
-  DEFAULT_COMPOSER_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
+} from "@/stores/layout/layout-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
 const EPIC_ID = "epic-1";
 const TAB_ID = "tab-1";
@@ -210,17 +210,11 @@ const noopStreamClientFactory: EpicStreamClientFactory = () => ({
 
 let epicHandle: OpenedStoreForTest;
 
-function startCustomizeSession(): void {
-  useCustomizeStore.setState({
-    session: { scene: "in-place", opener: { kind: "none" }, startedAt: 0 },
-    instances: new Map(),
-    activeKey: null,
-    popoverKey: null,
-    invoker: null,
-    disclosure: null,
-    pendingTarget: null,
-    preferredTileId: null,
-    history: { past: [], future: [] },
+function startEditorSession(): void {
+  useLayoutEditorStore.getState().beginSession({
+    scene: "in-place",
+    preferredInstanceId: null,
+    startedAt: 0,
   });
 }
 
@@ -346,8 +340,10 @@ beforeEach(() => {
     openTabOrder: [TAB_ID],
     activeTabId: TAB_ID,
   });
-  useLayoutStore.setState({ composer: DEFAULT_COMPOSER_LAYOUT });
-  startCustomizeSession();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+  useLayoutEditorStore.getState().endSession();
+  useLayoutEditorStore.setState({ instances: new Map() });
+  act(startEditorSession);
 });
 
 afterEach(() => {
@@ -355,23 +351,27 @@ afterEach(() => {
   disposeManagedCommandChatSessions();
   epicHandle.dispose();
   useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
-  useLayoutStore.setState({ composer: DEFAULT_COMPOSER_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   act(() => {
-    useCustomizeStore.setState({ session: null });
+    useLayoutEditorStore.getState().endSession();
   });
 });
 
-describe("compact dock chip order follows composer.dockOrder (S5)", () => {
+/** All three dock regions folded to their compact chip. */
+function foldAllDockRegionsToChips(): void {
+  useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
+  useLayoutStore.getState().setRegionValues("runningAgents", { size: "chip" });
+  useLayoutStore.getState().setRegionValues("background", { size: "chip" });
+}
+
+describe("compact dock chip order follows arrangement.dock (S5)", () => {
   it("renders the chips in dockOrder, not the fixed Files -> Agents -> Background order", () => {
-    useLayoutStore.setState({
-      composer: {
-        ...DEFAULT_COMPOSER_LAYOUT,
-        filesChanged: "compact",
-        activeAgents: "compact",
-        background: "compact",
-        // Deliberately NOT the fixed default order.
-        dockOrder: ["background", "activeAgents", "filesChanged"],
-      },
+    foldAllDockRegionsToChips();
+    const { arrangement } = useLayoutStore.getState();
+    // Deliberately NOT the fixed default order.
+    useLayoutStore.getState().setArrangement({
+      ...arrangement,
+      dock: ["background", "runningAgents", "changedFiles"],
     });
 
     renderSurfaces(
@@ -403,14 +403,7 @@ describe("compact dock chip order follows composer.dockOrder (S5)", () => {
   });
 
   it("reordering through Move and then folding keeps the new order on the chips", () => {
-    useLayoutStore.setState({
-      composer: {
-        ...DEFAULT_COMPOSER_LAYOUT,
-        filesChanged: "compact",
-        activeAgents: "compact",
-        background: "compact",
-      },
-    });
+    foldAllDockRegionsToChips();
     renderSurfaces(
       surfacesProps({
         queueItems: [],
@@ -441,12 +434,11 @@ describe("compact dock chip order follows composer.dockOrder (S5)", () => {
 
     // Real store write, same as a Move/drag would perform.
     act(() => {
-      useLayoutStore.setState((state) => ({
-        composer: {
-          ...state.composer,
-          dockOrder: ["background", "filesChanged", "activeAgents"],
-        },
-      }));
+      const { arrangement } = useLayoutStore.getState();
+      useLayoutStore.getState().setArrangement({
+        ...arrangement,
+        dock: ["background", "changedFiles", "runningAgents"],
+      });
     });
 
     expect(
@@ -462,15 +454,8 @@ describe("compact dock chip order follows composer.dockOrder (S5)", () => {
 });
 
 describe("temporarily revealing a compact row hands off ownership instead of duplicating it (S8)", () => {
-  it("the chip owns the Customize registration while folded, the ROW takes sole ownership once revealed, and the chip reclaims it on re-fold", () => {
-    useLayoutStore.setState({
-      composer: {
-        ...DEFAULT_COMPOSER_LAYOUT,
-        filesChanged: "compact",
-        activeAgents: "compact",
-        background: "compact",
-      },
-    });
+  it("the chip owns the layout-editor registration while folded, the ROW takes sole ownership once revealed, and the chip reclaims it on re-fold", () => {
+    foldAllDockRegionsToChips();
     renderSurfaces(
       surfacesProps({
         queueItems: [],
@@ -478,9 +463,13 @@ describe("temporarily revealing a compact row hands off ownership instead of dup
       }),
     );
 
+    // `useLayoutRegion`'s key is `${regionId}@${sceneId}:${instanceId}` -
+    // "changedFiles" is the region id for the Files changed row/chip, "shell"
+    // is the scene this suite renders without a view-tab context, and
+    // `CHAT_ID` is the instance.
     const registeredNode = () =>
-      [...useCustomizeStore.getState().instances.entries()].find(([key]) =>
-        key.startsWith("composer.filesChanged@"),
+      [...useLayoutEditorStore.getState().instances.entries()].find(([key]) =>
+        key.startsWith(`changedFiles@shell:${CHAT_ID}`),
       )?.[1].node;
 
     // Folded: the chip is the sole registered anchor - the row is not even

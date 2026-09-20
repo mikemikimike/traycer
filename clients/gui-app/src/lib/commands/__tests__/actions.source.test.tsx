@@ -5,7 +5,10 @@ import type { CommandContext, CommandItem } from "@/lib/commands/types";
 import { ACTION_META, getDefaultBindings } from "@/lib/keybindings/actions";
 import { setMobileApp } from "@/lib/mobile-app";
 import { useKeybindingStore } from "@/stores/settings/keybinding-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 function ctx(): CommandContext {
   return {
@@ -46,14 +49,16 @@ describe("actionsSource", () => {
   beforeEach(() => {
     window.localStorage.clear();
     useKeybindingStore.setState({ bindings: getDefaultBindings() });
-    useSettingsStore.setState({ homeTabEnabled: false });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+    useLayoutStore.getState().setRegionValues("homeTab", { shown: "hidden" });
   });
 
   afterEach(() => {
     cleanup();
     setMobileApp(false);
     useKeybindingStore.setState({ bindings: getDefaultBindings() });
-    useSettingsStore.setState({ homeTabEnabled: false });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+    useLayoutStore.getState().setRegionValues("homeTab", { shown: "hidden" });
   });
 
   it("emits one item per chord-kind action and skips digit-kind ones", () => {
@@ -91,7 +96,7 @@ describe("actionsSource", () => {
     // the suite's default is off, and under it `app.home.open` never reached
     // the `desktopOnly` loop below - the one row whose surface most obviously
     // invites a `desktopOnly` that would take Home off the phone.
-    useSettingsStore.setState({ homeTabEnabled: true });
+    useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
 
     const items = captureItems();
     const ids = items.map((item) => item.id);
@@ -108,9 +113,10 @@ describe("actionsSource", () => {
     // still lists.
     expect(ids).toContain("action:app.settings.open");
     // Home named explicitly rather than left to the loop above. Home has a
-    // SECOND gate (`homeTabEnabled`), so if it ever fell out of the list the
-    // loop would go quiet about it instead of failing - and `desktopOnly` is
-    // exactly the flag that would take the phone's Home command away.
+    // SECOND gate (the layout store's `homeTab.shown`), so if it ever fell
+    // out of the list the loop would go quiet about it instead of failing -
+    // and `desktopOnly` is exactly the flag that would take the phone's Home
+    // command away.
     expect(ids).toContain("action:app.home.open");
     expect(ACTION_META["app.home.open"].desktopOnly).toBe(false);
   });
@@ -137,15 +143,15 @@ describe("actionsSource", () => {
   // does nothing would be worse than no row. Locks down both sides of that
   // gate so the row can't reappear stale while the setting is off, or stay
   // missing once it's on.
-  describe("app.home.open row (gated on the homeTabEnabled setting)", () => {
+  describe("app.home.open row (gated on the layout store's homeTab.shown value)", () => {
     it("omits the row while the Home tab is off", () => {
-      useSettingsStore.setState({ homeTabEnabled: false });
+      useLayoutStore.getState().setRegionValues("homeTab", { shown: "hidden" });
       const ids = captureItems().map((item) => item.id);
       expect(ids).not.toContain("action:app.home.open");
     });
 
     it("includes the row, with its live shortcut, once the Home tab is on", () => {
-      useSettingsStore.setState({ homeTabEnabled: true });
+      useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
       const item = captureItems().find(
         (row) => row.id === "action:app.home.open",
       );

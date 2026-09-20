@@ -37,7 +37,7 @@ import {
   layoutHomeIsActive,
   useTabsStore,
 } from "@/stores/tabs/store";
-import { isHomeTabEnabled } from "@/stores/settings/settings-store";
+import { isHomeTabEnabled } from "@/stores/layout/layout-store";
 import { HOME_TAB_REF } from "@/stores/tabs/kinds/home";
 import {
   createEmptySplit,

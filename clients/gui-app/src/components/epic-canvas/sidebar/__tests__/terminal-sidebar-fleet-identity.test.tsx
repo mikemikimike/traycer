@@ -16,7 +16,6 @@ import {
   type PlainTerminalCollection,
 } from "@/lib/terminals/plain-terminal-authority";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
 import type { EpicCanvasTerminalTileDragData } from "@/components/epic-canvas/dnd/dnd";
 
 const EPIC_ID = "epic-1";
@@ -238,7 +237,6 @@ describe("terminal sidebar fleet identity consumers", () => {
     useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
     draggableCalls.calls = [];
     resourceChipCalls.calls = [];
-    useSettingsStore.setState({ navigatorResourceMetrics: ["cpu", "memory"] });
     durableCollection.value = freshPlainCollection([
       epicRunningPlainTerminal(SHARED_ID, HOST_A, "Host A shell"),
       epicRunningPlainTerminal(SHARED_ID, HOST_B, "Host B shell"),
@@ -247,7 +245,6 @@ describe("terminal sidebar fleet identity consumers", () => {
 
   afterEach(() => {
     cleanup();
-    useSettingsStore.setState({ navigatorResourceMetrics: [] });
   });
 
   it("highlights, registers DnD, and selects resources per owner host", () => {
@@ -291,19 +288,22 @@ describe("terminal sidebar fleet identity consumers", () => {
       draggableCalls.calls.map((call) => call.data.tile.hostId).sort(),
     ).toEqual([HOST_A, HOST_B].sort());
 
+    // The metrics a chip draws are no longer a setting - every reading prints,
+    // unconditionally (L-28) - so this pins the fixed default rather than a
+    // configured subset.
     expect(resourceChipCalls.calls).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "terminal",
           ownerId: SHARED_ID,
           hostId: HOST_A,
-          metrics: ["cpu", "memory"],
+          metrics: ["cpu", "memory", "processes"],
         }),
         expect.objectContaining({
           kind: "terminal",
           ownerId: SHARED_ID,
           hostId: HOST_B,
-          metrics: ["cpu", "memory"],
+          metrics: ["cpu", "memory", "processes"],
         }),
       ]),
     );

@@ -340,7 +340,12 @@ vi.mock("@/hooks/host/use-refresh-rate-limit-usage-on-traycer-turn", () => ({
 
 import { RateLimitPopover } from "@/components/layout/header/rate-limit-popover";
 import { useRateLimitPopoverStore } from "@/stores/rate-limits/rate-limit-popover-store";
-import { useLayoutStore } from "@/stores/settings/layout-store";
+import { useLayoutStore } from "@/stores/layout/layout-store";
+import {
+  statusBarShownProfileIds,
+  type StatusBarShownProfiles,
+} from "@/lib/layout/layout-arrangement";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 const NOW = Date.now();
 
@@ -365,6 +370,73 @@ const SINGLE_HOST_SCOPE = hostScopeFixture({});
 
 function resultKey(providerId: string, profileId: string | null): string {
   return profileId === null ? providerId : `${providerId}:${profileId}`;
+}
+
+/**
+ * One account checked or unchecked for the strip, on one host - the test
+ * double for `withProfileShown` in `rate-limit-popover.tsx` (module-private
+ * there), which is the only production writer of `arrangement.shownProfiles`.
+ * An emptied entry is REMOVED rather than left as `[]`, matching what the
+ * arrangement's own resolver does on rehydration.
+ */
+function setStatusBarProfileShown(
+  hostId: string,
+  providerId: RateLimitProviderId,
+  profileId: string | null,
+  shown: boolean,
+): void {
+  const arrangement = useLayoutStore.getState().arrangement;
+  const current = statusBarShownProfileIds(
+    arrangement.shownProfiles,
+    hostId,
+    providerId,
+  );
+  if (current.includes(profileId) === shown) return;
+  const next = shown
+    ? [...current, profileId]
+    : current.filter((candidate) => candidate !== profileId);
+  const hostShown: Record<string, ReadonlyArray<string | null>> = {
+    ...arrangement.shownProfiles[hostId],
+  };
+  if (next.length === 0) delete hostShown[providerId];
+  else hostShown[providerId] = next;
+  const nextShownProfiles: Record<string, StatusBarShownProfiles[string]> = {
+    ...arrangement.shownProfiles,
+  };
+  if (Object.keys(hostShown).length === 0) delete nextShownProfiles[hostId];
+  else nextShownProfiles[hostId] = hostShown;
+  useLayoutStore.getState().setArrangement({
+    ...arrangement,
+    shownProfiles: nextShownProfiles,
+  });
+}
+
+/**
+ * A provider's membership in the hidden deny-list, toggled - the test double
+ * for `StatusBarVisibilityMenu`'s own click handler (`hiddenProviders`
+ * mapping), reused here since this suite drives the same store field without
+ * going through that menu.
+ */
+function toggleStatusBarProvider(providerId: RateLimitProviderId): void {
+  const arrangement = useLayoutStore.getState().arrangement;
+  const hiddenProviders = arrangement.hiddenProviders.includes(providerId)
+    ? arrangement.hiddenProviders.filter((id) => id !== providerId)
+    : [...arrangement.hiddenProviders, providerId];
+  useLayoutStore.getState().setArrangement({ ...arrangement, hiddenProviders });
+}
+
+function setStatusBarPlacement(usageHost: "status-bar" | "header"): void {
+  useLayoutStore.getState().setArrangement({
+    ...useLayoutStore.getState().arrangement,
+    usageHost,
+  });
+}
+
+function setStatusBarMobileFooter(mobileFooter: boolean): void {
+  useLayoutStore.getState().setArrangement({
+    ...useLayoutStore.getState().arrangement,
+    mobileFooter,
+  });
 }
 
 function envelopeFor(
@@ -1288,7 +1360,9 @@ describe("<RateLimitPopover /> rail", () => {
     expect(screen.getByText("22% used")).toBeTruthy();
 
     act(() => {
-      useLayoutStore.getState().setStatusBarPercentMode("remaining");
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { amount: "remaining" });
     });
     // The words are the strip's own (`windowPercentText`), so the popover
     // under the footer and the footer never state one limit two ways.
@@ -1297,7 +1371,9 @@ describe("<RateLimitPopover /> rail", () => {
     expect(screen.queryByText("4% used")).toBeNull();
 
     act(() => {
-      useLayoutStore.getState().setStatusBarPercentMode("used");
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { amount: "used" });
     });
     expect(screen.getByText("4% used")).toBeTruthy();
     expect(screen.queryByText("96% remaining")).toBeNull();
@@ -1449,15 +1525,15 @@ describe("<RateLimitPopover /> rail", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Show Work in status bar" }),
     );
-    expect(
-      useLayoutStore.getState().statusBar.rateLimits.shownProfiles,
-    ).toEqual({ "host-a": { codex: ["work-profile"] } });
+    expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual({
+      "host-a": { codex: ["work-profile"] },
+    });
     fireEvent.click(
       screen.getByRole("button", { name: "Show Default Codex in status bar" }),
     );
-    expect(
-      useLayoutStore.getState().statusBar.rateLimits.shownProfiles,
-    ).toEqual({ "host-a": { codex: ["work-profile", null] } });
+    expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual({
+      "host-a": { codex: ["work-profile", null] },
+    });
 
     // The eye reads its pressed state through the selection the caller
     // resolved (a static double here), so re-render with both checked before
@@ -1477,9 +1553,7 @@ describe("<RateLimitPopover /> rail", () => {
         name: "Hide Default Codex from status bar",
       }),
     );
-    expect(
-      useLayoutStore.getState().statusBar.rateLimits.shownProfiles,
-    ).toEqual({});
+    expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual({});
   });
 
   it("reads checked accounts for the viewed host and highlights exactly those cards", () => {
@@ -1570,7 +1644,7 @@ describe("<RateLimitPopover /> rail", () => {
 
   it("hides the eye for a provider hidden from the strip", () => {
     configureTwoAccountProviders();
-    useLayoutStore.getState().toggleStatusBarProvider("codex");
+    toggleStatusBarProvider("codex");
     renderPopover();
 
     expect(
@@ -1598,7 +1672,7 @@ describe("<RateLimitPopover /> rail", () => {
 
     it("offers the eye on every card under the status-bar placement", () => {
       configureTwoAccountProviders();
-      useLayoutStore.getState().setStatusBarPlacement("status-bar");
+      setStatusBarPlacement("status-bar");
       renderPopover();
 
       expect(statusBarEyes()).toHaveLength(4);
@@ -1608,18 +1682,16 @@ describe("<RateLimitPopover /> rail", () => {
       configureTwoAccountProviders();
       // A real check in the store for the viewed host, and the selection the
       // caller would resolve from it.
-      useLayoutStore
-        .getState()
-        .setStatusBarProfileShown("host-a", "codex", "work-profile", true);
+      setStatusBarProfileShown("host-a", "codex", "work-profile", true);
       const checked = { "host-a": { codex: ["work-profile"] } };
-      expect(
-        useLayoutStore.getState().statusBar.rateLimits.shownProfiles,
-      ).toEqual(checked);
+      expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual(
+        checked,
+      );
       mocks.profileSelection = {
         shownProfiles: { codex: ["work-profile"] },
         lastProfileByHarness: { claude: "personal-profile" },
       };
-      useLayoutStore.getState().setStatusBarPlacement("header");
+      setStatusBarPlacement("header");
       renderPopover();
 
       // The cards themselves are unchanged; only the strip controls go.
@@ -1627,13 +1699,13 @@ describe("<RateLimitPopover /> rail", () => {
       expect(screen.getByText("Personal")).toBeTruthy();
       expectNoEyeAndNoHighlight();
       // The check is untouched - withheld, not cleared.
-      expect(
-        useLayoutStore.getState().statusBar.rateLimits.shownProfiles,
-      ).toEqual(checked);
+      expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual(
+        checked,
+      );
 
       // ...and takes effect again the moment the strip returns.
       cleanup();
-      useLayoutStore.getState().setStatusBarPlacement("status-bar");
+      setStatusBarPlacement("status-bar");
       renderPopover();
 
       expect(
@@ -1646,9 +1718,9 @@ describe("<RateLimitPopover /> rail", () => {
           .getByTestId("rate-limit-profile-card-codex-work-profile")
           .getAttribute("aria-current"),
       ).toBe("true");
-      expect(
-        useLayoutStore.getState().statusBar.rateLimits.shownProfiles,
-      ).toEqual(checked);
+      expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual(
+        checked,
+      );
     });
 
     it("ignores the placement on a mobile viewport and follows the footer switch", () => {
@@ -1659,13 +1731,13 @@ describe("<RateLimitPopover /> rail", () => {
       };
       setViewportWidth(MOBILE_VIEWPORT_WIDTH);
       // The placement a desktop would mount the strip on says nothing here.
-      useLayoutStore.getState().setStatusBarPlacement("status-bar");
+      setStatusBarPlacement("status-bar");
       renderPopover();
 
       expectNoEyeAndNoHighlight();
 
       cleanup();
-      useLayoutStore.getState().setStatusBarMobileFooter(true);
+      setStatusBarMobileFooter(true);
       renderPopover();
 
       expect(statusBarEyes()).toHaveLength(4);
@@ -1677,7 +1749,7 @@ describe("<RateLimitPopover /> rail", () => {
       // The provider rule still applies on top: a hidden provider has no
       // segment on a strip that IS there.
       cleanup();
-      useLayoutStore.getState().toggleStatusBarProvider("codex");
+      toggleStatusBarProvider("codex");
       renderPopover();
 
       expect(
@@ -3183,7 +3255,7 @@ describe("<RateLimitPopover /> rail settings", () => {
     // watcher polls, exactly as a settings search result's does.
     expect(useSettingsSearchStore.getState().pendingReveal).toMatchObject({
       section: "layout",
-      anchor: "layout-status-bar",
+      anchor: "layout-surface-status-bar",
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

@@ -54,10 +54,10 @@ import type { RateLimitWindowSeverity } from "@/lib/rate-limits/window-severity"
 import { useSampledNow } from "@/lib/relative-time";
 import {
   statusBarProviderLimitSelection,
-  useLayoutStore,
+  type LayoutArrangement,
   type StatusBarProviderLimitSelection,
-  type StatusBarProviderLimitSelections,
-} from "@/stores/settings/layout-store";
+} from "@/lib/layout/layout-arrangement";
+import { useLayoutArrangement, useRegionShown } from "@/lib/layout-overrides";
 
 /**
  * The status bar's left cluster, from the watched host's provider inventory to
@@ -441,7 +441,7 @@ interface OrderedSegment {
 }
 
 interface ToSegmentsContext {
-  readonly selections: StatusBarProviderLimitSelections;
+  readonly arrangement: LayoutArrangement;
   readonly hiddenProviders: ReadonlyArray<RateLimitProviderId>;
   readonly now: number;
 }
@@ -465,7 +465,7 @@ function toSegments(
     const shown = shownWindows(
       windows,
       statusBarProviderLimitSelection(
-        context.selections,
+        context.arrangement,
         target.provider.providerId,
       ),
     );
@@ -562,8 +562,10 @@ export function useStatusBarRateLimitSegments(input: {
 }): StatusBarRateLimitSegments {
   const passive = input.mode === "passive";
   const client = useHostClient();
-  const rateLimits = useLayoutStore((state) => state.statusBar.rateLimits);
-  const segmentOrder = useLayoutStore((state) => state.statusBar.segmentOrder);
+  const usageShown = useRegionShown("usageLimits");
+  const arrangement = useLayoutArrangement();
+  const hiddenProviders = arrangement.hiddenProviders;
+  const segmentOrder = arrangement.usageProviders;
   // The shared 60s clock, so a window that expires while the strip is on screen
   // drops out of it within the minute rather than at the next fetch.
   const now = useSampledNow();
@@ -571,8 +573,7 @@ export function useStatusBarRateLimitSegments(input: {
   const targets = input.providers
     .filter(
       (provider) =>
-        input.editing ||
-        !rateLimits.hiddenProviders.includes(provider.providerId),
+        input.editing || !hiddenProviders.includes(provider.providerId),
     )
     .flatMap((provider) => resolveTargets(provider, input.profileSelection))
     .map((target, order) => ({
@@ -581,8 +582,8 @@ export function useStatusBarRateLimitSegments(input: {
       // Editor-only segments observe cached data without starting requests.
       fetchEligible:
         target.fetchEligible &&
-        rateLimits.enabled &&
-        !rateLimits.hiddenProviders.includes(target.provider.providerId),
+        usageShown &&
+        !hiddenProviders.includes(target.provider.providerId),
     }));
   const queueObserved = targets.filter(
     (target) => target.lane === "ephemeralProcess",
@@ -639,18 +640,18 @@ export function useStatusBarRateLimitSegments(input: {
   const canonicallyOrdered = sortProviderStatesByProviderOrder(
     [
       ...toSegments(queueObserved, queueObservedQueries, {
-        selections: rateLimits.providers,
-        hiddenProviders: rateLimits.hiddenProviders,
+        arrangement,
+        hiddenProviders,
         now,
       }),
       ...toSegments(httpPolling, httpPollingQueries, {
-        selections: rateLimits.providers,
-        hiddenProviders: rateLimits.hiddenProviders,
+        arrangement,
+        hiddenProviders,
         now,
       }),
       ...toSegments(httpObserved, httpObservedQueries, {
-        selections: rateLimits.providers,
-        hiddenProviders: rateLimits.hiddenProviders,
+        arrangement,
+        hiddenProviders,
         now,
       }),
     ]

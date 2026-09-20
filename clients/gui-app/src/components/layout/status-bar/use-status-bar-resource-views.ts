@@ -1,12 +1,11 @@
-import { useDesktopAppResourceUsage } from "@/hooks/resources/use-desktop-app-resource-usage";
 import { useGlobalResourcesUnsupported } from "@/hooks/resources/use-global-resources-unsupported";
-import { getDesktopDiagnosticsBridge } from "@/lib/resources/desktop-app-resource-usage";
 import {
   statusBarResourceMetricViews,
   type StatusBarResourceMetricView,
 } from "@/lib/resources/status-bar-resource-reading";
 import { useGlobalResourceProjection } from "@/stores/resources/resources-registry";
-import { useStatusBarResourceValue } from "@/lib/layout-overrides";
+import { useRegionValues } from "@/lib/layout-overrides";
+import { shownResourceMetrics } from "@/lib/layout/layout-values";
 
 /**
  * The resource segment's readings, as a hook two surfaces can ask for.
@@ -19,11 +18,8 @@ import { useStatusBarResourceValue } from "@/lib/layout-overrides";
  * of "why is there no number" is exactly how a preview ends up disagreeing
  * with the thing it previews.
  *
- * Every source under it is a store or context read except two, neither of which
- * a second caller pays twice for: `useDesktopAppResourceUsage` subscribes to a
- * shared, refcounted sampler, so a second caller costs no extra IPC, and
- * `getDesktopDiagnosticsBridge()` is a synchronous property read of the object
- * the preload injected.
+ * Every source under it is a store or context read, so a second caller pays
+ * nothing for it.
  */
 export function useStatusBarResourceMetricViews(input: {
   /** The watched host, for the "too old to stream" verdict and its copy. */
@@ -36,39 +32,18 @@ export function useStatusBarResourceMetricViews(input: {
    */
   readonly hasExplicitPick: boolean;
 }): ReadonlyArray<StatusBarResourceMetricView> {
-  // Leaf by leaf: the desktop-app poll below is gated on `scope`, and a hook
-  // subscribed to the whole slice would re-run this on any status-bar change.
-  const scope = useStatusBarResourceValue("scope");
-  const metrics = useStatusBarResourceValue("metrics");
+  const metrics = shownResourceMetrics(useRegionValues("resourceMonitor"));
   // Raw, and handed over raw: `statusBarResourceMetricViews` attributes it to
   // the watched host before reading a number out of it. The registry publishes
   // one projection for the window, which is not necessarily the watched host's.
   const projection = useGlobalResourceProjection();
-  // Only the desktop-app scope reads this, and subscribing is what starts a
-  // once-a-second IPC poll of the shell. The strip is on screen for the life of
-  // the window, so asking for it under the default host-tree scope would run
-  // that poll all session for a number nothing renders.
-  const desktopApp = useDesktopAppResourceUsage(scope === "desktop-app");
-  // Whether the SHELL is there, which the reading above cannot answer: it is
-  // `null` for a browser build, for a first sample still in flight, and for a
-  // rejected one alike, and only the first of those three is a build without a
-  // desktop shell. Read at render rather than subscribed to because the bridge
-  // is injected by the preload before the first paint and never appears or
-  // leaves mid-session, so there is no change for a subscription to deliver.
-  const desktopBridgePresent = getDesktopDiagnosticsBridge() !== null;
-  // Asked unconditionally, and answered against this subtree's stream binding.
-  // It is only ever CONSULTED for the host-tree scope (see the reason
-  // resolver); the desktop-app scope reads a local IPC bridge and has no
-  // stream to be incompatible with.
+  // Answered against this subtree's stream binding.
   const globalStreamUnsupported = useGlobalResourcesUnsupported(input.hostId);
   return statusBarResourceMetricViews({
-    scope,
     metrics,
     projection,
     watchedHostId: input.hostId,
     hasExplicitPick: input.hasExplicitPick,
-    desktopApp,
-    desktopBridgePresent,
     globalStreamUnsupported,
     hostLabel: input.hostLabel,
   });

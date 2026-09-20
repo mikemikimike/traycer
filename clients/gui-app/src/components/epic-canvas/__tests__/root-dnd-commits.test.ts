@@ -8,10 +8,13 @@ import {
 } from "@/components/epic-canvas/dnd/root-dnd-commits";
 import type { EpicCanvasDragSourceData } from "@/components/epic-canvas/dnd/dnd";
 import {
-  DEFAULT_LEFT_PANEL_GROUPS,
   moveLeftPanelGroup,
   useLeftPanelStore,
 } from "@/stores/epics/left-panel-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 import { useEpicSidebarExpansionStore } from "@/stores/epics/epic-sidebar-expansion-store";
 import { makeGitFileDiffTile } from "@/lib/git/git-diff-tile";
 import type { NavigateNestedFocus } from "@/lib/epic-nested-focus-navigation";
@@ -290,9 +293,9 @@ function resetStores(): void {
     vi.fn<(viewTabId: string, args: TabStripMoveArgs) => void>();
   testState.canvasStore.splitPaneWithTab =
     vi.fn<(viewTabId: string, args: TabSplitArgs) => void>();
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
-    panelGroups: DEFAULT_LEFT_PANEL_GROUPS,
     mainCollapsedByTabId: {},
     panelSectionCollapsedByPanelId: {},
     commentsPanelRevealedByTabId: {},
@@ -469,8 +472,9 @@ describe("root dnd commits - left panel", () => {
   });
 
   it("inserts a rail group into a single-panel group via section bounds", () => {
-    useLeftPanelStore.setState({
-      panelGroups: [
+    useLeftPanelStore
+      .getState()
+      .applyPanelGroups([
         { panelIds: ["chats"] },
         { panelIds: ["artifacts"] },
         { panelIds: ["terminals"] },
@@ -479,8 +483,7 @@ describe("root dnd commits - left panel", () => {
         { panelIds: ["file-tree"] },
         { panelIds: ["sharing"] },
         { panelIds: ["comments"] },
-      ],
-    });
+      ]);
     const groupElement = document.createElement("div");
     groupElement.append(
       makeRectElement("chats", { x: 0, y: 0, width: 320, height: 900 }),
@@ -745,7 +748,7 @@ describe("root dnd commits - left panel drop resolver", () => {
   });
 
   it("never dispatches a store write for a noop drop commit", () => {
-    const before = useLeftPanelStore.getState().panelGroups;
+    const before = useLayoutStore.getState().arrangement.rail;
     const source = railSource("artifacts", "panel-section");
     const preview = {
       kind: "left-panel-rail",
@@ -767,7 +770,7 @@ describe("root dnd commits - left panel drop resolver", () => {
       rawNestedFocus,
     );
 
-    expect(useLeftPanelStore.getState().panelGroups).toBe(before);
+    expect(useLayoutStore.getState().arrangement.rail).toBe(before);
   });
 });
 

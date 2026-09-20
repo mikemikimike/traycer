@@ -19,7 +19,10 @@ import {
   useMobileHeaderStore,
 } from "@/stores/layout/mobile-header-store";
 import { useMobileNavStore } from "@/stores/layout/mobile-nav-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 import { emptySystemTabs, tabItemId } from "@/stores/tabs/layout";
 import type { SystemTabs } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
@@ -188,7 +191,10 @@ describe("MobileAppHeader", () => {
     useMobileNavStore.setState({ open: false });
     useMobileHeaderStore.setState({ rightActionEntries: new Map() });
     presentNoTab();
-    useSettingsStore.setState({ showGlobalResourceMonitor: false });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+    useLayoutStore
+      .getState()
+      .setRegionValues("resourceMonitor", { shown: "hidden" });
     // A cloud-homed epic's rename follows the live cloud verdict; the store
     // is module-scope Zustand defaulting to `signed-out`.
     useAuthStore.setState({ status: "signed-in" });
@@ -330,14 +336,18 @@ describe("MobileAppHeader", () => {
   });
 
   it("shows the resource monitor only when the global toggle is on", async () => {
-    useSettingsStore.setState({ showGlobalResourceMonitor: true });
+    useLayoutStore
+      .getState()
+      .setRegionValues("resourceMonitor", { shown: "shown" });
     renderAt("/");
     expect(
       await screen.findByRole("button", { name: "Resource monitor" }),
     ).not.toBeNull();
 
     cleanup();
-    useSettingsStore.setState({ showGlobalResourceMonitor: false });
+    useLayoutStore
+      .getState()
+      .setRegionValues("resourceMonitor", { shown: "hidden" });
     renderAt("/");
     await screen.findByRole("button", { name: "Open menu" });
     expect(

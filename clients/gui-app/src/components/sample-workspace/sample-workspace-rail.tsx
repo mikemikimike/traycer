@@ -1,4 +1,5 @@
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { railRegionForLeftPanelId } from "@/lib/layout/layout-arrangement";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import {
@@ -43,13 +44,9 @@ function SampleRailTile({ panelId }: { readonly panelId: LeftPanelId }) {
     ...SAMPLE_RAIL_PRESENCE,
     visibilityOverrideById,
   });
-  const { ref } = useLayoutHotspot({
-    settingId: "sidebar.panel",
-    tileId: panelId,
-    ghost: hidden,
-    condition: hidden
-      ? (definition.forcedOnHint ?? "Hidden from the sidebar")
-      : null,
+  const { ref } = useLayoutRegion({
+    regionId: railRegionForLeftPanelId(panelId),
+    instanceId: null,
   });
   return (
     <div

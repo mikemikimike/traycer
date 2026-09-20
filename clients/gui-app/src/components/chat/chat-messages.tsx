@@ -1,5 +1,4 @@
 import { useCoarsePointer } from "@/hooks/ui/use-coarse-pointer";
-import { CustomizeDropSlot } from "@/components/customize/customize-drop-slot";
 import { QuoteSelectionPopover } from "@/components/chat/quote/quote-selection-popover";
 import { useQuoteSelection } from "@/components/chat/quote/use-quote-selection";
 import { useChatFindController } from "@/components/chat/use-chat-find-controller";
@@ -120,9 +119,8 @@ import {
   subagentOpenInitializedScopes,
   useSubagentOpenStore,
 } from "@/stores/chats/subagent-open-store";
-import { useLayoutSetting } from "@/lib/layout-overrides";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
-import { cn } from "@/lib/utils";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import { isEpicCanvasTileInstanceLive } from "@/stores/epics/canvas/tile-instance-liveness";
 import { resolveHostedTileOwnership } from "@/components/epic-canvas/surface-host/hosted-tile-resolver";
@@ -2791,26 +2789,20 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
   const quoteReplyEnabled = useSettingsStore(
     (state) => state.quoteReplyEnabled,
   );
-  const chatTurnMinimapSide = useLayoutSetting("chatTurnMinimapSide");
+  const minimapShown = useRegionShown("minimap");
+  const minimapSide = useArrangementValue("minimapSide");
   const isMobileViewport = useIsMobileViewport();
   const coarsePointer = useCoarsePointer();
   const minimapDrawn =
     hasContent &&
     shouldRunChatTurnMinimapRail({
-      side: chatTurnMinimapSide,
+      shown: minimapShown,
       coarsePointer,
       mobileViewport: isMobileViewport,
     });
-  let minimapCondition: string | null = null;
-  if (!hasContent) minimapCondition = "No messages yet";
-  if (coarsePointer)
-    minimapCondition = "Minimap is unavailable with a coarse pointer";
-  if (chatTurnMinimapSide === "hide") minimapCondition = "Hidden";
-  const { ref: minimapHotspotRef, editing: minimapEditing } = useLayoutHotspot({
-    settingId: "chat.minimapSide",
-    tileId: taskId,
-    ghost: !minimapDrawn,
-    condition: minimapCondition,
+  const { ref: minimapHotspotRef } = useLayoutRegion({
+    regionId: "minimap",
+    instanceId: taskId,
   });
   const quoteSelection = useQuoteSelection({
     containerRef: transcriptContainerRef,
@@ -3904,31 +3896,6 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
     workingVerb,
   });
 
-  // A dashed placeholder rail while `editing` and the real minimap has
-  // nothing to mount on (hidden, or no content yet) - so the Customize
-  // popover still has something to anchor to. Computed here, in the same
-  // component that calls `useLayoutHotspot`, rather than in a helper function
-  // it would be passed into: `minimapHotspotRef` is a plain callback, not a
-  // React ref, but a value threaded straight from that hook reads as one to
-  // the react-compiler's ref-safety check once it crosses a function boundary.
-  // `hide` has no remembered side of its own, so the ghost defaults to the
-  // app's own default side rather than inventing one.
-  const minimapGhostSide =
-    chatTurnMinimapSide === "hide" ? "right" : chatTurnMinimapSide;
-  const minimapGhostRail =
-    minimapEditing && !isMobileViewport ? (
-      <div
-        ref={minimapHotspotRef}
-        data-testid="chat-minimap-ghost"
-        className={cn(
-          "pointer-events-none absolute top-0 bottom-0 hidden w-2 md:block",
-          minimapGhostSide === "left" ? "left-3" : "right-3",
-        )}
-      >
-        <div className="absolute inset-y-0 w-px rounded-full border border-dashed border-border/60" />
-      </div>
-    ) : null;
-
   return (
     <ChatOpenStoreScopeProvider value={instanceId}>
       <ActivityGroupOpenStoreProvider store={activityGroupOpenStore}>
@@ -3944,18 +3911,6 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
           onPointerDown={handleTranscriptPointerDown}
           className="relative flex-1 overflow-hidden"
         >
-          <CustomizeDropSlot
-            id="minimap:left"
-            group="chat-minimap"
-            tileId={taskId}
-            className="absolute inset-y-0 left-0 w-6"
-          />
-          <CustomizeDropSlot
-            id="minimap:right"
-            group="chat-minimap"
-            tileId={taskId}
-            className="absolute inset-y-0 right-0 w-6"
-          />
           <ChatTimeline
             rows={listRows}
             onVisibleRowRangeChange={onChatTimelineVisibleRowsChange}
@@ -3991,7 +3946,7 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
               preference, not a viewport rule, so it cannot stand in for this. */}
           {shouldMountChatTurnMinimap({
             hasContent,
-            side: chatTurnMinimapSide,
+            shown: minimapShown,
             mobileViewport: isMobileViewport,
           }) ? (
             <div className="contents max-md:hidden">
@@ -4005,11 +3960,11 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
                 viewportRef={transcriptContainerRef}
                 bottomInset={endInset}
                 onSelect={onMinimapItemSelect}
-                side={chatTurnMinimapSide}
+                shown={minimapShown}
+                side={minimapSide}
               />
             </div>
           ) : null}
-          {!minimapDrawn ? minimapGhostRail : null}
           {hasContent ? (
             <ScrollToEndPill
               state={scrollToEndPillState}

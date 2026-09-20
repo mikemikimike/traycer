@@ -12,9 +12,9 @@ import {
 /**
  * Marks a real element as a customizable region (4.1).
  *
- * The evolution of `useLayoutHotspot`: the node ref, the scene/instance key
- * and the pane-visibility gate are unchanged, because they are what makes a
- * hidden pane's copy of a region stay out of the editor. What changed is what
+ * The node ref, the scene/instance key and the pane-visibility gate are the
+ * registration hook's from the start, because they are what makes a hidden
+ * pane's copy of a region stay out of the editor. What changed is what
  * registration is FOR. The node used to be a rect source for a proxy button
  * drawn on top of it; it is now the attribute host that the decoration CSS
  * styles in place, plus the element the ring measures and the chip anchors to

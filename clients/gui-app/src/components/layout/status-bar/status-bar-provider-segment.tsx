@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { TriangleAlert } from "lucide-react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { HarnessIcon } from "@/components/home/pickers/harness-icon";
 import { AccentDot } from "@/components/providers/accent-dot";
 import { StatusBarMiniBar } from "@/components/layout/status-bar/status-bar-mini-bar";
@@ -28,18 +28,18 @@ import {
 import { UNAVAILABLE_DASH } from "@/lib/resources/memory-metric";
 import { useResetCountdown } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
-import type { PercentMode } from "@/stores/settings/layout-store";
+import type { AmountMode } from "@/lib/layout/layout-values";
 
 export interface StatusBarProviderSegmentProps {
   readonly segment: StatusBarProviderSegmentModel;
   /** Which of the reading's optional parts the preferences switched on. */
   readonly parts: StatusBarUsageParts;
-  readonly percentMode: PercentMode;
+  readonly percentMode: AmountMode;
   /**
-   * Whether this mount is the real strip rather than a passive preview (the
-   * Settings page, or a Customize option's picture). Only an interactive
-   * mount attaches the hotspot's `ref` - `useLayoutHotspot` still runs either
-   * way (rules of hooks), but a `ref` nobody attaches never registers.
+   * Whether this mount is the real strip rather than a depiction. Only an
+   * interactive mount attaches the region's `ref` - `useLayoutRegion` still
+   * runs either way (rules of hooks), but a `ref` nobody attaches never
+   * registers.
    */
   readonly interactive: boolean;
 }
@@ -88,26 +88,13 @@ export interface StatusBarProviderSegmentProps {
  * So what carries "this reading is stale" is the glyph and its sentence, which
  * cost the numbers nothing.
  */
-function providerGhostCondition(
-  segment: StatusBarProviderSegmentModel,
-): string | null {
-  if (segment.hidden) return "Hidden from the status bar";
-  if (segment.state === "cold") return "No reading yet";
-  if (segment.state === "unavailable" || segment.state === "degraded")
-    return statusBarSegmentTooltip(segment);
-  return null;
-}
-
 export function StatusBarProviderSegment(
   props: StatusBarProviderSegmentProps,
 ): ReactNode {
   const segment = props.segment;
-  const ghost = segment.hidden || segment.state === "cold";
-  const { ref, editing } = useLayoutHotspot({
-    settingId: "statusBar.provider",
-    tileId: statusBarSegmentKey(segment),
-    ghost,
-    condition: providerGhostCondition(segment),
+  const { ref } = useLayoutRegion({
+    regionId: "usageLimits",
+    instanceId: statusBarSegmentKey(segment),
   });
   const icon = (
     <HarnessIcon
@@ -118,13 +105,7 @@ export function StatusBarProviderSegment(
   return (
     <span
       ref={props.interactive ? ref : undefined}
-      className={cn(
-        "inline-flex min-w-0 items-center gap-1",
-        props.interactive &&
-          editing &&
-          ghost &&
-          "rounded-sm border border-dashed border-border/60 px-1 opacity-70",
-      )}
+      className="inline-flex min-w-0 items-center gap-1"
       data-testid={`status-bar-provider-segment-${segment.providerId}`}
       data-provider-id={segment.providerId}
       data-profile-id={segment.profileId ?? ""}
@@ -244,6 +225,7 @@ function SegmentBody(props: StatusBarProviderSegmentProps): ReactNode {
             window={window}
             percentMode={props.percentMode}
             showModeWord={parts.modeWord}
+            showPercent={parts.percent}
             showTimer={parts.timer}
             // The provider's live windows, not the ones the selection draws:
             // a provider drawing its tightest alone still has to say which of
@@ -268,13 +250,18 @@ function SegmentBody(props: StatusBarProviderSegmentProps): ReactNode {
  *
  * The percentage is its own span, and the only tinted one. Severity is a fact
  * about the reading rather than a preference about it, so it survives every
- * switch — including the one that takes the mini bar away, which is the only
- * other place this colour appears.
+ * switch that keeps the percentage - including the one that takes the mini bar
+ * away, which is the only other place this colour appears.
+ *
+ * Switching the percentage itself off leaves the window's own label (and the
+ * mode word and countdown, where those are on), which is what makes the bar a
+ * reading in its own right rather than a decoration beside a number.
  */
 function StatusBarWindowText(props: {
   readonly window: StatusBarRateLimitWindow;
-  readonly percentMode: PercentMode;
+  readonly percentMode: AmountMode;
   readonly showModeWord: boolean;
+  readonly showPercent: boolean;
   readonly showTimer: boolean;
   readonly visibleWindowCount: number;
 }): ReactNode {
@@ -296,13 +283,19 @@ function StatusBarWindowText(props: {
       className="whitespace-nowrap"
       data-testid={`status-bar-window-${window.windowKey}`}
     >
-      <span
-        data-testid={`status-bar-window-percent-${window.windowKey}`}
-        className={rateLimitWindowSeverityTextClassName(window.severity)}
-      >
-        {windowPercentValueText(window.usedPercent, props.percentMode)}
-      </span>
-      {` ${suffix}`}
+      {props.showPercent ? (
+        <>
+          <span
+            data-testid={`status-bar-window-percent-${window.windowKey}`}
+            className={rateLimitWindowSeverityTextClassName(window.severity)}
+          >
+            {windowPercentValueText(window.usedPercent, props.percentMode)}
+          </span>
+          {` ${suffix}`}
+        </>
+      ) : (
+        suffix
+      )}
     </span>
   );
 }

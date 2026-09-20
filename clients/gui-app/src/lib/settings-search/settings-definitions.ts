@@ -15,7 +15,7 @@
  * React-free and leaf: a `*.definitions.ts` collection may import this module
  * and the availability predicates, never the assembled index or its consumer.
  */
-import type { CustomizeSettingId } from "@/lib/customize/customize-setting-id";
+import type { RegionId } from "@/lib/layout/region-id";
 import type { SettingsAvailabilityContext } from "@/lib/settings/settings-availability";
 import type { SettingsSectionId } from "@/lib/settings-sections";
 
@@ -54,16 +54,14 @@ export interface SettingsSearchEntry {
    */
   readonly anchor: string | null;
   /**
-   * The Customize setting this result LAUNCHES the editor on, or `null` for an
-   * ordinary result that navigates to `section` and reveals `anchor`.
+   * The layout region this result aims at, or `null` for an ordinary result
+   * that navigates to `section` and reveals `anchor`.
    *
    * A launch entry is not an anchor: it has no element to land on (its `anchor`
    * is `null`, and the `use-settings-anchor-reveal` watcher is never armed for
-   * it), so the exact-target invariant does not apply to it. `section` names
-   * the page whose breadcrumb it wears - Appearance, where the editor's card
-   * lives - not a page it opens.
+   * it), so the exact-target invariant does not apply to it.
    */
-  readonly launch: CustomizeSettingId | null;
+  readonly launch: RegionId | null;
   readonly kind: SettingsSearchEntryKind;
   /**
    * Whether this entry's element exists in the given shell — the SAME
@@ -105,8 +103,7 @@ export interface SettingsPageInput {
   /**
    * Whether the WHOLE page exists in the given shell. Composed into the page's
    * own entry and into every member's gate, so a member cannot be offered by
-   * search in a shell where its page is withheld - the Layout page is the one
-   * that is, once the Customize editor takes its rows over.
+   * search in a shell where its page is withheld.
    */
   readonly availableWhen: SettingsAvailability;
   readonly label: string;

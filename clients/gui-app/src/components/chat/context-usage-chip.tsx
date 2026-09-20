@@ -1,5 +1,11 @@
-import { useLayoutEffect, useRef, type CSSProperties, type Ref } from "react";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type Ref,
+} from "react";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import { FoldVertical, Pin, PinOff } from "lucide-react";
 import {
@@ -27,15 +33,10 @@ import {
   type ContextUsageRow,
   type EffectiveContextUsage,
 } from "@/components/chat/context-usage";
-import {
-  useComposerLayoutValue,
-  useLayoutSetting,
-} from "@/lib/layout-overrides";
+import { useArrangementValue, useRegionValue } from "@/lib/layout-overrides";
+import type { ContextStyle } from "@/lib/layout/layout-values";
 import { cn } from "@/lib/utils";
-import {
-  useSettingsStore,
-  type ContextIndicatorStyle,
-} from "@/stores/settings/settings-store";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 interface ContextUsageChipProps {
   /**
@@ -68,13 +69,9 @@ const PINNED_NUMBER_TRANSITION = {
 
 export function ContextUsageChip(props: ContextUsageChipProps) {
   const tileId = useComposerTileId();
-  const noUsage =
-    props.usage === null || computeEffectiveContextUsage(props.usage) === null;
-  const { ref, editing } = useLayoutHotspot({
-    settingId: "chat.context",
-    tileId,
-    ghost: noUsage,
-    condition: noUsage ? "no usage reported yet" : null,
+  const { ref, editing } = useLayoutRegion({
+    regionId: "contextUsage",
+    instanceId: tileId,
   });
   return <ContextUsageChipView {...props} ref={ref} contextEditing={editing} />;
 }
@@ -94,13 +91,16 @@ export function ContextUsageChipView({
   const pinnedUnpinActionRef = useRef<HTMLButtonElement>(null);
   const focusPinnedActionAfterPinRef = useRef(false);
   const focusCompactTriggerAfterUnpinRef = useRef(false);
-  const pinContextUsageBreakdown = useLayoutSetting("pinContextUsageBreakdown");
-  // The SETTER still comes straight from the store: an override changes what
-  // this subtree draws, never where a real user gesture writes.
-  const setPinContextUsageBreakdown = useSettingsStore(
-    (s) => s.setPinContextUsageBreakdown,
+  const pinContextUsageBreakdown = useRegionValue(
+    "contextUsage",
+    "pinBreakdown",
   );
-  const indicatorStyle = useLayoutSetting("contextIndicatorStyle");
+  // The SETTER still writes the real store: an override changes what this
+  // subtree draws, never where a real user gesture writes.
+  const setPinContextUsageBreakdown = useCallback((pinBreakdown: boolean) => {
+    useLayoutStore.getState().setRegionValues("contextUsage", { pinBreakdown });
+  }, []);
+  const indicatorStyle = useRegionValue("contextUsage", "style");
   const effective = computeEffectiveContextUsage(usage);
   const noUsage = usage === null || effective === null;
 
@@ -273,7 +273,7 @@ export function ContextUsageChipView({
 
 interface ContextUsageRingProps {
   readonly percent: number;
-  readonly style: Exclude<ContextIndicatorStyle, "text">;
+  readonly style: Exclude<ContextStyle, "text">;
 }
 
 // Same construction as `MicProgressRing` (`home/toolbar/composer-mic-button`)
@@ -373,7 +373,7 @@ interface CompactActionProps {
  * the same compaction.
  */
 function CompactAction({ onCompact }: CompactActionProps) {
-  const compactButton = useComposerLayoutValue("compactButton");
+  const compactButton = useRegionValue("contextUsage", "compactButton");
   if (compactButton === "hidden") return null;
   return (
     <TooltipWrapper
@@ -464,8 +464,8 @@ function ContextUsagePinnedStrip({
   onCompact,
   actionRef,
 }: ContextUsagePinnedStripProps) {
-  const fields = useLayoutSetting("pinnedContextBreakdownFields");
-  const order = useLayoutSetting("pinnedContextBreakdownOrder");
+  const fields = useRegionValue("contextUsage", "pinnedFields");
+  const order = useArrangementValue("pinnedContextFieldOrder");
   const visibleRows = order.flatMap((key) =>
     rows.filter((row) => row.key === key && fields.includes(key)),
   );

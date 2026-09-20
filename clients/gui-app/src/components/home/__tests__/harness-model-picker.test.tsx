@@ -674,9 +674,9 @@ import { useProvidersFocusStore } from "@/stores/settings/providers-focus-store"
 import { useProviderProfileAddFlowStore } from "@/stores/settings/provider-profile-add-flow-store";
 import { useKeybindingStore } from "@/stores/settings/keybinding-store";
 import {
-  DEFAULT_COMPOSER_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ALL_PERMISSION_MODES } from "@traycer/protocol/persistence/epic/foundation";
@@ -1160,7 +1160,7 @@ describe("<HarnessModelPicker />", () => {
     // seeded record can't leak between tests.
     useComposerHarnessMemoryStore.getState().resetForTests();
     useProviderProfileAddFlowStore.getState().close();
-    useLayoutStore.setState({ composer: DEFAULT_COMPOSER_LAYOUT });
+    useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   });
 
   afterEach(() => {
@@ -1274,7 +1274,7 @@ describe("<HarnessModelPicker />", () => {
   // that mount this picker follow, so the setting is proven where it is read
   // rather than only on the trigger in isolation.
   it("draws the effort as bars, and spells the position out in the tooltip, when the layout setting asks for bars", async () => {
-    useLayoutStore.getState().setComposerReasoningIndicator("bars");
+    useLayoutStore.getState().setRegionValues("model", { style: "bars" });
     renderPicker({
       selection: {
         harnessId: "codex",
@@ -4158,36 +4158,7 @@ describe("<HarnessModelPicker />", () => {
     expect(selections.at(-1)?.harnessId).toBe("claude");
   });
 
-  it("renders the thinking-effort slider in the picker footer", async () => {
-    const { reasoningChanges } = renderPicker({
-      reasoning: "high",
-      storeModels: [
-        model({
-          slug: "gpt-5.5",
-          label: "GPT-5.5",
-          supportedReasoningEfforts: [
-            { id: "low", label: "Low", description: null },
-            { id: "high", label: "High", description: null },
-          ],
-        }),
-      ],
-    });
-
-    await openPicker();
-
-    expect(
-      screen.getByRole("group", { name: "Thinking effort" }),
-    ).not.toBeNull();
-    const slider = screen.getByRole("slider", { name: "Thinking effort" });
-    expect(slider.getAttribute("aria-valuetext")).toBe("High");
-
-    fireEvent.keyDown(slider, { key: "ArrowLeft" });
-
-    expect(reasoningChanges).toEqual(["low"]);
-  });
-
-  it("renders thinking effort buttons in the picker footer under the list setting", async () => {
-    useLayoutStore.getState().setComposerReasoningFooterControl("list");
+  it("renders thinking effort buttons in the picker footer", async () => {
     const { reasoningChanges } = renderPicker({
       reasoning: "high",
       storeModels: [
@@ -4369,68 +4340,6 @@ describe("<HarnessModelPicker />", () => {
     });
 
     expect(reasoningChanges).toEqual(["high"]);
-  });
-
-  it("lights the slider's max treatment when the sub-leader digit lands on the last stop", async () => {
-    // The ⌥-digit chord reaches the level through `usePickerLeaderScope`,
-    // never touching the slider - so this is the route that proves the max
-    // treatment is a reading of the VALUE inside a presented picker, not of
-    // a gesture some handler in the strip happened to see. The sparkle field
-    // is gated on the picker's own `visibleOpen`, which only the real picker
-    // threads through.
-    renderPicker({
-      reasoning: "low",
-      storeModels: [
-        model({
-          slug: "gpt-5.5",
-          label: "GPT-5.5",
-          supportedReasoningEfforts: [
-            { id: "low", label: "Low", description: null },
-            { id: "high", label: "High", description: null },
-          ],
-        }),
-      ],
-    });
-
-    await openPicker();
-    expect(screen.queryByTestId("model-reasoning-max-sparkles")).toBeNull();
-
-    act(() => {
-      fireLeaderDigit(2, "alt", false);
-    });
-
-    const slider = screen.getByTestId("model-reasoning-slider");
-    expect(slider.getAttribute("data-max")).toBe("true");
-    expect(screen.getByTestId("model-reasoning-max-sparkles")).not.toBeNull();
-    expect(screen.getByTestId("model-reasoning-range").className).toContain(
-      "reasoning-effort-max-range",
-    );
-  });
-
-  it("leaves the slider static when the sub-leader digit lands short of the last stop", async () => {
-    renderPicker({
-      reasoning: "high",
-      storeModels: [
-        model({
-          slug: "gpt-5.5",
-          label: "GPT-5.5",
-          supportedReasoningEfforts: [
-            { id: "low", label: "Low", description: null },
-            { id: "high", label: "High", description: null },
-          ],
-        }),
-      ],
-    });
-
-    await openPicker();
-    act(() => {
-      fireLeaderDigit(1, "alt", false);
-    });
-
-    expect(
-      screen.getByTestId("model-reasoning-slider").getAttribute("data-max"),
-    ).toBeNull();
-    expect(screen.queryByTestId("model-reasoning-max-sparkles")).toBeNull();
   });
 
   it("sets the thinking level on the now-committed model after a rail switch", async () => {

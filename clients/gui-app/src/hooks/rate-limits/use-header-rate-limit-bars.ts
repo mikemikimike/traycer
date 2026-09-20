@@ -25,10 +25,8 @@ import {
   type ProviderRateLimitEnvelope,
 } from "@/lib/rate-limits/rate-limit-envelope";
 import { type RateLimitWindowSeverity } from "@/lib/rate-limits/window-severity";
-import {
-  useStatusBarShown,
-  type StatusBarHostShownProfiles,
-} from "@/stores/settings/layout-store";
+import type { StatusBarHostShownProfiles } from "@/lib/layout/layout-arrangement";
+import { useStatusBarShown } from "@/stores/layout/layout-store";
 
 /**
  * The two windows a glyph bar can stand for, in fixed draw order: a provider's

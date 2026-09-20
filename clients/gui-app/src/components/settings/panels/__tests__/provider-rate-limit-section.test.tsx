@@ -21,7 +21,7 @@ import type { ProviderRateLimits } from "@traycer/protocol/host";
 import type { ProviderRateLimitEnvelope } from "@/lib/rate-limits/rate-limit-envelope";
 import { envelopeFromRateLimits } from "@/lib/rate-limits/__tests__/rate-limit-envelope-fixtures";
 import { formatResetFullDateTime } from "@/lib/relative-time";
-import { useLayoutStore } from "@/stores/settings/layout-store";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 type TurnRefreshCall = {
   readonly providerId: string | null;
@@ -335,7 +335,9 @@ describe("ProviderRateLimitForProvider", () => {
     expect(screen.getByText("55% used")).toBeTruthy();
 
     act(() => {
-      useLayoutStore.getState().setStatusBarPercentMode("remaining");
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { amount: "remaining" });
     });
     expect(screen.getByText("88% remaining")).toBeTruthy();
     expect(screen.getByText("45% remaining")).toBeTruthy();

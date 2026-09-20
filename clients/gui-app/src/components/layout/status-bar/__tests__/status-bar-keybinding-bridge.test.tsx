@@ -5,9 +5,9 @@ import {
   type KeybindingRouter,
 } from "@/lib/keybindings/dispatch";
 import {
-  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
-} from "@/stores/settings/layout-store";
+} from "@/stores/layout/layout-store";
 import { setMobileApp } from "@/lib/mobile-app";
 import { StatusBarKeybindingBridge } from "@/components/layout/status-bar/status-bar-keybinding-bridge";
 
@@ -32,12 +32,12 @@ const NOOP_ROUTER: KeybindingRouter = {
 };
 
 function resetStore(): void {
-  useLayoutStore.setState({ statusBar: DEFAULT_STATUS_BAR_LAYOUT });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   window.localStorage.clear();
 }
 
 function placement(): string {
-  return useLayoutStore.getState().statusBar.placement;
+  return useLayoutStore.getState().arrangement.usageHost;
 }
 
 beforeEach(resetStore);
@@ -70,7 +70,10 @@ describe("<StatusBarKeybindingBridge />", () => {
     // Change placement out from under the handler by some other writer (the
     // Layout page, the context menu) between registration and dispatch.
     act(() => {
-      useLayoutStore.getState().setStatusBarPlacement("header");
+      useLayoutStore.getState().setArrangement({
+        ...useLayoutStore.getState().arrangement,
+        usageHost: "header",
+      });
     });
 
     act(() => {

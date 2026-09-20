@@ -1,19 +1,23 @@
-import { useSettingsStore } from "@/stores/settings/settings-store";
-import { isMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 import { SampleWorkspaceBody } from "./sample-workspace-body";
 import { useEffect } from "react";
-import {
-  enterCustomize,
-  exitCustomize,
-  getSampleWorkspaceOpener,
-} from "@/lib/customize/enter-exit";
 import { useTabsStore } from "@/stores/tabs/store";
-import { useCustomizeStore } from "@/stores/customize/customize-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
 // A window has one canonical sample tab; a replacement mount takes ownership.
 let activationGeneration = 0;
 
+/**
+ * The sample canvas (L-15), which exists only for a live sample-scene session.
+ *
+ * The editor's one door decides the scene and opens this tab; this surface
+ * owns the other end of that lifetime. Closing the tab ends the session, and a
+ * session that ended elsewhere (Done, Discard, a lost lease) closes the tab -
+ * so the two can never be left disagreeing about whether the editor is open.
+ *
+ * The width threshold is NOT read here: `SampleSceneProvider` covers the real
+ * shell as well as this body, and closes the tab on a narrow window.
+ */
 export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
   const active = useTabsStore(
     (state) => state.activeItemId === `tab:sample-workspace:${tabId}`,
@@ -21,12 +25,7 @@ export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
   useEffect(() => {
     const generation = ++activationGeneration;
     if (!active) return;
-    enterCustomize({
-      scene: "sample",
-      opener: getSampleWorkspaceOpener(),
-      target: null,
-    });
-    const session = useCustomizeStore.getState().session;
+    const session = useLayoutEditorStore.getState().session;
     return () => {
       // StrictMode immediately sets up the same activation again. A real
       // unmount has no next setup and releases ownership in this microtask.
@@ -34,33 +33,21 @@ export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
         if (
           activationGeneration === generation &&
           session?.scene === "sample" &&
-          useCustomizeStore.getState().session === session
+          useLayoutEditorStore.getState().session === session
         )
-          exitCustomize("studio-closed");
+          useLayoutEditorStore.getState().endSession();
       });
     };
   }, [active]);
   useEffect(() => {
-    const closeIfUnavailable = () => {
-      if (
-        useSettingsStore.getState().visualLayoutEditorEnabled &&
-        !isMobileViewport()
-      )
-        return;
-      if (useCustomizeStore.getState().session?.scene === "sample")
-        exitCustomize(isMobileViewport() ? "below-md" : "switch-off");
+    const closeWithoutSession = (): void => {
+      if (useLayoutEditorStore.getState().session?.scene === "sample") return;
       tabCommandCoordinator.closeRefAfterConfirmed({
         kind: "sample-workspace",
         id: tabId,
       });
     };
-    const unsubscribe = useSettingsStore.subscribe(closeIfUnavailable);
-    window.addEventListener("resize", closeIfUnavailable);
-    closeIfUnavailable();
-    return () => {
-      unsubscribe();
-      window.removeEventListener("resize", closeIfUnavailable);
-    };
+    return useLayoutEditorStore.subscribe(closeWithoutSession);
   }, [tabId]);
   return (
     <div className="flex h-full min-h-0 flex-col" data-sample-workspace>

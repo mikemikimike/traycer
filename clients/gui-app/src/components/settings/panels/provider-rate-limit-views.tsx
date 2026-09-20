@@ -54,7 +54,7 @@ import {
 } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { windowPercentText } from "@/lib/rate-limits/status-bar-window-text";
-import { useLayoutStore } from "@/stores/settings/layout-store";
+import { useRegionValue } from "@/lib/layout-overrides";
 import {
   selectEarliestExpiringCodexResetCredit,
   visibleCodexResetCredits,
@@ -303,9 +303,7 @@ function WindowMeterDetail({
   readonly resetsAt: number | null;
   readonly usedPercent: number;
 }): ReactNode {
-  const percentMode = useLayoutStore(
-    (state) => state.statusBar.rateLimits.percentMode,
-  );
+  const percentMode = useRegionValue("usageLimits", "amount");
   return (
     <span className="flex items-center gap-1">
       <span>{windowPercentText(usedPercent, percentMode)}</span>

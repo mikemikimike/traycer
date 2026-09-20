@@ -5,7 +5,7 @@ import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { Kbd } from "@/components/ui/kbd";
 import { ShortcutHint } from "@/components/ui/shortcut-hint";
 import { HarnessModelTrigger } from "@/components/home/pickers/harness-model-trigger";
-import { useLayoutHotspot } from "@/components/customize/use-layout-hotspot";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import {
   findUpgradeServiceTierForModel,
@@ -85,8 +85,8 @@ import { useSystemTabModalActions } from "@/stores/tabs/use-system-tab-modal";
 import { useRegisterActiveModelPicker } from "@/hooks/command-palette/use-register-active-model-picker";
 import { useBindingForAction } from "@/stores/settings/keybinding-store";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
-import { useComposerLayoutValue } from "@/lib/layout-overrides";
-import type { ComposerReasoningIndicator } from "@/stores/settings/layout-store";
+import { useRegionValue } from "@/lib/layout-overrides";
+import type { ModelStyle } from "@/lib/layout/layout-values";
 import { useProvidersListForClient } from "@/hooks/providers/use-providers-list-query";
 import { useProviderProfileEnablementPending } from "@/hooks/providers/use-providers-set-profile-enabled-mutation";
 import { useHostClientForHostId } from "@/hooks/host/use-host-client-for-host-id";
@@ -1019,17 +1019,15 @@ function HarnessModelPickerImpl(props: HarnessModelPickerProps) {
     activityEnabled,
   );
   const tileId = useComposerTileId();
-  const { ref: modelHotspotRef } = useLayoutHotspot({
-    settingId: "composer.model",
-    tileId,
-    ghost: false,
-    condition: null,
+  const { ref: modelHotspotRef } = useLayoutRegion({
+    regionId: "model",
+    instanceId: tileId,
   });
   const selectedHarnessLabel = selectedHarness?.label ?? selection.harnessId;
   // Layout ▸ Composer ▸ Reasoning level. Read here rather than in the trigger
   // so the chip stays a pure function of its props, and both surfaces that
   // mount this picker (the chat composer, the terminal launcher) follow it.
-  const reasoningIndicator = useComposerLayoutValue("reasoningIndicator");
+  const reasoningIndicator = useRegionValue("model", "style");
   const tooltipLabel = (
     <HarnessModelPickerTooltip
       harnessLabel={selectedHarnessLabel}
@@ -1161,13 +1159,11 @@ export const HarnessModelPicker = memo(HarnessModelPickerSurface);
 function PresentationHarnessModelPicker(props: HarnessModelPickerProps) {
   const selection = useStore(props.store, (state) => state.selection);
   const tileId = useComposerTileId();
-  const { ref } = useLayoutHotspot({
-    settingId: "composer.model",
-    tileId,
-    ghost: false,
-    condition: "",
+  const { ref } = useLayoutRegion({
+    regionId: "model",
+    instanceId: tileId,
   });
-  const reasoningIndicator = useComposerLayoutValue("reasoningIndicator");
+  const reasoningIndicator = useRegionValue("model", "style");
   return (
     <HarnessModelTrigger
       ref={ref}
@@ -1248,7 +1244,7 @@ function TooltipSummaryRow({
  * only draws. The `text` mode keeps the bare name - the chip already says it.
  */
 function reasoningTooltipLabel(
-  reasoningIndicator: ComposerReasoningIndicator,
+  reasoningIndicator: ModelStyle,
   reasoningLabel: string | null,
   reasoningStep: ReasoningStep | null,
 ): string | null {

@@ -12,7 +12,7 @@ import {
   type ResourcesStreamClientFactory,
 } from "@/stores/resources/resources-store";
 import { getResourcesStreamClientFactoryOverride } from "@/providers/resources-stream-factory-override";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useRegionShown } from "@/lib/layout-overrides";
 
 export interface ResourcesStreamMountProps {
   readonly epicId: string;
@@ -50,13 +50,11 @@ export function ResourcesStreamMount(
   const hostId = useStreamHostId();
   const resourcesSupport = useStreamMethodSupport("resources.subscribe");
   const resourcesUnsupported = resourcesSupport === "unsupported";
-  const showGlobalResourceMonitor = useSettingsStore(
-    (state) => state.showGlobalResourceMonitor,
-  );
-  const navigatorChipsWanted = useSettingsStore(
-    (state) => state.navigatorResourceMetrics.length > 0,
-  );
-  const streamWanted = showGlobalResourceMonitor || navigatorChipsWanted;
+  // One switch owns the readings (L-48): with the resource monitor hidden
+  // there is no strip segment and no header button, and the stream that feeds
+  // them - and the sidebar's own chips, which read the same projection - does
+  // not connect at all.
+  const streamWanted = useRegionShown("resourceMonitor");
 
   useEffect(() => {
     if (resourcesUnsupported || !streamWanted) return;

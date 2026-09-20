@@ -8,10 +8,8 @@ import {
   selectLastProfileByHarness,
   useComposerHarnessMemoryStore,
 } from "@/stores/composer/composer-harness-memory-store";
-import {
-  useLayoutStore,
-  type StatusBarHostShownProfiles,
-} from "@/stores/settings/layout-store";
+import type { StatusBarHostShownProfiles } from "@/lib/layout/layout-arrangement";
+import { useLayoutArrangement } from "@/lib/layout-overrides";
 
 /**
  * Everything the usage surfaces need to decide WHICH ACCOUNTS a provider's
@@ -59,14 +57,11 @@ export interface RateLimitProfileSelection {
 export function useRateLimitProfileSelection(
   hostId: string | null,
 ): RateLimitProfileSelection {
-  const shownProfiles = useLayoutStore(
-    useShallow((state) =>
-      hostId === null
-        ? NO_HOST_SHOWN_PROFILES
-        : (state.statusBar.rateLimits.shownProfiles[hostId] ??
-          NO_HOST_SHOWN_PROFILES),
-    ),
-  );
+  const arrangement = useLayoutArrangement();
+  const shownProfiles =
+    hostId === null
+      ? NO_HOST_SHOWN_PROFILES
+      : (arrangement.shownProfiles[hostId] ?? NO_HOST_SHOWN_PROFILES);
   const lastProfileByHarness = useComposerHarnessMemoryStore(
     useShallow((state) => selectLastProfileByHarness(state, hostId)),
   );
