@@ -84,7 +84,14 @@ function ComposerAreaImpl({
         >
           {utilityRail}
         </div>
-        <div data-composer-editor-frame="" className="px-4 pt-4">
+        {/* The message box is non-editable chrome and dims while a layout
+            session is live (4.2). The toolbar below it is not marked: it is
+            where the composer's own regions live. */}
+        <div
+          data-composer-editor-frame=""
+          data-layout-passive
+          className="px-4 pt-4"
+        >
           <div
             data-composer-attachment-rail=""
             className="flex min-w-0 items-start gap-2 pb-2 empty:hidden"

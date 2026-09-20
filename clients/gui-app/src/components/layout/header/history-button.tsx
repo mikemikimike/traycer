@@ -33,6 +33,8 @@ export function HistoryButton() {
         type="button"
         variant="muted"
         size="icon-sm"
+        // Non-editable chrome, dimmed while a layout session is live (4.2).
+        data-layout-passive
         aria-label="History"
         aria-haspopup="dialog"
         aria-expanded={isActive}

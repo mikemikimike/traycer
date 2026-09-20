@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useEpicViewTabId } from "@/components/epic-canvas/view-tab-context";
 import { usePaneVisible } from "@/components/epic-tabs/pane-visibility-context";
+import { useRegionValue } from "@/lib/layout-overrides";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,
+  regionGhostRequested,
   useLayoutEditorStore,
   type LayoutEditorState,
   type RegionInstance,
@@ -30,11 +32,20 @@ export function useLayoutRegion(input: {
 }): {
   readonly ref: (node: HTMLElement | null) => void;
   readonly editing: boolean;
+  /**
+   * Whether a HIDDEN region should materialise in place right now (L-14).
+   *
+   * The host renders its real control on this, and the decoration CSS draws it
+   * at low opacity so it reads as a preview rather than as a setting that came
+   * back on. A region the user has not hidden never sees it.
+   */
+  readonly ghost: boolean;
 } {
   const { regionId, instanceId } = input;
   const viewTabId = useEpicViewTabId();
   const visible = usePaneVisible();
   const editing = useLayoutEditorStore((state) => state.session !== null);
+  const ghost = useRegionGhost(regionId);
   const nodeRef = useRef<HTMLElement | null>(null);
   const registered = useRef<RegionInstance | null>(null);
 
@@ -101,7 +112,37 @@ export function useLayoutRegion(input: {
     };
   }, [sync]);
 
-  return { ref, editing };
+  // After the commit that mounted the materialised control, not from the store
+  // subscription above: the node the flag belongs on is the one this render
+  // just produced.
+  useEffect(() => {
+    const node = registered.current?.node ?? null;
+    if (node === null) return;
+    flag(node, "data-ghost", ghost);
+  });
+
+  return { ref, editing, ghost };
+}
+
+/**
+ * Whether a region the user has HIDDEN should appear anyway, right now (L-14).
+ *
+ * Separate from {@link useLayoutRegion} because the mount decision and the
+ * registration are usually in different components: the strip decides whether
+ * the Home item exists, the Home item registers the region. Both ask this, and
+ * they cannot disagree.
+ *
+ * Only for a materialisation that is genuinely passive - a view over data the
+ * app already holds. A region whose control fetches, streams or claims a
+ * keyboard action stays absent while hidden and appears in the index with its
+ * state word instead (4.9): a preview may not start work.
+ */
+export function useRegionGhost(regionId: RegionId): boolean {
+  const hidden = useRegionValue(regionId, "shown") === "hidden";
+  const requested = useLayoutEditorStore((state) =>
+    regionGhostRequested(state, regionId),
+  );
+  return hidden && requested;
 }
 
 /**
@@ -147,4 +188,5 @@ function strip(node: HTMLElement): void {
   node.removeAttribute("data-layout-anchor");
   node.removeAttribute("data-hover");
   node.removeAttribute("data-selected");
+  node.removeAttribute("data-ghost");
 }

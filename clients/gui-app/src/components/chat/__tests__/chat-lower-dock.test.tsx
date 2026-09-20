@@ -435,14 +435,14 @@ const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
   "background",
 ];
 
-function dockHotspot(ghost: boolean): DockRowHotspot {
+function dockHotspot(hasContent: boolean): DockRowHotspot {
   return {
     hotspotRef: () => undefined,
-    // Every dock region in this suite is shown; only `folded` and `ghost`
-    // are what these tests are about.
+    // Every dock region in this suite is shown and none is materialising; only
+    // `folded` and whether the row has content are what these tests are about.
     shown: true,
-    ghost,
-    condition: "",
+    hasContent,
+    ghost: false,
     editing: false,
   };
 }
@@ -454,13 +454,13 @@ function dockHotspotsFor(
   input: DockInput,
 ): Readonly<Record<ChatDockSection, DockRowHotspot>> {
   return {
-    filesChanged: dockHotspot(input.changes.length === 0),
+    filesChanged: dockHotspot(input.changes.length > 0),
     activeAgents: dockHotspot(
-      !(input.activeAgents.length > 0 && input.selfAgent !== null),
+      input.activeAgents.length > 0 && input.selfAgent !== null,
     ),
     background: dockHotspot(
-      (input.backgroundItems?.length ?? 0) === 0 &&
-        input.heldManagedCommandCount === 0,
+      (input.backgroundItems?.length ?? 0) > 0 ||
+        input.heldManagedCommandCount > 0,
     ),
   };
 }

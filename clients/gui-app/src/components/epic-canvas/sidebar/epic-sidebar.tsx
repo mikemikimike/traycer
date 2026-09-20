@@ -704,6 +704,10 @@ export function EpicLeftPanelHost(props: EpicLeftPanelHostProps) {
       side={side ?? "left"}
       collapsible="none"
       className="w-full"
+      // The panel body is non-editable chrome and dims while a layout session
+      // is live (4.2). The rail beside it is a sibling, not a descendant, so
+      // its per-panel regions are untouched by this.
+      data-layout-passive
       data-testid="epic-sidebar"
       data-epic-id={epicId}
       data-left-panel-id={primaryPanel.id}
@@ -769,6 +773,7 @@ export function EpicLeftPanelLoadingHost(props: EpicLeftPanelHostProps) {
       side={side ?? "left"}
       collapsible="none"
       className="w-full"
+      data-layout-passive
       data-testid="epic-sidebar"
       data-epic-id={epicId}
       data-left-panel-id={primaryPanel.id}

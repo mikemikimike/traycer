@@ -56,7 +56,15 @@ function HistoryNavArrows() {
       ? "Go forward"
       : `Go forward (${formatChordForDisplay(forwardChord)})`;
   return (
-    <div className="flex shrink-0 items-center" style={NO_DRAG_STYLE}>
+    // Non-editable chrome: the layout editor dims this cluster while a session
+    // is live (4.2). The marker sits on the arrows' own box, which contains no
+    // customizable region - a `filter` on an ancestor of one would dim the
+    // region it contains.
+    <div
+      data-layout-passive
+      className="flex shrink-0 items-center"
+      style={NO_DRAG_STYLE}
+    >
       {/* Tooltip trigger is the wrapping <span>, not the Button: a disabled
           Button receives no pointer events, so a tooltip attached directly to it
           would vanish exactly when the arrow is disabled - the moment a user most

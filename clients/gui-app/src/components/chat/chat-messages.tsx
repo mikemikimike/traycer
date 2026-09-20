@@ -2789,10 +2789,17 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
   const quoteReplyEnabled = useSettingsStore(
     (state) => state.quoteReplyEnabled,
   );
-  const minimapShown = useRegionShown("minimap");
   const minimapSide = useArrangementValue("minimapSide");
   const isMobileViewport = useIsMobileViewport();
   const coarsePointer = useCoarsePointer();
+  const { ref: minimapHotspotRef, ghost: minimapGhost } = useLayoutRegion({
+    regionId: "minimap",
+    instanceId: taskId,
+  });
+  // A hidden minimap materialises in place while the editor points at it
+  // (L-14). It is a pure view over rows the transcript already has, so
+  // drawing one costs nothing the chat was not already paying.
+  const minimapShown = useRegionShown("minimap") || minimapGhost;
   const minimapDrawn =
     hasContent &&
     shouldRunChatTurnMinimapRail({
@@ -2800,10 +2807,6 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
       coarsePointer,
       mobileViewport: isMobileViewport,
     });
-  const { ref: minimapHotspotRef } = useLayoutRegion({
-    regionId: "minimap",
-    instanceId: taskId,
-  });
   const quoteSelection = useQuoteSelection({
     containerRef: transcriptContainerRef,
     enabled: quoteReplyEnabled && visible && !systemOverlayActive,

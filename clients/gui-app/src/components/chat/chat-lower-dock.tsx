@@ -14,22 +14,27 @@ import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
 import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
 import type { AgentRow } from "@/hooks/agent/use-agent-stop-controls";
 import { QueuedMessagePanel } from "@/components/chat/queued-message-surface";
+import {
+  SampleChip,
+  SampleDockRow,
+} from "@/components/sample-workspace/sample-dock-rows";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
 
 import { cn } from "@/lib/utils";
 import type { ChatPinnedStackTopSpacing } from "@/components/chat/chat-pinned-stack";
 
 /** One dock row's hotspot, registered by the tile regardless of which of the
- *  three anchors (ghost row here, real row here, or the compact chip in the
+ *  three anchors (sample row here, real row here, or the compact chip in the
  *  composer strip) currently carries it. */
 export interface DockRowHotspot {
   readonly hotspotRef: (node: HTMLElement | null) => void;
   /** The region's own Shown value - a hidden row draws neither row nor chip. */
   readonly shown: boolean;
-  /** No content at all - the region has nothing to anchor to but this row's
-   *  own ghost placeholder, regardless of the Row/Chip preference. */
+  /** Whether this chat has live content for the row right now. With none, an
+   *  editor session draws the sample leaf in its place instead (L-16). */
+  readonly hasContent: boolean;
+  /** A hidden row materialising because the editor is pointing at it (L-14). */
   readonly ghost: boolean;
-  readonly condition: string;
   readonly editing: boolean;
 }
 
@@ -103,12 +108,16 @@ interface LiveChatLowerDockProps {
 interface DockRowPlan {
   readonly section: ChatDockSection;
   readonly hotspot: DockRowHotspot;
-  readonly showGhost: boolean;
+  readonly showSample: boolean;
   readonly showRow: boolean;
 }
 
+/**
+ * The sample workspace's dock: every row is a sample leaf, because the scene
+ * has no chat behind it at all.
+ */
 interface PresentationChatLowerDockProps {
-  readonly presentationRows: Readonly<Record<ChatDockSection, ReactNode>>;
+  readonly presentation: true;
   readonly folded: ReadonlySet<ChatDockSection>;
   readonly dockOrder: ReadonlyArray<ChatDockSection>;
   readonly hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>>;
@@ -118,28 +127,40 @@ export type ChatLowerDockProps =
   | LiveChatLowerDockProps
   | PresentationChatLowerDockProps;
 
+/**
+ * Whether a row draws, and as what.
+ *
+ * A hidden row draws nothing at rest and materialises while the editor points
+ * at it (L-14). A drawn row with no live content draws the sample leaf while a
+ * session is live, so a `sampleFilled` region always has a node to hover, name
+ * and drag (L-16, 4.9) - and never over real content, which wins outright.
+ */
 function planDockRow(
   section: ChatDockSection,
   hotspot: DockRowHotspot,
   folded: ReadonlySet<ChatDockSection>,
+  presentation: boolean,
 ): DockRowPlan {
+  const unfolded = (hotspot.shown || hotspot.ghost) && !folded.has(section);
+  // The sample scene has no chat behind it, so it never has live content.
+  const hasContent = !presentation && hotspot.hasContent;
   return {
     section,
     hotspot,
-    showGhost: (hotspot.ghost || !hotspot.shown) && hotspot.editing,
-    showRow: hotspot.shown && !hotspot.ghost && !folded.has(section),
+    showSample: unfolded && !hasContent && (presentation || hotspot.editing),
+    showRow: unfolded && hasContent,
   };
 }
 
 export function ChatLowerDock(props: ChatLowerDockProps) {
-  const live = "presentationRows" in props ? null : props;
+  const live = "presentation" in props ? null : props;
   const todoVisible =
     live !== null && live.snapshotLoaded && live.todo !== null;
   const queueVisible = live !== null && live.queue.items.length > 0;
   const rows = props.dockOrder.map((section) =>
-    planDockRow(section, props.hotspots[section], props.folded),
+    planDockRow(section, props.hotspots[section], props.folded, live === null),
   );
-  const anyRowVisible = rows.some((row) => row.showGhost || row.showRow);
+  const anyRowVisible = rows.some((row) => row.showSample || row.showRow);
 
   if (!todoVisible && !queueVisible && !anyRowVisible) {
     return null;
@@ -167,7 +188,7 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
           {dockRows({
             rows,
             separatedBefore: queueVisible || todoVisible,
-            dock: props,
+            dock: live,
           })}
         </div>
       </div>
@@ -188,24 +209,25 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
 function dockRows(props: {
   readonly rows: ReadonlyArray<DockRowPlan>;
   readonly separatedBefore: boolean;
-  readonly dock: ChatLowerDockProps;
+  /** `null` in the sample scene, where every row is a sample leaf. */
+  readonly dock: LiveChatLowerDockProps | null;
 }): ReactNode {
   let separated = props.separatedBefore;
   const nodes: ReactNode[] = [];
   for (const row of props.rows) {
-    if (row.showGhost) {
+    if (row.showSample) {
       nodes.push(
-        dockGhostRow({
+        dockSampleRow({
           key: row.section,
+          section: row.section,
           hotspotRef: row.hotspot.hotspotRef,
-          condition: row.hotspot.condition,
           separated,
         }),
       );
       separated = true;
       continue;
     }
-    if (!row.showRow) continue;
+    if (!row.showRow || props.dock === null) continue;
     nodes.push(
       dockRow({
         key: row.section,
@@ -221,25 +243,31 @@ function dockRows(props: {
   return nodes;
 }
 
-function dockGhostRow(props: {
+/**
+ * The region's real leaf, drawn from sample data because this chat has none
+ * (L-16). `data-sample` is what the decoration CSS keys the "Sample" mark off,
+ * and the node is the region's own, so it hovers, names and drags exactly as a
+ * row with live content in it does.
+ */
+function dockSampleRow(props: {
   readonly key: string;
+  readonly section: ChatDockSection;
   readonly hotspotRef: (node: HTMLElement | null) => void;
-  readonly condition: string;
   readonly separated: boolean;
 }): ReactNode {
   return (
     <div
       key={props.key}
       ref={props.hotspotRef}
-      data-testid="chat-dock-ghost-row"
+      data-sample=""
+      data-testid="chat-dock-sample-row"
       className={cn(
-        "flex items-center px-3 py-2 text-ui-xs text-muted-foreground/60",
+        "relative min-w-0",
         props.separated && "border-t border-border/50",
       )}
     >
-      <span className="border-b border-dashed border-muted-foreground/40 pb-px">
-        {props.condition}
-      </span>
+      <SampleChip />
+      <SampleDockRow section={props.section} />
     </div>
   );
 }
@@ -250,22 +278,9 @@ function dockRow(props: {
   readonly editing: boolean;
   readonly hotspotRef: (node: HTMLElement | null) => void;
   readonly separated: boolean;
-  readonly dock: ChatLowerDockProps;
+  readonly dock: LiveChatLowerDockProps;
 }): ReactNode {
   const { dock } = props;
-  if ("presentationRows" in dock)
-    return (
-      <div
-        key={props.key}
-        ref={props.hotspotRef}
-        className={cn(
-          "min-w-0",
-          props.separated && "border-t border-border/50",
-        )}
-      >
-        {dock.presentationRows[props.section]}
-      </div>
-    );
   if (props.section === "filesChanged") {
     return (
       <span

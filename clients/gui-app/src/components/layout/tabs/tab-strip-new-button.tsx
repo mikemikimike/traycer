@@ -26,6 +26,8 @@ export function TabStripNewButton(
     >
       <button
         type="button"
+        // Non-editable chrome, dimmed while a layout session is live (4.2).
+        data-layout-passive
         data-testid="tab-new"
         aria-label={NEW_TAB_PLACEHOLDER}
         onClick={onNewTab}

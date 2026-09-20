@@ -308,6 +308,10 @@ export function ChatDockWorkspaceControls(props: {
 }): ReactNode {
   return (
     <>
+      {/* No passive marker on this cell: the compact strip inside it carries
+          the three dock regions, and a `filter` above a region dims the region
+          too. The host / workspace label marks its own root instead - see
+          `host-workspace-selector.tsx`. */}
       <div className="flex min-w-0 items-center gap-2 overflow-hidden">
         {props.hostWorkspaceSelector}
         <ChatDockCompactStrip />
@@ -435,7 +439,8 @@ export function ChatLowerInteractionSurfaces(
   });
   const todoVisible = props.runtime.snapshotLoaded && props.todo !== null;
   const dockFilesChangedVisible =
-    !chrome.hotspots.filesChanged.ghost && !chrome.folded.has("filesChanged");
+    chrome.hotspots.filesChanged.hasContent &&
+    !chrome.folded.has("filesChanged");
   // Kept as one boolean (rather than two) for the scroll-budget calc below,
   // which has always treated Todo and Files changed as a single pressure
   // unit - unchanged now that Files changed can render apart from Todo.
@@ -660,7 +665,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // The row's own content gate (self + descendants), not the chip's broader
   // one: a received-only queue item with no descendants keeps the chip alive
   // (see `agentsChip` below) but the panel this hotspot anchors has nothing of
-  // its own to draw, so it is not what "ghost" is asking about here.
+  // its own to draw, which is what decides whether the row is sample-filled.
   const activeAgentsHasContent = input.activeAgentsVisible;
   const filesChangedHotspot = useLayoutRegion({
     regionId: "changedFiles",
@@ -902,22 +907,22 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     filesChanged: {
       hotspotRef: filesChangedHotspot.ref,
       shown: changedFilesValues.shown === "shown",
-      ghost: !changesPresent,
-      condition: "nothing changed in this chat",
+      hasContent: changesPresent,
+      ghost: filesChangedHotspot.ghost,
       editing: filesChangedHotspot.editing,
     },
     activeAgents: {
       hotspotRef: activeAgentsHotspot.ref,
       shown: runningAgentsValues.shown === "shown",
-      ghost: !activeAgentsHasContent,
-      condition: "no agents running",
+      hasContent: activeAgentsHasContent,
+      ghost: activeAgentsHotspot.ghost,
       editing: activeAgentsHotspot.editing,
     },
     background: {
       hotspotRef: backgroundHotspot.ref,
       shown: backgroundValues.shown === "shown",
-      ghost: !input.backgroundVisible,
-      condition: "nothing in the background",
+      hasContent: input.backgroundVisible,
+      ghost: backgroundHotspot.ghost,
       editing: backgroundHotspot.editing,
     },
   };

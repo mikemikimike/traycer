@@ -70,6 +70,8 @@ export function UserMenu(props: UserMenuProps) {
               variant="ghost"
               size="icon-sm"
               aria-label="Open user menu"
+              // Non-editable chrome, dimmed while a layout session is live (4.2).
+              data-layout-passive
               data-testid="user-menu-trigger"
               className="rounded-full"
               onClick={() => {

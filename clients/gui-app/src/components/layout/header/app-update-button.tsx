@@ -45,7 +45,8 @@ export function AppUpdateHeaderButton() {
         {/* Trigger off the span, not the Button: a disabled Button has
             `pointer-events-none`, so it would never fire the hover that opens
             the (block-reason) tooltip. */}
-        <span className="inline-flex">
+        {/* Non-editable chrome, dimmed while a layout session is live (4.2). */}
+        <span data-layout-passive className="inline-flex">
           <Button
             type="button"
             variant="ghost"
@@ -77,7 +78,7 @@ export function AppUpdateHeaderButton() {
       <TooltipWrapper label={label} side="top" sideOffset={6} align={undefined}>
         {/* Span trigger: the Button is always disabled here, so the tooltip
             (download %) must hang off an element that still receives hover. */}
-        <span className="inline-flex">
+        <span data-layout-passive className="inline-flex">
           <Button
             type="button"
             variant="info-ghost"
@@ -150,7 +151,7 @@ function AppUpdateReadyButton(props: {
     <TooltipWrapper label={label} side="top" sideOffset={6} align={undefined}>
       {/* Span trigger so the block-reason tooltip still opens when the Button
           is disabled (disabled Buttons have `pointer-events-none`). */}
-      <span className="inline-flex">
+      <span data-layout-passive className="inline-flex">
         <Button
           type="button"
           variant="ghost"

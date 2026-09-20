@@ -12,9 +12,6 @@ import {
   ChatDockCompactStripProvider,
 } from "@/components/chat/chat-dock-compact-strip";
 import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
-import { ActiveAgentsHeader } from "@/components/chat/chat-active-agents-panel";
-import { BackgroundItemsHeader } from "@/components/chat/chat-background-items-panel";
-import { FileChangeHeader } from "@/components/chat/segments/file-change-segment";
 import { SegmentRow } from "@/components/chat/segments/segment-row";
 import {
   ChatUserMessageContent,
@@ -29,7 +26,6 @@ import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile
 import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
 import { createComposerPickerStore } from "@/components/chat/composer/picker/composer-picker-store";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
-import { Collapsible } from "@/components/ui/collapsible";
 import {
   useArrangementValue,
   useRegionShown,
@@ -40,8 +36,6 @@ import { SampleWorkspaceRail } from "./sample-workspace-rail";
 import {
   CONTEXT_USAGE_PREVIEW_SAMPLE,
   SAMPLE_CHANGED_FILE,
-  SAMPLE_AGENT,
-  SAMPLE_BACKGROUND,
   SAMPLE_TOOLBAR_VALUES,
   SAMPLE_DOCK,
   SAMPLE_MINIMAP_ITEMS,
@@ -84,22 +78,22 @@ export function SampleWorkspaceBody() {
       hotspotRef: files.ref,
       editing: files.editing,
       shown: changedFiles.shown === "shown",
-      ghost: false,
-      condition: "",
+      hasContent: false,
+      ghost: files.ghost,
     },
     activeAgents: {
       hotspotRef: agents.ref,
       editing: agents.editing,
       shown: runningAgents.shown === "shown",
-      ghost: false,
-      condition: "",
+      hasContent: false,
+      ghost: agents.ghost,
     },
     background: {
       hotspotRef: background.ref,
       editing: background.editing,
       shown: backgroundValues.shown === "shown",
-      ghost: false,
-      condition: "",
+      hasContent: false,
+      ghost: background.ghost,
     },
   };
   const chipSizes: Readonly<Record<ChatDockSection, boolean>> = {
@@ -133,47 +127,7 @@ export function SampleWorkspaceBody() {
                 dockOrder={dockOrder}
                 hotspots={hotspots}
                 topSpacing="compact"
-                presentationRows={{
-                  filesChanged: (
-                    <div className="flex items-center gap-2 px-3 py-2">
-                      <span className="text-ui-xs text-muted-foreground">
-                        Sample
-                      </span>
-                      <FileChangeHeader
-                        filePath={SAMPLE_CHANGED_FILE.path}
-                        operation="edit"
-                        additions={SAMPLE_CHANGED_FILE.additions}
-                        deletions={SAMPLE_CHANGED_FILE.deletions}
-                        isStreaming={false}
-                        endState={null}
-                        reason="snapshot"
-                        clickHandlers={null}
-                      />
-                    </div>
-                  ),
-                  activeAgents: (
-                    <Collapsible open={false} variant="panel">
-                      <ActiveAgentsHeader
-                        open={false}
-                        runningCount={SAMPLE_AGENT.count}
-                      />
-                      <p className="px-3 pb-2 text-ui-xs text-muted-foreground">
-                        {SAMPLE_AGENT.label}
-                      </p>
-                    </Collapsible>
-                  ),
-                  background: (
-                    <Collapsible open={false} variant="panel">
-                      <BackgroundItemsHeader
-                        open={false}
-                        headerSummary={`${SAMPLE_BACKGROUND.count} running`}
-                      />
-                      <p className="px-3 pb-2 text-ui-xs text-muted-foreground">
-                        {SAMPLE_BACKGROUND.label}
-                      </p>
-                    </Collapsible>
-                  ),
-                }}
+                presentation
               />
               <div className="shrink-0 px-4 pb-2">
                 <div className="mx-auto w-full max-w-3xl">
@@ -216,7 +170,10 @@ export function SampleWorkspaceBody() {
                   <ComposerWorkspaceRow
                     workspaceControls={
                       <>
-                        <span className="min-w-0 text-ui-xs text-muted-foreground">
+                        <span
+                          data-layout-passive
+                          className="min-w-0 text-ui-xs text-muted-foreground"
+                        >
                           Sample workspace
                         </span>
                         <ChatDockCompactStrip />

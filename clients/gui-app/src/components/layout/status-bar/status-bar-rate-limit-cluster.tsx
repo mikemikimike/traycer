@@ -113,7 +113,9 @@ export function StatusBarRateLimitCluster(props: {
         scroller takes the room and this stays pinned beside its right edge.
         The `pl-1` is the gap between the two.
       */}
-      <span className="flex shrink-0 items-center pl-1">
+      {/* The refresh affordance is not a customizable region, so it dims with
+          the rest of the passive chrome while a layout session is live (4.2). */}
+      <span data-layout-passive className="flex shrink-0 items-center pl-1">
         <StatusBarRateLimitRefresh
           refresh={refresh}
           // Nothing to refresh is not the same as a refresh that failed, so

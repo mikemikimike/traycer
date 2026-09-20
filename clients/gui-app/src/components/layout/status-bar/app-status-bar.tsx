@@ -330,12 +330,16 @@ function menuProviders(
  * `connecting` needs a moment — which is why it alone offers no button. A
  * strip is not the place to explain a plan restriction or a host version, so
  * those keep landing in the popover, where there is room for the sentence.
+ *
+ * It is passive chrome for the layout editor (4.2): it takes the slot the
+ * usage segments would occupy and is not a region of its own.
  */
 function StatusBarHostNotice(props: { readonly scope: HostScope }): ReactNode {
   const scope = props.scope;
   if (scope.status === "connecting") {
     return (
       <span
+        data-layout-passive
         className="truncate text-muted-foreground"
         data-testid="status-bar-host-connecting"
       >
@@ -346,6 +350,7 @@ function StatusBarHostNotice(props: { readonly scope: HostScope }): ReactNode {
   return (
     <span
       role="status"
+      data-layout-passive
       className="flex min-w-0 items-center gap-2"
       data-testid="status-bar-host-unavailable"
     >

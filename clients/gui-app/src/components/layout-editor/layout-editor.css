@@ -76,6 +76,55 @@
 }
 
 /* ---------------------------------------------------------------
+   Materialised hidden regions (L-14)
+
+   No ghosts at rest: a hidden region is absent until its index row is
+   hovered or selected, and then its REAL control appears in place, low
+   enough to read as a preview rather than as a setting that came back on.
+   The `filter` and `transform` here are on the region itself, never on an
+   ancestor of one.
+   --------------------------------------------------------------- */
+
+[data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
+  opacity: 0.4;
+  animation: layout-region-materialise 180ms var(--layout-editor-ease) both;
+}
+
+@keyframes layout-region-materialise {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 0.4;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+/* ---------------------------------------------------------------
+   Sample fill (L-16, 4.9)
+
+   A region with no live content draws its real leaf from sample data, so it
+   is still something to point at, name and drag. The mark that says so is
+   out of sight until the pointer or the selection is on that region: a
+   canvas tagged "Sample" everywhere is noise, and the one moment the word
+   earns its place is the moment the user is looking at the thing.
+   --------------------------------------------------------------- */
+
+[data-layout-sample-chip] {
+  display: none;
+}
+
+[data-layout-editing="1"]
+  [data-layout-region][data-sample]:is([data-hover="1"], [data-selected="1"])
+  [data-layout-sample-chip] {
+  display: inline-block;
+}
+
+/* ---------------------------------------------------------------
    Anchors (4.3)
 
    Two names rather than one, because the chip follows the pointer while the
@@ -186,6 +235,12 @@
   [data-layout-selection-ring] {
     transition: none;
   }
+
+  /* The materialised control still appears - that is the answer to "what is
+     hidden here" - it just arrives rather than being blurred into place. */
+  [data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
+    animation: none;
+  }
 }
 
 :root[data-reduce-panel-motion] [data-layout-passive] {
@@ -200,6 +255,12 @@
 
 :root[data-reduce-panel-motion] [data-layout-selection-ring] {
   transition: none;
+}
+
+:root[data-reduce-panel-motion]
+  [data-layout-editing="1"]
+  [data-layout-region][data-ghost="1"] {
+  animation: none;
 }
 
 /* ---------------------------------------------------------------
@@ -224,7 +285,8 @@
    --------------------------------------------------------------- */
 
 @media (forced-colors: active) {
-  [data-layout-editing="1"] [data-layout-passive] {
+  [data-layout-editing="1"] [data-layout-passive],
+  [data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
     opacity: 1;
     filter: none;
   }

@@ -260,6 +260,23 @@ export function preferredRegionInstance(
   return first;
 }
 
+/**
+ * Whether the editor is asking for this region to be on screen right now even
+ * though the user hid it (L-14).
+ *
+ * There are no ghosts at rest: a hidden region materialises in place only
+ * while its index row is hovered or selected, and vanishes again the moment
+ * the pointer leaves. Whether it is actually hidden is the caller's question -
+ * this one only says whether the editor is pointing at it.
+ */
+export function regionGhostRequested(
+  state: Pick<LayoutEditorState, "session" | "hovered" | "selected">,
+  regionId: RegionId,
+): boolean {
+  if (state.session === null) return false;
+  return state.hovered === regionId || state.selected === regionId;
+}
+
 /** Every live node for one region, in registration order (L-23). */
 export function regionInstances(
   state: Pick<LayoutEditorState, "instances">,

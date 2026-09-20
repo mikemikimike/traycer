@@ -482,6 +482,7 @@ export const ChatTimeline = memo(function ChatTimeline({
             "h-full overflow-x-hidden overflow-y-auto overscroll-y-contain [overflow-anchor:none]",
             className,
           )}
+          {...TRANSCRIPT_LAYOUT_PASSIVE}
           ListHeaderComponent={CHAT_TIMELINE_LIST_HEADER}
           ListFooterComponent={CHAT_TIMELINE_LIST_FOOTER}
           {...rest}
@@ -490,6 +491,17 @@ export const ChatTimeline = memo(function ChatTimeline({
     </NavigationHighlightStoreContext>
   );
 });
+
+/**
+ * The transcript body is non-editable chrome, so the layout editor dims it
+ * while a session is live (4.2). It is marked HERE rather than on the tile's
+ * transcript container, which is an ancestor of the minimap's region - a
+ * `filter` above a region would dim the region too.
+ *
+ * Spread rather than written as an attribute because the list's props are
+ * typed, and a lone `data-*` JSX attribute on them is an excess property.
+ */
+const TRANSCRIPT_LAYOUT_PASSIVE = { "data-layout-passive": "" };
 
 function chatTimelineKeyExtractor(item: TranscriptListRow): string {
   return item.key;

@@ -52,6 +52,7 @@ import { TabStripNewButton } from "@/components/layout/tabs/tab-strip-new-button
 import { TabStripHomeItem } from "@/components/layout/tabs/tab-strip-home-item";
 import { useHomeBadgeCount } from "@/components/home-focus/use-home-badge-count";
 import { useRegionShown } from "@/lib/layout-overrides";
+import { useRegionGhost } from "@/components/layout-editor/use-layout-region";
 import { useHorizontalWheelScroll } from "@/hooks/use-horizontal-wheel-scroll";
 import { useHeaderTabIndicators } from "./header-tab-presentation";
 import { NotificationIndicatorsProvider } from "@/components/notifications/notification-indicators-provider";
@@ -77,7 +78,7 @@ import {
 export function TabStrip() {
   const hasHydrated = useWindowsBridgeHydrated();
   const persistedStripCount = useTabsStore((s) => s.stripOrder.length);
-  const homeTabEnabled = useRegionShown("homeTab");
+  const homeTabEnabled = useHomeTabDrawn();
   if (!hasHydrated) {
     return (
       <TabStripSkeleton
@@ -102,7 +103,7 @@ function TabStripBody() {
   const modalActive = useAnySystemOverlayActive();
   const handleWheel = useHorizontalWheelScroll();
   const activeItemId = useTabsStore((state) => state.activeItemId);
-  const homeTabEnabled = useRegionShown("homeTab");
+  const homeTabEnabled = useHomeTabDrawn();
   // `activeItemId === null` over a populated strip means Home holds the
   // selection; over an empty one it means the same thing, since Home is the
   // only surface left to hold it.
@@ -357,8 +358,13 @@ function TabStripBody() {
           ) : null}
           <div className="relative flex min-w-0 max-w-full flex-[0_1_auto] items-end">
             <LayoutGroup id="header-tabs">
+              {/* The task tabs are non-editable chrome and dim while a layout
+                  session is live (4.2). The marker is on the scroller rather
+                  than on the strip root, which is an ancestor of the Home
+                  item's region. */}
               <div
                 ref={trailingSlotRef}
+                data-layout-passive
                 data-testid="header-tab-strip-scroll"
                 onWheel={handleWheel}
                 className="no-scrollbar flex min-w-0 max-w-full flex-[0_1_auto] touch-pan-x items-end overflow-x-auto overscroll-x-contain [-webkit-app-region:no-drag]"
@@ -429,6 +435,20 @@ function TabStripBody() {
       </ChatIndicatorHostScopes>
     </NotificationIndicatorsProvider>
   );
+}
+
+/**
+ * Whether the strip draws the Home item, which is its `shown` plus the
+ * editor's materialised preview of a hidden one (L-14). The item is a plain
+ * control over state the strip already has, so a preview of it starts nothing.
+ *
+ * Only the STRIP asks this: the route guards and the command coordinator that
+ * gate on Home ask `isHomeTabEnabled`, which never lies about the setting.
+ */
+function useHomeTabDrawn(): boolean {
+  const shown = useRegionShown("homeTab");
+  const ghost = useRegionGhost("homeTab");
+  return shown || ghost;
 }
 
 /**

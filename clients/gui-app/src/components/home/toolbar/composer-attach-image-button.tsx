@@ -35,12 +35,15 @@ export function ComposerAttachImageButton(
 ) {
   const { onAttachImages } = props;
   const inputRef = useRef<HTMLInputElement>(null);
-  const shown = useRegionShown("attachImage");
   const tileId = useComposerTileId();
-  const { ref: hotspotRef } = useLayoutRegion({
+  const { ref: hotspotRef, ghost } = useLayoutRegion({
     regionId: "attachImage",
     instanceId: tileId,
   });
+  // A hidden control materialises while the editor points at it (L-14); the
+  // button and its file input draw from props alone, so a preview starts
+  // nothing.
+  const shown = useRegionShown("attachImage") || ghost;
 
   const handleOpenImagePicker = useCallback(() => {
     const input = inputRef.current;

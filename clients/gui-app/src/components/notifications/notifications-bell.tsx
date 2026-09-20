@@ -206,6 +206,8 @@ export function NotificationsBell() {
             type="button"
             variant="ghost"
             size="icon-sm"
+            // Non-editable chrome, dimmed while a layout session is live (4.2).
+            data-layout-passive
             data-testid="notifications-bell"
             aria-label={ariaLabel}
             onPointerDown={onTriggerPointerDown}

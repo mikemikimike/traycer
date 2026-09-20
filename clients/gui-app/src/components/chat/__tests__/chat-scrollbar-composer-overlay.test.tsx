@@ -518,13 +518,14 @@ const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
   "background",
 ];
 
-function dockHotspot(ghost: boolean): DockRowHotspot {
+function dockHotspot(hasContent: boolean): DockRowHotspot {
   return {
     hotspotRef: () => undefined,
-    // Every dock region in this suite is shown; only `ghost` is under test.
+    // Every dock region in this suite is shown and none is materialising;
+    // only whether the row has live content is under test.
     shown: true,
-    ghost,
-    condition: "",
+    hasContent,
+    ghost: false,
     editing: false,
   };
 }
@@ -535,9 +536,9 @@ function dockHotspot(ghost: boolean): DockRowHotspot {
 const ONE_BACKGROUND_ITEM_DOCK_HOTSPOTS: Readonly<
   Record<ChatDockSection, DockRowHotspot>
 > = {
-  filesChanged: dockHotspot(true),
-  activeAgents: dockHotspot(true),
-  background: dockHotspot(false),
+  filesChanged: dockHotspot(false),
+  activeAgents: dockHotspot(false),
+  background: dockHotspot(true),
 };
 
 function viewerSurfacesProps(): ChatLowerInteractionSurfacesProps {
