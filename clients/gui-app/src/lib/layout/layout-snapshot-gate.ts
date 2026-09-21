@@ -59,3 +59,20 @@ export function claimLayoutSnapshotWindow(now: number): boolean {
   }
   return true;
 }
+
+/**
+ * Gives a claimed window back, for a send that did not go out (L-83, G3-04).
+ *
+ * The claim has to come first - two renderers launching together must not
+ * both count the same device - so the only way a rejected payload, a failed
+ * `posthog.init` or a future sanitizer rule does not cost a full day of the
+ * denominator per launch is to undo the claim afterwards. A failed send is
+ * not a race, so handing the window back cannot double-count anything.
+ */
+export function releaseLayoutSnapshotWindow(): void {
+  try {
+    localStorage.removeItem(LAYOUT_SNAPSHOT_KEY);
+  } catch {
+    // A device that cannot write cannot have claimed one either.
+  }
+}

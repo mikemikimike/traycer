@@ -43,6 +43,38 @@ export type AmountMode = "used" | "remaining";
  */
 export type ContextBreakdownField = ContextUsageRowKey;
 
+/**
+ * Every enum value some `LayoutValues` leaf can hold, as one list.
+ *
+ * A `Record` per enum rather than an array of each union, because a `Record`
+ * is what makes a new member a COMPILE error here - an array typed as the
+ * union does not have to be complete. The keys merge, so a value two enums
+ * share is named once.
+ *
+ * `lib/analytics.ts` validates every `layout_<region>_<key>` property against
+ * this set. Hand-listing it there let a fourth `ModelStyle` land with the
+ * allowlist behind, and a declared value that fails its validator drops the
+ * WHOLE `layout_snapshot` event for every user with nothing red anywhere
+ * (G3-03).
+ */
+export const LAYOUT_VALUE_ENUM_MEMBERS: ReadonlyArray<string> = Object.keys({
+  ...({ shown: true, hidden: true } satisfies Record<Visibility, true>),
+  ...({ auto: true, shown: true, hidden: true } satisfies Record<
+    RailVisibility,
+    true
+  >),
+  ...({ full: true, chip: true } satisfies Record<RegionSize, true>),
+  ...({ text: true, bars: true, "bars-text": true } satisfies Record<
+    ModelStyle,
+    true
+  >),
+  ...({ text: true, ring: true, "ring-only": true } satisfies Record<
+    ContextStyle,
+    true
+  >),
+  ...({ used: true, remaining: true } satisfies Record<AmountMode, true>),
+});
+
 export interface ShownValues {
   readonly shown: Visibility;
 }

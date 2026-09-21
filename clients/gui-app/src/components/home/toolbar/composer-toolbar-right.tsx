@@ -2,6 +2,8 @@ import { memo } from "react";
 import { useStore } from "zustand";
 
 import { ComposerSendButton } from "@/components/home/composer/composer-send-button";
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
+import { LayoutClusterContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useArrangementValue } from "@/lib/layout-overrides";
 import {
   renderToolbarItem,
@@ -32,8 +34,11 @@ function ComposerToolbarRightImpl(props: ComposerToolbarRightProps) {
   );
   const canSubmitResolved = props.canSubmit ? modelResolved : false;
 
-  return (
-    <div className="flex min-w-0 items-center justify-end gap-1">
+  const cluster = (
+    <div
+      {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
+      className="flex min-w-0 items-center justify-end gap-1"
+    >
       {order.map((id) => (
         <span key={id} className="contents" data-testid={`toolbar-item-${id}`}>
           {renderToolbarItem(id, props)}
@@ -52,6 +57,12 @@ function ComposerToolbarRightImpl(props: ComposerToolbarRightProps) {
       </span>
     </div>
   );
+
+  // One menu for the strip, naming whichever item the pointer was over
+  // (G3-10); the send button is no region, so a right-click on it opens
+  // nothing. A presentation copy gets no menu at all.
+  if (props.presentation === true) return cluster;
+  return <LayoutClusterContextMenu>{cluster}</LayoutClusterContextMenu>;
 }
 
 export const ComposerToolbarRight = memo(ComposerToolbarRightImpl);

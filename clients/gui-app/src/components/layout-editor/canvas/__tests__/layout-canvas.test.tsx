@@ -1,6 +1,10 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  cancelLayoutDrag,
+  layoutDragActive,
+} from "@/components/layout-editor/canvas/drag-engine";
 import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -84,6 +88,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cancelLayoutDrag();
   cleanup();
   useLayoutEditorStore.getState().endSession();
 });
@@ -195,6 +200,32 @@ describe("the session's canvas", () => {
     expect(useLayoutEditorStore.getState().keyboardNav).toBe(false);
     await flushFrame();
     expect(ring()?.hidden).toBe(false);
+  });
+
+  // The shell on screen during an exit is a snapshot of where the elements
+  // WERE, so a drag armed against it would measure boxes that are about to
+  // move. The press still selects - that is L-69 - it just carries nothing.
+  it("selects but arms no drag on a press while the session is leaving", () => {
+    openSession("tile-a");
+    const view = render(
+      <Canvas
+        regions={[
+          { regionId: "attachImage", instanceId: "tile-a", testId: "attach" },
+        ]}
+      />,
+    );
+
+    fireEvent.pointerDown(view.getByTestId("attach-inner"), { button: 0 });
+    expect(layoutDragActive()).toBe(true);
+    cancelLayoutDrag();
+
+    act(() => {
+      useLayoutEditorStore.setState({ leaving: true });
+    });
+    fireEvent.pointerDown(view.getByTestId("attach-inner"), { button: 0 });
+
+    expect(useLayoutEditorStore.getState().selected).toBe("attachImage");
+    expect(layoutDragActive()).toBe(false);
   });
 
   it("puts the ring on the preferred tile's instance, and hides it with no selection", async () => {

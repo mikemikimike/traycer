@@ -298,6 +298,14 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         set({ lockedBy });
       },
       recordGesture: (mutate) => {
+        // A quick verb fires with no session open (L-19), and there is no
+        // history for it to be a step in: pushing a snapshot onto a stack
+        // nothing can pop would notify every editor-store subscriber and stamp
+        // a first-change time for a session that does not exist (G3-12).
+        if (get().session === null) {
+          applyAsEditorWrite(mutate);
+          return;
+        }
         const before = getLayoutSnapshot();
         applyAsEditorWrite(mutate);
         // A gesture that landed on the value it already had is not a step: an

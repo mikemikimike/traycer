@@ -138,6 +138,25 @@ export function depictRegion<K extends RegionId>(
   );
 }
 
+/**
+ * {@link depictRegion}, for a caller holding a whole `LayoutValues` rather
+ * than one region's bag - the inspector's sections and its Style examples,
+ * which walk the map and draw whichever region is open.
+ *
+ * It lives here and not in the registry: `regions/` is the registry layer
+ * (G1-11), and a depiction import there closes a module cycle back through
+ * the Settings surface (G3-08). The indirection through a locally annotated
+ * parameter is what lets the two indexed accesses resolve together for every
+ * region at once.
+ */
+export function regionDepiction<K extends RegionId>(
+  region: K,
+  values: LayoutValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  return depictRegion(region, values[region], arrangement, null);
+}
+
 // ── Specimen data ───────────────────────────────────────────────────────────
 
 /**

@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
+import {
+  LayoutClusterContextMenu,
+  LayoutRegionContextMenu,
+} from "@/components/layout-editor/region-quick-verbs";
 import { offeredQuickVerbs } from "@/components/layout-editor/regions/quick-verbs";
 import {
   SHOW_HIDE_VERBS,
@@ -299,5 +302,46 @@ describe("layout_quick_verb analytics (L-19, L-46)", () => {
       AnalyticsEvent.LayoutQuickVerb,
       { region: "minimap", verb: "hide", undone: false },
     );
+  });
+});
+
+/**
+ * One root for a whole strip of regions (G3-10). The verbs still belong to the
+ * item the pointer was on, which is the thing a shared root could get wrong.
+ */
+describe("<LayoutClusterContextMenu />", () => {
+  function Cluster(): ReactNode {
+    return (
+      <LayoutClusterContextMenu>
+        <div data-testid="cluster">
+          <span data-layout-region="minimap" data-testid="first">
+            first
+          </span>
+          <span data-layout-region="access" data-testid="second">
+            second
+          </span>
+        </div>
+      </LayoutClusterContextMenu>
+    );
+  }
+
+  it("offers the verbs of the item the pointer was over", () => {
+    render(<Cluster />);
+
+    fireEvent.contextMenu(screen.getByTestId("second"));
+
+    expect(
+      screen.queryByTestId("layout-quick-verb-access-chip"),
+    ).not.toBeNull();
+    expect(screen.queryByTestId("layout-quick-verb-minimap-hide")).toBeNull();
+  });
+
+  it("opens nothing over the strip's own gaps", () => {
+    render(<Cluster />);
+
+    fireEvent.contextMenu(screen.getByTestId("cluster"));
+
+    expect(screen.queryByTestId("layout-quick-verb-access-chip")).toBeNull();
+    expect(screen.queryByTestId("layout-quick-verb-minimap-hide")).toBeNull();
   });
 });

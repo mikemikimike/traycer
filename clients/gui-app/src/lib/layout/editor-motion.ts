@@ -100,6 +100,14 @@ export function layoutTransitionRunning(): boolean {
 
 /** Enter or leave a session, with whatever motion this moment allows. */
 export function runLayoutEditorMotion(input: LayoutEditorMotionInput): void {
+  // A re-open inside the previous session's slide-out. `endSession` flushes
+  // the pending teardown, so the new session begins in this same task and
+  // React never unmounts the panel - which is still wearing the exit
+  // attribute, and would sit at `translateX(100%)` for the rest of the
+  // animation before sliding back in (G3-05). The pending `finish()` then
+  // removes an attribute that is already gone.
+  if (input.phase === "enter")
+    inspectorNode?.removeAttribute(EXITING_ATTRIBUTE);
   const startViewTransition = viewTransitionStarter();
   if (startViewTransition === undefined || !shellTransitionAllowed(input)) {
     if (input.phase === "enter") input.apply();

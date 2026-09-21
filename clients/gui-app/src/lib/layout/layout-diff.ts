@@ -186,9 +186,6 @@ export const LAYOUT_SETTING_PROPERTY_KEYS: ReadonlyArray<string> =
     layoutSettingPropertyName(region, key),
   );
 
-export type LayoutSettingPropertyKey =
-  (typeof LAYOUT_SETTING_PROPERTY_KEYS)[number];
-
 /**
  * One setting's reported value (L-54, L-55): `"default"` at the shipped
  * Default, the literal value otherwise, `"true"`/`"false"` for a boolean leaf
@@ -212,17 +209,26 @@ function settingPropertyValue(
  * drops the event for a missing declared key, plus the base preset, how many
  * settings differ from it, three arrangement enums and five reorder
  * booleans. `shownProfiles`, `providerLimits`, `hiddenProviders` and
- * `limitKeys` have no field here: this type is built only from `LayoutValues`
- * plus the five closed arrangement facts the plan names, so there is no
- * property for them to reach (L-54, C-41).
+ * `limitKeys` never reach it because {@link layoutSnapshotProperties} is
+ * built only from `LayoutValues` plus the five closed arrangement facts the
+ * plan names - the BUILDER is what keeps them out, not this type (L-54,
+ * C-41, G3-07).
  */
 export interface LayoutSnapshotProperties {
   // The ~40 `layout_<region>_<key>` properties are always strings
   // (`settingPropertyValue`'s return type); this index signature has to
   // cover the explicit properties below it too, so it is their union rather
-  // than `string` alone. `LAYOUT_SETTING_PROPERTY_KEYS` and the structural
-  // parity test in `layout-analytics.test.ts` are what keep the dynamic keys
-  // to exactly that set - TypeScript cannot express "every OTHER key" here.
+  // than `string` alone.
+  //
+  // It also means the property SET is a RUNTIME guarantee, not a type-level
+  // one (G3-07): the names are built by walking the registry, TypeScript
+  // cannot read literal keys out of that walk, and an index signature wide
+  // enough for them is wide enough for any other key. What holds the payload
+  // to exactly this set is `STRICT_EVENTS`'s key-count check in
+  // `sanitizeAnalyticsProperties` plus the structural test in
+  // `layout-analytics.test.ts`, which is also the only thing that would catch
+  // a new arrangement field joining the payload. Do not read this type as the
+  // guard.
   readonly [key: string]: string | number | boolean;
   readonly base_preset: LayoutPresetId;
   readonly changed_from_default_count: number;
@@ -257,10 +263,7 @@ export function layoutSnapshotProperties(
     // Built from the same walk `LAYOUT_SETTING_PROPERTY_KEYS` is, so this is
     // exactly that key set with a value per key - the structural test in
     // `layout-analytics.test.ts` is what proves it rather than a second cast.
-    ...(Object.fromEntries(settingEntries) as Record<
-      LayoutSettingPropertyKey,
-      string
-    >),
+    ...(Object.fromEntries(settingEntries) as Record<string, string>),
     base_preset: snapshot.basePreset,
     changed_from_default_count: changedFromDefaultCount,
     layout_usage_host: snapshot.arrangement.usageHost,

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { analyticsEventContractIsComplete } from "@/lib/analytics";
+import {
+  analyticsEventContractIsComplete,
+  sanitizeAnalyticsProperties,
+  Analytics,
+  AnalyticsEvent,
+} from "@/lib/analytics";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import {
   layoutDurationBucket,
@@ -10,6 +15,7 @@ import {
   type LayoutSnapshotProperties,
 } from "@/lib/layout/layout-diff";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
+import { LAYOUT_VALUE_ENUM_MEMBERS } from "@/lib/layout/layout-values";
 import { claimLayoutSnapshotWindow } from "@/lib/layout/layout-snapshot-gate";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
@@ -189,6 +195,119 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     expect(serialized).not.toContain("profile-a");
     expect(serialized).not.toContain("five-hour");
     expect(serialized).not.toContain("claude-code");
+  });
+});
+
+/**
+ * `layout_snapshot` is in `STRICT_EVENTS`, so a single declared property whose
+ * value fails its validator drops the WHOLE event - for every user, with the
+ * registry, the completeness suite and the compile all green (G3-03). These
+ * drive the real builders through the real sanitizer, which is the only place
+ * that verdict is reached.
+ */
+describe("the three layout payloads survive the analytics sanitizer", () => {
+  it("sends the shipped Default", () => {
+    expect(
+      Analytics.getInstance().track(
+        AnalyticsEvent.LayoutSnapshot,
+        layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT),
+      ),
+    ).toBe(true);
+  });
+
+  it("sends a snapshot carrying one value from every enum in the model", () => {
+    const snapshot: LayoutSnapshot = {
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      basePreset: "compact",
+      overrides: {
+        // Visibility, RegionSize, RailVisibility (both of its non-default
+        // members), ModelStyle, ContextStyle, AmountMode, a boolean leaf and
+        // the one list leaf.
+        mic: { shown: "hidden" },
+        runningAgents: { shown: "hidden", size: "chip" },
+        railAgents: { shown: "shown" },
+        railComments: { shown: "hidden" },
+        model: { style: "bars-text" },
+        contextUsage: {
+          style: "ring-only",
+          pinBreakdown: true,
+          pinnedFields: ["cacheRead"],
+          compactButton: "hidden",
+        },
+        usageLimits: { amount: "remaining", bar: false, word: true },
+        resourceMonitor: { memory: true, cpu: false },
+      },
+      arrangement: {
+        ...DEFAULT_ARRANGEMENT,
+        usageHost: "header",
+        minimapSide: "left",
+        resourceSide: "left",
+      },
+    };
+
+    const properties = layoutSnapshotProperties(snapshot);
+
+    expect(properties.layout_model_style).toBe("bars-text");
+    expect(properties.layout_rail_agents_shown).toBe("shown");
+    expect(properties.layout_rail_comments_shown).toBe("hidden");
+    expect(properties.layout_context_usage_style).toBe("ring-only");
+    expect(properties.layout_context_usage_pinned_fields).toBe("changed");
+    expect(properties.layout_usage_limits_amount).toBe("remaining");
+    expect(properties.layout_running_agents_size).toBe("chip");
+    expect(
+      Analytics.getInstance().track(AnalyticsEvent.LayoutSnapshot, properties),
+    ).toBe(true);
+  });
+
+  // The two artefacts are independent: the model owns the enums, `analytics.ts`
+  // owns the allowlist. Breaking the derivation between them is what this sees.
+  it("accepts every enum value some LayoutValues leaf can hold", () => {
+    const base = layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT);
+    const settingKey = LAYOUT_SETTING_PROPERTY_KEYS[0];
+    expect(LAYOUT_VALUE_ENUM_MEMBERS.length).toBeGreaterThan(0);
+
+    for (const member of LAYOUT_VALUE_ENUM_MEMBERS) {
+      expect(
+        sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, {
+          ...base,
+          [settingKey]: member,
+        }),
+        `${settingKey} = ${member}`,
+      ).not.toBeNull();
+    }
+  });
+
+  it("sends layout_editor_session, including a session with no first change", () => {
+    const summary = layoutEditorSessionChangeSummary(
+      DEFAULT_LAYOUT_SNAPSHOT,
+      DEFAULT_LAYOUT_SNAPSHOT,
+    );
+
+    expect(
+      Analytics.getInstance().track(AnalyticsEvent.LayoutEditorSession, {
+        source: "command_palette",
+        scene: "sample_workspace",
+        entry: "keyboard",
+        session_duration_bucket: layoutDurationBucket(30_000),
+        first_change_bucket: null,
+        changed_count: summary.changedCount,
+        undo_count: 0,
+        regions_touched_count: summary.regionsTouchedCount,
+        discarded: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("sends layout_quick_verb for every verb the menu offers", () => {
+    for (const verb of ["hide", "show", "chip", "full"] as const) {
+      expect(
+        Analytics.getInstance().track(AnalyticsEvent.LayoutQuickVerb, {
+          region: "runningAgents",
+          verb,
+          undone: verb === "hide",
+        }),
+      ).toBe(true);
+    }
   });
 });
 

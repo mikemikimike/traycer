@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -44,6 +45,10 @@ interface SortableListProps<Id extends string> {
   readonly onMove: (id: Id, toIndex: number) => void;
 }
 
+/** The operation every row carries, stated on the row rather than on the grab. */
+const GRAB_INSTRUCTIONS =
+  "Press space to pick up, arrow keys to move, space to drop, escape to cancel.";
+
 /** Where a grabbed item started, and where the arrows have taken it so far. */
 interface KeyboardGrab<Id extends string> {
   readonly id: Id;
@@ -73,6 +78,7 @@ export function SortableList<Id extends string>(
 ): ReactNode {
   const { items, selectedId, onMove } = props;
   const listRef = useRef<HTMLDivElement | null>(null);
+  const instructionsId = useId();
   const [grab, setGrab] = useState<KeyboardGrab<Id> | null>(null);
   const [announcement, setAnnouncement] = useState("");
 
@@ -127,9 +133,9 @@ export function SortableList<Id extends string>(
     function handleSpace(item: SortableListItem<Id>, index: number): void {
       if (grab === null) {
         setGrab({ id: item.id, from: index, to: index });
-        setAnnouncement(
-          `Grabbed ${item.label}. Use the arrow keys to move it, space to drop it, escape to cancel.`,
-        );
+        // What to do next is on the row already (`GRAB_INSTRUCTIONS`), so the
+        // grab only has to say what happened.
+        announce("Grabbed", item.label, index);
         return;
       }
       setGrab(null);
@@ -217,81 +223,94 @@ export function SortableList<Id extends string>(
   }
 
   return (
-    <div ref={listRef} className="flex flex-col gap-1">
-      {shown.map((item) => (
-        <div
-          key={item.id}
-          data-sortable-id={item.id}
-          data-grabbed={grab?.id === item.id ? "1" : undefined}
-          role={item.onActivate ? "button" : undefined}
-          tabIndex={0}
-          className={cn(
-            "flex touch-none items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-ui-sm",
-            item.id === selectedId && "border-foreground",
-            item.shown !== true && "text-muted-foreground",
-          )}
-          onPointerDown={(event) => {
-            handlePointerDown(event, item.id);
-          }}
-          onBlur={() => {
-            // A grab that outlived the focus it was made with would keep
-            // swallowing arrows for a row nobody is on.
-            if (grab !== null && grab.id === item.id)
-              cancelGrab(grab, item.label);
-          }}
-        >
-          <GripVertical
-            aria-hidden
-            className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
-          />
-          {item.icon ? (
-            <item.icon className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : null}
-          {/* A divider IS a line, so its row draws one where a panel's name
-            would keep going: the list reads the way the rail does. */}
-          {item.shown === null ? (
-            <>
-              <span className="shrink-0">{item.label}</span>
-              <span aria-hidden className="h-px flex-1 bg-border" />
-            </>
-          ) : (
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
-          )}
-          {item.onRemove === null ? null : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`Remove ${item.label.toLowerCase()}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                item.onRemove?.();
-              }}
-            >
-              <X />
-            </Button>
-          )}
-          {item.shown === null || item.onToggleShown === null ? null : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-pressed={item.shown}
-              aria-label={`${item.shown ? "Hide" : "Show"} ${item.label}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                item.onToggleShown?.();
-              }}
-            >
-              {item.shown ? <Eye /> : <EyeOff />}
-            </Button>
-          )}
-        </div>
-      ))}
+    <>
+      {/* Said before it is needed, not after: the instructions used to reach a
+          screen reader only once Space had already been pressed, which left
+          every row announced as an unnamed focusable group with no stated
+          operation (G3-18). One static line, described by every row. */}
+      <p id={instructionsId} className="sr-only">
+        {GRAB_INSTRUCTIONS}
+      </p>
+      <div ref={listRef} className="flex flex-col gap-1">
+        {shown.map((item) => (
+          <div
+            key={item.id}
+            data-sortable-id={item.id}
+            data-grabbed={grab?.id === item.id ? "1" : undefined}
+            // Every row, not only the ones that open a second level: a row
+            // that can be focused, grabbed and moved has an operation whether
+            // or not it also has a destination.
+            role="button"
+            aria-describedby={instructionsId}
+            tabIndex={0}
+            className={cn(
+              "flex touch-none items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-ui-sm",
+              item.id === selectedId && "border-foreground",
+              item.shown !== true && "text-muted-foreground",
+            )}
+            onPointerDown={(event) => {
+              handlePointerDown(event, item.id);
+            }}
+            onBlur={() => {
+              // A grab that outlived the focus it was made with would keep
+              // swallowing arrows for a row nobody is on.
+              if (grab !== null && grab.id === item.id)
+                cancelGrab(grab, item.label);
+            }}
+          >
+            <GripVertical
+              aria-hidden
+              className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
+            />
+            {item.icon ? (
+              <item.icon className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : null}
+            {/* A divider IS a line, so its row draws one where a panel's name
+              would keep going: the list reads the way the rail does. */}
+            {item.shown === null ? (
+              <>
+                <span className="shrink-0">{item.label}</span>
+                <span aria-hidden className="h-px flex-1 bg-border" />
+              </>
+            ) : (
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            )}
+            {item.onRemove === null ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove ${item.label.toLowerCase()}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  item.onRemove?.();
+                }}
+              >
+                <X />
+              </Button>
+            )}
+            {item.shown === null || item.onToggleShown === null ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-pressed={item.shown}
+                aria-label={`${item.shown ? "Hide" : "Show"} ${item.label}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  item.onToggleShown?.();
+                }}
+              >
+                {item.shown ? <Eye /> : <EyeOff />}
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
-    </div>
+    </>
   );
 }
 

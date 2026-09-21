@@ -8,6 +8,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { LayoutRegionMenuItems } from "@/components/layout-editor/region-quick-verbs";
+import { setRegionShown } from "@/components/layout-editor/layout-gestures";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
@@ -52,7 +53,6 @@ export function StatusBarVisibilityMenu(
   const hiddenProviders = useArrangementValue("hiddenProviders");
   const resourcesShown = useRegionShown("resourceMonitor");
   const setArrangement = useLayoutStore((state) => state.setArrangement);
-  const setRegionValues = useLayoutStore((state) => state.setRegionValues);
   // Below `md` the shell answers with `mobileFooter` and ignores `usageHost`
   // entirely, while `MobileAppHeader` draws its usage controls whatever
   // `usageHost` says. So the item would write a value that moves nothing, and
@@ -100,9 +100,7 @@ export function StatusBarVisibilityMenu(
         <ContextMenuCheckboxItem
           checked={resourcesShown}
           onCheckedChange={(checked) => {
-            setRegionValues("resourceMonitor", {
-              shown: checked ? "shown" : "hidden",
-            });
+            setRegionShown("resourceMonitor", checked);
           }}
         >
           Resource monitor

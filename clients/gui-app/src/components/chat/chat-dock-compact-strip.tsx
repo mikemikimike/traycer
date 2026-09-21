@@ -4,6 +4,7 @@ import { useCallback, useRef, type ReactNode } from "react";
 import { Bot, FileDiff, type LucideIcon } from "lucide-react";
 import { MessageSquareClock } from "@/components/notifications/message-square-clock";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
 import { SampleChip } from "@/components/sample-workspace/sample-dock-rows";
 import {
   STATUS_ANIMATION_PULSE_CADENCE_MS,
@@ -158,6 +159,7 @@ export function ChatDockCompactStrip(): ReactNode {
   return (
     <div
       data-testid="chat-dock-compact-strip"
+      {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
       className="ml-auto flex min-w-0 shrink-0 items-center gap-1"
     >
       {value.chips.map((chip) => (

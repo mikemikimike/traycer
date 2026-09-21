@@ -2,7 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
-import { ResourceTelemetryBridge } from "@/providers/resource-telemetry-bridge";
+import { AppTelemetryBridge } from "@/providers/app-telemetry-bridge";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
@@ -29,11 +29,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("<ResourceTelemetryBridge /> layout_snapshot firing (tech-plan section 7)", () => {
+describe("<AppTelemetryBridge /> layout_snapshot firing (tech-plan section 7)", () => {
   it("fires layout_snapshot for the current layout on mount", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
 
-    render(<ResourceTelemetryBridge />);
+    render(<AppTelemetryBridge />);
 
     expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
       AnalyticsEvent.LayoutSnapshot,
@@ -44,10 +44,30 @@ describe("<ResourceTelemetryBridge /> layout_snapshot firing (tech-plan section 
   it("does not fire a second time within the same 24h window on a remount", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
 
-    const first = render(<ResourceTelemetryBridge />);
+    const first = render(<AppTelemetryBridge />);
     first.unmount();
-    render(<ResourceTelemetryBridge />);
+    render(<AppTelemetryBridge />);
 
     expect(trackSpy).toHaveBeenCalledOnce();
+  });
+
+  // A day of the denominator per device per launch is what a claimed-but-unsent
+  // window costs, and the only symptom is a PostHog number that is quietly too
+  // small (G3-04, L-83).
+  it("gives the 24h window back when the event does not go out", () => {
+    const trackSpy = vi
+      .spyOn(Analytics.getInstance(), "track")
+      .mockReturnValue(false);
+
+    const first = render(<AppTelemetryBridge />);
+    first.unmount();
+
+    expect(window.localStorage.getItem(LAYOUT_SNAPSHOT_KEY)).toBeNull();
+
+    trackSpy.mockReturnValue(true);
+    render(<AppTelemetryBridge />);
+
+    expect(trackSpy).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem(LAYOUT_SNAPSHOT_KEY)).not.toBeNull();
   });
 });

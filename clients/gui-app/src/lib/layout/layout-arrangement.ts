@@ -280,75 +280,74 @@ export function movedWithin<T>(
 /**
  * One canvas drop written back into a group's FULL order (4.7).
  *
- * The canvas shows only the members that are currently drawn - a hidden region
- * has no element - so a drop there reorders a SUBSET. The members that were
- * not on screen keep the slots they had, which is what makes dragging two
- * visible chips past each other leave a hidden third where its owner put it.
+ * Stated as "`fromId` lands on this side of `toId`" rather than as a pair of
+ * indices, because the canvas shows only the members that are currently drawn
+ * and an index into what it showed is not an index into what is stored
+ * (G3-01). Placing by id needs no correspondence between the two orders at
+ * all: the member the user had hold of is the one that moves, and every other
+ * member - drawn or not - keeps its place relative to its neighbours.
  */
 export function moveCanvasOrderMember(input: {
   readonly arrangement: LayoutArrangement;
   readonly group: CanvasOrderGroupId;
-  /** The members that WERE on screen, in the order they were drawn. */
-  readonly visibleIds: ReadonlyArray<string>;
-  readonly fromIndex: number;
-  readonly toIndex: number;
+  /** The member that was picked up, by the id off the element in hand. */
+  readonly fromId: string;
+  /** The member it was dropped across. */
+  readonly toId: string;
+  /** Which side of `toId` it landed on. */
+  readonly placeAfter: boolean;
 }): LayoutArrangement {
-  const { arrangement, group, visibleIds, fromIndex, toIndex } = input;
+  const { arrangement, group, fromId, toId, placeAfter } = input;
   switch (group) {
     case "dock":
       return {
         ...arrangement,
-        dock: movedWithinVisible(
-          arrangement.dock,
-          visibleIds,
-          fromIndex,
-          toIndex,
-        ),
+        dock: placedBeside(arrangement.dock, fromId, toId, placeAfter),
       };
     case "toolbarLeft":
       return {
         ...arrangement,
-        toolbarLeft: movedWithinVisible(
+        toolbarLeft: placedBeside(
           arrangement.toolbarLeft,
-          visibleIds,
-          fromIndex,
-          toIndex,
+          fromId,
+          toId,
+          placeAfter,
         ),
       };
     case "toolbarRight":
       return {
         ...arrangement,
-        toolbarRight: movedWithinVisible(
+        toolbarRight: placedBeside(
           arrangement.toolbarRight,
-          visibleIds,
-          fromIndex,
-          toIndex,
+          fromId,
+          toId,
+          placeAfter,
         ),
       };
   }
 }
 
 /**
- * The subset the canvas showed, reordered and written back into the slots it
- * occupied. Typed in the group's own ids throughout: the visible ids arrive as
- * strings off the DOM and are only ever used to SELECT from the stored list,
- * never to build one, so a stray id narrows nothing away (G1-23).
+ * One member taken out of the stored list and put back beside another.
+ *
+ * Typed in the group's own ids throughout: the two ids arrive as strings off
+ * the DOM and are only ever used to SELECT from the stored list, never to
+ * build one, so an id this build does not know moves nothing rather than
+ * narrowing something away (G1-23).
  */
-function movedWithinVisible<T extends string>(
+function placedBeside<T extends string>(
   full: ReadonlyArray<T>,
-  visibleIds: ReadonlyArray<string>,
-  fromIndex: number,
-  toIndex: number,
+  fromId: string,
+  toId: string,
+  placeAfter: boolean,
 ): ReadonlyArray<T> {
-  const slots = full.flatMap((id, index) =>
-    visibleIds.includes(id) ? [index] : [],
-  );
-  const subset = slots.map((slot) => full[slot]);
-  const reordered = movedWithin(subset, fromIndex, toIndex);
-  const next = full.slice();
-  for (const [position, slot] of slots.entries())
-    next[slot] = reordered[position];
-  return next;
+  const moved = full.find((id) => id === fromId);
+  if (moved === undefined || fromId === toId) return full;
+  const remaining = full.filter((id) => id !== moved);
+  const anchor = remaining.findIndex((id) => id === toId);
+  if (anchor < 0) return full;
+  const insertAt = placeAfter ? anchor + 1 : anchor;
+  return [...remaining.slice(0, insertAt), moved, ...remaining.slice(insertAt)];
 }
 
 // ── The rail's writers ──────────────────────────────────────────────────────

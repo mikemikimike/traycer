@@ -5,7 +5,7 @@ import {
   revertControlValues,
 } from "@/components/layout-editor/inspector/region-control-io";
 import { NO_EXAMPLE_MATCH_COPY } from "@/components/layout-editor/regions/region-grammar";
-import { regionDepiction } from "@/components/layout-editor/regions/region-facts";
+import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";

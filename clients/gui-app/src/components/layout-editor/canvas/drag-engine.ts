@@ -95,11 +95,19 @@ export function armLayoutDrag(input: LayoutDragInput): void {
   if (event.button !== 0 || stopActiveDrag !== null) return;
   const originX = event.clientX;
   const originY = event.clientY;
+  // Captured for the arm phase too, not only once the drag has started: a
+  // press released just OUTSIDE the window delivers its `pointerup` nowhere
+  // without capture, and an arm that never disarms leaves `layoutDragActive()`
+  // true - which swallows every later `pointermove` on the canvas and refuses
+  // every later drag for the rest of the session (G3-06).
+  const pressed = event.target instanceof Element ? event.target : null;
 
   const disarm = (): void => {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
     window.removeEventListener("pointercancel", onPointerUp);
+    if (pressed !== null && pressed.hasPointerCapture(event.pointerId))
+      pressed.releasePointerCapture(event.pointerId);
     if (stopActiveDrag === disarm) stopActiveDrag = null;
   };
 
@@ -119,6 +127,7 @@ export function armLayoutDrag(input: LayoutDragInput): void {
     if (up.pointerId === event.pointerId) disarm();
   }
 
+  pressed?.setPointerCapture(event.pointerId);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
@@ -223,12 +232,26 @@ function startLayoutDrag(
     teardown();
   };
 
+  /**
+   * Every box is measured once, at the threshold crossing, and the firewall
+   * deliberately lets wheel and touch scroll through while the app underneath
+   * keeps streaming (L-17). A scroll therefore moves every member out from
+   * under the numbers this drag is reflowing against, so the gesture ends
+   * where it can still be honest rather than dropping into a slot the pointer
+   * was never over (G3-09). Capture phase, because a scroll on an ancestor
+   * does not bubble to `window`.
+   */
+  const onScroll = (): void => {
+    teardown();
+  };
+
   function teardown(): void {
     if (frame !== 0) cancelAnimationFrame(frame);
     frame = 0;
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
     window.removeEventListener("pointercancel", onPointerCancel);
+    window.removeEventListener("scroll", onScroll, true);
     for (const item of items) {
       item.style.transform = "";
       item.style.willChange = "";
@@ -253,6 +276,7 @@ function startLayoutDrag(
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerCancel);
+  window.addEventListener("scroll", onScroll, true);
   stopActiveDrag = teardown;
   // The first move is already in hand: the threshold crossing IS a move, and
   // waiting for the next one would start the drag a frame behind the pointer.

@@ -20,6 +20,7 @@ import {
 } from "@/components/sample-workspace/sample-dock-rows";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
 
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
 import { cn } from "@/lib/utils";
 import type { ChatPinnedStackTopSpacing } from "@/components/chat/chat-pinned-stack";
 
@@ -176,7 +177,14 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
           topPadding,
         )}
       >
-        <div className="@container mx-3 -mb-px overflow-hidden rounded-t-lg border border-b-0 border-border bg-muted/30">
+        {/* The box the dock's rows are laid out in, which is what a canvas
+            drag reorders inside (G3-01). A chip-sized row is drawn in the
+            composer's compact strip instead, so the two are separate
+            clusters and a drag in one never reaches the other. */}
+        <div
+          {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
+          className="@container mx-3 -mb-px overflow-hidden rounded-t-lg border border-b-0 border-border bg-muted/30"
+        >
           {live ? <QueueSection visible={queueVisible} dock={live} /> : null}
           {todoVisible ? (
             <PinnedTodoPanel

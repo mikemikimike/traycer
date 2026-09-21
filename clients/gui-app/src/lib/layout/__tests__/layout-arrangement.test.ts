@@ -211,53 +211,69 @@ describe("a canvas drop written back into the full order (4.7)", () => {
     toolbarLeft: ["attachImage", "access", "agent"],
   };
 
-  it("reorders the group when every member was on screen", () => {
+  it("puts the dragged member on the side of the anchor it was dropped", () => {
+    expect(
+      moveCanvasOrderMember({
+        arrangement,
+        group: "toolbarLeft",
+        fromId: "attachImage",
+        toId: "agent",
+        placeAfter: true,
+      }).toolbarLeft,
+    ).toEqual(["access", "agent", "attachImage"]);
+    expect(
+      moveCanvasOrderMember({
+        arrangement,
+        group: "toolbarLeft",
+        fromId: "agent",
+        toId: "attachImage",
+        placeAfter: false,
+      }).toolbarLeft,
+    ).toEqual(["agent", "attachImage", "access"]);
+  });
+
+  it("keeps a member that was NOT on screen beside the neighbours it had", () => {
+    // `access` is hidden, so the canvas showed the other two; dragging the
+    // first past the second must not move the hidden one relative to them.
     const next = moveCanvasOrderMember({
       arrangement,
       group: "toolbarLeft",
-      visibleIds: ["attachImage", "access", "agent"],
-      fromIndex: 0,
-      toIndex: 2,
+      fromId: "attachImage",
+      toId: "agent",
+      placeAfter: true,
     });
 
     expect(next.toolbarLeft).toEqual(["access", "agent", "attachImage"]);
   });
 
-  it("leaves a member that was NOT on screen in the slot it had", () => {
-    // `access` is hidden, so the canvas showed the other two; dragging the
-    // first past the second must not drag the hidden one along with it.
-    const next = moveCanvasOrderMember({
-      arrangement,
-      group: "toolbarLeft",
-      visibleIds: ["attachImage", "agent"],
-      fromIndex: 0,
-      toIndex: 1,
-    });
-
-    expect(next.toolbarLeft).toEqual(["agent", "access", "attachImage"]);
-  });
-
-  it("selects by id rather than trusting the ids it is handed", () => {
-    const next = moveCanvasOrderMember({
-      arrangement,
-      group: "toolbarLeft",
-      visibleIds: ["attachImage", "somethingElse", "agent"],
-      fromIndex: 0,
-      toIndex: 1,
-    });
-
-    // The id this build does not know selected nothing, so the drop moved the
-    // first visible member past the second: `agent`.
-    expect(next.toolbarLeft).toEqual(["agent", "access", "attachImage"]);
+  it("moves nothing for an id this build does not know", () => {
+    expect(
+      moveCanvasOrderMember({
+        arrangement,
+        group: "toolbarLeft",
+        fromId: "somethingElse",
+        toId: "agent",
+        placeAfter: true,
+      }).toolbarLeft,
+    ).toBe(arrangement.toolbarLeft);
+    expect(
+      moveCanvasOrderMember({
+        arrangement,
+        group: "toolbarLeft",
+        fromId: "attachImage",
+        toId: "somethingElse",
+        placeAfter: true,
+      }).toolbarLeft,
+    ).toBe(arrangement.toolbarLeft);
   });
 
   it("writes back only the group the drop was in", () => {
     const next = moveCanvasOrderMember({
       arrangement,
       group: "dock",
-      visibleIds: ["changedFiles", "runningAgents", "background"],
-      fromIndex: 0,
-      toIndex: 1,
+      fromId: "changedFiles",
+      toId: "runningAgents",
+      placeAfter: true,
     });
 
     expect(next.dock).toEqual(["runningAgents", "changedFiles", "background"]);

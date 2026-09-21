@@ -13,16 +13,17 @@
 //
 // Four claims, each a thing jsdom cannot decide:
 //
-//   1. Every region's two picture entry points - the registry face the
-//      inspector's sections and Style examples draw through, and
-//      `depictRegion`, which the ghosts and the preset miniatures draw
-//      through - produce the SAME tree, at the same width, in the same stage:
-//      same tags, same resolved `font-size`, `line-height`, `gap`, `height`,
-//      `padding`, `color`, `background-color` and `border-radius`, and the
-//      same rect relative to each picture's own frame. No class lists are
-//      compared, which would couple this to Tailwind's emitted strings.
-//   2. The nine rail regions have a LIVE node (the sample workspace's real
-//      rail) to compare their picture against, glyph for glyph.
+//   1. Every region the fixture can mount LIVE without the host runtime is
+//      compared with its picture, under the same host frame: the icon's
+//      painted box and colour where the region draws one, its own resolved
+//      `font-size` / `line-height` / `color` where it does not. Live versus
+//      picture, never picture versus picture - the two picture entry points
+//      became one function in L-77, so comparing them with each other could
+//      not fail for any input (G3-02, L-85).
+//   2. The coverage is stated rather than counted: every region with no live
+//      node here must be named in the fixture's `NO_LIVE_LEAF` table with the
+//      reason, and every region that HAS one must not be. The driver prints
+//      the uncovered list so the gap is visible in the output.
 //   3. The preset miniature is a uniformly SCALED app frame, not a reflowed
 //      one: its untransformed frame measures exactly 1000x620 with
 //      `offsetWidth`/`offsetHeight`, and its scale is the box width over that
@@ -46,148 +47,74 @@ import {
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
 
-/** The eight resolved properties L-53 names, plus the rect. */
-const COMPARED = [
-  "fontSize",
-  "lineHeight",
-  "gap",
-  "height",
-  "padding",
-  "color",
-  "backgroundColor",
-  "borderRadius",
-];
-
-function comparePictures(violations, region) {
-  const { regionId, registry, depict } = region;
-  if (registry.length !== depict.length) {
-    violations.push(
-      `${regionId}: the two pictures have different node counts (${String(registry.length)} vs ${String(depict.length)})`,
-    );
-    return;
-  }
-  for (let index = 0; index < registry.length; index += 1) {
-    const a = registry[index];
-    const b = depict[index];
-    if (a.tag !== b.tag) {
-      violations.push(
-        `${regionId} node ${String(index)}: tag ${a.tag} vs ${b.tag}`,
-      );
-      continue;
-    }
-    for (const property of COMPARED) {
-      if (a.style[property] !== b.style[property]) {
-        violations.push(
-          `${regionId} ${a.tag}[${String(index)}] ${property}: "${a.style[property]}" vs "${b.style[property]}"`,
-        );
-      }
-    }
-    if (a.painted !== b.painted) {
-      violations.push(
-        `${regionId} ${a.tag}[${String(index)}]: one picture paints it and the other does not`,
-      );
-      continue;
-    }
-    if (!a.painted) continue;
-    for (const side of ["x", "y", "width", "height"]) {
-      if (Math.abs(a.rect[side] - b.rect[side]) > 0.5) {
-        violations.push(
-          `${regionId} ${a.tag}[${String(index)}] rect.${side}: ${String(a.rect[side])} vs ${String(b.rect[side])}`,
-        );
-      }
-    }
-  }
-}
-
 // --- page-side probes -------------------------------------------------------
 
-const WALK = `
-  const walk = (frame) => {
-    const origin = frame.getBoundingClientRect();
-    const nodes = [];
-    const visit = (element) => {
-      const style = getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      nodes.push({
-        tag: element.tagName,
-        // An SVG <title> generates no box. It is still walked, so a picture
-        // that loses its accessible name still fails on the node count, but
-        // its "rect" is the viewport origin and says nothing about looks.
-        painted: element.getClientRects().length > 0,
-        style: {
-          fontSize: style.fontSize,
-          lineHeight: style.lineHeight,
-          gap: style.gap,
-          height: style.height,
-          padding: style.padding,
-          color: style.color,
-          backgroundColor: style.backgroundColor,
-          borderRadius: style.borderRadius,
-        },
-        rect: {
-          x: Math.round((rect.x - origin.x) * 100) / 100,
-          y: Math.round((rect.y - origin.y) * 100) / 100,
-          width: Math.round(rect.width * 100) / 100,
-          height: Math.round(rect.height * 100) / 100,
-        },
-      });
-      for (const child of element.children) visit(child);
-    };
-    visit(frame);
-    return nodes;
-  };
-`;
-
-const PICTURE_PROBE = `(() => {
-  ${WALK}
-  return [...document.querySelectorAll("[data-region-row]")].map((row) => {
-    const regionId = row.getAttribute("data-region-row");
-    const frames = ["via-registry", "via-depict"].map((which) =>
-      row.querySelector('[data-picture="' + which + '"] [data-layout-depiction]'),
-    );
-    if (frames.some((frame) => frame === null)) {
-      return { regionId, error: "a picture drew no depiction frame", registry: [], depict: [] };
-    }
-    return {
-      regionId,
-      error: null,
-      registry: walk(frames[0]),
-      depict: walk(frames[1]),
-    };
-  });
-})()`;
-
-const RAIL_PROBE = `(() => {
+/**
+ * Every live region node the fixture mounted, beside its picture.
+ *
+ * The icon is the comparison wherever a region draws one - its painted box and
+ * its resolved colour, which is what a wrong type scale or a wrong token moves.
+ * A region that draws no icon is compared on its own type scale and colour
+ * instead; its TEXT is not, because a picture is drawn from specimen data and
+ * a live leaf from the app's, and P2 is about how a region looks rather than
+ * what it currently says.
+ */
+const LIVE_PROBE = `(() => {
   const glyph = (node) => {
     const svg = node.querySelector("svg");
     if (svg === null) return null;
     const style = getComputedStyle(svg);
     const rect = svg.getBoundingClientRect();
     return {
+      kind: "glyph",
       width: Math.round(rect.width * 100) / 100,
       height: Math.round(rect.height * 100) / 100,
       color: style.color,
     };
   };
-  const rail = document.querySelector("#live-rail");
-  if (rail === null) return [];
-  return [...rail.querySelectorAll("[data-layout-region]")].map((node) => {
+  const scale = (node) => {
+    const style = getComputedStyle(node);
+    return {
+      kind: "scale",
+      fontSize: style.fontSize,
+      lineHeight: style.lineHeight,
+      color: style.color,
+    };
+  };
+  const nodes = [...document.querySelectorAll("[data-live-surface] [data-layout-region]")];
+  return nodes.map((node) => {
     const regionId = node.getAttribute("data-layout-region");
     const row = document.querySelector('[data-region-row="' + regionId + '"]');
     const picture = row === null
       ? null
-      : row.querySelector('[data-picture="via-depict"] [data-layout-depiction]');
-    const live = glyph(node);
-    if (live === null || picture === null) {
-      return { regionId, error: "no glyph to compare", live: null, picture: null };
+      : row.querySelector("[data-layout-depiction]");
+    if (picture === null) {
+      return { regionId, error: "the fixture drew no picture for it", live: null, drawn: null };
     }
-    const drawn = glyph(picture);
+    // The depiction's OWN root, not the host frame around it: the frame
+    // carries the surface's type scale, which is the thing the leaf inside it
+    // is supposed to inherit rather than the thing being compared.
+    const leaf = picture.firstElementChild ?? picture;
+    const live = glyph(node) ?? scale(node);
+    const drawn = live.kind === "glyph" ? glyph(leaf) : scale(leaf);
     if (drawn === null) {
-      return { regionId, error: "the picture drew no glyph", live, picture: null };
+      return { regionId, error: "the live leaf draws an icon and the picture does not", live, drawn: null };
     }
-    return { regionId, error: null, live, picture: drawn };
+    return { regionId, error: null, live, drawn };
   });
 })()`;
+
+const PICTURE_PROBE = `(() => {
+  return [...document.querySelectorAll("[data-region-row]")].map((row) => ({
+    regionId: row.getAttribute("data-region-row"),
+    framed: row.querySelector("[data-layout-depiction]") !== null,
+  }));
+})()`;
+
+const COVERAGE_PROBE = `(() => ({
+  regionIds: window.__layoutEditorProbe.regionIds,
+  noLiveLeaf: window.__layoutEditorProbe.noLiveLeaf,
+}))()`;
 
 const MINIATURE_PROBE = `(() => {
   const box = document.querySelector('[data-testid="preset-miniature"]');
@@ -328,28 +255,48 @@ try {
 
   const pictures = await evaluate(client, PICTURE_PROBE);
   for (const region of pictures) {
-    if (region.error !== null) {
-      violations.push(`${region.regionId}: ${region.error}`);
-      continue;
+    if (!region.framed) {
+      violations.push(`${region.regionId}: drew no depiction frame`);
     }
-    comparePictures(violations, region);
   }
 
-  const rail = await evaluate(client, RAIL_PROBE);
-  if (rail.length === 0) {
-    violations.push("the live rail rendered no regions to compare against");
+  const live = await evaluate(client, LIVE_PROBE);
+  if (live.length === 0) {
+    violations.push("no live region mounted, so nothing was compared");
   }
-  for (const entry of rail) {
+  for (const entry of live) {
     if (entry.error !== null) {
-      violations.push(`${entry.regionId} live rail: ${entry.error}`);
+      violations.push(`${entry.regionId} live: ${entry.error}`);
       continue;
     }
-    for (const property of ["width", "height", "color"]) {
-      if (entry.live[property] !== entry.picture[property]) {
+    for (const property of Object.keys(entry.live)) {
+      if (property === "kind") continue;
+      if (entry.live[property] !== entry.drawn[property]) {
         violations.push(
-          `${entry.regionId} rail glyph ${property}: live ${entry.live[property]}, picture ${entry.picture[property]}`,
+          `${entry.regionId} ${entry.live.kind} ${property}: live ${String(entry.live[property])}, picture ${String(entry.drawn[property])}`,
         );
       }
+    }
+  }
+
+  // The coverage claim itself, stated by the fixture and checked against what
+  // is really on the page: a region is either compared live or excused by
+  // name, never quietly neither (G3-02, L-85).
+  const coverage = await evaluate(client, COVERAGE_PROBE);
+  const comparedLive = new Set(live.map((entry) => entry.regionId));
+  const uncovered = coverage.regionIds.filter((id) => !comparedLive.has(id));
+  for (const regionId of uncovered) {
+    if (coverage.noLiveLeaf[regionId] === undefined) {
+      violations.push(
+        `${regionId} has no live node here and no stated reason: mount its real leaf or name it in the fixture's NO_LIVE_LEAF table`,
+      );
+    }
+  }
+  for (const regionId of Object.keys(coverage.noLiveLeaf)) {
+    if (comparedLive.has(regionId)) {
+      violations.push(
+        `${regionId} is excused in NO_LIVE_LEAF and does have a live node: delete the excuse`,
+      );
     }
   }
 
@@ -420,7 +367,12 @@ try {
     )}`,
   );
   console.log(
-    `layout editor parity regression passed (${String(pictures.length)} regions, ${String(rail.length)} live rail comparisons)`,
+    `layout editor parity regression passed: ${String(pictures.length)} pictures, ${String(live.length)} compared against a live leaf (${live.map((entry) => `${entry.regionId}/${entry.live.kind}`).join(", ")})`,
+  );
+  console.log(
+    `no live leaf in this fixture for ${String(uncovered.length)} region(s), each with a stated reason:\n${uncovered
+      .map((regionId) => `  - ${regionId}: ${coverage.noLiveLeaf[regionId]}`)
+      .join("\n")}`,
   );
 } finally {
   client?.close();

@@ -16,8 +16,8 @@ import {
 import { SizeRow } from "@/components/layout-editor/inspector/rows/size-row";
 import { StyleRow } from "@/components/layout-editor/inspector/rows/style-row";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
+import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import {
-  regionDepiction,
   regionFacts,
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";

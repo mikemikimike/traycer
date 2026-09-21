@@ -256,6 +256,94 @@ describe("the drag engine", () => {
     expect(layoutDragActive()).toBe(false);
   });
 
+  it("ignores a second pointer that presses while one is already in hand", async () => {
+    const fixture = mountRows(3);
+    const onDrop = vi.fn();
+
+    press(fixture, 0, onDrop);
+    movePointerTo(10);
+    await frames(2);
+    movePointerTo(40);
+    await frames(2);
+    const carried = translationOf(fixture.rows[0]);
+
+    // A second finger, moving the other way and letting go.
+    window.dispatchEvent(
+      new PointerEvent("pointermove", {
+        bubbles: true,
+        pointerId: 2,
+        clientY: -200,
+      }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 2 }),
+    );
+    await frames(2);
+
+    expect(translationOf(fixture.rows[0])).toBe(carried);
+    expect(layoutDragActive()).toBe(true);
+    expect(onDrop).not.toHaveBeenCalled();
+  });
+
+  it("releases the module when the press is cancelled before it travels", async () => {
+    const fixture = mountRows(3);
+    const onDrop = vi.fn();
+
+    press(fixture, 0, onDrop);
+    movePointerTo(4);
+    await frames(2);
+    expect(layoutDragActive()).toBe(true);
+
+    window.dispatchEvent(
+      new PointerEvent("pointercancel", { bubbles: true, pointerId: 1 }),
+    );
+
+    // The latch is off, so a later press can still arm one (a cancel during
+    // the arm phase is the only thing that frees it before the threshold).
+    expect(layoutDragActive()).toBe(false);
+    expect(onDrop).not.toHaveBeenCalled();
+
+    press(fixture, 1, onDrop);
+    expect(layoutDragActive()).toBe(true);
+  });
+
+  it("eats the click the release synthesises, and only that one", async () => {
+    const fixture = mountRows(3);
+    const clicked = vi.fn();
+    fixture.rows[0].addEventListener("click", clicked);
+
+    press(fixture, 0, vi.fn());
+    movePointerTo(10);
+    await frames(2);
+    movePointerTo(40);
+    await frames(2);
+    releasePointer();
+
+    fixture.rows[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicked).not.toHaveBeenCalled();
+
+    // The next one is an ordinary click again: the row still opens its level.
+    fixture.rows[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicked).toHaveBeenCalledOnce();
+  });
+
+  it("ends the gesture on a scroll rather than reflowing against stale boxes", async () => {
+    const fixture = mountRows(3);
+    const onDrop = vi.fn();
+
+    press(fixture, 0, onDrop);
+    movePointerTo(10);
+    await frames(2);
+    movePointerTo(40);
+    await frames(2);
+
+    fixture.container.dispatchEvent(new Event("scroll", { bubbles: false }));
+
+    expect(layoutDragActive()).toBe(false);
+    expect(onDrop).not.toHaveBeenCalled();
+    for (const row of fixture.rows) expect(row.style.transform).toBe("");
+  });
+
   it("holds a pinned member inside its cluster and springs it back", async () => {
     const fixture = mountRows(3);
     const clamp = document.createElement("div");

@@ -56,12 +56,8 @@ import type { RegionId } from "@/lib/layout/region-id";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, "..", "..", "..");
-const DEPICTION_FILE = path.join(
-  SRC,
-  "components",
-  "layout-editor",
-  "region-depiction.tsx",
-);
+const EDITOR_DIR = path.join(SRC, "components", "layout-editor");
+const DEPICTION_FILE = path.join(EDITOR_DIR, "region-depiction.tsx");
 
 /**
  * How a region is drawn, and against which values.
@@ -284,7 +280,7 @@ function appSources(directory: string): string[] {
     if (entry.isDirectory()) {
       if (entry.name === "__tests__" || entry.name === "test-support")
         return [];
-      if (full === path.join(SRC, "components", "layout-editor")) return [];
+      if (full === EDITOR_DIR) return [];
       return appSources(full);
     }
     return entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")
@@ -385,9 +381,28 @@ describe("the depiction layer's imports", () => {
    * the callers that read it (the specimen stage, the Style examples) drew
    * their pictures WITHOUT the host frame - the same region, two looks. One
    * way in is what stops that coming back.
+   *
+   * Asked of the app rather than of the declaration's spelling (G3-17): what
+   * matters is that no module OUTSIDE this one reads the table, which a
+   * reflowed `const` or a second export under another name would both leave
+   * true or false independently of how the declaration is written.
    */
   it("is reachable only through the framed entry point", () => {
-    expect(source).toContain("\nconst REGION_DEPICTIONS");
-    expect(source).not.toContain("export const REGION_DEPICTIONS");
+    const readers = appSources(SRC).filter((appSource) =>
+      appSource.includes("REGION_DEPICTIONS"),
+    );
+    expect(readers).toEqual([]);
+    // The editor's own modules are excluded from `appSources`, so the table's
+    // neighbours are checked here by name.
+    const editorModules = readdirSync(EDITOR_DIR, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isFile() &&
+          entry.name.endsWith(".tsx") &&
+          entry.name !== "region-depiction.tsx",
+      )
+      .map((entry) => readFileSync(path.join(EDITOR_DIR, entry.name), "utf8"));
+    for (const neighbour of editorModules)
+      expect(neighbour).not.toContain("REGION_DEPICTIONS");
   });
 });

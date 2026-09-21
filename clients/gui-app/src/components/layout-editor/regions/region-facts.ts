@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-import { depictRegion } from "@/components/layout-editor/region-depiction";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import {
   SURFACE_GROUPS,
@@ -109,21 +107,4 @@ export function regionStateWord<K extends RegionId>(
     regionArrangement: LayoutArrangement,
   ) => string = LAYOUT_REGIONS[region].stateWord;
   return stateWord(values[region], arrangement);
-}
-
-/**
- * {@link regionStateWord}, for the picture.
- *
- * Goes through `depictRegion` rather than a second read of the depiction
- * table, so the specimen stage and the Style examples get the SAME
- * host-context frame the canvas ghosts and the preset miniatures get. Drawn
- * without it, a status-bar segment inherits the inspector form's type scale
- * and stops being a picture of the strip - the one thing P2 forbids.
- */
-export function regionDepiction<K extends RegionId>(
-  region: K,
-  values: LayoutValues,
-  arrangement: LayoutArrangement,
-): ReactNode {
-  return depictRegion(region, values[region], arrangement, null);
 }

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { useNavigate, type UseNavigateResult } from "@tanstack/react-router";
 import { Eye, EyeOff, Layers, PanelTop } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +14,10 @@ import {
   quickVerbLabel,
   quickVerbToast,
 } from "@/components/layout-editor/regions/quick-verbs";
-import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import {
+  LAYOUT_REGION_IDS,
+  regionFacts,
+} from "@/components/layout-editor/regions/region-facts";
 import type {
   LayoutRegionIcon,
   QuickVerbId,
@@ -35,11 +38,13 @@ import type { RegionId } from "@/lib/layout/region-id";
 /**
  * Right-click on a piece of the app's own chrome (L-19).
  *
- * Two things live here because they are the same offer made in two places:
- * chrome that has no menu of its own gets {@link LayoutRegionContextMenu},
- * and chrome that already has one renders {@link LayoutRegionMenuItems} inside
- * it. Nesting a second Radix trigger on a subtree that already has one fires
- * both menus for the same event, which is why the choice is the call site's.
+ * Three things live here because they are the same offer made in three
+ * places: chrome that has no menu of its own gets
+ * {@link LayoutRegionContextMenu}, a STRIP of such chrome gets
+ * {@link LayoutClusterContextMenu}, and chrome that already has a menu renders
+ * {@link LayoutRegionMenuItems} inside it. Nesting a second Radix trigger on a
+ * subtree that already has one fires both menus for the same event, which is
+ * why the choice is the call site's.
  *
  * A quick verb does NOT enter the editor: it writes the same value the
  * inspector's own switch writes, through the same `region-control-io` seam, and
@@ -227,6 +232,57 @@ export function LayoutRegionContextMenu(props: {
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+/**
+ * One menu for a whole strip of regions, naming whichever one the pointer was
+ * over (G3-10).
+ *
+ * A root per ITEM is what this replaces: the composer's two clusters draw
+ * seven controls between them and every open chat tile draws both, so a
+ * four-tile canvas was carrying twenty-eight Radix roots and twenty-eight
+ * trigger spans for a gesture used a handful of times a session. The region is
+ * resolved from the event the same way the canvas resolves a hover, so the
+ * verbs are still per item.
+ *
+ * The child is the cluster's own box, taken `asChild`, so this adds no element
+ * of its own.
+ */
+export function LayoutClusterContextMenu(props: {
+  readonly children: ReactNode;
+}): ReactNode {
+  const [regionId, setRegionId] = useState<RegionId | null>(null);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        asChild
+        onContextMenu={(event: MouseEvent<HTMLElement>) => {
+          const region = regionUnder(event.target);
+          // Nothing customizable under the pointer - the strip's own gaps.
+          // Radix composes this ahead of its own opener and skips that opener
+          // once the event is defaulted-prevented, so the gap keeps whatever
+          // menu an ancestor owns instead of claiming one for no region.
+          if (region === null) event.preventDefault();
+          else setRegionId(region);
+        }}
+      >
+        {props.children}
+      </ContextMenuTrigger>
+      {regionId === null ? null : (
+        <ContextMenuContent>
+          <LayoutRegionMenuItems regionId={regionId} />
+        </ContextMenuContent>
+      )}
+    </ContextMenu>
+  );
+}
+
+function regionUnder(target: EventTarget): RegionId | null {
+  if (!(target instanceof Element)) return null;
+  const value = target
+    .closest("[data-layout-region]")
+    ?.getAttribute("data-layout-region");
+  return LAYOUT_REGION_IDS.find((id) => id === value) ?? null;
 }
 
 /** Which leaf a verb writes. */

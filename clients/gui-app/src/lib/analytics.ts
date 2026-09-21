@@ -4,6 +4,7 @@ import {
   type LayoutDurationBucket,
   type LayoutSnapshotProperties,
 } from "@/lib/layout/layout-diff";
+import { LAYOUT_VALUE_ENUM_MEMBERS } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { isMobileApp } from "@/lib/mobile-app";
 
@@ -1504,22 +1505,14 @@ const ANALYTICS_LAYOUT_DURATION_BUCKETS = new Set<string>([
  * identifier), not per-key semantics.
  */
 const ANALYTICS_LAYOUT_SETTING_VALUES = new Set<string>([
+  // The three spellings `settingPropertyValue` produces itself, then every
+  // enum member a leaf can hold - derived, so an enum this file has never
+  // heard of cannot silently fail its own validator (G3-03).
   "default",
   "changed",
   "true",
   "false",
-  "shown",
-  "hidden",
-  "auto",
-  "full",
-  "chip",
-  "text",
-  "bars",
-  "bars-text",
-  "ring",
-  "ring-only",
-  "used",
-  "remaining",
+  ...LAYOUT_VALUE_ENUM_MEMBERS,
 ]);
 
 const ANALYTICS_EVENTS = new Set<string>(Object.values(AnalyticsEvent));
