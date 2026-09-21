@@ -57,7 +57,12 @@ export const CONTEXT_USAGE_REGION: LayoutRegion<"contextUsage"> = {
   ],
   sampleFilled: false,
   rows: [
-    { kind: "style", description: null, examples: CONTEXT_USAGE_EXAMPLES },
+    {
+      kind: "style",
+      description: null,
+      specimen: "region",
+      examples: CONTEXT_USAGE_EXAMPLES,
+    },
     {
       kind: "fine-tune",
       rows: [

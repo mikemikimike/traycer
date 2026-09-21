@@ -1,11 +1,9 @@
 import { Fragment, type ReactNode } from "react";
 import { TriangleAlert } from "lucide-react";
-import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { HarnessIcon } from "@/components/home/pickers/harness-icon";
 import { AccentDot } from "@/components/providers/accent-dot";
 import { StatusBarMiniBar } from "@/components/layout/status-bar/status-bar-mini-bar";
 import {
-  statusBarSegmentKey,
   statusBarSegmentTooltip,
   type StatusBarUsageParts,
 } from "@/components/layout/status-bar/status-bar-usage-display";
@@ -35,13 +33,6 @@ export interface StatusBarProviderSegmentProps {
   /** Which of the reading's optional parts the preferences switched on. */
   readonly parts: StatusBarUsageParts;
   readonly percentMode: AmountMode;
-  /**
-   * Whether this mount is the real strip rather than a depiction. Only an
-   * interactive mount attaches the region's `ref` - `useLayoutRegion` still
-   * runs either way (rules of hooks), but a `ref` nobody attaches never
-   * registers.
-   */
-  readonly interactive: boolean;
 }
 
 /**
@@ -92,10 +83,6 @@ export function StatusBarProviderSegment(
   props: StatusBarProviderSegmentProps,
 ): ReactNode {
   const segment = props.segment;
-  const { ref } = useLayoutRegion({
-    regionId: "usageLimits",
-    instanceId: statusBarSegmentKey(segment),
-  });
   const icon = (
     <HarnessIcon
       harnessId={providerIdToGuiHarnessId(segment.providerId)}
@@ -104,7 +91,6 @@ export function StatusBarProviderSegment(
   );
   return (
     <span
-      ref={props.interactive ? ref : undefined}
       className="inline-flex min-w-0 items-center gap-1"
       data-testid={`status-bar-provider-segment-${segment.providerId}`}
       data-provider-id={segment.providerId}

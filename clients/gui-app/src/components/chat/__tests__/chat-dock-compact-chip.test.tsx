@@ -202,6 +202,47 @@ describe("<ChatDockCompactChip />", () => {
     );
   });
 
+  // A13 / L-97: the artifact's `.dchip` is a small BORDERED pill with the
+  // count in the foreground, and it borrows the composer toolbar's chip
+  // vocabulary (`toolbar-buttons.tsx`, restyled in the same pass) so the two
+  // rows of chips around the input read as one system.
+  it("draws as a bordered pill with the count in the foreground", () => {
+    renderChip(baseProps());
+
+    const chip = screen.getByTestId("chip");
+    expect(chip.className).toContain("rounded-full");
+    expect(chip.className).toContain("border-border");
+    expect(chip.className).toContain("bg-background");
+    expect(chip.className).toContain("h-6");
+    // The toolbar chips' own states, so hover, focus and press agree.
+    expect(chip.className).toContain("hover:bg-accent");
+    expect(chip.className).toContain("focus-visible:ring-ring/60");
+    expect(chip.className).toContain("active:scale-97");
+    // Reduced motion cancels the press, as it does on the toolbar chip.
+    expect(chip.className).toContain("motion-reduce:active:scale-100");
+
+    const count = chip.querySelector(".tabular-nums");
+    expect(count?.className).toContain("text-foreground");
+  });
+
+  // On a borderless chip a fill alone carried the toggle. On a bordered pill
+  // it reads as a hover that stuck, so the border moves too.
+  it("marks the expanded state on the border as well as the fill", () => {
+    const props = { ...baseProps(), expanded: false };
+    const { rerender } = renderChip(props);
+
+    expect(screen.getByTestId("chip").className).not.toContain(
+      "border-foreground/25",
+    );
+
+    rerenderChip(rerender, { ...props, expanded: true });
+
+    const chip = screen.getByTestId("chip");
+    expect(chip.className).toContain("border-foreground/25");
+    expect(chip.className).toContain("bg-accent");
+    expect(chip.className).toContain("text-foreground");
+  });
+
   it("fires onClick when clicked", () => {
     const onClick = vi.fn();
     renderChip({ ...baseProps(), onClick });

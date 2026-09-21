@@ -166,7 +166,6 @@ function dragBy(
       event,
       node,
       regionId,
-      onFrame: () => undefined,
     });
   };
   node.addEventListener("pointerdown", arm);
@@ -212,7 +211,6 @@ beforeEach(() => {
   });
   useLayoutEditorStore.getState().endSession();
   useLayoutEditorStore.getState().beginSession({
-    scene: "in-place",
     entry: "pointer",
     source: "direct_ui",
     preferredInstanceId: null,
@@ -287,7 +285,6 @@ describe("dragging a region on the canvas", () => {
       event: new PointerEvent("pointerdown", { pointerId: 1, button: 0 }),
       node,
       regionId: "minimap",
-      onFrame: () => undefined,
     });
 
     expect(armed).toBe(false);

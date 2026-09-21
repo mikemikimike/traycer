@@ -1,10 +1,4 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement, ReactNode } from "react";
 import type { ChatQueuedItem } from "@traycer/protocol/host/agent/gui/subscribe";
@@ -18,24 +12,14 @@ import type { ChatQueuedItem } from "@traycer/protocol/host/agent/gui/subscribe"
  *   folding them changed the order back. `chips` in `useChatDockChrome` is now
  *   sorted through the same `arrangement.dock` (`useArrangementValue("dock")`).
  *
- * - Blocking 8 ("a temporarily expanded compact section attaches one callback
- *   ref to two nodes"): the chip and the revealed row shared ONE ref
- *   callback (`xHotspot.ref`) across two different DOM nodes at once, so
- *   whichever attached last silently won the layout-editor registration, and
- *   detaching the row could clear it while the chip stayed on screen. Fixed
- *   state (re-verified against the current worktree, since an earlier pass
- *   here briefly nulled both sides mid-edit): the ROW's `hotspots[section]`
- *   record always carries the real ref (it only renders at all once its
- *   section is out of `folded`, i.e. once revealed), and the CHIP's own
- *   model nulls its ref while `revealed.has(section)`. So exactly one side
- *   ever holds the callback - the chip while folded, the row once revealed -
- *   never both.
- *
- * This reuses the real-mount harness from `chat-dock-customize.test.tsx`
- * (Customize session + real `ChatLowerInteractionSurfaces`) merged with
- * `chat-tile-lower-surfaces-dock-chrome.test.tsx`'s reveal-on-click pattern,
- * so both fixes are exercised through the actual compact strip, not a
- * fabricated chip model.
+ * Blocking 8 of that same review - "a temporarily expanded compact section
+ * attaches one callback ref to two nodes" - was the other half of this file.
+ * It went with its subject: a real chat tile registers no Customize region at
+ * all now (L-87), because the editor's canvas is always the sample workspace
+ * and no epic surface is ever presented beside it. There is one hotspot ref
+ * on the dock and the sample workspace owns it, so there is no hand-off left
+ * to get wrong. The order fix below is unaffected and mounts the real surface
+ * exactly as before.
  */
 
 vi.mock("@/lib/host/stream-runtime-context", () => ({
@@ -151,7 +135,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { WORKSPACE_COMPOSER_READY } from "@/lib/composer/workspace-composer-availability";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
-import { ChatDockCompactStrip } from "@/components/chat/chat-dock-compact-strip";
 import { NO_PROVIDER_FALLBACK } from "@/components/chat/fallback/fallback-state";
 import type { BackgroundItem } from "@traycer/protocol/host/agent/gui/subscribe";
 import {
@@ -212,7 +195,6 @@ let epicHandle: OpenedStoreForTest;
 
 function startEditorSession(): void {
   useLayoutEditorStore.getState().beginSession({
-    scene: "in-place",
     entry: "pointer",
     source: "direct_ui",
     preferredInstanceId: null,
@@ -288,7 +270,9 @@ function surfacesProps(patch: {
       onSubmitMessage: () => false,
       onSideChat: () => false,
       onSettingsChange: null,
-      workspaceControls: <ChatDockCompactStrip />,
+      // The chips left the workspace row (A12, L-97): `ChatLowerDock`
+      // renders the strip itself, above the composer.
+      workspaceControls: <div data-testid="workspace-controls-stub" />,
       workspaceAvailability: WORKSPACE_COMPOSER_READY,
     },
     todo: null,
@@ -452,65 +436,5 @@ describe("compact dock chip order follows arrangement.dock (S5)", () => {
       "chat-dock-chip-filesChanged",
       "chat-dock-chip-activeAgents",
     ]);
-  });
-});
-
-describe("temporarily revealing a compact row hands off ownership instead of duplicating it (S8)", () => {
-  it("the chip owns the layout-editor registration while folded, the ROW takes sole ownership once revealed, and the chip reclaims it on re-fold", () => {
-    foldAllDockRegionsToChips();
-    renderSurfaces(
-      surfacesProps({
-        queueItems: [],
-        accumulatedFileChanges: [fileChangeRow("/repo/src/a.ts")],
-      }),
-    );
-
-    // `useLayoutRegion`'s key is `${regionId}@${sceneId}:${instanceId}` -
-    // "changedFiles" is the region id for the Files changed row/chip, "shell"
-    // is the scene this suite renders without a view-tab context, and
-    // `CHAT_ID` is the instance.
-    const registeredNode = () =>
-      [...useLayoutEditorStore.getState().instances.entries()].find(([key]) =>
-        key.startsWith(`changedFiles@shell:${CHAT_ID}`),
-      )?.[1].node;
-
-    // Folded: the chip is the sole registered anchor - the row is not even
-    // rendered yet, so there is nothing for it to compete with. The
-    // registered node is the WRAPPER span the ref is attached to
-    // (`chat-dock-compact-strip.tsx`'s `ref={chip.hotspotRef}`), and the
-    // chip's own testid element is a child inside it - so the containment
-    // check goes wrapper-contains-chip, not the other way round.
-    const chip = screen.getByTestId("chat-dock-chip-filesChanged");
-    const foldedNode = registeredNode();
-    expect(foldedNode).toBeDefined();
-    expect(foldedNode && foldedNode.contains(chip)).toBe(true);
-
-    // Reveal the row (the same click a user makes to see it again). Both the
-    // chip and the row are now on screen at once - exactly the overlap the
-    // old bug mishandled by sharing one ref callback between them.
-    fireEvent.click(chip);
-    const panel = screen.getByTestId("accumulated-changes-panel");
-    expect(panel).not.toBeNull();
-
-    // Ownership has moved to the ROW, and only the row - not left on the
-    // chip, and not on both at once (which is what let "whichever attaches
-    // last wins" silently pick either one). Same wrapper-contains-child
-    // direction: the row's registered node is the wrapping span around
-    // `ChatAccumulatedChangesPanel` (`chat-lower-dock.tsx`'s
-    // `ref={props.hotspotRef}`), which contains the panel.
-    const revealedNode = registeredNode();
-    expect(revealedNode).toBeDefined();
-    expect(revealedNode && revealedNode.contains(panel)).toBe(true);
-    expect(revealedNode && chip.contains(revealedNode)).toBe(false);
-
-    // Folding it back (second click) must hand ownership back to the chip,
-    // not leave the setting registered against a node that is about to
-    // unmount - the observable half of "detaching the row can clear
-    // registration while the chip remains".
-    fireEvent.click(chip);
-    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
-    const refoldedNode = registeredNode();
-    expect(refoldedNode).toBeDefined();
-    expect(refoldedNode && refoldedNode.contains(chip)).toBe(true);
   });
 });

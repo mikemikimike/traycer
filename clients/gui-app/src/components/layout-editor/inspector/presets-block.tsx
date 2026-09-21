@@ -1,8 +1,16 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Bell, History, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
 import { cn } from "@/lib/utils";
-import { changeCount, resetToBase } from "@/lib/layout/layout-diff";
+import {
+  anythingChanged,
+  changeCount,
+  resetEverything,
+  resetToBase,
+} from "@/lib/layout/layout-diff";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RailEntry } from "@/lib/layout/rail";
 import { type LayoutValues } from "@/lib/layout/layout-values";
 import {
@@ -57,7 +65,13 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
 
   return (
     <div className="border-b border-border px-3.5 py-3.5">
-      <div className="grid grid-cols-3 gap-1.5">
+      {/* Capped rather than fluid, which is the one place on this page a width
+        cap is the right answer: a card is a PICTURE of a window, and at full
+        page width the three were ~470px each of mostly empty dark frame
+        immediately under the page title - the largest object on a page whose
+        subject is the list below it (P-2). The cap never binds in the 320px
+        dock, so the two hosts still draw the same card. */}
+      <div className="mx-auto grid w-full max-w-xl grid-cols-3 gap-1.5">
         {LAYOUT_PRESET_IDS.map((presetId, index) => (
           <PresetCard
             key={presetId}
@@ -90,7 +104,12 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
         Presets change how much is shown, not where things are.
       </p>
       <div className="mt-2.5 flex items-center gap-2 text-ui-sm text-muted-foreground">
-        <span data-testid="preset-status-line" className="min-w-0 flex-1">
+        {/* `truncate`: the button beside it takes ~120px of a 292px row, so
+          any count at all wrapped the label onto a second line (I-13). */}
+        <span
+          data-testid="preset-status-line"
+          className="min-w-0 flex-1 truncate"
+        >
           {PRESET_LABELS[basePreset]}
           {count > 0 ? ` + ${count} ${count === 1 ? "change" : "changes"}` : ""}
         </span>
@@ -108,8 +127,57 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
             Reset to {PRESET_LABELS[basePreset]}
           </Button>
         ) : null}
+        <ResetEverythingButton snapshot={snapshot} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The floor under everything else (L-20): the preset, every value AND the whole
+ * arrangement back to what shipped.
+ *
+ * It exists here rather than only on the page because both hosts need the same
+ * floor, but the page is why it had to be built: with no session there is no
+ * Undo, no Discard and no Cmd+Z (P-6), "Reset to Default" is values-only by
+ * construction (L-57), and three arrangement fields had no revert anywhere at
+ * all. Confirmed, because on this host it is irreversible.
+ */
+function ResetEverythingButton(props: {
+  readonly snapshot: LayoutSnapshot;
+}): ReactNode {
+  const { snapshot } = props;
+  const [confirming, setConfirming] = useState(false);
+  if (!anythingChanged(snapshot)) return null;
+  return (
+    <>
+      <Button
+        type="button"
+        variant="muted"
+        size="sm"
+        onClick={() => {
+          setConfirming(true);
+        }}
+      >
+        Reset everything
+      </Button>
+      <ConfirmDestructiveDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Reset the whole layout?"
+        description="Every setting, and where everything sits, go back to how the app shipped. This cannot be undone here."
+        cascadeSummary={null}
+        actionLabel="Reset everything"
+        isPending={false}
+        blockedReason={null}
+        onConfirm={() => {
+          setConfirming(false);
+          useLayoutEditorStore.getState().recordGesture(() => {
+            useLayoutStore.getState().replaceAll(resetEverything(snapshot));
+          });
+        }}
+      />
+    </>
   );
 }
 
@@ -175,12 +243,76 @@ function PresetCard(props: {
 
 const MINIATURE_FRAME_WIDTH = 1000;
 const MINIATURE_FRAME_HEIGHT = 620;
+/**
+ * The ratio a card in the 320px dock lands on, which is the frame's scale
+ * until the box has been measured - the prototype's `transform: scale(.08)`,
+ * "corrected to the exact ratio on the next frame".
+ *
+ * Seeded rather than left at 0 because a box that measures zero at layout time
+ * - inside a collapsed group, a hidden tab, a container that has not laid out
+ * - never measures again, and a frame at `scale(0)` is an empty card (I-18).
+ */
+const MINIATURE_SEED_SCALE = 0.081;
+
+/**
+ * A few turns of a conversation, as the transcript draws them.
+ *
+ * Inert static markup with no depictions of its own: the card is what makes a
+ * preset legible, and at this scale what carries that is the SHAPE of a page
+ * of chat - user bubbles against the right, assistant paragraphs running the
+ * column's width, a tool line between them. The three cards mount ~30
+ * `HostContextFrame`s between them already, and each one costs a
+ * `ResizeObserver` and a layout read (G1-21), so nothing here is a region.
+ */
+const MINIATURE_TRANSCRIPT: ReadonlyArray<{
+  readonly id: string;
+  readonly kind: "user" | "assistant" | "tool";
+  readonly text: string;
+}> = [
+  { id: "u1", kind: "user", text: "Make the task list easier to scan." },
+  {
+    id: "t1",
+    kind: "tool",
+    text: "Read src/task-list.tsx",
+  },
+  {
+    id: "a1",
+    kind: "assistant",
+    text: "I'll group related tasks, give the titles more room, and keep the progress visible beside each item. The changes can stay inside the existing list component.",
+  },
+  {
+    id: "u2",
+    kind: "user",
+    text: "Keep the layout comfortable on smaller windows.",
+  },
+  {
+    id: "a2",
+    kind: "assistant",
+    text: "The list now uses the available width. Long titles wrap, metadata stays beside its task, and the controls keep their touch targets.",
+  },
+];
+
+/** The tabs beside the home tab, which are chrome rather than regions. */
+const MINIATURE_TABS: ReadonlyArray<{
+  readonly label: string;
+  readonly active: boolean;
+}> = [
+  { label: "Start page", active: false },
+  { label: "Sample chat", active: true },
+];
 
 /**
  * A faithful, uniformly-scaled miniature of the real app frame (L-43, L-62):
  * the preset's own values, drawn with the SAME `depictRegion` the specimen
  * stage and the canvas use, under the CURRENT arrangement (2.2) - never a
  * reflowed or hand-drawn lookalike.
+ *
+ * The frame it is drawn into is the app's own: a top bar with real tab labels,
+ * a transcript with a few turns in it, the dock the preset produces, a
+ * composer box and the status strip. That part is inert static markup, and it
+ * is there because a card that was 60% empty `bg-card` read as a near-black
+ * rectangle in every dark preset, where `--card` and `--background` are the
+ * same colour (I-03).
  *
  * Everything the arrangement decides is honoured, because the card's whole
  * claim is that it is a picture of the user's own frame under that density:
@@ -200,13 +332,17 @@ function PresetMiniature(props: {
   const { arrangement } = props;
   const values = PRESET_VALUES[props.presetId];
   const boxRef = useRef<HTMLDivElement | null>(null);
-  const [scale, setScale] = useState(0);
+  const [scale, setScale] = useState(MINIATURE_SEED_SCALE);
 
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (box === null) return;
     const update = () => {
-      setScale(box.clientWidth / MINIATURE_FRAME_WIDTH);
+      // A width of 0 is "not laid out", not "this card is zero wide": taking
+      // it would replace the seed with a scale that draws nothing (I-18).
+      const width = box.clientWidth;
+      if (width === 0) return;
+      setScale(width / MINIATURE_FRAME_WIDTH);
     };
     update();
     if (typeof ResizeObserver === "undefined") return;
@@ -241,7 +377,7 @@ function PresetMiniature(props: {
           <div className="flex min-w-0 flex-1 flex-col">
             <MiniatureChatArea {...frame} />
             <MiniatureDock {...frame} />
-            <MiniatureToolbar {...frame} />
+            <MiniatureComposer {...frame} />
             <MiniatureComposerFoot {...frame} />
           </div>
         </div>
@@ -274,9 +410,20 @@ function MiniatureTopBar({ values, arrangement }: MiniatureFrame): ReactNode {
       />
       {/* The tab strip and the header's icon cluster are not regions and carry
         no preset-specific state, so they are the frame's own chrome rather
-        than depictions. */}
-      <span className="h-5 w-16 rounded-sm border border-border" />
-      <span className="h-5 w-16 rounded-sm border border-border" />
+        than depictions - drawn with their real labels, because two blank
+        rectangles are not a picture of a top bar (I-03). */}
+      {MINIATURE_TABS.map((tab) => (
+        <span
+          key={tab.label}
+          className={cn(
+            "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm text-muted-foreground",
+            tab.active &&
+              "border border-border bg-foreground/5 text-foreground",
+          )}
+        >
+          {tab.label}
+        </span>
+      ))}
       <span className="flex-1" />
       {inHeader ? (
         <>
@@ -294,8 +441,9 @@ function MiniatureTopBar({ values, arrangement }: MiniatureFrame): ReactNode {
           />
         </>
       ) : null}
-      <span className="size-5 rounded-sm border border-border" />
-      <span className="size-5 rounded-sm border border-border" />
+      <History className="size-4 shrink-0 text-muted-foreground" />
+      <Bell className="size-4 shrink-0 text-muted-foreground" />
+      <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
     </div>
   );
 }
@@ -312,18 +460,62 @@ function MiniatureChatArea({ values, arrangement }: MiniatureFrame): ReactNode {
     />
   );
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1 border-b border-border">
       {side === "left" ? minimap : null}
-      <div className="min-h-0 flex-1 border-b border-border bg-card" />
+      {/* Clipped rather than scrolled, exactly as the real transcript's top is
+        off-screen: the card is a window onto a conversation in progress. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-6 pt-5">
+        {MINIATURE_TRANSCRIPT.map((message) => (
+          <MiniatureMessage key={message.id} kind={message.kind}>
+            {message.text}
+          </MiniatureMessage>
+        ))}
+      </div>
       {side === "right" ? minimap : null}
     </div>
   );
 }
 
+/** One turn: a bubble against the right, a paragraph, or a tool line. */
+function MiniatureMessage(props: {
+  readonly kind: "user" | "assistant" | "tool";
+  readonly children: string;
+}): ReactNode {
+  if (props.kind === "user") {
+    return (
+      <span className="max-w-[78%] shrink-0 self-end rounded-lg border border-border bg-foreground/5 px-3.5 py-2.5 text-ui-sm">
+        {props.children}
+      </span>
+    );
+  }
+  if (props.kind === "tool") {
+    return (
+      <span className="flex shrink-0 items-center gap-2 text-ui-xs text-muted-foreground">
+        <Wrench className="size-3.5 shrink-0" />
+        {props.children}
+      </span>
+    );
+  }
+  return (
+    <span className="shrink-0 text-ui-sm leading-relaxed">
+      {props.children}
+    </span>
+  );
+}
+
 /**
- * The dock, split the way the canvas splits it: a chip-sized row draws in the
- * compact strip's own host context. The Compact card's whole claim is that the
- * dock folds to chips, so the miniature has to make that claim too (G1-02).
+ * The dock, split the way the canvas splits it, and placed the way the app
+ * places it (L-97).
+ *
+ * The full-size rows are ONE joined frame whose bottom edge disappears under
+ * the composer - today's `ChatLowerDock`, which the owner kept - and the
+ * chip-sized members are small pills above the composer's left edge, which is
+ * the one thing L-97 took from the artifact. Drawn as separate cards, the
+ * Compact card had nothing left to claim: the fold to chips IS the claim
+ * (G1-02), so the two shapes have to look different from each other here.
+ *
+ * The pills go ABOVE the joined frame because the tuck only exists while the
+ * frame touches the composer; both still sit above it, at its left edge.
  */
 function MiniatureDock({ values, arrangement }: MiniatureFrame): ReactNode {
   const shown = arrangement.dock.filter(
@@ -331,15 +523,14 @@ function MiniatureDock({ values, arrangement }: MiniatureFrame): ReactNode {
   );
   const rows = shown.filter((regionId) => values[regionId].size === "full");
   const chips = shown.filter((regionId) => values[regionId].size === "chip");
+  if (rows.length === 0 && chips.length === 0) return null;
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2">
-      {rows.map((regionId) => (
-        <div key={regionId}>
-          {depictRegion(regionId, values[regionId], arrangement, null)}
-        </div>
-      ))}
+    <div data-testid="preset-dock" className="flex flex-col gap-1.5 px-6 pt-2">
       {chips.length === 0 ? null : (
-        <div className="flex items-center gap-1">
+        <div
+          data-testid="preset-dock-chips"
+          className="flex items-center gap-1.5"
+        >
           {chips.map((regionId) => (
             <span key={regionId}>
               {depictRegion(
@@ -352,23 +543,61 @@ function MiniatureDock({ values, arrangement }: MiniatureFrame): ReactNode {
           ))}
         </div>
       )}
+      {rows.length === 0 ? null : (
+        // `-mb-px` over a frame with no bottom border: the seam between the
+        // dock and the composer is one line, not two touching ones.
+        <div
+          data-testid="preset-dock-frame"
+          className="-mb-px rounded-t-lg border border-b-0 border-border bg-foreground/3 px-3 py-2"
+        >
+          <div className="flex flex-col gap-1.5">
+            {rows.map((regionId) => (
+              <div key={regionId}>
+                {depictRegion(regionId, values[regionId], arrangement, null)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function MiniatureToolbar({ values, arrangement }: MiniatureFrame): ReactNode {
+/**
+ * The composer: a box with the prompt line above its two toolbar clusters.
+ *
+ * A box and nothing more. The toolbar clusters were drawn loose on the frame,
+ * so the preset's own composer buttons floated in empty space with no composer
+ * around them (I-03); what the composer LOOKS like inside is the depictions'
+ * business, and ticket C3 carries the new design into them.
+ *
+ * `bg-foreground/3` rather than `bg-card`, for the reason I-03 exists: every
+ * dark preset defines `--card` as `--background`, so a `bg-card` box on this
+ * frame is a border around nothing. It is also the real composer shell's own
+ * material.
+ */
+function MiniatureComposer({ values, arrangement }: MiniatureFrame): ReactNode {
   return (
-    <div className="flex items-center justify-between px-3 pb-2">
-      <MiniatureToolbarCluster
-        regionIds={arrangement.toolbarLeft}
-        values={values}
-        arrangement={arrangement}
-      />
-      <MiniatureToolbarCluster
-        regionIds={arrangement.toolbarRight}
-        values={values}
-        arrangement={arrangement}
-      />
+    <div data-testid="preset-composer" className="px-6 pb-2">
+      <div className="rounded-xl border border-border bg-foreground/3 px-3 pt-2.5 pb-2">
+        <div className="pb-4 text-ui-sm text-muted-foreground">
+          Describe the next change...
+        </div>
+        <div className="flex items-center">
+          <MiniatureToolbarCluster
+            regionIds={arrangement.toolbarLeft}
+            values={values}
+            arrangement={arrangement}
+          />
+          <span className="flex-1" />
+          <MiniatureToolbarCluster
+            regionIds={arrangement.toolbarRight}
+            values={values}
+            arrangement={arrangement}
+          />
+          <span className="ml-1.5 size-6 shrink-0 rounded-full border border-border bg-foreground/10" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -399,7 +628,7 @@ function MiniatureComposerFoot({
   arrangement,
 }: MiniatureFrame): ReactNode {
   return (
-    <div className="flex items-center justify-end border-t border-border px-3 py-1.5">
+    <div className="flex items-center justify-end px-6 pb-2">
       <MiniatureRegion
         regionId="contextUsage"
         values={values}

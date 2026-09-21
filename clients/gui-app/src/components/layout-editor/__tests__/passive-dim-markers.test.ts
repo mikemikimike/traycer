@@ -76,7 +76,12 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
       "components/home/composer/composer-shell.tsx": 1,
       "components/home/composer/composer-send-button.tsx": 2,
       "components/home/host-workspace-selector/host-workspace-selector.tsx": 1,
-      "components/sample-workspace/sample-workspace-body.tsx": 1,
+      // Two, and the second belongs to the item above: under L-87 the sample
+      // workspace IS the canvas, so its own transcript scroller takes the
+      // `opacity-only` marker `chat-timeline.tsx` carries for the real one
+      // (C-03). Counted here rather than there because the reduce below is a
+      // last-one-wins merge, and one file cannot be split across two items.
+      "components/sample-workspace/sample-workspace-body.tsx": 2,
     },
     deviation: null,
   },
@@ -112,6 +117,23 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
     item: "epic-sidebar.tsx: the panel body",
     files: { "components/epic-canvas/sidebar/epic-sidebar.tsx": 2 },
     deviation: null,
+  },
+  // The two items L-87 adds: the sample workspace IS the canvas now, so its
+  // own non-region chrome owes the same dim the real shell's does (C-03).
+  {
+    item: "sample-workspace-surface.tsx: the sample banner",
+    files: { "components/sample-workspace/sample-workspace-surface.tsx": 1 },
+    deviation: null,
+  },
+  {
+    item: "sample-workspace-rail.tsx: the sample rail's non-editable container",
+    files: {},
+    deviation:
+      "The sample rail has no non-region element, for the same reason " +
+      "`epic-sidebar-rail.tsx` above has none: every node in it - the " +
+      "`<aside>`, each group box - is an ANCESTOR of the rail tiles, and each " +
+      "tile is one of the nine rail regions. A marker on any of them would " +
+      "dim the regions, which is the inversion this registry exists to stop.",
   },
 ];
 

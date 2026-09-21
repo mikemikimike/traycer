@@ -4,9 +4,19 @@ import {
   changedControlKeys,
   revertControlValues,
 } from "@/components/layout-editor/inspector/region-control-io";
-import { NO_EXAMPLE_MATCH_COPY } from "@/components/layout-editor/regions/region-grammar";
-import { regionDepiction } from "@/components/layout-editor/region-depiction";
-import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import {
+  NO_EXAMPLE_MATCH_COPY,
+  type StyleSpecimen,
+} from "@/components/layout-editor/regions/region-grammar";
+import {
+  depictUsageProvider,
+  regionDepiction,
+} from "@/components/layout-editor/region-depiction";
+import {
+  USAGE_PROVIDER_IDS,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
@@ -24,11 +34,13 @@ export function StyleRow(props: {
     readonly patch: Partial<LayoutValues[RegionId]>;
   }>;
   readonly description: string | null;
+  readonly specimen: StyleSpecimen;
   readonly regionId: RegionId;
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
 }): ReactNode {
-  const { examples, description, regionId, values, arrangement } = props;
+  const { examples, description, specimen, regionId, values, arrangement } =
+    props;
   const regionValues = values[regionId];
   const matches = examples.map((example) =>
     Object.entries(example.patch).every(
@@ -71,6 +83,9 @@ export function StyleRow(props: {
             type="button"
             aria-checked={matches[index]}
             role="radio"
+            // The picture is `inert` below, so it is out of the a11y tree and
+            // this radio has no name left to take from its content.
+            aria-label={example.label}
             className={cn(
               "flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 text-left transition-colors active:press-scrim",
               matches[index] && "border-foreground",
@@ -90,8 +105,16 @@ export function StyleRow(props: {
                   "border-foreground after:absolute after:inset-0.75 after:rounded-full after:bg-foreground after:content-['']",
               )}
             />
-            <span className="min-w-0 flex-1 overflow-hidden">
-              {regionDepiction(
+            {/* `inert`, the same rule `PresetCard`'s miniature already
+              follows: an example draws the REAL leaf, and for Model that leaf
+              is `HarnessModelTrigger` - a genuine `<button>` nested inside a
+              `role="radio"`, which is invalid markup and reads to a screen
+              reader as two overlapping controls (P-8, P-9). `inert` takes the
+              picture out of focus, hit testing and the a11y tree in one, which
+              leaves this radio as the row's one control. */}
+            <span inert className="min-w-0 flex-1 overflow-hidden">
+              {drawExample(
+                specimen,
                 regionId,
                 valuesWithPatch(regionId, values, example.patch),
                 arrangement,
@@ -109,6 +132,49 @@ export function StyleRow(props: {
         <p className="mt-1.5 text-ui-xs text-muted-foreground">{description}</p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One example's picture: the whole region, or the one specimen segment the
+ * region's own grammar names instead (I-06).
+ *
+ * `depictUsageProvider` is the same framed segment the provider level puts on
+ * its stage, so the example row and that level draw identical pixels.
+ */
+function drawExample(
+  specimen: StyleSpecimen,
+  regionId: RegionId,
+  values: LayoutValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  if (specimen === "region") {
+    return regionDepiction(regionId, values, arrangement);
+  }
+  return depictUsageProvider(
+    specimenProvider(arrangement),
+    values.usageLimits,
+    arrangement,
+    // The specimen's own window, not live ones: a Style example is a picture
+    // of the READING SHAPE, and the same shape has to be comparable between
+    // the five rows. Only the provider level draws from live windows, because
+    // there the windows are what is being picked (L-96).
+    null,
+  );
+}
+
+/**
+ * The provider a usage example is drawn from: the first one the strip actually
+ * shows, so the example matches what the user is looking at, and the first
+ * configured provider when they have hidden them all.
+ */
+function specimenProvider(arrangement: LayoutArrangement): RateLimitProviderId {
+  return (
+    arrangement.usageProviders.find(
+      (providerId) => !arrangement.hiddenProviders.includes(providerId),
+    ) ??
+    arrangement.usageProviders.at(0) ??
+    USAGE_PROVIDER_IDS[0]
   );
 }
 

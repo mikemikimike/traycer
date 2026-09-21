@@ -286,7 +286,6 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
     expect(
       Analytics.getInstance().track(AnalyticsEvent.LayoutEditorSession, {
         source: "command_palette",
-        scene: "sample_workspace",
         entry: "keyboard",
         session_duration_bucket: layoutDurationBucket(30_000),
         first_change_bucket: null,

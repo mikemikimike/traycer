@@ -8,12 +8,21 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ChatPinnedStack } from "@/components/chat/chat-pinned-stack";
+import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
+import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
 import type { SegmentTodoItem } from "@/stores/composer/chat-store";
 
-describe("<ChatPinnedStack />", () => {
+/**
+ * The two panels as the dock's joined frame stacks them (L-97).
+ *
+ * `ChatPinnedStack` itself is gone: it was the pre-dock wrapper and had no
+ * production caller left once `ChatLowerDock` took over the frame, so the
+ * panels are mounted here the way the dock mounts them - Todo first, Changed
+ * files below it with its `separated` hairline.
+ */
+describe("the dock's pinned panels", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -135,11 +144,18 @@ function stackUi(
 ) {
   return (
     <TooltipProvider delayDuration={0}>
-      <ChatPinnedStack
-        todo={todo}
-        restore={baseRestore(changes)}
-        topSpacing="normal"
-      />
+      <div data-testid="chat-pinned-stack">
+        <PinnedTodoPanel
+          todo={todo}
+          scrollRegionMaxHeightClass="max-h-[min(40dvh,24rem)]"
+          separated={false}
+        />
+        <ChatAccumulatedChangesPanel
+          restore={baseRestore(changes)}
+          separated
+          scrollRegionMaxHeightClass={undefined}
+        />
+      </div>
     </TooltipProvider>
   );
 }

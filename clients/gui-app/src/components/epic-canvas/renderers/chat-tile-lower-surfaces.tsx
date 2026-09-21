@@ -26,16 +26,13 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import {
-  ChatDockCompactStrip,
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
   type ChatDockCompactStripValue,
   type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
 import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
-import { SAMPLE_DOCK } from "@/components/sample-workspace/sample-workspace-scene";
 import { isReceivedAgentResponse } from "@/components/chat/chat-queue-utils";
 import {
   type ChatLowerSurfaceTopSpacing,
@@ -288,19 +285,13 @@ interface ComposerSurfaceLayout {
 }
 
 /**
- * The chat composer's bottom strip: where this chat runs, then what it is
- * DOING, then how much context is left.
+ * The chat composer's bottom strip: where this chat runs, then how much
+ * context is left.
  *
- * The compact chips close the left cell, hard against the context-usage
- * cluster. They come and go with the chat's activity, and the host / workspace
- * pickers ahead of them must not shift under the pointer when one appears -
- * which is exactly what putting the chips first did. That ordering is the
- * whole of the fix, so it lives in a named component with a suite on it rather
- * than inline in the tile that happens to mount it.
- *
- * The strip is rendered here rather than handed in, so this node's identity
- * does not move when a count does - it reads its own contents from the dock's
- * context.
+ * The compact chips used to close the left cell, hard against the
+ * context-usage cluster. They live above the composer now (A12, L-97), which
+ * is where the artifact draws them and where they are adjacent to the rows
+ * they open - so this row is back to the two leaves it names.
  */
 export function ChatDockWorkspaceControls(props: {
   /** The host + workspace picker cluster, first and left-aligned. */
@@ -310,13 +301,10 @@ export function ChatDockWorkspaceControls(props: {
 }): ReactNode {
   return (
     <>
-      {/* No passive marker on this cell: the compact strip inside it carries
-          the three dock regions, and a `filter` above a region dims the region
-          too. The host / workspace label marks its own root instead - see
-          `host-workspace-selector.tsx`. */}
+      {/* No passive marker on this cell: the host / workspace label marks its
+          own root instead - see `host-workspace-selector.tsx`. */}
       <div className="flex min-w-0 items-center gap-2 overflow-hidden">
         {props.hostWorkspaceSelector}
-        <ChatDockCompactStrip />
       </div>
       {props.usageChip}
     </>
@@ -631,33 +619,41 @@ interface ChatDockChromeInput {
 const NO_BACKGROUND_ITEMS: ReadonlyArray<BackgroundItem> = [];
 
 /**
- * Whether one dock section draws as a chip, and whether that chip is the
- * SAMPLE one.
+ * Whether one dock section draws as a chip.
  *
- * A chip-sized section with live content is a chip, as always. A chip-sized
- * section with nothing to show is a chip too, but only while an editor session
- * is live and drawn from the sample model: otherwise the Size control would
- * change nothing in the one case sample fill exists for - an empty chat, which
- * is exactly what the Compact preset's own card promises to fold (L-16,
- * G1-03).
+ * Sample fill inside a real chat is gone with the in-place scene (L-87): the
+ * editor always opens the sample workspace, which mounts these same panels
+ * against sample data (L-98), so a chip here always stands for live content.
  *
- * `ghost` is the third way a section is on screen: a HIDDEN region materialises
- * in place while the index row points at it (L-14), and it has to materialise
- * as what the user configured. Reading `shown` alone made a hidden chip-sized
- * region come back as a full sample row, so the Size control it is standing
- * there to demonstrate appeared to do nothing.
+ * A ghost is gone for the same reason, one step further on: a HIDDEN region
+ * materialises while the index row points at it (L-14), and the index only
+ * ever points at the sample workspace's own instances. A real tile is never
+ * the canvas, so nothing here is ever asked to materialise.
  */
-function dockChipPlan(
-  values: SizedValues,
-  ghost: boolean,
-  hasContent: boolean,
-  editing: boolean,
-): { readonly chip: boolean; readonly sample: boolean } {
-  const onScreen = values.shown === "shown" || ghost;
-  const chipSized = onScreen && values.size === "chip";
-  const sample = chipSized && !hasContent && editing;
-  return { chip: (chipSized && hasContent) || sample, sample };
+function dockChipPlan(values: SizedValues, hasContent: boolean): boolean {
+  return values.shown === "shown" && values.size === "chip" && hasContent;
 }
+
+/**
+ * The three fields a dock row carries only for the Customize canvas, in the
+ * one state a REAL chat tile can be in: none of them (L-87).
+ *
+ * The editor's canvas is always the sample workspace, whose own dock supplies
+ * real values for these (`sample-workspace-body.tsx`). A real tile cannot be
+ * on screen while a session is live - the door activates the sample tab, the
+ * session ends the moment any other item becomes active, and that tab is
+ * `splitEligibility: "ineligible"` so nothing is ever presented beside it - and
+ * `useLayoutRegion` registers nothing from a surface whose
+ * `PaneVisibilityContext` is false, which is every backgrounded epic surface
+ * and every hosted chat body (`epic-surface.tsx`,
+ * `hosted-chat-surface-context-bridge.tsx`). So this tile registered three
+ * instances that nothing could ever draw.
+ */
+const NO_CUSTOMIZE_HOTSPOT = {
+  hotspotRef: () => undefined,
+  ghost: false,
+  editing: false,
+} satisfies Omit<DockRowHotspot, "shown" | "hasContent">;
 
 /**
  * Which dock rows are folded into a chip, what those chips say, and how the
@@ -698,18 +694,6 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // (see `agentsChip` below) but the panel this hotspot anchors has nothing of
   // its own to draw, which is what decides whether the row is sample-filled.
   const activeAgentsHasContent = input.activeAgentsVisible;
-  const filesChangedHotspot = useLayoutRegion({
-    regionId: "changedFiles",
-    instanceId: input.chatId,
-  });
-  const activeAgentsHotspot = useLayoutRegion({
-    regionId: "runningAgents",
-    instanceId: input.chatId,
-  });
-  const backgroundHotspot = useLayoutRegion({
-    regionId: "background",
-    instanceId: input.chatId,
-  });
   // The root agent counts as running too when it is itself active, exactly as
   // `ActiveAgentsPanel`'s own header counts it.
   const agentsRunningCount =
@@ -785,39 +769,15 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // A chip exists for every compact section that HAS something to show, whether
   // or not its row is currently revealed - the chip is the way back, so it
   // cannot be the thing that disappears when the row appears.
-  //
-  // And, while an editor session is live, for every compact section that has
-  // NOTHING to show: a chip-sized region still has to be a chip on the canvas,
-  // or the Size control changes nothing in the one case sample fill exists for
-  // (L-16, G1-03). Those chips draw the sample model instead of a count.
-  const editing = filesChangedHotspot.editing;
-  const filesPlan = dockChipPlan(
-    changedFilesValues,
-    filesChangedHotspot.ghost,
-    changesPresent,
-    editing,
-  );
+  const filesChip = dockChipPlan(changedFilesValues, changesPresent);
   // Received A2A rows follow this mode, so the chip is also owed when they are
   // the only thing folded: without it, folding would make them unreachable.
   const agentsHasContent = input.activeAgentsVisible || receivedAgentCount > 0;
-  const agentsPlan = dockChipPlan(
-    runningAgentsValues,
-    activeAgentsHotspot.ghost,
-    agentsHasContent,
-    editing,
-  );
-  const backgroundPlan = dockChipPlan(
+  const agentsChip = dockChipPlan(runningAgentsValues, agentsHasContent);
+  const backgroundChip = dockChipPlan(
     backgroundValues,
-    backgroundHotspot.ghost,
     input.backgroundVisible,
-    editing,
   );
-  const filesChip = filesPlan.chip;
-  const filesChipSample = filesPlan.sample;
-  const agentsChip = agentsPlan.chip;
-  const agentsChipSample = agentsPlan.sample;
-  const backgroundChip = backgroundPlan.chip;
-  const backgroundChipSample = backgroundPlan.sample;
 
   // A reveal belongs to a chip, so it dies with one. Per-tile stickiness is the
   // point - a revealed row stays revealed for as long as the tile lives - but
@@ -855,17 +815,11 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
 
   const chips = useMemo<ReadonlyArray<ChatDockCompactChipModel>>(() => {
     const models: ChatDockCompactChipModel[] = [];
-    if (filesChipSample) {
-      models.push(
-        sampleChipModel("filesChanged", filesChangedHotspot.ref, revealed),
-      );
-    } else if (filesChip) {
+    if (filesChip) {
       models.push({
         section: "filesChanged",
         glyph: "filesChanged",
-        hotspotRef: revealed.has("filesChanged")
-          ? null
-          : filesChangedHotspot.ref,
+        hotspotRef: null,
         working: false,
         // The file count leads and the line counts follow, the same order and
         // the same tones the panel's own header uses - the chip stands in for
@@ -881,20 +835,13 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // edit while a turn is still writing, so a turn touching twelve files
         // rang the chip beside the input twelve times.
         pulseToken: "changed",
-        sample: false,
       });
     }
-    if (agentsChipSample) {
-      models.push(
-        sampleChipModel("activeAgents", activeAgentsHotspot.ref, revealed),
-      );
-    } else if (agentsChip) {
+    if (agentsChip) {
       models.push({
         section: "activeAgents",
         glyph: "activeAgents",
-        hotspotRef: revealed.has("activeAgents")
-          ? null
-          : activeAgentsHotspot.ref,
+        hotspotRef: null,
         // Mid-turn is the live state here, exactly as the roster in `label`
         // words it - the chip draws it, the sentence says it.
         working: agentsWorking,
@@ -911,20 +858,15 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // moment this chip appears; a count moving between two non-zero values
         // is the same fact, updated.
         pulseToken: agentsRunningCount > 0 ? "running" : null,
-        sample: false,
       });
     }
-    if (backgroundChipSample) {
-      models.push(
-        sampleChipModel("background", backgroundHotspot.ref, revealed),
-      );
-    } else if (backgroundChip) {
+    if (backgroundChip) {
       models.push({
         section: "background",
         // The section's own mark whatever the rows are - activity lights it
         // rather than replacing it, and the kinds are the panel's to draw.
         glyph: "background",
-        hotspotRef: revealed.has("background") ? null : backgroundHotspot.ref,
+        hotspotRef: null,
         // The count IS the running count, so anything in it lights the chip -
         // and a shell whose process is alive is in that count whether or not it
         // is monitoring, since the host reports it as `running` either way
@@ -938,7 +880,6 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // part rather than letting a bare `0` stand for "nothing here".
         label: `Background. ${backgroundSummary}.`,
         pulseToken: backgroundRunning > 0 ? "running" : null,
-        sample: false,
       });
     }
     return dockOrder.flatMap((section) =>
@@ -946,13 +887,9 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     );
   }, [
     dockOrder,
-    revealed,
     filesChip,
-    filesChipSample,
     agentsChip,
-    agentsChipSample,
     backgroundChip,
-    backgroundChipSample,
     backgroundSummary,
     changeTotals,
     changedFileCount,
@@ -961,9 +898,6 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     agentsRoster,
     receivedAgentCount,
     backgroundRunning,
-    filesChangedHotspot.ref,
-    activeAgentsHotspot.ref,
-    backgroundHotspot.ref,
   ]);
 
   const strip = useMemo<ChatDockCompactStripValue>(
@@ -973,48 +907,23 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
 
   const hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>> = {
     filesChanged: {
-      hotspotRef: filesChangedHotspot.ref,
+      ...NO_CUSTOMIZE_HOTSPOT,
       shown: changedFilesValues.shown === "shown",
       hasContent: changesPresent,
-      ghost: filesChangedHotspot.ghost,
-      editing: filesChangedHotspot.editing,
     },
     activeAgents: {
-      hotspotRef: activeAgentsHotspot.ref,
+      ...NO_CUSTOMIZE_HOTSPOT,
       shown: runningAgentsValues.shown === "shown",
       hasContent: activeAgentsHasContent,
-      ghost: activeAgentsHotspot.ghost,
-      editing: activeAgentsHotspot.editing,
     },
     background: {
-      hotspotRef: backgroundHotspot.ref,
+      ...NO_CUSTOMIZE_HOTSPOT,
       shown: backgroundValues.shown === "shown",
       hasContent: input.backgroundVisible,
-      ghost: backgroundHotspot.ghost,
-      editing: backgroundHotspot.editing,
     },
   };
 
   return { folded, dockQueue, strip, dockOrder, hotspots };
-}
-
-/**
- * One chip-sized dock region with nothing live in it, drawn from the sample
- * model the sample workspace already uses (L-16, G1-03).
- *
- * The same models, so the two scenes cannot drift: a region shown as a chip in
- * an empty chat reads exactly as it does in the sample workspace.
- */
-function sampleChipModel(
-  section: ChatDockSection,
-  hotspotRef: (node: HTMLElement | null) => void,
-  revealed: ReadonlySet<ChatDockSection>,
-): ChatDockCompactChipModel {
-  const model = SAMPLE_DOCK.find((entry) => entry.section === section);
-  if (model === undefined) {
-    throw new Error(`no sample dock chip for section: ${section}`);
-  }
-  return { ...model, hotspotRef: revealed.has(section) ? null : hotspotRef };
 }
 
 /** How many agents the chip's sentence names before it starts counting. */

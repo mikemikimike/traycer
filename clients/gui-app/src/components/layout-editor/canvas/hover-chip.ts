@@ -38,18 +38,45 @@ export function createHoverChip(): HoverChipController {
   element.setAttribute("data-anchored", anchored ? "1" : "0");
   document.body.append(element);
 
+  /** What the measured path has to re-place against; `null` while hidden. */
+  let placed: { node: HTMLElement; placement: HoverChipPlacement } | null =
+    null;
+
+  // A scroll or a window resize moves the region the chip names without
+  // telling either store, so the measured path would be left behind by a
+  // transcript scroll (C-07). Every OTHER way the canvas reflows - a dock
+  // switch, a float toggle, a value write - is an editor-store notification,
+  // and the painter re-runs `show` on each of those. The anchored path needs
+  // none of it: the browser keeps the chip on its anchor by itself.
+  const replace = (): void => {
+    if (placed === null) return;
+    place(element, placed.node, placed.placement);
+  };
+  if (!anchored) {
+    window.addEventListener("scroll", replace, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener("resize", replace, { passive: true });
+  }
+
   return {
     show: ({ label, node, placement }) => {
       element.textContent = label;
       element.setAttribute("data-placement", placement);
       element.hidden = false;
       if (anchored) return;
+      placed = { node, placement };
       place(element, node, placement);
     },
     hide: () => {
       element.hidden = true;
+      placed = null;
     },
     destroy: () => {
+      window.removeEventListener("scroll", replace, { capture: true });
+      window.removeEventListener("resize", replace);
+      placed = null;
       element.remove();
     },
   };

@@ -1,11 +1,16 @@
 import type { ReactNode } from "react";
 import { Bot, Cpu, FileDiff, History, Mic, Shield } from "lucide-react";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
 import { ActiveAgentsHeader } from "@/components/chat/chat-active-agents-panel";
 import { BackgroundItemsHeader } from "@/components/chat/chat-background-items-panel";
+import {
+  ChatDiffTargetContext,
+  type ChatSnapshotDiffOpener,
+} from "@/components/chat/chat-diff-target";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
 import { contextUsageTone } from "@/components/chat/context-usage";
-import { FileChangeHeader } from "@/components/chat/segments/file-change-segment";
+import { SAMPLE_RESTORE } from "@/components/sample-workspace/sample-workspace-scene";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { ComposerAttachImageTrigger } from "@/components/home/toolbar/composer-attach-image-button";
 import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
@@ -21,6 +26,7 @@ import {
 } from "@/components/layout-editor/region-depiction-frame";
 import { type LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
+import { tightestRateLimitWindow } from "@/lib/rate-limits/tightest-window";
 import type {
   ContextUsageValues,
   LayoutValues,
@@ -42,7 +48,8 @@ import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-ba
  * chrome is already split into an interactive mount and a drawing view -
  * `StatusBarUsageReadings`, `HarnessModelTrigger`, `PermissionsTrigger`,
  * `TabStripHomeItemView`, `MinimapRailTick`, `LeftPanelRailIcon`, the dock's
- * three headers and its compact chip all take what they draw from props - and
+ * two headers, its changed-files panel and its compact chip all take what they
+ * draw from props - and
  * for those a depiction IS the shipping component under specimen data. The
  * four that read a preference through a hook of their own rather than from a
  * prop (the resource segment, the context chip, the mic button, the harness
@@ -64,7 +71,8 @@ import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-ba
 export type { HostContextId };
 
 /**
- * Where a region really lives, given what the arrangement says about it.
+ * Where a region really lives, given what the arrangement says about it and
+ * what its own values make of it.
  *
  * Read off the region rather than off the registry's `surface`, so the
  * depiction module owes the registry nothing and the two can be imported in
@@ -72,14 +80,29 @@ export type { HostContextId };
  */
 function hostContextFor(
   regionId: RegionId,
+  values: LayoutValues[RegionId],
   arrangement: LayoutArrangement,
 ): HostContextId {
   // The one region whose surface the user can move (L-19). Everything else is
   // where it lives, which the table below states once per region.
-  if (regionId === "usageLimits") {
-    return arrangement.usageHost === "header" ? "top-bar" : "status-bar";
-  }
-  return HOST_BY_REGION[regionId];
+  if (regionId === "usageLimits") return usageHostContext(arrangement);
+  const host = HOST_BY_REGION[regionId];
+  // The second region that moves surface, and this one moves itself: a dock
+  // member set to Chip is not a row in the dock's joined frame, it is a pill
+  // in the strip above the composer (L-97, A12). Its picture is framed where
+  // the real thing stands, or the chip would be drawn inside a frame it has
+  // just left.
+  if (host === "dock" && isChipSized(values)) return "chip-strip";
+  return host;
+}
+
+/** Where the usage cluster is hosted right now (L-28). */
+function usageHostContext(arrangement: LayoutArrangement): HostContextId {
+  return arrangement.usageHost === "header" ? "top-bar" : "status-bar";
+}
+
+function isChipSized(values: LayoutValues[RegionId]): boolean {
+  return "size" in values && values.size === "chip";
 }
 
 /**
@@ -131,7 +154,7 @@ export function depictRegion<K extends RegionId>(
   const depict = REGION_DEPICTIONS[regionId];
   return (
     <HostContextFrame
-      host={hostContext ?? hostContextFor(regionId, arrangement)}
+      host={hostContext ?? hostContextFor(regionId, values, arrangement)}
     >
       {depict(values, arrangement)}
     </HostContextFrame>
@@ -186,6 +209,21 @@ function specimenWindow(): StatusBarRateLimitWindow {
 
 function noop(): void {}
 
+/**
+ * The scroll cap a dock panel takes from its tile. A picture never opens, so
+ * nothing is ever measured against it; it is here because the real panel asks
+ * for one and a picture must not invent a different geometry to hand it.
+ */
+const SPECIMEN_SCROLL_REGION_CLASS = "max-h-[min(24dvh,12rem)]";
+
+/** Every handler the changed-files header asks for, going nowhere. */
+const INERT_DIFF_OPENER: ChatSnapshotDiffOpener = {
+  segment: () => ({ onClick: noop, onDoubleClick: noop }),
+  cumulative: () => ({ onClick: noop, onDoubleClick: noop }),
+  cumulativeBundle: () => noop,
+  hash: () => ({ onClick: noop, onDoubleClick: noop }),
+};
+
 // ── Per-region renderers ────────────────────────────────────────────────────
 
 /**
@@ -200,23 +238,38 @@ export function depictUsageProvider(
   providerId: RateLimitProviderId,
   values: UsageLimitsValues,
   arrangement: LayoutArrangement,
+  windows: ReadonlyArray<StatusBarRateLimitWindow> | null,
 ): ReactNode {
   return (
-    <HostContextFrame host={hostContextFor("usageLimits", arrangement)}>
-      {depictUsageProviderSegment(providerId, values)}
+    <HostContextFrame host={usageHostContext(arrangement)}>
+      {depictUsageProviderSegment(providerId, values, windows)}
     </HostContextFrame>
   );
 }
 
-/** The segment itself, which the cluster repeats once per shown provider. */
+/**
+ * The segment itself, which the cluster repeats once per shown provider.
+ *
+ * `windows` is the one place a picture is drawn from live numbers rather than
+ * from the specimen, and it is the provider level that needs it (L-96): the
+ * limits a user ticks there are that provider's OWN windows, so a stage drawn
+ * from the specimen would answer a tick with a picture that never changes.
+ * The caller reads them; this module still asks for nothing (the passivity
+ * contract in the header).
+ *
+ * An empty list is the same answer as `null` - a provider that has reported
+ * nothing yet - because a segment drawn from no windows is a picture of no
+ * reading at all.
+ */
 function depictUsageProviderSegment(
   providerId: RateLimitProviderId,
   values: UsageLimitsValues,
+  windows: ReadonlyArray<StatusBarRateLimitWindow> | null,
 ): ReactNode {
-  const window = specimenWindow();
+  const drawn =
+    windows === null || windows.length === 0 ? [specimenWindow()] : windows;
   return (
     <StatusBarUsageReadings
-      interactive={false}
       display={{
         percentMode: values.amount,
         showModeWord: values.word,
@@ -234,9 +287,9 @@ function depictUsageProviderSegment(
             hidden: false,
             state: "live",
             reason: null,
-            windows: [window],
-            shown: [window],
-            tightest: window,
+            windows: drawn,
+            shown: drawn,
+            tightest: tightestRateLimitWindow(drawn),
           },
         ],
       }}
@@ -253,7 +306,7 @@ function depictUsageLimits(
   );
   return shownProviders.map((providerId) => (
     <span key={providerId} className="inline-flex shrink-0 items-center">
-      {depictUsageProviderSegment(providerId, values)}
+      {depictUsageProviderSegment(providerId, values, null)}
     </span>
   ));
 }
@@ -432,19 +485,25 @@ function depictChangedFiles(values: SizedValues): ReactNode {
       />
     );
   }
+  // The real row, not a look-alike of it. This drew `FileChangeHeader` - a
+  // TRANSCRIPT segment header, "Edit - path" - which is the same miss L-98
+  // names in the sample dock: the changed-files row is the "N files changed"
+  // panel, with its count, its `+/-` and its header actions. The panel reads
+  // nothing of its own; it is handed the same `SAMPLE_RESTORE` the sample
+  // workspace's dock is fed, so the canvas and the picture cannot disagree.
+  //
+  // The opener is what the header's "Review all" is gated on, and it is the
+  // sample scene's shape: a handler that goes nowhere, so the picture is
+  // complete and still opens nothing (the passivity contract above; the
+  // specimen stage is `inert` besides).
   return (
-    <span className="flex items-center gap-1">
-      <FileChangeHeader
-        filePath="src/task-list.tsx"
-        operation="edit"
-        additions={12}
-        deletions={3}
-        isStreaming={false}
-        endState={null}
-        reason="snapshot"
-        clickHandlers={null}
+    <ChatDiffTargetContext.Provider value={INERT_DIFF_OPENER}>
+      <ChatAccumulatedChangesPanel
+        restore={SAMPLE_RESTORE}
+        separated={false}
+        scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
       />
-    </span>
+    </ChatDiffTargetContext.Provider>
   );
 }
 
@@ -534,8 +593,14 @@ const REGION_DEPICTIONS: {
   ),
   // `ComposerHarnessLabel`'s own span: that component binds itself to the
   // composer's tile and its hotspot, neither of which a picture has.
+  //
+  // Its classes, to the letter, minus the one that cannot travel: `@max-lg`
+  // is the COMPOSER's container query (C1), and a picture is drawn in a 320px
+  // dock where that query would hide the label the stage exists to show. The
+  // tone is the plain `text-muted-foreground` C1 gave the real label - it was
+  // `/70` here for as long as it was there.
   agent: () => (
-    <span className="inline-block shrink-0 truncate px-1 text-ui-xs text-muted-foreground/70">
+    <span className="inline-block shrink-0 truncate px-1 text-ui-xs text-muted-foreground">
       Codex
     </span>
   ),

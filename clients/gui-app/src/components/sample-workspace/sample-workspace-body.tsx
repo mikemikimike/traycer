@@ -7,11 +7,13 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import {
-  ChatDockCompactStrip,
-  ChatDockCompactStripProvider,
-} from "@/components/chat/chat-dock-compact-strip";
+import { ChatDockCompactStripProvider } from "@/components/chat/chat-dock-compact-strip";
 import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
+import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
+import {
+  ChatDiffTargetContext,
+  type ChatSnapshotDiffOpener,
+} from "@/components/chat/chat-diff-target";
 import { SegmentRow } from "@/components/chat/segments/segment-row";
 import {
   ChatUserMessageContent,
@@ -35,15 +37,40 @@ import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
 import { SampleWorkspaceRail } from "./sample-workspace-rail";
 import {
   CONTEXT_USAGE_PREVIEW_SAMPLE,
+  SAMPLE_AGENT_DESCENDANTS,
+  SAMPLE_BACKGROUND_ITEMS,
   SAMPLE_CHANGED_FILE,
-  SAMPLE_TOOLBAR_VALUES,
+  SAMPLE_CHAT_ID,
   SAMPLE_DOCK,
+  SAMPLE_EPIC_ID,
+  SAMPLE_HOST_ID,
   SAMPLE_MINIMAP_ITEMS,
+  SAMPLE_NO_PENDING_STOPS,
+  SAMPLE_QUEUE,
+  SAMPLE_RESTORE,
+  SAMPLE_SELF_AGENT,
   SAMPLE_TILE_ID,
+  SAMPLE_TODO,
+  SAMPLE_TOOLBAR_VALUES,
   SAMPLE_TURNS,
+  SAMPLE_VIEW_TAB_ID,
   sampleNoop,
+  sampleNoopAction,
 } from "./sample-workspace-scene";
 import { cn } from "@/lib/utils";
+
+/**
+ * The diff openers the changed-files panel asks for before it draws "Review
+ * all". Real handler shapes with nothing behind them: the panel's own gate is
+ * "is there an opener", so a null context would silently drop the action and
+ * the sample would go on missing the header button L-98 is about.
+ */
+const SAMPLE_DIFF_OPENER: ChatSnapshotDiffOpener = {
+  segment: () => ({ onClick: sampleNoop, onDoubleClick: sampleNoop }),
+  cumulative: () => ({ onClick: sampleNoop, onDoubleClick: sampleNoop }),
+  cumulativeBundle: () => sampleNoop,
+  hash: () => ({ onClick: sampleNoop, onDoubleClick: sampleNoop }),
+};
 
 export function SampleWorkspaceBody() {
   const [pickerStore] = useState(() => createComposerPickerStore());
@@ -73,26 +100,29 @@ export function SampleWorkspaceBody() {
     regionId: "background",
     instanceId: SAMPLE_TILE_ID,
   });
+  // Every dock member HAS content here (L-98): the sample scene feeds the real
+  // panels, so a row draws its own header, its actions and its body exactly as
+  // a live chat's does rather than a look-alike header.
   const hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>> = {
     filesChanged: {
       hotspotRef: files.ref,
       editing: files.editing,
       shown: changedFiles.shown === "shown",
-      hasContent: false,
+      hasContent: true,
       ghost: files.ghost,
     },
     activeAgents: {
       hotspotRef: agents.ref,
       editing: agents.editing,
       shown: runningAgents.shown === "shown",
-      hasContent: false,
+      hasContent: true,
       ghost: agents.ghost,
     },
     background: {
       hotspotRef: background.ref,
       editing: background.editing,
       shown: backgroundValues.shown === "shown",
-      hasContent: false,
+      hasContent: true,
       ghost: background.ghost,
     },
   };
@@ -118,76 +148,121 @@ export function SampleWorkspaceBody() {
         <SampleWorkspaceRail />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <SampleTranscript />
-          <div inert className="contents">
-            <ChatDockCompactStripProvider
-              value={{ chips, expanded: new Set(), onToggle: sampleNoop }}
-            >
-              <ChatLowerDock
-                folded={folded}
-                dockOrder={dockOrder}
-                hotspots={hotspots}
-                topSpacing="compact"
-                presentation
-              />
-              <div className="shrink-0 px-4 pb-2">
-                <div className="mx-auto w-full max-w-3xl">
-                  <ComposerShell
-                    pickerStore={pickerStore}
-                    onDragOver={sampleNoop}
-                    onDragEnter={sampleNoop}
-                    onDragLeave={sampleNoop}
-                    onDrop={sampleNoop}
-                    dragOverlayVariant={null}
-                    utilityRail={null}
-                    attachmentsStrip={null}
-                    editor={
-                      <p className="pb-5 text-ui text-muted-foreground">
-                        Describe the next change…
-                      </p>
-                    }
-                    toolbar={
-                      <ComposerToolbar
-                        presentation
-                        store={toolbarStore}
-                        onAttachImages={sampleNoop}
-                        canSubmit={false}
-                        attachmentPending={false}
-                        onSubmit={sampleNoop}
-                        activeTurnStatus={null}
-                        stopDisabled
-                        onStopTurn={null}
-                        composerDisabledHint="Sample content"
-                        dictation={null}
-                        dictationPreparing={null}
-                        settingsLocked
-                        createProfileHostId={null}
-                        runTargetHostId={null}
-                        terminalLoginSurface={null}
-                        chatLineCarriesAutoMode={null}
+          {/* The two contexts the real dock panels resolve before they draw:
+              the tab's host (the Background panel and the agent stop buttons
+              read it) and the diff opener (the changed-files panel's "Review
+              all"). Both name the sample scene, so every store they consult
+              answers empty and the panels show the sample data below and
+              nothing of the user's own work. */}
+          <TabHostContext.Provider value={SAMPLE_HOST_ID}>
+            <ChatDiffTargetContext.Provider value={SAMPLE_DIFF_OPENER}>
+              <div inert className="contents">
+                <ChatDockCompactStripProvider
+                  value={{ chips, expanded: new Set(), onToggle: sampleNoop }}
+                >
+                  <ChatLowerDock
+                    snapshotLoaded
+                    epicId={SAMPLE_EPIC_ID}
+                    chatId={SAMPLE_CHAT_ID}
+                    viewTabId={SAMPLE_VIEW_TAB_ID}
+                    selfAgent={SAMPLE_SELF_AGENT}
+                    activeAgents={SAMPLE_AGENT_DESCENDANTS}
+                    todo={SAMPLE_TODO}
+                    restore={SAMPLE_RESTORE}
+                    queue={SAMPLE_QUEUE}
+                    folded={folded}
+                    dockOrder={dockOrder}
+                    hotspots={hotspots}
+                    backgroundItems={SAMPLE_BACKGROUND_ITEMS}
+                    runningManagedCommandCount={0}
+                    heldManagedCommandCount={0}
+                    backgroundStopPendingTaskIds={SAMPLE_NO_PENDING_STOPS}
+                    backgroundStopAllPending={false}
+                    backgroundSessionStopPending={false}
+                    activeTurnStatus={null}
+                    canAct
+                    queueResumeRequested={false}
+                    queueKeepPausedRequested={false}
+                    readOnly={false}
+                    editingQueueItemId={null}
+                    topSpacing="compact"
+                    scrollRegionMaxHeightClass="max-h-[min(24dvh,12rem)]"
+                    onQueuePause={sampleNoopAction}
+                    onQueueResume={sampleNoopAction}
+                    onQueueEdit={sampleNoop}
+                    onQueueCancel={sampleNoop}
+                    onQueueAbortSteer={sampleNoop}
+                    onQueueReorder={sampleNoop}
+                    onQueueSteerNow={sampleNoop}
+                    onBackgroundItemClick={sampleNoop}
+                    onBackgroundItemStop={sampleNoopAction}
+                    onBackgroundItemsStopAll={sampleNoopAction}
+                    onBackgroundSessionStop={sampleNoopAction}
+                  />
+                  <div className="shrink-0 px-4 pb-2">
+                    <div className="mx-auto w-full max-w-3xl">
+                      <ComposerShell
+                        pickerStore={pickerStore}
+                        onDragOver={sampleNoop}
+                        onDragEnter={sampleNoop}
+                        onDragLeave={sampleNoop}
+                        onDrop={sampleNoop}
+                        dragOverlayVariant={null}
+                        utilityRail={null}
+                        attachmentsStrip={null}
+                        editor={
+                          // No marker of its own: `ComposerShell` already
+                          // marks `data-composer-editor-frame`, which this
+                          // placeholder renders inside, and a second marker on
+                          // a descendant would dim it twice.
+                          <p className="pb-5 text-ui text-muted-foreground">
+                            Describe the next change…
+                          </p>
+                        }
+                        toolbar={
+                          <ComposerToolbar
+                            presentation
+                            store={toolbarStore}
+                            onAttachImages={sampleNoop}
+                            canSubmit={false}
+                            attachmentPending={false}
+                            onSubmit={sampleNoop}
+                            activeTurnStatus={null}
+                            stopDisabled
+                            onStopTurn={null}
+                            composerDisabledHint="Sample content"
+                            dictation={null}
+                            dictationPreparing={null}
+                            settingsLocked
+                            createProfileHostId={null}
+                            runTargetHostId={null}
+                            terminalLoginSurface={null}
+                            chatLineCarriesAutoMode={null}
+                          />
+                        }
                       />
-                    }
-                  />
-                  <ComposerWorkspaceRow
-                    workspaceControls={
-                      <>
-                        <span
-                          data-layout-passive
-                          className="min-w-0 text-ui-xs text-muted-foreground"
-                        >
-                          Sample workspace
-                        </span>
-                        <ChatDockCompactStrip />
-                        <ContextUsageChip
-                          usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
-                          onCompact={sampleNoop}
-                        />
-                      </>
-                    }
-                  />
-                </div>
+                      <ComposerWorkspaceRow
+                        workspaceControls={
+                          <>
+                            <span
+                              data-layout-passive
+                              className="min-w-0 text-ui-xs text-muted-foreground"
+                            >
+                              Sample workspace
+                            </span>
+                            <ContextUsageChip
+                              usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
+                              onCompact={sampleNoop}
+                            />
+                          </>
+                        }
+                      />
+                    </div>
+                  </div>
+                </ChatDockCompactStripProvider>
               </div>
-            </ChatDockCompactStripProvider>
-          </div>
+            </ChatDiffTargetContext.Provider>
+          </TabHostContext.Provider>
         </div>
       </div>
     </ComposerTileIdProvider>
@@ -214,6 +289,14 @@ function SampleTranscript() {
     const scroller = viewport.current;
     const turns = content.current;
     if (!scroller || !turns) return;
+    // Open at the latest turn, the way a real chat does.
+    //
+    // This is the slice the owner's recording shows: the scroller opened at
+    // the TOP, so its bottom edge landed wherever a line happened to be and
+    // the dock's opaque band cut that line in half. Scrolled to the end, the
+    // scroller's bottom edge lands on the content's own `py-6`, and the last
+    // thing above the dock is whitespace rather than half a sentence.
+    scroller.scrollTop = scroller.scrollHeight;
     const measure = () => {
       const nodes = Array.from(
         turns.querySelectorAll<HTMLElement>("[data-sample-turn]"),
@@ -237,8 +320,15 @@ function SampleTranscript() {
   }, []);
   return (
     <div className="relative min-h-0 flex-1">
+      {/* `opacity-only`, for the reason `chat-timeline.tsx` carries the same
+          value: a full-height scroller under a `filter` is a continuously
+          repainting filtered layer the size of the pane. This is the canvas the
+          editor always opens now (L-87), so without it nothing on screen reads
+          as calm content under lit chrome (C-03). The minimap region is a
+          SIBLING of this scroller, so the marker never sits above a region. */}
       <div
         ref={viewport}
+        data-layout-passive="opacity-only"
         className="h-full overflow-y-auto px-4"
         aria-label="Sample conversation"
       >

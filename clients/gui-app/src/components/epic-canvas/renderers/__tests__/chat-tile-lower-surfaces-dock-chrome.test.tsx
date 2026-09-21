@@ -109,10 +109,10 @@ vi.mock("@dnd-kit/sortable", () => ({
   }),
 }));
 
-// The one deliberate departure from `chat-lower-background-spacing.test.tsx`'s
-// stub: that suite discards `workspaceControls`, which is exactly where
-// `<ChatDockCompactStrip />` lives. This renders it, the way `chat-tile.tsx`
-// composes the real composer.
+// Renders `workspaceControls` rather than discarding it, so the row's own
+// contents stay observable. The compact chips are NOT in it any more (A12,
+// L-97) - `ChatLowerDock` draws the strip above the composer, which is outside
+// this stub and is what the chip assertions below reach.
 vi.mock("@/components/chat/composer/chat-composer", () => ({
   ChatComposer: (props: { readonly workspaceControls: ReactNode }) => (
     <div data-testid="composer-stub">{props.workspaceControls}</div>
@@ -145,7 +145,6 @@ import {
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { ChatDockCompactStrip } from "@/components/chat/chat-dock-compact-strip";
 import { NO_PROVIDER_FALLBACK } from "@/components/chat/fallback/fallback-state";
 import {
   ChatLowerInteractionSurfaces,
@@ -406,7 +405,9 @@ function surfacesProps(patch: {
       onSettingsChange: null,
       // The one required departure from the background-spacing harness: this
       // must actually contain the strip, not `null`.
-      workspaceControls: <ChatDockCompactStrip />,
+      // The chips are no longer in the workspace row (A12, L-97):
+      // `ChatLowerDock` renders the strip itself, above the composer.
+      workspaceControls: <div data-testid="workspace-controls-stub" />,
       workspaceAvailability: WORKSPACE_COMPOSER_READY,
     },
     todo: null,
@@ -490,32 +491,6 @@ afterEach(() => {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   setAgentStopControls({ self: null, descendants: [] });
 });
-
-/** The editor, decorating this tile (L-14, L-16). */
-function openLayoutSession(): void {
-  act(() => {
-    useLayoutEditorStore.getState().beginSession({
-      scene: "in-place",
-      entry: "pointer",
-      source: "direct_ui",
-      preferredInstanceId: CHAT_ID,
-      startedAt: 0,
-    });
-  });
-}
-
-function sampleRowRegions(): ReadonlyArray<string | null> {
-  return screen
-    .queryAllByTestId("chat-dock-sample-row")
-    .map((row) => row.getAttribute("data-layout-region"));
-}
-
-/** The element the chip's hotspot ref is on - the chip's own wrapper. */
-function chipHotspot(section: string): HTMLElement {
-  const host = screen.getByTestId(`chat-dock-chip-${section}`).parentElement;
-  if (host === null) throw new Error(`chip ${section} has no hotspot host`);
-  return host;
-}
 
 describe("useChatDockChrome via ChatDockCompactStrip", () => {
   it("prints the files-changed chip from the accumulated line counts and names the file count in its label", () => {
@@ -1058,128 +1033,5 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     // Back as a CHIP, not silently revealed by the stale reveal from before.
     expect(screen.getByTestId("chat-dock-chip-filesChanged")).not.toBeNull();
     expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
-  });
-});
-
-/**
- * Sample fill (L-16) and materialised hidden regions (L-14), through the whole
- * surface rather than through hand-built hotspots.
- *
- * `useChatDockChrome` is what decides whether a section is a chip or a row, and
- * the dock only draws what it is handed: a suite that passes its own
- * `folded: new Set()` and its own `shown` covers `planDockRow` and nothing
- * else, and stays green with `dockChipPlan` deleted outright. These go through
- * the real chrome, so a region's Size and Shown are what the editor would
- * actually be changing.
- */
-describe("what the editor sees on the dock", () => {
-  const EMPTY = surfacesProps({
-    restoreContext: EMPTY_RESTORE,
-    queueItems: [],
-    backgroundItems: [],
-  });
-
-  it("draws nothing for an empty row until a session opens", () => {
-    renderSurfaces(EMPTY);
-
-    expect(sampleRowRegions()).toHaveLength(0);
-
-    openLayoutSession();
-
-    expect(sampleRowRegions()).toEqual([
-      "changedFiles",
-      "runningAgents",
-      "background",
-    ]);
-  });
-
-  it("gives the sample row the region's own node, so it is hoverable", () => {
-    openLayoutSession();
-    renderSurfaces(EMPTY);
-
-    const row = screen.getAllByTestId("chat-dock-sample-row")[0];
-    expect(row.getAttribute("data-layout-region")).toBe("changedFiles");
-    expect(row.getAttribute("data-layout-instance")).toBe(CHAT_ID);
-    expect(row.hasAttribute("data-sample")).toBe(true);
-    // The real drawing leaf, fed from the sample scene.
-    expect(row.textContent).toContain("task-list.tsx");
-  });
-
-  it("never draws over live content", () => {
-    openLayoutSession();
-    renderSurfaces(
-      surfacesProps({
-        restoreContext: {
-          ...EMPTY_RESTORE,
-          accumulatedFileChanges: [fileChangeRow("/repo/src/a.ts", 4, 1)],
-        },
-        queueItems: [],
-        backgroundItems: [],
-      }),
-    );
-
-    expect(sampleRowRegions()).toEqual(["runningAgents", "background"]);
-    expect(
-      screen.getByTestId("accumulated-changes-panel").textContent,
-    ).toContain("1 file changed");
-  });
-
-  it("materialises a hidden region only while the index row points at it", () => {
-    act(() => {
-      useLayoutStore
-        .getState()
-        .setRegionValues("changedFiles", { shown: "hidden" });
-    });
-    openLayoutSession();
-    renderSurfaces(EMPTY);
-
-    expect(sampleRowRegions()).toEqual(["runningAgents", "background"]);
-
-    act(() => {
-      useLayoutEditorStore.getState().select("changedFiles");
-    });
-
-    expect(sampleRowRegions()).toContain("changedFiles");
-    const row = screen
-      .getAllByTestId("chat-dock-sample-row")
-      .find(
-        (node) => node.getAttribute("data-layout-region") === "changedFiles",
-      );
-    expect(row?.getAttribute("data-ghost")).toBe("1");
-
-    act(() => {
-      useLayoutEditorStore.getState().select(null);
-    });
-
-    expect(sampleRowRegions()).not.toContain("changedFiles");
-  });
-
-  // The defect: `dockChipPlan` asked `shown === "shown"` and nothing else, so a
-  // hidden region that is chip-sized materialised as a full sample ROW. The
-  // user is pointing at it precisely to see what their Size setting does, and
-  // it showed them the other setting.
-  it("materialises a hidden chip-sized region as a chip, not as a row (L-14, L-16)", () => {
-    act(() => {
-      useLayoutStore
-        .getState()
-        .setRegionValues("changedFiles", { shown: "hidden", size: "chip" });
-    });
-    openLayoutSession();
-    renderSurfaces(EMPTY);
-
-    expect(screen.queryByTestId("chat-dock-chip-filesChanged")).toBeNull();
-    expect(sampleRowRegions()).not.toContain("changedFiles");
-
-    act(() => {
-      useLayoutEditorStore.getState().select("changedFiles");
-    });
-
-    const hotspot = chipHotspot("filesChanged");
-    expect(hotspot.getAttribute("data-layout-region")).toBe("changedFiles");
-    expect(hotspot.getAttribute("data-ghost")).toBe("1");
-    // Drawn from the sample model, because the chat has no changes of its own.
-    expect(hotspot.hasAttribute("data-sample")).toBe(true);
-    // And it is a chip INSTEAD of the row, never as well as.
-    expect(sampleRowRegions()).not.toContain("changedFiles");
   });
 });

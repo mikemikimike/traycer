@@ -29,28 +29,16 @@ import {
  * elements which shrink rather than disappear have.
  */
 
-const DOCK_ORDER_ROW = {
-  kind: "position-order",
-  group: "dock",
-  description: "Drag to reorder, here or on the canvas.",
-  pinnedRight: false,
-  dividers: false,
-} as const;
+const DOCK_ORDER_ROW = { kind: "position-order", group: "dock" } as const;
 
 const TOOLBAR_LEFT_ORDER_ROW = {
   kind: "position-order",
   group: "toolbarLeft",
-  description: "Drag to reorder, here or on the canvas.",
-  pinnedRight: false,
-  dividers: false,
 } as const;
 
 const TOOLBAR_RIGHT_ORDER_ROW = {
   kind: "position-order",
   group: "toolbarRight",
-  description: "Drag to reorder, here or on the canvas.",
-  pinnedRight: false,
-  dividers: false,
 } as const;
 
 const DOCK_SIZE_ROW = {
@@ -171,8 +159,13 @@ export const MODEL_REGION: LayoutRegion<"model"> = {
   keywords: ["model", "chip", "effort", "medium", "bars", "reasoning"],
   sampleFilled: false,
   rows: [
-    { kind: "style", description: null, examples: MODEL_EXAMPLES },
-    { ...TOOLBAR_RIGHT_ORDER_ROW, pinnedRight: true },
+    {
+      kind: "style",
+      description: null,
+      specimen: "region",
+      examples: MODEL_EXAMPLES,
+    },
+    TOOLBAR_RIGHT_ORDER_ROW,
   ],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: modelStateWord,

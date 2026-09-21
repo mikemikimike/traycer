@@ -18,7 +18,12 @@ export function ComposerHarnessLabel(props: {
   return (
     <span
       ref={ref}
-      className="hidden shrink-0 truncate px-1 text-ui-xs text-muted-foreground/70 lg:inline-block"
+      // The plain chip: no border, no fill, the composer's own muted text
+      // (L-88). `@max-lg` is the COMPOSER's container query, the same box every
+      // neighbouring control measures itself against - a viewport `lg:` drew
+      // the label in all four tiles of a wide canvas however narrow each tile
+      // was, and then truncated it to nothing useful.
+      className="inline-block shrink-0 truncate px-1 text-ui-xs text-muted-foreground @max-lg:hidden"
     >
       {props.label ?? UNAVAILABLE_DASH}
     </span>

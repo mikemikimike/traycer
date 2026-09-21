@@ -40,6 +40,49 @@ function noPreferenceBlock(): string {
   return match[1];
 }
 
+/** The body of the one `prefers-reduced-motion: reduce` block. */
+function reduceBlock(): string {
+  const match =
+    /@media \(prefers-reduced-motion: reduce\) \{\n([\s\S]*?)\n\}/.exec(css);
+  if (match === null) throw new Error("no reduce media block");
+  return match[1];
+}
+
+interface CssRule {
+  readonly selector: string;
+  readonly body: string;
+}
+
+/**
+ * The stylesheet as rules, so a claim about the CASCADE can be made about the
+ * selector a rule actually carries rather than about a source string that a
+ * formatter reflow would break (the reason this file compares artefacts).
+ */
+function rules(source: string): ReadonlyArray<CssRule> {
+  const found: CssRule[] = [];
+  // Comments first: this file is heavily commented, and a comment sits between
+  // a rule's closing brace and the next rule's selector.
+  const bare = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  const pattern = /([^{}]+)\{([^{}]*)\}/g;
+  let match = pattern.exec(bare);
+  while (match !== null) {
+    found.push({ selector: match[1].trim(), body: match[2].trim() });
+    match = pattern.exec(bare);
+  }
+  return found;
+}
+
+/** The rule that makes a FLOATING panel fade in rather than slide in. */
+function floatArrivalSelector(): string {
+  const rule = rules(css).find(
+    (candidate) =>
+      candidate.body.includes("animation-name: layout-inspector-appear") &&
+      !candidate.body.includes("animation-direction"),
+  );
+  if (rule === undefined) throw new Error("no float arrival rule");
+  return rule.selector;
+}
+
 describe("the named groups (5.2, C-14)", () => {
   it("names exactly two groups, so the transcript is never snapshotted twice", () => {
     const declared = css.match(/view-transition-name: ([a-z-]+);/g) ?? [];
@@ -97,5 +140,31 @@ describe("the named groups (5.2, C-14)", () => {
       /\[data-layout-inspector\]\[data-entered\][^{]*\{([^}]*)\}/.exec(css);
 
     expect(entered?.[1]).toContain("animation: none");
+  });
+
+  it("keeps that silence when the panel is switched to Float (I-16)", () => {
+    // `[data-layout-inspector][data-entered]` and the float arrival both carry
+    // two attributes, so they TIE on specificity and source order decides -
+    // which the float rule, declared later, wins. An already-entered panel
+    // switched to Float therefore had `animation-name` re-declared on it and
+    // replayed the 220ms fade over a panel that had been on screen for
+    // minutes. Scoping the arrival to panels that have not entered is the fix;
+    // the exiting variant stays unscoped, because an exiting panel carries
+    // `data-entered` too and its reverse fade is wanted.
+    expect(floatArrivalSelector()).toContain(":not([data-entered])");
+  });
+
+  it("still silences the float arrival under the reduced-motion preference", () => {
+    // The scoping above adds a third attribute, so the block's plain float
+    // spelling no longer out-ranks it. Asserted as "the block neutralises the
+    // exact selector the arrival carries", so the two cannot drift apart.
+    const silenced = rules(reduceBlock()).find((rule) =>
+      rule.body.includes("animation: none"),
+    );
+    const selectors = (silenced?.selector ?? "")
+      .split(",")
+      .map((one) => one.trim());
+
+    expect(selectors).toContain(floatArrivalSelector());
   });
 });

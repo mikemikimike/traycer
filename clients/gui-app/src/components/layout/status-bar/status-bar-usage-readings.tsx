@@ -23,10 +23,8 @@ import type { StatusBarRateLimitCluster } from "@/hooks/rate-limits/use-status-b
 export function StatusBarUsageReadings(props: {
   readonly cluster: StatusBarRateLimitCluster;
   readonly display: StatusBarUsageDisplay;
-  /** `false` for every passive mount: the Settings preview, an option picture. */
-  readonly interactive: boolean;
 }): ReactNode {
-  const { cluster, display, interactive } = props;
+  const { cluster, display } = props;
   const parts = statusBarUsageParts(display);
   return (
     <>
@@ -37,7 +35,6 @@ export function StatusBarUsageReadings(props: {
             segment={segment}
             parts={parts}
             percentMode={display.percentMode}
-            interactive={interactive}
           />
         ))
       ) : (

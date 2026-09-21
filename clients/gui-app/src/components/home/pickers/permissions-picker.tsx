@@ -317,9 +317,14 @@ export function PermissionsTrigger({
       {...rest}
       aria-label={label}
       disabled={disabled}
+      // Shield alone means a SQUARE chip, not a pill with its label removed:
+      // the label and chevron are `hidden` in both of these cases, so keeping
+      // the pill's side padding would leave a 34px box beside the model chip's
+      // 28px one. `@max-lg` is the composer going narrow, `compact` is the
+      // user choosing the chip size in Layout; they arrive at the same shape.
       className={cn(
-        "max-w-[min(32cqw,13rem)] disabled:cursor-not-allowed disabled:opacity-50",
-        compact && "justify-center",
+        "max-w-[min(32cqw,13rem)] @max-lg:size-7 @max-lg:justify-center @max-lg:px-0",
+        compact && "size-7 justify-center px-0",
       )}
     >
       {icon}

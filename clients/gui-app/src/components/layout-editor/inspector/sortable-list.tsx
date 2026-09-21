@@ -6,8 +6,9 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Eye, EyeOff, GripVertical, X, type LucideIcon } from "lucide-react";
+import { ChevronRight, GripVertical, X, type LucideIcon } from "lucide-react";
 import { armLayoutDrag } from "@/components/layout-editor/canvas/drag-engine";
+import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { Button } from "@/components/ui/button";
 import { movedWithin } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
@@ -23,26 +24,42 @@ export interface SortableListItem<Id extends string> {
   readonly id: Id;
   readonly label: string;
   readonly icon: LucideIcon | null;
-  /** `null` for a divider, which carries no Shown state of its own. */
-  readonly shown: boolean | null;
+  /** A group boundary (L-25) rather than a member: a rule, with no state. */
+  readonly divider: boolean;
+  /** Drawn muted: the member is hidden. */
+  readonly dimmed: boolean;
+  /** Differs from what shipped - the row's own changed dot (L-20, P-7). */
+  readonly changed: boolean;
+  /** The presence rule spelled out under the name (L-47), where one exists. */
+  readonly hint: string | null;
   /**
-   * Bound per item rather than looked up from a list-level `(id) => void`:
-   * the caller already knows each item's real (region or divider) identity
-   * when it builds the list, so the click handler needs no string-keyed
-   * re-derivation here.
+   * The row's inline controls: its ONE Shown control, its Size where it has
+   * one, and its revert. `null` in the dock, where the section header above
+   * the list owns them and a second copy on the row would be D5 again.
    */
-  readonly onToggleShown: (() => void) | null;
+  readonly control: ReactNode;
+  /** What this row's disclosure opens IN PLACE (L-89), or `null` for none. */
+  readonly detail: ReactNode;
+  readonly open: boolean;
+  readonly onToggleOpen: (() => void) | null;
   /** Taking the item out of the list altogether: a rail divider, and only that. */
   readonly onRemove: (() => void) | null;
-  /** Opening a second level (the usage-providers row's own breadcrumb screen). */
+  /** Opening a second level as its own screen (the dock's provider level). */
   readonly onActivate: (() => void) | null;
 }
 
 interface SortableListProps<Id extends string> {
   readonly items: ReadonlyArray<SortableListItem<Id>>;
   readonly selectedId: string | null;
-  /** One item's new index in this list. The caller writes it as one gesture. */
-  readonly onMove: (id: Id, toIndex: number) => void;
+  /**
+   * One item's new index in this list. The caller writes it as one gesture.
+   *
+   * `null` for a list with no order of its own - the Chat and Status bar cards
+   * are two rows that cannot be rearranged - and then the rows carry no handle,
+   * no grab and no reorder keys. One row component, drawn the same way whether
+   * or not the list it is in happens to be ordered.
+   */
+  readonly onMove: ((id: Id, toIndex: number) => void) | null;
 }
 
 /** The operation every row carries, stated on the row rather than on the grab. */
@@ -57,9 +74,14 @@ interface KeyboardGrab<Id extends string> {
 }
 
 /**
- * The Position row's sortable sibling list (L-24): `.sortlist` / `.sitem` in
- * the prototype, and the keyboard path for every reorder the canvas offers a
- * pointer.
+ * The layout form's one row list (L-24, L-95): the sortable siblings of the
+ * Position row in the dock, and the surface card's whole body on the page.
+ *
+ * The two hosts differ by COMPOSITION and by nothing else. The page draws the
+ * list with `selectedId: null` and a control slot on every row; the inspector
+ * draws the SAME list for one region with `selectedId` on its row and the
+ * controls in the section header above it. Neither has a row component of its
+ * own (L-03).
  *
  * Three ways to move an item, all landing on the same one-index-at-a-time
  * write:
@@ -77,10 +99,13 @@ export function SortableList<Id extends string>(
   props: SortableListProps<Id>,
 ): ReactNode {
   const { items, selectedId, onMove } = props;
+  const host = useLayoutFormHost();
+  const page = host === "page";
   const listRef = useRef<HTMLDivElement | null>(null);
   const instructionsId = useId();
   const [grab, setGrab] = useState<KeyboardGrab<Id> | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const ordered = onMove !== null;
 
   // While an item is grabbed the list draws where it WOULD land. Nothing is
   // written until the drop, so Escape is a true cancel and the whole move is
@@ -98,11 +123,12 @@ export function SortableList<Id extends string>(
    * Both gestures are bound on the list natively rather than as props on each
    * row, and Escape is why.
    *
-   * The editor's own ladder listens natively on the inspector shell (5.3),
-   * which is an ANCESTOR; a React handler is delegated at the ROOT, above the
-   * shell, so it would run only after the ladder had already walked back. A
-   * native listener on this container runs while the event is still on its way
-   * up, which is what lets a cancelled grab be a rung of its own. Click
+   * A cancelled grab is a rung of the Escape ladder in its own right, and it
+   * has to be settled before any ANCESTOR sees the key. Bound natively on the
+   * list, it is settled at the deepest point there is and its
+   * `stopPropagation` holds whatever else is listening above - the editor's
+   * own ladder (now `document`, I-02), the shell, a future layer - without
+   * depending on where React happens to delegate its handlers. Click
    * follows keydown here so that the two read together and so the row keeps
    * its keyboard operation without an `onClick` prop that has no `onKeyDown`
    * beside it.
@@ -116,8 +142,12 @@ export function SortableList<Id extends string>(
     ): { item: SortableListItem<Id>; index: number } | null {
       const target = event.target;
       if (!(target instanceof Element)) return null;
-      // A control in the row is a control, not the row.
+      // A control in the row is a control, not the row - and everything the
+      // row's disclosure opened is the DETAIL's, not the row's. Without the
+      // second test a space pressed on a checkbox label inside an expanded
+      // card would pick the whole row up (L-95's in-place levels).
       if (target.closest("button") !== null) return null;
+      if (target.closest(DETAIL_SELECTOR) !== null) return null;
       const id = target
         .closest("[data-sortable-id]")
         ?.getAttribute("data-sortable-id");
@@ -140,7 +170,7 @@ export function SortableList<Id extends string>(
       }
       setGrab(null);
       announce("Dropped", item.label, grab.to);
-      if (grab.to !== grab.from) onMove(grab.id, grab.to);
+      if (grab.to !== grab.from) onMove?.(grab.id, grab.to);
     }
 
     function handleArrow(
@@ -159,7 +189,7 @@ export function SortableList<Id extends string>(
       const to = Math.min(Math.max(index + delta, 0), last);
       if (to === index) return;
       announce("Moved", item.label, to);
-      onMove(item.id, to);
+      onMove?.(item.id, to);
     }
 
     function handleKeyDown(event: KeyboardEvent): void {
@@ -167,14 +197,22 @@ export function SortableList<Id extends string>(
       if (row === null) return;
       if (grab !== null && grab.id !== row.item.id) return;
       const arrow = arrowDelta(event.key);
-      if (event.key === " ") {
+      if (event.key === " " && !ordered) {
+        // An unordered list has nothing to grab, so Space is the row's own
+        // activation - the same thing Enter and a click do.
+        event.preventDefault();
+        activate(row.item);
+      } else if (event.key === " ") {
         event.preventDefault();
         handleSpace(row.item, row.index);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        activate(row.item);
       } else if (event.key === "Escape" && grab !== null) {
         event.preventDefault();
         event.stopPropagation();
         cancelGrab(grab, row.item.label);
-      } else if (arrow !== null && (grab !== null || event.altKey)) {
+      } else if (arrow !== null && ordered && (grab !== null || event.altKey)) {
         // Without a grab the arrows belong to the index's own walk unless the
         // modifier L-31 names is held.
         event.preventDefault();
@@ -184,7 +222,8 @@ export function SortableList<Id extends string>(
 
     function handleClick(event: MouseEvent): void {
       if (grab !== null) return;
-      rowItem(event)?.item.onActivate?.();
+      const row = rowItem(event);
+      if (row !== null) activate(row.item);
     }
 
     list.addEventListener("keydown", handleKeyDown);
@@ -199,7 +238,7 @@ export function SortableList<Id extends string>(
     event: ReactPointerEvent<HTMLDivElement>,
     id: Id,
   ): void {
-    if (grab !== null) return;
+    if (grab !== null || !ordered) return;
     // A control in the row is a control, not a handle.
     if (
       event.target instanceof Element &&
@@ -208,7 +247,6 @@ export function SortableList<Id extends string>(
       return;
     armLayoutDrag({
       event: event.nativeEvent,
-      onFrame: null,
       resolve: () => {
         const rows = rowsOf(listRef.current);
         const index = rows.findIndex(
@@ -228,90 +266,176 @@ export function SortableList<Id extends string>(
           screen reader only once Space had already been pressed, which left
           every row announced as an unnamed focusable group with no stated
           operation (G3-18). One static line, described by every row. */}
-      <p id={instructionsId} className="sr-only">
-        {GRAB_INSTRUCTIONS}
-      </p>
+      {ordered ? (
+        <p id={instructionsId} className="sr-only">
+          {GRAB_INSTRUCTIONS}
+        </p>
+      ) : null}
       <div ref={listRef} className="flex flex-col gap-1">
         {shown.map((item) => (
+          // The card, not the control: an expanded row's detail holds real
+          // controls, so the thing carrying `role="button"` has to be the grab
+          // line inside it rather than the box around both (P-9's trap).
           <div
             key={item.id}
             data-sortable-id={item.id}
             data-grabbed={grab?.id === item.id ? "1" : undefined}
-            // Every row, not only the ones that open a second level: a row
-            // that can be focused, grabbed and moved has an operation whether
-            // or not it also has a destination.
-            role="button"
-            aria-describedby={instructionsId}
-            tabIndex={0}
             className={cn(
-              "flex touch-none items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-ui-sm",
+              "overflow-hidden rounded-lg border border-border bg-card",
               item.id === selectedId && "border-foreground",
-              item.shown !== true && "text-muted-foreground",
             )}
-            onPointerDown={(event) => {
-              handlePointerDown(event, item.id);
-            }}
+            // On the card rather than on the grab line inside it: a focus
+            // leaving anything in this row - the grab line, a control, a
+            // control in its expanded detail - is a grab nobody is holding.
             onBlur={() => {
-              // A grab that outlived the focus it was made with would keep
-              // swallowing arrows for a row nobody is on.
               if (grab !== null && grab.id === item.id)
                 cancelGrab(grab, item.label);
             }}
           >
-            <GripVertical
-              aria-hidden
-              className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
+            <SortableRowLine
+              item={item}
+              instructionsId={ordered ? instructionsId : null}
+              page={page}
+              onPointerDown={(event) => {
+                handlePointerDown(event, item.id);
+              }}
             />
-            {item.icon ? (
-              <item.icon className="size-3.5 shrink-0 text-muted-foreground" />
+            {item.detail !== null && item.open ? (
+              <div data-sortable-detail className="border-t border-border">
+                {item.detail}
+              </div>
             ) : null}
-            {/* A divider IS a line, so its row draws one where a panel's name
-              would keep going: the list reads the way the rail does. */}
-            {item.shown === null ? (
-              <>
-                <span className="shrink-0">{item.label}</span>
-                <span aria-hidden className="h-px flex-1 bg-border" />
-              </>
-            ) : (
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            )}
-            {item.onRemove === null ? null : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Remove ${item.label.toLowerCase()}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  item.onRemove?.();
-                }}
-              >
-                <X />
-              </Button>
-            )}
-            {item.shown === null || item.onToggleShown === null ? null : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-pressed={item.shown}
-                aria-label={`${item.shown ? "Hide" : "Show"} ${item.label}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  item.onToggleShown?.();
-                }}
-              >
-                {item.shown ? <Eye /> : <EyeOff />}
-              </Button>
-            )}
           </div>
         ))}
       </div>
-      <p className="sr-only" role="status" aria-live="polite">
-        {announcement}
-      </p>
+      {ordered ? (
+        <p className="sr-only" role="status" aria-live="polite">
+          {announcement}
+        </p>
+      ) : null}
     </>
   );
+}
+
+/**
+ * The grab line: the part of a row a pointer picks up and a key operates.
+ *
+ * A component of its own rather than more JSX inside the list's `map`, because
+ * an expanded row's detail holds real controls - so `role="button"` has to sit
+ * on this line and not on the card around both (P-9's trap), and the line is
+ * where every one of the row's optional parts is decided.
+ */
+function SortableRowLine<Id extends string>(props: {
+  readonly item: SortableListItem<Id>;
+  /** The static instructions to point at, or `null` in an unordered list. */
+  readonly instructionsId: string | null;
+  readonly page: boolean;
+  readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+}): ReactNode {
+  const { item, instructionsId, page, onPointerDown } = props;
+  const onRemove = item.onRemove;
+  return (
+    <div
+      // Every row, not only the ones that open something: a row that can be
+      // focused, grabbed and moved has an operation whether or not it also has
+      // a destination.
+      role="button"
+      aria-describedby={instructionsId ?? undefined}
+      aria-expanded={item.detail === null ? undefined : item.open}
+      tabIndex={0}
+      className={cn(
+        "flex touch-none items-center gap-2",
+        page ? "px-3 py-2.5 text-ui" : "px-2.5 py-1.5 text-ui-sm",
+        item.dimmed && "text-muted-foreground",
+      )}
+      onPointerDown={onPointerDown}
+    >
+      {instructionsId === null ? null : (
+        <GripVertical
+          aria-hidden
+          className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
+        />
+      )}
+      {item.icon ? (
+        <item.icon className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : null}
+      {/* A divider IS a line, so its row draws one where a panel's name would
+        keep going: the list reads the way the rail does. */}
+      {item.divider ? (
+        <>
+          <span className="shrink-0">{item.label}</span>
+          <span aria-hidden className="h-px flex-1 bg-border" />
+        </>
+      ) : (
+        <SortableRowName item={item} />
+      )}
+      {item.control === null ? null : (
+        <div className="flex shrink-0 items-center gap-1.5">{item.control}</div>
+      )}
+      {onRemove === null ? null : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Remove ${item.label.toLowerCase()}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+        >
+          <X />
+        </Button>
+      )}
+      {item.detail === null ? null : (
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            item.open && "rotate-90",
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A member's name, its changed dot and the presence rule under it (L-47). */
+function SortableRowName<Id extends string>(props: {
+  readonly item: SortableListItem<Id>;
+}): ReactNode {
+  const { item } = props;
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 truncate">{item.label}</span>
+        {item.changed ? (
+          <span
+            aria-hidden
+            data-testid="changed-dot"
+            className="size-1.5 shrink-0 rounded-full bg-info"
+          />
+        ) : null}
+      </div>
+      {item.hint === null ? null : (
+        <p className="mt-0.5 text-ui-xs text-muted-foreground">{item.hint}</p>
+      )}
+    </div>
+  );
+}
+
+/** Everything the row's disclosure opened, which the row itself must not claim. */
+const DETAIL_SELECTOR = "[data-sortable-detail]";
+
+/**
+ * What pressing a row does: open its own disclosure in place, or open the
+ * screen it names. Never both - a row has one destination.
+ */
+function activate<Id extends string>(item: SortableListItem<Id>): void {
+  if (item.onToggleOpen !== null) {
+    item.onToggleOpen();
+    return;
+  }
+  item.onActivate?.();
 }
 
 function arrowDelta(key: string): number | null {

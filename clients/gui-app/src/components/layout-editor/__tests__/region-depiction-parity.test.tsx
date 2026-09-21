@@ -6,12 +6,13 @@ import { fileURLToPath } from "node:url";
 import { cleanup, render } from "@testing-library/react";
 import { isValidElement, type ElementType, type ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vitest";
+import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
 import { ActiveAgentsHeader } from "@/components/chat/chat-active-agents-panel";
 import { BackgroundItemsHeader } from "@/components/chat/chat-background-items-panel";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
-import { FileChangeHeader } from "@/components/chat/segments/file-change-segment";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { ComposerAttachImageTrigger } from "@/components/home/toolbar/composer-attach-image-button";
+import { ComposerHarnessLabel } from "@/components/home/toolbar/composer-harness-label";
 import { HarnessModelTrigger } from "@/components/home/pickers/harness-model-trigger";
 import { PermissionsTrigger } from "@/components/home/pickers/permissions-picker";
 import { StatusBarUsageReadings } from "@/components/layout/status-bar/status-bar-usage-readings";
@@ -144,8 +145,8 @@ const REGION_PARITY: Readonly<Record<RegionId, ReadonlyArray<ParityCase>>> = {
   changedFiles: [
     realLeaf(ChatDockCompactChip, CHIP_MODULE, AS_CHIP),
     realLeaf(
-      FileChangeHeader,
-      "@/components/chat/segments/file-change-segment",
+      ChatAccumulatedChangesPanel,
+      "@/components/chat/chat-accumulated-changes-panel",
       AS_FULL,
     ),
   ],
@@ -346,6 +347,64 @@ describe("the depictions drawn from their own markup", () => {
       "mic",
       "resourceMonitor",
     ]);
+  });
+});
+
+/**
+ * The one hand-drawn depiction whose original CAN be rendered beside it.
+ *
+ * `agent` is drawn from its own markup because `ComposerHarnessLabel` binds
+ * itself to the composer's tile and its hotspot - but it takes no preference
+ * through a hook, so the real component mounts here and the two class lists can
+ * be compared for real instead of by eye. This is the leaf half of what
+ * `region-depiction-frame-parity.test.tsx` does for the host frames, and it is
+ * the check C1 needed: that label's tone moved from `/70` to plain
+ * `text-muted-foreground`, and nothing would have said so.
+ *
+ * The container query is the one class that cannot travel: `@max-lg` measures
+ * the COMPOSER, and a picture is drawn in a 320px dock where it would hide the
+ * label the stage exists to show.
+ */
+describe("the hand-drawn harness label", () => {
+  const CONTAINER_QUERY = "@max-lg:hidden";
+
+  function classesOf(node: Element | null): ReadonlyArray<string> {
+    if (!(node instanceof HTMLElement)) throw new Error("no label rendered");
+    return [...node.classList].filter(
+      (className) => className !== CONTAINER_QUERY,
+    );
+  }
+
+  it("carries the real label's own classes", () => {
+    const real = render(<ComposerHarnessLabel label="Codex" />);
+    const realClasses = classesOf(real.container.firstElementChild);
+
+    const picture = render(
+      depictRegion(
+        "agent",
+        SHIPPED_DEFAULT_VALUES.agent,
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+    const drawn = classesOf(frameOf(picture.container).firstElementChild);
+
+    expect(realClasses.length).toBeGreaterThan(0);
+    expect([...drawn].sort()).toEqual([...realClasses].sort());
+  });
+
+  it("does not take the composer's container query with it", () => {
+    const picture = render(
+      depictRegion(
+        "agent",
+        SHIPPED_DEFAULT_VALUES.agent,
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+    const drawn = frameOf(picture.container).firstElementChild;
+    if (!(drawn instanceof HTMLElement)) throw new Error("no label drawn");
+    expect([...drawn.classList]).not.toContain(CONTAINER_QUERY);
   });
 });
 

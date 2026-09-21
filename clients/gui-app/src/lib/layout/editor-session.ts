@@ -5,7 +5,6 @@ import {
   AnalyticsEvent,
   type AnalyticsSource,
 } from "@/lib/analytics";
-import { aNativeTileIsPresented } from "@/lib/browser-view/tiles/tile-rect-registry";
 import { runLayoutEditorMotion } from "@/lib/layout/editor-motion";
 import {
   layoutEditorFitsWindow,
@@ -22,17 +21,16 @@ import {
 } from "@/lib/layout/layout-diff";
 import type { RegionId } from "@/lib/layout/region-id";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
-import { navigateToSettingsSection } from "@/lib/settings-navigation";
-import { activateTabIntent } from "@/lib/tab-navigation";
-import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import {
-  findPaneById,
-  resolveActivePaneTab,
-} from "@/stores/epics/canvas/tile-tree";
+  closeSystemOverlay,
+  navigateToLayoutRegion,
+  navigateToSettingsSection,
+} from "@/lib/settings-navigation";
+import { activateTabIntent } from "@/lib/tab-navigation";
+import { SAMPLE_TILE_ID } from "@/components/sample-workspace/sample-workspace-scene";
 import {
   useLayoutEditorStore,
   type LayoutEditorEntryMethod,
-  type LayoutEditorScene,
   type LayoutEditorSession,
 } from "@/stores/layout/layout-editor-store";
 import { getLayoutSnapshot } from "@/stores/layout/layout-store";
@@ -41,13 +39,21 @@ import { useTabsStore } from "@/stores/tabs/store";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 
 /**
- * The one door into and out of the layout editor (L-15, 5.1, 5.3).
+ * The one door into and out of the layout editor (L-87, 5.1, 5.3).
  *
  * Every entry point - the palette, the chrome's context menus, the Appearance
- * card, a Settings search result - lands here, because the scene, the lease,
+ * card, a Settings search result - lands here, because the canvas, the lease,
  * the width gate and the teardown are session facts and not properties of
  * whichever gesture reached them. The entry points themselves are ticket 10;
  * what this module owns is what happens once one of them fires.
+ *
+ * The canvas is ALWAYS the sample workspace (L-87, superseding L-15): a user
+ * who asks to customize the layout is not asking to have their own task
+ * rearranged under them. The sample tab and the session therefore have one
+ * lifetime - the door opens the tab before the session begins, closing the tab
+ * ends the session, and ending the session closes the tab - which is the one
+ * invariant behind the width gate here, the watcher below and
+ * `SampleSceneProvider`'s own close.
  */
 
 type NavigateFn = UseNavigateResult<string>;
@@ -84,9 +90,9 @@ export interface OpenLayoutEditorInput {
   /** The region to preselect, for a deep link out of Settings search (5.3). */
   readonly target: RegionId | null;
   /**
-   * The router's navigate, needed only for the sample-workspace fallback
-   * scene: the sample is a real top-level tab, so it is opened through the
-   * ordinary tab navigation controller rather than by writing the tab store.
+   * The router's navigate: the sample workspace is a real top-level tab, so it
+   * is opened through the ordinary tab navigation controller rather than by
+   * writing the tab store.
    */
   readonly navigate: NavigateFn;
 }
@@ -115,22 +121,30 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
   // cannot reflow beside a 320px instrument panel, so the form takes the whole
   // page instead of the editor opening into a canvas with no room.
   if (!layoutEditorFitsWindow()) {
-    navigateToSettingsSection("layout");
+    // A press that does nothing is worse than one that explains itself: the
+    // redirect has nowhere to go before the modal bridge publishes an API
+    // (a cold launch behind `HostReadyGate`), and the user would otherwise be
+    // left pressing a row with no window wide enough and no page to land on.
+    //
+    // The target goes WITH it. The page has a row per region now (L-95), so
+    // the region a search result or a quick verb named is something the
+    // redirect can land on rather than discard (A.5 gap 1).
+    const reached =
+      input.target === null
+        ? navigateToSettingsSection("layout")
+        : navigateToLayoutRegion(input.target);
+    if (!reached) toast.info("Customize layout needs a wider window.");
     return false;
   }
   if (!acquireLayoutEditorLease()) return false;
-
-  // A presented browser tile is painted outside the page, so it neither dims
-  // with the canvas nor travels with a shell snapshot: the editor takes the
-  // sample workspace instead of the tile's own chat (C-18, 4.2).
-  const preferredInstanceId = aNativeTileIsPresented()
-    ? null
-    : preferredChatTileId();
-  const scene: LayoutEditorScene =
-    preferredInstanceId === null ? "sample" : "in-place";
+  // The app's own system overlay is chrome the editor is about to decorate,
+  // and it is portalled above everything the editor draws (L-91). Dismissing
+  // it belongs to the door for the same reason the lease and the width gate
+  // do: a call site that forgets is a call site that reopens the bug.
+  closeSystemOverlay();
   // Before the session begins, so the activation this performs is not the tab
   // switch the session watcher exits on.
-  if (scene === "sample") openSampleWorkspace(input.navigate);
+  openSampleWorkspace(input.navigate);
 
   runLayoutEditorMotion({
     phase: "enter",
@@ -138,16 +152,23 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
     dockMode: editor.dockMode,
     apply: () => {
       useLayoutEditorStore.getState().beginSession({
-        scene,
         entry: input.entry,
         source: input.source,
-        preferredInstanceId,
+        // Pinned to the sample tile rather than left to "whichever instance
+        // registered first" (L-23). A background tab's tiles no longer
+        // register at all - `useLayoutRegion` gates on `usePaneVisible()` and
+        // `SurfacePresentationBoundary` turns that off for an unpresented
+        // surface - but a SPLIT presents both sides as visible, so a chat tile
+        // beside the sample workspace registers the same regions the sample
+        // scene does. Without the pin the travelling ring would settle on
+        // whichever of the two mounted first.
+        preferredInstanceId: SAMPLE_TILE_ID,
         startedAt: Date.now(),
       });
       if (input.target !== null) {
         useLayoutEditorStore.getState().select(input.target);
       }
-      watchSession(scene);
+      watchSession();
       startLayoutEditorHeartbeat(() => {
         closeLayoutEditor("lease-lost");
       });
@@ -246,32 +267,12 @@ function endSession(
   // is not this editor's to close: the first case has nothing to close and the
   // second would take away a tab the user just chose.
   if (
-    session.scene === "sample" &&
     reason !== "tab-switch" &&
     reason !== "sample-closed" &&
     reason !== "lease-lost"
   ) {
     tabCommandCoordinator.closeRefAfterConfirmed({ ...SAMPLE_WORKSPACE_REF });
   }
-}
-
-/**
- * The tile whose copy of a region wins when several are on screen (L-23,
- * C-25), and the scene decision with it: a real chat in the active pane is the
- * canvas, and the sample workspace is only the automatic fallback when there
- * is none (L-15).
- */
-function preferredChatTileId(): string | null {
-  const state = useEpicCanvasStore.getState();
-  if (state.activeTabId === null) return null;
-  const canvas = state.canvasByTabId[state.activeTabId];
-  if (canvas === undefined) return null;
-  const pane =
-    canvas.activePaneId === null
-      ? null
-      : findPaneById(canvas.root, canvas.activePaneId);
-  if (pane === null) return null;
-  return resolveActivePaneTab(pane.activeTabId, pane.tabInstanceIds);
 }
 
 /**
@@ -289,7 +290,14 @@ function openSampleWorkspace(navigate: NavigateFn): void {
         state.items.some((existing) => existing.id === item.id)
       )
         return item;
-      return { ...item, sampleReturnItemId: state.activeItemId };
+      // A capture pointing at the sample tab itself is a tab that returns to
+      // itself, which `removeLayoutRef` would resolve to a tab it has just
+      // removed. `null` is the honest answer - it means Home.
+      return {
+        ...item,
+        sampleReturnItemId:
+          state.activeItemId === item.id ? null : state.activeItemId,
+      };
     });
     return { items, stripOrder: flattenLayoutRefs(layout) };
   });
@@ -303,14 +311,13 @@ let stopSessionWatch: (() => void) | null = null;
  *
  * The editor never auto-exits on something the app merely SAYS (L-17) - only
  * on the canvas going away underneath it: another tab taking over, the sample
- * scene closing, the window narrowing past the width the editor needs.
+ * tab closing, the window narrowing past the width the editor needs.
  */
-function watchSession(scene: LayoutEditorScene): void {
+function watchSession(): void {
   stopWatchingSession();
   const activeItemId = useTabsStore.getState().activeItemId;
   const unwatchTabs = useTabsStore.subscribe((state) => {
     if (
-      scene === "sample" &&
       !state.items.some(
         (item) => item.kind === "tab" && item.ref.kind === "sample-workspace",
       )
@@ -320,25 +327,11 @@ function watchSession(scene: LayoutEditorScene): void {
     }
     if (state.activeItemId !== activeItemId) closeLayoutEditor("tab-switch");
   });
-  // The preferred tile is re-read rather than frozen: a tile can close under
-  // the editor, and the ring and the chip have to follow the instance that is
-  // still on screen.
-  const unwatchCanvas = useEpicCanvasStore.subscribe(() => {
-    const state = useLayoutEditorStore.getState();
-    const session = state.session;
-    if (session === null || session.scene !== "in-place") return;
-    const preferredInstanceId = preferredChatTileId();
-    if (preferredInstanceId === session.preferredInstanceId) return;
-    useLayoutEditorStore.setState({
-      session: { ...session, preferredInstanceId },
-    });
-  });
   const unwatchWidth = subscribeLayoutEditorFitsWindow(() => {
     if (!layoutEditorFitsWindow()) closeLayoutEditor("below-threshold");
   });
   stopSessionWatch = () => {
     unwatchTabs();
-    unwatchCanvas();
     unwatchWidth();
   };
 }
@@ -376,7 +369,6 @@ function trackLayoutEditorSession(input: {
   const summary = layoutEditorSessionChangeSummary(entrySnapshot, exitSnapshot);
   Analytics.getInstance().track(AnalyticsEvent.LayoutEditorSession, {
     source: session.source,
-    scene: session.scene === "sample" ? "sample_workspace" : "in_place",
     entry: session.entry,
     session_duration_bucket: layoutDurationBucket(now - session.startedAt),
     first_change_bucket:

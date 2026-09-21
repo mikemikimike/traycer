@@ -76,11 +76,14 @@ afterEach(() => {
 });
 
 describe("float geometry (5.4, section 6)", () => {
-  it("keeps the panel inside the window whatever was remembered", () => {
+  it("keeps the panel inside the window, and off the chrome above the app", () => {
+    // `y` floors at the top inset rather than at 0: the app's own header is up
+    // there, and a panel over it takes the title bar's drag region with it.
     expect(clampFloatPosition({ x: -400, y: -80 }, VIEWPORT)).toEqual({
       x: 0,
-      y: 0,
+      y: 28,
     });
+    expect(clampFloatPosition({ x: 10, y: 0 }, VIEWPORT).y).toBe(28);
     expect(clampFloatPosition({ x: 9000, y: 9000 }, VIEWPORT)).toEqual({
       x: VIEWPORT.width - FLOAT_DOCK_WIDTH,
       y: VIEWPORT.height - floatDockHeight(VIEWPORT.height),
@@ -133,8 +136,13 @@ describe("dragging the panel by its header (L-38)", () => {
     expect(useLayoutEditorStore.getState().dockMode).toBe("float");
   });
 
-  it("docks to the side when the release lands near an edge", () => {
+  it("docks to the side when the release lands near an edge, and forgets where it was", () => {
     const panel = mountPanel();
+    // A position the user really left behind, so the assertion below is about
+    // the snap CLEARING it rather than about it never having been set (I-15).
+    act(() => {
+      useLayoutEditorStore.getState().setFloatPosition({ x: 500, y: 200 });
+    });
     renderHook(() => useFloatingDock(panel));
 
     act(() => {

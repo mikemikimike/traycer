@@ -34,9 +34,6 @@ import {
  * than about a session (L-38).
  */
 
-/** Whether the editor is decorating the user's own chat or the sample workspace (L-15). */
-export type LayoutEditorScene = "in-place" | "sample";
-
 /**
  * The gesture that reached the door (L-30, L-54).
  *
@@ -61,7 +58,6 @@ export interface LayoutDockPosition {
 }
 
 export interface LayoutEditorSession {
-  readonly scene: LayoutEditorScene;
   readonly entry: LayoutEditorEntryMethod;
   /**
    * The gesture that reached the door (`OpenLayoutEditorInput.source`),
@@ -71,9 +67,11 @@ export interface LayoutEditorSession {
    */
   readonly source: AnalyticsSource;
   /**
-   * The chat tile whose instance of a region wins when several are on screen
+   * The tile whose instance of a region wins when several are on screen
    * (L-23): it carries the anchor and the travelling ring, the others get a
-   * static outline.
+   * static outline. The door pins it to the sample tile (L-87), which is the
+   * only one the user is looking at - a retained background epic tab keeps
+   * registering its own chat regions for as long as it is open.
    */
   readonly preferredInstanceId: string | null;
   readonly startedAt: number;
@@ -186,7 +184,16 @@ export interface LayoutEditorState {
   readonly setFilter: (filter: string) => void;
   readonly setPreviewPreset: (previewPreset: LayoutPresetId | null) => void;
   readonly setDockMode: (dockMode: LayoutDockMode) => void;
-  readonly setFloatPosition: (floatPosition: LayoutDockPosition) => void;
+  /**
+   * Where a floating inspector was left, or `null` for "nowhere in
+   * particular".
+   *
+   * `null` is a real value rather than a missing one: an edge snap takes the
+   * SIDE as the memory and must clear the coordinates with it, or the next
+   * Float opens flush against the edge it was docked to, one pixel from
+   * snapping straight back (I-15).
+   */
+  readonly setFloatPosition: (floatPosition: LayoutDockPosition | null) => void;
   readonly setLockedBy: (lockedBy: LayoutEditorLock) => void;
   /** One gesture: whatever `mutate` writes to the layout store is one undo step. */
   readonly recordGesture: (mutate: () => void) => void;

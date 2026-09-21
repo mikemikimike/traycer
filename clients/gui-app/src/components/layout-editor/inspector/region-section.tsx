@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
+import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
+import { RegionShownControl } from "@/components/layout-editor/inspector/region-controls";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import { assertNever } from "@/components/layout-editor/inspector/rows/assert-never";
 import { ProvidersChildrenRow } from "@/components/layout-editor/inspector/rows/children-row";
@@ -9,10 +10,6 @@ import {
   PositionOrderRow,
   PositionSideRow,
 } from "@/components/layout-editor/inspector/rows/position-row";
-import {
-  isRailRegionId,
-  setRegionShown,
-} from "@/components/layout-editor/layout-gestures";
 import { SizeRow } from "@/components/layout-editor/inspector/rows/size-row";
 import { StyleRow } from "@/components/layout-editor/inspector/rows/style-row";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
@@ -21,7 +18,6 @@ import {
   regionFacts,
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";
-import { Switch } from "@/components/ui/switch";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
@@ -29,14 +25,15 @@ import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import {
-  useLayoutSnapshot,
-  useLayoutStore,
-} from "@/stores/layout/layout-store";
+import { useLayoutSnapshot } from "@/stores/layout/layout-store";
 
 interface RegionSectionProps {
   readonly regionId: RegionId;
-  /** The same section renders in both hosts (L-03); only the children row differs. */
+  /**
+   * Which host is drawing this section (L-03), published to every row below it
+   * so density and "where a deeper level opens" are answered once at the top
+   * rather than threaded through each row (P-4, L-89).
+   */
   readonly host: "inspector" | "page";
   readonly onOpenProvider: ((providerId: string) => void) | null;
 }
@@ -60,92 +57,83 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
   const arrangement = snapshot.arrangement;
   const region = LAYOUT_REGIONS[regionId];
   const facts = regionFacts(regionId);
-  const shownValue = values[regionId].shown;
-  const shown = shownValue !== "hidden";
+  const shown = values[regionId].shown !== "hidden";
   const where =
     facts.whereByHost !== null
       ? facts.whereByHost[arrangement.usageHost]
       : facts.where;
 
-  function setRailVisibility(next: string): void {
-    if (!isRailRegionId(regionId)) return;
-    if (next !== "auto" && next !== "shown" && next !== "hidden") return;
-    useLayoutEditorStore.getState().recordGesture(() => {
-      useLayoutStore.getState().setRegionValues(regionId, { shown: next });
-    });
-  }
-
   return (
-    <div className="flex flex-col">
-      <SpecimenStage off={!shown}>
-        {regionDepiction(regionId, values, arrangement)}
-      </SpecimenStage>
-      <div className="flex items-start gap-2.5 px-3.5 pt-3.5 pb-3">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground">
-          <facts.icon className="size-3.5" />
+    <LayoutFormHostContext value={host}>
+      <div className="flex flex-col">
+        <SpecimenStage off={!shown}>
+          {regionDepiction(regionId, values, arrangement)}
+        </SpecimenStage>
+        {/* `flex-wrap` plus a floor on the text column, the same rule the rows
+          below carry (I-05): the rail's three-position control is ~150px of a
+          292px header, so in the 320px dock it takes its own line under the
+          name rather than crushing "Sidebar - icon rail" to one word per
+          line. */}
+        <div className="flex flex-wrap items-start gap-x-2.5 gap-y-2 px-3.5 pt-3.5 pb-3">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground">
+            <facts.icon className="size-3.5" />
+          </div>
+          <div className="min-w-32 flex-1">
+            <div className="text-ui-sm font-medium">{facts.name}</div>
+            <div className="mt-0.5 text-ui-xs text-muted-foreground">
+              {where}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* The region's ONE visibility control, the same component the
+              page puts inline on this region's row. The rail's is three-state
+              for all nine panels (L-47, L-93, I-10). */}
+            <RegionShownControl regionId={regionId} values={values} />
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-ui-sm font-medium">{facts.name}</div>
-          <div className="mt-0.5 text-ui-xs text-muted-foreground">{where}</div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {isRailRegionId(regionId) && facts.hint !== null ? (
-            <SegmentedControl
-              ariaLabel={`${facts.name} visibility`}
-              value={shownValue}
-              onChange={setRailVisibility}
-              options={[
-                { value: "auto", label: "Auto" },
-                { value: "shown", label: "Shown" },
-                { value: "hidden", label: "Hidden" },
-              ]}
+        {facts.hint !== null ? (
+          <p className="px-3.5 pb-2 text-ui-xs text-muted-foreground">
+            {facts.hint}
+          </p>
+        ) : null}
+        {/* `inert`, not `aria-hidden`: `aria-hidden` leaves its descendants in
+          the tab order, so a keyboard user landed inside the greyed rows of a
+          hidden region - and `pointer-events-none` did not stop that either.
+          `inert` removes focus, hit testing and the a11y tree in one, and
+          subsumes the pointer rule (G1-06). */}
+        <div inert={!shown} className={cn(!shown && "opacity-40")}>
+          {region.rows.map((row) => (
+            // Each grammar row kind appears at most once per region (L-08), so
+            // `row.kind` is a stable key without an index.
+            <GrammarRowView
+              key={row.kind}
+              row={row}
+              regionId={regionId}
+              values={values}
+              arrangement={arrangement}
+              snapshot={snapshot}
+              filter={filter}
+              onOpenProvider={onOpenProvider}
             />
-          ) : (
-            <Switch
-              aria-label={`Show ${facts.name}`}
-              checked={shown}
-              onCheckedChange={() => {
-                setRegionShown(regionId, !shown);
-              }}
-            />
-          )}
+          ))}
         </div>
       </div>
-      {isRailRegionId(regionId) && facts.hint !== null ? (
-        <p className="px-3.5 pb-2 text-ui-xs text-muted-foreground">
-          {facts.hint}
-        </p>
-      ) : null}
-      {/* `inert`, not `aria-hidden`: `aria-hidden` leaves its descendants in
-        the tab order, so a keyboard user landed inside the greyed rows of a
-        hidden region - and `pointer-events-none` did not stop that either.
-        `inert` removes focus, hit testing and the a11y tree in one, and
-        subsumes the pointer rule (G1-06). */}
-      <div inert={!shown} className={cn(!shown && "opacity-40")}>
-        {region.rows.map((row) => (
-          // Each grammar row kind appears at most once per region (L-08), so
-          // `row.kind` is a stable key without an index.
-          <GrammarRowView
-            key={row.kind}
-            row={row}
-            regionId={regionId}
-            host={host}
-            values={values}
-            arrangement={arrangement}
-            snapshot={snapshot}
-            filter={filter}
-            onOpenProvider={onOpenProvider}
-          />
-        ))}
-      </div>
-    </div>
+    </LayoutFormHostContext>
   );
 }
 
-function GrammarRowView(props: {
+/**
+ * One grammar row, drawn by the module that owns its KIND.
+ *
+ * Exported because both hosts draw the same rows, in different places: the
+ * dock stacks all of a region's rows under its header, and the page puts Size
+ * and Position on the region's row inside its surface list and opens the rest
+ * - Style, Fine-tune and the providers list - behind that row's own disclosure
+ * (L-95). Which rows a host draws is composition; how a row is drawn is not.
+ */
+export function GrammarRowView(props: {
   readonly row: AnyGrammarRow;
   readonly regionId: RegionId;
-  readonly host: "inspector" | "page";
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
   readonly snapshot: LayoutSnapshot;
@@ -155,7 +143,6 @@ function GrammarRowView(props: {
   const {
     row,
     regionId,
-    host,
     values,
     arrangement,
     snapshot,
@@ -196,9 +183,6 @@ function GrammarRowView(props: {
         <PositionOrderRow
           regionId={regionId}
           group={row.group}
-          description={row.description}
-          pinnedRight={row.pinnedRight}
-          dividers={row.dividers}
           values={values}
           arrangement={arrangement}
           snapshot={snapshot}
@@ -209,6 +193,7 @@ function GrammarRowView(props: {
         <StyleRow
           examples={row.examples}
           description={row.description}
+          specimen={row.specimen}
           regionId={regionId}
           values={values}
           arrangement={arrangement}
@@ -228,7 +213,6 @@ function GrammarRowView(props: {
         <ProvidersChildrenRow
           values={values}
           arrangement={arrangement}
-          host={host}
           onOpenProvider={onOpenProvider}
         />
       );

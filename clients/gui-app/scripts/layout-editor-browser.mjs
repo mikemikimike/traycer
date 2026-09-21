@@ -19,7 +19,10 @@
 //      `font-size` / `line-height` / `color` where it does not. Live versus
 //      picture, never picture versus picture - the two picture entry points
 //      became one function in L-77, so comparing them with each other could
-//      not fail for any input (G3-02, L-85).
+//      not fail for any input (G3-02, L-85). Three live surfaces answer for
+//      seventeen of the twenty-two regions: the sample rail (nine), the
+//      composer toolbar in presentation mode (five), and the dock's compact
+//      strip at Chip size (three, since L-98).
 //   2. The coverage is stated rather than counted: every region with no live
 //      node here must be named in the fixture's `NO_LIVE_LEAF` table with the
 //      reason, and every region that HAS one must not be. The driver prints

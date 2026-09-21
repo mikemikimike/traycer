@@ -199,11 +199,7 @@ export function StatusBarUsageTrigger(props: {
                 : `${SAMPLE_USAGE_USED_PERCENT}% used`}
             </span>
           ) : (
-            <StatusBarUsageReadings
-              cluster={cluster}
-              display={display}
-              interactive
-            />
+            <StatusBarUsageReadings cluster={cluster} display={display} />
           )}
         </span>
       </button>

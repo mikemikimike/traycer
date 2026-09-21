@@ -156,8 +156,17 @@
 }
 
 /* A floating panel carries its position in the same `transform` the slide
-   would animate, so it arrives and leaves by fading rather than by moving. */
-[data-layout-inspector][data-dock-mode="float"] {
+   would animate, so it arrives and leaves by fading rather than by moving.
+
+   `:not([data-entered])` for the same reason the plain panel's `animation:
+   none` above exists, and because that rule could not reach this one: both
+   selectors carry two attributes, so they TIE on specificity and this one wins
+   by coming later in the file. The result was that switching an already-entered
+   panel to Float re-declared `animation-name` on it and replayed a 220ms fade
+   over a panel that had been on screen for minutes (I-16). The exiting variant
+   below is deliberately left unscoped - an exiting panel carries `data-entered`
+   too, and its reverse fade is the thing the user asked for. */
+[data-layout-inspector][data-dock-mode="float"]:not([data-entered]) {
   animation-name: layout-inspector-appear;
 }
 
@@ -302,26 +311,21 @@
   outline-offset: 3px;
 }
 
-/* The OTHER instances of the selected region, which the travelling ring is not
-   drawn around. Foreground rather than `--ring`, and twice the hover's weight:
-   `--ring` is a soft grey in this app's light palettes and measures between
-   2.0:1 and 2.9:1 against the surfaces it lands on in nine of them, which is
-   under the 3:1 a non-text indicator owes (`layout-editor-contrast.test.ts`).
-   Weight carries "selected here too"; the accent stays on the one ring the
-   user is actually pointing at. */
-[data-layout-editing="1"]
-  [data-layout-region][data-selected="1"]:not(
-    [data-layout-anchor~="selected"]
-  ) {
-  outline: 2px solid var(--foreground);
-  outline-offset: 3px;
-}
+/* There is no rule here for the OTHER instances of a selected region, and
+   there is nothing left for one to match. L-23's "every instance highlights
+   together" needed a region to have two, and L-87 took the second away: the
+   editor's canvas is always the sample workspace, `SurfacePresentationBoundary`
+   publishes `PaneVisibilityContext = false` for every other top-level surface,
+   and `useLayoutRegion` registers nothing from a surface that is not visible.
+   The sample tab is `splitEligibility: "ineligible"`, so no second surface is
+   ever presented beside it, and the app-wide chrome around it draws each of
+   its regions once (the status bar is not even mounted while the usage cluster
+   is hosted in the header - `statusBarShown`).
 
-/* The instance the travelling ring is drawn around draws nothing itself. */
-[data-layout-editing="1"]
-  [data-layout-region][data-selected="1"][data-layout-anchor~="selected"] {
-  outline: none;
-}
+   So the selected region is always the anchor instance, and the travelling
+   ring is the whole of the selection signal. The 2px `--foreground` outline
+   that stood in for it elsewhere, and the `outline: none` that cancelled it on
+   the anchor, went with the case they were written for. */
 
 /* ---------------------------------------------------------------
    Reordering (L-24, L-29, 4.7)
@@ -389,26 +393,6 @@
     filter: blur(0);
     transform: scale(1);
   }
-}
-
-/* ---------------------------------------------------------------
-   Sample fill (L-16, 4.9)
-
-   A region with no live content draws its real leaf from sample data, so it
-   is still something to point at, name and drag. The mark that says so is
-   out of sight until the pointer or the selection is on that region: a
-   canvas tagged "Sample" everywhere is noise, and the one moment the word
-   earns its place is the moment the user is looking at the thing.
-   --------------------------------------------------------------- */
-
-[data-layout-sample-chip] {
-  display: none;
-}
-
-[data-layout-editing="1"]
-  [data-layout-region][data-sample]:is([data-hover="1"], [data-selected="1"])
-  [data-layout-sample-chip] {
-  display: inline-block;
 }
 
 /* ---------------------------------------------------------------
@@ -524,10 +508,17 @@
      first two left the float pair reinstating `layout-inspector-appear` under
      the preference - at `0s`, so the visible cost was one extra frame before
      the session ended, but the rule said the opposite of what it meant. With
-     no animation to wait for, the session ends in the same frame. */
+     no animation to wait for, the session ends in the same frame.
+
+     The float's arrival now carries `:not([data-entered])` (I-16), which is a
+     third attribute and so MORE specific than the plain float spelling: without
+     the matching entry here it would out-rank this block and put
+     `layout-inspector-appear` back under the preference, which is exactly the
+     bug the paragraph above describes. */
   [data-layout-inspector],
   [data-layout-inspector][data-exiting="1"],
   [data-layout-inspector][data-dock-mode="float"],
+  [data-layout-inspector][data-dock-mode="float"]:not([data-entered]),
   [data-layout-inspector][data-dock-mode="float"][data-exiting="1"] {
     animation: none;
   }
@@ -605,6 +596,34 @@
 }
 
 /* ---------------------------------------------------------------
+   The editing outline (L-87)
+
+   One rule, on the element that already carries the session marker: the app
+   column (`app-shell.tsx` writes `data-layout-column`, `layout-canvas.ts`
+   writes `data-layout-editing`). The column holds the header, the tab strip
+   and the screen, and it is deliberately NOT an ancestor of the inspector
+   (C-06) - so outlining it draws one box around the tab and the screen it
+   belongs to, and leaves the instrument panel outside it.
+
+   INSET (`outline-offset: -2px`), because an outset outline on a
+   `h-safe-dvh` column is clipped by the window edge on three sides and reads
+   as a stray hairline - the same trap the full-bleed rows above document.
+
+   Static: the outline is a statement about the mode, not an event, so there
+   is nothing to animate and no reduced-motion gate to honour. The amber cap
+   on the sample tab (`stores/tabs/kinds/sample-workspace.tsx`) is the other
+   half of the same signal and uses the same token.
+
+   A region's own hover outline is `outline-offset: 3px` on a DIFFERENT
+   element, so the two never compose into one thicker line.
+   --------------------------------------------------------------- */
+
+[data-layout-column][data-layout-editing="1"] {
+  outline: 2px dotted var(--warning-foreground);
+  outline-offset: -2px;
+}
+
+/* ---------------------------------------------------------------
    Forced colors
 
    `opacity` and `filter` survive a forced-colors palette, so the dim would
@@ -635,5 +654,12 @@
     box-shadow: none;
     outline: 2px solid Highlight;
     outline-offset: 0;
+  }
+
+  /* The editing outline (L-87). A forced-colors palette drops
+     `--warning-foreground` like every other theme colour, and this outline is
+     the whole of what says the screen is in an editing mode. */
+  [data-layout-column][data-layout-editing="1"] {
+    outline: 2px dotted Highlight;
   }
 }

@@ -122,7 +122,9 @@ export interface QueuedMessagePanelProps {
   readonly readOnly: boolean;
   readonly editingQueueItemId: string | null;
   readonly scrollRegionMaxHeightClass: string;
-  readonly separated?: boolean;
+  /** A hairline above this panel, because a sibling drew before it in the
+   *  dock's shared frame (L-97). */
+  readonly separated: boolean;
   readonly onPause: () => string | null;
   readonly onResume: () => string | null;
   // Edit / steer are prompt-only by type: a managed-command item carries no
@@ -201,7 +203,7 @@ export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
       data-testid="queued-message-rows"
       className={cn(
         "@container",
-        props.separated === true ? "border-t border-border/50" : null,
+        props.separated ? "border-t border-border/50" : null,
         props.readOnly ? "opacity-95" : null,
       )}
       variant="panel"

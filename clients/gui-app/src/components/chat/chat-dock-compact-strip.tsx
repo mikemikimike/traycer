@@ -5,7 +5,6 @@ import { Bot, FileDiff, type LucideIcon } from "lucide-react";
 import { MessageSquareClock } from "@/components/notifications/message-square-clock";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
-import { SampleChip } from "@/components/sample-workspace/sample-dock-rows";
 import {
   STATUS_ANIMATION_PULSE_CADENCE_MS,
   useStatusAnimation,
@@ -144,10 +143,17 @@ function ChipGlyph(props: {
 }
 
 /**
- * The compact chips, at the tail of the composer's bottom strip - after the
- * host and workspace chips, hard against the context-usage cluster. They come
- * and go with what the chat is doing, and the tail is where that can happen
- * without the pickers on the left shifting under the pointer.
+ * The compact chips, side by side ABOVE the composer at its left edge (A12,
+ * L-97) - the one thing the owner kept from the artifact's compact composer.
+ *
+ * They used to close the composer's workspace ROW, at its right edge, where
+ * `overflow-hidden` clipped anything that overhung and a chip could only ever
+ * appear between the workspace picker and the context-usage cluster. Above the
+ * input they read as what they are: the dock's own members, folded, adjacent to
+ * the rows they open.
+ *
+ * It wraps rather than truncates: a narrow tile gets a second line of pills,
+ * which costs 24px of the transcript and is what a chip-sized member is for.
  *
  * Renders nothing outside a chat tile, and nothing inside one whose every row
  * is either on screen or empty.
@@ -160,20 +166,17 @@ export function ChatDockCompactStrip(): ReactNode {
     <div
       data-testid="chat-dock-compact-strip"
       {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
-      className="ml-auto flex min-w-0 shrink-0 items-center gap-1"
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
     >
       {value.chips.map((chip) => (
         <span
           key={chip.section}
-          data-sample={chip.sample ? "" : undefined}
-          className={cn(
-            editing ? "relative inline-flex items-center" : "contents",
-          )}
+          // `contents` at rest, a real box while a session is live: the
+          // hotspot ref lands here, and a `display: contents` node has no rect
+          // for the hover outline or the travelling ring to measure (C-06).
+          className={cn(editing ? "inline-flex items-center" : "contents")}
           ref={chip.hotspotRef}
         >
-          {editing && chip.sample ? (
-            <SampleChip className="-top-3 right-0" />
-          ) : null}
           <ChatDockCompactChip
             icon={<ChipGlyph glyph={chip.glyph} working={chip.working} />}
             text={chip.text}

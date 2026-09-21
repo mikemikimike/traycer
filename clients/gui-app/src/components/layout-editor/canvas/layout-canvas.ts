@@ -13,14 +13,17 @@ import { createSelectionRing } from "@/components/layout-editor/canvas/selection
 import {
   LAYOUT_REGION_IDS,
   regionFacts,
+  regionStateWord,
 } from "@/components/layout-editor/regions/region-facts";
+import { decoratedHoverRegion } from "@/components/layout-editor/use-layout-region";
 import { layoutTransitionRunning } from "@/lib/layout/editor-motion";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,
   useLayoutEditorStore,
 } from "@/stores/layout/layout-editor-store";
-import { useLayoutStore } from "@/stores/layout/layout-store";
+import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 
 /**
  * The canvas half of an editor session: what the pointer is on, and where the
@@ -53,24 +56,27 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
 
     const paint = (): void => {
       const state = useLayoutEditorStore.getState();
+      const hoveredRegion = decoratedHoverRegion(state);
       const hovered =
-        state.hovered === null
+        hoveredRegion === null
           ? null
-          : preferredRegionInstance(state, state.hovered);
-      if (state.hovered === null || hovered === null) chip.hide();
+          : preferredRegionInstance(state, hoveredRegion);
+      if (hoveredRegion === null || hovered === null) chip.hide();
       else
         chip.show({
-          label: regionFacts(state.hovered).name,
+          label: hoverChipLabel(hoveredRegion),
           node: hovered.node,
-          placement: chipPlacement(state.hovered),
+          placement: chipPlacement(hoveredRegion),
         });
       const selected =
         state.selected === null
           ? null
           : preferredRegionInstance(state, state.selected);
       // Identity-guarded inside the controller, so this costs nothing on the
-      // notifications that did not move the selection. What the canvas UNDER
-      // the ring does is a separate signal - see the two subscriptions below.
+      // notifications that did not move the selection. Where the ring's node
+      // IS is not this hook's business at all: the controller re-reads the
+      // rect every frame, so every reflow of the canvas under it is followed
+      // without anything here having to notice one (L-90).
       ring.track(selected?.node ?? null);
     };
 
@@ -78,6 +84,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       // A member in hand owns the pointer: re-hovering whatever it is passing
       // over would move the chip and the selection mid-gesture.
       if (layoutDragActive()) return;
+      if (!hoverCapablePointer(event.pointerType)) return;
       const target = event.target;
       if (!(target instanceof Node) || !column.contains(target)) return;
       useLayoutEditorStore.getState().setHovered(regionUnder(target, column));
@@ -101,7 +108,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       // about to move or are already a snapshot; neither is something to
       // measure a drag against.
       if (state.leaving || layoutTransitionRunning()) return;
-      armRegionDrag({ event, node, regionId, onFrame: ring.refresh });
+      armRegionDrag({ event, node, regionId });
     };
 
     // Leaving the canvas drops the canvas's own hover. The inspector's rows
@@ -118,16 +125,6 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       // re-open that flushes the old session's teardown before React has
       // re-rendered, where the unmount cleanup below never runs at all.
       if (state.leaving && !previous.leaving) cancelLayoutDrag();
-      // A preview changes what every region draws, so the ring's own node can
-      // move without resizing - which is the one case neither the
-      // `ResizeObserver` nor the scroll/resize listeners in the controller
-      // would see.
-      if (state.previewPreset !== previous.previewPreset) ring.refresh();
-    });
-    // A layout write is the other way the canvas reflows under a ring that is
-    // already parked on the right element.
-    const unsubscribeLayout = useLayoutStore.subscribe(() => {
-      ring.refresh();
     });
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -135,7 +132,6 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
 
     return () => {
       unsubscribe();
-      unsubscribeLayout();
       document.removeEventListener("pointermove", onPointerMove, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
       column.removeEventListener("pointerleave", onPointerLeave);
@@ -178,4 +174,39 @@ function regionUnder(target: Node, column: HTMLElement): RegionId | null {
 /** A top-bar region has nothing above it, so its chip goes underneath (4.3). */
 function chipPlacement(regionId: RegionId): HoverChipPlacement {
   return regionFacts(regionId).surface === "topBar" ? "below" : "above";
+}
+
+/**
+ * What the chip says: the region's name AND the state it is in right now
+ * (C-05) - "Browsers · Shown", "Minimap · Right".
+ *
+ * The name alone made the chip a label for something the pointer was already
+ * on. The state word is the answer to the question hovering asks, and it is
+ * read through the same `regionStateWord` the inspector's index rows print, so
+ * the canvas and the list can never name one region's state two ways. The
+ * separator is the app's own middle dot rather than the prototype's ASCII dash.
+ *
+ * Off the store rather than out of a render: the chip is a DOM element this
+ * module owns, and a hover must not re-render a chat tile.
+ */
+function hoverChipLabel(regionId: RegionId): string {
+  const snapshot = getLayoutSnapshot();
+  const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
+  const state = regionStateWord(regionId, values, snapshot.arrangement);
+  return `${regionFacts(regionId).name} · ${state}`;
+}
+
+/**
+ * Whether this pointer can REST on a region, which is the precondition for
+ * hover decoration at all (C-09).
+ *
+ * The prototype refuses hover unless `(hover: hover) and (pointer: fine)`; a
+ * per-event answer is the same rule and is also right on a hybrid machine,
+ * where the media query describes the device and this describes the gesture. A
+ * touch or a pen reports a move on the way to a tap, which would light a
+ * region up and leave a chip sitting behind the finger. The app already
+ * answers this question this way for its hover popovers.
+ */
+function hoverCapablePointer(pointerType: string): boolean {
+  return pointerType === "mouse";
 }

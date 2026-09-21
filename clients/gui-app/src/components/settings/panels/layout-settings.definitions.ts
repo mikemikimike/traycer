@@ -54,8 +54,11 @@ export const LAYOUT = defineSettingsSection("layout", {
     group: "customize",
     search: { anchor: "layout-customize" },
     label: "Customize layout",
+    // What pressing it actually does (L-87): the editor always opens a sample
+    // workspace, so the user's own task is never rearranged under them. The old
+    // copy said "where it lives", which read as "in your task".
     description:
-      "Point at the app's own chrome and change it where it lives. Everything below is the same set of settings.",
+      "Point at the app's own chrome in a sample workspace and change it there. Everything below is the same set of settings.",
     availableWhen: alwaysAvailable,
     keywords: [
       "customize",

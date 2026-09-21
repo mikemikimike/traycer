@@ -24,7 +24,6 @@ function Region(props: {
 function openSession(preferredInstanceId: string | null): void {
   act(() => {
     useLayoutEditorStore.getState().beginSession({
-      scene: "in-place",
       entry: "pointer",
       source: "direct_ui",
       preferredInstanceId,
@@ -135,15 +134,54 @@ describe("decoration", () => {
 
     act(() => {
       useLayoutEditorStore.getState().setHovered("minimap");
-      useLayoutEditorStore.getState().select("minimap");
     });
 
     expect(view.getByTestId("a").hasAttribute("data-layout-anchor")).toBe(
       false,
     );
     expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
-      "hover selected",
+      "hover",
     );
+
+    act(() => {
+      useLayoutEditorStore.getState().select("minimap");
+    });
+
+    // Still one instance, and now one role: the selection takes the hover's
+    // place rather than joining it (C-08).
+    expect(view.getByTestId("a").hasAttribute("data-layout-anchor")).toBe(
+      false,
+    );
+    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
+      "selected",
+    );
+  });
+
+  it("takes the hover decoration off a region once it is selected (C-08)", () => {
+    // The ring is the one signal for a selection. The pointer is still over
+    // the region it just selected, so this has to be derived rather than
+    // cleared once - and it is derived in ONE place, so the attributes here
+    // and the chip the canvas shows can never disagree.
+    openSession("tile-b");
+    const view = render(
+      <>
+        <Region regionId="minimap" instanceId="tile-a" testId="a" />
+        <Region regionId="minimap" instanceId="tile-b" testId="b" />
+      </>,
+    );
+    act(() => {
+      useLayoutEditorStore.getState().setHovered("minimap");
+    });
+    expect(view.getByTestId("a").getAttribute("data-hover")).toBe("1");
+
+    act(() => {
+      useLayoutEditorStore.getState().select("minimap");
+    });
+
+    expect(view.getByTestId("a").hasAttribute("data-hover")).toBe(false);
+    expect(view.getByTestId("b").hasAttribute("data-hover")).toBe(false);
+    expect(view.getByTestId("a").getAttribute("data-selected")).toBe("1");
+    expect(useLayoutEditorStore.getState().hovered).toBe("minimap");
   });
 
   it("keeps the hover anchor and the selection anchor apart", () => {

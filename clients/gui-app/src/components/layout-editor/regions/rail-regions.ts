@@ -17,15 +17,7 @@ import type { RailRegionId } from "@/lib/layout/region-id";
  * (C-35).
  */
 
-const RAIL_ROWS = [
-  {
-    kind: "position-order",
-    group: "rail",
-    description: "Drag to reorder. Dividers are items too.",
-    pinnedRight: false,
-    dividers: true,
-  },
-] as const;
+const RAIL_ROWS = [{ kind: "position-order", group: "rail" }] as const;
 
 function railRegionBase(
   regionId: RailRegionId,

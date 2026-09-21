@@ -40,7 +40,6 @@ function seed(activeItemId: string): void {
 
 function beginSampleSession() {
   useLayoutEditorStore.getState().beginSession({
-    scene: "sample",
     entry: "pointer",
     source: "direct_ui",
     preferredInstanceId: null,
@@ -151,21 +150,16 @@ describe("S3 - a REAL exit still cleans up", () => {
     expect(useLayoutEditorStore.getState().session).toBeNull();
   });
 
-  it("closes the tab when it is active but the editor opened somewhere else", () => {
+  it("closes a sample tab left behind with no session to be a canvas for", () => {
     seed(SAMPLE_ITEM_ID);
+    beginSampleSession();
     render(<SampleWorkspaceSurface tabId="sample-workspace" />);
     expect(sampleTabCount()).toBe(1);
 
-    // The editor's door opened an in-place session (a different tab's own
-    // canvas), so this stale sample tab is not what the session is for.
+    // The session ended somewhere else (Done, Discard, a lost lease): the tab
+    // and the session have one lifetime (L-87), so the tab goes with it.
     act(() => {
-      useLayoutEditorStore.getState().beginSession({
-        scene: "in-place",
-        entry: "pointer",
-        source: "direct_ui",
-        preferredInstanceId: null,
-        startedAt: 0,
-      });
+      useLayoutEditorStore.getState().endSession();
     });
 
     expect(sampleTabCount()).toBe(0);

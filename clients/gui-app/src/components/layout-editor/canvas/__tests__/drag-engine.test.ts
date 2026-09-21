@@ -61,7 +61,6 @@ function press(
     if (!(event instanceof PointerEvent)) return;
     armLayoutDrag({
       event,
-      onFrame: null,
       resolve: () => ({ items: fixture.rows, index, clamp: null }),
       onDrop,
     });
@@ -364,7 +363,6 @@ describe("the drag engine", () => {
       if (!(event instanceof PointerEvent)) return;
       armLayoutDrag({
         event,
-        onFrame: null,
         resolve: () => ({ items: fixture.rows, index: 2, clamp }),
         onDrop,
       });

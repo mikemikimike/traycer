@@ -81,7 +81,6 @@ describe("customizeSource", () => {
   it("offers nothing from inside a session", () => {
     useLayoutEditorStore.setState({
       session: {
-        scene: "in-place",
         entry: "pointer",
         source: "direct_ui",
         preferredInstanceId: null,

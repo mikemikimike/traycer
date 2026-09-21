@@ -48,6 +48,69 @@ export function positionRowChanged(
   });
 }
 
+/**
+ * Whether THIS region alone sits somewhere other than where it shipped - the
+ * question the index's changed dot asks (I-17).
+ *
+ * The same three row shapes as {@link positionRowChanged}, and the same answer
+ * for two of them: a host and a side are already this region's own. An order
+ * group is where the two questions part. {@link positionRowChanged} asks about
+ * the GROUP, which is right for the revert that puts the whole group back and
+ * wrong for a dot: all nine rail regions share the `rail` group, and the
+ * shipped panel grouping arrives as dividers (L-49), so one carried divider
+ * lit every sidebar row before the user had touched anything.
+ *
+ * MOVED here means: this region's index among its group's REGIONS, counted
+ * with the rail's dividers left out, differs from its index in
+ * `DEFAULT_ARRANGEMENT`. Dividers are left out because adding one shifts every
+ * entry below it without moving any panel relative to its neighbours - the
+ * boundary moved, not the row. A region its group no longer holds is absent
+ * from both lists and has not moved.
+ */
+export function regionPositionMoved(
+  snapshot: LayoutSnapshot,
+  region: RegionId,
+): boolean {
+  const arrangement = snapshot.arrangement;
+  return positionRows(region).some((row) => {
+    switch (row.kind) {
+      case "position-host":
+        return arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost;
+      case "position-side":
+        return (
+          edgeSideFor(region, arrangement) !==
+          edgeSideFor(region, DEFAULT_ARRANGEMENT)
+        );
+      case "position-order":
+        return (
+          groupRegionIds(arrangement, row.group).indexOf(region) !==
+          groupRegionIds(DEFAULT_ARRANGEMENT, row.group).indexOf(region)
+        );
+    }
+  });
+}
+
+/** One order group's members, in order, dividers excluded. */
+function groupRegionIds(
+  arrangement: LayoutArrangement,
+  group: OrderGroupId,
+): ReadonlyArray<string> {
+  switch (group) {
+    case "dock":
+      return arrangement.dock;
+    case "toolbarLeft":
+      return arrangement.toolbarLeft;
+    case "toolbarRight":
+      return arrangement.toolbarRight;
+    case "usageProviders":
+      return arrangement.usageProviders;
+    case "rail":
+      return arrangement.rail.flatMap((entry) =>
+        entry.kind === "divider" ? [] : [entry.id],
+      );
+  }
+}
+
 /** This region's Position row put back, leaving every other row alone. */
 export function revertPositionRow(
   arrangement: LayoutArrangement,

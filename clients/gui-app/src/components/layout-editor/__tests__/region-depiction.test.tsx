@@ -71,6 +71,34 @@ describe("the host context a depiction is drawn in", () => {
     }
   });
 
+  /**
+   * The second region that moves surface, and this one moves itself: a dock
+   * member set to Chip is a pill in the strip above the composer, not a row in
+   * the dock's joined frame (L-97). A picture framed by the region's SURFACE
+   * alone drew the real pill inside the frame it had just left.
+   */
+  it("frames a dock member by the size it is drawn at", () => {
+    const full = render(
+      depictRegion(
+        "changedFiles",
+        { shown: "shown", size: "full" },
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+    expect(hostOf("changedFiles", full.container)).toBe("dock");
+
+    const chip = render(
+      depictRegion(
+        "changedFiles",
+        { shown: "shown", size: "chip" },
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+    expect(hostOf("changedFiles", chip.container)).toBe("chip-strip");
+  });
+
   it("honours a host the caller named over the one the region lives in", () => {
     const { container } = render(
       depictRegion(

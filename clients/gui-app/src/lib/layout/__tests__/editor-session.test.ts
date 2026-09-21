@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mock } from "vitest";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import {
   abandonLayoutEditorSession,
@@ -12,10 +13,16 @@ import {
 } from "@/lib/layout/test-support/fake-view-transition";
 import { LAYOUT_EDITOR_LEASE_KEY } from "@/lib/layout/editor-lease";
 import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
-import { registerTileRect } from "@/lib/browser-view/tiles/tile-rect-registry";
+import { SAMPLE_TILE_ID } from "@/components/sample-workspace/sample-workspace-scene";
 import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
+import type { SystemModalActive } from "@/stores/tabs/system-overlay-types";
+import {
+  preferredRegionInstance,
+  useLayoutEditorStore,
+  type RegionInstance,
+} from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
@@ -29,6 +36,10 @@ const navigation = vi.hoisted(() => ({
   activateTabIntent: vi.fn(),
   navigateToSettingsSection: vi.fn(),
 }));
+const toasts = vi.hoisted(() => ({ info: vi.fn() }));
+// The door's only two toasts are `info`; a namespace-only mock would make an
+// unexpected call throw rather than fail an assertion.
+vi.mock("sonner", () => ({ toast: { info: toasts.info } }));
 vi.mock("@/lib/tab-navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/tab-navigation")>()),
   activateTabIntent: navigation.activateTabIntent,
@@ -54,9 +65,9 @@ vi.mock("@/lib/settings-navigation", async (importOriginal) => ({
 const navigate = vi.fn();
 let transitions: Array<FakeViewTransition> = [];
 let uninstallViewTransitions: () => void = () => undefined;
-let deregisterTile: (() => void) | null = null;
 const HISTORY_REF: TabRef = { kind: "history", id: "history" };
 const EPIC_REF: TabRef = { kind: "epic", id: "tab-a" };
+const SAMPLE_REF: TabRef = { kind: "sample-workspace", id: "sample-workspace" };
 
 function setViewportWidth(width: number): void {
   Object.defineProperty(window, "innerWidth", {
@@ -102,29 +113,45 @@ function forceReducedMotion(): void {
   document.documentElement.setAttribute("data-reduce-panel-motion", "");
 }
 
-/** A tile registration that makes `aNativeTileIsPresented()` true (C-18). */
-function presentNativeTile(): void {
-  const surface = document.createElement("div");
-  surface.getBoundingClientRect = () => ({
-    left: 0,
-    top: 0,
-    right: 600,
-    bottom: 400,
-    width: 600,
-    height: 400,
-    x: 0,
-    y: 0,
-    toJSON: () => ({}),
+/**
+ * One live region node, registered the way `useLayoutRegion` registers one.
+ *
+ * `instanceId` is what decides the anchor: the sample tile's own id, or a chat
+ * tile in a tab the user is not looking at.
+ */
+function registerRegion(
+  regionId: RegionId,
+  instanceId: string,
+): RegionInstance {
+  const instance: RegionInstance = {
+    key: `${regionId}@shell:${instanceId}`,
+    regionId,
+    sceneId: "shell",
+    instanceId,
+    node: document.createElement("div"),
+  };
+  useLayoutEditorStore.getState().registerInstance(instance);
+  return instance;
+}
+
+/**
+ * The modal bridge as `SystemTabModalHost` publishes it, with `active` set to
+ * whichever overlay is up.
+ */
+function publishModalApi(active: SystemModalActive | null): {
+  readonly close: Mock<() => void>;
+} {
+  const close = vi.fn();
+  setSystemTabModalApi({
+    active,
+    openSettings: vi.fn(),
+    openHistory: vi.fn(),
+    close,
+    setSection: vi.fn(),
+    promoteToTab: vi.fn(),
+    isOverlayActive: (kind) => active?.kind === kind,
   });
-  deregisterTile = registerTileRect(
-    {
-      viewTabId: "view-1",
-      paneId: "pane-1",
-      tileInstanceId: "tile-1",
-      pageSessionId: "page-1",
-    },
-    surface,
-  );
+  return { close };
 }
 
 /**
@@ -194,7 +221,12 @@ beforeEach(() => {
   window.localStorage.clear();
   navigation.activateTabIntent.mockReset();
   navigation.navigateToSettingsSection.mockReset();
+  // The redirect reaches a Settings surface unless a test says otherwise; the
+  // door only speaks up when it does not.
+  navigation.navigateToSettingsSection.mockReturnValue(true);
+  toasts.info.mockReset();
   navigate.mockReset();
+  publishModalApi(null);
   setViewportWidth(1440);
   useLayoutStore.setState({
     ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -214,8 +246,7 @@ afterEach(() => {
   // The motionless teardown, so nothing is left waiting on a transition this
   // suite never settles and no teardown survives into the next test.
   abandonLayoutEditorSession();
-  deregisterTile?.();
-  deregisterTile = null;
+  setSystemTabModalApi(null);
   setLayoutInspectorNode(null);
   uninstallViewTransitions();
   transitions.length = 0;
@@ -237,8 +268,21 @@ describe("the width gate (L-02, 5.1)", () => {
 
     expect(useLayoutEditorStore.getState().session).toBeNull();
     expect(navigation.navigateToSettingsSection).toHaveBeenCalledWith("layout");
+    expect(toasts.info).not.toHaveBeenCalled();
     // Nothing was claimed on the way out: another window can still open it.
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
+  });
+
+  it("says so when there is no Settings surface to redirect into", () => {
+    // Before the modal bridge publishes an API - a cold launch behind
+    // `HostReadyGate` - the redirect reaches nothing, and the press would
+    // otherwise be silently dead.
+    navigation.navigateToSettingsSection.mockReturnValue(false);
+    setViewportWidth(700);
+
+    expect(open(null)).toBe(false);
+
+    expect(toasts.info).toHaveBeenCalledOnce();
   });
 
   it("turns on 1100px exactly, and on no other number (L-64)", () => {
@@ -258,7 +302,6 @@ describe("the width gate (L-02, 5.1)", () => {
   });
 
   it("holds a live session open at the threshold and drops it one pixel below", () => {
-    seedOpenChat("tile-7");
     open(null);
 
     setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH);
@@ -274,25 +317,16 @@ describe("the width gate (L-02, 5.1)", () => {
   });
 });
 
-describe("choosing the scene (L-15, 5.1)", () => {
-  it("lands in the most recently active real chat", () => {
+describe("the canvas (L-87, 5.1)", () => {
+  it("opens the sample workspace, whatever the user was doing", () => {
+    // A real chat in the active pane of the active Epic tab used to BE the
+    // canvas (L-15). L-87 takes that away: the user's own task is never
+    // rearranged under them, so the same gesture opens the sample tab here
+    // and with nothing open at all.
     seedOpenChat("tile-7");
 
     expect(open(null)).toBe(true);
 
-    const session = useLayoutEditorStore.getState().session;
-    expect(session?.scene).toBe("in-place");
-    expect(session?.preferredInstanceId).toBe("tile-7");
-    expect(navigation.activateTabIntent).not.toHaveBeenCalled();
-    expect(sampleTabPresent()).toBe(false);
-  });
-
-  it("falls back to the sample workspace only when no chat is open", () => {
-    expect(open(null)).toBe(true);
-
-    const session = useLayoutEditorStore.getState().session;
-    expect(session?.scene).toBe("sample");
-    expect(session?.preferredInstanceId).toBeNull();
     expect(navigation.activateTabIntent).toHaveBeenCalledWith(
       navigate,
       { kind: "sample-workspace" },
@@ -314,27 +348,88 @@ describe("choosing the scene (L-15, 5.1)", () => {
     );
   });
 
-  it("takes the sample workspace when a native browser tile is on screen (C-18)", () => {
-    // The chat is there and would be the canvas on its own. A `<webview>`
-    // guest paints outside the page, so it neither dims with the rest of the
-    // app nor travels with a shell snapshot, and the editor would be decorating
-    // a chat with an undimmed hole in it.
-    seedOpenChat("tile-7");
-    presentNativeTile();
+  it("never captures a return pointing at the sample tab itself", () => {
+    // A capture of the sample tab is a tab that returns to itself, which
+    // `removeLayoutRef` resolves to an item it has just removed.
+    useTabsStore.setState({ activeItemId: tabItemId(SAMPLE_REF) });
 
-    expect(open(null)).toBe(true);
+    open(null);
 
-    const session = useLayoutEditorStore.getState().session;
-    expect(session?.scene).toBe("sample");
-    expect(session?.preferredInstanceId).toBeNull();
+    const sample = useTabsStore
+      .getState()
+      .items.find(
+        (item) => item.kind === "tab" && item.ref.kind === "sample-workspace",
+      );
+    expect(sample?.kind).toBe("tab");
+    expect(sample?.kind === "tab" ? sample.sampleReturnItemId : "unset").toBe(
+      null,
+    );
+  });
+
+  it("anchors the decoration to the sample tile, not to a background tab's chat", () => {
+    // A retained background epic tab keeps registering its own chat regions
+    // for as long as it is open - `usePaneVisible` is about split panes, not
+    // about which TOP-LEVEL tab is on screen. Registered FIRST here, because
+    // "the first instance registered" is exactly the fallback that would put
+    // the travelling ring on a tile nobody can see.
+    open(null);
+    const background = registerRegion("mic", "background-tile");
+    const sampleTile = registerRegion("mic", SAMPLE_TILE_ID);
+
+    expect(
+      preferredRegionInstance(useLayoutEditorStore.getState(), "mic"),
+    ).toBe(sampleTile);
+    expect(
+      preferredRegionInstance(useLayoutEditorStore.getState(), "mic"),
+    ).not.toBe(background);
   });
 
   it("preselects a deep-link target (5.3)", () => {
-    seedOpenChat("tile-7");
-
     open("minimap");
 
     expect(useLayoutEditorStore.getState().selected).toBe("minimap");
+  });
+});
+
+describe("the system overlay the editor opens under (L-91)", () => {
+  it("closes the modal that would otherwise paint over the editor", () => {
+    const overlay = publishModalApi({ kind: "settings", section: "layout" });
+
+    expect(open(null)).toBe(true);
+
+    expect(overlay.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes a History modal too, not only Settings", () => {
+    // The palette reaches the door from any surface, and `close()` is the one
+    // dismissal both overlays share.
+    const overlay = publishModalApi({ kind: "history", section: null });
+
+    open(null);
+
+    expect(overlay.close).toHaveBeenCalledOnce();
+  });
+
+  it("never navigates back when no overlay is up", () => {
+    // `close()` pops the router's history whenever the adjacent entry looks
+    // like an overlay entry, so calling it unconditionally turns Customize
+    // layout into a back gesture.
+    const overlay = publishModalApi(null);
+
+    open(null);
+
+    expect(overlay.close).not.toHaveBeenCalled();
+  });
+
+  it("leaves the overlay alone when the width gate redirects into it", () => {
+    // Below the gate the door sends the user INTO Settings > Layout; closing
+    // the overlay would shut the surface the redirect is about to use.
+    const overlay = publishModalApi({ kind: "settings", section: "layout" });
+    setViewportWidth(700);
+
+    expect(open(null)).toBe(false);
+
+    expect(overlay.close).not.toHaveBeenCalled();
   });
 });
 
@@ -351,7 +446,6 @@ describe("the single-window lease (L-32, 5.3)", () => {
   });
 
   it("releases the lease on the way out", () => {
-    seedOpenChat("tile-7");
     open(null);
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).not.toBeNull();
 
@@ -369,7 +463,6 @@ describe("the single-window lease (L-32, 5.3)", () => {
 
 describe("leaving (5.3)", () => {
   it("puts the entry snapshot back on Discard and keeps it on Done", () => {
-    seedOpenChat("tile-7");
     open(null);
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
@@ -413,8 +506,6 @@ describe("leaving (5.3)", () => {
 
 describe("the entry method (L-30, L-54)", () => {
   it("records the gesture that reached the door on the session", () => {
-    seedOpenChat("tile-7");
-
     open(null);
     expect(useLayoutEditorStore.getState().session?.entry).toBe("pointer");
 
@@ -439,7 +530,6 @@ describe("the guarded fallback exit (5.2)", () => {
   beforeEach(forceReducedMotion);
 
   it("keeps the session open until the inspector has slid out", async () => {
-    seedOpenChat("tile-7");
     open("minimap");
     const slideOut = mountAnimatedInspector();
 
@@ -461,7 +551,6 @@ describe("the guarded fallback exit (5.2)", () => {
   });
 
   it("lets the first reason stand when a second arrives mid-exit", async () => {
-    seedOpenChat("tile-7");
     open(null);
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
@@ -480,7 +569,6 @@ describe("the guarded fallback exit (5.2)", () => {
   });
 
   it("hands the editor over to a session opened while it was still sliding out", async () => {
-    seedOpenChat("tile-7");
     open(null);
     const slideOut = mountAnimatedInspector();
     closeLayoutEditor("done");
@@ -499,12 +587,12 @@ describe("the guarded fallback exit (5.2)", () => {
 
 describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
   it("tears the old session down before the new one is decided", () => {
-    // The sample scene, because the sample workspace is the thing the old
-    // teardown would take away: it closes the tab by ref, and the re-open has
-    // just activated a tab under that same ref.
+    // The sample workspace is the thing the old teardown would take away: it
+    // closes the tab by ref, and the re-open has just activated a tab under
+    // that same ref.
     open(null);
     const first = useLayoutEditorStore.getState().session;
-    expect(first?.scene).toBe("sample");
+    expect(first).not.toBeNull();
     expect(sampleTabPresent()).toBe(true);
 
     // Done, then "actually, not yet" inside the exit's own 220ms. Neither
@@ -521,14 +609,13 @@ describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
 
     // The browser skips the first transition, so the exit's update callback
     // runs BEFORE the entry's. An exit teardown still in flight here would
-    // close the tab the re-open just activated and leave the new session on a
-    // sample scene with no sample tab.
+    // close the tab the re-open just activated and leave the new session with
+    // no sample tab under it.
     drainTransitions();
 
     const second = useLayoutEditorStore.getState().session;
     expect(second).not.toBeNull();
     expect(second).not.toBe(first);
-    expect(second?.scene).toBe("sample");
     expect(sampleTabPresent()).toBe(true);
     // And the new session holds the key the old one gave back.
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).not.toBeNull();
@@ -536,9 +623,8 @@ describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
 });
 
 describe("layout_editor_session analytics (L-46, L-54)", () => {
-  it("fires once at exit with the session's own source, scene and entry", () => {
+  it("fires once at exit with the session's own source and entry", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    seedOpenChat("tile-7");
     open(null);
     expect(trackSpy).not.toHaveBeenCalled();
 
@@ -548,28 +634,23 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
       AnalyticsEvent.LayoutEditorSession,
       expect.objectContaining({
         source: "direct_ui",
-        scene: "in_place",
         entry: "pointer",
         discarded: false,
       }),
     );
   });
 
-  it("reports the sample scene under its analytics spelling", () => {
+  it("carries no scene property, because there is only one scene (L-87)", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
     open(null);
 
     close("done");
 
-    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
-      AnalyticsEvent.LayoutEditorSession,
-      expect.objectContaining({ scene: "sample_workspace" }),
-    );
+    expect(trackSpy.mock.calls[0]?.[1]).not.toHaveProperty("scene");
   });
 
   it("reports discarded: true only when the exit reason is discard", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    seedOpenChat("tile-7");
     open(null);
 
     close("discard");
@@ -582,7 +663,6 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
 
   it("reports first_change_bucket as null for a session with no change", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    seedOpenChat("tile-7");
     open(null);
 
     close("done");
@@ -600,7 +680,6 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
 
   it("counts the value change made this session and the region it touched", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    seedOpenChat("tile-7");
     open(null);
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
@@ -620,7 +699,6 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
 
   it("counts an undo that landed", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    seedOpenChat("tile-7");
     open(null);
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
@@ -655,7 +733,6 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
 
   it("counts what was built before a Discard, not the zero left after it", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    seedOpenChat("tile-7");
     open(null);
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
@@ -677,7 +754,6 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
 
 describe("the canvas going away underneath the editor (5.3)", () => {
   it("exits when another tab takes over", () => {
-    seedOpenChat("tile-7");
     open(null);
 
     useTabsStore.setState((state) => ({
@@ -693,7 +769,6 @@ describe("the canvas going away underneath the editor (5.3)", () => {
   });
 
   it("exits when the window narrows past the width the editor needs", () => {
-    seedOpenChat("tile-7");
     open(null);
 
     setViewportWidth(700);
@@ -703,14 +778,18 @@ describe("the canvas going away underneath the editor (5.3)", () => {
     expect(useLayoutEditorStore.getState().session).toBeNull();
   });
 
-  it("follows the preferred tile when the pane's active chat changes", () => {
-    seedOpenChat("tile-7");
+  it("exits when the sample tab is closed by hand", () => {
+    // The one exit a user can reach without finding the inspector, and with
+    // the sample workspace as the only canvas it means "I am done".
     open(null);
 
-    seedOpenChat("tile-9");
+    useTabsStore.setState((state) => ({
+      items: state.items.filter(
+        (item) => item.kind !== "tab" || item.ref.kind !== "sample-workspace",
+      ),
+    }));
+    drainTransitions();
 
-    expect(useLayoutEditorStore.getState().session?.preferredInstanceId).toBe(
-      "tile-9",
-    );
+    expect(useLayoutEditorStore.getState().session).toBeNull();
   });
 });

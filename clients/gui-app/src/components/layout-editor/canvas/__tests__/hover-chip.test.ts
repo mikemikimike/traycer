@@ -64,6 +64,15 @@ describe("the anchored path", () => {
 
     expect(chipElement().getAttribute("data-placement")).toBe("below");
   });
+
+  it("writes no coordinates on a scroll either - the browser owns them", () => {
+    const node = region(column(), { x: 100, y: 200, width: 60, height: 20 });
+    chip?.show({ label: "Minimap - Right", node, placement: "above" });
+
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(chipElement().style.top).toBe("");
+  });
 });
 
 describe("the measured fallback", () => {
@@ -106,5 +115,44 @@ describe("the measured fallback", () => {
     chip?.hide();
 
     expect(chipElement().hidden).toBe(true);
+  });
+
+  it("re-places itself when a scroll moves the region under it (C-07)", () => {
+    // It used to measure once per `show()`, and `show()` only runs on an
+    // editor-store notification - which a transcript scroll is not. Every
+    // OTHER way the canvas reflows (a dock switch, a float toggle, a value
+    // write) IS one, so these two events are the whole gap.
+    const host = column();
+    const node = region(host, { x: 100, y: 200, width: 60, height: 20 });
+    chip?.show({ label: "Minimap", node, placement: "above" });
+    expect(chipElement().style.top).toBe("194px");
+
+    node.getBoundingClientRect = (): DOMRect => new DOMRect(100, 60, 60, 20);
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(chipElement().style.top).toBe("54px");
+  });
+
+  it("re-places itself on a window resize", () => {
+    const host = column();
+    const node = region(host, { x: 100, y: 200, width: 60, height: 20 });
+    chip?.show({ label: "Minimap", node, placement: "above" });
+
+    node.getBoundingClientRect = (): DOMRect => new DOMRect(300, 200, 60, 20);
+    window.dispatchEvent(new Event("resize"));
+
+    expect(chipElement().style.left).toBe("330px");
+  });
+
+  it("stops following once it is hidden", () => {
+    const host = column();
+    const node = region(host, { x: 100, y: 200, width: 60, height: 20 });
+    chip?.show({ label: "Minimap", node, placement: "above" });
+    chip?.hide();
+
+    node.getBoundingClientRect = (): DOMRect => new DOMRect(100, 60, 60, 20);
+    window.dispatchEvent(new Event("scroll"));
+
+    expect(chipElement().style.top).toBe("194px");
   });
 });

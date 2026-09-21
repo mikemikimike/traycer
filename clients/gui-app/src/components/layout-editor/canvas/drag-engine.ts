@@ -57,8 +57,6 @@ export interface LayoutDragInput {
    * reflow that starts in the wrong place.
    */
   readonly resolve: () => LayoutDragTarget | null;
-  /** Once per painted frame, for an overlay that has to follow what moves. */
-  readonly onFrame: (() => void) | null;
   /** The one write a drag makes, with the transforms already cleared. */
   readonly onDrop: (fromIndex: number, toIndex: number) => void;
 }
@@ -189,7 +187,6 @@ function startLayoutDrag(
         return;
       }
     }
-    input.onFrame?.();
   };
 
   const onPointerMove = (move: PointerEvent): void => {

@@ -176,7 +176,7 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
       <ToolbarPillButton
         aria-label={`Permissions: ${permissionOption.label}`}
         data-testid="composer-mobile-options-trigger"
-        className="size-8 shrink-0 justify-center px-0"
+        className="size-7 shrink-0 justify-center px-0"
         onClick={() => {
           setOptionsOpen(true);
         }}

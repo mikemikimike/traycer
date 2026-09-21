@@ -40,6 +40,8 @@ import { artifactOperationVerb } from "@/lib/chat/artifact-operation-verb";
 
 interface ChatAccumulatedChangesPanelProps {
   readonly restore: ChatRestoreContextValue;
+  /** A hairline above this panel, because a sibling drew before it in the
+   *  dock's shared frame (L-97). */
   readonly separated: boolean;
   readonly scrollRegionMaxHeightClass?: string;
 }

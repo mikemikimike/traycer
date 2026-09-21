@@ -304,12 +304,6 @@ export type AnalyticsProvider =
 
 export type AnalyticsRole = "editor" | "owner" | "viewer";
 
-/**
- * Which scene a Customize session edits: the user's real app chrome, or the
- * sample workspace tab that guarantees a populated chat to edit against.
- */
-export type AnalyticsLayoutEditorScene = "in_place" | "sample_workspace";
-
 export type AnalyticsSetting =
   | "allowPrereleaseUpdates"
   | "agentBrowserAccess"
@@ -1012,8 +1006,10 @@ export interface AnalyticsEventProperties {
   readonly [AnalyticsEvent.LayoutSnapshot]: LayoutSnapshotProperties;
   /**
    * Once on Customize layout exit (L-46, L-54). `source` is the gesture that
-   * opened the session; `scene` is what it edited; `entry` is the one extra
-   * property L-54 adds, because it measures L-30's own gate. The rest is the
+   * opened the session and `entry` is the one extra property L-54 adds,
+   * because it measures L-30's own gate. There is no `scene`: every session
+   * edits the sample workspace (L-87), and a property with one possible value
+   * is noise. The rest is the
    * session's change summary: `changed_count` is the value delta against the
    * base preset at exit (what "Reset to <preset>" would revert, L-57),
    * `regions_touched_count` is the distinct regions that moved between entry
@@ -1021,7 +1017,6 @@ export interface AnalyticsEventProperties {
    * than a separate exit-reason property.
    */
   readonly [AnalyticsEvent.LayoutEditorSession]: SourceProperties & {
-    readonly scene: AnalyticsLayoutEditorScene;
     readonly entry: "pointer" | "keyboard";
     readonly session_duration_bucket: LayoutDurationBucket;
     readonly first_change_bucket: LayoutDurationBucket | null;
@@ -1835,7 +1830,6 @@ const EVENT_PROPERTY_KEYS = new Map<AnalyticsEvent, ReadonlyArray<string>>([
     [AnalyticsEvent.LayoutEditorSession],
     [
       "source",
-      "scene",
       "entry",
       "session_duration_bucket",
       "first_change_bucket",
@@ -2032,11 +2026,6 @@ const EVENT_EXACT_PROPERTY_VALUES = new Map<string, ReadonlySet<string>>([
     [AnalyticsEvent.OnboardingStarted],
     "mode",
     new Set(["first_run", "replay"]),
-  ),
-  ...eventValueEntries(
-    [AnalyticsEvent.LayoutEditorSession],
-    "scene",
-    new Set(["in_place", "sample_workspace"]),
   ),
   ...eventValueEntries(
     [

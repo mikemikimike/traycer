@@ -27,6 +27,12 @@ const FLOAT_DOCK_VIEWPORT_MARGIN = 92;
 export const DOCK_EDGE_SNAP_PX = 24;
 /** Where the panel opens before it has ever been dragged. */
 const FLOAT_DOCK_DEFAULT_INSET = 48;
+/**
+ * The strip along the top of the window the panel never covers: the app's own
+ * chrome is up there, and a floating panel over it takes the title bar's drag
+ * region with it. The prototype's `clampFloat` floor.
+ */
+const FLOAT_DOCK_TOP_INSET = 28;
 
 export interface DockViewport {
   readonly width: number;
@@ -46,10 +52,13 @@ export function clampFloatPosition(
   viewport: DockViewport,
 ): LayoutDockPosition {
   const maxX = Math.max(0, viewport.width - FLOAT_DOCK_WIDTH);
-  const maxY = Math.max(0, viewport.height - floatDockHeight(viewport.height));
+  const maxY = Math.max(
+    FLOAT_DOCK_TOP_INSET,
+    viewport.height - floatDockHeight(viewport.height),
+  );
   return {
     x: Math.min(Math.max(position.x, 0), maxX),
-    y: Math.min(Math.max(position.y, 0), maxY),
+    y: Math.min(Math.max(position.y, FLOAT_DOCK_TOP_INSET), maxY),
   };
 }
 
@@ -171,9 +180,15 @@ export function useFloatingDock(root: HTMLElement | null): LayoutDockPosition {
       if (root.hasPointerCapture(event.pointerId))
         root.releasePointerCapture(event.pointerId);
       const side = edgeSnapDockMode(latest, readViewport());
-      if (side === null)
+      if (side === null) {
         useLayoutEditorStore.getState().setFloatPosition(latest);
-      else useLayoutEditorStore.getState().setDockMode(side);
+        return;
+      }
+      // The SIDE is the memory now. Leaving the snap coordinates behind is
+      // what made the next Float open the panel flush against the edge it was
+      // docked to, one pixel from snapping straight back (I-15).
+      useLayoutEditorStore.getState().setFloatPosition(null);
+      useLayoutEditorStore.getState().setDockMode(side);
     };
 
     root.addEventListener("pointerdown", onPointerDown);

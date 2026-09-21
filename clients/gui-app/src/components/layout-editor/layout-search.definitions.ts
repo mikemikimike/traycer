@@ -1,5 +1,6 @@
 import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
+import type { RegionId } from "@/lib/layout/region-id";
 import type { SettingsSearchEntry } from "@/lib/settings-search/settings-definitions";
 import { alwaysAvailable } from "@/lib/settings/settings-availability";
 
@@ -31,6 +32,25 @@ export const LAYOUT_LAUNCH_ENTRIES: ReadonlyArray<SettingsSearchEntry> =
     group: surfaceLabel(region.surface),
     keywords: [...region.keywords],
   }));
+
+/**
+ * The one way to find a region's ROW on the full-width page.
+ *
+ * A region is a row of its surface card's list now (L-95), and every list row
+ * already carries its own id - so the row a result or the width-gate redirect
+ * has to land on is `[data-sortable-id="<regionId>"]`, which is stable because
+ * the registry's ids are. It is NOT a `data-settings-anchor`: those are the
+ * search index's own tokens, one per indexed entry, and a region's result is a
+ * LAUNCH entry that opens the editor rather than scrolling this page (see
+ * `SETTINGS.md` § Launch results).
+ *
+ * Scoped by the caller to the panel it is looking inside, because the docked
+ * inspector draws the same row ids for whichever region is selected and the
+ * two can be on screen together in a split.
+ */
+export function layoutRegionRowSelector(regionId: RegionId): string {
+  return `[data-sortable-id="${regionId}"]`;
+}
 
 function surfaceLabel(surface: string): string {
   return (

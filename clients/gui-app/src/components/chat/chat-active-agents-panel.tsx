@@ -28,6 +28,8 @@ export function ActiveAgentsPanel(props: {
   readonly self: AgentRow;
   readonly descendants: ReadonlyArray<AgentRow>;
   readonly scrollRegionMaxHeightClass: string;
+  /** A hairline above this panel, because a sibling drew before it in the
+   *  dock's shared frame (L-97). */
   readonly separated: boolean;
 }) {
   // Open on arrival when a chip click is what put this row back in the dock.

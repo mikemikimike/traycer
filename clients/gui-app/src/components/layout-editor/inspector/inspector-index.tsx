@@ -1,6 +1,7 @@
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
+import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import {
   LAYOUT_REGION_LIST,
@@ -8,7 +9,7 @@ import {
 } from "@/components/layout-editor/regions/region-facts";
 import { regionMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
-import { positionRowChanged } from "@/components/layout-editor/regions/region-position-rows";
+import { regionPositionMoved } from "@/components/layout-editor/regions/region-position-rows";
 import { regionChanged } from "@/lib/layout/layout-diff";
 import type { LayoutPresetId } from "@/lib/layout/layout-presets";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
@@ -35,6 +36,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   const filter = useLayoutEditorStore((state) => state.filter);
   const snapshot = useLayoutSnapshot();
   const filterRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Map<RegionId, HTMLButtonElement>>(new Map());
 
   const groups = SURFACE_GROUPS.map((group) => ({
@@ -48,6 +50,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   const orderedIds = groups.flatMap((entry) =>
     entry.regions.map((region) => region.id),
   );
+  const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
 
   function focusRow(index: number): void {
     if (orderedIds.length === 0) return;
@@ -55,6 +58,22 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
     const regionId = orderedIds[clamped];
     rowRefs.current.get(regionId)?.focus();
   }
+
+  // The keyboard starts in the index, on entry and on every walk back out of a
+  // level (L-31, I-02) - the counterpart of the back row taking focus on the
+  // way in. Read out of the DOM rather than off `orderedIds`, so this stays a
+  // mount-only effect: a filter keystroke rebuilds the rows and must leave
+  // focus in the field.
+  //
+  // Quiet, like the prototype's own entry focus: `preventScroll` keeps the
+  // presets block the session just opened onto in view, and the canvas stays
+  // dark because a row's `onFocus` only lights it once the keyboard has been
+  // used.
+  useEffect(() => {
+    rootRef.current
+      ?.querySelector<HTMLButtonElement>("[data-region-id]")
+      ?.focus({ preventScroll: true });
+  }, []);
 
   function handleRowKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,
@@ -77,12 +96,17 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   }
 
   return (
-    <div>
+    <div ref={rootRef}>
       <PresetsBlock onPreviewPreset={onPreviewPreset} />
       <RegionFilter
         ref={filterRef}
         onArrowDown={() => {
           focusRow(0);
+        }}
+        onEnter={() => {
+          const first = orderedIds.at(0);
+          if (first === undefined) return;
+          useLayoutEditorStore.getState().select(first);
         }}
       />
       {orderedIds.length === 0 ? (
@@ -98,7 +122,11 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
             {entry.regions.map((region) => {
               const changed =
                 regionChanged(snapshot, region.id) ||
-                positionRowChanged(snapshot, region.id);
+                regionPositionMoved(snapshot, region.id);
+              // "Auto" is not off: only a region a person turned off reads
+              // muted, which is the prototype's `.idx-row.off` (I-09).
+              const hidden =
+                readControlValue(values[region.id], "shown") === "hidden";
               return (
                 <button
                   key={region.id}
@@ -132,10 +160,15 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                     handleRowKeyDown(event, region.id);
                   }}
                 >
-                  <region.icon
-                    className={cn("size-3.5 shrink-0 text-muted-foreground")}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{region.name}</span>
+                  <region.icon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate",
+                      hidden && "text-muted-foreground",
+                    )}
+                  >
+                    {region.name}
+                  </span>
                   {changed ? (
                     <span
                       aria-hidden
@@ -144,14 +177,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                     />
                   ) : null}
                   <span className="shrink-0 text-ui-xs text-muted-foreground">
-                    {regionStateWord(
-                      region.id,
-                      effectiveLayoutValues(
-                        snapshot.basePreset,
-                        snapshot.overrides,
-                      ),
-                      snapshot.arrangement,
-                    )}
+                    {regionStateWord(region.id, values, snapshot.arrangement)}
                   </span>
                 </button>
               );

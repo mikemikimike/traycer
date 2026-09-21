@@ -7,13 +7,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
-import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
-import {
-  chatChangesPanelHasContent,
-  hasChatPinnedStackContent,
-} from "@/components/chat/chat-pinned-stack-utils";
 import { LivePulse } from "@/components/ui/live-pulse";
 import {
   Collapsible,
@@ -30,82 +24,6 @@ import type { SegmentTodoItem } from "@/stores/composer/chat-store";
 export type ChatLowerSurfaceTopSpacing = "normal" | "connected";
 export type ChatPinnedStackTopSpacing = "normal" | "compact";
 
-interface ChatPinnedStackProps {
-  readonly todo: PinnedTodoSnapshot | null;
-  readonly restore: ChatRestoreContextValue;
-  readonly topSpacing: ChatPinnedStackTopSpacing;
-  readonly scrollRegionMaxHeightClass?: string;
-}
-
-export function PinnedStackSections(props: {
-  readonly todo: PinnedTodoSnapshot | null;
-  readonly restore: ChatRestoreContextValue;
-  readonly scrollRegionMaxHeightClass: string;
-  readonly separated: boolean;
-  /**
-   * The changes panel is standing as a chip under the input instead. The todo
-   * panel is not configurable, so the stack can still be here without it.
-   */
-  readonly changesFolded: boolean;
-}) {
-  const { restore, todo } = props;
-  // The same predicate `chatPinnedStackVisible` gates the whole stack on -
-  // shared rather than restated, because a stack that mounts and a section
-  // that renders nothing is an empty bordered box.
-  const showChanges =
-    !props.changesFolded && chatChangesPanelHasContent(restore);
-  if (todo === null && !showChanges) return null;
-
-  return (
-    <>
-      {todo !== null ? (
-        <PinnedTodoPanel
-          todo={todo}
-          scrollRegionMaxHeightClass={props.scrollRegionMaxHeightClass}
-          separated={props.separated}
-        />
-      ) : null}
-      {showChanges ? (
-        <ChatAccumulatedChangesPanel
-          restore={restore}
-          separated={todo !== null || props.separated}
-          scrollRegionMaxHeightClass={props.scrollRegionMaxHeightClass}
-        />
-      ) : null}
-    </>
-  );
-}
-
-export function ChatPinnedStack(props: ChatPinnedStackProps) {
-  const scrollRegionMaxHeightClass =
-    props.scrollRegionMaxHeightClass ?? "max-h-[min(40dvh,24rem)]";
-  if (!hasChatPinnedStackContent(props.todo, props.restore)) return null;
-
-  return (
-    <div
-      className={cn(
-        "bg-canvas px-4",
-        props.topSpacing === "normal" ? "pt-4" : "pt-2",
-      )}
-    >
-      <div className="mx-auto w-full max-w-3xl">
-        <div
-          data-testid="chat-pinned-stack"
-          className="@container mx-3 -mb-px overflow-hidden rounded-t-lg border border-b-0 border-border bg-muted/30"
-        >
-          <PinnedStackSections
-            todo={props.todo}
-            restore={props.restore}
-            scrollRegionMaxHeightClass={scrollRegionMaxHeightClass}
-            separated={false}
-            changesFolded={false}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface TodoCounts {
   readonly completed: number;
   readonly cancelled: number;
@@ -117,6 +35,8 @@ interface TodoCounts {
 export function PinnedTodoPanel(props: {
   readonly todo: PinnedTodoSnapshot;
   readonly scrollRegionMaxHeightClass: string;
+  /** A hairline above this panel, because a sibling drew before it in the
+   *  dock's shared frame (L-97). */
   readonly separated: boolean;
 }) {
   const { todo } = props;

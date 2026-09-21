@@ -118,7 +118,6 @@ function renderSegment(props: {
         segment={props.segment}
         parts={parts}
         percentMode={props.percentMode ?? "used"}
-        interactive={false}
       />
     </TooltipProvider>,
   );

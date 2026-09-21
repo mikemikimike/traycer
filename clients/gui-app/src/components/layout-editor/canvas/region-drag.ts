@@ -40,16 +40,13 @@ export function armRegionDrag(input: {
   readonly event: PointerEvent;
   readonly node: HTMLElement;
   readonly regionId: RegionId;
-  /** The overlays that have to keep up with an element that is moving. */
-  readonly onFrame: () => void;
 }): boolean {
-  const { event, node, regionId, onFrame } = input;
+  const { event, node, regionId } = input;
   const group = canvasOrderGroupForRegion(regionId);
   if (group === null) return false;
   const resolve = (): LayoutDragTarget | null => resolveGroup(node, group);
   armLayoutDrag({
     event,
-    onFrame,
     resolve,
     onDrop: (fromIndex, toIndex) => {
       const items = resolve()?.items ?? [];

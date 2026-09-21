@@ -109,9 +109,9 @@ const SETUP_GUIDES = {
       {
         section: "layout",
         selector: `[data-settings-anchor="${LAYOUT.definitions.sidebar.anchor}"]`,
-        title: "Every piece has a section",
+        title: "Every piece has a row",
         content:
-          "One section per piece of chrome, grouped by where it sits: show it, hide it, or move it.",
+          "One row per piece of chrome, grouped by where it sits: show it, hide it, or drag it into place.",
       },
       // The guide ends by SHOWING the editor rather than entering it (L-50):
       // the chrome around Settings dims the way it does on the canvas, so the
@@ -120,9 +120,9 @@ const SETUP_GUIDES = {
       {
         section: "layout",
         selector: `[data-settings-anchor="${LAYOUT.definitions.customizeEntry.anchor}"]`,
-        title: "Or point at the app itself",
+        title: "Or point at the chrome itself",
         content:
-          "The app dims around what you can change. Customize layout opens it beside your real workspace.",
+          "The app dims around what you can change. Customize layout opens a sample workspace, so your own task is left alone.",
         litChrome: true,
       },
     ],

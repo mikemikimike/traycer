@@ -26,9 +26,11 @@ import {
  *
  * The bars are WCAG's, applied to what each thing IS. 4.5:1 for anything with
  * words in it - the name chip, the inspector's body and secondary text. 3:1
- * for an INDICATOR, which is the hover outline, the selected outline and the
- * travelling ring: those are the only things that say "this is the element
- * you are editing", so they answer to 1.4.11.
+ * for an INDICATOR, which is the hover outline and the travelling ring: those
+ * are the only things that say "this is the element you are editing", so they
+ * answer to 1.4.11. (The static outline on a selected region's OTHER instances
+ * was a third, until L-87 left every region with exactly one - see
+ * `layout-editor.css`.)
  *
  * The passive dim and a materialised ghost do NOT. Both are deliberately
  * faint, and 1.4.11 exempts a component that is not available for
@@ -162,15 +164,6 @@ const HOVER_OUTLINE = tokenName(
     "outline",
   ),
 );
-const SELECTED_OUTLINE = tokenName(
-  cssValue(
-    topLevel(
-      (selector) =>
-        selector.includes('[data-selected="1"]') && selector.includes(":not("),
-    ),
-    "outline",
-  ),
-);
 const RING_SHADOW = cssValue(
   topLevel((selector) => selector === "[data-layout-selection-ring]"),
   "box-shadow",
@@ -227,6 +220,49 @@ const INSPECTOR_SURFACE = tokenName(
     "background",
   ),
 );
+const EDITING_OUTLINE_RULE = RULES.find(
+  (rule) =>
+    rule.context === "" && rule.selector.includes("[data-layout-column]"),
+);
+const EDITING_OUTLINE = tokenName(
+  cssValue(
+    topLevel((selector) => selector.includes("[data-layout-column]")),
+    "outline",
+  ),
+);
+const EDITING_OUTLINE_OFFSET = cssValue(
+  topLevel((selector) => selector.includes("[data-layout-column]")),
+  "outline-offset",
+);
+
+/**
+ * The amber cap the sample tab ships, read out of the tab kind itself.
+ *
+ * The tab's colour is a TSX field and the outline is CSS, and they are one
+ * signal: a reader who sees an amber tab and a differently-coloured screen
+ * outline learns nothing from either. Read rather than restated, so a change
+ * to one of them fails here instead of drifting.
+ */
+const SAMPLE_TAB_COLOR = (() => {
+  const source = readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "stores",
+      "tabs",
+      "kinds",
+      "sample-workspace.tsx",
+    ),
+    "utf8",
+  );
+  const value = /appearance:\s*\{\s*color:\s*"([^"]+)"/.exec(source)?.[1];
+  if (value === undefined) {
+    throw new Error("sample-workspace.tsx: no appearance colour to measure");
+  }
+  return tokenName(value);
+})();
 
 // --- measuring --------------------------------------------------------------
 
@@ -276,7 +312,6 @@ function onSurfaces(
 describe("layout-editor.css is read, not assumed", () => {
   it("yields the tokens, alphas and opacities the matrix measures", () => {
     expect(HOVER_OUTLINE).toBe("--foreground");
-    expect(SELECTED_OUTLINE).toBe("--foreground");
     expect(RING_BANDS).toContain("--ring");
     expect(RING_HALO_ALPHA).toBeGreaterThan(0);
     expect(RING_HALO_ALPHA).toBeLessThan(1);
@@ -293,6 +328,23 @@ describe("layout-editor.css is read, not assumed", () => {
   });
 
   /**
+   * The outline is drawn INSIDE the column's box. An outset one on a
+   * `h-safe-dvh` column is clipped by the window edge on three sides, which
+   * reads as a stray hairline rather than as a frame around the screen.
+   */
+  it("draws the editing outline inside the column, where nothing can clip it", () => {
+    expect(EDITING_OUTLINE_RULE?.selector).toContain(
+      '[data-layout-editing="1"]',
+    );
+    expect(Number.parseFloat(EDITING_OUTLINE_OFFSET)).toBeLessThan(0);
+  });
+
+  /** One signal, so the tab's cap and the screen's outline are one token. */
+  it("paints the sample tab and the editing outline from the same token", () => {
+    expect(SAMPLE_TAB_COLOR).toBe(EDITING_OUTLINE);
+  });
+
+  /**
    * The guide's lit moment (L-50) is the same dim with no session behind it,
    * so it has to be the same DECLARATIONS - not a second set that can drift
    * into a different treatment under the same name.
@@ -305,14 +357,35 @@ describe("layout-editor.css is read, not assumed", () => {
 });
 
 describe("the canvas decoration across every built-in palette", () => {
-  it("holds 3:1 for the hover and selected outlines on every surface", () => {
+  it("holds 3:1 for the hover outline on every surface", () => {
     expect(
       violations((palette, need) => {
         onSurfaces(palette, need, "hover outline", () =>
           themeToken(palette.tokens, HOVER_OUTLINE),
         );
-        onSurfaces(palette, need, "selected outline", () =>
-          themeToken(palette.tokens, SELECTED_OUTLINE),
+      }),
+    ).toEqual([]);
+  });
+
+  /**
+   * The editing mode's own colour, measured as what it IS: a 2px dotted
+   * outline around the app column and a 1.5px cap on the sample tab, both
+   * non-text indicators owing 3:1 (1.4.11). `--warning` is the tint of the
+   * status pair and is a mid amber in the light palettes, which is why the
+   * pair's FOREGROUND is what ships here - the same reason L-78 took
+   * `--foreground` over `--ring` for the selection outline.
+   *
+   * Both halves land on the same surfaces: the tab strip sits on the app's
+   * header and the outline runs around a column that can show any of them.
+   */
+  it("holds 3:1 for the editing outline and the sample tab's cap", () => {
+    expect(
+      violations((palette, need) => {
+        onSurfaces(palette, need, "editing outline", () =>
+          themeToken(palette.tokens, EDITING_OUTLINE),
+        );
+        onSurfaces(palette, need, "sample tab cap", () =>
+          themeToken(palette.tokens, SAMPLE_TAB_COLOR),
         );
       }),
     ).toEqual([]);

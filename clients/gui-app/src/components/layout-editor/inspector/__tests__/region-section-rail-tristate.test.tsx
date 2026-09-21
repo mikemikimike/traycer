@@ -60,7 +60,7 @@ describe("rail region tri-state header (L-47)", () => {
     }
   });
 
-  it("falls back to a plain Shown switch when the rail region has no hint", () => {
+  it("gives a rail region with no written rule the same tri-state, and no hint line", () => {
     const facts = regionFacts("railAgents");
     expect(facts.hint).toBeNull();
 
@@ -72,12 +72,36 @@ describe("rail region tri-state header (L-47)", () => {
       />,
     );
 
+    // The value is three-state for all nine panels (L-47, I-10), so the
+    // control is too: a two-position switch could not reach "pinned open".
     expect(
-      screen.getByRole("switch", { name: `Show ${facts.name}` }),
+      screen.getByRole("radiogroup", { name: `${facts.name} visibility` }),
     ).not.toBeNull();
     expect(
-      screen.queryByRole("radiogroup", { name: `${facts.name} visibility` }),
+      screen.queryByRole("switch", { name: `Show ${facts.name}` }),
     ).toBeNull();
+    expect(
+      screen.getAllByRole("radio").map((option) => option.textContent),
+    ).toEqual(["Auto", "Shown", "Hidden"]);
+    // Auto still means "follow the app"; only a rule that is written down
+    // gets a line spelling it out.
+    expect(screen.queryByText(/^Auto - /)).toBeNull();
+  });
+
+  it("keeps Hidden reachable from the tri-state on a panel with no rule", () => {
+    render(
+      <RegionSection
+        regionId="railFileTree"
+        host="inspector"
+        onOpenProvider={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Hidden" }));
+
+    expect(useLayoutStore.getState().overrides.railFileTree?.shown).toBe(
+      "hidden",
+    );
   });
 
   it("sets the rail region's shown value from Auto/Shown/Hidden without collapsing to a boolean", () => {

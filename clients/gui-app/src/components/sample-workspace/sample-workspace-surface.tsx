@@ -8,12 +8,12 @@ import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 let activationGeneration = 0;
 
 /**
- * The sample canvas (L-15), which exists only for a live sample-scene session.
+ * The editor's canvas (L-87), which exists only for a live session.
  *
- * The editor's one door decides the scene and opens this tab; this surface
- * owns the other end of that lifetime. Closing the tab ends the session, and a
- * session that ended elsewhere (Done, Discard, a lost lease) closes the tab -
- * so the two can never be left disagreeing about whether the editor is open.
+ * The editor's one door opens this tab; this surface owns the other end of
+ * that lifetime. Closing the tab ends the session, and a session that ended
+ * elsewhere (Done, Discard, a lost lease) closes the tab - so the two can
+ * never be left disagreeing about whether the editor is open.
  *
  * The width threshold is NOT read here: `SampleSceneProvider` covers the real
  * shell as well as this body, and closes the tab on a narrow window.
@@ -32,7 +32,7 @@ export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
       queueMicrotask(() => {
         if (
           activationGeneration === generation &&
-          session?.scene === "sample" &&
+          session !== null &&
           useLayoutEditorStore.getState().session === session
         )
           useLayoutEditorStore.getState().endSession();
@@ -41,7 +41,7 @@ export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
   }, [active]);
   useEffect(() => {
     const closeWithoutSession = (): void => {
-      if (useLayoutEditorStore.getState().session?.scene === "sample") return;
+      if (useLayoutEditorStore.getState().session !== null) return;
       tabCommandCoordinator.closeRefAfterConfirmed({
         kind: "sample-workspace",
         id: tabId,
@@ -51,7 +51,14 @@ export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
   }, [tabId]);
   return (
     <div className="flex h-full min-h-0 flex-col" data-sample-workspace>
-      <p className="shrink-0 border-b px-4 py-2 text-ui-sm text-muted-foreground">
+      {/* The banner is the canvas's own caption, not chrome the user can
+          customize, so it takes the passive dim with everything else that is
+          not a region (C-03). A sibling of the body below it, so the marker
+          never sits above one. */}
+      <p
+        data-layout-passive
+        className="shrink-0 border-b px-4 py-2 text-ui-sm text-muted-foreground"
+      >
         Sample content. Changes apply to your layout.
       </p>
       <SampleWorkspaceBody />

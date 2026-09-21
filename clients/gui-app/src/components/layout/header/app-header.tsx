@@ -184,7 +184,7 @@ function HeaderUsageControls(): ReactNode {
   const showGlobalResourceMonitor = useRegionShown("resourceMonitor");
   const inHeader = useArrangementValue("usageHost") === "header";
   const usageEnabled = useRegionShown("usageLimits");
-  const { ref } = useLayoutRegion({
+  const { ref, editing } = useLayoutRegion({
     regionId: "usageLimits",
     instanceId: null,
   });
@@ -194,7 +194,19 @@ function HeaderUsageControls(): ReactNode {
     // its own, so this is the whole menu; it names `usageLimits` because that
     // is the region this element registers.
     <LayoutRegionContextMenu regionId="usageLimits">
-      <span ref={ref} className="contents">
+      {/*
+        `display: contents` generates no box, so `getBoundingClientRect()`
+        answers 0,0,0,0 and the travelling ring collapsed to a 6px dot at the
+        top-left of the window while the hover outline had nothing to paint on
+        (C-06). A session needs a real box here and the header needs none of
+        its own, so this is the mic slot's pattern: the cluster's children keep
+        laying out in the header's own row at rest, and become a row of their
+        own - with the header's gap - exactly while the editor is open.
+      */}
+      <span
+        ref={ref}
+        className={cn(editing ? "inline-flex items-center gap-2" : "contents")}
+      >
         {usageEnabled ? <RateLimitIconButton /> : null}
         {/* Hidden and pointed at: the passive depiction in place, never the
           live control - both of these fetch or stream (L-14, L-62). */}

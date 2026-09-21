@@ -15,30 +15,52 @@ import { prefersReducedMotion } from "@/lib/layout/editor-motion";
  * It is the one piece of the editor that still measures rects, because a CSS
  * outline cannot animate from one element's box to another's. Everything else
  * about selection is a data attribute (L-13).
+ *
+ * ## Why the loop never parks (L-90)
+ *
+ * The loop runs for as long as a region is selected and re-reads the tracked
+ * rect every frame. It used to park once the springs settled and be woken by a
+ * LIST - a `ResizeObserver` on the node, window `scroll` and `resize`, a preset
+ * preview, a layout-store write - and the owner found the hole in that list
+ * live: switching the inspector's dock side writes the EDITOR store and moves
+ * the app column 320px sideways without resizing anything, so none of the four
+ * fired and the ring stayed at its old viewport coordinates, drawn around the
+ * inspector's "Discard changes".
+ *
+ * A dock switch is not a special case, it is the first one noticed. A float
+ * toggle, a float edge-snap, a ghost materialising beside the selection, the
+ * inspector arriving or leaving and the region's own host remounting all move
+ * a box without resizing it and without passing through either store. Reading
+ * the rect is the only mechanism under which none of them has to be enumerated,
+ * and it is what the approved prototype does (`startRingLoop`).
+ *
+ * The G1-04 budget this replaced a wake list to protect is still honoured, and
+ * measured rather than assumed: a frame on which the target has not moved and
+ * the springs have arrived costs exactly ONE `getBoundingClientRect` and writes
+ * nothing - no spring step, no style write, no reduced-motion read.
  */
 
 /** Clears the region's own edge without swallowing its neighbours. */
 const RING_PADDING = 3;
+
+/** The ring's own box in viewport pixels, which is the rect plus the padding. */
+interface RingBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
 
 export interface SelectionRingController {
   /**
    * The node the ring should be on now, or `null` to put it away.
    *
    * Identity-guarded: called with the node it is already on, it does nothing.
-   * The canvas painter runs on every editor-store notification, and re-arming
-   * the rAF loop from there forced a layout read per notification for a ring
-   * that had already arrived (G1-04).
+   * The canvas painter runs on every editor-store notification, and a re-track
+   * that restarted the travel would make a hover or a filter keystroke
+   * re-animate a ring that is already where it belongs.
    */
   readonly track: (node: HTMLElement | null) => void;
-  /**
-   * Re-measure the node it is already on, because the canvas UNDER it moved.
-   *
-   * Its own entry point rather than a side effect of {@link track}, so the
-   * things that actually move a region - a layout write, a preset preview, a
-   * scroll, a resize, the node's own size - are the things that wake the loop,
-   * and a hover or a filter keystroke is not.
-   */
-  readonly refresh: () => void;
   readonly destroy: () => void;
 }
 
@@ -55,9 +77,6 @@ export function createSelectionRing(): SelectionRingController {
     width: new Spring(0, RING_SPRING.response, RING_SPRING.zeta),
     height: new Spring(0, RING_SPRING.response, RING_SPRING.zeta),
   };
-  const observer = new ResizeObserver(() => {
-    arm();
-  });
 
   let tracked: HTMLElement | null = null;
   let frame = 0;
@@ -65,27 +84,40 @@ export function createSelectionRing(): SelectionRingController {
   // The first frame on a fresh selection places the ring without travelling
   // to it from wherever it last was, and fades it in instead.
   let fresh = true;
+  /** The box the springs are aiming at, and the one an idle frame compares to. */
+  let aim: RingBox | null = null;
+  /** Whether `data-on` is on the element, which is what fades it in. */
+  let lit = false;
 
-  function arm(): void {
+  function start(): void {
     if (tracked === null || frame !== 0) return;
     lastFrameAt = performance.now();
     frame = requestAnimationFrame(tick);
   }
 
   function tick(now: number): void {
-    frame = 0;
     const node = tracked;
-    if (node === null) return;
+    if (node === null) {
+      frame = 0;
+      return;
+    }
     const step = Math.min((now - lastFrameAt) / 1000, MAX_SPRING_STEP_SECONDS);
     lastFrameAt = now;
+    // Scheduled before the work, so the loop survives every early return below
+    // and `cancel()` still has a frame id to take back.
+    frame = requestAnimationFrame(tick);
 
     const rect = node.getBoundingClientRect();
-    const target = {
+    const target: RingBox = {
       x: rect.left - RING_PADDING,
       y: rect.top - RING_PADDING,
       width: rect.width + RING_PADDING * 2,
       height: rect.height + RING_PADDING * 2,
     };
+    // Nothing has moved, the ring has arrived and it is already lit: the rect
+    // above is the whole cost of this frame.
+    if (lit && aim !== null && sameBox(aim, target) && settled()) return;
+    aim = target;
 
     if (fresh || prefersReducedMotion()) {
       springs.x.snap(target.x);
@@ -112,18 +144,10 @@ export function createSelectionRing(): SelectionRingController {
       // One frame with the ring placed but still transparent, so the opacity
       // transition has something to run from.
       fresh = false;
-      lastFrameAt = now;
-      frame = requestAnimationFrame(tick);
       return;
     }
+    lit = true;
     element.setAttribute("data-on", "1");
-
-    // Parked once it has arrived: a rAF loop that keeps reading a rect at rest
-    // is the expensive half of this design, and nothing is moving.
-    if (!settled()) {
-      lastFrameAt = now;
-      frame = requestAnimationFrame(tick);
-    }
   }
 
   function settled(): boolean {
@@ -137,17 +161,17 @@ export function createSelectionRing(): SelectionRingController {
 
   function track(node: HTMLElement | null): void {
     if (node === tracked) return;
-    if (tracked !== null) observer.unobserve(tracked);
     tracked = node;
     if (node === null) {
       cancel();
       element.removeAttribute("data-on");
       element.hidden = true;
       fresh = true;
+      lit = false;
+      aim = null;
       return;
     }
-    observer.observe(node);
-    arm();
+    start();
   }
 
   function cancel(): void {
@@ -155,24 +179,21 @@ export function createSelectionRing(): SelectionRingController {
     frame = 0;
   }
 
-  // A scroll or a window resize moves the region without resizing it, so
-  // neither observer above would see it.
-  const wake = (): void => {
-    arm();
-  };
-  window.addEventListener("scroll", wake, { capture: true, passive: true });
-  window.addEventListener("resize", wake, { passive: true });
-
   return {
     track,
-    refresh: arm,
     destroy: () => {
       cancel();
-      observer.disconnect();
-      window.removeEventListener("scroll", wake, { capture: true });
-      window.removeEventListener("resize", wake);
       element.remove();
       tracked = null;
     },
   };
+}
+
+function sameBox(left: RingBox, right: RingBox): boolean {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
 }

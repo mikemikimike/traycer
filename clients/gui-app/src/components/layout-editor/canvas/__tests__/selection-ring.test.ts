@@ -7,19 +7,31 @@ import {
 let ring: SelectionRingController | null = null;
 let measured = 0;
 
-function region(rect: {
+interface Rect {
   x: number;
   y: number;
   width: number;
   height: number;
-}): HTMLElement {
+}
+
+/**
+ * A region whose rect is a MUTABLE fact, because that is what the canvas is: a
+ * dock switch or a ghost appearing beside a region moves its box without
+ * touching the element.
+ */
+function region(rect: Rect): HTMLElement & { moveTo: (next: Rect) => void } {
+  let current = rect;
   const node = document.createElement("div");
   node.getBoundingClientRect = (): DOMRect => {
     measured += 1;
-    return new DOMRect(rect.x, rect.y, rect.width, rect.height);
+    return new DOMRect(current.x, current.y, current.width, current.height);
   };
   document.body.append(node);
-  return node;
+  return Object.assign(node, {
+    moveTo: (next: Rect): void => {
+      current = next;
+    },
+  });
 }
 
 function ringElement(): HTMLElement {
@@ -84,35 +96,53 @@ describe("the one shared ring", () => {
     expect(ringElement().getAttribute("data-on")).toBe("1");
   });
 
-  it("parks once it has arrived and wakes when told the canvas moved", () => {
+  it("follows a region that MOVED without resizing, with nothing waking it (L-90)", () => {
+    // The bug the owner reported: a dock-side switch moves the app column
+    // 320px sideways without resizing anything, so the node's own
+    // `ResizeObserver` stays silent, no window scroll or resize fires, and
+    // neither store the parked loop listened to is written by the panel's own
+    // dock preference. Nothing here wakes the ring either - it re-reads.
     const node = region({ x: 100, y: 50, width: 200, height: 30 });
+    document.documentElement.setAttribute("data-reduce-panel-motion", "");
     ring?.track(node);
     frames(2);
-    const atRest = measured;
+    expect(ringBox()).toEqual({ x: 97, y: 47, width: 206, height: 36 });
 
-    frames(40);
-    expect(measured).toBe(atRest);
-
-    ring?.refresh();
+    node.moveTo({ x: 420, y: 50, width: 200, height: 30 });
     frames(1);
-    expect(measured).toBeGreaterThan(atRest);
+
+    expect(ringBox()).toEqual({ x: 417, y: 47, width: 206, height: 36 });
   });
 
-  it("does not wake for a re-track of the node it is already on (G1-04)", () => {
+  it("costs one rect read and no write on a frame where nothing moved (G1-04)", () => {
+    // The budget the parked loop existed to protect, kept by an idle frame
+    // rather than by a wake list: the rect is read, found unchanged, and the
+    // frame ends without stepping a spring or touching a style.
+    const node = region({ x: 100, y: 50, width: 200, height: 30 });
+    ring?.track(node);
+    frames(4);
+    const atRest = measured;
+    const painted = ringElement().style.transform;
+
+    frames(10);
+
+    expect(measured - atRest).toBe(10);
+    expect(ringElement().style.transform).toBe(painted);
+  });
+
+  it("does not restart the travel for a re-track of the node it is already on", () => {
     // The canvas painter runs on every editor-store notification - a hover, a
-    // filter keystroke - and used to re-arm the loop through `track`. That is
-    // a layout read per notification for a ring that has already arrived,
-    // which is why re-measuring is `refresh`'s own entry point now.
+    // filter keystroke - and calls `track` on each of them.
     const node = region({ x: 100, y: 50, width: 200, height: 30 });
     ring?.track(node);
     frames(40);
-    const atRest = measured;
+    const painted = ringElement().style.transform;
 
     ring?.track(node);
     ring?.track(node);
     frames(4);
 
-    expect(measured).toBe(atRest);
+    expect(ringElement().style.transform).toBe(painted);
   });
 
   it("travels to a second region rather than jumping to it", () => {
@@ -141,7 +171,7 @@ describe("the one shared ring", () => {
     expect(ringBox()).toEqual({ x: 597, y: 397, width: 106, height: 26 });
   });
 
-  it("hides and stops measuring on deselect", () => {
+  it("stops measuring on deselect", () => {
     ring?.track(region({ x: 100, y: 50, width: 200, height: 30 }));
     frames(2);
 

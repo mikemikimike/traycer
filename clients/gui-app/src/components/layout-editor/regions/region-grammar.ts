@@ -104,20 +104,31 @@ export interface StyleExample<K extends RegionId> {
   readonly patch: Partial<LayoutValues[K]>;
 }
 
+/**
+ * What ONE Style example draws (L-10).
+ *
+ * `region` is the region itself, which is one element for every region that
+ * has a Style block but one. The usage cluster repeats a segment per shown
+ * provider, so drawing the region there asked a 260px example row for eight
+ * segments and clipped it after two (I-06); `usage-provider` is the specimen
+ * the prototype picks instead - a single provider's segment, which is what
+ * the reading actually looks like.
+ */
+export type StyleSpecimen = "region" | "usage-provider";
+
 export type GrammarRow<K extends RegionId> =
   | { readonly kind: "size"; readonly description: string }
   | { readonly kind: "position-host"; readonly description: string }
   | { readonly kind: "position-side"; readonly description: string }
-  | {
-      readonly kind: "position-order";
-      readonly group: OrderGroupId;
-      readonly description: string;
-      readonly pinnedRight: boolean;
-      readonly dividers: boolean;
-    }
+  // Names its group and nothing else: how the list is operated, whether its
+  // boundaries are items and what is pinned inside it are facts about the
+  // GROUP, and they live once in `surface-groups.ts` rather than once per
+  // member (D1-D4, D8).
+  | { readonly kind: "position-order"; readonly group: OrderGroupId }
   | {
       readonly kind: "style";
       readonly description: string | null;
+      readonly specimen: StyleSpecimen;
       readonly examples: ReadonlyArray<StyleExample<K>>;
     }
   | { readonly kind: "fine-tune"; readonly rows: ReadonlyArray<FineTuneRow<K>> }

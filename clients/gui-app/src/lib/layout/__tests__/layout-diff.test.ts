@@ -1,0 +1,167 @@
+import { describe, expect, it } from "vitest";
+import {
+  anythingChanged,
+  arrangementChanged,
+  mobileFooterChanged,
+  providerChanged,
+  resetEverything,
+  revertProvider,
+  usageProvidersChanged,
+} from "@/lib/layout/layout-diff";
+import {
+  DEFAULT_ARRANGEMENT,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+
+/**
+ * The page's safety net (L-20, P-6).
+ *
+ * The full-width host has no session, so it has no Undo, no Discard and no
+ * Cmd+Z, and "Reset to <preset>" is values-only by construction (L-57). These
+ * are the predicates a changed dot and a per-row revert read for the three
+ * arrangement fields nothing measured - `hiddenProviders`, `providerLimits`
+ * and `mobileFooter` - and the floor underneath all of them.
+ */
+
+const PROVIDER: RateLimitProviderId = DEFAULT_ARRANGEMENT.usageProviders[0];
+const OTHER_PROVIDER: RateLimitProviderId =
+  DEFAULT_ARRANGEMENT.usageProviders[1];
+
+function snapshotWith(arrangement: LayoutArrangement): LayoutSnapshot {
+  return { basePreset: "default", overrides: {}, arrangement };
+}
+
+describe("one provider's own state", () => {
+  it("is unchanged until it is hidden or its limits are picked", () => {
+    expect(providerChanged(DEFAULT_ARRANGEMENT, PROVIDER)).toBe(false);
+
+    const hidden: LayoutArrangement = {
+      ...DEFAULT_ARRANGEMENT,
+      hiddenProviders: [PROVIDER],
+    };
+    expect(providerChanged(hidden, PROVIDER)).toBe(true);
+    expect(providerChanged(hidden, OTHER_PROVIDER)).toBe(false);
+
+    const picked: LayoutArrangement = {
+      ...DEFAULT_ARRANGEMENT,
+      providerLimits: { [PROVIDER]: { automatic: false, limitKeys: ["5h"] } },
+    };
+    expect(providerChanged(picked, PROVIDER)).toBe(true);
+  });
+
+  it("reverts to shown and Automatic, leaving every other provider alone", () => {
+    const before: LayoutArrangement = {
+      ...DEFAULT_ARRANGEMENT,
+      hiddenProviders: [PROVIDER, OTHER_PROVIDER],
+      providerLimits: {
+        [PROVIDER]: { automatic: false, limitKeys: ["5h"] },
+        [OTHER_PROVIDER]: { automatic: false, limitKeys: ["week"] },
+      },
+    };
+
+    const after = revertProvider(before, PROVIDER);
+
+    expect(providerChanged(after, PROVIDER)).toBe(false);
+    expect(providerChanged(after, OTHER_PROVIDER)).toBe(true);
+    expect(after.hiddenProviders).toEqual([OTHER_PROVIDER]);
+  });
+});
+
+describe("what the page can see as changed", () => {
+  it("counts hidden providers, picked limits and a reorder as the providers changing", () => {
+    expect(usageProvidersChanged(DEFAULT_ARRANGEMENT)).toBe(false);
+    expect(
+      usageProvidersChanged({
+        ...DEFAULT_ARRANGEMENT,
+        hiddenProviders: [PROVIDER],
+      }),
+    ).toBe(true);
+    expect(
+      usageProvidersChanged({
+        ...DEFAULT_ARRANGEMENT,
+        providerLimits: { [PROVIDER]: { automatic: true, limitKeys: [] } },
+      }),
+    ).toBe(true);
+    expect(
+      usageProvidersChanged({
+        ...DEFAULT_ARRANGEMENT,
+        usageProviders: [...DEFAULT_ARRANGEMENT.usageProviders].reverse(),
+      }),
+    ).toBe(true);
+  });
+
+  it("sees the small-screen status bar, which had no indication anywhere", () => {
+    expect(mobileFooterChanged(DEFAULT_ARRANGEMENT)).toBe(false);
+    expect(
+      mobileFooterChanged({ ...DEFAULT_ARRANGEMENT, mobileFooter: true }),
+    ).toBe(true);
+  });
+
+  it("answers for the whole arrangement, field by field", () => {
+    expect(arrangementChanged(DEFAULT_ARRANGEMENT)).toBe(false);
+    const eachOne: ReadonlyArray<Partial<LayoutArrangement>> = [
+      { usageHost: "header" },
+      { minimapSide: "left" },
+      { resourceSide: "left" },
+      { mobileFooter: true },
+      { hiddenProviders: [PROVIDER] },
+      { dock: [...DEFAULT_ARRANGEMENT.dock].reverse() },
+    ];
+    for (const patch of eachOne) {
+      expect(
+        arrangementChanged({ ...DEFAULT_ARRANGEMENT, ...patch }),
+        JSON.stringify(patch),
+      ).toBe(true);
+    }
+  });
+});
+
+describe("Reset everything (L-20)", () => {
+  it("puts back the preset, every value and every arrangement field", () => {
+    const before: LayoutSnapshot = {
+      basePreset: "compact",
+      overrides: { minimap: { shown: "hidden" } },
+      arrangement: {
+        ...DEFAULT_ARRANGEMENT,
+        usageHost: "header",
+        minimapSide: "left",
+        resourceSide: "left",
+        mobileFooter: true,
+        hiddenProviders: [PROVIDER],
+        providerLimits: { [PROVIDER]: { automatic: false, limitKeys: ["5h"] } },
+        dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
+        usageProviders: [...DEFAULT_ARRANGEMENT.usageProviders].reverse(),
+      },
+    };
+
+    const after = resetEverything(before);
+
+    expect(after.basePreset).toBe("default");
+    expect(after.overrides).toEqual({});
+    expect(arrangementChanged(after.arrangement)).toBe(false);
+    expect(anythingChanged(after)).toBe(false);
+  });
+
+  it("never hands a divider id back out, which is the one field it keeps", () => {
+    const before = snapshotWith({
+      ...DEFAULT_ARRANGEMENT,
+      dividerSeq: DEFAULT_ARRANGEMENT.dividerSeq + 7,
+    });
+
+    expect(resetEverything(before).arrangement.dividerSeq).toBe(
+      DEFAULT_ARRANGEMENT.dividerSeq + 7,
+    );
+  });
+
+  it("has nothing to do on a snapshot that is already the shipped one", () => {
+    expect(anythingChanged(snapshotWith(DEFAULT_ARRANGEMENT))).toBe(false);
+    expect(
+      anythingChanged({
+        ...snapshotWith(DEFAULT_ARRANGEMENT),
+        basePreset: "compact",
+      }),
+    ).toBe(true);
+  });
+});

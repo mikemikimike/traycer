@@ -38,20 +38,41 @@ export type HostContextId =
 /**
  * Each host's own row, copied from the surface named beside it rather than
  * approximated - these are the numbers the parity regression compares (L-53).
+ *
+ * What is copied is how the surface PAINTS and SPACES what it holds: its fill,
+ * border, radius, gap, alignment, height and type scale. What is not is where
+ * the surface sits in its own page - the margins and paddings that tuck it
+ * under a neighbour - because a picture has no neighbour to tuck under.
+ * `region-depiction-frame-parity.test.tsx` renders the real surface beside the
+ * frame and holds the first half of that split; it is the only thing that
+ * keeps these strings honest as the surfaces move (Risk 3).
+ *
+ * A surface that carries no type scale of its own gets none here either: since
+ * C1 and C2 every composer control is a chip with its own `text-ui-xs`, so a
+ * scale invented here would be drift in the one direction a subset check
+ * cannot see.
  */
 const HOST_CONTEXT_CLASS: Readonly<Record<HostContextId, string>> = {
-  // `layout/tabs/tab-strip.tsx`: tabs stand on the strip's baseline.
-  "top-bar": "flex items-end gap-0.5 text-ui-sm",
+  // `layout/tabs/tab-strip.tsx`: tabs stand on the strip's baseline, with no
+  // gap and no scale of the strip's own - a tab carries `headerTabClassName`.
+  "top-bar": "flex items-end",
   // `layout/status-bar/app-status-bar.tsx`: the strip's one row.
   "status-bar": "flex h-6 items-center gap-2 text-ui-xs tabular-nums",
   // `home/toolbar/composer-toolbar-left.tsx`, which the right cluster shares.
-  toolbar: "flex items-center gap-1 text-ui-sm",
-  // The composer's lower row, where the context chip sits.
-  "composer-foot": "flex items-center gap-0.5 text-ui-sm",
-  // `chat/chat-lower-dock.tsx`: a dock row takes the card's whole width.
-  dock: "flex w-full flex-col items-stretch gap-1 text-ui-sm",
-  // `chat/chat-dock-compact-strip.tsx`: the chips share one row.
-  "chip-strip": "flex items-center gap-1 text-ui-xs",
+  toolbar: "flex items-center gap-1",
+  // `home/composer/composer-workspace-mode-row.tsx`: the composer's lower row,
+  // where the workspace label and the context chip sit.
+  "composer-foot": "flex items-center gap-2",
+  // `chat/chat-lower-dock.tsx`'s joined frame (L-97): one bordered surface
+  // tucked under the composer, filled with the same `bg-foreground/3` the
+  // composer itself carries. `border-b-0` travels with it, because the frame's
+  // bottom edge IS the composer's top edge; what stays behind is the tuck
+  // itself (`mx-3`, `-mb-px`), which needs a composer below to mean anything.
+  dock: "flex w-full flex-col items-stretch rounded-t-lg border border-b-0 border-border bg-foreground/3",
+  // `chat/chat-dock-compact-strip.tsx`: the pills share one row above the
+  // composer. The strip wraps onto a second line and a picture never does, so
+  // `flex-wrap` is deliberately not copied - see `CLIP_FADE`.
+  "chip-strip": "flex items-center gap-1.5",
   // `epic-canvas/sidebar/epic-sidebar-rail.tsx`, vertical orientation.
   rail: "flex w-12 flex-col items-center gap-1 py-2",
   // The transcript edge the minimap's ticks are positioned against.

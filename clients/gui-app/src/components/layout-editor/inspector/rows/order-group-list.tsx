@@ -1,19 +1,21 @@
 import type { ReactNode } from "react";
-import {
-  SortableList,
-  type SortableListItem,
-} from "@/components/layout-editor/inspector/sortable-list";
+import { Plus } from "lucide-react";
+import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
 import { assertNever } from "@/components/layout-editor/inspector/rows/assert-never";
 import {
-  setRegionShown,
-  writeArrangement,
-} from "@/components/layout-editor/layout-gestures";
-import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
-import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+  dividerOrderItem,
+  providerOrderItems,
+  regionRowItem,
+  regionRowItems,
+  type SortableRowDecorator,
+} from "@/components/layout-editor/inspector/rows/order-row-items";
+import { writeArrangement } from "@/components/layout-editor/layout-gestures";
+import { ORDER_GROUPS } from "@/components/layout-editor/regions/surface-groups";
+import { Button } from "@/components/ui/button";
 import {
+  insertRailDivider,
   movedWithin,
   moveRailEntry,
-  removeRailDivider,
   type LayoutArrangement,
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
@@ -23,7 +25,6 @@ import type {
   RegionId,
   ToolbarRegionId,
 } from "@/lib/layout/region-id";
-import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
@@ -34,8 +35,11 @@ import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
  * to `string` meant re-narrowing each id back on the way out, where a
  * mis-routed id was silently DROPPED instead of failing (G1-23).
  *
- * Its own module because two rows draw one: the Position row of every movable
- * region, and the Usage limits section's children row.
+ * THE list for its group, in both hosts (L-03, L-95). The page draws it once
+ * per surface card with `selectedId: null`, and the inspector draws the same
+ * one for the selected region with `selectedId` on its row - which is the whole
+ * of what the two hosts need to differ by, and why nine rail sections could
+ * collapse into one list without a page-only component.
  */
 export function OrderGroupList(props: {
   readonly group: OrderGroupId;
@@ -43,14 +47,56 @@ export function OrderGroupList(props: {
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
   readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
+  readonly decorate: SortableRowDecorator | null;
 }): ReactNode {
-  const { group, selectedId, values, arrangement, onOpenProvider } = props;
+  const { group, arrangement } = props;
+  return (
+    <div className="flex flex-col gap-2">
+      <OrderGroupRows {...props} />
+      {ORDER_GROUPS[group].dividers ? (
+        <Button
+          type="button"
+          variant="muted-outline"
+          size="xs"
+          className="self-start"
+          onClick={() => {
+            // Appended, so a new boundary never lands in the middle of a
+            // grouping the user has already made; dragging it up is the
+            // gesture that places it (L-25).
+            writeArrangement(
+              insertRailDivider(arrangement, arrangement.rail.length),
+            );
+          }}
+        >
+          <Plus />
+          Add divider
+        </Button>
+      ) : null}
+      {ORDER_GROUPS[group].note === null ? null : (
+        <p className="text-ui-xs text-muted-foreground">
+          {ORDER_GROUPS[group].note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function OrderGroupRows(props: {
+  readonly group: OrderGroupId;
+  readonly selectedId: RegionId | null;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+  readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
+  readonly decorate: SortableRowDecorator | null;
+}): ReactNode {
+  const { group, selectedId, values, arrangement, onOpenProvider, decorate } =
+    props;
   switch (group) {
     case "dock":
       return (
         <SortableList<DockRegionId>
           selectedId={selectedId}
-          items={arrangement.dock.map((id) => regionOrderItem(id, values))}
+          items={regionRowItems(arrangement.dock, values, decorate)}
           onMove={(id, toIndex) => {
             writeArrangement({
               ...arrangement,
@@ -63,9 +109,7 @@ export function OrderGroupList(props: {
       return (
         <SortableList<ToolbarRegionId>
           selectedId={selectedId}
-          items={arrangement.toolbarLeft.map((id) =>
-            regionOrderItem(id, values),
-          )}
+          items={regionRowItems(arrangement.toolbarLeft, values, decorate)}
           onMove={(id, toIndex) => {
             writeArrangement({
               ...arrangement,
@@ -78,9 +122,7 @@ export function OrderGroupList(props: {
       return (
         <SortableList<ToolbarRegionId>
           selectedId={selectedId}
-          items={arrangement.toolbarRight.map((id) =>
-            regionOrderItem(id, values),
-          )}
+          items={regionRowItems(arrangement.toolbarRight, values, decorate)}
           onMove={(id, toIndex) => {
             writeArrangement({
               ...arrangement,
@@ -93,7 +135,7 @@ export function OrderGroupList(props: {
       return (
         <SortableList<RateLimitProviderId>
           selectedId={selectedId}
-          items={providerOrderItems(arrangement, onOpenProvider)}
+          items={providerOrderItems(arrangement, onOpenProvider, decorate)}
           onMove={(id, toIndex) => {
             writeArrangement({
               ...arrangement,
@@ -113,7 +155,7 @@ export function OrderGroupList(props: {
           items={arrangement.rail.map((entry) =>
             entry.kind === "divider"
               ? dividerOrderItem(entry.id, arrangement)
-              : regionOrderItem(entry.id, values),
+              : regionRowItem(entry.id, values, decorate),
           )}
           // Panels and dividers alike, which is the whole of L-25: dragging a
           // divider is what splits and merges groups, and dragging a panel
@@ -136,85 +178,4 @@ function movedById<Id extends string>(
 ): ReadonlyArray<Id> {
   const fromIndex = list.indexOf(id);
   return fromIndex < 0 ? list : movedWithin(list, fromIndex, toIndex);
-}
-
-function regionOrderItem<Id extends RegionId>(
-  regionId: Id,
-  values: LayoutValues,
-): SortableListItem<Id> {
-  const facts = regionFacts(regionId);
-  return {
-    id: regionId,
-    label: facts.name,
-    icon: facts.icon,
-    shown: readControlValue(values[regionId], "shown") !== "hidden",
-    onToggleShown: () => {
-      setRegionShown(
-        regionId,
-        readControlValue(values[regionId], "shown") === "hidden",
-      );
-    },
-    onRemove: null,
-    onActivate: null,
-  };
-}
-
-/** A group boundary as a first-class row: draggable, and removable (L-25). */
-function dividerOrderItem(
-  entryId: string,
-  arrangement: LayoutArrangement,
-): SortableListItem<string> {
-  return {
-    id: entryId,
-    label: "Divider",
-    icon: null,
-    shown: null,
-    onToggleShown: null,
-    onRemove: () => {
-      writeArrangement(removeRailDivider(arrangement, entryId));
-    },
-    onActivate: null,
-  };
-}
-
-/**
- * The usage providers as list rows, with the second level wired only where
- * there is one to open.
- *
- * One builder for both callers: the `usageProviders` order group and the
- * Usage limits section's own children row draw the SAME list, and writing it
- * twice left the order-group branch unreachable and drifting (G1-13).
- */
-function providerOrderItems(
-  arrangement: LayoutArrangement,
-  onOpenProvider: ((providerId: RateLimitProviderId) => void) | null,
-): ReadonlyArray<SortableListItem<RateLimitProviderId>> {
-  return arrangement.usageProviders.map((providerId) => ({
-    id: providerId,
-    label: providerDisplayName(providerId),
-    icon: null,
-    shown: !arrangement.hiddenProviders.includes(providerId),
-    onToggleShown: () => {
-      toggleHiddenProvider(providerId, arrangement);
-    },
-    onRemove: null,
-    onActivate:
-      onOpenProvider === null
-        ? null
-        : () => {
-            onOpenProvider(providerId);
-          },
-  }));
-}
-
-function toggleHiddenProvider(
-  providerId: RateLimitProviderId,
-  arrangement: LayoutArrangement,
-): void {
-  writeArrangement({
-    ...arrangement,
-    hiddenProviders: arrangement.hiddenProviders.includes(providerId)
-      ? arrangement.hiddenProviders.filter((entry) => entry !== providerId)
-      : [...arrangement.hiddenProviders, providerId],
-  });
 }

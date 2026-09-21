@@ -47,6 +47,34 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => vi.fn(),
 }));
+// The dock's own panels are the REAL ones now (L-98), so this render reaches
+// the same host boundary every other dock suite fakes away: the agent stop
+// button's `HostRuntimeProvider` hooks and the managed half's RPCs. The app
+// mounts both app-wide (`traycer-app.tsx`), so the fake is about this
+// standalone render, not about what the sample workspace needs to exist.
+vi.mock("@/components/chat/agent-stop-button", () => ({
+  AgentStopButton: (props: { readonly label: string }) => (
+    <button type="button">{props.label}</button>
+  ),
+}));
+vi.mock(
+  "@/hooks/managed-command/use-managed-command-lifecycle-mutations",
+  () => ({
+    useManagedCommandStart: () => ({ mutate: vi.fn(), isPending: false }),
+    useManagedCommandStop: () => ({ mutate: vi.fn(), isPending: false }),
+    useManagedCommandStopAll: () => ({ mutate: vi.fn(), isPending: false }),
+    useManagedCommandDelete: () => ({ mutate: vi.fn(), isPending: false }),
+    useManagedCommandConfigureIsPending: () => false,
+    useManagedCommandRelaunchOnHostRestart: (
+      _target: unknown,
+      streamed: { relaunchOnHostRestart: boolean },
+    ) => streamed.relaunchOnHostRestart,
+    useManagedCommandConfigure: () => ({ mutate: vi.fn(), isPending: false }),
+    useManagedCommandStopAllIsPending: () => false,
+    useManagedCommandDeliverHeld: () => ({ mutate: vi.fn(), isPending: false }),
+    useManagedCommandDeliverHeldIsPending: () => false,
+  }),
+);
 
 function Probe(): ReactNode {
   return (
@@ -128,11 +156,28 @@ describe("SampleWorkspaceBody - content", () => {
     expect(screen.getAllByText(/Sample tool/)).toHaveLength(1);
   });
 
-  it("renders the three populated dock rows, the composer, and the sample context chip", () => {
+  // L-98: the dock rows are the REAL panels fed sample data, not look-alike
+  // headers. Each assertion below is something only the real panel draws -
+  // the changed-files COUNT with its header actions, the collapsible agents
+  // and background panels, the pinned todo and the queued message - so a
+  // return to hand-drawn headers fails every one of them.
+  it("mounts the real dock panels with sample data, the composer, and the sample context chip", () => {
     renderBody();
 
-    expect(screen.getByText(/Sample agent/)).not.toBeNull();
-    expect(screen.getByText(/Sample shell/)).not.toBeNull();
+    const changes = screen.getByTestId("accumulated-changes-panel");
+    expect(changes.textContent).toContain("3 files changed");
+    expect(screen.getByTestId("accumulated-review-all")).not.toBeNull();
+    expect(screen.getByTestId("accumulated-undo-all")).not.toBeNull();
+    // Collapsible, which the old `FileChangeHeader` stand-in never was.
+    expect(changes.getAttribute("data-state")).toBe("closed");
+
+    const agents = screen.getByTestId("active-agents-panel");
+    expect(agents.textContent).toContain("2 running");
+    const background = screen.getByTestId("background-items-panel");
+    expect(background.textContent).toContain("running");
+    expect(screen.getByTestId("pinned-todo-panel")).not.toBeNull();
+    expect(screen.getByTestId("queued-message-rows")).not.toBeNull();
+
     expect(screen.getByText("Describe the next change…")).not.toBeNull();
     expect(screen.getByText("Sample workspace")).not.toBeNull();
     expect(screen.getByTestId("context-usage-meter")).not.toBeNull();
@@ -157,7 +202,9 @@ describe("SampleWorkspaceBody - content", () => {
     // ...but the text inside it is, and so is everything from the dock down.
     const turn = document.querySelector("[data-sample-turn]");
     expect(turn?.closest("[inert]")).not.toBeNull();
-    expect(screen.getByText(/Sample agent/).closest("[inert]")).not.toBeNull();
+    expect(
+      screen.getByTestId("active-agents-panel").closest("[inert]"),
+    ).not.toBeNull();
     expect(
       screen.getByText("Describe the next change…").closest("[inert]"),
     ).not.toBeNull();
@@ -174,13 +221,12 @@ describe("SampleWorkspaceBody - sample labelling", () => {
     useLayoutEditorStore.getState().endSession();
   });
 
-  it("SampleSceneProvider reads 'sample' only while a sample-scene session is live", () => {
+  it("SampleSceneProvider reads 'sample' exactly while a session is live", () => {
     renderBody();
     expect(screen.getByTestId("sample-probe").textContent).toBe("real");
 
     act(() => {
       useLayoutEditorStore.getState().beginSession({
-        scene: "sample",
         entry: "pointer",
         source: "direct_ui",
         preferredInstanceId: null,
@@ -188,17 +234,6 @@ describe("SampleWorkspaceBody - sample labelling", () => {
       });
     });
     expect(screen.getByTestId("sample-probe").textContent).toBe("sample");
-
-    act(() => {
-      useLayoutEditorStore.getState().beginSession({
-        scene: "in-place",
-        entry: "pointer",
-        source: "direct_ui",
-        preferredInstanceId: null,
-        startedAt: 0,
-      });
-    });
-    expect(screen.getByTestId("sample-probe").textContent).toBe("real");
 
     act(() => {
       useLayoutEditorStore.getState().endSession();

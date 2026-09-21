@@ -18,7 +18,11 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import type { ChatDockSection } from "@/components/chat/chat-dock-compact-strip";
+import {
+  ChatDockCompactStripProvider,
+  type ChatDockCompactChipModel,
+  type ChatDockSection,
+} from "@/components/chat/chat-dock-compact-strip";
 import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
@@ -161,6 +165,78 @@ describe("<ChatLowerDock />", () => {
 
     expect(frame).not.toBeNull();
     expect(changes.className).not.toContain("border-t");
+  });
+
+  // L-97: the full rows keep ONE frame tucked under the composer, and that
+  // frame's fill is not `bg-muted` at any alpha - every preset's dark variant
+  // defines `--muted` identical to `--card`, so a muted fill on this bordered
+  // box over `bg-canvas` is invisible in most of the eighteen themes.
+  it("draws one joined frame with no muted fill", () => {
+    renderDock({
+      ...emptyDock(),
+      changes: [fileChange()],
+      todo: todoSnapshot([todoItem("Current task")]),
+    });
+
+    const dock = screen.getByTestId("chat-lower-dock");
+    const frames = dock.querySelectorAll(".rounded-t-lg");
+    expect(frames).toHaveLength(1);
+    const frame = frames[0];
+    expect(frame.className).toContain("border-b-0");
+    expect(frame.className).toContain("-mb-px");
+    // The frame's OWN fill. (`Collapsible variant="panel"` paints its own
+    // `bg-muted/30` inside; that is the design system's call and lives in
+    // `components/ui/collapsible.tsx`, not here.)
+    expect(frame.className).not.toContain("bg-muted");
+    expect(frame.className).toContain("bg-foreground/3");
+    // Both panels live inside that one frame rather than in cards of their own.
+    expect(frame.contains(screen.getByTestId("pinned-todo-panel"))).toBe(true);
+    expect(
+      frame.contains(screen.getByTestId("accumulated-changes-panel")),
+    ).toBe(true);
+  });
+
+  // A12: the pills stand ABOVE the frame at the composer's left edge, not in
+  // the workspace row at its right. `ml-auto` was what pushed them right.
+  it("puts the pill row first in the stack and left-aligned", () => {
+    renderDock({
+      ...emptyDock(),
+      changes: [fileChange()],
+      chips: [compactChip("background")],
+    });
+
+    const dock = screen.getByTestId("chat-lower-dock");
+    const strip = screen.getByTestId("chat-dock-compact-strip");
+    const frame = dock.querySelector(".rounded-t-lg");
+
+    expect(strip.className).not.toContain("ml-auto");
+    expect(strip.className).toContain("flex-wrap");
+    expect(frame).not.toBeNull();
+    expect(strip.compareDocumentPosition(frame as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  // A.4.4 / risk 2: a fully compact chat has no todo, no queue and no row, so
+  // the dock's own null gate used to take the chips off screen with it the
+  // moment they moved into the dock. Mutation check: drop the `anyChipVisible`
+  // term in `ChatLowerDock` and this goes red.
+  it("stays on screen for a chip-only chat", () => {
+    renderDock({
+      ...emptyDock(),
+      changes: [fileChange()],
+      folded: new Set(["filesChanged", "activeAgents", "background"]),
+      chips: [compactChip("filesChanged")],
+    });
+
+    expect(screen.getByTestId("chat-lower-dock")).not.toBeNull();
+    expect(screen.getByTestId("chat-dock-compact-strip")).not.toBeNull();
+    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+    // And the frame collapses rather than drawing an empty bordered box.
+    const frame = screen
+      .getByTestId("chat-lower-dock")
+      .querySelector(".rounded-t-lg");
+    expect(frame?.childElementCount).toBe(0);
   });
 
   it("renders background items and dispatches item actions", () => {
@@ -416,6 +492,8 @@ describe("<ChatLowerDock />", () => {
 });
 
 interface DockInput {
+  /** The compact chips the surrounding strip context is holding, if any. */
+  readonly chips?: ReadonlyArray<ChatDockCompactChipModel>;
   readonly queue: ChatSessionState["queue"];
   readonly todo: PinnedTodoSnapshot | null;
   readonly changes: ReadonlyArray<AccumulatedChangeRow>;
@@ -465,51 +543,89 @@ function dockHotspotsFor(
   };
 }
 
+/** A dock with nothing in it, for the tests that add exactly one thing. */
+function emptyDock(): DockInput {
+  return {
+    folded: undefined,
+    queue: queueState([]),
+    todo: null,
+    changes: [],
+    backgroundItems: undefined,
+    heldManagedCommandCount: 0,
+    selfAgent: null,
+    activeAgents: [],
+    onBackgroundItemClick: () => undefined,
+    onBackgroundItemStop: () => null,
+    onBackgroundItemsStopAll: () => null,
+  };
+}
+
+function compactChip(section: ChatDockSection): ChatDockCompactChipModel {
+  return {
+    section,
+    glyph: section,
+    hotspotRef: null,
+    working: false,
+    text: "1",
+    lineDeltas: null,
+    label: `${section} chip`,
+    pulseToken: null,
+  };
+}
+
 function renderDock(input: DockInput) {
   return render(
     // The dock's background panel reads the tile's bound host to open a
     // managed command's output window, the same as it does inside a real tile.
     <TabHostProvider hostId="host-1">
       <TooltipProvider delayDuration={0}>
-        <ChatLowerDock
-          snapshotLoaded
-          epicId="epic-1"
-          chatId="chat-1"
-          viewTabId="tab-1"
-          selfAgent={input.selfAgent}
-          activeAgents={input.activeAgents}
-          todo={input.todo}
-          restore={baseRestore(input.changes)}
-          queue={input.queue}
-          folded={input.folded ?? new Set()}
-          dockOrder={DEFAULT_DOCK_ORDER}
-          hotspots={dockHotspotsFor(input)}
-          queueResumeRequested={false}
-          queueKeepPausedRequested={false}
-          backgroundItems={input.backgroundItems}
-          runningManagedCommandCount={0}
-          heldManagedCommandCount={input.heldManagedCommandCount}
-          backgroundStopPendingTaskIds={new Set()}
-          backgroundStopAllPending={false}
-          backgroundSessionStopPending={false}
-          activeTurnStatus="running"
-          canAct
-          readOnly={false}
-          editingQueueItemId={null}
-          topSpacing="normal"
-          scrollRegionMaxHeightClass="max-h-96"
-          onQueuePause={() => null}
-          onQueueResume={() => null}
-          onQueueEdit={vi.fn()}
-          onQueueCancel={vi.fn()}
-          onQueueAbortSteer={vi.fn()}
-          onQueueReorder={vi.fn()}
-          onQueueSteerNow={vi.fn()}
-          onBackgroundItemClick={input.onBackgroundItemClick}
-          onBackgroundItemStop={input.onBackgroundItemStop}
-          onBackgroundItemsStopAll={input.onBackgroundItemsStopAll}
-          onBackgroundSessionStop={() => null}
-        />
+        <ChatDockCompactStripProvider
+          value={{
+            chips: input.chips ?? [],
+            expanded: new Set<ChatDockSection>(),
+            onToggle: () => undefined,
+          }}
+        >
+          <ChatLowerDock
+            snapshotLoaded
+            epicId="epic-1"
+            chatId="chat-1"
+            viewTabId="tab-1"
+            selfAgent={input.selfAgent}
+            activeAgents={input.activeAgents}
+            todo={input.todo}
+            restore={baseRestore(input.changes)}
+            queue={input.queue}
+            folded={input.folded ?? new Set()}
+            dockOrder={DEFAULT_DOCK_ORDER}
+            hotspots={dockHotspotsFor(input)}
+            queueResumeRequested={false}
+            queueKeepPausedRequested={false}
+            backgroundItems={input.backgroundItems}
+            runningManagedCommandCount={0}
+            heldManagedCommandCount={input.heldManagedCommandCount}
+            backgroundStopPendingTaskIds={new Set()}
+            backgroundStopAllPending={false}
+            backgroundSessionStopPending={false}
+            activeTurnStatus="running"
+            canAct
+            readOnly={false}
+            editingQueueItemId={null}
+            topSpacing="normal"
+            scrollRegionMaxHeightClass="max-h-96"
+            onQueuePause={() => null}
+            onQueueResume={() => null}
+            onQueueEdit={vi.fn()}
+            onQueueCancel={vi.fn()}
+            onQueueAbortSteer={vi.fn()}
+            onQueueReorder={vi.fn()}
+            onQueueSteerNow={vi.fn()}
+            onBackgroundItemClick={input.onBackgroundItemClick}
+            onBackgroundItemStop={input.onBackgroundItemStop}
+            onBackgroundItemsStopAll={input.onBackgroundItemsStopAll}
+            onBackgroundSessionStop={() => null}
+          />
+        </ChatDockCompactStripProvider>
       </TooltipProvider>
     </TabHostProvider>,
   );

@@ -3,10 +3,12 @@ import "@/components/layout-editor/layout-editor.css";
 import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
 import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas";
 import { useFloatingDock } from "@/components/layout-editor/inspector/dock-modes";
+import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
 import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
+import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import {
   initializeLayoutEditorWindow,
   watchLayoutEditorLease,
@@ -113,6 +115,29 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
     };
   }, [live]);
 
+  // Escape's one owner while a session is live (L-31, C-26), for the same
+  // reason as the chord above: the ladder is a fact about the SESSION, not
+  // about what has focus. It used to be a listener on the inspector panel,
+  // which selecting a region killed - the focused index row unmounted, focus
+  // fell back to `<body>`, and the key never passed through the panel again
+  // (I-02). Nothing has to be fought for here: the filter's clear and the
+  // sortable list's grab-cancel both stop the native event below this node,
+  // and a layer that took focus answers for itself (see `ownsItsOwnEscape`).
+  useEffect(() => {
+    if (!live) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (ownsItsOwnEscape(event.target)) return;
+      event.preventDefault();
+      if (useLayoutEditorStore.getState().popInspectorLevel()) return;
+      closeLayoutEditor("escape");
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [live]);
+
   if (!live) return null;
 
   return (
@@ -148,29 +173,40 @@ function InspectorBody(): ReactNode {
   let body: ReactNode;
   if (level !== null) {
     body = (
-      <ProviderLevel
-        providerId={level.providerId}
-        onBack={() => {
-          useLayoutEditorStore.getState().popInspectorLevel();
-        }}
-      />
+      <>
+        {/* Keyed per level, so arriving at a deeper one re-homes focus onto
+          its own way back rather than leaving it on the row that opened it. */}
+        <InspectorBackRow
+          key={`provider-${level.providerId}`}
+          label={regionFacts("usageLimits").name}
+          onBack={popLevel}
+        />
+        <ProviderLevel providerId={level.providerId} />
+      </>
     );
   } else if (selected !== null) {
     body = (
-      // Keyed on the region: the section holds per-region local state (the
-      // Fine-tune disclosure), and an unkeyed element would carry one
-      // region's open state into the next (G1-20).
-      <RegionSection
-        key={selected}
-        regionId={selected}
-        host="inspector"
-        onOpenProvider={(providerId) => {
-          if (!isUsageProviderId(providerId)) return;
-          useLayoutEditorStore
-            .getState()
-            .openLevel({ kind: "usage-provider", providerId });
-        }}
-      />
+      <>
+        <InspectorBackRow
+          key={`section-${selected}`}
+          label="All regions"
+          onBack={popLevel}
+        />
+        {/* Keyed on the region: the section holds per-region local state (the
+          Fine-tune disclosure), and an unkeyed element would carry one
+          region's open state into the next (G1-20). */}
+        <RegionSection
+          key={selected}
+          regionId={selected}
+          host="inspector"
+          onOpenProvider={(providerId) => {
+            if (!isUsageProviderId(providerId)) return;
+            useLayoutEditorStore
+              .getState()
+              .openLevel({ kind: "usage-provider", providerId });
+          }}
+        />
+      </>
     );
   } else {
     body = (
@@ -190,8 +226,31 @@ function InspectorBody(): ReactNode {
   return <InspectorShell onExit={exit}>{body}</InspectorShell>;
 }
 
+function popLevel(): void {
+  useLayoutEditorStore.getState().popInspectorLevel();
+}
+
 function exit(reason: LayoutEditorExitReason): void {
   closeLayoutEditor(reason);
+}
+
+/**
+ * An open overlay owns Escape for its own layer.
+ *
+ * A Radix layer that has taken focus - the canvas's own quick-verb context
+ * menu, a dialog, a popover - dismisses itself on Escape, and a ladder step in
+ * the same press would close the menu AND leave the level the user was
+ * reading. Read off the event's target rather than off a layer count, because
+ * this listener is installed when the session opens and a layer that mounts
+ * later is dismissed AFTER it, so `defaultPrevented` alone answers too late.
+ */
+function ownsItsOwnEscape(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return (
+    target.closest(
+      '[data-radix-popper-content-wrapper],[role="dialog"],[role="menu"],[role="listbox"]',
+    ) !== null
+  );
 }
 
 function isUsageProviderId(id: string): id is RateLimitProviderId {

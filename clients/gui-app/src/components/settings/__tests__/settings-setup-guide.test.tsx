@@ -209,7 +209,6 @@ describe("SettingsSetupGuide", () => {
     });
     useLayoutEditorStore.setState({
       session: {
-        scene: "in-place",
         entry: "pointer",
         source: "direct_ui",
         preferredInstanceId: null,

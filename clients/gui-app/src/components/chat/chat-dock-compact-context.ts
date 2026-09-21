@@ -72,16 +72,6 @@ export interface ChatDockCompactChipModel {
   /** The whole sentence it stands for - the chip's accessible name. */
   readonly label: string;
   readonly pulseToken: string | null;
-  /**
-   * True when this chip stands in for content the chat does not have (L-16).
-   *
-   * A chip-sized region with nothing live in it still has to be something the
-   * editor can point at, name and drag, and it has to draw as a CHIP - which
-   * is the whole difference the Size control makes. Without this it fell
-   * through to the full sample row and flipping Size changed nothing on the
-   * canvas (G1-03).
-   */
-  readonly sample: boolean;
 }
 
 export interface ChatDockCompactStripValue {

@@ -1,10 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
 import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
+import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -13,16 +15,33 @@ import {
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 
+/**
+ * The provider level's limit checklist reads the status bar's rate-limit cache
+ * (L-96), which wants a host runtime this keyboard harness has no business
+ * standing up. The windows themselves are `provider-limits-choose.test.tsx`'s
+ * subject.
+ */
+vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
+  useProviderLimitWindows: () => ({ windows: [], drawnKeys: [] }),
+}));
+
 function isUsageProviderId(id: string): id is RateLimitProviderId {
   return USAGE_PROVIDER_IDS.some((candidate) => candidate === id);
 }
 
+function popLevel(): void {
+  useLayoutEditorStore.getState().popInspectorLevel();
+}
+
 /**
- * A minimal stand-in for what tickets 05/07 mount: which of the three screens
- * shows is read straight off the editor store's own `selected`/`level`, the
- * same way `popInspectorLevel`'s own ladder (index -> section -> provider) is
- * documented to work. Nothing here belongs in the components under test -
- * this harness only proves they compose the way the later tickets will.
+ * The body `layout-editor.tsx` mounts, with which of the three screens shows
+ * read straight off the editor store's own `selected`/`level`. Nothing here
+ * belongs in the components under test; the harness only composes them the
+ * way the editor root does, so the keyboard model can be driven without a
+ * session, a canvas and a firewall around it.
+ *
+ * Escape is deliberately NOT part of it: the ladder is the editor root's own
+ * `document` listener (I-02), and `layout-editor.test.tsx` drives it there.
  */
 function Harness(props: { readonly onExit: () => void }): ReactNode {
   const selected = useLayoutEditorStore((state) => state.selected);
@@ -31,31 +50,41 @@ function Harness(props: { readonly onExit: () => void }): ReactNode {
   let body: ReactNode;
   if (level !== null) {
     body = (
-      <ProviderLevel
-        providerId={level.providerId}
-        onBack={() => {
-          useLayoutEditorStore.getState().popInspectorLevel();
-        }}
-      />
+      <>
+        <InspectorBackRow
+          key={`provider-${level.providerId}`}
+          label={regionFacts("usageLimits").name}
+          onBack={popLevel}
+        />
+        <ProviderLevel providerId={level.providerId} />
+      </>
     );
   } else if (selected !== null) {
     body = (
-      <RegionSection
-        regionId={selected}
-        host="inspector"
-        onOpenProvider={(providerId) => {
-          if (!isUsageProviderId(providerId)) return;
-          useLayoutEditorStore
-            .getState()
-            .openLevel({ kind: "usage-provider", providerId });
-        }}
-      />
+      <>
+        <InspectorBackRow
+          key={`section-${selected}`}
+          label="All regions"
+          onBack={popLevel}
+        />
+        <RegionSection
+          key={selected}
+          regionId={selected}
+          host="inspector"
+          onOpenProvider={(providerId) => {
+            if (!isUsageProviderId(providerId)) return;
+            useLayoutEditorStore
+              .getState()
+              .openLevel({ kind: "usage-provider", providerId });
+          }}
+        />
+      </>
     );
   } else {
     body = (
       <InspectorIndex
         onPreviewPreset={() => {
-          // Preview wiring is the canvas's, a later ticket.
+          // Preview wiring is the canvas's, and is driven elsewhere.
         }}
       />
     );
@@ -85,15 +114,8 @@ afterEach(() => {
 });
 
 describe("inspector keyboard model (L-31)", () => {
-  it("walks the index with arrows, opens a region with Enter, and Escape walks back until it exits", () => {
-    let doneCount = 0;
-    render(
-      <Harness
-        onExit={() => {
-          doneCount += 1;
-        }}
-      />,
-    );
+  it("walks the index with arrows and opens a region with Enter", () => {
+    render(<Harness onExit={() => {}} />);
 
     const filterInput = screen.getByRole("textbox", { name: "Filter regions" });
 
@@ -129,22 +151,6 @@ describe("inspector keyboard model (L-31)", () => {
     expect(
       screen.queryByRole("textbox", { name: "Filter regions" }),
     ).toBeNull();
-
-    // First Escape (inside the open section) walks back to the index -
-    // `popInspectorLevel` pops `selected`, not the whole editor.
-    const sectionHeading = screen.getByText("Home tab");
-    fireEvent.keyDown(sectionHeading, { key: "Escape" });
-    expect(useLayoutEditorStore.getState().selected).toBeNull();
-    expect(doneCount).toBe(0);
-    expect(
-      screen.queryByRole("textbox", { name: "Filter regions" }),
-    ).not.toBeNull();
-
-    // Second Escape (already at the index) exits the editor.
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Filter regions" }), {
-      key: "Escape",
-    });
-    expect(doneCount).toBe(1);
   });
 
   it("returns focus to the filter on ArrowUp from the first row", () => {
@@ -158,5 +164,72 @@ describe("inspector keyboard model (L-31)", () => {
 
     fireEvent.keyDown(firstRow, { key: "ArrowUp" });
     expect(document.activeElement).toBe(filterInput);
+  });
+
+  it("opens the first match on Enter in the filter (I-08)", () => {
+    render(<Harness onExit={() => {}} />);
+    const filterInput = screen.getByRole("textbox", { name: "Filter regions" });
+
+    fireEvent.change(filterInput, { target: { value: "minimap" } });
+    fireEvent.keyDown(filterInput, { key: "Enter" });
+
+    expect(useLayoutEditorStore.getState().selected).toBe("minimap");
+  });
+
+  it("leaves Enter alone when the filter matches nothing", () => {
+    render(<Harness onExit={() => {}} />);
+    const filterInput = screen.getByRole("textbox", { name: "Filter regions" });
+
+    fireEvent.change(filterInput, { target: { value: "zzzz" } });
+    fireEvent.keyDown(filterInput, { key: "Enter" });
+
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+  });
+});
+
+describe("the shared back row (L-89)", () => {
+  it("takes focus on the way into a level and walks back out of it", () => {
+    render(<Harness onExit={() => {}} />);
+
+    // Focus starts on the first index row on entry, and the pointer opens a
+    // section: the row that had focus unmounts with it, which is what used to
+    // drop focus onto `<body>` (I-02).
+    expect(document.activeElement?.getAttribute("data-region-id")).toBe(
+      "homeTab",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Home tab/ }));
+
+    const back = screen.getByRole("button", { name: "All regions" });
+    expect(document.activeElement).toBe(back);
+
+    fireEvent.click(back);
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Filter regions" }),
+    ).not.toBeNull();
+    // And back out again, focus is in the index rather than on a row that no
+    // longer exists.
+    expect(document.activeElement?.getAttribute("data-region-id")).toBe(
+      "homeTab",
+    );
+  });
+
+  it("names the parent level rather than the index, one level deeper", () => {
+    render(<Harness onExit={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Usage limits/ }));
+    const providerRow = screen.getAllByRole("button", {
+      name: /Anthropic|Claude|OpenAI|Codex/,
+    })[0];
+    fireEvent.click(providerRow);
+
+    expect(useLayoutEditorStore.getState().level).not.toBeNull();
+    const back = screen.getByRole("button", { name: "Usage limits" });
+    expect(document.activeElement).toBe(back);
+
+    fireEvent.click(back);
+    expect(useLayoutEditorStore.getState().level).toBeNull();
+    expect(useLayoutEditorStore.getState().selected).toBe("usageLimits");
+    expect(screen.getByRole("button", { name: "All regions" })).not.toBeNull();
   });
 });

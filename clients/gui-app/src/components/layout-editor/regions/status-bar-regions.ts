@@ -106,6 +106,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
     {
       kind: "style",
       description: "Each example is the real segment, drawn at full size.",
+      specimen: "usage-provider",
       examples: USAGE_LIMITS_EXAMPLES,
     },
     {

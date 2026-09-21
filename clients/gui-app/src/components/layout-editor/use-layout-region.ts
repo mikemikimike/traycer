@@ -192,7 +192,7 @@ export function useRegionGhost(regionId: RegionId): boolean {
 function decorate(instance: RegionInstance): void {
   const state = useLayoutEditorStore.getState();
   const editing = state.session !== null;
-  const hovered = editing && state.hovered === instance.regionId;
+  const hovered = editing && decoratedHoverRegion(state) === instance.regionId;
   const selected = editing && state.selected === instance.regionId;
   flag(instance.node, "data-hover", hovered);
   flag(instance.node, "data-selected", selected);
@@ -201,6 +201,28 @@ function decorate(instance: RegionInstance): void {
   if (selected && isAnchorInstance(state, instance)) roles.push("selected");
   if (roles.length === 0) instance.node.removeAttribute("data-layout-anchor");
   else instance.node.setAttribute("data-layout-anchor", roles.join(" "));
+}
+
+/**
+ * The region the hover decoration is on, which is never the selected one
+ * (C-08).
+ *
+ * A selected region used to wear all three signals at once - the travelling
+ * ring, the 1px hover outline and the floating name chip - because the pointer
+ * is still over the region it just selected. The prototype clears the hover
+ * inside `selectRegion`, which works there because it sets hover on
+ * `pointerover`; here hover is set on `pointermove`, so a one-off clear would
+ * be undone by the next pixel of movement. Deriving it instead makes the ring
+ * the single signal for as long as the selection stands, however the pointer
+ * moves over it.
+ *
+ * Shared by the two readers rather than restated: the attributes this module
+ * stamps, and the chip `layout-canvas.ts` shows.
+ */
+export function decoratedHoverRegion(
+  state: Pick<LayoutEditorState, "hovered" | "selected">,
+): RegionId | null {
+  return state.hovered === state.selected ? null : state.hovered;
 }
 
 function isAnchorInstance(

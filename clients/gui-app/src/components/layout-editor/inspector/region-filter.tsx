@@ -7,6 +7,8 @@ interface RegionFilterProps {
   readonly ref: Ref<HTMLInputElement>;
   /** ArrowDown from the field moves to the first index row (L-31). */
   readonly onArrowDown: () => void;
+  /** Enter opens the first match, without a trip through the rows. */
+  readonly onEnter: () => void;
 }
 
 /**
@@ -29,6 +31,9 @@ export function RegionFilter(props: RegionFilterProps): ReactNode {
       event.preventDefault();
       useLayoutEditorStore.getState().setKeyboardNav(true);
       props.onArrowDown();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      props.onEnter();
     } else if (event.key === "Escape" && filter.length > 0) {
       event.preventDefault();
       event.stopPropagation();

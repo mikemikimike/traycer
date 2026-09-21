@@ -1,4 +1,3 @@
-import { useCoarsePointer } from "@/hooks/ui/use-coarse-pointer";
 import { QuoteSelectionPopover } from "@/components/chat/quote/quote-selection-popover";
 import { useQuoteSelection } from "@/components/chat/quote/use-quote-selection";
 import { useChatFindController } from "@/components/chat/use-chat-find-controller";
@@ -62,7 +61,6 @@ import { ChatTurnMinimap } from "@/components/chat/chat-turn-minimap";
 import {
   CHAT_TURN_MINIMAP_KEYBOARD_OWNER_SELECTOR,
   shouldMountChatTurnMinimap,
-  shouldRunChatTurnMinimapRail,
 } from "@/components/chat/chat-turn-minimap-logic";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { buildChatActivityTimeline } from "@/components/chat/chat-activity-groups";
@@ -120,7 +118,6 @@ import {
   useSubagentOpenStore,
 } from "@/stores/chats/subagent-open-store";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
-import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import { isEpicCanvasTileInstanceLive } from "@/stores/epics/canvas/tile-instance-liveness";
 import { resolveHostedTileOwnership } from "@/components/epic-canvas/surface-host/hosted-tile-resolver";
@@ -2791,22 +2788,17 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
   );
   const minimapSide = useArrangementValue("minimapSide");
   const isMobileViewport = useIsMobileViewport();
-  const coarsePointer = useCoarsePointer();
-  const { ref: minimapHotspotRef, ghost: minimapGhost } = useLayoutRegion({
-    regionId: "minimap",
-    instanceId: taskId,
-  });
-  // A hidden minimap materialises in place while the editor points at it
-  // (L-14). It is a pure view over rows the transcript already has, so
-  // drawing one costs nothing the chat was not already paying.
-  const minimapShown = useRegionShown("minimap") || minimapGhost;
-  const minimapDrawn =
-    hasContent &&
-    shouldRunChatTurnMinimapRail({
-      shown: minimapShown,
-      coarsePointer,
-      mobileViewport: isMobileViewport,
-    });
+  // No Customize registration here, and no ghost: a real chat tile is never
+  // the editor's canvas (L-87). The door opens the sample workspace tab and
+  // activates it, the session ends on any other tab becoming active
+  // (`editor-session.ts`), and that tab is `splitEligibility: "ineligible"`,
+  // so no epic surface is ever presented beside it. `epic-surface.tsx` and
+  // `hosted-chat-surface-context-bridge.tsx` both publish
+  // `PaneVisibilityContext = topLevelVisible`, which is what `useLayoutRegion`
+  // gates registration on - so this tile could only ever have registered an
+  // instance nothing on screen was drawn from. The sample workspace registers
+  // `minimap` itself, against the leaf it really draws.
+  const minimapShown = useRegionShown("minimap");
   const quoteSelection = useQuoteSelection({
     containerRef: transcriptContainerRef,
     enabled: quoteReplyEnabled && visible && !systemOverlayActive,
@@ -3954,7 +3946,6 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
           }) ? (
             <div className="contents max-md:hidden">
               <ChatTurnMinimap
-                ref={minimapDrawn ? minimapHotspotRef : null}
                 rows={listRows}
                 transcriptWindow={transcriptWindow}
                 inViewRefreshRef={minimapInViewRefreshRef}

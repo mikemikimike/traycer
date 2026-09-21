@@ -967,6 +967,7 @@ function renderPanel(input: {
         readOnly={input.readOnly}
         editingQueueItemId={null}
         scrollRegionMaxHeightClass="max-h-96"
+        separated={false}
         onPause={input.onPause ?? (() => null)}
         onResume={input.onResume ?? (() => null)}
         onEdit={vi.fn()}

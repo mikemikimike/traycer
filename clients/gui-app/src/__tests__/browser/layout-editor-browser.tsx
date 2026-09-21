@@ -1,6 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  ChatDockCompactStrip,
+  ChatDockCompactStripProvider,
+  type ChatDockSection,
+} from "@/components/chat/chat-dock-compact-strip";
 import { createHoverChip } from "@/components/layout-editor/canvas/hover-chip";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import { regionDepiction } from "@/components/layout-editor/region-depiction";
@@ -9,6 +15,10 @@ import { LAYOUT_REGION_IDS } from "@/components/layout-editor/regions/region-fac
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
 import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
 import { SampleWorkspaceRail } from "@/components/sample-workspace/sample-workspace-rail";
+import {
+  SAMPLE_DOCK,
+  SAMPLE_TILE_ID,
+} from "@/components/sample-workspace/sample-workspace-scene";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -36,9 +46,12 @@ import "@/components/layout-editor/layout-editor.css";
  *    than counting them as covered - a coverage claim nobody can rely on is
  *    worse than an honest gap (G3-02). The two picture entry points are one
  *    function since L-77, so comparing them with each other proved nothing.
- * 2. **The rail.** The sample workspace's rail is a real surface built from
- *    the app's own components, so each of the nine rail regions has a live
- *    node; it is the first of the live surfaces above.
+ * 2. **The live surfaces.** Three of them, and each is a mount the app itself
+ *    makes. The sample workspace's rail is a real surface built from the app's
+ *    own components, so each of the nine rail regions has a live node. The
+ *    composer's toolbar in presentation mode carries the five toolbar regions.
+ *    The dock's compact strip carries the three dock members at Chip size
+ *    (L-98) - the size at which they mount with no host runtime behind them.
  * 3. **Uniform scaling only.** The preset miniature's frame is measured
  *    untransformed, with `offsetWidth`/`offsetHeight`, against the 1000x620
  *    it claims - a reflowed card would be any other size.
@@ -65,13 +78,7 @@ const NO_LIVE_LEAF: Readonly<Partial<Record<RegionId, string>>> = {
   minimap:
     "ChatTurnMinimapView is driven by the transcript's measured viewport and its scroll position",
   contextUsage:
-    "ContextUsageChip reads the preference seam and the chat's live context usage",
-  runningAgents:
-    "the dock rows mount inside a chat tile's lower surfaces, which need the chat session and its runtime",
-  changedFiles:
-    "the dock rows mount inside a chat tile's lower surfaces, which need the chat session and its runtime",
-  background:
-    "the dock rows mount inside a chat tile's lower surfaces, which need the chat session and its runtime",
+    "ContextUsageChip draws through `motion/react-m`, which needs the app's LazyMotion feature provider",
 };
 
 declare global {
@@ -160,6 +167,62 @@ function LiveToolbar(): ReactNode {
   );
 }
 
+/**
+ * The dock's three members, live, as the pills they are at Chip size.
+ *
+ * They had no live node here at all while the rows mounted only inside a chat
+ * tile's lower surfaces. L-98 moved the sample workspace onto the REAL dock, and
+ * its compact strip is the half that needs no host runtime: the chips are
+ * `ChatDockCompactChip` fed a model, which is the same leaf the picture draws.
+ * The full ROW still has none - `ActiveAgentsPanel` mounts `AgentStopButton`,
+ * which resolves a host client and a mutation - so this fixture draws all three
+ * at Chip size on both sides (see the store seed below).
+ *
+ * `working: false` on every chip, against the sample scene's own two: a working
+ * glyph is `text-primary` under a per-frame opacity sweep, and the driver
+ * compares the glyph's resolved colour. The picture is drawn at rest, so the
+ * live side is too - the state is not what is being compared here.
+ */
+function LiveDockChips(): ReactNode {
+  const files = useLayoutRegion({
+    regionId: "changedFiles",
+    instanceId: SAMPLE_TILE_ID,
+  });
+  const agents = useLayoutRegion({
+    regionId: "runningAgents",
+    instanceId: SAMPLE_TILE_ID,
+  });
+  const background = useLayoutRegion({
+    regionId: "background",
+    instanceId: SAMPLE_TILE_ID,
+  });
+  const refs: Readonly<
+    Record<ChatDockSection, (node: HTMLElement | null) => void>
+  > = {
+    filesChanged: files.ref,
+    activeAgents: agents.ref,
+    background: background.ref,
+  };
+  const chips = SAMPLE_DOCK.map((chip) => ({
+    ...chip,
+    working: false,
+    hotspotRef: refs[chip.section],
+  }));
+  return (
+    <ChatDockCompactStripProvider
+      value={{
+        chips,
+        expanded: new Set<ChatDockSection>(),
+        onToggle: () => undefined,
+      }}
+    >
+      <HostContextFrame host="chip-strip">
+        <ChatDockCompactStrip />
+      </HostContextFrame>
+    </ChatDockCompactStripProvider>
+  );
+}
+
 export function Fixture(): ReactNode {
   useEffect(() => {
     const chip = createHoverChip();
@@ -188,6 +251,10 @@ export function Fixture(): ReactNode {
 
         <section data-live-surface id="live-toolbar" style={{ width: 720 }}>
           <LiveToolbar />
+        </section>
+
+        <section data-live-surface id="live-dock" style={{ width: 720 }}>
+          <LiveDockChips />
         </section>
 
         <section id="pictures">
@@ -229,12 +296,17 @@ export function Fixture(): ReactNode {
 // surfaces' `data-layout-region` attributes are what the driver compares
 // against.
 useLayoutEditorStore.getState().beginSession({
-  scene: "sample",
   entry: "pointer",
   source: "direct_ui",
   preferredInstanceId: null,
   startedAt: 0,
 });
+
+// The three dock members at Chip size, so the picture and the live leaf are
+// pictures of the same thing (see `LiveDockChips`). Every other region is drawn
+// at whatever this build ships as its default.
+for (const regionId of ["changedFiles", "runningAgents", "background"] as const)
+  useLayoutStore.getState().setRegionValues(regionId, { size: "chip" });
 
 const container = document.getElementById("root");
 if (container !== null) createRoot(container).render(<Fixture />);

@@ -98,10 +98,14 @@ export function HarnessModelTrigger(props: HarnessModelTriggerProps) {
       ref={ref}
       aria-label={summary}
       disabled={disabled}
+      // The narrow collapse is a SQUARE of the chip's own height, so the
+      // harness glyph sits in the same box attach and the access shield do.
+      // It is a different axis from `reasoningIndicator`: "this tile is
+      // narrow" versus "the user asked for bars", and both survive.
       className={cn(
-        "max-w-[min(50cqw,18rem)] min-w-0 justify-start disabled:cursor-not-allowed disabled:opacity-50",
+        "max-w-[min(50cqw,18rem)] min-w-0 justify-start",
         collapseWhenNarrow &&
-          "@max-lg:size-8 @max-lg:justify-center @max-lg:px-0",
+          "@max-lg:size-7 @max-lg:justify-center @max-lg:px-0",
       )}
       {...rest}
     >

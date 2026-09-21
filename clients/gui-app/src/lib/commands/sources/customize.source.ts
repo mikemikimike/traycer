@@ -54,7 +54,7 @@ export const customizeSource: ReactCommandSource = {
       return [
         {
           ...item,
-          description: "Point at the app's own chrome and change it in place",
+          description: "Rearrange the app's chrome in a sample workspace",
           run: () => {
             openLayoutEditor({
               source: "command_palette",

@@ -104,15 +104,27 @@ export function ChatDockCompactChip(props: ChatDockCompactChipProps) {
         }}
         onClick={props.onClick}
         className={cn(
-          "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-xs whitespace-nowrap outline-none transition-colors",
-          "text-muted-foreground hover:bg-accent/50 hover:text-foreground focus-visible:bg-accent/50 focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60",
-          props.expanded && "bg-accent/40 text-foreground",
+          // The artifact's `.dchip` (A13), spelled in the same vocabulary the
+          // composer toolbar's chips now use (`toolbar-buttons.tsx`): one
+          // bordered material on the app's own background, `hover` and
+          // `focus-visible` landing on `accent`, a `scale-97` press that
+          // reduced motion cancels. A dock chip is the round one - it counts a
+          // thing rather than opening a menu - so it is a pill, not a square.
+          "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-border bg-background px-2.5 text-ui-xs whitespace-nowrap outline-none transition-[background-color,border-color,color,transform] duration-120 ease-out",
+          "text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 active:scale-97",
+          "motion-reduce:transition-none motion-reduce:active:scale-100",
+          // The pressed state has to read against a BORDER, not only against
+          // the page: a fill alone is what made the borderless chip's toggle
+          // legible, and on a bordered pill it reads as a hover that stuck.
+          props.expanded && "border-foreground/25 bg-accent text-foreground",
         )}
       >
         {props.icon}
         <span
           className={cn(
-            "font-mono text-code-xs tabular-nums",
+            // The number is the chip's content, so it takes the foreground
+            // while the glyph and the frame stay muted (`.dc-n`, A.1).
+            "font-mono text-code-xs tabular-nums text-foreground",
             props.working && "text-primary",
           )}
         >

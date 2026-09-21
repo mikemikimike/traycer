@@ -622,6 +622,8 @@ export function BackgroundItemsPanel(props: {
   /** Feeds the confirm dialog's "the active turn will also be stopped" line. */
   readonly turnActive: boolean;
   readonly scrollRegionMaxHeightClass: string;
+  /** A hairline above this panel, because a sibling drew before it in the
+   *  dock's shared frame (L-97). */
   readonly separated: boolean;
   readonly onItemClick: (item: BackgroundItem) => void;
   readonly onStopItem: (taskId: string) => string | null;

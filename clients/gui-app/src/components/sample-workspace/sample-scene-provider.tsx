@@ -21,9 +21,9 @@ export function SampleSceneProvider({
         id: "sample-workspace",
       });
   }, [fits]);
-  const sample = useLayoutEditorStore(
-    (state) => state.session?.scene === "sample",
-  );
+  // A live session IS the sample scene (L-87): the tab and the session have
+  // one lifetime, so there is no second thing to ask about.
+  const sample = useLayoutEditorStore((state) => state.session !== null);
   return (
     <SampleSceneContext.Provider value={sample}>
       {children}

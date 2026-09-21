@@ -29,7 +29,6 @@ function chip(
     lineDeltas: null,
     label: `${section} label`,
     pulseToken: null,
-    sample: false,
   };
 }
 

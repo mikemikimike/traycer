@@ -20,6 +20,7 @@ import {
 } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
  * What is different from the base preset, and the way back.
@@ -89,6 +90,102 @@ export function reorderedGroups(
 /** Every value back to the base preset. Values only: the arrangement stays. */
 export function resetToBase(snapshot: LayoutSnapshot): LayoutSnapshot {
   return { ...snapshot, overrides: {} };
+}
+
+// ── The floor (L-20's "Reset everything", P-6) ──────────────────────────────
+//
+// `changeCount` and `resetToBase` are deliberately values-only, and
+// `positionRowChanged` covers the usage host, the two sides and the five order
+// groups. That leaves three arrangement fields nothing measured and nothing
+// put back - `hiddenProviders`, `providerLimits` and `mobileFooter` - so a
+// page reading "Default" with no changes could have three providers hidden and
+// the mobile footer off. The predicates below are what a changed dot and a
+// per-row revert read; `resetEverything` is the floor under both, and it
+// matters most on this host, which has no session and therefore no Undo.
+
+/** Whether ONE provider has been hidden or had its limits picked (L-26, L-96). */
+export function providerChanged(
+  arrangement: LayoutArrangement,
+  providerId: RateLimitProviderId,
+): boolean {
+  return (
+    arrangement.hiddenProviders.includes(providerId) ||
+    arrangement.providerLimits[providerId] !== undefined
+  );
+}
+
+/** That provider back to shown, on Automatic, leaving every other one alone. */
+export function revertProvider(
+  arrangement: LayoutArrangement,
+  providerId: RateLimitProviderId,
+): LayoutArrangement {
+  const providerLimits = { ...arrangement.providerLimits };
+  delete providerLimits[providerId];
+  return {
+    ...arrangement,
+    hiddenProviders: arrangement.hiddenProviders.filter(
+      (entry) => entry !== providerId,
+    ),
+    providerLimits,
+  };
+}
+
+/** Whether anything about the usage providers differs from what shipped. */
+export function usageProvidersChanged(arrangement: LayoutArrangement): boolean {
+  return (
+    arrangement.hiddenProviders.length > 0 ||
+    Object.keys(arrangement.providerLimits).length > 0 ||
+    reorderedGroups(arrangement).includes("usageProviders")
+  );
+}
+
+/** Whether the strip is drawn on a narrow viewport against what shipped (L-51). */
+export function mobileFooterChanged(arrangement: LayoutArrangement): boolean {
+  return arrangement.mobileFooter !== DEFAULT_ARRANGEMENT.mobileFooter;
+}
+
+/** Whether ANY of where things live differs from the shipped arrangement. */
+export function arrangementChanged(arrangement: LayoutArrangement): boolean {
+  return (
+    reorderedGroups(arrangement).length > 0 ||
+    arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost ||
+    arrangement.minimapSide !== DEFAULT_ARRANGEMENT.minimapSide ||
+    arrangement.resourceSide !== DEFAULT_ARRANGEMENT.resourceSide ||
+    usageProvidersChanged(arrangement) ||
+    mobileFooterChanged(arrangement)
+  );
+}
+
+/**
+ * Everything back to what shipped: the Default preset, no value overrides and
+ * the shipped arrangement (L-20).
+ *
+ * `dividerSeq` is the one field that does NOT go back. It is the rail's
+ * "only ever increases" counter, and handing out an id a removed divider once
+ * held is the one way two entries in a list keyed by id can collide.
+ */
+export function resetEverything(snapshot: LayoutSnapshot): LayoutSnapshot {
+  return {
+    ...snapshot,
+    basePreset: "default",
+    overrides: {},
+    arrangement: {
+      ...DEFAULT_ARRANGEMENT,
+      dividerSeq: Math.max(
+        snapshot.arrangement.dividerSeq,
+        DEFAULT_ARRANGEMENT.dividerSeq,
+      ),
+    },
+  };
+}
+
+/** Whether a snapshot has anything at all for "Reset everything" to undo. */
+export function anythingChanged(snapshot: LayoutSnapshot): boolean {
+  return (
+    snapshot.basePreset !== "default" ||
+    changeCount(snapshot) > 0 ||
+    arrangementChanged(snapshot.arrangement)
+  );
 }
 
 /**

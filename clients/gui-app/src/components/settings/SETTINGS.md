@@ -1390,21 +1390,58 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     stays, because it is the guide's final coachmark target (L-50). Everywhere
     else the entries are the palette's "Customize layout", the five chrome
     context menus and a Settings-search launch result.
-  - **One form, two hosts (L-03).** The layout form is a set of section
-    components under `components/layout-editor/inspector/` - `PresetsBlock` and
-    one `RegionSection` per region - and this page is the FULL-WIDTH host for
-    exactly those components: the presets block first, then one
-    `SettingsGroup` per surface (Top bar · Sidebar · Chat · Composer · Status
-    bar), every section expanded, no canvas. The other host is the docked
-    inspector the layout editor opens beside the real app. There is no second
-    implementation and no page-only control; a row added to a region appears
-    in both.
+  - **One form, two hosts (L-03), and the page GROUPS (L-92, L-95).** The
+    layout form is a set of components under
+    `components/layout-editor/inspector/`, and the two hosts differ by
+    COMPOSITION rather than by components. The docked inspector filters by
+    SELECTION: one `RegionSection` for the selected region, with its order
+    group's list drawn `selectedId={regionId}`. This page cannot filter,
+    because nothing is selected, so it groups: one `SettingsGroup` per SURFACE
+    (Top bar · Sidebar · Chat · Composer · Status bar) whose body is a
+    `SurfaceSection` - one specimen of the surface, the surface's own rows, and
+    one `OrderGroupList` per order group it owns, drawn `selectedId={null}`.
+    Same registry, same lists, same write seams (`layout-gestures.ts`,
+    `inspector/region-control-io.ts`); no page-only row component.
     The index belongs to the dock, not here: an index exists to pick ONE
-    section to open, and on the page they are all open.
-  - **What a section draws** is the region's own grammar (L-08): a specimen of
-    the REAL leaf, a `Shown` switch, then the region's rows. Rail regions carry
-    a three-state `Auto · Shown · Hidden` instead of a switch (L-47), because a
-    panel's own presence rule is what `auto` defers to.
+    section to open, and on the page every row is already there. What the page
+    took from it is the FILTER (L-07), which hides a surface card with no match
+    and leaves an order list whole - filtering the members of a list a drag
+    reorders would make a drop land between rows the user could not see.
+  - **A region is a ROW** (L-95). The L-08 grammar survives inside it: the
+    stage is the SURFACE's, `Shown` and `Size` sit inline because they are one
+    control each, Position IS the row's place in its list, and `Style`,
+    `Fine-tune` and the Providers list open behind the row's own disclosure -
+    one level deep, never off the page, which is L-89 satisfied by never
+    leaving it. Rail regions carry a three-state `Auto · Shown · Hidden`
+    (L-47, L-93), because a panel's own presence rule is what `auto` defers to.
+    `regions/surface-groups.ts` is the tier above the registry: which order
+    groups a surface owns, and the facts that belong to a LIST rather than to a
+    member (its heading, its reorder instruction, "Add divider", the
+    pinned-right note). Those were the repeats L-92 was about - nine identical
+    rail Position lists, three dock copies, three toolbar-left copies.
+  - **Exactly one control per thing.** A region's visibility has one control on
+    either host (`RegionShownControl`), and the eye button the sortable rows
+    used to carry is gone: it wrote through `regionShownOnValue`, so two
+    presses anywhere turned a pinned `shown` back into `auto` without saying
+    so. `usageHost` is a SURFACE control - it moves Usage limits AND Resource
+    monitor and removes the strip - so the page draws it once on the Status bar
+    card ("Where these live"), not on a region.
+  - **The safety net.** There is no session here, so no Undo, no Discard and no
+    Cmd+Z, and "Reset to <preset>" is values-only by construction (L-57).
+    `PresetsBlock` therefore carries **Reset everything** (L-20, confirmed
+    because it is irreversible here), and `lib/layout/layout-diff.ts` owns the
+    pure builders behind it plus the predicates for the three arrangement
+    fields nothing measured before - `hiddenProviders`, `providerLimits` and
+    `mobileFooter`. Every region row has a changed dot and its own revert, and
+    each order list has one for the whole group.
+  - **Landing on a region.** Below the editor's width threshold the door
+    redirects here, and `navigateToLayoutRegion` (`lib/settings-navigation.ts`)
+    carries the target through: the page takes the pending region, opens that
+    row's disclosure, scrolls it to the middle of the pane and leaves the same
+    flash a settings-search result leaves. The row is found by
+    `layoutRegionRowSelector` - `[data-sortable-id="<regionId>"]`, scoped to
+    this panel - and NOT by a `data-settings-anchor`, because a region's search
+    result is a LAUNCH entry (below) rather than an anchor on this page.
   - **One store.** `stores/layout/layout-store.ts` holds
     `{ basePreset, overrides, arrangement }` - a density preset, the minimal
     delta against it, and where things live - and every chrome surface reads it

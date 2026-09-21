@@ -58,14 +58,16 @@ export function listTileRects(): readonly TileRect[] {
  * by the compositor, so nothing the page does to itself reaches it: the layout
  * editor's `opacity` and `filter` dim leaves it as the one lit thing on a calm
  * canvas, and a view transition glides a snapshot of the shell out from under
- * a tile that never moves. The editor therefore asks this twice - which scene
- * it opens into, and whether the entry and the exit animate.
+ * a tile that never moves. The editor asks this once, for the second of those
+ * - whether the entry and the exit animate (`shellTransitionAllowed`). It no
+ * longer asks it to pick a canvas: every session opens the sample workspace
+ * (L-87).
  *
  * A registration only exists while its tile is `presented`, and a zero-sized
  * surface is a tile with nowhere to paint, so measuring is what separates
  * "registered" from "on screen".
  *
- * Read imperatively and never subscribed: both answers are needed once, at the
+ * Read imperatively and never subscribed: the answer is needed once, at the
  * moment a gesture reaches the door.
  */
 export function aNativeTileIsPresented(): boolean {
