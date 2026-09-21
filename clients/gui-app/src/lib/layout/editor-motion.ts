@@ -21,21 +21,34 @@ import type {
  */
 
 /**
- * Set on `:root` for the life of a transition and carrying the dock side, so
- * the stylesheet can name exactly two groups and un-name them again. The names
- * are deliberately not permanent: a `view-transition-name` that outlives its
- * transition joins every LATER one, and the app column is on screen for the
- * whole session.
+ * Set on `:root` for the life of a transition, so the stylesheet can name
+ * exactly two groups and un-name them again. The names are deliberately not
+ * permanent: a `view-transition-name` that outlives its transition joins every
+ * LATER one, and the app column is on screen for the whole session.
+ *
+ * Two tokens, the phase and the dock side (L-66), because the exit's shell
+ * snapshot grows where the entry's shrinks and the stylesheet has to be able to
+ * treat them differently. Token-matched with `~=`, never `=`.
  */
 const TRANSITION_ATTRIBUTE = "data-layout-transition";
 
 /** The inspector, while its exit animation plays (fallback path only). */
 const EXITING_ATTRIBUTE = "data-exiting";
 
-const INSPECTOR_SELECTOR = "[data-layout-inspector]";
+/**
+ * The inspector that arrived inside a view transition, whose snapshot has
+ * already played the slide. Stamped before the new state is captured and never
+ * taken off: the panel's own `layout-inspector-in` would otherwise start the
+ * moment the transition ends and replay an arrival the user just watched
+ * (G2-01).
+ */
+const ENTERED_ATTRIBUTE = "data-entered";
 
 /** The transition whose names `:root` is currently holding, if any. */
 let runningTransition: ViewTransition | null = null;
+
+/** The live inspector, handed over by the shell that renders it. */
+let inspectorNode: HTMLElement | null = null;
 
 export interface LayoutEditorMotionInput {
   readonly phase: "enter" | "exit";
@@ -47,6 +60,18 @@ export interface LayoutEditorMotionInput {
    * or a failed transition changes the motion and never the outcome.
    */
   readonly apply: () => void;
+}
+
+/**
+ * The inspector's own ref callback (`layout-editor.tsx`).
+ *
+ * The panel is authored and styled in `components/layout-editor`, so this
+ * module is HANDED the element rather than going looking for it: a selector
+ * string here would be the same layering inversion G1-11 closed, written as a
+ * pairing nothing type-checks.
+ */
+export function setLayoutInspectorNode(node: HTMLElement | null): void {
+  inspectorNode = node;
 }
 
 /**
@@ -82,13 +107,19 @@ export function runLayoutEditorMotion(input: LayoutEditorMotionInput): void {
     return;
   }
   const root = document.documentElement;
-  root.setAttribute(TRANSITION_ATTRIBUTE, input.dockMode);
+  root.setAttribute(TRANSITION_ATTRIBUTE, `${input.phase} ${input.dockMode}`);
   const transition = startViewTransition(() => {
     // The old state is captured before this callback and the new state when it
     // returns, so the React commit has to land INSIDE it: without `flushSync`
     // the store write would render on a later task and both snapshots would be
     // the same picture.
     flushSync(input.apply);
+    // That commit is what mounted the panel, so its node is in hand here - and
+    // the stamp lands before the new state is captured, which is what keeps the
+    // snapshot the panel at rest.
+    if (input.phase === "enter") {
+      inspectorNode?.setAttribute(ENTERED_ATTRIBUTE, "1");
+    }
   });
   runningTransition = transition;
   // `finished` rejects when the update callback throws and fulfils when the
@@ -140,7 +171,7 @@ function shellTransitionAllowed(input: LayoutEditorMotionInput): boolean {
  * there are no animations to collect and the teardown is immediate.
  */
 function slideInspectorOut(apply: () => void): void {
-  const inspector = document.querySelector<HTMLElement>(INSPECTOR_SELECTOR);
+  const inspector = inspectorNode;
   if (inspector === null) {
     apply();
     return;

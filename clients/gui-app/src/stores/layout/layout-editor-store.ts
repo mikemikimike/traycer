@@ -135,15 +135,13 @@ export interface LayoutEditorState {
    * Whether the layout differs from {@link entrySnapshot}, which is what the
    * Discard button is enabled by.
    *
-   * Maintained by the four paths that can change the answer - a gesture, an
-   * undo, a redo, a discard - plus the rebase watcher, rather than derived in
-   * a selector: as a selector it serialised the whole triple TWICE on every
+   * Derived in the ONE place that sees every layout write - the session's
+   * layout-store watcher - rather than in a selector or by hand at each gesture
+   * path. As a selector it serialised the whole triple TWICE on every
    * editor-store notification, which on a pointer sweep is hundreds of times a
-   * second (G1-04).
+   * second (G1-04); by hand it was five call sites that had to stay in step.
    */
   readonly dirty: boolean;
-  /** Whether something in the app is waiting for the user (L-17, 4.8). */
-  readonly relayRaised: boolean;
   readonly lockedBy: LayoutEditorLock;
 
   readonly beginSession: (session: LayoutEditorSession) => void;
@@ -167,7 +165,6 @@ export interface LayoutEditorState {
   readonly setPreviewPreset: (previewPreset: LayoutPresetId | null) => void;
   readonly setDockMode: (dockMode: LayoutDockMode) => void;
   readonly setFloatPosition: (floatPosition: LayoutDockPosition) => void;
-  readonly setRelayRaised: (relayRaised: boolean) => void;
   readonly setLockedBy: (lockedBy: LayoutEditorLock) => void;
   /** One gesture: whatever `mutate` writes to the layout store is one undo step. */
   readonly recordGesture: (mutate: () => void) => void;
@@ -189,7 +186,6 @@ const SESSION_DEFAULTS = {
   history: EMPTY_LAYOUT_HISTORY,
   entrySnapshot: null,
   dirty: false,
-  relayRaised: false,
 } as const;
 
 export const useLayoutEditorStore = create<LayoutEditorState>()(
@@ -273,10 +269,6 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         set({ dockMode });
       },
       setFloatPosition: (floatPosition) => set({ floatPosition }),
-      setRelayRaised: (relayRaised) => {
-        if (get().relayRaised === relayRaised) return;
-        set({ relayRaised });
-      },
       setLockedBy: (lockedBy) => {
         if (get().lockedBy === lockedBy) return;
         set({ lockedBy });
@@ -288,10 +280,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         // Undo that visibly does nothing is worse than no Undo.
         const after = getLayoutSnapshot();
         if (sameSnapshot(before, after)) return;
-        set({
-          history: recordLayoutChange(get().history, before),
-          dirty: !sameSnapshot(get().entrySnapshot, after),
-        });
+        set({ history: recordLayoutChange(get().history, before) });
       },
       undo: () => {
         const travel = undoLayout(get().history, getLayoutSnapshot());
@@ -299,10 +288,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(travel.snapshot);
         });
-        set({
-          history: travel.history,
-          dirty: !sameSnapshot(get().entrySnapshot, getLayoutSnapshot()),
-        });
+        set({ history: travel.history });
       },
       redo: () => {
         const travel = redoLayout(get().history, getLayoutSnapshot());
@@ -310,10 +296,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(travel.snapshot);
         });
-        set({
-          history: travel.history,
-          dirty: !sameSnapshot(get().entrySnapshot, getLayoutSnapshot()),
-        });
+        set({ history: travel.history });
       },
       discard: () => {
         const entrySnapshot = get().entrySnapshot;
@@ -321,7 +304,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(entrySnapshot);
         });
-        set({ history: EMPTY_LAYOUT_HISTORY, dirty: false });
+        set({ history: EMPTY_LAYOUT_HISTORY });
       },
     }),
     {
@@ -398,6 +381,16 @@ function applyAsEditorWrite(mutate: () => void): void {
 
 let stopLayoutWatch: (() => void) | null = null;
 
+/**
+ * The session's one window onto the layout store, and the only writer of
+ * {@link LayoutEditorState.dirty}.
+ *
+ * Every path that can change whether there is anything to discard - a gesture,
+ * an undo, a redo, a discard, and a write from another window - is a write to
+ * the layout store, so the answer is derived here instead of restated at each
+ * of them. What the editor's own writes do NOT do is move the entry snapshot:
+ * that is what tells Discard apart from an external rebase (L-18).
+ */
 function watchExternalLayoutWrites(): void {
   stopWatchingLayoutWrites();
   let previous = getLayoutSnapshot();
@@ -405,9 +398,12 @@ function watchExternalLayoutWrites(): void {
     const before = previous;
     const next = getLayoutSnapshot();
     previous = next;
-    if (editorWriteDepth > 0) return;
     const entrySnapshot = useLayoutEditorStore.getState().entrySnapshot;
     if (entrySnapshot === null) return;
+    if (editorWriteDepth > 0) {
+      setDirty(!sameSnapshot(entrySnapshot, next));
+      return;
+    }
     // History is deliberately left alone: the old editor wiped the stacks on
     // any external write, which lost the user's own work to someone else's.
     const rebased = rebaseLayoutSnapshot(entrySnapshot, before, next);
@@ -416,6 +412,15 @@ function watchExternalLayoutWrites(): void {
       dirty: !sameSnapshot(rebased, next),
     });
   });
+}
+
+/**
+ * Guarded like every other setter here: zustand notifies on every `set`, and
+ * this one runs on each of the hundreds of layout writes a drag lands.
+ */
+function setDirty(dirty: boolean): void {
+  if (useLayoutEditorStore.getState().dirty === dirty) return;
+  useLayoutEditorStore.setState({ dirty });
 }
 
 function stopWatchingLayoutWrites(): void {

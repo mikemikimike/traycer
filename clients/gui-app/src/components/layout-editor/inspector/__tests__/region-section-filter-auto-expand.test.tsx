@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -68,7 +74,7 @@ describe("Fine-tune auto-expand (L-07, fineTuneMatchesFilter)", () => {
     expect(screen.queryByText("Percentage")).not.toBeNull();
   });
 
-  it("stays manually closeable after an auto-expand", () => {
+  it("stays manually closeable, and the close does not silence the NEXT query (G1-20)", () => {
     useLayoutEditorStore.setState({ filter: "percentage" });
     render(
       <RegionSection
@@ -80,6 +86,22 @@ describe("Fine-tune auto-expand (L-07, fineTuneMatchesFilter)", () => {
     const trigger = screen.getByRole("button", { name: /Fine-tune \(\d+\)/ });
     expect(trigger.getAttribute("data-state")).toBe("open");
 
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("data-state")).toBe("closed");
+
+    // The regression itself: the manual answer is scoped to the filter it was
+    // given under. Without that scoping, closing Fine-tune once silenced
+    // L-07's auto-expand for the rest of the session, so typing a word that
+    // only matches a fine-tune label looked like no match at all - and a test
+    // that stops at the close above passes with the scoping deleted.
+    act(() => {
+      useLayoutEditorStore.setState({ filter: "time until reset" });
+    });
+
+    expect(trigger.getAttribute("data-state")).toBe("open");
+    expect(screen.queryByText("Percentage")).not.toBeNull();
+
+    // And the answer given under THIS filter is still the user's to give.
     fireEvent.click(trigger);
     expect(trigger.getAttribute("data-state")).toBe("closed");
   });

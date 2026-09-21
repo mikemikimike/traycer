@@ -16,29 +16,36 @@ import { useSyncExternalStore } from "react";
  */
 export const LAYOUT_EDITOR_MIN_WIDTH = 1100;
 
-const LAYOUT_EDITOR_QUERY = `(min-width: ${String(LAYOUT_EDITOR_MIN_WIDTH)}px)`;
-
 /**
  * Imperative read, for the command-time call sites that must not re-render on
- * a resize: the door, and the session watcher's own resize handler.
+ * a resize: the door, and the live session's own watcher.
  */
 export function layoutEditorFitsWindow(): boolean {
   return window.innerWidth >= LAYOUT_EDITOR_MIN_WIDTH;
 }
 
+/**
+ * The one owner of the EDGE as well as of the number (L-64).
+ *
+ * A `resize` listener rather than a media query because the answer above is
+ * `window.innerWidth`: measuring the value one way and the change another left
+ * the two halves of `useLayoutEditorFitsWindow` disagreeing, and the live
+ * session watching a third thing again.
+ */
+export function subscribeLayoutEditorFitsWindow(
+  onChange: () => void,
+): () => void {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+
 /** The same answer, subscribed, for the surfaces that live through a resize. */
 export function useLayoutEditorFitsWindow(): boolean {
   return useSyncExternalStore(
-    subscribe,
+    subscribeLayoutEditorFitsWindow,
     layoutEditorFitsWindow,
     serverSnapshot,
   );
-}
-
-function subscribe(onChange: () => void): () => void {
-  const query = window.matchMedia(LAYOUT_EDITOR_QUERY);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
 }
 
 function serverSnapshot(): boolean {

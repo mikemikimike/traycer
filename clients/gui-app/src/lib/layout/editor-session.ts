@@ -3,7 +3,10 @@ import { toast } from "sonner";
 import type { AnalyticsSource } from "@/lib/analytics";
 import { aNativeTileIsPresented } from "@/lib/browser-view/tiles/tile-rect-registry";
 import { runLayoutEditorMotion } from "@/lib/layout/editor-motion";
-import { layoutEditorFitsWindow } from "@/lib/layout/editor-width";
+import {
+  layoutEditorFitsWindow,
+  subscribeLayoutEditorFitsWindow,
+} from "@/lib/layout/editor-width";
 import {
   acquireLayoutEditorLease,
   releaseLayoutEditorLease,
@@ -91,9 +94,13 @@ export interface OpenLayoutEditorInput {
 export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
   const editor = useLayoutEditorStore.getState();
   // A session that is on its way out is not one to hand back: the user who
-  // asked again during the slide-out asked for a new session, and the exit
-  // already in flight yields to it (see `endSession`).
+  // asked again during the slide-out asked for a new session.
   if (editor.session !== null && !editor.leaving) return true;
+  // And that session goes NOW rather than whenever its exit motion lands. On
+  // the view-transition path both applies are deferred and the exit's runs
+  // first, so a teardown left in flight would end the session this call is
+  // about to begin and close the sample tab it just activated.
+  flushPendingTeardown();
   // The width gate (L-02, L-64), owned by `editor-width.ts`: below it the app
   // cannot reflow beside a 320px instrument panel, so the form takes the whole
   // page instead of the editor opening into a canvas with no room.
@@ -151,18 +158,14 @@ export function closeLayoutEditor(reason: LayoutEditorExitReason): void {
   const session = editor.session;
   if (session === null || editor.leaving) return;
   useLayoutEditorStore.setState({ leaving: true });
-  // Synchronous whatever the exit animates: an editor on its way out must stop
-  // watching for reasons to leave, and must not go on renewing a lease it has
-  // given up.
-  stopWatchingSession();
-  releaseLayoutEditorLease();
+  pendingTeardown = () => {
+    endSession(session, reason);
+  };
   runLayoutEditorMotion({
     phase: "exit",
     entry: session.entry,
     dockMode: editor.dockMode,
-    apply: () => {
-      endSession(session, reason);
-    },
+    apply: flushPendingTeardown,
   });
   if (reason === "lease-lost") {
     toast.info(
@@ -171,15 +174,49 @@ export function closeLayoutEditor(reason: LayoutEditorExitReason): void {
   }
 }
 
+/**
+ * The teardown of a session that is leaving and whose exit motion has not
+ * landed yet.
+ *
+ * One slot, because one session leaves at a time: `closeLayoutEditor` refuses
+ * a second reason while `leaving` is up. It exists so the teardown has an owner
+ * other than the motion callback - `openLayoutEditor` runs it early, and the
+ * shell's unmount runs it with no motion at all.
+ */
+let pendingTeardown: (() => void) | null = null;
+
+function flushPendingTeardown(): void {
+  const teardown = pendingTeardown;
+  pendingTeardown = null;
+  teardown?.();
+}
+
+/**
+ * The shell itself is going away (a sign-out, a window closing), so there is no
+ * document left to glide and no inspector left to slide out: whatever is open
+ * ends here and now.
+ */
+export function abandonLayoutEditorSession(): void {
+  const editor = useLayoutEditorStore.getState();
+  if (editor.session === null) return;
+  if (editor.leaving) {
+    flushPendingTeardown();
+    return;
+  }
+  endSession(editor.session, "done");
+}
+
 /** The teardown itself, once whatever carries the exit has played. */
 function endSession(
   session: LayoutEditorSession,
   reason: LayoutEditorExitReason,
 ): void {
+  // Here rather than at the top of `closeLayoutEditor`: until this runs the
+  // editor is still rendered and still writing, and a lease given up 140ms to
+  // 220ms early lets a second window take the key out from under a live editor.
+  stopWatchingSession();
+  releaseLayoutEditorLease();
   const editor = useLayoutEditorStore.getState();
-  // A session opened while this one was sliding out owns the editor now, and
-  // tearing it down here would close an editor the user just asked for.
-  if (editor.session !== session) return;
   if (reason === "discard") editor.discard();
   editor.endSession();
   // A sample tab that is already gone, or that the user navigated away from,
@@ -273,14 +310,13 @@ function watchSession(scene: LayoutEditorScene): void {
       session: { ...session, preferredInstanceId },
     });
   });
-  const onResize = (): void => {
+  const unwatchWidth = subscribeLayoutEditorFitsWindow(() => {
     if (!layoutEditorFitsWindow()) closeLayoutEditor("below-threshold");
-  };
-  window.addEventListener("resize", onResize);
+  });
   stopSessionWatch = () => {
     unwatchTabs();
     unwatchCanvas();
-    window.removeEventListener("resize", onResize);
+    unwatchWidth();
   };
 }
 

@@ -167,14 +167,15 @@ describe("the mounted editor root", () => {
     act(() => {
       openSession();
     });
-    expect(useLayoutEditorStore.getState().relayRaised).toBe(false);
+    expect(view.container.textContent).not.toContain(
+      "An agent is waiting for you",
+    );
 
     feed.blocking = 1;
     act(() => {
       view.rerender(<LayoutEditor column={column} />);
     });
 
-    expect(useLayoutEditorStore.getState().relayRaised).toBe(true);
     expect(view.container.textContent).toContain("An agent is waiting for you");
   });
 });

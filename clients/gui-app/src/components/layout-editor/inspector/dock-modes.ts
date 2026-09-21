@@ -96,8 +96,23 @@ export function useFloatingDock(root: HTMLElement | null): LayoutDockPosition {
   const floating = useLayoutEditorStore((state) => state.dockMode === "float");
   const stored = useLayoutEditorStore((state) => state.floatPosition);
   const [viewport, setViewport] = useState<DockViewport>(readViewport);
+  const [measuredFloating, setMeasuredFloating] = useState(floating);
 
+  // Remeasured as the panel STARTS floating, during the render that begins it,
+  // so the first floating frame is already clamped to the window as it is now.
+  // Adjusted here rather than in an effect, which would be a cascading render
+  // and paint one frame against a viewport the window may have left long ago.
+  if (measuredFloating !== floating) {
+    setMeasuredFloating(floating);
+    if (floating) setViewport(readViewport());
+  }
+
+  // And the listener runs only while it floats: `position` is read nowhere
+  // else, and this hook is called by the editor root in every window whether or
+  // not the editor has ever been opened - one `resize` listener and one render
+  // per resize event, for a number nothing draws.
   useEffect(() => {
+    if (!floating) return;
     const onResize = (): void => {
       setViewport(readViewport());
     };
@@ -105,7 +120,7 @@ export function useFloatingDock(root: HTMLElement | null): LayoutDockPosition {
     return () => {
       window.removeEventListener("resize", onResize);
     };
-  }, []);
+  }, [floating]);
 
   const position =
     stored === null

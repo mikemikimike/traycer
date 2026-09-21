@@ -640,13 +640,21 @@ const NO_BACKGROUND_ITEMS: ReadonlyArray<BackgroundItem> = [];
  * change nothing in the one case sample fill exists for - an empty chat, which
  * is exactly what the Compact preset's own card promises to fold (L-16,
  * G1-03).
+ *
+ * `ghost` is the third way a section is on screen: a HIDDEN region materialises
+ * in place while the index row points at it (L-14), and it has to materialise
+ * as what the user configured. Reading `shown` alone made a hidden chip-sized
+ * region come back as a full sample row, so the Size control it is standing
+ * there to demonstrate appeared to do nothing.
  */
 function dockChipPlan(
   values: SizedValues,
+  ghost: boolean,
   hasContent: boolean,
   editing: boolean,
 ): { readonly chip: boolean; readonly sample: boolean } {
-  const chipSized = values.shown === "shown" && values.size === "chip";
+  const onScreen = values.shown === "shown" || ghost;
+  const chipSized = onScreen && values.size === "chip";
   const sample = chipSized && !hasContent && editing;
   return { chip: (chipSized && hasContent) || sample, sample };
 }
@@ -783,17 +791,24 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // or the Size control changes nothing in the one case sample fill exists for
   // (L-16, G1-03). Those chips draw the sample model instead of a count.
   const editing = filesChangedHotspot.editing;
-  const filesPlan = dockChipPlan(changedFilesValues, changesPresent, editing);
+  const filesPlan = dockChipPlan(
+    changedFilesValues,
+    filesChangedHotspot.ghost,
+    changesPresent,
+    editing,
+  );
   // Received A2A rows follow this mode, so the chip is also owed when they are
   // the only thing folded: without it, folding would make them unreachable.
   const agentsHasContent = input.activeAgentsVisible || receivedAgentCount > 0;
   const agentsPlan = dockChipPlan(
     runningAgentsValues,
+    activeAgentsHotspot.ghost,
     agentsHasContent,
     editing,
   );
   const backgroundPlan = dockChipPlan(
     backgroundValues,
+    backgroundHotspot.ghost,
     input.backgroundVisible,
     editing,
   );

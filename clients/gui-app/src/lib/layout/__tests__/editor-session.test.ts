@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  abandonLayoutEditorSession,
   closeLayoutEditor,
   openLayoutEditor,
 } from "@/lib/layout/editor-session";
+import { setLayoutInspectorNode } from "@/lib/layout/editor-motion";
+import {
+  installFakeViewTransitions,
+  type FakeViewTransition,
+} from "@/lib/layout/test-support/fake-view-transition";
 import { LAYOUT_EDITOR_LEASE_KEY } from "@/lib/layout/editor-lease";
 import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
 import { registerTileRect } from "@/lib/browser-view/tiles/tile-rect-registry";
@@ -31,7 +37,22 @@ vi.mock("@/lib/settings-navigation", async (importOriginal) => ({
   navigateToSettingsSection: navigation.navigateToSettingsSection,
 }));
 
+/**
+ * The door, driven the way a pointer entry actually drives it.
+ *
+ * `document.startViewTransition` is installed for the whole suite, so every
+ * `open` and `close` below takes the production branch: the session change is
+ * deferred into the transition's update callback rather than landing inside the
+ * call. A suite without it reads `session` straight after `open(...)` and
+ * passes for a reason that does not exist in a browser - which is exactly how
+ * the re-open-during-exit race got through gate 1.
+ *
+ * The three cases that are ABOUT the guarded fallback turn a real guard on
+ * (`data-reduce-panel-motion`) rather than uninstalling the API.
+ */
 const navigate = vi.fn();
+let transitions: Array<FakeViewTransition> = [];
+let uninstallViewTransitions: () => void = () => undefined;
 let deregisterTile: (() => void) | null = null;
 const HISTORY_REF: TabRef = { kind: "history", id: "history" };
 const EPIC_REF: TabRef = { kind: "epic", id: "tab-a" };
@@ -44,15 +65,40 @@ function setViewportWidth(width: number): void {
   });
 }
 
+/**
+ * Every update callback the browser has queued, in the order it would run
+ * them: starting a transition skips the one already running, and a skipped
+ * transition's callback is a task ahead of the new one's.
+ */
+function drainTransitions(): void {
+  while (transitions.length > 0) transitions.shift()?.runUpdate();
+}
+
 function open(target: RegionId | null): boolean {
   // The one door takes a `navigate` because the sample-workspace fallback is a
   // real tab; every other path ignores it.
-  return openLayoutEditor({
+  const opened = openLayoutEditor({
     source: "direct_ui",
     entry: "pointer",
     target,
     navigate,
   });
+  drainTransitions();
+  return opened;
+}
+
+/** Leaving, then the frame the view transition defers the teardown to. */
+function close(reason: "done" | "discard" | "tab-switch"): void {
+  closeLayoutEditor(reason);
+  drainTransitions();
+}
+
+/**
+ * The guard that puts both halves of the door on the fallback branch, which is
+ * the only branch the inspector's own slide-out exists on.
+ */
+function forceReducedMotion(): void {
+  document.documentElement.setAttribute("data-reduce-panel-motion", "");
 }
 
 /** A tile registration that makes `aNativeTileIsPresented()` true (C-18). */
@@ -98,6 +144,8 @@ function mountAnimatedInspector(): { readonly finishSlideOut: () => void } {
     writable: true,
     value: () => [{ finished }],
   });
+  // The shell's ref callback is how the door learns which element to animate.
+  setLayoutInspectorNode(inspector);
   return { finishSlideOut: settle };
 }
 
@@ -139,6 +187,9 @@ function sampleTabPresent(): boolean {
 }
 
 beforeEach(() => {
+  const installed = installFakeViewTransitions();
+  transitions = installed.transitions;
+  uninstallViewTransitions = installed.uninstall;
   window.localStorage.clear();
   navigation.activateTabIntent.mockReset();
   navigation.navigateToSettingsSection.mockReset();
@@ -159,9 +210,16 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  closeLayoutEditor("done");
+  // The motionless teardown, so nothing is left waiting on a transition this
+  // suite never settles and no teardown survives into the next test.
+  abandonLayoutEditorSession();
   deregisterTile?.();
   deregisterTile = null;
+  setLayoutInspectorNode(null);
+  uninstallViewTransitions();
+  transitions.length = 0;
+  document.documentElement.removeAttribute("data-reduce-panel-motion");
+  document.documentElement.removeAttribute("data-layout-transition");
   document.body.replaceChildren();
   useTabsStore.setState({ ...emptyTabStripLayout(), stripOrder: [] });
 });
@@ -204,6 +262,9 @@ describe("the width gate (L-02, 5.1)", () => {
 
     setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH - 1);
     window.dispatchEvent(new Event("resize"));
+    expect(useLayoutEditorStore.getState().leaving).toBe(true);
+
+    drainTransitions();
     expect(useLayoutEditorStore.getState().session).toBeNull();
   });
 });
@@ -291,6 +352,12 @@ describe("the single-window lease (L-32, 5.3)", () => {
 
     closeLayoutEditor("done");
 
+    // Still held while the editor is still on screen and still writing: the
+    // key goes back with the teardown, not 220ms before it (G2-03).
+    expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).not.toBeNull();
+
+    drainTransitions();
+
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
   });
 });
@@ -304,7 +371,7 @@ describe("leaving (5.3)", () => {
     });
     expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
 
-    closeLayoutEditor("discard");
+    close("discard");
 
     expect(getLayoutSnapshot().overrides.mic).toBeUndefined();
 
@@ -312,7 +379,7 @@ describe("leaving (5.3)", () => {
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
-    closeLayoutEditor("done");
+    close("done");
 
     expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
   });
@@ -321,14 +388,14 @@ describe("leaving (5.3)", () => {
     open(null);
     expect(sampleTabPresent()).toBe(true);
 
-    closeLayoutEditor("done");
+    close("done");
 
     expect(sampleTabPresent()).toBe(false);
 
     open(null);
     expect(sampleTabPresent()).toBe(true);
 
-    closeLayoutEditor("tab-switch");
+    close("tab-switch");
 
     expect(sampleTabPresent()).toBe(true);
   });
@@ -346,7 +413,9 @@ describe("the entry method (L-30, L-54)", () => {
     open(null);
     expect(useLayoutEditorStore.getState().session?.entry).toBe("pointer");
 
-    closeLayoutEditor("done");
+    close("done");
+    // Keyboard entry is one of L-30's guards, so this one lands in the frame
+    // it is made in whether or not the API is there.
     openLayoutEditor({
       source: "command_palette",
       entry: "keyboard",
@@ -358,7 +427,12 @@ describe("the entry method (L-30, L-54)", () => {
   });
 });
 
-describe("the exit's own motion (5.2)", () => {
+describe("the guarded fallback exit (5.2)", () => {
+  // The inspector's own slide-out exists only on the fallback branch, so these
+  // three turn the app's Panel animations switch off rather than pretending
+  // the browser has no View Transition API.
+  beforeEach(forceReducedMotion);
+
   it("keeps the session open until the inspector has slid out", async () => {
     seedOpenChat("tile-7");
     open("minimap");
@@ -400,7 +474,7 @@ describe("the exit's own motion (5.2)", () => {
     expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
   });
 
-  it("yields to a session opened while it was still sliding out", async () => {
+  it("hands the editor over to a session opened while it was still sliding out", async () => {
     seedOpenChat("tile-7");
     open(null);
     const slideOut = mountAnimatedInspector();
@@ -411,9 +485,48 @@ describe("the exit's own motion (5.2)", () => {
     slideOut.finishSlideOut();
     await tick();
 
-    // The teardown that was in flight belonged to the session before it.
+    // The old session was torn down by the re-open itself, so the slide-out
+    // landing afterwards has nothing left to do.
     expect(useLayoutEditorStore.getState().session).toBe(reopened);
     expect(useLayoutEditorStore.getState().selected).toBe("minimap");
+  });
+});
+
+describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
+  it("tears the old session down before the new one is decided", () => {
+    // The sample scene, because the sample workspace is the thing the old
+    // teardown would take away: it closes the tab by ref, and the re-open has
+    // just activated a tab under that same ref.
+    open(null);
+    const first = useLayoutEditorStore.getState().session;
+    expect(first?.scene).toBe("sample");
+    expect(sampleTabPresent()).toBe(true);
+
+    // Done, then "actually, not yet" inside the exit's own 220ms. Neither
+    // callback has run: on this branch both applies are deferred.
+    closeLayoutEditor("done");
+    expect(
+      openLayoutEditor({
+        source: "direct_ui",
+        entry: "pointer",
+        target: null,
+        navigate,
+      }),
+    ).toBe(true);
+
+    // The browser skips the first transition, so the exit's update callback
+    // runs BEFORE the entry's. An exit teardown still in flight here would
+    // close the tab the re-open just activated and leave the new session on a
+    // sample scene with no sample tab.
+    drainTransitions();
+
+    const second = useLayoutEditorStore.getState().session;
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(second?.scene).toBe("sample");
+    expect(sampleTabPresent()).toBe(true);
+    // And the new session holds the key the old one gave back.
+    expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).not.toBeNull();
   });
 });
 
@@ -429,6 +542,7 @@ describe("the canvas going away underneath the editor (5.3)", () => {
       ],
       activeItemId: tabItemId(EPIC_REF),
     }));
+    drainTransitions();
 
     expect(useLayoutEditorStore.getState().session).toBeNull();
   });
@@ -439,6 +553,7 @@ describe("the canvas going away underneath the editor (5.3)", () => {
 
     setViewportWidth(700);
     window.dispatchEvent(new Event("resize"));
+    drainTransitions();
 
     expect(useLayoutEditorStore.getState().session).toBeNull();
   });

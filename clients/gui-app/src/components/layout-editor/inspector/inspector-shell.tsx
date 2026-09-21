@@ -19,7 +19,7 @@ interface InspectorShellProps {
    * off the bottom rung of the ladder, or Discard changes - which restores the
    * entry snapshot on the way out rather than leaving the user in an editor
    * they just emptied. The caller owns all three, because ending a session is
-   * the door's job and this shell also renders without one.
+   * the door's job.
    */
   readonly onExit: (reason: "done" | "escape" | "discard") => void;
   readonly children: ReactNode;
@@ -40,9 +40,14 @@ const DOCK_MODES: ReadonlyArray<{
  * Done), the relay slot, the scrollable body the caller supplies, and the
  * footer's Discard changes. `.insp-head` / `.insp-foot` in the prototype.
  *
+ * The dock is its one host. L-03's "one form, two hosts" is about the SECTION
+ * TREE - `RegionSection` and `PresetsBlock`, which `Settings > Layout` renders
+ * inside its own `SettingsPanelShell` - not about this chrome: Undo, Redo, the
+ * dock-mode group and Done are the instrument panel's, and the full-width page
+ * has no use for any of them.
+ *
  * 320px is the plan's one frozen inspector width (section 6); every other
- * measurement here is fluid, so the SAME shell also wraps the full-width
- * `Settings > Layout` host's card without carrying a dock-only width (L-03).
+ * measurement here is fluid, so the panel fits whatever the dock gives it.
  */
 export function InspectorShell(props: InspectorShellProps): ReactNode {
   const { onExit } = props;

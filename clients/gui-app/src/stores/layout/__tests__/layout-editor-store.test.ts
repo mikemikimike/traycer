@@ -301,13 +301,12 @@ describe("where the panel sits is the only persisted state (L-38)", () => {
 });
 
 describe("session-scoped fields", () => {
-  it("clears hover, selection, filter and the relay on exit", () => {
+  it("clears hover, selection and the filter on exit", () => {
     session(null);
     editorState().select("minimap");
     editorState().setHovered("mic");
     editorState().setFilter("mini");
     editorState().setKeyboardNav(true);
-    editorState().setRelayRaised(true);
 
     editorState().endSession();
 
@@ -315,7 +314,75 @@ describe("session-scoped fields", () => {
     expect(editorState().hovered).toBeNull();
     expect(editorState().filter).toBe("");
     expect(editorState().keyboardNav).toBe(false);
-    expect(editorState().relayRaised).toBe(false);
     expect(editorState().session).toBeNull();
+  });
+});
+
+/**
+ * `dirty` is the only thing Discard is gated on, and until this landed it had
+ * no test anywhere - a boolean five call sites had to keep in step, whose
+ * failure mode is a permanently disabled or permanently enabled button and
+ * nothing red to say so (G2-08). It is now derived by the session's one
+ * layout-store watcher, so these five cases are five inputs to one mechanism
+ * rather than five copies of it.
+ */
+describe("whether there is anything to discard", () => {
+  function hideTheMic(): void {
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+  }
+
+  it("is false on entry and raised by a gesture", () => {
+    session(null);
+    expect(editorState().dirty).toBe(false);
+
+    hideTheMic();
+
+    expect(editorState().dirty).toBe(true);
+  });
+
+  it("drops again on an undo back to the entry state, and returns on the redo", () => {
+    session(null);
+    hideTheMic();
+
+    editorState().undo();
+    expect(editorState().dirty).toBe(false);
+
+    editorState().redo();
+    expect(editorState().dirty).toBe(true);
+  });
+
+  it("drops on Discard", () => {
+    session(null);
+    hideTheMic();
+
+    editorState().discard();
+
+    expect(editorState().dirty).toBe(false);
+  });
+
+  it("stays false when a write the editor did not make rebases the entry", () => {
+    // The path with no other observer: the rebase moves what Discard would
+    // restore TO, so another window's change is not something this session has
+    // to discard. A rebase that forgot to re-answer this left the button lit
+    // over a layout identical to the one it would restore.
+    session(null);
+
+    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+
+    expect(editorState().dirty).toBe(false);
+    expect(editorState().entrySnapshot?.overrides.agent).toEqual({
+      shown: "hidden",
+    });
+  });
+
+  it("survives an external write landing on top of the session's own change", () => {
+    session(null);
+    hideTheMic();
+
+    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+
+    expect(editorState().dirty).toBe(true);
   });
 });

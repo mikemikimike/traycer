@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import "@/components/layout-editor/layout-editor.css";
 import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
 import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas";
@@ -11,14 +11,15 @@ import {
   initializeLayoutEditorWindow,
   watchLayoutEditorLease,
 } from "@/lib/layout/editor-lease";
+import { setLayoutInspectorNode } from "@/lib/layout/editor-motion";
 import {
+  abandonLayoutEditorSession,
   closeLayoutEditor,
   type LayoutEditorExitReason,
 } from "@/lib/layout/editor-session";
 import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useDesktopWindowId } from "@/lib/windows/desktop-window-id";
-import { useBlockingAttentionCount } from "@/stores/notifications/merged-notifications";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
 interface LayoutEditorProps {
@@ -47,6 +48,13 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
   const [inspector, setInspector] = useState<HTMLDivElement | null>(null);
   const floatPosition = useFloatingDock(inspector);
 
+  // The panel is this file's markup, so the door is HANDED it rather than
+  // going looking for it: `editor-motion.ts` animates the exit on this node.
+  const bindInspector = useCallback((node: HTMLDivElement | null) => {
+    setInspector(node);
+    setLayoutInspectorNode(node);
+  }, []);
+
   // Unconditional, with the column: the hook sets and removes
   // `data-layout-editing` itself, so the attribute can never outlive a session.
   useLayoutCanvas(column);
@@ -58,15 +66,23 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
   // One window holds the editor open (L-32). Watched for the whole life of the
   // shell rather than per session, because the lease that matters here is the
   // one ANOTHER window took while this one was not looking.
-  useEffect(() => {
-    const unwatch = watchLayoutEditorLease(() => {
-      closeLayoutEditor("lease-lost");
-    });
-    return () => {
-      unwatch();
-      closeLayoutEditor("done");
-    };
-  }, []);
+  useEffect(
+    () =>
+      watchLayoutEditorLease(() => {
+        closeLayoutEditor("lease-lost");
+      }),
+    [],
+  );
+
+  // The shell going away is a different concern from another window's lease,
+  // and it does not go through the door's motion: a sign-out or a window
+  // teardown has no document left to glide and no inspector left to slide out.
+  useEffect(
+    () => () => {
+      abandonLayoutEditorSession();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!live || column === null || inspector === null) return;
@@ -101,7 +117,7 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
 
   return (
     <div
-      ref={setInspector}
+      ref={bindInspector}
       data-layout-inspector
       data-dock-mode={dockMode}
       style={
@@ -120,21 +136,14 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
 
 /**
  * Which of the three screens the inspector shows, read off the editor store's
- * own ladder (index -> section -> provider level), plus the relay signal.
+ * own ladder (index -> section -> provider level).
  *
  * Separate from the root so that none of it - least of all the notification
- * feed the relay reads - is subscribed to while the editor is closed.
+ * feed the relay row reads - is subscribed to while the editor is closed.
  */
 function InspectorBody(): ReactNode {
   const selected = useLayoutEditorStore((state) => state.selected);
   const level = useLayoutEditorStore((state) => state.level);
-  // The app under the editor stays alive, and anything that needs the user
-  // relays as a quiet row rather than taking them out of the editor (L-17).
-  const blocking = useBlockingAttentionCount();
-
-  useEffect(() => {
-    useLayoutEditorStore.getState().setRelayRaised(blocking > 0);
-  }, [blocking]);
 
   let body: ReactNode;
   if (level !== null) {

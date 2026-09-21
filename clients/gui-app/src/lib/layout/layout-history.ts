@@ -14,9 +14,9 @@ import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
  */
 
 export interface LayoutHistory {
-  /** Snapshots to go back TO, oldest first. */
+  /** Snapshots to go back TO, nearest last - a stack. */
   readonly past: ReadonlyArray<LayoutSnapshot>;
-  /** Snapshots to go forward TO, oldest first. */
+  /** Snapshots to go forward TO, nearest last - a stack. */
   readonly future: ReadonlyArray<LayoutSnapshot>;
 }
 

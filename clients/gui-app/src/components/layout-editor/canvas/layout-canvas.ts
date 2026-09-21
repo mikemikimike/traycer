@@ -113,6 +113,11 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
     paint();
     const unsubscribe = useLayoutEditorStore.subscribe((state, previous) => {
       paint();
+      // An exit has started. Every path out of the editor raises `leaving`
+      // first, so this is the one edge that catches them all - including a
+      // re-open that flushes the old session's teardown before React has
+      // re-rendered, where the unmount cleanup below never runs at all.
+      if (state.leaving && !previous.leaving) cancelLayoutDrag();
       // A preview changes what every region draws, so the ring's own node can
       // move without resizing - which is the one case neither the
       // `ResizeObserver` nor the scroll/resize listeners in the controller

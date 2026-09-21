@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runLayoutEditorMotion } from "@/lib/layout/editor-motion";
+import {
+  runLayoutEditorMotion,
+  setLayoutInspectorNode,
+} from "@/lib/layout/editor-motion";
+import {
+  installFakeViewTransitions,
+  type FakeViewTransition,
+} from "@/lib/layout/test-support/fake-view-transition";
 import { registerTileRect } from "@/lib/browser-view/tiles/tile-rect-registry";
 import type { LayoutDockMode } from "@/stores/layout/layout-editor-store";
 import type { BrowserViewTileKey } from "@traycer-clients/shared/platform/browser-view";
@@ -20,54 +27,10 @@ const TILE_KEY: BrowserViewTileKey = {
   pageSessionId: "page-1",
 };
 
-/** A transition whose update callback and settlement the test drives. */
-class FakeViewTransition {
-  private settle: (() => void) | null = null;
-  private fail: (() => void) | null = null;
-  readonly finished: Promise<void>;
-  readonly ready = Promise.resolve();
-  readonly updateCallbackDone = Promise.resolve();
-
-  constructor(private readonly update: () => void) {
-    this.finished = new Promise<void>((resolve, reject) => {
-      this.settle = resolve;
-      this.fail = () => reject(new Error("skipped"));
-    });
-  }
-
-  runUpdate(): void {
-    this.update();
-  }
-
-  finish(): void {
-    this.settle?.();
-  }
-
-  /** What `skipTransition()` and a throwing callback both look like from here. */
-  reject(): void {
-    this.fail?.();
-  }
-
-  skipTransition(): void {
-    this.finish();
-  }
-}
-
-let transitions: FakeViewTransition[] = [];
+let transitions: Array<FakeViewTransition> = [];
+let uninstallViewTransitions: () => void = () => undefined;
 let deregisterTile: (() => void) | null = null;
 let originalMatchMedia: typeof window.matchMedia;
-
-function installViewTransitions(): void {
-  Object.defineProperty(document, "startViewTransition", {
-    configurable: true,
-    writable: true,
-    value: (update: () => void) => {
-      const transition = new FakeViewTransition(update);
-      transitions.push(transition);
-      return transition;
-    },
-  });
-}
 
 function setPrefersReducedMotion(matches: boolean): void {
   Object.defineProperty(window, "matchMedia", {
@@ -96,10 +59,12 @@ function presentNativeTile(): void {
   deregisterTile = registerTileRect(TILE_KEY, surface);
 }
 
+/** The panel as the shell's ref callback hands it to the module. */
 function mountInspector(): HTMLElement {
   const inspector = document.createElement("div");
   inspector.setAttribute("data-layout-inspector", "");
   document.body.append(inspector);
+  setLayoutInspectorNode(inspector);
   return inspector;
 }
 
@@ -136,15 +101,17 @@ function tick(): Promise<void> {
 }
 
 beforeEach(() => {
-  transitions = [];
   originalMatchMedia = window.matchMedia.bind(window);
-  installViewTransitions();
+  const installed = installFakeViewTransitions();
+  transitions = installed.transitions;
+  uninstallViewTransitions = installed.uninstall;
 });
 
 afterEach(() => {
   deregisterTile?.();
   deregisterTile = null;
-  Reflect.deleteProperty(document, "startViewTransition");
+  setLayoutInspectorNode(null);
+  uninstallViewTransitions();
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     writable: true,
@@ -253,7 +220,7 @@ describe("the named groups (5.2)", () => {
 
     expect(
       document.documentElement.getAttribute("data-layout-transition"),
-    ).toBe("right");
+    ).toBe("enter right");
 
     startedTransition().finish();
     await tick();
@@ -263,12 +230,44 @@ describe("the named groups (5.2)", () => {
     ).toBe(false);
   });
 
-  it("carries the dock side, which is how the pseudo-elements learn it", () => {
+  it("carries the phase and the dock side, which is how the pseudo-elements learn them (L-66)", () => {
     enter("left", () => undefined);
 
     expect(
       document.documentElement.getAttribute("data-layout-transition"),
-    ).toBe("left");
+    ).toBe("enter left");
+
+    runLayoutEditorMotion({
+      phase: "exit",
+      entry: "pointer",
+      dockMode: "left",
+      apply: () => undefined,
+    });
+
+    // The exit's shell snapshot grows where the entry's shrinks, so the
+    // stylesheet has to be able to tell them apart.
+    expect(
+      document.documentElement.getAttribute("data-layout-transition"),
+    ).toBe("exit left");
+  });
+
+  it("marks the arrived panel so its own slide never replays (G2-01)", async () => {
+    const inspector = mountInspector();
+    enter("right", () => undefined);
+
+    // Stamped INSIDE the update callback, before the new state is captured, so
+    // the snapshot is the panel at rest.
+    expect(inspector.hasAttribute("data-entered")).toBe(false);
+    startedTransition().runUpdate();
+    expect(inspector.getAttribute("data-entered")).toBe("1");
+
+    startedTransition().finish();
+    await tick();
+
+    // And it outlives the transition: the mark, not the running transition, is
+    // what keeps the panel's `layout-inspector-in` from starting once the
+    // names come off.
+    expect(inspector.getAttribute("data-entered")).toBe("1");
   });
 
   it("keeps them while a second transition that replaced the first is running", async () => {

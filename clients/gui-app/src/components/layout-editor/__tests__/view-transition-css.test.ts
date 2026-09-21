@@ -8,17 +8,15 @@ import { describe, expect, it } from "vitest";
 /**
  * The half of the entry and exit motion that only CSS can state (L-30, 5.2).
  *
- * `editor-motion.ts` decides WHETHER a transition runs and its unit test
- * covers that; what no jsdom test can observe is which elements the browser
- * then snapshots, because jsdom runs no view transition at all. The rules
- * below are the ones a wrong stylesheet breaks silently - a name that outlives
- * its transition, a second gate that is missing, a group the transcript joined
- * by accident, an old snapshot that squashes instead of cropping - so they are
- * asserted against the stylesheet itself.
- *
- * The pairing with `app-shell.tsx` is here for the same reason: the column's
- * marker and the selector that names it are one mechanism written in two
- * files, and a rename on either side leaves a rule that matches nothing.
+ * Everything here compares two INDEPENDENT artefacts: the stylesheet against
+ * the rule L-30 states (exactly two named groups, a third of which would put
+ * the streaming transcript in a snapshot of its own), against `app-shell.tsx`'s
+ * own marker, and against the attribute value `editor-motion.ts` writes. A rule
+ * written out again as an exact source string is not one of those - it fails a
+ * correct stylesheet on a formatter reflow and passes a wrong one that kept the
+ * spelling, which is how G2-01 lived in this file with this suite green on it.
+ * What those pins were reaching for is the owner's live pass, which plan 5.2
+ * already books.
  */
 
 const SOURCE_DIR = path.resolve(
@@ -72,28 +70,32 @@ describe("the named groups (5.2, C-14)", () => {
       "data-layout-column",
     );
   });
-});
 
-describe("what the groups animate (section 6)", () => {
-  it("crops the old shell snapshot rather than squashing it (C-14)", () => {
-    const shellImages =
-      /::view-transition-old\(layout-shell\),\n::view-transition-new\(layout-shell\) \{\n([\s\S]*?)\n\}/.exec(
-        css,
-      );
+  it("matches the attribute by token, because it carries two (L-66)", () => {
+    // `editor-motion.ts` writes "<phase> <side>", so a rule spelled `=` would
+    // quietly stop matching the moment the phase joined the side - and a
+    // stylesheet that matches nothing fails silently by construction.
+    const valued =
+      css.match(/\[data-layout-transition[~^|*$]?=[^\]]*\]/g) ?? [];
 
-    expect(shellImages?.[1]).toContain("object-fit: cover");
-    expect(shellImages?.[1]).toContain("object-position: left top");
+    expect(valued.length).toBeGreaterThan(0);
+    valued.forEach((selector) => {
+      expect(selector.startsWith("[data-layout-transition~=")).toBe(true);
+    });
+    // And the exit is addressable at all, which is the whole reason the phase
+    // is on the attribute; `editor-motion.test.ts` pins the value written.
+    expect(valued.some((selector) => selector.includes("exit"))).toBe(true);
   });
 
-  it("leaves the editor faster than it arrives", () => {
-    expect(css).toContain(
-      "::view-transition-new(layout-inspector) {\n  animation: layout-inspector-in 220ms",
-    );
-    expect(css).toContain(
-      "::view-transition-old(layout-inspector) {\n  animation: layout-inspector-out 140ms",
-    );
-    expect(css).toContain(
-      '[data-layout-inspector][data-exiting="1"] {\n  animation: layout-inspector-out 140ms',
-    );
+  it("silences the panel's own slide for a panel that arrived in a snapshot (G2-01)", () => {
+    // The other half of a mechanism written in two files: `editor-motion.ts`
+    // stamps `data-entered` on the panel it hands to a view transition, and the
+    // stylesheet is what has to stop `layout-inspector-in` from starting on it.
+    // Unconsumed, the stamp is inert and the panel slides in a second time the
+    // moment the transition's names come off.
+    const entered =
+      /\[data-layout-inspector\]\[data-entered\][^{]*\{([^}]*)\}/.exec(css);
+
+    expect(entered?.[1]).toContain("animation: none");
   });
 });

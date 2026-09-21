@@ -70,6 +70,17 @@
   animation: layout-inspector-in 220ms var(--layout-editor-ease) both;
 }
 
+/* A panel that arrived inside a view transition has already been seen to
+   arrive: its snapshot played the slide, and `editor-motion.ts` stamps this
+   before that snapshot is taken. Keyed on the panel rather than on the running
+   transition because the attribute is what OUTLIVES it - gating on
+   `:root[data-layout-transition]` made the live element's animation-name change
+   from `none` back to `layout-inspector-in` the moment the transition finished,
+   which started a second 220ms slide over the arrival just watched (G2-01). */
+[data-layout-inspector][data-entered] {
+  animation: none;
+}
+
 [data-layout-inspector][data-dock-mode="right"] {
   border-left: 1px solid var(--border);
 }
@@ -175,10 +186,11 @@
    the static old bitmap, and cannot ghost against a live copy of itself.
 
    The names are applied only while `editor-motion.ts` holds
-   `:root[data-layout-transition]`, and that attribute also carries the dock
-   side, because a custom property set on `:root` is what reaches the
-   view-transition pseudo tree. Naming a group permanently would enrol the app
-   column in every later transition, including the ones L-30 guards off.
+   `:root[data-layout-transition]`, and that attribute carries the phase and the
+   dock side as two tokens, because a custom property set on `:root` is what
+   reaches the view-transition pseudo tree and the two directions are not the
+   same picture (L-66). Naming a group permanently would enrol the app column in
+   every later transition, including the ones L-30 guards off.
 
    The reduced-motion gate is here as well as in JS (C-14): a preference that
    turns on between the guard and the capture still has no groups to animate,
@@ -198,14 +210,10 @@
   }
 }
 
-:root[data-layout-transition="left"] {
+/* The attribute carries two tokens, the phase and the side, so every rule that
+   reads a value matches by TOKEN - an `=` here would silently stop matching. */
+:root[data-layout-transition~="left"] {
   --layout-inspector-away: -100%;
-}
-
-/* The panel's own slide would otherwise play INSIDE the snapshot that is
-   already carrying it. */
-:root[data-layout-transition] [data-layout-inspector] {
-  animation: none;
 }
 
 ::view-transition-group(layout-shell) {
@@ -224,6 +232,16 @@
   object-fit: cover;
   object-position: left top;
   animation-timing-function: var(--layout-editor-ease);
+}
+
+/* The exit's own half of that, separated because the two directions are not
+   the same picture: on the way out the group box GROWS, so `cover` enlarges
+   the narrower old snapshot rather than cropping it. It stays `cover` until
+   the owner's live pass says it reads as a zoom, and `object-fit: none` is
+   then this one line (L-66). */
+:root[data-layout-transition~="exit"]::view-transition-old(layout-shell),
+:root[data-layout-transition~="exit"]::view-transition-new(layout-shell) {
+  object-fit: cover;
 }
 
 /* One side of the pair exists at a time - there is no inspector before the
@@ -474,11 +492,17 @@
    --------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
-  /* Both spellings, because the exit rule carries the higher specificity and
-     would otherwise outlive the preference. With no animation to wait for, the
-     session ends in the same frame. */
+  /* Every spelling that names an animation above, because specificity is per
+     selector and each of those carries more of it than the plain panel: the
+     exit, and the floating panel's fade in both directions. Listing only the
+     first two left the float pair reinstating `layout-inspector-appear` under
+     the preference - at `0s`, so the visible cost was one extra frame before
+     the session ended, but the rule said the opposite of what it meant. With
+     no animation to wait for, the session ends in the same frame. */
   [data-layout-inspector],
-  [data-layout-inspector][data-exiting="1"] {
+  [data-layout-inspector][data-exiting="1"],
+  [data-layout-inspector][data-dock-mode="float"],
+  [data-layout-inspector][data-dock-mode="float"][data-exiting="1"] {
     animation: none;
   }
 
