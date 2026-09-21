@@ -93,9 +93,26 @@ describe("the one shared ring", () => {
     frames(40);
     expect(measured).toBe(atRest);
 
-    ring?.track(node);
+    ring?.refresh();
     frames(1);
     expect(measured).toBeGreaterThan(atRest);
+  });
+
+  it("does not wake for a re-track of the node it is already on (G1-04)", () => {
+    // The canvas painter runs on every editor-store notification - a hover, a
+    // filter keystroke - and used to re-arm the loop through `track`. That is
+    // a layout read per notification for a ring that has already arrived,
+    // which is why re-measuring is `refresh`'s own entry point now.
+    const node = region({ x: 100, y: 50, width: 200, height: 30 });
+    ring?.track(node);
+    frames(40);
+    const atRest = measured;
+
+    ring?.track(node);
+    ring?.track(node);
+    frames(4);
+
+    expect(measured).toBe(atRest);
   });
 
   it("travels to a second region rather than jumping to it", () => {

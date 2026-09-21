@@ -7,6 +7,7 @@ import {
   type RailVisibility,
 } from "@/lib/layout/layout-values";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
@@ -118,13 +119,39 @@ function mergeValues(
 export function useRegionValues<K extends RegionId>(
   regionId: K,
 ): LayoutValues[K] {
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const stored = useLayoutStore((state) => state.overrides[regionId]);
+  const { base, stored } = useRegionBase(regionId);
   const override = use(LayoutOverrideContext).values?.[regionId];
   return useMemo(
-    () => layered(PRESET_VALUES[basePreset][regionId], stored, override),
-    [basePreset, regionId, stored, override],
+    () => layered(base, stored, override),
+    [base, stored, override],
   );
+}
+
+/**
+ * What a region's values rest on right now: the base preset and the stored
+ * delta, or the PREVIEWED preset alone (L-43, L-65).
+ *
+ * The preview tier is session-only and lives in the editor store, so hovering
+ * or arrow-focusing a preset card shows the whole canvas under that density
+ * without writing anything - nothing reaches the layout store, the history or
+ * `localStorage`, and leaving the card puts the real values back in one
+ * render. It is the base AND the delta that a preview replaces, because a
+ * preset card is a picture of that density itself and the three cards would
+ * otherwise differ by the user's own changes as well as by density (2.2).
+ */
+function useRegionBase<K extends RegionId>(
+  regionId: K,
+): {
+  readonly base: LayoutValues[K];
+  readonly stored: Partial<LayoutValues[K]> | undefined;
+} {
+  const previewPreset = useLayoutEditorStore((state) => state.previewPreset);
+  const basePreset = useLayoutStore((state) => state.basePreset);
+  const stored = useLayoutStore((state) => state.overrides[regionId]);
+  if (previewPreset !== null) {
+    return { base: PRESET_VALUES[previewPreset][regionId], stored: undefined };
+  }
+  return { base: PRESET_VALUES[basePreset][regionId], stored };
 }
 
 /**
@@ -138,12 +165,9 @@ export function useRegionValue<
   K extends RegionId,
   Key extends keyof LayoutValues[K] & string,
 >(regionId: K, key: Key): LayoutValues[K][Key] {
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const stored = useLayoutStore((state) => state.overrides[regionId]);
+  const { base, stored } = useRegionBase(regionId);
   const override = use(LayoutOverrideContext).values?.[regionId];
-  return (
-    override?.[key] ?? stored?.[key] ?? PRESET_VALUES[basePreset][regionId][key]
-  );
+  return override?.[key] ?? stored?.[key] ?? base[key];
 }
 
 /**
@@ -164,19 +188,13 @@ export function useRailVisibility(regionId: RailRegionId): RailVisibility {
 }
 
 /**
- * The whole arrangement as this subtree should draw it. Prefer the field hook
- * below: this one's result changes whenever any field does.
+ * One arrangement field, subscribed to exactly that field.
+ *
+ * There is deliberately no whole-arrangement hook: every reader wants one or
+ * two fields, and subscribing to the object made a dock reorder or a divider
+ * drag re-render the rate-limit segment hook, the profile-selection hook, the
+ * visibility menu and the header popover (G1-14).
  */
-export function useLayoutArrangement(): LayoutArrangement {
-  const stored = useLayoutStore((state) => state.arrangement);
-  const override = use(LayoutOverrideContext).arrangement;
-  return useMemo(
-    () => (override === undefined ? stored : { ...stored, ...override }),
-    [stored, override],
-  );
-}
-
-/** One arrangement field, subscribed to exactly that field. */
 export function useArrangementValue<Key extends keyof LayoutArrangement>(
   key: Key,
 ): LayoutArrangement[Key] {

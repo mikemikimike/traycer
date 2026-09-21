@@ -15,7 +15,6 @@ import {
   moveLeftPanelToGroupPosition,
   moveLeftPanelToPanelPosition,
   matchesChatOwnershipFilter,
-  useLeftPanelGroups,
   useLeftPanelStore,
   useChatArchiveVisibility,
   type ArtifactFilter,
@@ -24,6 +23,13 @@ import {
   type LeftPanelId,
   type PanelVisibilityOverrideById,
 } from "../left-panel-store";
+import {
+  applyLeftPanelGroups,
+  currentLeftPanelGroups,
+  clearRailVisibilityOverrides,
+  setRailVisibilityOverride,
+  useLeftPanelGroups,
+} from "@/lib/layout/rail-view";
 import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import {
@@ -69,17 +75,16 @@ function resetLayoutStore(): void {
 /**
  * Apply a group move through the public pipeline (the DnD commit path):
  * resolve the next groups with the pure `moveLeftPanelGroup` helper, then
- * commit them atomically via `applyPanelGroups`.
+ * commit them atomically via `applyLeftPanelGroups`.
  */
 function applyPanelGroupMove(
   sourcePanelId: LeftPanelId,
   targetPanelId: LeftPanelId,
   position: "before" | "after" | "combine",
 ): void {
-  const store = useLeftPanelStore.getState();
-  store.applyPanelGroups(
+  applyLeftPanelGroups(
     moveLeftPanelGroup(
-      store.getPanelGroups(),
+      currentLeftPanelGroups(),
       sourcePanelId,
       targetPanelId,
       position,
@@ -124,10 +129,12 @@ function resetStore(): void {
   });
 }
 
+/** The shipped grouping with Agents and Artifacts pulled apart, and nothing else. */
 const SPLIT_PANEL_GROUPS: ReadonlyArray<LeftPanelGroup> = [
   { panelIds: ["chats"] },
   { panelIds: ["artifacts"] },
   { panelIds: ["terminals"] },
+  { panelIds: ["browsers"] },
   { panelIds: ["git-diff"] },
   { panelIds: ["pull-requests"] },
   { panelIds: ["file-tree"] },
@@ -136,7 +143,7 @@ const SPLIT_PANEL_GROUPS: ReadonlyArray<LeftPanelGroup> = [
 ];
 
 function splitChatsAndArtifacts(): void {
-  useLeftPanelStore.getState().applyPanelGroups(SPLIT_PANEL_GROUPS);
+  applyLeftPanelGroups(SPLIT_PANEL_GROUPS);
 }
 
 describe("useLeftPanelStore", () => {
@@ -197,7 +204,7 @@ describe("useLeftPanelStore", () => {
   });
 
   it("defaults panel groups with chats and artifacts combined", () => {
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "artifacts"] },
       { panelIds: ["terminals"] },
       { panelIds: ["browsers"] },
@@ -390,20 +397,6 @@ describe("useLeftPanelStore", () => {
     );
   });
 
-  it("restores the whole visibility map in one write", () => {
-    // What an undo needs: a walk over the per-panel setter would persist and
-    // re-render once per panel and show intermediate rails on the way.
-    useLeftPanelStore.getState().setPanelVisibilityOverride("chats", false);
-
-    useLeftPanelStore
-      .getState()
-      .setPanelVisibilityOverrides({ terminals: false });
-
-    expect(visibilityOverrides()).toEqual({
-      terminals: false,
-    });
-  });
-
   it("persists active chat and artifact filters set through actions", () => {
     act(() => {
       useLeftPanelStore.getState().setChatOrigin("epic-a", "gui");
@@ -524,44 +517,44 @@ describe("useLeftPanelStore", () => {
   it("reorders panel groups before or after another group", () => {
     splitChatsAndArtifacts();
     applyPanelGroupMove("artifacts", "chats", "before");
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["artifacts"] },
       { panelIds: ["chats"] },
       { panelIds: ["terminals"] },
+      { panelIds: ["browsers"] },
       { panelIds: ["git-diff"] },
       { panelIds: ["pull-requests"] },
       { panelIds: ["file-tree"] },
       { panelIds: ["sharing"] },
       { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
     ]);
 
     applyPanelGroupMove("comments", "chats", "after");
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["artifacts"] },
       { panelIds: ["chats"] },
       { panelIds: ["comments"] },
       { panelIds: ["terminals"] },
+      { panelIds: ["browsers"] },
       { panelIds: ["git-diff"] },
       { panelIds: ["pull-requests"] },
       { panelIds: ["file-tree"] },
       { panelIds: ["sharing"] },
-      { panelIds: ["browsers"] },
     ]);
   });
 
   it("combines two panel groups into one group", () => {
     splitChatsAndArtifacts();
     applyPanelGroupMove("artifacts", "chats", "combine");
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "artifacts"] },
       { panelIds: ["terminals"] },
+      { panelIds: ["browsers"] },
       { panelIds: ["git-diff"] },
       { panelIds: ["pull-requests"] },
       { panelIds: ["file-tree"] },
       { panelIds: ["sharing"] },
       { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
     ]);
   });
 
@@ -571,15 +564,15 @@ describe("useLeftPanelStore", () => {
     useLeftPanelStore.getState().setActivePanelId("tab-a", "artifacts");
     useLeftPanelStore.getState().setActivePanelId("tab-b", "file-tree");
 
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "artifacts"] },
       { panelIds: ["terminals"] },
+      { panelIds: ["browsers"] },
       { panelIds: ["git-diff"] },
       { panelIds: ["pull-requests"] },
       { panelIds: ["file-tree"] },
       { panelIds: ["sharing"] },
       { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
     ]);
     expect(useLeftPanelStore.getState().getActivePanelId("tab-a")).toBe(
       "artifacts",
@@ -661,16 +654,15 @@ describe("useLeftPanelStore", () => {
 
   it("extracts one panel from a combined group before or after another group", () => {
     applyPanelGroupMove("artifacts", "chats", "combine");
-    const store = useLeftPanelStore.getState();
-    store.applyPanelGroups(
+    applyLeftPanelGroups(
       moveLeftPanelToGroupPosition(
-        store.getPanelGroups(),
+        currentLeftPanelGroups(),
         "artifacts",
         "comments",
         "before",
       ),
     );
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats"] },
       { panelIds: ["terminals"] },
       { panelIds: ["browsers"] },
@@ -683,13 +675,13 @@ describe("useLeftPanelStore", () => {
     ]);
   });
 
-  it("applyPanelGroups writes nothing for structurally equal groups", () => {
+  it("applyLeftPanelGroups writes nothing for structurally equal groups", () => {
     // Identity is asserted on the RAIL, which is what the groups are derived
-    // from: `getPanelGroups()` builds its view on every call, while the hook
+    // from: `currentLeftPanelGroups()` builds its view on every call, while the
     // below memoizes on exactly this array.
     const before = useLayoutStore.getState().arrangement.rail;
 
-    useLeftPanelStore.getState().applyPanelGroups(
+    applyLeftPanelGroups(
       DEFAULT_LEFT_PANEL_GROUPS.map((group) => ({
         panelIds: [...group.panelIds],
       })),
@@ -698,24 +690,32 @@ describe("useLeftPanelStore", () => {
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
   });
 
-  it("applyPanelGroups normalizes duplicate and missing panel ids", () => {
-    useLeftPanelStore
-      .getState()
-      .applyPanelGroups([
-        { panelIds: ["chats", "chats"] },
-        { panelIds: ["comments"] },
-      ]);
-
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
-      { panelIds: ["chats"] },
+  it("applyLeftPanelGroups normalizes duplicate and missing panel ids", () => {
+    applyLeftPanelGroups([
+      { panelIds: ["chats", "chats"] },
       { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
+    ]);
+
+    // One normalizer owns this now - the rail's (`normalizeRail`), which the
+    // arrangement runs on every write. A panel the caller left out comes back
+    // beside its canonical neighbours rather than appended as its own group
+    // at the end, so the seven missing here join the group Agents is in.
+    // Nothing in the app can send an incomplete list: every caller derives its
+    // groups from the rail, which always names all nine.
+    expect(currentLeftPanelGroups()).toEqual([
+      {
+        panelIds: [
+          "chats",
+          "artifacts",
+          "terminals",
+          "browsers",
+          "git-diff",
+          "pull-requests",
+          "file-tree",
+          "sharing",
+        ],
+      },
+      { panelIds: ["comments"] },
     ]);
   });
 
@@ -973,10 +973,8 @@ describe("useLeftPanelStore", () => {
   it("persists panel visibility overrides so they survive a reload", () => {
     expect(visibilityOverrides()).toEqual({});
 
-    useLeftPanelStore
-      .getState()
-      .setPanelVisibilityOverride("pull-requests", true);
-    useLeftPanelStore.getState().setPanelVisibilityOverride("sharing", false);
+    setRailVisibilityOverride("pull-requests", true);
+    setRailVisibilityOverride("sharing", false);
 
     expect(visibilityOverrides()).toEqual({
       "pull-requests": true,
@@ -991,12 +989,8 @@ describe("useLeftPanelStore", () => {
   it("drops an override rather than storing the rule's own answer", () => {
     // `null` is how the menu says "this matches the panel's own rule again",
     // so the entry has to disappear - not flip to `false`.
-    useLeftPanelStore
-      .getState()
-      .setPanelVisibilityOverride("pull-requests", true);
-    useLeftPanelStore
-      .getState()
-      .setPanelVisibilityOverride("pull-requests", null);
+    setRailVisibilityOverride("pull-requests", true);
+    setRailVisibilityOverride("pull-requests", null);
 
     expect(visibilityOverrides()).toEqual({});
     expect(readPersistedLayoutOverrides()).toEqual({});
@@ -1006,7 +1000,7 @@ describe("useLeftPanelStore", () => {
     // `collab-tile-body` / `start-comment-draft` switch the sidebar to Comments
     // on the user's behalf. If Comments is switched off, that must be a no-op
     // rather than pointing the sidebar at a panel with no rail icon.
-    useLeftPanelStore.getState().setPanelVisibilityOverride("comments", false);
+    setRailVisibilityOverride("comments", false);
     useLeftPanelStore.getState().setMainCollapsed("tab-a", true);
 
     useLeftPanelStore.getState().setActivePanelIdAndExpand("tab-a", "comments");
@@ -1029,27 +1023,27 @@ describe("useLeftPanelStore", () => {
   });
 
   it("clears every override at once", () => {
-    useLeftPanelStore.getState().setPanelVisibilityOverride("chats", false);
-    useLeftPanelStore.getState().setPanelVisibilityOverride("comments", true);
+    setRailVisibilityOverride("chats", false);
+    setRailVisibilityOverride("comments", true);
 
-    useLeftPanelStore.getState().clearPanelVisibilityOverrides();
+    clearRailVisibilityOverrides();
 
     expect(visibilityOverrides()).toEqual({});
   });
 
   it("keeps slice identity when an override is set to its current value", () => {
     const before = useLeftPanelStore.getState();
-    useLeftPanelStore.getState().setPanelVisibilityOverride("chats", null);
+    setRailVisibilityOverride("chats", null);
     expect(useLeftPanelStore.getState()).toBe(before);
 
-    useLeftPanelStore.getState().setPanelVisibilityOverride("chats", false);
+    setRailVisibilityOverride("chats", false);
     const afterHide = useLeftPanelStore.getState();
-    useLeftPanelStore.getState().setPanelVisibilityOverride("chats", false);
+    setRailVisibilityOverride("chats", false);
     expect(useLeftPanelStore.getState()).toBe(afterHide);
 
-    useLeftPanelStore.getState().clearPanelVisibilityOverrides();
+    clearRailVisibilityOverrides();
     const cleared = useLeftPanelStore.getState();
-    useLeftPanelStore.getState().clearPanelVisibilityOverrides();
+    clearRailVisibilityOverrides();
     expect(useLeftPanelStore.getState()).toBe(cleared);
   });
 });

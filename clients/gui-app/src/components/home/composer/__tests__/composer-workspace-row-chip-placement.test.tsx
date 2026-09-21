@@ -30,6 +30,7 @@ function renderRow(working: boolean) {
               lineDeltas: null,
               label: "Active agents. 2 running.",
               pulseToken: null,
+              sample: false,
             },
           ],
           expanded: new Set(),

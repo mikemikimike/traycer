@@ -1,9 +1,10 @@
 import { rateLimitCapableProviderIdSchema } from "@traycer/protocol/host/rate-limit";
 import { CONTEXT_USAGE_ROW_KEYS } from "@/components/chat/context-usage";
-import type {
-  ContextBreakdownField,
-  LayoutValues,
-  RailVisibility,
+import {
+  sameFieldList,
+  type ContextBreakdownField,
+  type LayoutValues,
+  type RailVisibility,
 } from "@/lib/layout/layout-values";
 import type {
   DockRegionId,
@@ -63,6 +64,15 @@ export interface StatusBarProviderLimitSelection {
 }
 
 /**
+ * Every configured provider's selection. A provider with no entry has never
+ * been configured, which {@link statusBarProviderLimitSelection} reads as the
+ * automatic default.
+ */
+export type StatusBarProviderLimits = Readonly<
+  Partial<Record<RateLimitProviderId, StatusBarProviderLimitSelection>>
+>;
+
+/**
  * The accounts one provider's segments describe, on one host: profile ids, with
  * `null` standing for the provider's ambient login. A provider with no entry
  * has nothing checked.
@@ -97,9 +107,7 @@ export interface LayoutArrangement {
   readonly rail: ReadonlyArray<RailEntry>;
   readonly usageProviders: ReadonlyArray<RateLimitProviderId>;
   readonly hiddenProviders: ReadonlyArray<RateLimitProviderId>;
-  readonly providerLimits: Readonly<
-    Partial<Record<RateLimitProviderId, StatusBarProviderLimitSelection>>
-  >;
+  readonly providerLimits: StatusBarProviderLimits;
   readonly shownProfiles: StatusBarShownProfiles;
   readonly usageHost: UsageHost;
   readonly resourceSide: EdgeSide;
@@ -132,7 +140,7 @@ export const DEFAULT_DOCK_ORDER: ReadonlyArray<DockRegionId> = [
  * re-inserted lands beside the neighbours it renders beside, whichever cluster
  * it belongs to.
  */
-export const TOOLBAR_REGION_IDS: ReadonlyArray<ToolbarRegionId> = [
+const TOOLBAR_REGION_IDS: ReadonlyArray<ToolbarRegionId> = [
   "attachImage",
   "access",
   "agent",
@@ -184,17 +192,23 @@ const PANEL_BY_RAIL_REGION: Readonly<Record<RailRegionId, LeftPanelId>> = {
   railComments: "comments",
 };
 
-const RAIL_REGION_BY_PANEL: Readonly<Record<LeftPanelId, RailRegionId>> = {
-  chats: "railAgents",
-  artifacts: "railArtifacts",
-  terminals: "railTerminals",
-  browsers: "railBrowsers",
-  "git-diff": "railGitDiff",
-  "pull-requests": "railPullRequests",
-  "file-tree": "railFileTree",
-  sharing: "railSharing",
-  comments: "railComments",
-};
+/**
+ * Exported for the one caller that walks it rather than asking about a panel
+ * it already knows: the shipped-key carry, which reads a persisted map keyed
+ * by panel id (L-61).
+ */
+export const RAIL_REGION_BY_PANEL: Readonly<Record<LeftPanelId, RailRegionId>> =
+  {
+    chats: "railAgents",
+    artifacts: "railArtifacts",
+    terminals: "railTerminals",
+    browsers: "railBrowsers",
+    "git-diff": "railGitDiff",
+    "pull-requests": "railPullRequests",
+    "file-tree": "railFileTree",
+    sharing: "railSharing",
+    comments: "railComments",
+  };
 
 /**
  * Which sidebar panel a rail region draws, for the surfaces that need the
@@ -292,10 +306,10 @@ export const AUTOMATIC_LIMIT_SELECTION: StatusBarProviderLimitSelection = {
  * shows its tightest limit without a visit to the editor.
  */
 export function statusBarProviderLimitSelection(
-  arrangement: LayoutArrangement,
+  providerLimits: StatusBarProviderLimits,
   providerId: RateLimitProviderId,
 ): StatusBarProviderLimitSelection {
-  return arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
+  return providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
 }
 
 /** One shared empty list, so an unchecked provider never allocates. */
@@ -520,6 +534,13 @@ export function removeRailDivider(
  * Run on the WRITE as well as on rehydration, because a drag that lands
  * impossibly is repaired where a persisted blob would be rather than only on
  * the next start.
+ *
+ * Every field it did not have to change keeps its INPUT identity, and an
+ * arrangement it changed nothing about is returned as itself. Identity is the
+ * only thing a selector subscribed to one arrangement field compares, so
+ * rebuilding the arrays on every call made a no-op write - and, once ticket
+ * 09's drag loop writes per frame, every frame of a drag - re-render the whole
+ * status bar (G1-14).
  */
 export function normalizeArrangement(
   arrangement: LayoutArrangement,
@@ -528,20 +549,77 @@ export function normalizeArrangement(
     arrangement.toolbarLeft,
     arrangement.toolbarRight,
   );
-  const rail = normalizeRail(arrangement.rail);
-  return {
+  const rail = keptEntries(arrangement.rail, normalizeRail(arrangement.rail));
+  const next: LayoutArrangement = {
     ...arrangement,
-    dock: mergeOrder(arrangement.dock, DEFAULT_DOCK_ORDER),
-    toolbarLeft: toolbar.left,
-    toolbarRight: toolbar.right,
+    dock: keptOrder(
+      arrangement.dock,
+      mergeOrder(arrangement.dock, DEFAULT_DOCK_ORDER),
+    ),
+    toolbarLeft: keptOrder(arrangement.toolbarLeft, toolbar.left),
+    toolbarRight: keptOrder(arrangement.toolbarRight, toolbar.right),
     rail,
-    usageProviders: mergeOrder(arrangement.usageProviders, USAGE_PROVIDER_IDS),
-    pinnedContextFieldOrder: mergeOrder(
+    usageProviders: keptOrder(
+      arrangement.usageProviders,
+      mergeOrder(arrangement.usageProviders, USAGE_PROVIDER_IDS),
+    ),
+    pinnedContextFieldOrder: keptOrder(
       arrangement.pinnedContextFieldOrder,
-      CONTEXT_USAGE_ROW_KEYS,
+      mergeOrder(arrangement.pinnedContextFieldOrder, CONTEXT_USAGE_ROW_KEYS),
     ),
     dividerSeq: Math.max(arrangement.dividerSeq, highestDividerSeq(rail)),
   };
+  return sameArrangement(arrangement, next) ? arrangement : next;
+}
+
+/** The stored list when normalising did not move anything, so its identity survives. */
+function keptOrder<Id extends string>(
+  stored: ReadonlyArray<Id>,
+  normalized: ReadonlyArray<Id>,
+): ReadonlyArray<Id> {
+  return sameFieldList(stored, normalized) ? stored : normalized;
+}
+
+/** {@link keptOrder} for the rail, which is entries rather than ids. */
+function keptEntries(
+  stored: ReadonlyArray<RailEntry>,
+  normalized: ReadonlyArray<RailEntry>,
+): ReadonlyArray<RailEntry> {
+  const same =
+    stored.length === normalized.length &&
+    stored.every(
+      (entry, index) =>
+        entry.kind === normalized[index].kind &&
+        entry.id === normalized[index].id,
+    );
+  return same ? stored : normalized;
+}
+
+/**
+ * Whether normalising left every field exactly as it found it. Reference
+ * equality throughout, because each field above already reuses the input's
+ * identity when it did not change it.
+ */
+function sameArrangement(
+  left: LayoutArrangement,
+  right: LayoutArrangement,
+): boolean {
+  return (
+    left.dock === right.dock &&
+    left.toolbarLeft === right.toolbarLeft &&
+    left.toolbarRight === right.toolbarRight &&
+    left.rail === right.rail &&
+    left.usageProviders === right.usageProviders &&
+    left.pinnedContextFieldOrder === right.pinnedContextFieldOrder &&
+    left.hiddenProviders === right.hiddenProviders &&
+    left.providerLimits === right.providerLimits &&
+    left.shownProfiles === right.shownProfiles &&
+    left.usageHost === right.usageHost &&
+    left.resourceSide === right.resourceSide &&
+    left.minimapSide === right.minimapSide &&
+    left.mobileFooter === right.mobileFooter &&
+    left.dividerSeq === right.dividerSeq
+  );
 }
 
 /**
@@ -734,11 +812,7 @@ function persistedLimitSelection(
     : AUTOMATIC_LIMIT_SELECTION;
 }
 
-function persistedProviderLimits(
-  value: unknown,
-): Readonly<
-  Partial<Record<RateLimitProviderId, StatusBarProviderLimitSelection>>
-> {
+function persistedProviderLimits(value: unknown): StatusBarProviderLimits {
   if (!isRecord(value)) return {};
   const limits: Partial<
     Record<RateLimitProviderId, StatusBarProviderLimitSelection>
@@ -798,9 +872,21 @@ function persistedSide(value: unknown, fallback: EdgeSide): EdgeSide {
 /**
  * The rail as it was stored. Structure only: `normalizeRail` decides which
  * panels are missing and where they land.
+ *
+ * A stored list that survives as NOTHING - an empty array, or nine entries
+ * this build has no case for - falls back to the shipped rail rather than to
+ * `normalizeRail`'s answer for `[]`, which is all nine panels with no dividers
+ * at all and is not a grouping anybody chose (G1-22).
  */
 function persistedRail(value: unknown): ReadonlyArray<RailEntry> {
   if (!Array.isArray(value)) return DEFAULT_RAIL;
+  const entries = readRailEntries(value);
+  return entries.length === 0 ? DEFAULT_RAIL : entries;
+}
+
+function readRailEntries(
+  value: ReadonlyArray<unknown>,
+): ReadonlyArray<RailEntry> {
   return value.flatMap((entry): RailEntry[] => {
     if (!isRecord(entry) || typeof entry.id !== "string") return [];
     if (entry.kind === "divider") {

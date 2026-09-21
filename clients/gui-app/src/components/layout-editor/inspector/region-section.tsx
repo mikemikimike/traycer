@@ -8,23 +8,32 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
-import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
+import {
+  InspectorRow,
+  RevertButton,
+} from "@/components/layout-editor/inspector/inspector-row";
+import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "@/components/layout-editor/inspector/segmented-control";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import {
   SortableList,
   type SortableListItem,
 } from "@/components/layout-editor/inspector/sortable-list";
 import {
+  changedControlKeys,
   isControlValueChanged,
   readControlValue,
   revertControlValue,
+  revertControlValues,
   writeControlValue,
 } from "@/components/layout-editor/inspector/region-control-io";
 import {
   EDGE_SIDE_OPTIONS,
   fineTuneMatchesFilter,
   LAYOUT_REGIONS,
+  NO_EXAMPLE_MATCH_COPY,
   positionRowChanged,
   regionDepiction,
   regionFacts,
@@ -37,15 +46,18 @@ import {
   type LayoutArrangement,
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
+import type { DockRegionId, ToolbarRegionId } from "@/lib/layout/region-id";
 import {
   effectiveLayoutValues,
   type LayoutValues,
+  type RegionValueKey,
 } from "@/lib/layout/layout-values";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
+  useLayoutSnapshot,
   useLayoutStore,
   type LayoutSnapshot,
 } from "@/stores/layout/layout-store";
@@ -66,13 +78,6 @@ function visibilityWord(on: boolean): "shown" | "hidden" {
   return on ? "shown" : "hidden";
 }
 
-function useSnapshot(): LayoutSnapshot {
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const overrides = useLayoutStore((state) => state.overrides);
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  return { basePreset, overrides, arrangement };
-}
-
 /**
  * One region's section, in the fixed grammar order (L-08): stage, header with
  * Shown, Size, Position, Style, Fine-tune (collapsed), children - rows that do
@@ -82,7 +87,7 @@ function useSnapshot(): LayoutSnapshot {
  */
 export function RegionSection(props: RegionSectionProps): ReactNode {
   const { regionId, host, onOpenProvider } = props;
-  const snapshot = useSnapshot();
+  const snapshot = useLayoutSnapshot();
   const filter = useLayoutEditorStore((state) => state.filter);
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
   const arrangement = snapshot.arrangement;
@@ -94,20 +99,6 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
     facts.whereByHost !== null
       ? facts.whereByHost[arrangement.usageHost]
       : facts.where;
-
-  function toggleShown(next: boolean): void {
-    useLayoutEditorStore.getState().recordGesture(() => {
-      if (isRailRegionId(regionId)) {
-        useLayoutStore
-          .getState()
-          .setRegionValues(regionId, { shown: next ? "auto" : "hidden" });
-      } else {
-        useLayoutStore
-          .getState()
-          .setRegionValues(regionId, { shown: next ? "shown" : "hidden" });
-      }
-    });
-  }
 
   function setRailVisibility(next: string): void {
     if (!isRailRegionId(regionId)) return;
@@ -146,7 +137,9 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
             <Switch
               aria-label={`Show ${facts.name}`}
               checked={shown}
-              onCheckedChange={toggleShown}
+              onCheckedChange={() => {
+                setRegionShown(regionId, !shown);
+              }}
             />
           )}
         </div>
@@ -156,10 +149,12 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
           {facts.hint}
         </p>
       ) : null}
-      <div
-        className={cn(!shown && "pointer-events-none opacity-40")}
-        aria-hidden={!shown}
-      >
+      {/* `inert`, not `aria-hidden`: `aria-hidden` leaves its descendants in
+        the tab order, so a keyboard user landed inside the greyed rows of a
+        hidden region - and `pointer-events-none` did not stop that either.
+        `inert` removes focus, hit testing and the a11y tree in one, and
+        subsumes the pointer rule (G1-06). */}
+      <div inert={!shown} className={cn(!shown && "opacity-40")}>
         {region.rows.map((row) => (
           // Each grammar row kind appears at most once per region (L-08), so
           // `row.kind` is a stable key without an index.
@@ -330,12 +325,28 @@ function GrammarRowView(props: {
     case "children":
       return (
         <ProvidersChildrenRow
+          values={values}
           arrangement={arrangement}
           host={host}
           onOpenProvider={onOpenProvider}
         />
       );
+    default:
+      return assertNever(row);
   }
+}
+
+/**
+ * The closing case of a switch over a closed union.
+ *
+ * Both switches below return `ReactNode`, which INCLUDES `undefined`, so
+ * falling off the end of either is something TypeScript accepts in silence: a
+ * grammar row kind or an order group added later would render nothing and say
+ * nothing (G1-22). A local helper rather than a shared one, which is the same
+ * shape the three other `assertNever`s in this app take.
+ */
+function assertNever(value: never): never {
+  throw new Error(`unhandled layout section member: ${JSON.stringify(value)}`);
 }
 
 function PositionOrderRow(props: {
@@ -346,7 +357,6 @@ function PositionOrderRow(props: {
   readonly snapshot: LayoutSnapshot;
 }): ReactNode {
   const { row, regionId, values, arrangement, snapshot } = props;
-  const group = row.group;
 
   return (
     <InspectorRow
@@ -356,26 +366,18 @@ function PositionOrderRow(props: {
       onRevert={
         positionRowChanged(snapshot, regionId)
           ? () => {
-              useLayoutEditorStore.getState().recordGesture(() => {
-                useLayoutStore
-                  .getState()
-                  .setArrangement(revertPositionRow(arrangement, regionId));
-              });
+              writeArrangement(revertPositionRow(arrangement, regionId));
             }
           : undefined
       }
       control={
         <div className="flex flex-col gap-2">
-          <SortableList
+          <OrderGroupList
+            group={row.group}
             selectedId={regionId}
-            items={orderGroupItems(group, arrangement, values)}
-            onReorder={(nextIds) => {
-              useLayoutEditorStore.getState().recordGesture(() => {
-                useLayoutStore
-                  .getState()
-                  .setArrangement(setOrderGroup(arrangement, group, nextIds));
-              });
-            }}
+            values={values}
+            arrangement={arrangement}
+            onOpenProvider={null}
           />
           {row.pinnedRight ? (
             <p className="text-ui-xs text-muted-foreground">
@@ -388,86 +390,167 @@ function PositionOrderRow(props: {
   );
 }
 
-function toggleRegionShown(regionId: RegionId, values: LayoutValues): void {
-  const shownRaw = readControlValue(values[regionId], "shown");
-  const next = shownRaw === "hidden";
+/** The one rule for a region's Shown switch, tri-state rail included (L-47). */
+function setRegionShown(regionId: RegionId, next: boolean): void {
+  // A rail panel turned back ON goes to `auto` rather than `shown`: its own
+  // presence rule is the default, and pinning it open is a separate answer the
+  // three-state control above gives (L-47).
+  const onValue = isRailRegionId(regionId) ? "auto" : "shown";
+  const shown = next ? onValue : "hidden";
   useLayoutEditorStore.getState().recordGesture(() => {
-    if (isRailRegionId(regionId)) {
-      useLayoutStore
-        .getState()
-        .setRegionValues(regionId, { shown: next ? "auto" : "hidden" });
-    } else {
-      useLayoutStore
-        .getState()
-        .setRegionValues(regionId, { shown: next ? "shown" : "hidden" });
-    }
+    useLayoutStore.getState().setRegionValues(regionId, { shown });
   });
 }
 
-function regionOrderItem(
-  regionId: RegionId,
+/** Every arrangement write from this section, as one recorded gesture. */
+function writeArrangement(arrangement: LayoutArrangement): void {
+  useLayoutEditorStore.getState().recordGesture(() => {
+    useLayoutStore.getState().setArrangement(arrangement);
+  });
+}
+
+function regionOrderItem<Id extends RegionId>(
+  regionId: Id,
   values: LayoutValues,
-): SortableListItem {
+): SortableListItem<Id> {
   const facts = regionFacts(regionId);
-  const shownRaw = readControlValue(values[regionId], "shown");
   return {
     id: regionId,
     label: facts.name,
     icon: facts.icon,
-    shown: shownRaw !== "hidden",
+    shown: readControlValue(values[regionId], "shown") !== "hidden",
     onToggleShown: () => {
-      toggleRegionShown(regionId, values);
+      setRegionShown(
+        regionId,
+        readControlValue(values[regionId], "shown") === "hidden",
+      );
     },
     onActivate: null,
   };
 }
 
 /**
- * One order group's list rows. Built per group rather than off one opaque
- * `ReadonlyArray<string>`, because only the rail actually mixes panels and
- * dividers - every other group's members are already known to be regions, so
- * building the list straight off the arrangement's own typed arrays needs no
- * runtime guess about what an id names. `usageProviders` has no
- * `position-order` row of its own - the registry reaches the provider list
- * through the `children` row instead (`ProvidersChildrenRow`) - so this
- * branch only completes the switch over every `OrderGroupId`.
+ * The usage providers as list rows, with the second level wired only where
+ * there is one to open.
+ *
+ * One builder for both callers: the `usageProviders` order group and the
+ * Usage limits section's own children row draw the SAME list, and writing it
+ * twice left the order-group branch unreachable and drifting (G1-13).
  */
-function orderGroupItems(
-  group: OrderGroupId,
+function providerOrderItems(
   arrangement: LayoutArrangement,
-  values: LayoutValues,
-): ReadonlyArray<SortableListItem> {
+  onOpenProvider: ((providerId: RateLimitProviderId) => void) | null,
+): ReadonlyArray<SortableListItem<RateLimitProviderId>> {
+  return arrangement.usageProviders.map((providerId) => ({
+    id: providerId,
+    label: providerDisplayName(providerId),
+    icon: null,
+    shown: !arrangement.hiddenProviders.includes(providerId),
+    onToggleShown: () => {
+      toggleHiddenProvider(providerId, arrangement);
+    },
+    onActivate:
+      onOpenProvider === null
+        ? null
+        : () => {
+            onOpenProvider(providerId);
+          },
+  }));
+}
+
+/**
+ * One order group's sortable list, typed in that group's own ids.
+ *
+ * Written as a branch per group rather than through one `ReadonlyArray<string>`
+ * seam: only the rail actually mixes two kinds of id, and widening every group
+ * to `string` meant re-narrowing each id back on the way out, where a
+ * mis-routed id was silently DROPPED instead of failing (G1-23).
+ */
+function OrderGroupList(props: {
+  readonly group: OrderGroupId;
+  readonly selectedId: RegionId | null;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+  readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
+}): ReactNode {
+  const { group, selectedId, values, arrangement, onOpenProvider } = props;
   switch (group) {
     case "dock":
-      return arrangement.dock.map((id) => regionOrderItem(id, values));
-    case "toolbarLeft":
-      return arrangement.toolbarLeft.map((id) => regionOrderItem(id, values));
-    case "toolbarRight":
-      return arrangement.toolbarRight.map((id) => regionOrderItem(id, values));
-    case "usageProviders":
-      return arrangement.usageProviders.map((id) => ({
-        id,
-        label: providerDisplayName(id),
-        icon: null,
-        shown: !arrangement.hiddenProviders.includes(id),
-        onToggleShown: () => {
-          toggleHiddenProvider(id, arrangement);
-        },
-        onActivate: null,
-      }));
-    case "rail":
-      return arrangement.rail.map((entry) =>
-        entry.kind === "divider"
-          ? {
-              id: entry.id,
-              label: "Divider",
-              icon: null,
-              shown: null,
-              onToggleShown: null,
-              onActivate: null,
-            }
-          : regionOrderItem(entry.id, values),
+      return (
+        <SortableList<DockRegionId>
+          selectedId={selectedId}
+          items={arrangement.dock.map((id) => regionOrderItem(id, values))}
+          onReorder={(dock) => {
+            writeArrangement({ ...arrangement, dock });
+          }}
+        />
       );
+    case "toolbarLeft":
+      return (
+        <SortableList<ToolbarRegionId>
+          selectedId={selectedId}
+          items={arrangement.toolbarLeft.map((id) =>
+            regionOrderItem(id, values),
+          )}
+          onReorder={(toolbarLeft) => {
+            writeArrangement({ ...arrangement, toolbarLeft });
+          }}
+        />
+      );
+    case "toolbarRight":
+      return (
+        <SortableList<ToolbarRegionId>
+          selectedId={selectedId}
+          items={arrangement.toolbarRight.map((id) =>
+            regionOrderItem(id, values),
+          )}
+          onReorder={(toolbarRight) => {
+            writeArrangement({ ...arrangement, toolbarRight });
+          }}
+        />
+      );
+    case "usageProviders":
+      return (
+        <SortableList<RateLimitProviderId>
+          selectedId={selectedId}
+          items={providerOrderItems(arrangement, onOpenProvider)}
+          onReorder={(usageProviders) => {
+            writeArrangement({ ...arrangement, usageProviders });
+          }}
+        />
+      );
+    case "rail":
+      return (
+        <SortableList<string>
+          selectedId={selectedId}
+          items={arrangement.rail.map((entry) =>
+            entry.kind === "divider"
+              ? {
+                  id: entry.id,
+                  label: "Divider",
+                  icon: null,
+                  shown: null,
+                  onToggleShown: null,
+                  onActivate: null,
+                }
+              : regionOrderItem(entry.id, values),
+          )}
+          onReorder={(ids) => {
+            // One lookup table rather than a `find` per id: ticket 09 drives
+            // this from a drag, where the list is walked every frame.
+            const byId = new Map(arrangement.rail.map((e) => [e.id, e]));
+            writeArrangement({
+              ...arrangement,
+              rail: ids.flatMap((id) => {
+                const entry = byId.get(id);
+                return entry === undefined ? [] : [entry];
+              }),
+            });
+          }}
+        />
+      );
+    default:
+      return assertNever(group);
   }
 }
 
@@ -475,60 +558,11 @@ function toggleHiddenProvider(
   providerId: RateLimitProviderId,
   arrangement: LayoutArrangement,
 ): void {
-  useLayoutEditorStore.getState().recordGesture(() => {
-    const hidden = arrangement.hiddenProviders.includes(providerId)
+  writeArrangement({
+    ...arrangement,
+    hiddenProviders: arrangement.hiddenProviders.includes(providerId)
       ? arrangement.hiddenProviders.filter((entry) => entry !== providerId)
-      : [...arrangement.hiddenProviders, providerId];
-    useLayoutStore
-      .getState()
-      .setArrangement({ ...arrangement, hiddenProviders: hidden });
-  });
-}
-
-function setOrderGroup(
-  arrangement: LayoutArrangement,
-  group: OrderGroupId,
-  nextIds: ReadonlyArray<string>,
-): LayoutArrangement {
-  switch (group) {
-    case "dock":
-      return { ...arrangement, dock: asRegionIds(nextIds, arrangement.dock) };
-    case "toolbarLeft":
-      return {
-        ...arrangement,
-        toolbarLeft: asRegionIds(nextIds, arrangement.toolbarLeft),
-      };
-    case "toolbarRight":
-      return {
-        ...arrangement,
-        toolbarRight: asRegionIds(nextIds, arrangement.toolbarRight),
-      };
-    case "rail":
-      return {
-        ...arrangement,
-        rail: nextIds.flatMap((id) => {
-          const entry = arrangement.rail.find(
-            (candidate) => candidate.id === id,
-          );
-          return entry === undefined ? [] : [entry];
-        }),
-      };
-    case "usageProviders":
-      return {
-        ...arrangement,
-        usageProviders: asRegionIds(nextIds, arrangement.usageProviders),
-      };
-  }
-}
-
-/** `nextIds` reordered `canonical`, dropping anything reorder cannot have added. */
-function asRegionIds<Id extends string>(
-  nextIds: ReadonlyArray<string>,
-  canonical: ReadonlyArray<Id>,
-): ReadonlyArray<Id> {
-  return nextIds.flatMap((id) => {
-    const match = canonical.find((candidate) => candidate === id);
-    return match === undefined ? [] : [match];
+      : [...arrangement.hiddenProviders, providerId],
   });
 }
 
@@ -551,13 +585,35 @@ function StyleRow(props: {
     ),
   );
   const anyMatch = matches.some((match) => match);
+  // Every key any example writes, which is what this block as a whole owns -
+  // picking "bar only" writes five of them, so a revert that only offered the
+  // five Fine-tune rows individually was not the "each changed row has its own
+  // revert" L-20 asks for (G1-17).
+  const keys = exampleKeys(examples);
+  const changed = changedControlKeys(regionId, keys).length > 0;
 
   return (
     <div className="border-t border-border px-3.5 py-3">
-      <div className="mb-2 text-overline text-muted-foreground uppercase">
-        Style
+      <div className="mb-2 flex items-center gap-2">
+        <div className="min-w-0 flex-1 text-overline text-muted-foreground uppercase">
+          Style
+        </div>
+        {changed ? (
+          <RevertButton
+            label="Revert Style"
+            onRevert={() => {
+              revertControlValues(regionId, keys);
+            }}
+          />
+        ) : null}
       </div>
-      <div className="flex flex-col gap-1.5">
+      {/* The radios need an owner, or a screen reader announces five orphans
+        with no group name and no position in a set (G1-16). */}
+      <div
+        role="radiogroup"
+        aria-label="Style"
+        className="flex flex-col gap-1.5"
+      >
         {examples.map((example, index) => (
           <button
             key={example.id}
@@ -595,7 +651,7 @@ function StyleRow(props: {
       </div>
       {!anyMatch ? (
         <p className="mt-1.5 text-ui-xs text-muted-foreground">
-          Custom - no example matches the fine-tune below.
+          {NO_EXAMPLE_MATCH_COPY}
         </p>
       ) : null}
       {description ? (
@@ -603,6 +659,19 @@ function StyleRow(props: {
       ) : null}
     </div>
   );
+}
+
+/** Every key the Style block's examples write, each named once. */
+function exampleKeys(
+  examples: ReadonlyArray<{
+    readonly patch: Partial<LayoutValues[RegionId]>;
+  }>,
+): ReadonlyArray<string> {
+  const keys = new Set<string>();
+  for (const example of examples) {
+    for (const key of Object.keys(example.patch)) keys.add(key);
+  }
+  return [...keys];
 }
 
 /**
@@ -629,50 +698,60 @@ function valuesWithPatch(
   return next;
 }
 
+/**
+ * A fine-tune row as a caller walking EVERY region sees it.
+ *
+ * The registry's own `FineTuneRow<K>` ties each key to its region, which does
+ * not survive the walk (see `RegionRowFacts`); what does survive is
+ * `RegionValueKey`, the union of every region's keys, so a row still cannot
+ * name something no region has.
+ */
+interface FineTuneRowFacts {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string | null;
+  readonly control:
+    | { readonly kind: "switch"; readonly key: RegionValueKey }
+    | {
+        readonly kind: "segment";
+        readonly key: RegionValueKey;
+        readonly options: ReadonlyArray<SegmentedControlOption>;
+      }
+    | {
+        readonly kind: "checks";
+        readonly keys: ReadonlyArray<RegionValueKey>;
+        readonly options: ReadonlyArray<SegmentedControlOption>;
+      }
+    | {
+        readonly kind: "field-checks";
+        readonly key: RegionValueKey;
+        readonly options: ReadonlyArray<SegmentedControlOption>;
+      };
+}
+
 function FineTuneDisclosure(props: {
-  readonly rows: ReadonlyArray<{
-    readonly id: string;
-    readonly label: string;
-    readonly description: string | null;
-    readonly control:
-      | { readonly kind: "switch"; readonly key: string }
-      | {
-          readonly kind: "segment";
-          readonly key: string;
-          readonly options: ReadonlyArray<{
-            readonly value: string;
-            readonly label: string;
-          }>;
-        }
-      | {
-          readonly kind: "checks";
-          readonly keys: ReadonlyArray<string>;
-          readonly options: ReadonlyArray<{
-            readonly value: string;
-            readonly label: string;
-          }>;
-        }
-      | {
-          readonly kind: "field-checks";
-          readonly key: string;
-          readonly options: ReadonlyArray<{
-            readonly value: string;
-            readonly label: string;
-          }>;
-        };
-  }>;
+  readonly rows: ReadonlyArray<FineTuneRowFacts>;
   readonly regionId: RegionId;
   readonly regionValues: LayoutValues[RegionId];
   readonly filter: string;
 }): ReactNode {
   const { rows, regionId, regionValues, filter } = props;
   const [manuallyOpen, setManuallyOpen] = useState<boolean | null>(null);
-  const open = manuallyOpen ?? fineTuneMatchesFilter(regionId, filter);
+  // The manual answer is scoped to the filter that was in force when it was
+  // given: without this, opening Fine-tune once and closing it again silenced
+  // L-07's auto-expand for the rest of the session, so typing a word that only
+  // matches a fine-tune label looked like no match at all (G1-20).
+  const [openedUnder, setOpenedUnder] = useState(filter);
+  const manual = openedUnder === filter ? manuallyOpen : null;
+  const open = manual ?? fineTuneMatchesFilter(regionId, filter);
 
   return (
     <Collapsible
       open={open}
-      onOpenChange={setManuallyOpen}
+      onOpenChange={(next) => {
+        setManuallyOpen(next);
+        setOpenedUnder(filter);
+      }}
       className="border-t border-border"
     >
       <CollapsibleTrigger
@@ -697,37 +776,7 @@ function FineTuneDisclosure(props: {
 }
 
 function FineTuneRowView(props: {
-  readonly row: {
-    readonly id: string;
-    readonly label: string;
-    readonly description: string | null;
-    readonly control:
-      | { readonly kind: "switch"; readonly key: string }
-      | {
-          readonly kind: "segment";
-          readonly key: string;
-          readonly options: ReadonlyArray<{
-            readonly value: string;
-            readonly label: string;
-          }>;
-        }
-      | {
-          readonly kind: "checks";
-          readonly keys: ReadonlyArray<string>;
-          readonly options: ReadonlyArray<{
-            readonly value: string;
-            readonly label: string;
-          }>;
-        }
-      | {
-          readonly kind: "field-checks";
-          readonly key: string;
-          readonly options: ReadonlyArray<{
-            readonly value: string;
-            readonly label: string;
-          }>;
-        };
-  };
+  readonly row: FineTuneRowFacts;
   readonly regionId: RegionId;
   readonly regionValues: LayoutValues[RegionId];
 }): ReactNode {
@@ -834,11 +883,16 @@ function FineTuneRowView(props: {
 
   const currentList = readControlValue(regionValues, control.key);
   const selected = Array.isArray(currentList) ? currentList : [];
+  // The list cannot be emptied. An empty pinned breakdown is not a state the
+  // card has - it would draw an empty box - so the resolver drops it, and
+  // before this guard the user emptied the list, watched the card go blank for
+  // the session and found every row back on the next launch (G1-07).
+  const last = selected.length <= 1;
   return (
     <InspectorRow
       stacked
       label={row.label}
-      description={row.description ?? undefined}
+      description={row.description ?? "At least one row stays in the card."}
       onRevert={
         isControlValueChanged(regionId, control.key)
           ? () => {
@@ -850,6 +904,10 @@ function FineTuneRowView(props: {
         <div className="flex flex-col gap-1.5">
           {control.options.map((option) => {
             const checked = selected.includes(option.value);
+            // Named rather than written inline: `react/jsx-no-leaked-render`
+            // autofixes a `&&` in a JSX position into `? … : null`, and
+            // `disabled` takes a boolean.
+            const locked = checked && last;
             return (
               <label
                 key={option.value}
@@ -857,6 +915,7 @@ function FineTuneRowView(props: {
               >
                 <Checkbox
                   checked={checked}
+                  disabled={locked}
                   onCheckedChange={(next) => {
                     const nextList = control.options
                       .map((entry) => entry.value)
@@ -865,6 +924,7 @@ function FineTuneRowView(props: {
                           ? next === true
                           : selected.includes(value),
                       );
+                    if (nextList.length === 0) return;
                     writeControlValue(regionId, control.key, nextList);
                   }}
                 />
@@ -878,42 +938,36 @@ function FineTuneRowView(props: {
   );
 }
 
+/**
+ * Usage limits' own second level (L-26): the same provider list the
+ * `usageProviders` order group draws, with the rows opening a provider where
+ * there is a level to open.
+ */
 function ProvidersChildrenRow(props: {
+  readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
   readonly host: "inspector" | "page";
   readonly onOpenProvider: ((providerId: string) => void) | null;
 }): ReactNode {
-  const { arrangement, host, onOpenProvider } = props;
+  const { values, arrangement, host, onOpenProvider } = props;
   const opensSecondLevel = host === "inspector" && onOpenProvider !== null;
   return (
     <div className="border-t border-border px-3.5 py-3">
       <div className="mb-2 text-overline text-muted-foreground uppercase">
         Providers
       </div>
-      <SortableList
+      <OrderGroupList
+        group="usageProviders"
         selectedId={null}
-        items={arrangement.usageProviders.map((providerId) => ({
-          id: providerId,
-          label: providerDisplayName(providerId),
-          icon: null,
-          shown: !arrangement.hiddenProviders.includes(providerId),
-          onToggleShown: () => {
-            toggleHiddenProvider(providerId, arrangement);
-          },
-          onActivate: opensSecondLevel
-            ? () => {
+        values={values}
+        arrangement={arrangement}
+        onOpenProvider={
+          opensSecondLevel
+            ? (providerId) => {
                 onOpenProvider(providerId);
               }
-            : null,
-        }))}
-        onReorder={(nextIds) => {
-          useLayoutEditorStore.getState().recordGesture(() => {
-            useLayoutStore.getState().setArrangement({
-              ...arrangement,
-              usageProviders: asRegionIds(nextIds, arrangement.usageProviders),
-            });
-          });
-        }}
+            : null
+        }
       />
       {opensSecondLevel ? (
         <p className="mt-1.5 text-ui-xs text-muted-foreground">

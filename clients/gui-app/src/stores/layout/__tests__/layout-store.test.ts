@@ -6,15 +6,13 @@ import {
 } from "@/lib/layout/layout-arrangement";
 import {
   changeCount,
-  changedKeys,
   regionChanged,
-  resetEverything,
   resetToBase,
-  revertKeys,
 } from "@/lib/layout/layout-diff";
 import {
   effectiveLayoutValues,
   PRESET_VALUES,
+  type LayoutValues,
 } from "@/lib/layout/layout-values";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
 import {
@@ -66,6 +64,84 @@ async function relaunchStore(): Promise<{
     }),
     carried: () => module.useLayoutStore.getState().layoutCarryDone,
   };
+}
+
+/** A v1.3.0 machine's two legacy records, holding all five shipped values. */
+function seedLegacyRecords(): void {
+  window.localStorage.setItem(
+    persistKey(STORE_KEYS.settings),
+    JSON.stringify({
+      state: {
+        chatTurnMinimapSide: "left",
+        pinContextUsageBreakdown: true,
+        pinnedContextBreakdownFields: ["output", "used"],
+        pinnedContextBreakdownOrder: ["output", "used"],
+        showGlobalResourceMonitor: false,
+        // Everything else the settings record holds is deliberately not
+        // carried: it never shipped as a layout value.
+        contextIndicatorStyle: "ring",
+        homeTabEnabled: true,
+      },
+      version: 1,
+    }),
+  );
+  window.localStorage.setItem(
+    persistKey(STORE_KEYS.leftPanel),
+    JSON.stringify({
+      // The whole grouping, which is the shape the sidebar store holds: a
+      // panel it has no group for is its own group there.
+      state: {
+        panelGroups: [
+          { panelIds: ["chats", "artifacts", "terminals"] },
+          { panelIds: ["browsers"] },
+          { panelIds: ["git-diff"] },
+          { panelIds: ["pull-requests"] },
+          { panelIds: ["file-tree"] },
+          { panelIds: ["sharing"] },
+          { panelIds: ["comments"] },
+        ],
+        // The fifth shipped key (L-61). `true` and `false` are both real
+        // preferences; a panel absent from this map is on its own presence
+        // rule and must carry nothing, and a non-boolean is not a preference.
+        panelVisibilityOverrideById: {
+          comments: false,
+          sharing: true,
+          "git-diff": "yes",
+        },
+      },
+      // An OLDER version than this build's, which is what a machine updating
+      // from v1.3.0 has - and what makes zustand rewrite the record through
+      // the current `partialize` the moment the sidebar store is created.
+      version: 2,
+    }),
+  );
+}
+
+/** What {@link seedLegacyRecords} must produce, all five keys at once. */
+function expectCarried(snapshot: LayoutSnapshot, label: string): void {
+  expect(snapshot.overrides, label).toEqual({
+    contextUsage: { pinBreakdown: true, pinnedFields: ["used", "output"] },
+    resourceMonitor: { shown: "hidden" },
+    railComments: { shown: "hidden" },
+    railSharing: { shown: "shown" },
+  });
+  expect(snapshot.arrangement.minimapSide, label).toBe("left");
+  expect(snapshot.arrangement.pinnedContextFieldOrder, label).toEqual([
+    "output",
+    "used",
+    "fresh",
+    "cacheRead",
+    "cacheWrite",
+  ]);
+  expect(leftPanelGroupsFromRail(snapshot.arrangement.rail), label).toEqual([
+    { panelIds: ["chats", "artifacts", "terminals"] },
+    { panelIds: ["browsers"] },
+    { panelIds: ["git-diff"] },
+    { panelIds: ["pull-requests"] },
+    { panelIds: ["file-tree"] },
+    { panelIds: ["sharing"] },
+    { panelIds: ["comments"] },
+  ]);
 }
 
 describe("useLayoutStore", () => {
@@ -159,7 +235,7 @@ describe("useLayoutStore", () => {
     });
   });
 
-  describe("counting and reverting", () => {
+  describe("counting", () => {
     it("counts VALUES only, never the arrangement (L-57)", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("model", { style: "bars" });
@@ -175,37 +251,18 @@ describe("useLayoutStore", () => {
       expect(changeCount(getLayoutSnapshot())).toBe(3);
     });
 
-    it("names the changed keys of one region and leaves the others alone", () => {
+    it("marks the changed region and leaves the others alone", () => {
       useLayoutStore
         .getState()
         .setRegionValues("usageLimits", { bar: false, word: false });
       const snapshot = getLayoutSnapshot();
 
-      expect(changedKeys(snapshot, "usageLimits")).toEqual(["bar", "word"]);
       expect(regionChanged(snapshot, "usageLimits")).toBe(true);
       expect(regionChanged(snapshot, "model")).toBe(false);
     });
-
-    it("reverts one row and keeps the rest of the region", () => {
-      useLayoutStore
-        .getState()
-        .setRegionValues("usageLimits", { bar: false, word: false });
-
-      const reverted = revertKeys(getLayoutSnapshot(), "usageLimits", ["bar"]);
-
-      expect(reverted.overrides).toEqual({ usageLimits: { word: false } });
-    });
-
-    it("drops the region once its last changed key is reverted", () => {
-      useLayoutStore.getState().setRegionValues("usageLimits", { bar: false });
-
-      const reverted = revertKeys(getLayoutSnapshot(), "usageLimits", ["bar"]);
-
-      expect(reverted.overrides).toEqual({});
-    });
   });
 
-  describe("the two resets", () => {
+  describe("reset to base", () => {
     it("puts the values back and leaves the arrangement where it is", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("model", { style: "bars" });
@@ -216,15 +273,36 @@ describe("useLayoutStore", () => {
       expect(getLayoutSnapshot().overrides).toEqual({});
       expect(getLayoutSnapshot().arrangement.usageHost).toBe("header");
     });
+  });
 
-    it("puts the whole page back, arrangement and preset included", () => {
-      const store = useLayoutStore.getState();
-      store.setBasePreset("detailed");
-      store.setArrangement({ ...DEFAULT_ARRANGEMENT, usageHost: "header" });
+  describe("the write path parses like a rehydrate (G1-08)", () => {
+    it("refuses a value this build has no case for", () => {
+      // The registry's control seam writes by a dynamic key, so a typo reaches
+      // the store as a real patch. It has to die here rather than render from
+      // a default branch for a session and vanish on the next launch.
+      const patch: Partial<LayoutValues["mic"]> = {};
+      Reflect.set(patch, "shown", "sideways");
+      useLayoutStore.getState().setRegionValues("mic", patch);
 
-      useLayoutStore.getState().replaceAll(resetEverything());
+      expect(getLayoutSnapshot().overrides).toEqual({});
+    });
 
-      expect(getLayoutSnapshot()).toEqual(DEFAULT_LAYOUT_SNAPSHOT);
+    it("applies several regions as ONE notification, so one undo step", () => {
+      let notifications = 0;
+      const unsubscribe = useLayoutStore.subscribe(() => {
+        notifications += 1;
+      });
+      useLayoutStore.getState().setRegionValuesMany({
+        model: { style: "bars" },
+        homeTab: { shown: "shown" },
+      });
+      unsubscribe();
+
+      expect(notifications).toBe(1);
+      expect(getLayoutSnapshot().overrides).toEqual({
+        model: { style: "bars" },
+        homeTab: { shown: "shown" },
+      });
     });
   });
 
@@ -272,73 +350,49 @@ describe("useLayoutStore", () => {
   });
 });
 
-describe("the one-shot carry of the four shipped values (L-49)", () => {
+describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
   beforeEach(reset);
   afterEach(reset);
 
-  it("carries the minimap, the pinned breakdown, the resource switch and the rail", async () => {
-    window.localStorage.setItem(
-      persistKey(STORE_KEYS.settings),
-      JSON.stringify({
-        state: {
-          chatTurnMinimapSide: "left",
-          pinContextUsageBreakdown: true,
-          pinnedContextBreakdownFields: ["output", "used"],
-          pinnedContextBreakdownOrder: ["output", "used"],
-          showGlobalResourceMonitor: false,
-          // Everything else the settings record holds is deliberately not
-          // carried: it never shipped as a layout value.
-          contextIndicatorStyle: "ring",
-          homeTabEnabled: true,
-        },
-        version: 1,
-      }),
-    );
-    window.localStorage.setItem(
-      persistKey(STORE_KEYS.leftPanel),
-      JSON.stringify({
-        // The whole grouping, which is the shape the sidebar store holds: a
-        // panel it has no group for is its own group there.
-        state: {
-          panelGroups: [
-            { panelIds: ["chats", "artifacts", "terminals"] },
-            { panelIds: ["browsers"] },
-            { panelIds: ["git-diff"] },
-            { panelIds: ["pull-requests"] },
-            { panelIds: ["file-tree"] },
-            { panelIds: ["sharing"] },
-            { panelIds: ["comments"] },
-          ],
-        },
-        version: 3,
-      }),
-    );
+  it("carries the minimap, the pinned breakdown, the resource switch, the rail and the per-panel Hide/Show", async () => {
+    seedLegacyRecords();
 
     const relaunched = await relaunchStore();
-    const { overrides, arrangement } = relaunched.state();
 
-    expect(overrides).toEqual({
-      contextUsage: { pinBreakdown: true, pinnedFields: ["used", "output"] },
-      resourceMonitor: { shown: "hidden" },
-    });
-    expect(arrangement.minimapSide).toBe("left");
-    expect(arrangement.pinnedContextFieldOrder).toEqual([
-      "output",
-      "used",
-      "fresh",
-      "cacheRead",
-      "cacheWrite",
-    ]);
-    expect(leftPanelGroupsFromRail(arrangement.rail)).toEqual([
-      { panelIds: ["chats", "artifacts", "terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-    ]);
+    expectCarried(relaunched.state(), "relaunch");
     expect(relaunched.carried()).toBe(true);
+  });
+
+  it("carries all five whichever store module the entry path loads first (L-61)", async () => {
+    // The order dependence this pins is not hypothetical. A zustand store
+    // rewrites its own record through the CURRENT `partialize` on its first
+    // write, and both legacy record owners have since dropped the fields the
+    // carry reads. They reach that write differently, and this exercises
+    // both: the sidebar store's record is an older version, so the migration
+    // its `create()` runs writes it back; the settings record is current, so
+    // it takes an ordinary `setState` - what any launch does within seconds
+    // of start-up - to erase the three keys there.
+    for (const order of ["layout-first", "owners-first"] as const) {
+      reset();
+      seedLegacyRecords();
+      vi.resetModules();
+      if (order === "owners-first") {
+        const settings = await import("@/stores/settings/settings-store");
+        settings.useSettingsStore.setState({});
+        await import("@/stores/epics/left-panel-store");
+      }
+      const module = await import("@/stores/layout/layout-store");
+      const state = module.useLayoutStore.getState();
+
+      expectCarried(
+        {
+          basePreset: state.basePreset,
+          overrides: state.overrides,
+          arrangement: state.arrangement,
+        },
+        order,
+      );
+    }
   });
 
   it("carries a hidden minimap as hidden, on the default side", async () => {

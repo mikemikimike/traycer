@@ -73,7 +73,8 @@ export function InspectorRow(props: InspectorRowProps): ReactNode {
   );
 }
 
-function RevertButton(props: {
+/** The per-row revert glyph, also used by the Style block's own header (L-20). */
+export function RevertButton(props: {
   readonly onRevert: () => void;
   readonly label: string;
 }): ReactNode {

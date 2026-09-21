@@ -8,6 +8,7 @@ import {
   undoLayout,
   type LayoutHistory,
 } from "@/lib/layout/layout-history";
+import type { LayoutPresetId } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { basePersistOptions, persistKey, STORE_KEYS } from "@/lib/persist";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
@@ -96,11 +97,30 @@ export interface LayoutEditorState {
    */
   readonly keyboardNav: boolean;
   readonly filter: string;
+  /**
+   * The preset the pointer or arrow focus is on right now, previewed on the
+   * canvas without writing anything (L-43, L-65). The override seam prefers it
+   * while it is set; leaving the card clears it and a click commits through
+   * the ordinary gesture path, so the preview never reaches the layout store,
+   * the history or `localStorage`.
+   */
+  readonly previewPreset: LayoutPresetId | null;
   readonly dockMode: LayoutDockMode;
   readonly floatPosition: LayoutDockPosition | null;
   readonly history: LayoutHistory;
   /** The state Discard restores, rebased on every external write (L-18). */
   readonly entrySnapshot: LayoutSnapshot | null;
+  /**
+   * Whether the layout differs from {@link entrySnapshot}, which is what the
+   * Discard button is enabled by.
+   *
+   * Maintained by the four paths that can change the answer - a gesture, an
+   * undo, a redo, a discard - plus the rebase watcher, rather than derived in
+   * a selector: as a selector it serialised the whole triple TWICE on every
+   * editor-store notification, which on a pointer sweep is hundreds of times a
+   * second (G1-04).
+   */
+  readonly dirty: boolean;
   /** Whether something in the app is waiting for the user (L-17, 4.8). */
   readonly relayRaised: boolean;
   readonly lockedBy: LayoutEditorLock;
@@ -123,6 +143,7 @@ export interface LayoutEditorState {
   readonly setHovered: (regionId: RegionId | null) => void;
   readonly setKeyboardNav: (keyboardNav: boolean) => void;
   readonly setFilter: (filter: string) => void;
+  readonly setPreviewPreset: (previewPreset: LayoutPresetId | null) => void;
   readonly setDockMode: (dockMode: LayoutDockMode) => void;
   readonly setFloatPosition: (floatPosition: LayoutDockPosition) => void;
   readonly setRelayRaised: (relayRaised: boolean) => void;
@@ -142,8 +163,10 @@ const SESSION_DEFAULTS = {
   hovered: null,
   keyboardNav: false,
   filter: "",
+  previewPreset: null,
   history: EMPTY_LAYOUT_HISTORY,
   entrySnapshot: null,
+  dirty: false,
   relayRaised: false,
 } as const;
 
@@ -185,7 +208,15 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           instances.delete(key);
           return { instances };
         }),
-      select: (selected) => set({ selected, level: null }),
+      // Every one of these setters is guarded, because zustand notifies on
+      // every `set` and the canvas's own painter runs on every notification:
+      // `setHovered` alone fires on each pointer event, which on a 120Hz
+      // trackpad is 120 full repaints a second of state that did not move
+      // (G1-04).
+      select: (selected) => {
+        if (get().selected === selected) return;
+        set({ selected, level: null });
+      },
       openLevel: (level) => set({ level }),
       popInspectorLevel: () => {
         const state = get();
@@ -199,20 +230,46 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         }
         return false;
       },
-      setHovered: (hovered) => set({ hovered }),
-      setKeyboardNav: (keyboardNav) => set({ keyboardNav }),
-      setFilter: (filter) => set({ filter }),
-      setDockMode: (dockMode) => set({ dockMode }),
+      setHovered: (hovered) => {
+        if (get().hovered === hovered) return;
+        set({ hovered });
+      },
+      setKeyboardNav: (keyboardNav) => {
+        if (get().keyboardNav === keyboardNav) return;
+        set({ keyboardNav });
+      },
+      setFilter: (filter) => {
+        if (get().filter === filter) return;
+        set({ filter });
+      },
+      setPreviewPreset: (previewPreset) => {
+        if (get().previewPreset === previewPreset) return;
+        set({ previewPreset });
+      },
+      setDockMode: (dockMode) => {
+        if (get().dockMode === dockMode) return;
+        set({ dockMode });
+      },
       setFloatPosition: (floatPosition) => set({ floatPosition }),
-      setRelayRaised: (relayRaised) => set({ relayRaised }),
-      setLockedBy: (lockedBy) => set({ lockedBy }),
+      setRelayRaised: (relayRaised) => {
+        if (get().relayRaised === relayRaised) return;
+        set({ relayRaised });
+      },
+      setLockedBy: (lockedBy) => {
+        if (get().lockedBy === lockedBy) return;
+        set({ lockedBy });
+      },
       recordGesture: (mutate) => {
         const before = getLayoutSnapshot();
         applyAsEditorWrite(mutate);
         // A gesture that landed on the value it already had is not a step: an
         // Undo that visibly does nothing is worse than no Undo.
-        if (sameSnapshot(before, getLayoutSnapshot())) return;
-        set({ history: recordLayoutChange(get().history, before) });
+        const after = getLayoutSnapshot();
+        if (sameSnapshot(before, after)) return;
+        set({
+          history: recordLayoutChange(get().history, before),
+          dirty: !sameSnapshot(get().entrySnapshot, after),
+        });
       },
       undo: () => {
         const travel = undoLayout(get().history, getLayoutSnapshot());
@@ -220,7 +277,10 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(travel.snapshot);
         });
-        set({ history: travel.history });
+        set({
+          history: travel.history,
+          dirty: !sameSnapshot(get().entrySnapshot, getLayoutSnapshot()),
+        });
       },
       redo: () => {
         const travel = redoLayout(get().history, getLayoutSnapshot());
@@ -228,7 +288,10 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(travel.snapshot);
         });
-        set({ history: travel.history });
+        set({
+          history: travel.history,
+          dirty: !sameSnapshot(get().entrySnapshot, getLayoutSnapshot()),
+        });
       },
       discard: () => {
         const entrySnapshot = get().entrySnapshot;
@@ -236,7 +299,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(entrySnapshot);
         });
-        set({ history: EMPTY_LAYOUT_HISTORY });
+        set({ history: EMPTY_LAYOUT_HISTORY, dirty: false });
       },
     }),
     {
@@ -296,16 +359,6 @@ export function regionGhostRequested(
   return state.hovered === regionId || state.selected === regionId;
 }
 
-/** Every live node for one region, in registration order (L-23). */
-export function regionInstances(
-  state: Pick<LayoutEditorState, "instances">,
-  regionId: RegionId,
-): ReadonlyArray<RegionInstance> {
-  return [...state.instances.values()].filter(
-    (instance) => instance.regionId === regionId,
-  );
-}
-
 /**
  * Writes the editor made itself, so the external-write watcher can tell them
  * apart from a write by another window or by a settings surface (L-18).
@@ -335,8 +388,10 @@ function watchExternalLayoutWrites(): void {
     if (entrySnapshot === null) return;
     // History is deliberately left alone: the old editor wiped the stacks on
     // any external write, which lost the user's own work to someone else's.
+    const rebased = rebaseLayoutSnapshot(entrySnapshot, before, next);
     useLayoutEditorStore.setState({
-      entrySnapshot: rebaseLayoutSnapshot(entrySnapshot, before, next),
+      entrySnapshot: rebased,
+      dirty: !sameSnapshot(rebased, next),
     });
   });
 }
@@ -351,8 +406,11 @@ function stopWatchingLayoutWrites(): void {
  * sides are plain data built by the same resolvers, so key order is not a
  * variable.
  */
-function sameSnapshot(left: LayoutSnapshot, right: LayoutSnapshot): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function sameSnapshot(
+  left: LayoutSnapshot | null,
+  right: LayoutSnapshot,
+): boolean {
+  return left !== null && JSON.stringify(left) === JSON.stringify(right);
 }
 
 function persistedDockMode(persistedState: unknown): LayoutDockMode {

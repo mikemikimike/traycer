@@ -148,15 +148,25 @@
    point is that editable chrome reads as lit against calm content.
    --------------------------------------------------------------- */
 
-[data-layout-passive] {
+/* Scoped under a live session, both of them. Unscoped, the transition rule
+   gave every marked leaf a permanent 200ms opacity/filter transition for the
+   whole life of the app - which outside a session was the only runtime effect
+   this whole marker set had, and it changed how the send and stop buttons
+   fade in ordinary use (G1-19). */
+[data-layout-editing="1"] [data-layout-passive] {
+  opacity: 0.45;
+  filter: saturate(0.45);
   transition:
     opacity var(--layout-editor-dim-duration) var(--layout-editor-ease),
     filter var(--layout-editor-dim-duration) var(--layout-editor-ease);
 }
 
-[data-layout-editing="1"] [data-layout-passive] {
-  opacity: 0.45;
-  filter: saturate(0.45);
+/* The transcript dims with `opacity` alone. It is a virtualised, full-viewport
+   list that keeps STREAMING under the editor (L-17), and a `filter` on it is a
+   continuously repainting filtered layer the size of the window; the small
+   leaves around it keep the desaturation that carries the signal. */
+[data-layout-editing="1"] [data-layout-passive="opacity-only"] {
+  filter: none;
 }
 
 /* ---------------------------------------------------------------
@@ -343,12 +353,9 @@
     transition: none;
   }
 
-  [data-layout-passive] {
-    transition: opacity var(--layout-editor-dim-duration) linear;
-  }
-
   [data-layout-editing="1"] [data-layout-passive] {
     filter: none;
+    transition: opacity var(--layout-editor-dim-duration) linear;
   }
 
   [data-layout-selection-ring] {
@@ -371,14 +378,11 @@
   transition: none;
 }
 
-:root[data-reduce-panel-motion] [data-layout-passive] {
-  transition: opacity var(--layout-editor-dim-duration) linear;
-}
-
 :root[data-reduce-panel-motion]
   [data-layout-editing="1"]
   [data-layout-passive] {
   filter: none;
+  transition: opacity var(--layout-editor-dim-duration) linear;
 }
 
 :root[data-reduce-panel-motion] [data-layout-selection-ring] {

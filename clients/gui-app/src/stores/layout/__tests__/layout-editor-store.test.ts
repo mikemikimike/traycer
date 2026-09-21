@@ -4,7 +4,6 @@ import { LAYOUT_HISTORY_CAP } from "@/lib/layout/layout-history";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
 import {
   preferredRegionInstance,
-  regionInstances,
   useLayoutEditorStore,
   type LayoutEditorState,
   type RegionInstance,
@@ -14,6 +13,21 @@ import {
   getLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+
+/**
+ * Every live registration of one region, in registration order.
+ *
+ * Read off the store's own map rather than through a helper exported only for
+ * this: the map IS the public shape (`preferredRegionInstance` takes it), and
+ * a second accessor with no production caller was dead weight (G1-12).
+ */
+function instancesOf(
+  regionId: RegionInstance["regionId"],
+): ReadonlyArray<RegionInstance> {
+  return [...editorState().instances.values()].filter(
+    (entry) => entry.regionId === regionId,
+  );
+}
 
 function session(preferredInstanceId: string | null): void {
   useLayoutEditorStore.getState().beginSession({
@@ -215,10 +229,7 @@ describe("instances", () => {
     editorState().registerInstance(preferred);
 
     expect(preferredRegionInstance(editorState(), "minimap")).toBe(preferred);
-    expect(regionInstances(editorState(), "minimap")).toEqual([
-      background,
-      preferred,
-    ]);
+    expect(instancesOf("minimap")).toEqual([background, preferred]);
 
     editorState().unregisterInstance(preferred.key, preferred.node);
     expect(preferredRegionInstance(editorState(), "minimap")).toBe(background);
@@ -249,7 +260,7 @@ describe("instances", () => {
 
     editorState().endSession();
 
-    expect(regionInstances(editorState(), "mic")).toEqual([live]);
+    expect(instancesOf("mic")).toEqual([live]);
   });
 });
 

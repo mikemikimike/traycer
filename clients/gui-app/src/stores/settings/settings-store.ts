@@ -3,6 +3,14 @@ import {
   type BrowserSearchEngine,
 } from "@/lib/browser-view/browser-search";
 import { create } from "zustand";
+// Imported for its module-load side effect, and for that reason only: the
+// layout store's shipped-key carry (L-49, L-61) reads THIS store's record raw,
+// and zustand's `persist` rewrites that record through the current
+// `partialize` - which no longer carries the minimap side, the pinned
+// breakdown or the resource-monitor switch - the moment `create()` runs below.
+// Capturing it first has to be strictly earlier than this module's body, which
+// an import is and a bootstrap call is not (G1-01).
+import "@/lib/layout/legacy-layout-records";
 import { useThemeLibraryStore } from "@/stores/settings/theme-library-store";
 import { persist } from "zustand/middleware";
 import {
@@ -136,8 +144,13 @@ export function inactiveCursorStyleFor(
  * chip prints them; the stored list is always a subsequence of this one.
  */
 export type NavigatorResourceMetric = "cpu" | "memory" | "processes";
-/** Chips draw every reading; nothing selects a subset any more (L-28). */
-export const DEFAULT_NAVIGATOR_RESOURCE_METRICS: ReadonlyArray<NavigatorResourceMetric> =
+/**
+ * The fixed set the chips draw, with nothing selecting a subset any more
+ * (L-28). WHETHER they draw is the Resource monitor region's Shown switch,
+ * which the chips and the stream both follow (L-60) - see
+ * `useNavigatorResourceMetrics`.
+ */
+export const NAVIGATOR_RESOURCE_METRICS: ReadonlyArray<NavigatorResourceMetric> =
   ["cpu", "memory", "processes"];
 
 // Default font sizes, shared with the Appearance panel so its reset-to-default

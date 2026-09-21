@@ -11,6 +11,7 @@ import {
   preferredRegionInstance,
   useLayoutEditorStore,
 } from "@/stores/layout/layout-editor-store";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
  * The canvas half of an editor session: what the pointer is on, and where the
@@ -58,9 +59,9 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
         state.selected === null
           ? null
           : preferredRegionInstance(state, state.selected);
-      // Called on every store change, with the same node as often as not: the
-      // ring parks itself once its springs arrive, and this is what wakes it
-      // when the canvas underneath may have moved.
+      // Identity-guarded inside the controller, so this costs nothing on the
+      // notifications that did not move the selection. What the canvas UNDER
+      // the ring does is a separate signal - see the two subscriptions below.
       ring.track(selected?.node ?? null);
     };
 
@@ -85,13 +86,26 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
     };
 
     paint();
-    const unsubscribe = useLayoutEditorStore.subscribe(paint);
+    const unsubscribe = useLayoutEditorStore.subscribe((state, previous) => {
+      paint();
+      // A preview changes what every region draws, so the ring's own node can
+      // move without resizing - which is the one case neither the
+      // `ResizeObserver` nor the scroll/resize listeners in the controller
+      // would see.
+      if (state.previewPreset !== previous.previewPreset) ring.refresh();
+    });
+    // A layout write is the other way the canvas reflows under a ring that is
+    // already parked on the right element.
+    const unsubscribeLayout = useLayoutStore.subscribe(() => {
+      ring.refresh();
+    });
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerdown", onPointerDown, true);
     column.addEventListener("pointerleave", onPointerLeave);
 
     return () => {
       unsubscribe();
+      unsubscribeLayout();
       document.removeEventListener("pointermove", onPointerMove, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
       column.removeEventListener("pointerleave", onPointerLeave);

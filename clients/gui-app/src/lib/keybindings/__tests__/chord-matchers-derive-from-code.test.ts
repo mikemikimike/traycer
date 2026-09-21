@@ -140,6 +140,9 @@ const KEYBOARD_KEY_READS: Readonly<Record<string, number>> = {
   // named keys, none of them a registered chord.
   "gui-app/src/components/layout-editor/inspector/inspector-index.tsx": 4,
   "gui-app/src/components/layout-editor/inspector/sortable-list.tsx": 3,
+  // The editor's own Mod+Z / Mod+Shift+Z, matched by the letter the user
+  // reads - see PRINTABLE_CHARACTER_MATCHES.
+  "gui-app/src/components/layout-editor/layout-editor.tsx": 1,
   "gui-app/src/components/layout/find-in-page-bar.tsx": 2,
   "gui-app/src/components/layout/header/desktop-menu-buttons.tsx": 3,
   "gui-app/src/components/layout/tabs/tab-group-chip.tsx": 4,
@@ -216,6 +219,10 @@ const PRINTABLE_CHARACTER_MATCHES: Readonly<
   "gui-app/src/components/providers/profile-dropdown.tsx": {
     chars: ["r"],
     why: "single-letter accelerator on a visible label inside an open menu",
+  },
+  "gui-app/src/components/layout-editor/layout-editor.tsx": {
+    chars: ["z"],
+    why: "platform mod+Z undo convention, scoped to an open Customize session and matched where the letter is",
   },
   "gui-app/src/components/composer/drafts/composer-drafts-control.tsx": {
     chars: ["c", "d"],

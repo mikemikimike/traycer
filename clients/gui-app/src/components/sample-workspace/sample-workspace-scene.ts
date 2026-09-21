@@ -111,6 +111,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     },
     label: "Sample: one changed file, 12 additions and 3 deletions",
     pulseToken: null,
+    sample: true,
   },
   {
     section: "activeAgents",
@@ -120,6 +121,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     lineDeltas: null,
     label: "Sample: one active agent",
     pulseToken: null,
+    sample: true,
   },
   {
     section: "background",
@@ -129,6 +131,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     lineDeltas: null,
     label: "Sample: one background shell",
     pulseToken: null,
+    sample: true,
   },
 ];
 export function sampleNoop(): void {}

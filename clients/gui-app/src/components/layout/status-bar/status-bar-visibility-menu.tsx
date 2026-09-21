@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/context-menu";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { trackSettingChanged } from "@/lib/analytics";
-import { useLayoutArrangement, useRegionShown } from "@/lib/layout-overrides";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { navigateToSettingsSection } from "@/lib/settings-navigation";
 import { useLayoutStore } from "@/stores/layout/layout-store";
@@ -50,8 +50,7 @@ interface StatusBarVisibilityMenuProps {
 export function StatusBarVisibilityMenu(
   props: StatusBarVisibilityMenuProps,
 ): ReactNode {
-  const arrangement = useLayoutArrangement();
-  const hiddenProviders = arrangement.hiddenProviders;
+  const hiddenProviders = useArrangementValue("hiddenProviders");
   const resourcesShown = useRegionShown("resourceMonitor");
   const setArrangement = useLayoutStore((state) => state.setArrangement);
   const setRegionValues = useLayoutStore((state) => state.setRegionValues);
@@ -90,8 +89,10 @@ export function StatusBarVisibilityMenu(
                 "layout",
                 "layout.statusBar.rateLimits.provider",
               );
+              // The whole arrangement is read at write time rather than
+              // subscribed: this menu needs it only to spread it (G1-14).
               setArrangement({
-                ...arrangement,
+                ...useLayoutStore.getState().arrangement,
                 hiddenProviders: hiddenProviders.includes(provider.providerId)
                   ? hiddenProviders.filter((id) => id !== provider.providerId)
                   : [...hiddenProviders, provider.providerId],
@@ -124,7 +125,10 @@ export function StatusBarVisibilityMenu(
           <ContextMenuItem
             onSelect={() => {
               trackSettingChanged("layout", "layout.statusBar.placement");
-              setArrangement({ ...arrangement, usageHost: "header" });
+              setArrangement({
+                ...useLayoutStore.getState().arrangement,
+                usageHost: "header",
+              });
             }}
           >
             Move to header

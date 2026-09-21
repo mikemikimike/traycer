@@ -15,6 +15,10 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import {
+  applyLeftPanelGroups,
+  currentLeftPanelGroups,
+} from "@/lib/layout/rail-view";
 import { useEpicSidebarExpansionStore } from "@/stores/epics/epic-sidebar-expansion-store";
 import { makeGitFileDiffTile } from "@/lib/git/git-diff-tile";
 import type { NavigateNestedFocus } from "@/lib/epic-nested-focus-navigation";
@@ -313,16 +317,14 @@ describe("root dnd commits - left panel", () => {
   afterEach(resetStores);
 
   it("extracts a grouped section to the rail end from the rail background", () => {
-    useLeftPanelStore
-      .getState()
-      .applyPanelGroups(
-        moveLeftPanelGroup(
-          useLeftPanelStore.getState().getPanelGroups(),
-          "artifacts",
-          "chats",
-          "combine",
-        ),
-      );
+    applyLeftPanelGroups(
+      moveLeftPanelGroup(
+        currentLeftPanelGroups(),
+        "artifacts",
+        "chats",
+        "combine",
+      ),
+    );
     const source = railSource("artifacts", "panel-section");
     const target = { kind: "left-panel-rail-list" } as const;
     const preview = resolveCanvasDropPreview({
@@ -337,7 +339,7 @@ describe("root dnd commits - left panel", () => {
     expect(isLeftPanelDropNoop(source, preview)).toBe(false);
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats"] },
       { panelIds: ["terminals"] },
       { panelIds: ["browsers"] },
@@ -351,16 +353,14 @@ describe("root dnd commits - left panel", () => {
   });
 
   it("flags same-group middle-band section drops as no-ops", () => {
-    useLeftPanelStore
-      .getState()
-      .applyPanelGroups(
-        moveLeftPanelGroup(
-          useLeftPanelStore.getState().getPanelGroups(),
-          "artifacts",
-          "chats",
-          "combine",
-        ),
-      );
+    applyLeftPanelGroups(
+      moveLeftPanelGroup(
+        currentLeftPanelGroups(),
+        "artifacts",
+        "chats",
+        "combine",
+      ),
+    );
     const source = railSource("artifacts", "panel-section");
     const target = {
       kind: "left-panel-rail-item",
@@ -425,7 +425,7 @@ describe("root dnd commits - left panel", () => {
     expect(isLeftPanelDropNoop(source, preview)).toBe(false);
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "artifacts"] },
       { panelIds: ["file-tree"] },
       { panelIds: ["terminals"] },
@@ -460,7 +460,7 @@ describe("root dnd commits - left panel", () => {
     });
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "artifacts"] },
       { panelIds: ["terminals", "file-tree"] },
       { panelIds: ["browsers"] },
@@ -472,18 +472,17 @@ describe("root dnd commits - left panel", () => {
   });
 
   it("inserts a rail group into a single-panel group via section bounds", () => {
-    useLeftPanelStore
-      .getState()
-      .applyPanelGroups([
-        { panelIds: ["chats"] },
-        { panelIds: ["artifacts"] },
-        { panelIds: ["terminals"] },
-        { panelIds: ["git-diff"] },
-        { panelIds: ["pull-requests"] },
-        { panelIds: ["file-tree"] },
-        { panelIds: ["sharing"] },
-        { panelIds: ["comments"] },
-      ]);
+    applyLeftPanelGroups([
+      { panelIds: ["chats"] },
+      { panelIds: ["artifacts"] },
+      { panelIds: ["terminals"] },
+      { panelIds: ["browsers"] },
+      { panelIds: ["git-diff"] },
+      { panelIds: ["pull-requests"] },
+      { panelIds: ["file-tree"] },
+      { panelIds: ["sharing"] },
+      { panelIds: ["comments"] },
+    ]);
     const groupElement = document.createElement("div");
     groupElement.append(
       makeRectElement("chats", { x: 0, y: 0, width: 320, height: 900 }),
@@ -504,29 +503,27 @@ describe("root dnd commits - left panel", () => {
 
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "file-tree"] },
       { panelIds: ["artifacts"] },
       { panelIds: ["terminals"] },
+      { panelIds: ["browsers"] },
       { panelIds: ["git-diff"] },
       { panelIds: ["pull-requests"] },
       { panelIds: ["sharing"] },
       { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
     ]);
   });
 
   it("inserts a rail group at the nearest grouped-section boundary", () => {
-    useLeftPanelStore
-      .getState()
-      .applyPanelGroups(
-        moveLeftPanelGroup(
-          useLeftPanelStore.getState().getPanelGroups(),
-          "artifacts",
-          "chats",
-          "combine",
-        ),
-      );
+    applyLeftPanelGroups(
+      moveLeftPanelGroup(
+        currentLeftPanelGroups(),
+        "artifacts",
+        "chats",
+        "combine",
+      ),
+    );
     const groupElement = document.createElement("div");
     groupElement.append(
       makeRectElement("chats", { x: 0, y: 0, width: 320, height: 300 }),
@@ -548,7 +545,7 @@ describe("root dnd commits - left panel", () => {
 
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(useLeftPanelStore.getState().getPanelGroups()).toEqual([
+    expect(currentLeftPanelGroups()).toEqual([
       { panelIds: ["chats", "git-diff", "artifacts"] },
       { panelIds: ["terminals"] },
       { panelIds: ["browsers"] },

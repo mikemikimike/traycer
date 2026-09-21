@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
@@ -8,14 +7,14 @@ import {
   STORE_KEYS,
 } from "@/lib/persist";
 import type { EpicArtifactKind } from "@traycer/protocol/common/registry";
-import {
-  leftPanelGroupsFromRail,
-  panelVisibilityOverridesFromValues,
-  railFromLeftPanelGroups,
-  railRegionForLeftPanelId,
-  railVisibilityFor,
-} from "@/lib/layout/layout-arrangement";
+import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+// Imported for its module-load side effect, and for that reason only: the
+// shipped-key carry (L-49, L-61) reads this store's record RAW, and zustand's
+// `persist` rewrites that record through the current `partialize` the moment
+// `create()` runs below. Capturing it first has to be strictly earlier than
+// this module's body, which an import is and a bootstrap call is not.
+import "@/lib/layout/legacy-layout-records";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 import {
   DEFAULT_SORT_MODE,
@@ -279,17 +278,6 @@ interface LeftPanelStore {
     panelId: LeftPanelId,
   ) => void;
   readonly copyTabState: (sourceTabId: string, targetTabId: string) => void;
-  readonly getPanelGroups: () => ReadonlyArray<LeftPanelGroup>;
-  /**
-   * Atomic panel-groups write for the rail/section DnD commit layer: callers
-   * resolve the next groups with the pure `moveLeftPanel*` helpers (see
-   * `resolveLeftPanelGroupsForDrop` in `root-dnd-commits.ts`) and apply the
-   * result here. Normalizes the input and keeps slice identity when the
-   * result is structurally unchanged.
-   */
-  readonly applyPanelGroups: (
-    nextGroups: ReadonlyArray<LeftPanelGroup>,
-  ) => void;
 
   readonly isMainCollapsed: (tabId: string) => boolean;
   readonly setMainCollapsed: (tabId: string, collapsed: boolean) => void;
@@ -307,27 +295,6 @@ interface LeftPanelStore {
 
   readonly isCommentsPanelRevealed: (tabId: string) => boolean;
   readonly revealCommentsPanel: (tabId: string) => void;
-
-  /**
-   * `null` drops the override so the panel goes back to following its own
-   * availability rule. Callers pass `null` whenever the value they are setting
-   * already matches that rule, keeping the persisted map to real preferences.
-   */
-  readonly setPanelVisibilityOverride: (
-    panelId: LeftPanelId,
-    override: boolean | null,
-  ) => void;
-  /**
-   * The whole map at once, for a caller holding a complete answer rather than
-   * one panel's - the Customize editor's undo, which restores the arrangement a
-   * gesture changed in ONE write. A walk over the per-panel setter would persist
-   * and re-render once per panel, and would leave the rail in intermediate
-   * states an undo never meant to show.
-   */
-  readonly setPanelVisibilityOverrides: (
-    overrides: PanelVisibilityOverrideById,
-  ) => void;
-  readonly clearPanelVisibilityOverrides: () => void;
 
   readonly getLocalRootCreatePending: (
     epicId: string,
@@ -566,6 +533,21 @@ function findPanelLocation(
   return { groupIndex, panelIndex };
 }
 
+/**
+ * The nine rail regions' show/hide, for this store's OWN activation guard.
+ *
+ * A read, deliberately not a write: the rail's shape belongs to the layout
+ * store and `lib/layout/rail-view.ts` owns the writers (G1-09). What this
+ * store still needs to know is which panels a user has switched off, because
+ * it must not make one of them the active panel.
+ */
+function currentPanelVisibilityOverrides(): PanelVisibilityOverrideById {
+  const state = useLayoutStore.getState();
+  return panelVisibilityOverridesFromValues(
+    effectiveLayoutValues(state.basePreset, state.overrides),
+  );
+}
+
 export function areLeftPanelGroupsEqual(
   left: ReadonlyArray<LeftPanelGroup>,
   right: ReadonlyArray<LeftPanelGroup>,
@@ -581,24 +563,6 @@ export function areLeftPanelGroupsEqual(
         )
       );
     })
-  );
-}
-
-/**
- * The rail as the sidebar's group view, off the ONE place it lives now
- * (`arrangement.rail`). The store's own accessors read through here, so a
- * caller that holds `useLeftPanelStore.getState()` still asks one question and
- * gets one answer.
- */
-function currentPanelGroups(): ReadonlyArray<LeftPanelGroup> {
-  return leftPanelGroupsFromRail(useLayoutStore.getState().arrangement.rail);
-}
-
-/** The nine rail regions' show/hide, as the sparse map the render paths read. */
-function currentPanelVisibilityOverrides(): PanelVisibilityOverrideById {
-  const state = useLayoutStore.getState();
-  return panelVisibilityOverridesFromValues(
-    effectiveLayoutValues(state.basePreset, state.overrides),
   );
 }
 
@@ -1022,18 +986,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
         });
       },
 
-      getPanelGroups: () => currentPanelGroups(),
-
-      applyPanelGroups: (nextGroups) => {
-        const arrangement = useLayoutStore.getState().arrangement;
-        const normalized = normalizeLeftPanelGroups(nextGroups);
-        if (areLeftPanelGroupsEqual(currentPanelGroups(), normalized)) return;
-        useLayoutStore.getState().setArrangement({
-          ...arrangement,
-          rail: railFromLeftPanelGroups(normalized, arrangement.dividerSeq),
-        });
-      },
-
       isMainCollapsed: (tabId) => get().mainCollapsedByTabId[tabId] ?? false,
 
       setMainCollapsed: (tabId, collapsed) => {
@@ -1124,34 +1076,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
             },
           };
         });
-      },
-
-      setPanelVisibilityOverride: (panelId, override) => {
-        useLayoutStore
-          .getState()
-          .setRegionValues(railRegionForLeftPanelId(panelId), {
-            shown: railVisibilityFor(override),
-          });
-      },
-
-      setPanelVisibilityOverrides: (overrides) => {
-        for (const panelId of LEFT_PANEL_IDS) {
-          useLayoutStore
-            .getState()
-            .setRegionValues(railRegionForLeftPanelId(panelId), {
-              shown: railVisibilityFor(overrides[panelId] ?? null),
-            });
-        }
-      },
-
-      clearPanelVisibilityOverrides: () => {
-        for (const panelId of LEFT_PANEL_IDS) {
-          useLayoutStore
-            .getState()
-            .setRegionValues(railRegionForLeftPanelId(panelId), {
-              shown: "auto",
-            });
-        }
       },
 
       getLocalRootCreatePending: (epicId, panelId) =>
@@ -1574,11 +1498,6 @@ export function useActiveLeftPanelId(tabId: string): LeftPanelId {
   );
 }
 
-export function useLeftPanelGroups(): ReadonlyArray<LeftPanelGroup> {
-  const rail = useLayoutStore((state) => state.arrangement.rail);
-  return useMemo(() => leftPanelGroupsFromRail(rail), [rail]);
-}
-
 export function useMainPanelCollapsed(tabId: string): boolean {
   return useLeftPanelStore((s) => s.mainCollapsedByTabId[tabId] ?? false);
 }
@@ -1596,18 +1515,6 @@ export function useLeftPanelSectionCollapsed(panelId: LeftPanelId): boolean {
 export function useCommentsPanelRevealed(tabId: string): boolean {
   return useLeftPanelStore(
     (s) => s.commentsPanelRevealedByTabId[tabId] ?? false,
-  );
-}
-
-export function usePanelVisibilityOverrides(): PanelVisibilityOverrideById {
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const overrides = useLayoutStore((state) => state.overrides);
-  return useMemo(
-    () =>
-      panelVisibilityOverridesFromValues(
-        effectiveLayoutValues(basePreset, overrides),
-      ),
-    [basePreset, overrides],
   );
 }
 

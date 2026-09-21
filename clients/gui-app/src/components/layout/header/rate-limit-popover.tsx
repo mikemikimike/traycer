@@ -140,7 +140,7 @@ import {
   statusBarShownProfileIds,
   type StatusBarShownProfiles,
 } from "@/lib/layout/layout-arrangement";
-import { useLayoutArrangement } from "@/lib/layout-overrides";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import {
   useLayoutStore,
   useStatusBarShown,
@@ -1839,9 +1839,8 @@ function ProfileRateLimitProviderBlock({
   const checkedProfileIds = profileSelection.shownProfiles[providerId] ?? [];
   // A provider hidden from the strip has no segment for the eye to govern;
   // the eye goes with it rather than toggling a preference nothing shows.
-  const arrangement = useLayoutArrangement();
-  const providerHiddenFromStrip =
-    arrangement.hiddenProviders.includes(providerId);
+  const hiddenProviders = useArrangementValue("hiddenProviders");
+  const providerHiddenFromStrip = hiddenProviders.includes(providerId);
   // The host the eye writes for, or `null` when there is no eye to draw.
   const eyeHostId =
     stripShown && !providerHiddenFromStrip ? displayedHostId : null;
@@ -1977,10 +1976,15 @@ function ProfileRateLimitProviderBlock({
                         "layout",
                         "layout.statusBar.shownProfiles",
                       );
+                      // Read at write time rather than subscribed: this row
+                      // needs the whole arrangement only to spread it, and a
+                      // subscription to it re-renders the popover on every
+                      // dock reorder and divider drag (G1-14).
+                      const current = useLayoutStore.getState().arrangement;
                       setArrangement({
-                        ...arrangement,
+                        ...current,
                         shownProfiles: withProfileShown({
-                          shownProfiles: arrangement.shownProfiles,
+                          shownProfiles: current.shownProfiles,
                           hostId: eyeHostId,
                           providerId,
                           profileId: target.profileId,

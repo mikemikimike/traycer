@@ -2,14 +2,26 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { changeCount, resetToBase } from "@/lib/layout/layout-diff";
+import type {
+  LayoutArrangement,
+  RailEntry,
+} from "@/lib/layout/layout-arrangement";
 import {
   LAYOUT_PRESET_IDS,
   PRESET_VALUES,
   type LayoutPresetId,
+  type LayoutValues,
 } from "@/lib/layout/layout-values";
-import { depictRegion } from "@/lib/layout/region-depiction";
+import {
+  depictRegion,
+  type HostContextId,
+} from "@/lib/layout/region-depiction";
+import type { RegionId, ToolbarRegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { useLayoutStore } from "@/stores/layout/layout-store";
+import {
+  useLayoutSnapshot,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 const PRESET_LABELS: Readonly<Record<LayoutPresetId, string>> = {
   default: "Default",
@@ -19,9 +31,11 @@ const PRESET_LABELS: Readonly<Record<LayoutPresetId, string>> = {
 
 interface PresetsBlockProps {
   /**
-   * Hover/arrow-focus preview without writing (L-43, L-44): `null` clears the
-   * preview. The caller (the canvas, wired in a later ticket) decides how to
-   * render a previewed preset; this block only reports the intent.
+   * Hover/arrow-focus preview without writing (L-43, L-44, L-65): `null`
+   * clears the preview. The docked inspector routes this into the editor
+   * store's session-only preview tier, which the override seam prefers while
+   * it is set; the full-width Settings host has no canvas to preview onto and
+   * passes a no-op.
    */
   readonly onPreviewPreset: (presetId: LayoutPresetId | null) => void;
 }
@@ -32,16 +46,8 @@ interface PresetsBlockProps {
  * `.statusline` in the prototype.
  */
 export function PresetsBlock(props: PresetsBlockProps): ReactNode {
-  // Three separate selectors, each a stable reference from the store, rather
-  // than one selector returning `{ ... }`: a selector that allocates a new
-  // object on every call defeats `useSyncExternalStore`'s own caching and
-  // free-runs the component (React's "getSnapshot should be cached" loop).
-  // `region-section.tsx`'s `useSnapshot` is the same shape for the same
-  // reason.
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const overrides = useLayoutStore((state) => state.overrides);
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  const snapshot = { basePreset, overrides, arrangement };
+  const snapshot = useLayoutSnapshot();
+  const basePreset = snapshot.basePreset;
   const count = changeCount(snapshot);
 
   function commitPreset(presetId: LayoutPresetId): void {
@@ -58,6 +64,7 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
           <PresetCard
             key={presetId}
             presetId={presetId}
+            arrangement={snapshot.arrangement}
             on={basePreset === presetId}
             onCommit={() => {
               commitPreset(presetId);
@@ -110,21 +117,22 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
 
 function PresetCard(props: {
   readonly presetId: LayoutPresetId;
+  readonly arrangement: LayoutArrangement;
   readonly on: boolean;
   readonly onCommit: () => void;
   readonly onPreview: () => void;
   readonly onClearPreview: () => void;
   readonly onArrowMove: (direction: 1 | -1) => void;
 }): ReactNode {
-  const { presetId, on } = props;
+  const { presetId, arrangement, on } = props;
   return (
     // A `<div role="button">`, not a native `<button>`: the miniature draws
     // the region's own real depiction (`PresetMiniature`, below), and a few
     // regions (`runningAgents` among them) depict as a genuinely interactive
     // component with its own `<button>` - nesting that inside a native
     // button is invalid HTML and reads as two overlapping controls. The
-    // miniature itself is `aria-hidden`, so nothing inside it is reachable
-    // by assistive tech either way; this card is the one control.
+    // miniature is `inert`, so nothing inside it is focusable, hit-testable
+    // or in the a11y tree; this card is the one control.
     <div
       id={`layout-preset-${presetId}`}
       role="button"
@@ -154,7 +162,7 @@ function PresetCard(props: {
         props.onArrowMove(event.key === "ArrowRight" ? 1 : -1);
       }}
     >
-      <PresetMiniature presetId={presetId} />
+      <PresetMiniature presetId={presetId} arrangement={arrangement} />
       <span
         className={cn(
           "text-center text-ui-xs text-muted-foreground",
@@ -171,20 +179,27 @@ const MINIATURE_FRAME_WIDTH = 1000;
 const MINIATURE_FRAME_HEIGHT = 620;
 
 /**
- * A faithful, uniformly-scaled miniature of the real app frame (L-43): the
- * preset's own values, drawn with the SAME `depictRegion` the specimen stage
- * uses, under the current arrangement (2.2) - never a reflowed or hand-drawn
- * lookalike. `.mini-box` / `.mini-frame` in the prototype.
+ * A faithful, uniformly-scaled miniature of the real app frame (L-43, L-62):
+ * the preset's own values, drawn with the SAME `depictRegion` the specimen
+ * stage and the canvas use, under the CURRENT arrangement (2.2) - never a
+ * reflowed or hand-drawn lookalike.
  *
- * The rail and top bar carry no preset-specific state (presets are
- * density-only, L-20), so they are drawn as plain chrome rather than through
- * `depictRegion` for every rail icon - a preset card compares density, and
- * density is entirely in the composer, the chat edge and the status bar.
+ * Everything the arrangement decides is honoured, because the card's whole
+ * claim is that it is a picture of the user's own frame under that density:
+ * a chip-sized dock row draws as a chip in the compact strip rather than as a
+ * full row, the usage cluster sits in whichever surface `usageHost` names, the
+ * resource readout and the minimap take the sides they are on, and the rail is
+ * the real rail with its real dividers. The three cards then differ by density
+ * and by nothing else, which is what makes them comparable.
+ *
+ * `inert`: several depictions render a real `<button>`, and `aria-hidden`
+ * would have left every one of them in the tab order at 1/12 scale (G1-06).
  */
 function PresetMiniature(props: {
   readonly presetId: LayoutPresetId;
+  readonly arrangement: LayoutArrangement;
 }): ReactNode {
-  const arrangement = useLayoutStore((state) => state.arrangement);
+  const { arrangement } = props;
   const values = PRESET_VALUES[props.presetId];
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(0);
@@ -202,108 +217,277 @@ function PresetMiniature(props: {
     return () => observer.disconnect();
   }, []);
 
+  const frame = { values, arrangement };
+
   return (
     <div
       ref={boxRef}
-      aria-hidden
+      inert
+      data-testid="preset-miniature"
       className="relative w-full overflow-hidden rounded border border-border bg-background"
       style={{
         aspectRatio: `${MINIATURE_FRAME_WIDTH} / ${MINIATURE_FRAME_HEIGHT}`,
       }}
     >
       <div
-        className="pointer-events-none absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-background"
+        className="absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-background"
         style={{
           width: MINIATURE_FRAME_WIDTH,
           height: MINIATURE_FRAME_HEIGHT,
           transform: `scale(${scale})`,
         }}
       >
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-          {values.homeTab.shown === "shown"
-            ? depictRegion("homeTab", values.homeTab, arrangement, null)
-            : null}
-          <span className="h-5 w-16 rounded-sm border border-border" />
-        </div>
+        <MiniatureTopBar {...frame} />
         <div className="flex min-h-0 flex-1">
-          <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-border py-3">
-            <span className="size-6 rounded-md border border-border" />
-            <span className="size-6 rounded-md border border-border" />
-            <span className="size-6 rounded-md border border-border" />
-          </div>
+          <MiniatureRail {...frame} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 border-b border-border bg-card" />
-            <div className="flex flex-col gap-1.5 px-3 py-2">
-              {arrangement.dock.map((regionId) =>
-                values[regionId].shown === "shown" ? (
-                  <div key={regionId}>
-                    {depictRegion(
-                      regionId,
-                      values[regionId],
-                      arrangement,
-                      null,
-                    )}
-                  </div>
-                ) : null,
-              )}
-            </div>
-            <div className="flex items-center justify-between px-3 pb-2">
-              <div className="flex items-center gap-1.5">
-                {arrangement.toolbarLeft.map((regionId) =>
-                  values[regionId].shown === "shown" ? (
-                    <span key={regionId}>
-                      {depictRegion(
-                        regionId,
-                        values[regionId],
-                        arrangement,
-                        null,
-                      )}
-                    </span>
-                  ) : null,
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {arrangement.toolbarRight.map((regionId) =>
-                  values[regionId].shown === "shown" ? (
-                    <span key={regionId}>
-                      {depictRegion(
-                        regionId,
-                        values[regionId],
-                        arrangement,
-                        null,
-                      )}
-                    </span>
-                  ) : null,
-                )}
-              </div>
-            </div>
-            <div className="flex items-center justify-end border-t border-border px-3 py-1.5">
-              {values.contextUsage.shown === "shown"
-                ? depictRegion(
-                    "contextUsage",
-                    values.contextUsage,
-                    arrangement,
-                    null,
-                  )
-                : null}
-            </div>
+            <MiniatureChatArea {...frame} />
+            <MiniatureDock {...frame} />
+            <MiniatureToolbar {...frame} />
+            <MiniatureComposerFoot {...frame} />
           </div>
         </div>
-        <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3">
-          {values.usageLimits.shown === "shown"
-            ? depictRegion("usageLimits", values.usageLimits, arrangement, null)
-            : null}
-          <span className="flex-1" />
-          {values.resourceMonitor.shown === "shown"
-            ? depictRegion(
-                "resourceMonitor",
-                values.resourceMonitor,
-                arrangement,
-                null,
-              )
-            : null}
-        </div>
+        <MiniatureStatusBar {...frame} />
       </div>
     </div>
   );
+}
+
+/** Everything a miniature part needs: the preset's values and the arrangement. */
+interface MiniatureFrame {
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+}
+
+/**
+ * The top bar, which under the `header` usage placement is where BOTH
+ * status-bar regions live - exactly as `HeaderUsageControls` renders them
+ * (L-51's `statusBarShown`).
+ */
+function MiniatureTopBar({ values, arrangement }: MiniatureFrame): ReactNode {
+  const inHeader = arrangement.usageHost === "header";
+  return (
+    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+      <MiniatureRegion
+        regionId="homeTab"
+        values={values}
+        arrangement={arrangement}
+        hostContext={null}
+      />
+      {/* The tab strip and the header's icon cluster are not regions and carry
+        no preset-specific state, so they are the frame's own chrome rather
+        than depictions. */}
+      <span className="h-5 w-16 rounded-sm border border-border" />
+      <span className="h-5 w-16 rounded-sm border border-border" />
+      <span className="flex-1" />
+      {inHeader ? (
+        <>
+          <MiniatureRegion
+            regionId="usageLimits"
+            values={values}
+            arrangement={arrangement}
+            hostContext="top-bar"
+          />
+          <MiniatureRegion
+            regionId="resourceMonitor"
+            values={values}
+            arrangement={arrangement}
+            hostContext="top-bar"
+          />
+        </>
+      ) : null}
+      <span className="size-5 rounded-sm border border-border" />
+      <span className="size-5 rounded-sm border border-border" />
+    </div>
+  );
+}
+
+/** The transcript, with the minimap on the side the arrangement puts it. */
+function MiniatureChatArea({ values, arrangement }: MiniatureFrame): ReactNode {
+  const side = arrangement.minimapSide;
+  const minimap = (
+    <MiniatureRegion
+      regionId="minimap"
+      values={values}
+      arrangement={arrangement}
+      hostContext={null}
+    />
+  );
+  return (
+    <div className="flex min-h-0 flex-1">
+      {side === "left" ? minimap : null}
+      <div className="min-h-0 flex-1 border-b border-border bg-card" />
+      {side === "right" ? minimap : null}
+    </div>
+  );
+}
+
+/**
+ * The dock, split the way the canvas splits it: a chip-sized row draws in the
+ * compact strip's own host context. The Compact card's whole claim is that the
+ * dock folds to chips, so the miniature has to make that claim too (G1-02).
+ */
+function MiniatureDock({ values, arrangement }: MiniatureFrame): ReactNode {
+  const shown = arrangement.dock.filter(
+    (regionId) => values[regionId].shown === "shown",
+  );
+  const rows = shown.filter((regionId) => values[regionId].size === "full");
+  const chips = shown.filter((regionId) => values[regionId].size === "chip");
+  return (
+    <div className="flex flex-col gap-1.5 px-3 py-2">
+      {rows.map((regionId) => (
+        <div key={regionId}>
+          {depictRegion(regionId, values[regionId], arrangement, null)}
+        </div>
+      ))}
+      {chips.length === 0 ? null : (
+        <div className="flex items-center gap-1">
+          {chips.map((regionId) => (
+            <span key={regionId}>
+              {depictRegion(
+                regionId,
+                values[regionId],
+                arrangement,
+                "chip-strip",
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniatureToolbar({ values, arrangement }: MiniatureFrame): ReactNode {
+  return (
+    <div className="flex items-center justify-between px-3 pb-2">
+      <MiniatureToolbarCluster
+        regionIds={arrangement.toolbarLeft}
+        values={values}
+        arrangement={arrangement}
+      />
+      <MiniatureToolbarCluster
+        regionIds={arrangement.toolbarRight}
+        values={values}
+        arrangement={arrangement}
+      />
+    </div>
+  );
+}
+
+function MiniatureToolbarCluster(props: {
+  readonly regionIds: ReadonlyArray<ToolbarRegionId>;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+}): ReactNode {
+  const { regionIds, values, arrangement } = props;
+  return (
+    <div className="flex items-center gap-1.5">
+      {regionIds.map((regionId) => (
+        <MiniatureRegion
+          key={regionId}
+          regionId={regionId}
+          values={values}
+          arrangement={arrangement}
+          hostContext={null}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MiniatureComposerFoot({
+  values,
+  arrangement,
+}: MiniatureFrame): ReactNode {
+  return (
+    <div className="flex items-center justify-end border-t border-border px-3 py-1.5">
+      <MiniatureRegion
+        regionId="contextUsage"
+        values={values}
+        arrangement={arrangement}
+        hostContext={null}
+      />
+    </div>
+  );
+}
+
+/**
+ * The status strip, or nothing at all: under the `header` placement the strip
+ * is not drawn and both of its regions have moved up (L-51).
+ */
+function MiniatureStatusBar({
+  values,
+  arrangement,
+}: MiniatureFrame): ReactNode {
+  if (arrangement.usageHost === "header") return null;
+  const monitor = (
+    <MiniatureRegion
+      regionId="resourceMonitor"
+      values={values}
+      arrangement={arrangement}
+      hostContext={null}
+    />
+  );
+  return (
+    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3">
+      {arrangement.resourceSide === "left" ? monitor : null}
+      <MiniatureRegion
+        regionId="usageLimits"
+        values={values}
+        arrangement={arrangement}
+        hostContext={null}
+      />
+      <span className="flex-1" />
+      {arrangement.resourceSide === "right" ? monitor : null}
+    </div>
+  );
+}
+
+/**
+ * One region, drawn only when this preset shows it - the single place the
+ * miniature asks that question, so no part of the frame can forget to.
+ */
+function MiniatureRegion<K extends RegionId>(props: {
+  readonly regionId: K;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+  readonly hostContext: HostContextId | null;
+}): ReactNode {
+  const { regionId, values, arrangement, hostContext } = props;
+  const regionValues = values[regionId];
+  if (regionValues.shown !== "shown") return null;
+  return depictRegion(regionId, regionValues, arrangement, hostContext);
+}
+
+/** The real rail: the arrangement's own entries, dividers included (L-25). */
+function MiniatureRail({ values, arrangement }: MiniatureFrame): ReactNode {
+  return (
+    <div className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-3">
+      {arrangement.rail.map((entry) => (
+        <MiniatureRailEntry
+          key={entry.id}
+          entry={entry}
+          values={values}
+          arrangement={arrangement}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MiniatureRailEntry(props: {
+  readonly entry: RailEntry;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+}): ReactNode {
+  const { entry, values, arrangement } = props;
+  if (entry.kind === "divider") {
+    return <span className="my-1 h-px w-6 bg-border" />;
+  }
+  const railValues = values[entry.id];
+  // A panel the user hid leaves a gap in the miniature exactly as it leaves one
+  // in the rail; the density preset is not what hid it.
+  if (railValues.shown === "hidden") return null;
+  return <span>{depictRegion(entry.id, railValues, arrangement, null)}</span>;
 }

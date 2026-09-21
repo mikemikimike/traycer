@@ -4,6 +4,7 @@ import { useCallback, useRef, type ReactNode } from "react";
 import { Bot, FileDiff, type LucideIcon } from "lucide-react";
 import { MessageSquareClock } from "@/components/notifications/message-square-clock";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
+import { SampleChip } from "@/components/sample-workspace/sample-dock-rows";
 import {
   STATUS_ANIMATION_PULSE_CADENCE_MS,
   useStatusAnimation,
@@ -162,9 +163,15 @@ export function ChatDockCompactStrip(): ReactNode {
       {value.chips.map((chip) => (
         <span
           key={chip.section}
-          className={cn(editing ? "inline-flex items-center" : "contents")}
+          data-sample={chip.sample ? "" : undefined}
+          className={cn(
+            editing ? "relative inline-flex items-center" : "contents",
+          )}
           ref={chip.hotspotRef}
         >
+          {editing && chip.sample ? (
+            <SampleChip className="-top-3 right-0" />
+          ) : null}
           <ChatDockCompactChip
             icon={<ChipGlyph glyph={chip.glyph} working={chip.working} />}
             text={chip.text}

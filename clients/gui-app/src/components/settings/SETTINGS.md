@@ -1002,10 +1002,12 @@ means the drain UI renders NOTHING - never a zero, which would offer to end
   - **Running agents**: Prevent sleep while running
     (`prevent-sleep-settings-section.tsx`, hidden in the mobile app - see
     "Two different mobile questions") is the only row left. The two
-    resource-visibility toggles that used to sit beside it - the global
-    resources button and the sidebar resource chips - moved to **Layout**
-    (Status bar and Sidebar respectively), which is where WHERE-a-thing-sits
-    controls live now. Because that leaves one self-hiding row, the group
+    resource-visibility toggles that used to sit beside it are gone. Both
+    answers now come from ONE switch, Layout ▸ Status bar ▸ Resource monitor ▸
+    Shown (L-48, L-60): off means no status-bar segment, no header button, no
+    sidebar or task-navigator chips, and no `resources.subscribe` stream at
+    all. The sidebar chips have no control of their own and never moved to a
+    Sidebar row. Because that leaves one self-hiding row, the group
     itself is returned by `prevent-sleep-settings-section.tsx` rather than
     wrapped here, so the heading disappears with the row instead of drawing
     over an empty card.

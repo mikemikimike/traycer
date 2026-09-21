@@ -929,32 +929,6 @@ export function regionDepiction<K extends RegionId>(
   return depict(values[region], arrangement);
 }
 
-// ── Surface-level rows (L-51) ───────────────────────────────────────────────
-
-/**
- * The grammar's surface tier: a row that belongs to a surface rather than to
- * anything in it, shown above that surface's regions in the index.
- *
- * One entry, and it decides whether a SURFACE exists at all, which is why it
- * lives on the arrangement rather than in a region's value bag. Only the
- * full-width host renders it, and only on a narrow window.
- */
-export interface SurfaceRow {
-  readonly id: "mobileFooter";
-  readonly surface: SurfaceGroupId;
-  readonly label: string;
-  readonly description: string | null;
-}
-
-export const SURFACE_ROWS: ReadonlyArray<SurfaceRow> = [
-  {
-    id: "mobileFooter",
-    surface: "statusBar",
-    label: "Show the status bar on small screens",
-    description: null,
-  },
-];
-
 // ── The provider level (L-26) ───────────────────────────────────────────────
 
 /**

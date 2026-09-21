@@ -1,3 +1,4 @@
+import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import { useSidebarCopyIdMenuEntry } from "@/components/epic-canvas/sidebar/use-sidebar-copy-id-menu-entry";
 /**
  * Host-driven raw-terminal list rendered as a left-panel rail entry. Durable
@@ -66,7 +67,6 @@ import {
   useEpicLeftPanelStore,
   useLeftPanelSectionCollapsed,
 } from "@/stores/epics/left-panel-store";
-import { DEFAULT_NAVIGATOR_RESOURCE_METRICS } from "@/stores/settings/settings-store";
 import {
   SidebarContextMenuItems,
   SidebarDropdownMenuItems,
@@ -202,7 +202,7 @@ interface TerminalSidebarBodyProps {
 function TerminalSidebarBody(props: TerminalSidebarBodyProps) {
   const { panel } = props;
   const listRef = useRef<HTMLUListElement>(null);
-  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
+  const navigatorResourceMetrics = useNavigatorResourceMetrics();
   const revealRequest = useSidebarNodeRevealRequest(props.tabId);
   useLayoutEffect(() => {
     if (revealRequest === null || listRef.current === null) return;
@@ -317,7 +317,7 @@ function TerminalRow(props: TerminalRowProps) {
     durable,
     authority,
   });
-  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
+  const navigatorResourceMetrics = useNavigatorResourceMetrics();
   const label = actions.label;
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");

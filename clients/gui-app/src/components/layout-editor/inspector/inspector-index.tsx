@@ -1,5 +1,4 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
@@ -9,21 +8,16 @@ import {
   regionMatchesFilter,
   regionStateWord,
   SURFACE_GROUPS,
-  SURFACE_ROWS,
 } from "@/lib/layout/layout-regions";
 import { regionChanged } from "@/lib/layout/layout-diff";
 import type { LayoutPresetId } from "@/lib/layout/layout-values";
 import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import {
-  useLayoutStore,
-  type LayoutSnapshot,
-} from "@/stores/layout/layout-store";
+import { useLayoutSnapshot } from "@/stores/layout/layout-store";
 
 interface InspectorIndexProps {
   /** Nothing selected (L-06): presets, then the region index. */
-  readonly host: "inspector" | "page";
   readonly onPreviewPreset: (presetId: LayoutPresetId | null) => void;
 }
 
@@ -37,9 +31,9 @@ interface InspectorIndexProps {
  * section, and ArrowUp from the first row returns to the filter.
  */
 export function InspectorIndex(props: InspectorIndexProps): ReactNode {
-  const { host, onPreviewPreset } = props;
+  const { onPreviewPreset } = props;
   const filter = useLayoutEditorStore((state) => state.filter);
-  const snapshot = useSnapshot();
+  const snapshot = useLayoutSnapshot();
   const filterRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<Map<RegionId, HTMLButtonElement>>(new Map());
 
@@ -91,7 +85,6 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
           focusRow(0);
         }}
       />
-      {host === "page" ? <SurfaceRows /> : null}
       {orderedIds.length === 0 ? (
         <p className="px-3.5 py-4 text-ui-sm text-muted-foreground">
           No region matches "{filter}".
@@ -167,51 +160,5 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
         ))
       )}
     </div>
-  );
-}
-
-function useSnapshot(): LayoutSnapshot {
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const overrides = useLayoutStore((state) => state.overrides);
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  return { basePreset, overrides, arrangement };
-}
-
-/**
- * The grammar's surface tier (L-51): rendered only by the full-width host,
- * above that surface's regions - today that is `mobileFooter` alone, on the
- * Status bar group.
- */
-function SurfaceRows(): ReactNode {
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  return (
-    <>
-      {SURFACE_ROWS.map((row) => (
-        <div
-          key={row.id}
-          className="flex min-h-11 items-center gap-3 border-t border-border px-3.5 py-2.5"
-        >
-          <div className="min-w-0 flex-1">
-            <div className="text-ui-sm">{row.label}</div>
-            {row.description ? (
-              <p className="mt-0.5 text-ui-xs text-muted-foreground">
-                {row.description}
-              </p>
-            ) : null}
-          </div>
-          <Switch
-            aria-label={row.label}
-            checked={arrangement.mobileFooter}
-            onCheckedChange={(checked) => {
-              useLayoutEditorStore.getState().recordGesture(() => {
-                useLayoutStore
-                  .getState()
-                  .setArrangement({ ...arrangement, mobileFooter: checked });
-              });
-            }}
-          />
-        </div>
-      ))}
-    </>
   );
 }

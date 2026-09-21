@@ -501,7 +501,7 @@ export const ChatTimeline = memo(function ChatTimeline({
  * Spread rather than written as an attribute because the list's props are
  * typed, and a lone `data-*` JSX attribute on them is an excess property.
  */
-const TRANSCRIPT_LAYOUT_PASSIVE = { "data-layout-passive": "" };
+const TRANSCRIPT_LAYOUT_PASSIVE = { "data-layout-passive": "opacity-only" };
 
 function chatTimelineKeyExtractor(item: TranscriptListRow): string {
   return item.key;

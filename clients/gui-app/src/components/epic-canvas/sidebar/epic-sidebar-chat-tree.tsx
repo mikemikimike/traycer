@@ -1,3 +1,4 @@
+import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import { useSidebarCopyIdMenuEntry } from "@/components/epic-canvas/sidebar/use-sidebar-copy-id-menu-entry";
 /**
  * Chat/terminal-agent tree body for the sidebar. Renders the tree of chat nodes
@@ -195,7 +196,6 @@ import {
 import { AgentRoleBadges } from "./agent-role-badges";
 import { AgentHoverTooltip } from "@/components/epic-canvas/sidebar/agent-hover-tooltip";
 import { isEditableRole } from "@/lib/epic-permissions";
-import { DEFAULT_NAVIGATOR_RESOURCE_METRICS } from "@/stores/settings/settings-store";
 import {
   Archive,
   ArchiveRestore,
@@ -3342,7 +3342,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
     },
     [onToggle],
   );
-  const navigatorResourceMetrics = DEFAULT_NAVIGATOR_RESOURCE_METRICS;
+  const navigatorResourceMetrics = useNavigatorResourceMetrics();
   const ownerKind = useEpicNodeOwnerKind(nodeId);
 
   const showRowControls = !selectionMode;

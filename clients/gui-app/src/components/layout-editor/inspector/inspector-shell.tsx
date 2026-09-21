@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils";
 import { RelayRow } from "@/components/layout-editor/inspector/relay-row";
 import type { LayoutDockMode } from "@/stores/layout/layout-editor-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 
 interface InspectorShellProps {
   /**
@@ -54,12 +53,9 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
   const canRedo = useLayoutEditorStore(
     (state) => state.history.future.length > 0,
   );
-  const canDiscard = useLayoutEditorStore(
-    (state) =>
-      state.entrySnapshot !== null &&
-      JSON.stringify(state.entrySnapshot) !==
-        JSON.stringify(getLayoutSnapshot()),
-  );
+  // A boolean the gesture paths maintain, never a selector that serialises the
+  // layout triple on every editor-store notification (G1-04).
+  const canDiscard = useLayoutEditorStore((state) => state.dirty);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Escape (L-31: "Escape walks back via the editor store's

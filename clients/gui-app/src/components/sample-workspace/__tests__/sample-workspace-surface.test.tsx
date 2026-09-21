@@ -10,7 +10,7 @@ import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-worksp
 import { SAMPLE_TURNS } from "@/components/sample-workspace/sample-workspace-scene";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
-import { useLeftPanelStore } from "@/stores/epics/left-panel-store";
+import { clearRailVisibilityOverrides } from "@/lib/layout/rail-view";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
@@ -108,7 +108,7 @@ beforeEach(() => {
     dockMode: "right",
     lockedBy: "none",
   });
-  useLeftPanelStore.getState().clearPanelVisibilityOverrides();
+  clearRailVisibilityOverrides();
 });
 
 afterEach(() => {

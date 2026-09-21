@@ -25,33 +25,99 @@ import { describe, expect, it } from "vitest";
  * generate no box at all, so `opacity` and `filter` on them are silent no-ops
  * - the failure mode that made the old `data-customize-inert` markers useless.
  */
-const PASSIVE_LEAVES: Readonly<Record<string, number>> = {
-  // Top bar: everything in the header's clusters except `HeaderUsageControls`,
-  // which IS a region, and the Home item, which is one too.
-  "components/layout/header/history-nav-buttons.tsx": 1,
-  "components/layout/header/app-update-button.tsx": 3,
-  "components/layout/header/history-button.tsx": 1,
-  "components/notifications/notifications-bell.tsx": 1,
-  "components/auth/user-menu.tsx": 1,
-  "components/layout/tabs/tab-strip.tsx": 1,
-  "components/layout/tabs/tab-strip-new-button.tsx": 1,
-  // Chat: the transcript body, never the container that also holds the
-  // minimap's region.
-  "components/chat/chat-timeline.tsx": 1,
-  // Composer: the message box and the send/stop control. The toolbar beneath
-  // them is where the composer's regions live and is deliberately absent.
-  "components/home/composer/composer-shell.tsx": 1,
-  "components/home/composer/composer-send-button.tsx": 2,
-  "components/home/host-workspace-selector/host-workspace-selector.tsx": 1,
-  "components/sample-workspace/sample-workspace-body.tsx": 1,
-  // Status bar: the refresh affordance and the host notice that takes the
-  // usage segments' slot.
-  "components/layout/status-bar/status-bar-rate-limit-cluster.tsx": 1,
-  "components/layout/status-bar/app-status-bar.tsx": 2,
-  // Sidebar: the panel body. The rail is its sibling, and every icon on the
-  // rail is a region, so the rail carries no marker at all.
-  "components/epic-canvas/sidebar/epic-sidebar.tsx": 2,
-};
+interface PlanLeafSet {
+  /** The item as the plan's 4.2 enumerates it, verbatim enough to find. */
+  readonly item: string;
+  /** Marker count per file, or `{}` for an item this tree has no leaf for. */
+  readonly files: Readonly<Record<string, number>>;
+  /** Why an item carries no marker. `null` for an item that does. */
+  readonly deviation: string | null;
+}
+
+/**
+ * Plan 4.2's enumerated leaf set, item by item.
+ *
+ * Written from the PLAN and not from the tree, which is the point: the
+ * previous version of this constant was read off the implementation and then
+ * asserted back against a grep of that same implementation, so the two items
+ * the plan names and the tree does not have could never fail it (G1-18). An
+ * item with no leaf is present here with its reason, so a reader comparing
+ * this file with the plan sees the gap rather than having to notice an
+ * absence.
+ */
+const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
+  {
+    item: "app-header.tsx: history nav, update, history, bell, identity - but NOT HeaderUsageControls",
+    files: {
+      "components/layout/header/history-nav-buttons.tsx": 1,
+      "components/layout/header/app-update-button.tsx": 3,
+      "components/layout/header/history-button.tsx": 1,
+      "components/notifications/notifications-bell.tsx": 1,
+      "components/auth/user-menu.tsx": 1,
+    },
+    deviation: null,
+  },
+  {
+    item: "tab-strip.tsx: the tab items and the add button, not the Home item",
+    files: {
+      "components/layout/tabs/tab-strip.tsx": 1,
+      "components/layout/tabs/tab-strip-new-button.tsx": 1,
+    },
+    deviation: null,
+  },
+  {
+    item: "chat-messages.tsx: the transcript body, not the minimap",
+    files: { "components/chat/chat-timeline.tsx": 1 },
+    deviation: null,
+  },
+  {
+    item: "the composer input and send button, and the composer foot's workspace label",
+    files: {
+      "components/home/composer/composer-shell.tsx": 1,
+      "components/home/composer/composer-send-button.tsx": 2,
+      "components/home/host-workspace-selector/host-workspace-selector.tsx": 1,
+      "components/sample-workspace/sample-workspace-body.tsx": 1,
+    },
+    deviation: null,
+  },
+  {
+    item: "app-status-bar.tsx: the refresh affordance",
+    files: {
+      "components/layout/status-bar/status-bar-rate-limit-cluster.tsx": 1,
+      "components/layout/status-bar/app-status-bar.tsx": 2,
+    },
+    deviation: null,
+  },
+  {
+    item: "app-status-bar.tsx: the spacers",
+    files: {},
+    deviation:
+      "The strip has no spacer leaf. Its one growing box is the usage slot " +
+      "(`status-bar-rate-limit-slot`), which CONTAINS the usageLimits region, " +
+      "so a `filter` on it would dim the region - the exact inversion the " +
+      "leaf-level rule exists to prevent. The only non-region children left " +
+      "are the two host notices, which take the segments' slot and are " +
+      "marked above.",
+  },
+  {
+    item: "epic-sidebar-rail.tsx: the non-panel chrome",
+    files: {},
+    deviation:
+      "The rail has no non-panel chrome. Every child is a RailGroupButton, " +
+      "which IS a region, plus the transient drop previews that exist only " +
+      "during a drag; the rail container itself is an ancestor of all nine " +
+      "regions. Marking anything here would dim the regions.",
+  },
+  {
+    item: "epic-sidebar.tsx: the panel body",
+    files: { "components/epic-canvas/sidebar/epic-sidebar.tsx": 2 },
+    deviation: null,
+  },
+];
+
+const PASSIVE_LEAVES: Readonly<Record<string, number>> = PLAN_4_2.reduce<
+  Record<string, number>
+>((leaves, entry) => ({ ...leaves, ...entry.files }), {});
 
 const SRC_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -65,6 +131,16 @@ const MARKER = /data-layout-passive/g;
 describe("the passive dim's marker set", () => {
   it("is exactly the leaf set 4.2 enumerates", () => {
     expect(markerCounts()).toEqual(PASSIVE_LEAVES);
+  });
+
+  it("states a reason for every plan item this tree has no leaf for", () => {
+    for (const entry of PLAN_4_2) {
+      const hasFiles = Object.keys(entry.files).length > 0;
+      expect(hasFiles || entry.deviation !== null, entry.item).toBe(true);
+      // And the converse: an item that IS marked must not also claim a
+      // deviation, or the record says two things at once.
+      expect(hasFiles && entry.deviation !== null, entry.item).toBe(false);
+    }
   });
 
   it("never marks a `contents` wrapper, which generates no box to dim", () => {

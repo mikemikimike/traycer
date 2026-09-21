@@ -62,13 +62,24 @@ Generated — don't hand-edit: `src/routeTree.gen.ts`, `dist/`, `.tanstack/`.
 - **`cn(...)`** from `@/lib/utils` for all composed `className`s. No template
   literals / `+` / `.join(" ")`. Static single strings OK.
 - **Fluid layout sizing** — `w-full`, `max-w-*`, viewport caps. No fixed px/rem
-  for layout surfaces (icons / touch targets OK). One recorded exception:
-  Settings ▸ Layout's status-bar preview frame
-  (`panels/layout/status-bar-preview.tsx`) is a SIMULATED viewport whose width
-  control names a pixel width, so it draws `w-[480px]` / `w-[880px]` /
-  `w-[920px]` — always under `max-w-full`, since a frame wider than the
-  ~944px Settings pane silently pushes the strip's right-hand cluster
-  off-screen. A new fixed-px layout width needs the same kind of argument.
+  for layout surfaces (icons / touch targets OK). Two recorded exceptions, both
+  the same case — a SIMULATED viewport, where the pixel size is the thing being
+  simulated rather than a layout choice:
+  - The layout editor's preset miniature frame
+    (`components/layout-editor/inspector/presets-block.tsx`) draws a 1000×620
+    app frame and scales it uniformly by `boxWidth / 1000`, so the card is a
+    picture of a real window at a real width rather than a reflow of one. The
+    frame is inside a `w-full` box with an `aspect-ratio`, so the CARD is
+    fluid and only the simulated viewport inside it is fixed.
+  - The layout inspector is 320px wide (`layout-editor.css`), always under
+    `max-width: 100%`. It is an instrument panel like DevTools: a fluid width
+    would change the measured width of the specimen stage, which is the thing
+    the user is judging.
+
+  A new fixed-px layout width needs the same kind of argument.
+  (The previous entry named `panels/layout/status-bar-preview.tsx`, deleted
+  with the legacy Layout page.)
+
 - **Safe area** — never write `env(safe-area-inset-*)`; `index.css` owns the
   only reads. `#root` reserves the top and both horizontal insets app-wide
   (landscape is supported, so the sensor housing can be on either side), which

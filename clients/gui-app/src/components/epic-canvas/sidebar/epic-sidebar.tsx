@@ -106,14 +106,16 @@ import {
   useAcknowledgedRootCreatePending,
   useCommentsPanelRevealed,
   useEpicLeftPanelStore,
-  useLeftPanelGroups,
   useLeftPanelSectionCollapsed,
   useLocalRootCreatePending,
-  usePanelVisibilityOverrides,
   type LeftPanelGroup,
   type LeftPanelId,
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
+import {
+  useLeftPanelGroups,
+  usePanelVisibilityOverrides,
+} from "@/lib/layout/rail-view";
 import {
   selectPrScopeHasItems,
   usePrPresenceStore,

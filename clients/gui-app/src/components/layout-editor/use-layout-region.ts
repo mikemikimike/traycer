@@ -48,20 +48,41 @@ export function useLayoutRegion(input: {
   const ghost = useRegionGhost(regionId);
   const nodeRef = useRef<HTMLElement | null>(null);
   const registered = useRef<RegionInstance | null>(null);
+  // Read by `sync`, which runs on registration rather than on a ghost change,
+  // so a region that re-registers while materialised keeps its flag.
+  const ghostRef = useRef(ghost);
 
   const sync = useCallback(() => {
     const previous = registered.current;
     const state = useLayoutEditorStore.getState();
+    const node = nodeRef.current;
+    const sceneId = viewTabId ?? "shell";
+    const key = `${regionId}@${sceneId}:${instanceId ?? "-"}`;
+    const wanted = state.session !== null && node !== null && visible;
+    // Idempotent, because it runs twice on mount by construction: the `ref`
+    // callback fires before effects, and the mount effect below has to run it
+    // too for the case the ref callback cannot see (a pane becoming visible, a
+    // scene id changing). Re-stripping and re-registering an unchanged node
+    // was pure churn, and on a scene with thirty regions it was thirty of
+    // them (G1-21).
+    if (
+      previous !== null &&
+      wanted &&
+      previous.key === key &&
+      previous.node === node
+    ) {
+      decorate(previous);
+      return;
+    }
     if (previous !== null) {
       strip(previous.node);
       state.unregisterInstance(previous.key, previous.node);
     }
     registered.current = null;
-    const node = nodeRef.current;
-    if (state.session === null || node === null || !visible) return;
-    const sceneId = viewTabId ?? "shell";
+    // `wanted` carries `node !== null`, so this narrows `node` too.
+    if (!wanted) return;
     const instance: RegionInstance = {
-      key: `${regionId}@${sceneId}:${instanceId ?? "-"}`,
+      key,
       regionId,
       sceneId,
       instanceId,
@@ -72,6 +93,7 @@ export function useLayoutRegion(input: {
     if (instanceId !== null)
       node.setAttribute("data-layout-instance", instanceId);
     state.registerInstance(instance);
+    flag(node, "data-ghost", ghostRef.current);
     decorate(instance);
   }, [regionId, instanceId, viewTabId, visible]);
 
@@ -114,12 +136,15 @@ export function useLayoutRegion(input: {
 
   // After the commit that mounted the materialised control, not from the store
   // subscription above: the node the flag belongs on is the one this render
-  // just produced.
+  // just produced. Keyed on the flag itself rather than run on every render,
+  // which is what a ~30-region scene pays for a value that changes on a hover
+  // (G1-21).
   useEffect(() => {
+    ghostRef.current = ghost;
     const node = registered.current?.node ?? null;
     if (node === null) return;
     flag(node, "data-ghost", ghost);
-  });
+  }, [ghost]);
 
   return { ref, editing, ghost };
 }

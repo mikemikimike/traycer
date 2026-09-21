@@ -1,16 +1,26 @@
 import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SampleSceneProvider } from "@/components/sample-workspace/sample-scene-provider";
+import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
 import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 import type { TabRef } from "@/stores/tabs/types";
 
-const viewport = vi.hoisted(() => ({ mobile: false }));
-vi.mock("@/hooks/ui/use-mobile-viewport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/hooks/ui/use-mobile-viewport")>()),
-  useIsMobileViewport: () => viewport.mobile,
-}));
+/**
+ * The sample tab follows the EDITOR's width threshold, not the phone
+ * breakpoint (L-64): the sample workspace exists only to be the editor's
+ * canvas, so it closes at exactly the width the door refuses to open at.
+ * This suite drives the real owner rather than mocking a viewport hook the
+ * provider no longer reads.
+ */
+function setViewportWidth(width: number): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+}
 
 const EPIC_REF: TabRef = { kind: "epic", id: "tab-a" };
 const SAMPLE_REF: TabRef = { kind: "sample-workspace", id: "sample-workspace" };
@@ -42,7 +52,7 @@ function seedBackgroundSampleTab(): void {
 }
 
 beforeEach(() => {
-  viewport.mobile = false;
+  setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH);
   tabCommandCoordinator.resetReconciliationForTesting();
 });
 afterEach(() => {
@@ -59,11 +69,11 @@ describe("SampleSceneProvider global close guard", () => {
     expect(sampleTabCount()).toBe(1);
   });
 
-  it("closes a retained background sample tab when the viewport drops below md", () => {
+  it("closes a retained background sample tab when the window narrows past the threshold", () => {
     seedBackgroundSampleTab();
     const view = render(<SampleSceneProvider>{null}</SampleSceneProvider>);
 
-    viewport.mobile = true;
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH - 1);
     act(() => {
       view.rerender(<SampleSceneProvider>{null}</SampleSceneProvider>);
     });
@@ -71,8 +81,8 @@ describe("SampleSceneProvider global close guard", () => {
     expect(sampleTabCount()).toBe(0);
   });
 
-  it("closes a stale sample tab on mount if the viewport is already narrow", () => {
-    viewport.mobile = true;
+  it("closes a stale sample tab on mount if the window is already narrow", () => {
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH - 1);
     seedBackgroundSampleTab();
 
     render(<SampleSceneProvider>{null}</SampleSceneProvider>);
@@ -84,7 +94,7 @@ describe("SampleSceneProvider global close guard", () => {
     useTabsStore.setState({ ...emptyTabStripLayout(), stripOrder: [] });
     const view = render(<SampleSceneProvider>{null}</SampleSceneProvider>);
 
-    viewport.mobile = true;
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH - 1);
     expect(() =>
       act(() => {
         view.rerender(<SampleSceneProvider>{null}</SampleSceneProvider>);

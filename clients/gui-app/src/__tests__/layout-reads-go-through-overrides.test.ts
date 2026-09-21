@@ -47,7 +47,7 @@ const MIGRATED_READS: ReadonlyArray<{
   },
   {
     selector: /\b(?:state|s)\s*\.\s*arrangement\b/,
-    hook: "useLayoutArrangement() / useArrangementValue(key)",
+    hook: "useArrangementValue(key)",
   },
 ];
 
@@ -62,6 +62,11 @@ const MIGRATED_READS: ReadonlyArray<{
 const DIRECT_READ_EXEMPTIONS: Readonly<Record<string, string>> = {
   // The seam itself.
   "lib/layout-overrides.ts": "the seam",
+  // The rail's derivation and its writers. What it answers is which panels
+  // EXIST on the rail and in what order - an ancestor seam by D11, and the one
+  // the sidebar's own mount decisions are made from. Layering a specimen's
+  // preview over it would mount real panels.
+  "lib/layout/rail-view.ts": "the rail's shape: an ancestor seam",
 };
 
 /**

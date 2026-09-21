@@ -266,7 +266,7 @@ function dockSampleRow(props: {
         props.separated && "border-t border-border/50",
       )}
     >
-      <SampleChip />
+      <SampleChip className="right-2 top-1" />
       <SampleDockRow section={props.section} />
     </div>
   );

@@ -1,7 +1,7 @@
 import type { UseNavigateResult } from "@tanstack/react-router";
 import { toast } from "sonner";
 import type { AnalyticsSource } from "@/lib/analytics";
-import { isMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import { layoutEditorFitsWindow } from "@/lib/layout/editor-width";
 import {
   acquireLayoutEditorLease,
   releaseLayoutEditorLease,
@@ -76,10 +76,10 @@ export interface OpenLayoutEditorInput {
 export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
   const editor = useLayoutEditorStore.getState();
   if (editor.session !== null) return true;
-  // The width gate, read at this one call site: below it the app cannot reflow
-  // beside a 320px instrument panel, so the form takes the whole page instead
-  // of the editor opening into a canvas with no room (L-02, 5.1).
-  if (isMobileViewport()) {
+  // The width gate (L-02, L-64), owned by `editor-width.ts`: below it the app
+  // cannot reflow beside a 320px instrument panel, so the form takes the whole
+  // page instead of the editor opening into a canvas with no room.
+  if (!layoutEditorFitsWindow()) {
     navigateToSettingsSection("layout");
     return false;
   }
@@ -216,7 +216,7 @@ function watchSession(scene: LayoutEditorScene): void {
     });
   });
   const onResize = (): void => {
-    if (isMobileViewport()) closeLayoutEditor("below-threshold");
+    if (!layoutEditorFitsWindow()) closeLayoutEditor("below-threshold");
   };
   window.addEventListener("resize", onResize);
   stopSessionWatch = () => {

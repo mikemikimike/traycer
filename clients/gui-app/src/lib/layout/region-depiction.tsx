@@ -72,35 +72,49 @@ export type { HostContextId };
  * depiction module owes the registry nothing and the two can be imported in
  * one direction only.
  */
-export function hostContextFor(
+function hostContextFor(
   regionId: RegionId,
   arrangement: LayoutArrangement,
 ): HostContextId {
-  switch (regionId) {
-    case "homeTab":
-      return "top-bar";
-    case "usageLimits":
-      return arrangement.usageHost === "header" ? "top-bar" : "status-bar";
-    case "resourceMonitor":
-      return "status-bar";
-    case "minimap":
-      return "chat";
-    case "contextUsage":
-      return "composer-foot";
-    case "runningAgents":
-    case "changedFiles":
-    case "background":
-      return "dock";
-    case "attachImage":
-    case "access":
-    case "agent":
-    case "model":
-    case "mic":
-      return "toolbar";
-    default:
-      return "rail";
+  // The one region whose surface the user can move (L-19). Everything else is
+  // where it lives, which the table below states once per region.
+  if (regionId === "usageLimits") {
+    return arrangement.usageHost === "header" ? "top-bar" : "status-bar";
   }
+  return HOST_BY_REGION[regionId];
 }
+
+/**
+ * Every region's own surface.
+ *
+ * A total `Record<RegionId, ...>` rather than a switch with a `default`: a
+ * region added without a host is a compile error here, where a `default` used
+ * to draw it in the sidebar and say nothing (G1-22).
+ */
+const HOST_BY_REGION: Readonly<Record<RegionId, HostContextId>> = {
+  homeTab: "top-bar",
+  usageLimits: "status-bar",
+  resourceMonitor: "status-bar",
+  minimap: "chat",
+  contextUsage: "composer-foot",
+  runningAgents: "dock",
+  changedFiles: "dock",
+  background: "dock",
+  attachImage: "toolbar",
+  access: "toolbar",
+  agent: "toolbar",
+  model: "toolbar",
+  mic: "toolbar",
+  railAgents: "rail",
+  railTerminals: "rail",
+  railBrowsers: "rail",
+  railArtifacts: "rail",
+  railGitDiff: "rail",
+  railPullRequests: "rail",
+  railFileTree: "rail",
+  railSharing: "rail",
+  railComments: "rail",
+};
 
 /**
  * One region as a picture, in its host's own context.

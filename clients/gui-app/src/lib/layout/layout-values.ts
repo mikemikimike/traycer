@@ -85,7 +85,7 @@ export interface ResourceMonitorValues extends ShownValues {
 /** The four readings the monitor can print, in the order it prints them. */
 export type ResourceMetric = "cpu" | "memory" | "processes" | "ramShare";
 
-export const RESOURCE_METRIC_IDS: ReadonlyArray<ResourceMetric> = [
+const RESOURCE_METRIC_IDS: ReadonlyArray<ResourceMetric> = [
   "cpu",
   "memory",
   "processes",
@@ -147,6 +147,20 @@ export interface LayoutValues {
 export type LayoutOverrides = {
   readonly [K in RegionId]?: Partial<LayoutValues[K]>;
 };
+
+/**
+ * Every key some region's value bag has, as one union.
+ *
+ * The UNION and not the intersection, which is what `keyof LayoutValues[RegionId]`
+ * gives (`shown`, the only key all twenty-two share). It is the type a caller
+ * walking every region can still name a control's key with - the registry's
+ * own `ControlSpec<K>.key` stays tied to its region - so `region-control-io.ts`
+ * takes this rather than a bare `string` and a typo cannot be passed at all
+ * (G1-08).
+ */
+export type RegionValueKey = {
+  readonly [K in RegionId]: keyof LayoutValues[K] & string;
+}[RegionId];
 
 /**
  * Every region exactly as the app ships it, which is also the Default preset.

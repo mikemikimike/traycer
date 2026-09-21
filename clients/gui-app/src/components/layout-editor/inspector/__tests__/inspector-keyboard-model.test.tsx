@@ -54,7 +54,6 @@ function Harness(props: { readonly onExit: () => void }): ReactNode {
   } else {
     body = (
       <InspectorIndex
-        host="inspector"
         onPreviewPreset={() => {
           // Preview wiring is the canvas's, a later ticket.
         }}

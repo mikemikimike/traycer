@@ -13,8 +13,8 @@ import {
 import { UNAVAILABLE_DASH } from "@/lib/resources/memory-metric";
 import { cn } from "@/lib/utils";
 import type { NavigatorResourceMetric } from "@/stores/settings/settings-store";
-
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+
 function pluralize(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : plural;
 }
@@ -174,7 +174,7 @@ export interface NavigatorResourceHotspotChipProps {
 export function NavigatorResourceHotspotChip(
   props: NavigatorResourceHotspotChipProps,
 ): ReactNode {
-  if (props.owner === null) return null;
+  if (props.owner === null || props.metrics.length === 0) return null;
   return (
     <OwnerResourceChip
       {...props.owner}

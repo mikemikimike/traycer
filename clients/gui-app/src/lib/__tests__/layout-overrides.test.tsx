@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   useArrangementValue,
-  useLayoutArrangement,
   useRailVisibility,
   useRegionShown,
   useRegionValue,
@@ -12,6 +11,8 @@ import {
 } from "@/lib/layout-overrides";
 import { LayoutOverrideProvider } from "@/providers/layout-override-provider";
 import { PRESET_VALUES } from "@/lib/layout/layout-values";
+import { persistKey, STORE_KEYS } from "@/lib/persist";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
@@ -19,6 +20,8 @@ import {
 
 function resetStore(): void {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+  useLayoutEditorStore.getState().endSession();
+  window.localStorage.clear();
 }
 
 beforeEach(resetStore);
@@ -169,7 +172,11 @@ describe("layout override seam", () => {
   });
 
   it("merges the arrangement field by field", () => {
-    const arrangement = readUnder(useLayoutArrangement, (children) => (
+    // One field per read, because that is the only way the seam is read now:
+    // a whole-arrangement hook made every consumer of one edge rerender on any
+    // other field's write (G1-12, G1-21). Nesting still merges, and a field
+    // nobody overrode still comes through by identity from the store.
+    const nested = (children: ReactNode): ReactNode => (
       <LayoutOverrideProvider value={{ arrangement: { minimapSide: "left" } }}>
         <LayoutOverrideProvider
           value={{ arrangement: { resourceSide: "left" } }}
@@ -177,11 +184,17 @@ describe("layout override seam", () => {
           {children}
         </LayoutOverrideProvider>
       </LayoutOverrideProvider>
-    ));
+    );
 
-    expect(arrangement.minimapSide).toBe("left");
-    expect(arrangement.resourceSide).toBe("left");
-    expect(arrangement.dock).toBe(useLayoutStore.getState().arrangement.dock);
+    expect(readUnder(() => useArrangementValue("minimapSide"), nested)).toBe(
+      "left",
+    );
+    expect(readUnder(() => useArrangementValue("resourceSide"), nested)).toBe(
+      "left",
+    );
+    expect(readUnder(() => useArrangementValue("dock"), nested)).toBe(
+      useLayoutStore.getState().arrangement.dock,
+    );
   });
 
   it("hands a rail panel its three-state visibility rather than a boolean", () => {
@@ -238,6 +251,67 @@ describe("layout override seam", () => {
       });
 
       expect(renders).toBe(before);
+    });
+  });
+
+  describe("the session-only preview tier (L-43, L-65)", () => {
+    it("shows the previewed preset's own density, delta and all", () => {
+      act(() => {
+        // A change the user made on top of their base preset. A preset card is
+        // a picture of that DENSITY, so the preview has to replace the delta
+        // as well as the base - otherwise the three cards differ by the user's
+        // own changes too (2.2).
+        useLayoutStore.getState().setRegionValues("model", { style: "bars" });
+      });
+
+      expect(readUnder(() => useRegionValue("model", "style"), bare)).toBe(
+        "bars",
+      );
+
+      act(() => {
+        useLayoutEditorStore.getState().setPreviewPreset("compact");
+      });
+
+      expect(readUnder(() => useRegionValue("model", "style"), bare)).toBe(
+        PRESET_VALUES.compact.model.style,
+      );
+    });
+
+    it("writes nothing while it is set, and puts the real values back on leave", () => {
+      const before = useLayoutStore.getState();
+
+      act(() => {
+        useLayoutEditorStore.getState().setPreviewPreset("detailed");
+      });
+
+      // Not the store, not the history, not localStorage: the whole point of
+      // a tier above the seam rather than a write the leave has to undo.
+      expect(useLayoutStore.getState()).toBe(before);
+      expect(useLayoutEditorStore.getState().history.past).toHaveLength(0);
+      expect(
+        window.localStorage.getItem(persistKey(STORE_KEYS.layout)),
+      ).toBeNull();
+
+      act(() => {
+        useLayoutEditorStore.getState().setPreviewPreset(null);
+      });
+
+      expect(readUnder(() => useRegionValue("model", "style"), bare)).toBe(
+        PRESET_VALUES.default.model.style,
+      );
+    });
+
+    it("still lets a specimen override win, so the stage is not previewed away", () => {
+      act(() => {
+        useLayoutEditorStore.getState().setPreviewPreset("compact");
+      });
+
+      expect(
+        readUnder(
+          () => useRegionValue("model", "style"),
+          under({ values: { model: { style: "text" } } }),
+        ),
+      ).toBe("text");
     });
   });
 });

@@ -148,7 +148,11 @@ function InspectorBody(): ReactNode {
     );
   } else if (selected !== null) {
     body = (
+      // Keyed on the region: the section holds per-region local state (the
+      // Fine-tune disclosure), and an unkeyed element would carry one
+      // region's open state into the next (G1-20).
       <RegionSection
+        key={selected}
         regionId={selected}
         host="inspector"
         onOpenProvider={(providerId) => {
@@ -161,11 +165,15 @@ function InspectorBody(): ReactNode {
     );
   } else {
     body = (
+      // Preview-without-writing (L-43, L-65): the editor store's session-only
+      // preview tier, which the override seam prefers while it is set. Nothing
+      // reaches the layout store or the history, so leaving the card restores
+      // the real values in one render and a click still commits as one undo
+      // step through `recordGesture`.
       <InspectorIndex
-        host="inspector"
-        // Preview-without-writing (L-43) needs a preview tier the override
-        // seam does not have yet; a preset still commits on click.
-        onPreviewPreset={() => {}}
+        onPreviewPreset={(presetId) => {
+          useLayoutEditorStore.getState().setPreviewPreset(presetId);
+        }}
       />
     );
   }

@@ -44,7 +44,7 @@ afterEach(() => {
 
 describe("index changed-dots and the header count (L-57)", () => {
   it("shows neither a dot nor a change count before anything is touched", () => {
-    render(<InspectorIndex host="inspector" onPreviewPreset={() => {}} />);
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
     expect(screen.queryAllByTestId("changed-dot")).toHaveLength(0);
     // Scoped to the status line: "Default" alone also names the preset
     // card underneath it, so an unscoped query is ambiguous.
@@ -54,7 +54,7 @@ describe("index changed-dots and the header count (L-57)", () => {
   });
 
   it("dots the region a value change touches, and the header counts it", () => {
-    render(<InspectorIndex host="inspector" onPreviewPreset={() => {}} />);
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
     act(() => {
       useLayoutStore.getState().setRegionValues("resourceMonitor", {
         shown: "hidden",
@@ -73,7 +73,7 @@ describe("index changed-dots and the header count (L-57)", () => {
   });
 
   it("dots a region whose Position row moved even though no value changed", () => {
-    render(<InspectorIndex host="inspector" onPreviewPreset={() => {}} />);
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
     act(() => {
       const arrangement = useLayoutStore.getState().arrangement;
       useLayoutStore.getState().setArrangement({

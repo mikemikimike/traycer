@@ -20,6 +20,9 @@ interface SpecimenStageProps {
 export function SpecimenStage(props: SpecimenStageProps): ReactNode {
   return (
     <div
+      // The plan's section 6 freezes the stage radius at 10px, which IS a token
+      // here: this app's `--radius` is 6px and `--radius-xl` is 1.6667x it.
+      // Stock Tailwind's 12px `rounded-xl` is not what this theme means by it.
       className="relative m-3 flex min-h-22 items-center justify-start overflow-hidden rounded-xl border border-border bg-card px-4 py-4.5"
       style={{
         backgroundImage:

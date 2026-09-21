@@ -42,12 +42,16 @@ import {
 import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
 import {
+  clearRailVisibilityOverrides,
+  setRailVisibilityOverride,
+  useLeftPanelGroups,
+  usePanelVisibilityOverrides,
+} from "@/lib/layout/rail-view";
+import {
   useActiveLeftPanelId,
   useCommentsPanelRevealed,
   useEpicLeftPanelStore,
-  useLeftPanelGroups,
   useMainPanelCollapsed,
-  usePanelVisibilityOverrides,
   type LeftPanelGroup,
   type LeftPanelId,
 } from "@/stores/epics/left-panel-store";
@@ -353,12 +357,6 @@ function RailContextMenuContent(props: {
   readonly context: LeftPanelAvailabilityContext;
   readonly contextPanelId: LeftPanelId | null;
 }): ReactNode {
-  const setOverride = useEpicLeftPanelStore(
-    (s) => s.setPanelVisibilityOverride,
-  );
-  const clearOverrides = useEpicLeftPanelStore(
-    (s) => s.clearPanelVisibilityOverrides,
-  );
   const { context, contextPanelId } = props;
   const visibility = LEFT_PANEL_DEFINITIONS.map((definition) => ({
     definition,
@@ -383,7 +381,9 @@ function RailContextMenuContent(props: {
       {pointedEntry !== null && visibleCount > 1 ? (
         <>
           <ContextMenuItem
-            onSelect={() => setOverride(pointedEntry.definition.id, false)}
+            onSelect={() =>
+              setRailVisibilityOverride(pointedEntry.definition.id, false)
+            }
             data-testid="epic-rail-hide-pointed-panel"
           >
             {`Hide '${pointedEntry.definition.title}'`}
@@ -397,7 +397,7 @@ function RailContextMenuContent(props: {
           checked={entry.visible}
           disabled={entry.locked}
           onCheckedChange={(next) =>
-            setOverride(
+            setRailVisibilityOverride(
               entry.definition.id,
               next === entry.autoVisible ? null : next,
             )
@@ -420,7 +420,7 @@ function RailContextMenuContent(props: {
         <>
           <ContextMenuSeparator />
           <ContextMenuItem
-            onSelect={clearOverrides}
+            onSelect={clearRailVisibilityOverrides}
             data-testid="epic-rail-reset-panel-visibility"
           >
             Reset panel visibility

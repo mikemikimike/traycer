@@ -9,8 +9,8 @@ import {
 import {
   useLeftPanelGroups,
   usePanelVisibilityOverrides,
-  type LeftPanelId,
-} from "@/stores/epics/left-panel-store";
+} from "@/lib/layout/rail-view";
+import type { LeftPanelId } from "@/stores/epics/left-panel-store";
 import { SAMPLE_RAIL_PRESENCE } from "./sample-workspace-scene";
 import { cn } from "@/lib/utils";
 

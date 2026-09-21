@@ -16,6 +16,10 @@ import { cn } from "@/lib/utils";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { admitsLocalPlane, useAuthStore } from "@/stores/auth/auth-store";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import {
+  GhostRegion,
+  GhostRegionPicture,
+} from "@/components/layout-editor/ghost-region";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
 
@@ -184,10 +188,15 @@ function HeaderUsageControls(): ReactNode {
     instanceId: null,
   });
   if (!inHeader) return null;
-  if (!usageEnabled && !showGlobalResourceMonitor) return null;
   return (
     <span ref={ref} className="contents">
       {usageEnabled ? <RateLimitIconButton /> : null}
+      {/* Hidden and pointed at: the passive depiction in place, never the
+        live control - both of these fetch or stream (L-14, L-62). */}
+      {usageEnabled ? null : <GhostRegionPicture regionId="usageLimits" />}
+      {showGlobalResourceMonitor ? null : (
+        <GhostRegion regionId="resourceMonitor" />
+      )}
       {showGlobalResourceMonitor ? (
         // Unconditionally the owner of `app.resources.open`: this whole
         // component is behind `inHeader`, so the strip's own popover is not

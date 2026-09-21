@@ -3,8 +3,15 @@ import { Eye, EyeOff, GripVertical, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export interface SortableListItem {
-  readonly id: string;
+/**
+ * Generic in its id, so each order group passes its OWN union - region ids for
+ * the dock and the toolbars, provider ids for the usage list, ids-or-divider
+ * ids for the rail. A reorder therefore hands the caller back exactly the ids
+ * it put in, and the re-narrowing helper that used to sit on the other side of
+ * a widened `string` is gone (G1-23).
+ */
+export interface SortableListItem<Id extends string> {
+  readonly id: Id;
   readonly label: string;
   readonly icon: LucideIcon | null;
   /** `null` for a divider, which carries no Shown state of its own. */
@@ -20,11 +27,11 @@ export interface SortableListItem {
   readonly onActivate: (() => void) | null;
 }
 
-interface SortableListProps {
-  readonly items: ReadonlyArray<SortableListItem>;
+interface SortableListProps<Id extends string> {
+  readonly items: ReadonlyArray<SortableListItem<Id>>;
   readonly selectedId: string | null;
   /** One Alt+Arrow step: the whole id list, reordered. */
-  readonly onReorder: (ids: ReadonlyArray<string>) => void;
+  readonly onReorder: (ids: ReadonlyArray<Id>) => void;
 }
 
 /**
@@ -35,13 +42,12 @@ interface SortableListProps {
  * wiring) - while Alt+ArrowUp/Down reorders now, which is L-31's own keyboard
  * path and does not depend on the drag engine at all.
  */
-export function SortableList(props: SortableListProps): ReactNode {
+export function SortableList<Id extends string>(
+  props: SortableListProps<Id>,
+): ReactNode {
   const { items, selectedId, onReorder } = props;
 
-  function handleKeyDown(
-    event: KeyboardEvent<HTMLDivElement>,
-    id: string,
-  ): void {
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>, id: Id): void {
     if (!event.altKey) return;
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();

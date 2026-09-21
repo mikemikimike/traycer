@@ -25,6 +25,12 @@ import {
   useLeftPanelStore,
   type PanelVisibilityOverrideById,
 } from "@/stores/epics/left-panel-store";
+import {
+  applyLeftPanelGroups,
+  currentLeftPanelGroups,
+  clearRailVisibilityOverrides,
+  setRailVisibilityOverride,
+} from "@/lib/layout/rail-view";
 import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import {
@@ -399,16 +405,14 @@ describe("<EpicLeftPanelRail />", () => {
   });
 
   it("shows the rail extraction slot for section-origin drops on rail background", () => {
-    useLeftPanelStore
-      .getState()
-      .applyPanelGroups(
-        moveLeftPanelGroup(
-          useLeftPanelStore.getState().getPanelGroups(),
-          "artifacts",
-          DEFAULT_LEFT_PANEL_ID,
-          "combine",
-        ),
-      );
+    applyLeftPanelGroups(
+      moveLeftPanelGroup(
+        currentLeftPanelGroups(),
+        "artifacts",
+        DEFAULT_LEFT_PANEL_ID,
+        "combine",
+      ),
+    );
     setRailDragState(
       {
         kind: "left-panel-rail-item",
@@ -506,18 +510,14 @@ describe("<EpicLeftPanelRail />", () => {
 
     it("keeps the rail icon for a PR-less epic the user checked on", () => {
       setPullRequestPresence(false);
-      useLeftPanelStore
-        .getState()
-        .setPanelVisibilityOverride("pull-requests", true);
+      setRailVisibilityOverride("pull-requests", true);
       renderRail();
 
       expect(screen.getByTestId("epic-rail-pull-requests")).not.toBeNull();
     });
 
     it("drops the rail icon for a populated epic the user unchecked", () => {
-      useLeftPanelStore
-        .getState()
-        .setPanelVisibilityOverride("pull-requests", false);
+      setRailVisibilityOverride("pull-requests", false);
       renderRail();
 
       expect(screen.queryByTestId("epic-rail-pull-requests")).toBeNull();
@@ -576,12 +576,8 @@ describe("<EpicLeftPanelRail />", () => {
       // The whole point of the override: an explicit "off" outranks the
       // presence gate, in both directions and at any later moment.
       setPullRequestPresence(false);
-      useLeftPanelStore
-        .getState()
-        .setPanelVisibilityOverride("pull-requests", false);
-      useLeftPanelStore
-        .getState()
-        .setPanelVisibilityOverride("comments", false);
+      setRailVisibilityOverride("pull-requests", false);
+      setRailVisibilityOverride("comments", false);
       testState.activeArtifactId = "artifact-1";
       testState.activeArtifact = { kind: "spec" };
       renderRail();
@@ -597,14 +593,12 @@ describe("<EpicLeftPanelRail />", () => {
 
     it("resumes following presence once the override is cleared", () => {
       setPullRequestPresence(true);
-      useLeftPanelStore
-        .getState()
-        .setPanelVisibilityOverride("pull-requests", false);
+      setRailVisibilityOverride("pull-requests", false);
       renderRail();
       expect(screen.queryByTestId("epic-rail-pull-requests")).toBeNull();
 
       act(() => {
-        useLeftPanelStore.getState().clearPanelVisibilityOverrides();
+        clearRailVisibilityOverrides();
       });
 
       expect(screen.getByTestId("epic-rail-pull-requests")).not.toBeNull();
@@ -706,9 +700,7 @@ describe("<EpicLeftPanelRail />", () => {
       expect(screen.getByTestId("epic-rail-pull-requests")).not.toBeNull();
 
       act(() => {
-        useLeftPanelStore
-          .getState()
-          .setPanelVisibilityOverride("pull-requests", false);
+        setRailVisibilityOverride("pull-requests", false);
       });
       expect(screen.queryByTestId("epic-rail-pull-requests")).toBeNull();
 
@@ -716,16 +708,14 @@ describe("<EpicLeftPanelRail />", () => {
     });
 
     it("retains a grouped PR section when its active sibling stays selected", () => {
-      useLeftPanelStore
-        .getState()
-        .applyPanelGroups(
-          moveLeftPanelGroup(
-            DEFAULT_LEFT_PANEL_GROUPS,
-            "pull-requests",
-            "git-diff",
-            "combine",
-          ),
-        );
+      applyLeftPanelGroups(
+        moveLeftPanelGroup(
+          DEFAULT_LEFT_PANEL_GROUPS,
+          "pull-requests",
+          "git-diff",
+          "combine",
+        ),
+      );
       setPullRequestPresenceForHost(HOST_ID, true);
       useLeftPanelStore.getState().setActivePanelId(TAB_ID, "git-diff");
       const rendered = render(
@@ -886,8 +876,8 @@ describe("<EpicLeftPanelRail />", () => {
     });
 
     it("resets every override at once", () => {
-      useLeftPanelStore.getState().setPanelVisibilityOverride("sharing", false);
-      useLeftPanelStore.getState().setPanelVisibilityOverride("comments", true);
+      setRailVisibilityOverride("sharing", false);
+      setRailVisibilityOverride("comments", true);
       renderRail();
       openRailMenu();
 
@@ -915,7 +905,7 @@ describe("<EpicLeftPanelRail />", () => {
         "file-tree",
         "sharing",
       ] as const) {
-        useLeftPanelStore.getState().setPanelVisibilityOverride(panelId, false);
+        setRailVisibilityOverride(panelId, false);
       }
       renderRail();
       openRailMenu();
@@ -932,7 +922,7 @@ describe("<EpicLeftPanelRail />", () => {
 
     it("highlights the fallback icon when the active panel is hidden", () => {
       useLeftPanelStore.getState().setActivePanelId(TAB_ID, "sharing");
-      useLeftPanelStore.getState().setPanelVisibilityOverride("sharing", false);
+      setRailVisibilityOverride("sharing", false);
       renderRail();
 
       // The body falls back to Agents, so the rail must mark Agents - not sit
@@ -1028,16 +1018,14 @@ describe("Browsers panel registration", () => {
     expect(screen.getByTestId("epic-browsers-panel-empty")).toBeTruthy();
 
     act(() => {
-      useLeftPanelStore
-        .getState()
-        .applyPanelGroups(
-          moveLeftPanelGroup(
-            DEFAULT_LEFT_PANEL_GROUPS,
-            "terminals",
-            "browsers",
-            "combine",
-          ),
-        );
+      applyLeftPanelGroups(
+        moveLeftPanelGroup(
+          DEFAULT_LEFT_PANEL_GROUPS,
+          "terminals",
+          "browsers",
+          "combine",
+        ),
+      );
     });
     expect(
       screen
@@ -1051,16 +1039,14 @@ describe("Browsers panel registration", () => {
     ).toBe("epic-left-panel-sections");
 
     act(() => {
-      useLeftPanelStore
-        .getState()
-        .applyPanelGroups(
-          moveLeftPanelGroup(
-            DEFAULT_LEFT_PANEL_GROUPS,
-            "browsers",
-            "terminals",
-            "before",
-          ),
-        );
+      applyLeftPanelGroups(
+        moveLeftPanelGroup(
+          DEFAULT_LEFT_PANEL_GROUPS,
+          "browsers",
+          "terminals",
+          "before",
+        ),
+      );
     });
     const reorderedRailIds = Array.from(
       screen.getByTestId("epic-sidebar-rail").children,

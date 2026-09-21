@@ -6,31 +6,27 @@ import {
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import {
-  minimizeOverrides,
   overrideKeys,
   PRESET_VALUES,
+  sameFieldList,
   sameRegionValue,
   type LayoutValues,
 } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
-import {
-  DEFAULT_LAYOUT_SNAPSHOT,
-  type LayoutSnapshot,
-} from "@/stores/layout/layout-store";
+import type { LayoutSnapshot } from "@/stores/layout/layout-store";
 
 /**
- * What is different from the base preset, and the four ways back.
+ * What is different from the base preset, and the way back.
  *
  * The scope is settled (C-11) and deliberately narrower than "everything a
  * user could have touched": a change is a VALUE that differs from the base
  * preset, an order group that is no longer in its default order, or a provider
  * switched off the strip. Presets are density-only (L-20), so putting the
- * arrangement back is a separate gesture - `resetToBase` leaves it alone and
- * only `resetEverything` clears it.
+ * arrangement back is a separate gesture and `resetToBase` leaves it alone.
  */
 
 /** Which keys of one region differ from the base preset, in the patch's order. */
-export function changedKeys<K extends RegionId>(
+function changedKeys<K extends RegionId>(
   snapshot: LayoutSnapshot,
   region: K,
 ): ReadonlyArray<keyof LayoutValues[K] & string> {
@@ -59,11 +55,15 @@ export function regionChanged(
  * also carried the arrangement would leave changes behind after a reset that
  * claimed to clear them. An arrangement change is still a change a person
  * made - it earns a dot in the index and a revert on its own Position row
- * (`positionRowChanged`), and "Reset everything" clears it.
+ * (`positionRowChanged`).
  */
 export function changeCount(snapshot: LayoutSnapshot): number {
-  const minimal = minimizeOverrides(snapshot.overrides, snapshot.basePreset);
-  return Object.values(minimal).reduce(
+  // No re-minimizing: `overrides` is invariantly minimal, because every write
+  // path into the store (`setRegionValues`, `setRegionValuesMany`,
+  // `setBasePreset`, `replaceAll`) and every rehydrate ends in the same
+  // resolver. Re-deriving it here allocated twenty-two objects on every filter
+  // keystroke to confirm what the store already guarantees (G1-21).
+  return Object.values(snapshot.overrides).reduce(
     (total: number, patch: object | undefined) =>
       total + (patch === undefined ? 0 : Object.keys(patch).length),
     0,
@@ -75,40 +75,14 @@ export function reorderedGroups(
   arrangement: LayoutArrangement,
 ): ReadonlyArray<OrderGroupId> {
   return ORDER_GROUP_IDS.filter(
-    (group) => !sameOrder(orderIds(arrangement, group), defaultOrderIds(group)),
+    (group) =>
+      !sameFieldList(orderIds(arrangement, group), defaultOrderIds(group)),
   );
-}
-
-/**
- * One row put back: the keys are dropped from the delta, which is the same
- * thing as taking the base preset's answer for them (L-20).
- */
-export function revertKeys<K extends RegionId>(
-  snapshot: LayoutSnapshot,
-  region: K,
-  keys: ReadonlyArray<keyof LayoutValues[K] & string>,
-): LayoutSnapshot {
-  const patch = snapshot.overrides[region];
-  if (patch === undefined) return snapshot;
-  const kept: Partial<LayoutValues[K]> = { ...patch };
-  for (const key of keys) delete kept[key];
-  return {
-    ...snapshot,
-    overrides: minimizeOverrides(
-      { ...snapshot.overrides, [region]: kept },
-      snapshot.basePreset,
-    ),
-  };
 }
 
 /** Every value back to the base preset. Values only: the arrangement stays. */
 export function resetToBase(snapshot: LayoutSnapshot): LayoutSnapshot {
   return { ...snapshot, overrides: {} };
-}
-
-/** The whole page back: values, arrangement and the base preset itself. */
-export function resetEverything(): LayoutSnapshot {
-  return DEFAULT_LAYOUT_SNAPSHOT;
 }
 
 /**
@@ -147,14 +121,4 @@ const GROUP_BOUNDARY = "|";
 
 function defaultOrderIds(group: OrderGroupId): ReadonlyArray<string> {
   return orderIds(DEFAULT_ARRANGEMENT, group);
-}
-
-function sameOrder(
-  left: ReadonlyArray<string>,
-  right: ReadonlyArray<string>,
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((id, index) => id === right[index])
-  );
 }

@@ -24,10 +24,21 @@ export interface SelectionRingController {
   /**
    * The node the ring should be on now, or `null` to put it away.
    *
-   * Called again with the SAME node whenever the canvas may have moved: the
-   * loop parks itself once the springs arrive, and this is what wakes it.
+   * Identity-guarded: called with the node it is already on, it does nothing.
+   * The canvas painter runs on every editor-store notification, and re-arming
+   * the rAF loop from there forced a layout read per notification for a ring
+   * that had already arrived (G1-04).
    */
   readonly track: (node: HTMLElement | null) => void;
+  /**
+   * Re-measure the node it is already on, because the canvas UNDER it moved.
+   *
+   * Its own entry point rather than a side effect of {@link track}, so the
+   * things that actually move a region - a layout write, a preset preview, a
+   * scroll, a resize, the node's own size - are the things that wake the loop,
+   * and a hover or a filter keystroke is not.
+   */
+  readonly refresh: () => void;
   readonly destroy: () => void;
 }
 
@@ -125,11 +136,9 @@ export function createSelectionRing(): SelectionRingController {
   }
 
   function track(node: HTMLElement | null): void {
-    if (node !== tracked) {
-      if (tracked !== null) observer.unobserve(tracked);
-      tracked = node;
-      if (node !== null) observer.observe(node);
-    }
+    if (node === tracked) return;
+    if (tracked !== null) observer.unobserve(tracked);
+    tracked = node;
     if (node === null) {
       cancel();
       element.removeAttribute("data-on");
@@ -137,6 +146,7 @@ export function createSelectionRing(): SelectionRingController {
       fresh = true;
       return;
     }
+    observer.observe(node);
     arm();
   }
 
@@ -155,6 +165,7 @@ export function createSelectionRing(): SelectionRingController {
 
   return {
     track,
+    refresh: arm,
     destroy: () => {
       cancel();
       observer.disconnect();

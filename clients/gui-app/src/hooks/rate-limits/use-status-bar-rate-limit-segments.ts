@@ -54,10 +54,10 @@ import type { RateLimitWindowSeverity } from "@/lib/rate-limits/window-severity"
 import { useSampledNow } from "@/lib/relative-time";
 import {
   statusBarProviderLimitSelection,
-  type LayoutArrangement,
+  type StatusBarProviderLimits,
   type StatusBarProviderLimitSelection,
 } from "@/lib/layout/layout-arrangement";
-import { useLayoutArrangement, useRegionShown } from "@/lib/layout-overrides";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 
 /**
  * The status bar's left cluster, from the watched host's provider inventory to
@@ -441,7 +441,7 @@ interface OrderedSegment {
 }
 
 interface ToSegmentsContext {
-  readonly arrangement: LayoutArrangement;
+  readonly providerLimits: StatusBarProviderLimits;
   readonly hiddenProviders: ReadonlyArray<RateLimitProviderId>;
   readonly now: number;
 }
@@ -465,7 +465,7 @@ function toSegments(
     const shown = shownWindows(
       windows,
       statusBarProviderLimitSelection(
-        context.arrangement,
+        context.providerLimits,
         target.provider.providerId,
       ),
     );
@@ -563,9 +563,9 @@ export function useStatusBarRateLimitSegments(input: {
   const passive = input.mode === "passive";
   const client = useHostClient();
   const usageShown = useRegionShown("usageLimits");
-  const arrangement = useLayoutArrangement();
-  const hiddenProviders = arrangement.hiddenProviders;
-  const segmentOrder = arrangement.usageProviders;
+  const hiddenProviders = useArrangementValue("hiddenProviders");
+  const segmentOrder = useArrangementValue("usageProviders");
+  const providerLimits = useArrangementValue("providerLimits");
   // The shared 60s clock, so a window that expires while the strip is on screen
   // drops out of it within the minute rather than at the next fetch.
   const now = useSampledNow();
@@ -640,17 +640,17 @@ export function useStatusBarRateLimitSegments(input: {
   const canonicallyOrdered = sortProviderStatesByProviderOrder(
     [
       ...toSegments(queueObserved, queueObservedQueries, {
-        arrangement,
+        providerLimits,
         hiddenProviders,
         now,
       }),
       ...toSegments(httpPolling, httpPollingQueries, {
-        arrangement,
+        providerLimits,
         hiddenProviders,
         now,
       }),
       ...toSegments(httpObserved, httpObservedQueries, {
-        arrangement,
+        providerLimits,
         hiddenProviders,
         now,
       }),

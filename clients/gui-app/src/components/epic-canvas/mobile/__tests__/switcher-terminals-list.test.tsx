@@ -191,6 +191,12 @@ vi.mock("@/components/epic-canvas/mobile/switcher-create-actions", () => ({
     <button type="button" data-testid="switcher-new-terminal" />
   ),
 }));
+// The chips follow the Resource monitor's own Shown switch now (L-60), so the
+// row asks this hook rather than reading a settings field. Non-empty here,
+// which is what a shown monitor answers.
+vi.mock("@/hooks/resources/use-navigator-resource-metrics", () => ({
+  useNavigatorResourceMetrics: () => ["cpu", "memory", "processes"],
+}));
 vi.mock("@/components/resources/resource-usage-chip", () => ({
   OwnerResourceChip: (props: {
     readonly ownerId: string;

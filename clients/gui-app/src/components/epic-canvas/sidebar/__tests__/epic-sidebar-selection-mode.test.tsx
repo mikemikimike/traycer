@@ -820,6 +820,13 @@ vi.mock("@/stores/epics/epic-sidebar-expansion-store", () => ({
     }),
 }));
 
+// The rail's shape and its per-panel Hide/Show live beside the bijection
+// now, not on the panel store (G1-09), so the sidebar's two reads are
+// stubbed where they are actually imported from.
+vi.mock("@/lib/layout/rail-view", () => ({
+  useLeftPanelGroups: () => [{ panelIds: [testState.activePanelId] }],
+  usePanelVisibilityOverrides: () => ({}),
+}));
 vi.mock("@/stores/epics/left-panel-store", () => ({
   CHAT_ARCHIVE_VISIBILITY: {
     Unarchived: "unarchived",
@@ -862,7 +869,6 @@ vi.mock("@/stores/epics/left-panel-store", () => ({
   useChatArchiveVisibility: () => testState.archiveVisibility,
   useChatSort: () => ({ field: "updated", direction: "desc" }),
   useCommentsPanelRevealed: () => false,
-  usePanelVisibilityOverrides: () => ({}),
   useEpicLeftPanelStore: (selector: (state: unknown) => unknown) =>
     selector({
       clearAcknowledgedRootCreatePending: vi.fn(),
@@ -874,7 +880,6 @@ vi.mock("@/stores/epics/left-panel-store", () => ({
       setPanelSectionWeights: vi.fn(),
       togglePanelSectionCollapsed: vi.fn(),
     }),
-  useLeftPanelGroups: () => [{ panelIds: [testState.activePanelId] }],
   useLeftPanelSectionCollapsed: (panelId: string) =>
     testState.collapsedPanelIds.has(panelId),
   useLocalRootCreatePending: () => null,
@@ -1194,10 +1199,6 @@ vi.mock("@/stores/settings/settings-store", async (importOriginal) => {
       "terminal-agent": undefined,
     },
     tilePlacement: actual.DEFAULT_TILE_PLACEMENT_SETTINGS,
-    // The chat tree reads this to decide whether a row carries a resource
-    // chip at all. The mock is a hand-built state, so a key the tree starts
-    // reading has to be added here or every row throws on it.
-    navigatorResourceMetrics: actual.DEFAULT_NAVIGATOR_RESOURCE_METRICS,
   };
   return {
     ...actual,

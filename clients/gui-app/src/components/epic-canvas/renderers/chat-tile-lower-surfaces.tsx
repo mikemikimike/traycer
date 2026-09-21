@@ -35,6 +35,7 @@ import {
   type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
 import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
+import { SAMPLE_DOCK } from "@/components/sample-workspace/sample-workspace-scene";
 import { isReceivedAgentResponse } from "@/components/chat/chat-queue-utils";
 import {
   type ChatLowerSurfaceTopSpacing,
@@ -74,6 +75,7 @@ import {
   useRunningManagedCommandsForChat,
 } from "@/stores/managed-commands/managed-commands-for-chat";
 import { useArrangementValue, useRegionValues } from "@/lib/layout-overrides";
+import type { SizedValues } from "@/lib/layout/layout-values";
 import { cn } from "@/lib/utils";
 import type {
   PendingInterviewView,
@@ -629,6 +631,27 @@ interface ChatDockChromeInput {
 const NO_BACKGROUND_ITEMS: ReadonlyArray<BackgroundItem> = [];
 
 /**
+ * Whether one dock section draws as a chip, and whether that chip is the
+ * SAMPLE one.
+ *
+ * A chip-sized section with live content is a chip, as always. A chip-sized
+ * section with nothing to show is a chip too, but only while an editor session
+ * is live and drawn from the sample model: otherwise the Size control would
+ * change nothing in the one case sample fill exists for - an empty chat, which
+ * is exactly what the Compact preset's own card promises to fold (L-16,
+ * G1-03).
+ */
+function dockChipPlan(
+  values: SizedValues,
+  hasContent: boolean,
+  editing: boolean,
+): { readonly chip: boolean; readonly sample: boolean } {
+  const chipSized = values.shown === "shown" && values.size === "chip";
+  const sample = chipSized && !hasContent && editing;
+  return { chip: (chipSized && hasContent) || sample, sample };
+}
+
+/**
  * Which dock rows are folded into a chip, what those chips say, and how the
  * user gets a row back.
  *
@@ -754,20 +777,32 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // A chip exists for every compact section that HAS something to show, whether
   // or not its row is currently revealed - the chip is the way back, so it
   // cannot be the thing that disappears when the row appears.
-  const filesChip =
-    changedFilesValues.shown === "shown" &&
-    changedFilesValues.size === "chip" &&
-    changesPresent;
+  //
+  // And, while an editor session is live, for every compact section that has
+  // NOTHING to show: a chip-sized region still has to be a chip on the canvas,
+  // or the Size control changes nothing in the one case sample fill exists for
+  // (L-16, G1-03). Those chips draw the sample model instead of a count.
+  const editing = filesChangedHotspot.editing;
+  const filesPlan = dockChipPlan(changedFilesValues, changesPresent, editing);
   // Received A2A rows follow this mode, so the chip is also owed when they are
   // the only thing folded: without it, folding would make them unreachable.
-  const agentsChip =
-    runningAgentsValues.shown === "shown" &&
-    runningAgentsValues.size === "chip" &&
-    (input.activeAgentsVisible || receivedAgentCount > 0);
-  const backgroundChip =
-    backgroundValues.shown === "shown" &&
-    backgroundValues.size === "chip" &&
-    input.backgroundVisible;
+  const agentsHasContent = input.activeAgentsVisible || receivedAgentCount > 0;
+  const agentsPlan = dockChipPlan(
+    runningAgentsValues,
+    agentsHasContent,
+    editing,
+  );
+  const backgroundPlan = dockChipPlan(
+    backgroundValues,
+    input.backgroundVisible,
+    editing,
+  );
+  const filesChip = filesPlan.chip;
+  const filesChipSample = filesPlan.sample;
+  const agentsChip = agentsPlan.chip;
+  const agentsChipSample = agentsPlan.sample;
+  const backgroundChip = backgroundPlan.chip;
+  const backgroundChipSample = backgroundPlan.sample;
 
   // A reveal belongs to a chip, so it dies with one. Per-tile stickiness is the
   // point - a revealed row stays revealed for as long as the tile lives - but
@@ -805,7 +840,11 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
 
   const chips = useMemo<ReadonlyArray<ChatDockCompactChipModel>>(() => {
     const models: ChatDockCompactChipModel[] = [];
-    if (filesChip) {
+    if (filesChipSample) {
+      models.push(
+        sampleChipModel("filesChanged", filesChangedHotspot.ref, revealed),
+      );
+    } else if (filesChip) {
       models.push({
         section: "filesChanged",
         glyph: "filesChanged",
@@ -827,9 +866,14 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // edit while a turn is still writing, so a turn touching twelve files
         // rang the chip beside the input twelve times.
         pulseToken: "changed",
+        sample: false,
       });
     }
-    if (agentsChip) {
+    if (agentsChipSample) {
+      models.push(
+        sampleChipModel("activeAgents", activeAgentsHotspot.ref, revealed),
+      );
+    } else if (agentsChip) {
       models.push({
         section: "activeAgents",
         glyph: "activeAgents",
@@ -852,9 +896,14 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // moment this chip appears; a count moving between two non-zero values
         // is the same fact, updated.
         pulseToken: agentsRunningCount > 0 ? "running" : null,
+        sample: false,
       });
     }
-    if (backgroundChip) {
+    if (backgroundChipSample) {
+      models.push(
+        sampleChipModel("background", backgroundHotspot.ref, revealed),
+      );
+    } else if (backgroundChip) {
       models.push({
         section: "background",
         // The section's own mark whatever the rows are - activity lights it
@@ -874,6 +923,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // part rather than letting a bare `0` stand for "nothing here".
         label: `Background. ${backgroundSummary}.`,
         pulseToken: backgroundRunning > 0 ? "running" : null,
+        sample: false,
       });
     }
     return dockOrder.flatMap((section) =>
@@ -883,8 +933,11 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     dockOrder,
     revealed,
     filesChip,
+    filesChipSample,
     agentsChip,
+    agentsChipSample,
     backgroundChip,
+    backgroundChipSample,
     backgroundSummary,
     changeTotals,
     changedFileCount,
@@ -928,6 +981,25 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   };
 
   return { folded, dockQueue, strip, dockOrder, hotspots };
+}
+
+/**
+ * One chip-sized dock region with nothing live in it, drawn from the sample
+ * model the sample workspace already uses (L-16, G1-03).
+ *
+ * The same models, so the two scenes cannot drift: a region shown as a chip in
+ * an empty chat reads exactly as it does in the sample workspace.
+ */
+function sampleChipModel(
+  section: ChatDockSection,
+  hotspotRef: (node: HTMLElement | null) => void,
+  revealed: ReadonlySet<ChatDockSection>,
+): ChatDockCompactChipModel {
+  const model = SAMPLE_DOCK.find((entry) => entry.section === section);
+  if (model === undefined) {
+    throw new Error(`no sample dock chip for section: ${section}`);
+  }
+  return { ...model, hotspotRef: revealed.has(section) ? null : hotspotRef };
 }
 
 /** How many agents the chip's sentence names before it starts counting. */

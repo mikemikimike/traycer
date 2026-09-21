@@ -96,10 +96,12 @@ export function HostContextFrame(props: {
   }, [measure]);
 
   // The box is not the only thing that moves: a longer reading at the same
-  // width overflows a frame that never resized, so every render re-reads the
-  // two numbers. `setClipped` bails out on an unchanged answer, so the common
-  // case costs two DOM reads.
-  useEffect(measure);
+  // width overflows a frame that never resized, so the two numbers are re-read
+  // whenever the CONTENT changes. Keyed on the children rather than run on
+  // every render (G1-21): the presets block alone mounts ~30 of these, and an
+  // unkeyed effect made every filter keystroke a synchronous layout read per
+  // frame while none of their content had moved.
+  useEffect(measure, [measure, props.children]);
 
   return (
     <div

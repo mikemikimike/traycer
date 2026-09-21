@@ -7,12 +7,16 @@ import {
   moveRailEntry,
   normalizeArrangement,
   normalizeRail,
+  panelVisibilityOverridesFromValues,
+  RAIL_REGION_BY_PANEL,
   railFromLeftPanelGroups,
+  railVisibilityFor,
   removeRailDivider,
   resolvePersistedArrangement,
   type LayoutArrangement,
   type RailEntry,
 } from "@/lib/layout/layout-arrangement";
+import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import { DEFAULT_LEFT_PANEL_GROUPS } from "@/stores/epics/left-panel-store";
 
 function panel(id: RailEntry["id"]): RailEntry {
@@ -210,6 +214,66 @@ describe("normalizeArrangement", () => {
       "runningAgents",
       "background",
     ]);
+  });
+
+  it("hands an already-normal arrangement straight back, by identity", () => {
+    // Every write path ends here, so a no-op write - a drag that lands where
+    // it started, a bulk clear that changed nothing - must not mint a new
+    // object: a fresh `arrangement` invalidates every selector subscribed to
+    // any field of it, which is the whole chrome (G1-21).
+    const arrangement = normalizeArrangement(DEFAULT_ARRANGEMENT);
+
+    expect(arrangement).toBe(DEFAULT_ARRANGEMENT);
+    expect(normalizeArrangement(arrangement)).toBe(arrangement);
+  });
+
+  it("re-inserts every panel when the stored rail has none left", () => {
+    // An empty rail is a corrupt record, not a user preference: the sidebar
+    // would have no icons at all, and no gesture in the editor can produce it.
+    const arrangement = normalizeArrangement(withRail([]));
+
+    expect(arrangement.rail).toEqual(
+      DEFAULT_RAIL.filter((entry) => entry.kind === "panel"),
+    );
+  });
+});
+
+describe("the rail's three-state visibility (L-47, L-61)", () => {
+  it("round-trips Hide, Show and back onto the panel's own rule", () => {
+    expect(railVisibilityFor(true)).toBe("shown");
+    expect(railVisibilityFor(false)).toBe("hidden");
+    // `null` is the menu saying "follow the panel's own presence rule again",
+    // which has to be the ABSENCE of an entry rather than a stored `false`.
+    expect(railVisibilityFor(null)).toBe("auto");
+  });
+
+  it("reads the nine regions as the sparse map the sidebar renders from", () => {
+    const values = effectiveLayoutValues("default", {
+      railSharing: { shown: "shown" },
+      railComments: { shown: "hidden" },
+      railAgents: { shown: "auto" },
+    });
+
+    expect(panelVisibilityOverridesFromValues(values)).toEqual({
+      sharing: true,
+      comments: false,
+    });
+  });
+
+  it("names every rail region, so a panel added later cannot be silently absent", () => {
+    const values = effectiveLayoutValues(
+      "default",
+      Object.fromEntries(
+        Object.values(RAIL_REGION_BY_PANEL).map((regionId) => [
+          regionId,
+          { shown: "hidden" },
+        ]),
+      ),
+    );
+
+    expect(
+      Object.keys(panelVisibilityOverridesFromValues(values)).sort(),
+    ).toEqual(Object.keys(RAIL_REGION_BY_PANEL).sort());
   });
 });
 

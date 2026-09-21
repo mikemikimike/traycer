@@ -1,4 +1,5 @@
 import { use, useEffect, useState, type ReactNode } from "react";
+import { GhostRegion } from "@/components/layout-editor/ghost-region";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { isHostScopeUsable } from "@/components/settings/host-scope/host-scope-status";
 import { useScopedHostBinding } from "@/components/settings/host-scope/use-scoped-host-binding";
@@ -154,7 +155,11 @@ function ScopedAppStatusBar(props: {
   const scopedToOwnHost =
     !props.hasExplicitPick || isHostScopeUsable(scope.status);
 
-  const resources = !resourcesEnabled ? null : (
+  // Hidden and pointed at: the passive depiction in place, never the live
+  // segment - which opens a stream (L-14, L-62).
+  const resources = !resourcesEnabled ? (
+    <GhostRegion regionId="resourceMonitor" />
+  ) : (
     <ResourceMonitorPopover
       trigger="custom"
       contentSide="top"
@@ -244,6 +249,12 @@ function ScopedAppStatusBar(props: {
                   scope={scope}
                   editing={editing}
                 />
+                {/* Hidden and pointed at: the passive depiction takes the
+                  slot the segments left empty (L-14, L-62). The slot itself
+                  is always reserved, so nothing shifts. */}
+                {rateLimitsEnabled ? null : (
+                  <GhostRegion regionId="usageLimits" />
+                )}
               </span>
             </PopoverAnchor>
             <RateLimitPopover

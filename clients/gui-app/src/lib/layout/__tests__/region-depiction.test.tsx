@@ -4,9 +4,10 @@ import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { SHIPPED_DEFAULT_VALUES } from "@/lib/layout/layout-values";
 import {
   depictRegion,
-  hostContextFor,
   type HostContextId,
 } from "@/lib/layout/region-depiction";
+import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 
 /**
@@ -28,13 +29,27 @@ function hostOf(regionId: RegionId, container: HTMLElement): string | null {
   return frameOf(regionId, container).getAttribute("data-layout-depiction");
 }
 
+/**
+ * The host a region is drawn in, read off the picture rather than off the
+ * mapping that produced it: the mapping is private to the module, and what
+ * callers actually depend on is the frame's own context attribute.
+ */
+function drawnHostOf(
+  regionId: RegionId,
+  arrangement: LayoutArrangement,
+): string | null {
+  const values: LayoutValues[RegionId] = SHIPPED_DEFAULT_VALUES[regionId];
+  const { container } = render(
+    depictRegion(regionId, values, arrangement, null),
+  );
+  return hostOf(regionId, container);
+}
+
 describe("the host context a depiction is drawn in", () => {
   it("follows the arrangement for the one region that moves surface", () => {
-    expect(hostContextFor("usageLimits", DEFAULT_ARRANGEMENT)).toBe(
-      "status-bar",
-    );
+    expect(drawnHostOf("usageLimits", DEFAULT_ARRANGEMENT)).toBe("status-bar");
     expect(
-      hostContextFor("usageLimits", {
+      drawnHostOf("usageLimits", {
         ...DEFAULT_ARRANGEMENT,
         usageHost: "header",
       }),
@@ -52,9 +67,7 @@ describe("the host context a depiction is drawn in", () => {
       ["railComments", "rail"],
     ];
     for (const [regionId, host] of expected) {
-      expect(hostContextFor(regionId, DEFAULT_ARRANGEMENT), regionId).toBe(
-        host,
-      );
+      expect(drawnHostOf(regionId, DEFAULT_ARRANGEMENT), regionId).toBe(host);
     }
   });
 

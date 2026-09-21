@@ -59,11 +59,14 @@ import {
   moveLeftPanelToGroup,
   moveLeftPanelToGroupPosition,
   moveLeftPanelToPanelPosition,
-  useLeftPanelStore,
   type LeftPanelGroup,
   type LeftPanelId,
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
+import {
+  applyLeftPanelGroups,
+  currentLeftPanelGroups,
+} from "@/lib/layout/rail-view";
 import type { QueryClient } from "@tanstack/react-query";
 import type { HostRpcRegistry } from "@traycer/protocol/host/index";
 import type { HostRuntimeBinding } from "@/providers/host-runtime-provider";
@@ -379,7 +382,7 @@ export function isLeftPanelDropNoop(
 ): boolean {
   if (source.kind !== LEFT_PANEL_RAIL_ITEM_DND_TYPE) return false;
   if (preview === null) return false;
-  const currentGroups = useLeftPanelStore.getState().getPanelGroups();
+  const currentGroups = currentLeftPanelGroups();
   const nextGroups = resolveLeftPanelGroupsForDrop(
     source,
     preview,
@@ -577,14 +580,13 @@ export function commitResolvedCanvasDrop(
     );
   }
   if (drop.source.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE) {
-    const leftPanelStore = useLeftPanelStore.getState();
     const nextGroups = resolveLeftPanelGroupsForDrop(
       drop.source,
       drop.preview,
-      leftPanelStore.getPanelGroups(),
+      currentLeftPanelGroups(),
     );
     if (nextGroups !== null) {
-      leftPanelStore.applyPanelGroups(nextGroups);
+      applyLeftPanelGroups(nextGroups);
       return true;
     }
     return false;

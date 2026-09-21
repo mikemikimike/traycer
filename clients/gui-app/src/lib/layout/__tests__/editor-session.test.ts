@@ -4,6 +4,7 @@ import {
   openLayoutEditor,
 } from "@/lib/layout/editor-session";
 import { LAYOUT_EDITOR_LEASE_KEY } from "@/lib/layout/editor-lease";
+import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
 import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -112,6 +113,35 @@ describe("the width gate (L-02, 5.1)", () => {
     expect(navigation.navigateToSettingsSection).toHaveBeenCalledWith("layout");
     // Nothing was claimed on the way out: another window can still open it.
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
+  });
+
+  it("turns on 1100px exactly, and on no other number (L-64)", () => {
+    // The number is the point. A gate asserted only at 700px passes just as
+    // well on the 768px mobile breakpoint three surfaces used to read for
+    // this, which is the bug L-64 settles: the editor opened into a 900px
+    // window with no room for either half of itself.
+    expect(LAYOUT_EDITOR_MIN_WIDTH).toBe(1100);
+
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH - 1);
+    expect(open(null)).toBe(false);
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH);
+    expect(open(null)).toBe(true);
+    expect(useLayoutEditorStore.getState().session).not.toBeNull();
+  });
+
+  it("holds a live session open at the threshold and drops it one pixel below", () => {
+    seedOpenChat("tile-7");
+    open(null);
+
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH);
+    window.dispatchEvent(new Event("resize"));
+    expect(useLayoutEditorStore.getState().session).not.toBeNull();
+
+    setViewportWidth(LAYOUT_EDITOR_MIN_WIDTH - 1);
+    window.dispatchEvent(new Event("resize"));
+    expect(useLayoutEditorStore.getState().session).toBeNull();
   });
 });
 

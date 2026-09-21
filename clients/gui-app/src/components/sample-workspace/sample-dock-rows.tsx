@@ -4,6 +4,7 @@ import { BackgroundItemsHeader } from "@/components/chat/chat-background-items-p
 import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
 import { FileChangeHeader } from "@/components/chat/segments/file-change-segment";
 import { Collapsible } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import {
   SAMPLE_AGENT,
   SAMPLE_BACKGROUND,
@@ -75,12 +76,18 @@ export function SampleDockRow(props: {
  * the one moment the label matters is the moment the user is pointing at the
  * thing it labels.
  */
-export function SampleChip(): ReactNode {
+export function SampleChip(props: {
+  /** Where the mark sits on its host, which only the host knows. */
+  readonly className: string;
+}): ReactNode {
   return (
     <span
       data-layout-sample-chip
       aria-hidden
-      className="pointer-events-none absolute right-2 top-1 z-10 rounded-sm bg-foreground/8 px-1.5 text-overline font-medium uppercase text-muted-foreground"
+      className={cn(
+        "pointer-events-none absolute z-10 rounded-sm bg-foreground/8 px-1.5 text-overline font-medium uppercase text-muted-foreground",
+        props.className,
+      )}
     >
       Sample
     </span>
