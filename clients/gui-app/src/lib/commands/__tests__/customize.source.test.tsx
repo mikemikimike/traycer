@@ -83,7 +83,6 @@ describe("customizeSource", () => {
       session: {
         entry: "pointer",
         source: "direct_ui",
-        preferredInstanceId: null,
         startedAt: 0,
       },
     });

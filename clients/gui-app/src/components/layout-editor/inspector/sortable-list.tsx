@@ -273,9 +273,10 @@ export function SortableList<Id extends string>(
       ) : null}
       <div ref={listRef} className="flex flex-col gap-1">
         {shown.map((item) => (
-          // The card, not the control: an expanded row's detail holds real
-          // controls, so the thing carrying `role="button"` has to be the grab
-          // line inside it rather than the box around both (P-9's trap).
+          // The card carries the row's identity and nothing operable: the
+          // thing with `role="button"` is the NAME inside it, because a
+          // composite widget must not contain the controls it would otherwise
+          // name itself from (P-9's trap, R1-02).
           <div
             key={item.id}
             data-sortable-id={item.id}
@@ -318,12 +319,22 @@ export function SortableList<Id extends string>(
 }
 
 /**
- * The grab line: the part of a row a pointer picks up and a key operates.
+ * The row's one line: what a pointer picks up, what a key operates, and
+ * whatever the host hung on the end of it.
  *
- * A component of its own rather than more JSX inside the list's `map`, because
- * an expanded row's detail holds real controls - so `role="button"` has to sit
- * on this line and not on the card around both (P-9's trap), and the line is
- * where every one of the row's optional parts is decided.
+ * The line is a plain box and the OPERATION sits on the grab inside it
+ * (`role="button"` on the name, the host's controls as its siblings). A
+ * `role="button"` computes its accessible name from its contents and must not
+ * contain interactive descendants, so a page row that carried its own Shown
+ * radios, its Size and its revert read to a screen reader as one collapsed
+ * button named "Agents Auto Shown Hidden", with three real controls unreachable
+ * as controls (R1-02). Putting the role on the whole line was that defect; the
+ * split is what fixes it, and the line keeps the padding so the drag's hit area
+ * is still the row rather than the words in it.
+ *
+ * The chevron stays OUTSIDE the grab, at the end of the line where a disclosure
+ * belongs: it is `aria-hidden` decoration, `aria-expanded` is on the grab, and
+ * the alternative was drawing it between the name and the controls.
  */
 function SortableRowLine<Id extends string>(props: {
   readonly item: SortableListItem<Id>;
@@ -336,13 +347,6 @@ function SortableRowLine<Id extends string>(props: {
   const onRemove = item.onRemove;
   return (
     <div
-      // Every row, not only the ones that open something: a row that can be
-      // focused, grabbed and moved has an operation whether or not it also has
-      // a destination.
-      role="button"
-      aria-describedby={instructionsId ?? undefined}
-      aria-expanded={item.detail === null ? undefined : item.open}
-      tabIndex={0}
       className={cn(
         "flex touch-none items-center gap-2",
         page ? "px-3 py-2.5 text-ui" : "px-2.5 py-1.5 text-ui-sm",
@@ -350,25 +354,43 @@ function SortableRowLine<Id extends string>(props: {
       )}
       onPointerDown={onPointerDown}
     >
-      {instructionsId === null ? null : (
-        <GripVertical
-          aria-hidden
-          className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
-        />
-      )}
-      {item.icon ? (
-        <item.icon className="size-3.5 shrink-0 text-muted-foreground" />
-      ) : null}
-      {/* A divider IS a line, so its row draws one where a panel's name would
-        keep going: the list reads the way the rail does. */}
-      {item.divider ? (
-        <>
-          <span className="shrink-0">{item.label}</span>
-          <span aria-hidden className="h-px flex-1 bg-border" />
-        </>
-      ) : (
-        <SortableRowName item={item} />
-      )}
+      <div
+        // Every row, not only the ones that open something: a row that can be
+        // focused, grabbed and moved has an operation whether or not it also
+        // has a destination.
+        role="button"
+        aria-describedby={instructionsId ?? undefined}
+        aria-expanded={item.detail === null ? undefined : item.open}
+        tabIndex={0}
+        className="flex min-w-0 flex-1 items-center gap-2"
+      >
+        {/* Both glyphs carry a hook of their own, so a test can name THIS row's
+          icon rather than counting the SVGs in the line and breaking on the
+          next legitimate one (R1-19). */}
+        {instructionsId === null ? null : (
+          <GripVertical
+            aria-hidden
+            data-row-grip
+            className="size-3.5 shrink-0 cursor-grab text-muted-foreground"
+          />
+        )}
+        {item.icon ? (
+          <item.icon
+            data-row-icon
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+        ) : null}
+        {/* A divider IS a line, so its row draws one where a panel's name would
+          keep going: the list reads the way the rail does. */}
+        {item.divider ? (
+          <>
+            <span className="shrink-0">{item.label}</span>
+            <span aria-hidden className="h-px flex-1 bg-border" />
+          </>
+        ) : (
+          <SortableRowName item={item} />
+        )}
+      </div>
       {item.control === null ? null : (
         <div className="flex shrink-0 items-center gap-1.5">{item.control}</div>
       )}

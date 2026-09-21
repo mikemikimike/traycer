@@ -33,7 +33,6 @@ function railRegionBase(
     whereByHost: null,
     hint,
     keywords: [...keywords, "sidebar", "rail", "panel"],
-    sampleFilled: false,
     rows: RAIL_ROWS,
     quickVerbs: SHOW_HIDE_VERBS,
     stateWord: railStateWord,

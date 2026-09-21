@@ -149,8 +149,6 @@ export interface LayoutRegion<K extends RegionId> {
    */
   readonly hint: string | null;
   readonly keywords: ReadonlyArray<string>;
-  /** Renders the sample leaf when the live app has no content for it (L-16). */
-  readonly sampleFilled: boolean;
   readonly rows: ReadonlyArray<GrammarRow<K>>;
   readonly quickVerbs: ReadonlyArray<QuickVerbId>;
   readonly stateWord: (

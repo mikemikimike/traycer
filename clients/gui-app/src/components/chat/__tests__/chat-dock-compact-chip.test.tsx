@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
+import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { DiffLineCounts } from "@/lib/file-change-diff-hunks";
 
@@ -29,6 +30,10 @@ function baseProps(): ChipProps {
     testId: "chip",
     onClick: vi.fn(),
   };
+}
+
+function classesOf(element: Element): ReadonlyArray<string> {
+  return element.getAttribute("class")?.split(/\s+/).filter(Boolean) ?? [];
 }
 
 function renderChip(props: ChipProps) {
@@ -206,20 +211,49 @@ describe("<ChatDockCompactChip />", () => {
   // count in the foreground, and it borrows the composer toolbar's chip
   // vocabulary (`toolbar-buttons.tsx`, restyled in the same pass) so the two
   // rows of chips around the input read as one system.
-  it("draws as a bordered pill with the count in the foreground", () => {
+  //
+  // Read OFF the toolbar chip rather than restated, the way
+  // `toolbar-buttons.test.tsx` reads the pill off the square: a list of class
+  // literals copied from `chat-dock-compact-chip.tsx` observes nothing that
+  // file does not already say, and can only fail for a rename. This fails for
+  // the thing that actually goes wrong - a state added to the toolbar chip and
+  // forgotten on the dock chip, or the other way round.
+  it("borrows the toolbar chip's material and states", () => {
+    render(<ToolbarIconButton aria-label="probe" />);
+    const square = classesOf(screen.getByRole("button", { name: "probe" }));
+    cleanup();
+
+    renderChip(baseProps());
+    const chip = classesOf(screen.getByTestId("chip"));
+
+    // The material: one bordered box on the app's own background.
+    for (const material of ["border", "border-border", "bg-background"]) {
+      expect(square, `toolbar chip lost ${material}`).toContain(material);
+      expect(chip, `dock chip lost ${material}`).toContain(material);
+    }
+    // The states, minus the two families a dock chip has no state for: it
+    // opens no menu (`data-[state=open]:`) and is never disabled, being the
+    // only door back to the row it folded away (`disabled:`).
+    const states = square.filter(
+      (candidate) =>
+        candidate.includes(":") &&
+        !candidate.startsWith("data-[state=open]:") &&
+        !candidate.startsWith("disabled:"),
+    );
+    expect(states.length).toBeGreaterThan(0);
+    for (const state of states) {
+      expect(chip, `dock chip is missing ${state}`).toContain(state);
+    }
+  });
+
+  // The one geometry claim that is genuinely this component's: a chip counts a
+  // thing rather than opening a menu, so it is the round one.
+  it("is a pill, and puts the count in the foreground", () => {
     renderChip(baseProps());
 
     const chip = screen.getByTestId("chip");
-    expect(chip.className).toContain("rounded-full");
-    expect(chip.className).toContain("border-border");
-    expect(chip.className).toContain("bg-background");
-    expect(chip.className).toContain("h-6");
-    // The toolbar chips' own states, so hover, focus and press agree.
-    expect(chip.className).toContain("hover:bg-accent");
-    expect(chip.className).toContain("focus-visible:ring-ring/60");
-    expect(chip.className).toContain("active:scale-97");
-    // Reduced motion cancels the press, as it does on the toolbar chip.
-    expect(chip.className).toContain("motion-reduce:active:scale-100");
+    expect(classesOf(chip)).toContain("rounded-full");
+    expect(classesOf(chip)).not.toContain("rounded-md");
 
     const count = chip.querySelector(".tabular-nums");
     expect(count?.className).toContain("text-foreground");

@@ -7,8 +7,17 @@ interface RegionFilterProps {
   readonly ref: Ref<HTMLInputElement>;
   /** ArrowDown from the field moves to the first index row (L-31). */
   readonly onArrowDown: () => void;
-  /** Enter opens the first match, without a trip through the rows. */
-  readonly onEnter: () => void;
+  /**
+   * Enter opens the first match, without a trip through the rows, or `null`
+   * for a host with nowhere for Enter to go.
+   *
+   * `null` is not the same as a handler that does nothing: the key is only
+   * taken - `preventDefault` - by a host that is going to act on it. The page
+   * host (`layout-settings-panel.tsx`) has no "first match" to open, and
+   * swallowing Enter there left the key doing nothing at all, unable to reach
+   * a form or the Settings modal around it.
+   */
+  readonly onEnter: (() => void) | null;
 }
 
 /**
@@ -32,8 +41,10 @@ export function RegionFilter(props: RegionFilterProps): ReactNode {
       useLayoutEditorStore.getState().setKeyboardNav(true);
       props.onArrowDown();
     } else if (event.key === "Enter") {
+      const onEnter = props.onEnter;
+      if (onEnter === null) return;
       event.preventDefault();
-      props.onEnter();
+      onEnter();
     } else if (event.key === "Escape" && filter.length > 0) {
       event.preventDefault();
       event.stopPropagation();

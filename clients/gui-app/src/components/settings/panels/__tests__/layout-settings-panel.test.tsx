@@ -252,10 +252,7 @@ describe("Settings - Layout", () => {
           mobileFooter: true,
           hiddenProviders: [DEFAULT_ARRANGEMENT.usageProviders[0]],
           providerLimits: {
-            [DEFAULT_ARRANGEMENT.usageProviders[0]]: {
-              automatic: false,
-              limitKeys: ["5h"],
-            },
+            [DEFAULT_ARRANGEMENT.usageProviders[0]]: { limitKeys: ["5h"] },
           },
           dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
         });

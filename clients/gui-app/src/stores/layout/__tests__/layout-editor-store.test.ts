@@ -29,11 +29,10 @@ function instancesOf(
   );
 }
 
-function session(preferredInstanceId: string | null): void {
+function session(): void {
   useLayoutEditorStore.getState().beginSession({
     entry: "pointer",
     source: "direct_ui",
-    preferredInstanceId,
     startedAt: 0,
   });
 }
@@ -77,7 +76,7 @@ afterEach(() => {
 
 describe("a gesture is one undo step", () => {
   it("records the state a gesture replaced and puts it back", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
@@ -93,7 +92,7 @@ describe("a gesture is one undo step", () => {
   });
 
   it("counts everything one gesture touched as one step", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       const layout = useLayoutStore.getState();
       layout.setRegionValues("mic", { shown: "hidden" });
@@ -107,7 +106,7 @@ describe("a gesture is one undo step", () => {
   });
 
   it("does not record a gesture that changed nothing", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       // `shown` is already what the base preset says, so there is no delta.
       useLayoutStore.getState().setRegionValues("mic", { shown: "shown" });
@@ -117,7 +116,7 @@ describe("a gesture is one undo step", () => {
   });
 
   it("drops the redo branch once a new gesture lands", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
@@ -131,7 +130,7 @@ describe("a gesture is one undo step", () => {
   });
 
   it("keeps at most the capped number of steps", () => {
-    session(null);
+    session();
     for (let step = 0; step < LAYOUT_HISTORY_CAP + 5; step += 1) {
       const shown = step % 2 === 0 ? "hidden" : "shown";
       editorState().recordGesture(() => {
@@ -145,7 +144,7 @@ describe("a gesture is one undo step", () => {
 
 describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
   it("counts only actual undo travel, not redo or a dropped redo branch", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
@@ -165,13 +164,13 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
   });
 
   it("does not count an undo with nothing to travel to", () => {
-    session(null);
+    session();
     editorState().undo();
     expect(editorState().undoCount).toBe(0);
   });
 
   it("sets firstChangeAt on the first gesture and never moves it again", () => {
-    session(null);
+    session();
     expect(editorState().firstChangeAt).toBeNull();
 
     editorState().recordGesture(() => {
@@ -190,7 +189,7 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
   });
 
   it("leaves firstChangeAt null for a gesture that changed nothing", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "shown" });
     });
@@ -198,7 +197,7 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
   });
 
   it("resets both on the next session", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
@@ -207,7 +206,7 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
     expect(editorState().firstChangeAt).not.toBeNull();
 
     editorState().endSession();
-    session(null);
+    session();
 
     expect(editorState().undoCount).toBe(0);
     expect(editorState().firstChangeAt).toBeNull();
@@ -217,7 +216,7 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
 describe("Discard and external writes (L-18)", () => {
   it("restores the state the session started from", () => {
     useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
@@ -230,7 +229,7 @@ describe("Discard and external writes (L-18)", () => {
   });
 
   it("rebases the entry snapshot onto a write the editor did not make", () => {
-    session(null);
+    session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
@@ -248,7 +247,7 @@ describe("Discard and external writes (L-18)", () => {
   });
 
   it("stops rebasing once the session ends", () => {
-    session(null);
+    session();
     const entry = editorState().entrySnapshot;
     editorState().endSession();
 
@@ -261,7 +260,7 @@ describe("Discard and external writes (L-18)", () => {
 
 describe("the inspector ladder (L-31)", () => {
   it("walks provider level, then section, then index", () => {
-    session(null);
+    session();
     editorState().select("usageLimits");
     editorState().openLevel({
       kind: "usage-provider",
@@ -279,7 +278,7 @@ describe("the inspector ladder (L-31)", () => {
   });
 
   it("closes an open level when the selection moves", () => {
-    session(null);
+    session();
     editorState().select("usageLimits");
     editorState().openLevel({
       kind: "usage-provider",
@@ -293,25 +292,28 @@ describe("the inspector ladder (L-31)", () => {
 });
 
 describe("instances", () => {
-  it("prefers the session's tile and falls back to the first registered", () => {
-    session("tile-b");
-    const background = instance({ regionId: "minimap", instanceId: "tile-a" });
-    const preferred = instance({ regionId: "minimap", instanceId: "tile-b" });
-    editorState().registerInstance(background);
-    editorState().registerInstance(preferred);
+  // A live session has one visible scene, so the overlays follow the first
+  // registration and the map is the only thing that decides which that is
+  // (L-87 deleted the second tile the old pin existed to choose between).
+  it("points the overlays at the first registration and drops with it", () => {
+    session();
+    const first = instance({ regionId: "minimap", instanceId: "tile-a" });
+    const second = instance({ regionId: "minimap", instanceId: "tile-b" });
+    editorState().registerInstance(first);
+    editorState().registerInstance(second);
 
-    expect(preferredRegionInstance(editorState(), "minimap")).toBe(preferred);
-    expect(instancesOf("minimap")).toEqual([background, preferred]);
+    expect(preferredRegionInstance(editorState(), "minimap")).toBe(first);
+    expect(instancesOf("minimap")).toEqual([first, second]);
 
-    editorState().unregisterInstance(preferred.key, preferred.node);
-    expect(preferredRegionInstance(editorState(), "minimap")).toBe(background);
+    editorState().unregisterInstance(first.key, first.node);
+    expect(preferredRegionInstance(editorState(), "minimap")).toBe(second);
 
-    editorState().unregisterInstance(background.key, background.node);
+    editorState().unregisterInstance(second.key, second.node);
     expect(preferredRegionInstance(editorState(), "minimap")).toBeNull();
   });
 
   it("ignores an unregister from a node that is no longer the live one", () => {
-    session(null);
+    session();
     const first = instance({ regionId: "mic", instanceId: null });
     editorState().registerInstance(first);
     const remounted: RegionInstance = {
@@ -326,7 +328,7 @@ describe("instances", () => {
   });
 
   it("survives a session boundary, because the nodes belong to the app", () => {
-    session(null);
+    session();
     const live = instance({ regionId: "mic", instanceId: null });
     editorState().registerInstance(live);
 
@@ -338,7 +340,7 @@ describe("instances", () => {
 
 describe("where the panel sits is the only persisted state (L-38)", () => {
   it("writes only the dock mode and the float position to its own leaf", async () => {
-    session(null);
+    session();
     editorState().select("minimap");
     editorState().setDockMode("float");
     editorState().setFloatPosition({ x: 120, y: 64 });
@@ -373,7 +375,7 @@ describe("where the panel sits is the only persisted state (L-38)", () => {
 
 describe("session-scoped fields", () => {
   it("clears hover, selection and the filter on exit", () => {
-    session(null);
+    session();
     editorState().select("minimap");
     editorState().setHovered("mic");
     editorState().setFilter("mini");
@@ -405,7 +407,7 @@ describe("whether there is anything to discard", () => {
   }
 
   it("is false on entry and raised by a gesture", () => {
-    session(null);
+    session();
     expect(editorState().dirty).toBe(false);
 
     hideTheMic();
@@ -414,7 +416,7 @@ describe("whether there is anything to discard", () => {
   });
 
   it("drops again on an undo back to the entry state, and returns on the redo", () => {
-    session(null);
+    session();
     hideTheMic();
 
     editorState().undo();
@@ -425,7 +427,7 @@ describe("whether there is anything to discard", () => {
   });
 
   it("drops on Discard", () => {
-    session(null);
+    session();
     hideTheMic();
 
     editorState().discard();
@@ -438,7 +440,7 @@ describe("whether there is anything to discard", () => {
     // restore TO, so another window's change is not something this session has
     // to discard. A rebase that forgot to re-answer this left the button lit
     // over a layout identical to the one it would restore.
-    session(null);
+    session();
 
     useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
 
@@ -449,7 +451,7 @@ describe("whether there is anything to discard", () => {
   });
 
   it("survives an external write landing on top of the session's own change", () => {
-    session(null);
+    session();
     hideTheMic();
 
     useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });

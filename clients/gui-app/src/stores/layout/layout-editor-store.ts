@@ -66,14 +66,6 @@ export interface LayoutEditorSession {
    * only ever sees the session, never the call that opened it.
    */
   readonly source: AnalyticsSource;
-  /**
-   * The tile whose instance of a region wins when several are on screen
-   * (L-23): it carries the anchor and the travelling ring, the others get a
-   * static outline. The door pins it to the sample tile (L-87), which is the
-   * only one the user is looking at - a retained background epic tab keeps
-   * registering its own chat regions for as long as it is open.
-   */
-  readonly preferredInstanceId: string | null;
   readonly startedAt: number;
 }
 
@@ -368,25 +360,29 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
 );
 
 /**
- * The instance the overlays point at: the preferred tile's, or the first one
- * registered when that tile has no node for this region (4.6, C-25).
+ * The instance the overlays point at: the first one registered for the region
+ * (4.6, C-25).
+ *
+ * "First" is enough because a live session has exactly one instance of a
+ * region to choose from. `useLayoutRegion` registers nothing from a surface
+ * whose `PaneVisibilityContext` is false; the editor's canvas is always the
+ * sample workspace, which is a plain top-level tab and
+ * `splitEligibility: "ineligible"`, so while a session is live that tab is the
+ * only visible surface. What is left registering is the sample scene and the
+ * shell around it (the header, the tab strip, the status bar), each of which
+ * draws any one region once. This used to be a PIN on the sample tile, carried
+ * on the session, back when the editor decorated the user's own screen in
+ * place (L-15) and two tiles could both be looking at it; L-87 removed the
+ * second tile, and the pin with it.
  */
 export function preferredRegionInstance(
-  state: Pick<LayoutEditorState, "instances" | "session">,
+  state: Pick<LayoutEditorState, "instances">,
   regionId: RegionId,
 ): RegionInstance | null {
-  const preferredInstanceId = state.session?.preferredInstanceId ?? null;
-  let first: RegionInstance | null = null;
   for (const instance of state.instances.values()) {
-    if (instance.regionId !== regionId) continue;
-    if (
-      preferredInstanceId !== null &&
-      instance.instanceId === preferredInstanceId
-    )
-      return instance;
-    first = first ?? instance;
+    if (instance.regionId === regionId) return instance;
   }
-  return first;
+  return null;
 }
 
 /**

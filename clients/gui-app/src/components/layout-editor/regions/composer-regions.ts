@@ -61,7 +61,6 @@ export const RUNNING_AGENTS_REGION: LayoutRegion<"runningAgents"> = {
   whereByHost: null,
   hint: null,
   keywords: ["agents", "running", "active", "work"],
-  sampleFilled: true,
   rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
@@ -76,7 +75,6 @@ export const CHANGED_FILES_REGION: LayoutRegion<"changedFiles"> = {
   whereByHost: null,
   hint: null,
   keywords: ["changed", "files", "diff", "edits", "added", "removed"],
-  sampleFilled: true,
   rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
@@ -91,7 +89,6 @@ export const BACKGROUND_REGION: LayoutRegion<"background"> = {
   whereByHost: null,
   hint: null,
   keywords: ["background", "shell", "tasks", "running"],
-  sampleFilled: true,
   rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
@@ -106,7 +103,6 @@ export const ATTACH_IMAGE_REGION: LayoutRegion<"attachImage"> = {
   whereByHost: null,
   hint: null,
   keywords: ["attach", "image", "screenshot", "paste", "upload"],
-  sampleFilled: false,
   rows: [TOOLBAR_LEFT_ORDER_ROW],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,
@@ -121,7 +117,6 @@ export const ACCESS_REGION: LayoutRegion<"access"> = {
   whereByHost: null,
   hint: null,
   keywords: ["access", "supervised", "permissions", "approval"],
-  sampleFilled: false,
   rows: [
     {
       kind: "size",
@@ -142,7 +137,6 @@ export const AGENT_REGION: LayoutRegion<"agent"> = {
   whereByHost: null,
   hint: null,
   keywords: ["harness", "provider", "vendor", "model"],
-  sampleFilled: false,
   rows: [TOOLBAR_LEFT_ORDER_ROW],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,
@@ -157,7 +151,6 @@ export const MODEL_REGION: LayoutRegion<"model"> = {
   whereByHost: null,
   hint: null,
   keywords: ["model", "chip", "effort", "medium", "bars", "reasoning"],
-  sampleFilled: false,
   rows: [
     {
       kind: "style",
@@ -180,7 +173,6 @@ export const MIC_REGION: LayoutRegion<"mic"> = {
   whereByHost: null,
   hint: null,
   keywords: ["microphone", "mic", "voice", "dictation", "speech"],
-  sampleFilled: false,
   rows: [TOOLBAR_RIGHT_ORDER_ROW],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,

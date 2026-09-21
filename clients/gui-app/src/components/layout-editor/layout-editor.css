@@ -600,10 +600,13 @@
 
    One rule, on the element that already carries the session marker: the app
    column (`app-shell.tsx` writes `data-layout-column`, `layout-canvas.ts`
-   writes `data-layout-editing`). The column holds the header, the tab strip
-   and the screen, and it is deliberately NOT an ancestor of the inspector
-   (C-06) - so outlining it draws one box around the tab and the screen it
-   belongs to, and leaves the instrument panel outside it.
+   writes `data-layout-editing`). The column holds the header, the WHOLE tab
+   strip and the screen, and it is deliberately NOT an ancestor of the
+   inspector (C-06) - so outlining it draws one box around the app the editor
+   is decorating and leaves the instrument panel outside it. The box is around
+   every open tab, not around the sample one: which tab is being customized is
+   said by the amber cap on the sample tab, and this line says that the app
+   under it is in edit mode.
 
    INSET (`outline-offset: -2px`), because an outset outline on a
    `h-safe-dvh` column is clipped by the window edge on three sides and reads

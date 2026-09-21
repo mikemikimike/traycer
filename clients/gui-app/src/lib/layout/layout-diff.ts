@@ -1,9 +1,11 @@
 import {
   DEFAULT_ARRANGEMENT,
+  isAutomaticLimitSelection,
   ORDER_GROUP_IDS,
   type EdgeSide,
   type LayoutArrangement,
   type OrderGroupId,
+  type StatusBarProviderLimitSelection,
   type UsageHost,
 } from "@/lib/layout/layout-arrangement";
 import { leftPanelGroupsFromRail } from "@/lib/layout/rail";
@@ -103,6 +105,23 @@ export function resetToBase(snapshot: LayoutSnapshot): LayoutSnapshot {
 // per-row revert read; `resetEverything` is the floor under both, and it
 // matters most on this host, which has no session and therefore no Undo.
 
+/**
+ * Whether one provider's stored selection differs from the shipped default.
+ *
+ * By DIFFERENCE rather than by presence: an entry equal to Automatic says
+ * nothing the absence of one does not, and reading presence as change left a
+ * provider the user had put back marked forever - down to offering "Reset
+ * everything", a confirmed destructive action, on a layout nobody had changed
+ * (R1-03). The writer no longer stores such an entry; a map rehydrated from an
+ * older write still can, which is why the truth is measured here and not
+ * assumed at the write.
+ */
+function limitsChanged(
+  selection: StatusBarProviderLimitSelection | undefined,
+): boolean {
+  return selection !== undefined && !isAutomaticLimitSelection(selection);
+}
+
 /** Whether ONE provider has been hidden or had its limits picked (L-26, L-96). */
 export function providerChanged(
   arrangement: LayoutArrangement,
@@ -110,7 +129,7 @@ export function providerChanged(
 ): boolean {
   return (
     arrangement.hiddenProviders.includes(providerId) ||
-    arrangement.providerLimits[providerId] !== undefined
+    limitsChanged(arrangement.providerLimits[providerId])
   );
 }
 
@@ -134,7 +153,9 @@ export function revertProvider(
 export function usageProvidersChanged(arrangement: LayoutArrangement): boolean {
   return (
     arrangement.hiddenProviders.length > 0 ||
-    Object.keys(arrangement.providerLimits).length > 0 ||
+    Object.values(arrangement.providerLimits).some((selection) =>
+      limitsChanged(selection),
+    ) ||
     reorderedGroups(arrangement).includes("usageProviders")
   );
 }

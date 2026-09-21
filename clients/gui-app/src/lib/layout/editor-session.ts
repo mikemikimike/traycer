@@ -27,7 +27,6 @@ import {
   navigateToSettingsSection,
 } from "@/lib/settings-navigation";
 import { activateTabIntent } from "@/lib/tab-navigation";
-import { SAMPLE_TILE_ID } from "@/components/sample-workspace/sample-workspace-scene";
 import {
   useLayoutEditorStore,
   type LayoutEditorEntryMethod,
@@ -54,6 +53,14 @@ import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
  * ends the session, and ending the session closes the tab - which is the one
  * invariant behind the width gate here, the watcher below and
  * `SampleSceneProvider`'s own close.
+ *
+ * It is also why nothing here says which INSTANCE of a region the overlays
+ * follow. The sample tab is activated before the session begins, it is
+ * `splitEligibility: "ineligible"` so nothing is ever presented beside it, and
+ * `useLayoutRegion` registers nothing from a surface whose
+ * `PaneVisibilityContext` is false - which every other top-level surface's is
+ * while the sample tab is the active one. One visible scene, one instance per
+ * region, nothing to choose between.
  */
 
 type NavigateFn = UseNavigateResult<string>;
@@ -154,15 +161,6 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
       useLayoutEditorStore.getState().beginSession({
         entry: input.entry,
         source: input.source,
-        // Pinned to the sample tile rather than left to "whichever instance
-        // registered first" (L-23). A background tab's tiles no longer
-        // register at all - `useLayoutRegion` gates on `usePaneVisible()` and
-        // `SurfacePresentationBoundary` turns that off for an unpresented
-        // surface - but a SPLIT presents both sides as visible, so a chat tile
-        // beside the sample workspace registers the same regions the sample
-        // scene does. Without the pin the travelling ring would settle on
-        // whichever of the two mounted first.
-        preferredInstanceId: SAMPLE_TILE_ID,
         startedAt: Date.now(),
       });
       if (input.target !== null) {

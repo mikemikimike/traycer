@@ -21,12 +21,11 @@ function Region(props: {
   return <div ref={ref} data-testid={props.testId} />;
 }
 
-function openSession(preferredInstanceId: string | null): void {
+function openSession(): void {
   act(() => {
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
       source: "direct_ui",
-      preferredInstanceId,
       startedAt: 0,
     });
   });
@@ -54,7 +53,7 @@ describe("registration", () => {
       preferredRegionInstance(useLayoutEditorStore.getState(), "minimap"),
     ).toBeNull();
 
-    openSession("tile-a");
+    openSession();
 
     expect(node.getAttribute("data-layout-region")).toBe("minimap");
     expect(node.getAttribute("data-layout-instance")).toBe("tile-a");
@@ -70,7 +69,7 @@ describe("registration", () => {
   });
 
   it("leaves a hidden pane's copy out of the editor", () => {
-    openSession(null);
+    openSession();
     const view = render(
       <PaneVisibilityContext value={false}>
         <Region regionId="mic" instanceId="tile-a" testId="mic" />
@@ -86,7 +85,7 @@ describe("registration", () => {
   });
 
   it("unregisters and leaves the app's element as it was found", () => {
-    openSession(null);
+    openSession();
     const view = render(
       <Region regionId="mic" instanceId={null} testId="mic" />,
     );
@@ -105,7 +104,7 @@ describe("registration", () => {
 
 describe("decoration", () => {
   it("lights up every instance of a hovered region (L-23)", () => {
-    openSession("tile-b");
+    openSession();
     const view = render(
       <>
         <Region regionId="minimap" instanceId="tile-a" testId="a" />
@@ -124,7 +123,7 @@ describe("decoration", () => {
   });
 
   it("anchors exactly one instance per role (C-12)", () => {
-    openSession("tile-b");
+    openSession();
     const view = render(
       <>
         <Region regionId="minimap" instanceId="tile-a" testId="a" />
@@ -136,10 +135,10 @@ describe("decoration", () => {
       useLayoutEditorStore.getState().setHovered("minimap");
     });
 
-    expect(view.getByTestId("a").hasAttribute("data-layout-anchor")).toBe(
+    expect(view.getByTestId("b").hasAttribute("data-layout-anchor")).toBe(
       false,
     );
-    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
+    expect(view.getByTestId("a").getAttribute("data-layout-anchor")).toBe(
       "hover",
     );
 
@@ -149,10 +148,10 @@ describe("decoration", () => {
 
     // Still one instance, and now one role: the selection takes the hover's
     // place rather than joining it (C-08).
-    expect(view.getByTestId("a").hasAttribute("data-layout-anchor")).toBe(
+    expect(view.getByTestId("b").hasAttribute("data-layout-anchor")).toBe(
       false,
     );
-    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
+    expect(view.getByTestId("a").getAttribute("data-layout-anchor")).toBe(
       "selected",
     );
   });
@@ -162,7 +161,7 @@ describe("decoration", () => {
     // the region it just selected, so this has to be derived rather than
     // cleared once - and it is derived in ONE place, so the attributes here
     // and the chip the canvas shows can never disagree.
-    openSession("tile-b");
+    openSession();
     const view = render(
       <>
         <Region regionId="minimap" instanceId="tile-a" testId="a" />
@@ -185,7 +184,7 @@ describe("decoration", () => {
   });
 
   it("keeps the hover anchor and the selection anchor apart", () => {
-    openSession(null);
+    openSession();
     const view = render(
       <>
         <Region regionId="minimap" instanceId={null} testId="minimap" />
@@ -206,8 +205,8 @@ describe("decoration", () => {
     );
   });
 
-  it("moves the anchor onto the surviving instance when the preferred one goes", () => {
-    openSession("tile-b");
+  it("moves the anchor onto the surviving instance when the anchored one goes", () => {
+    openSession();
     const view = render(
       <>
         <Region regionId="minimap" instanceId="tile-a" testId="a" />
@@ -217,13 +216,13 @@ describe("decoration", () => {
     act(() => {
       useLayoutEditorStore.getState().select("minimap");
     });
-    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
+    expect(view.getByTestId("a").getAttribute("data-layout-anchor")).toBe(
       "selected",
     );
 
-    view.rerender(<Region regionId="minimap" instanceId="tile-a" testId="a" />);
+    view.rerender(<Region regionId="minimap" instanceId="tile-b" testId="b" />);
 
-    expect(view.getByTestId("a").getAttribute("data-layout-anchor")).toBe(
+    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
       "selected",
     );
   });

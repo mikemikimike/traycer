@@ -61,14 +61,16 @@ export type CanvasOrderGroupId = "dock" | "toolbarLeft" | "toolbarRight";
 /**
  * Which of one provider's limits its usage segment draws.
  *
- * `automatic` is the tightest limit at the moment of drawing, so it can name a
- * different window from one reading to the next; `limitKeys` are explicit
- * picks by `windowKey`. At least one of the two is always on - a selection
- * with neither would draw nothing, which is what the provider's own Shown
- * switch is for.
+ * `limitKeys` are explicit picks by `windowKey`, and an EMPTY list is
+ * Automatic - the tightest limit at the moment of drawing, which can name a
+ * different window from one reading to the next. The two modes are exclusive
+ * by construction, so there is one field and not two: a stored `automatic`
+ * boolean beside the list was a second representation of `limitKeys.length
+ * === 0`, which is how two fields for one fact come to disagree (R1-15).
+ * Nothing draws nothing - a provider the user wants gone has its own Shown
+ * switch.
  */
 export interface StatusBarProviderLimitSelection {
-  readonly automatic: boolean;
   readonly limitKeys: ReadonlyArray<string>;
 }
 
@@ -204,9 +206,23 @@ export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
 
 /** What a provider draws until told otherwise: its tightest limit, and only that. */
 export const AUTOMATIC_LIMIT_SELECTION: StatusBarProviderLimitSelection = {
-  automatic: true,
   limitKeys: [],
 };
+
+/**
+ * Whether a stored selection says anything the DEFAULT does not.
+ *
+ * The one definition of "this provider is on Automatic", read by the writer
+ * that refuses to store it (`provider-level.tsx`) and by the predicate that
+ * decides whether a provider counts as changed (`layout-diff.ts`). Both used
+ * to answer from PRESENCE, which made a return to Automatic a permanent mark
+ * on a layout byte-identical to the shipped one (R1-03).
+ */
+export function isAutomaticLimitSelection(
+  selection: StatusBarProviderLimitSelection,
+): boolean {
+  return selection.limitKeys.length === 0;
+}
 
 /**
  * The selection one provider is on, with the default standing in for a provider

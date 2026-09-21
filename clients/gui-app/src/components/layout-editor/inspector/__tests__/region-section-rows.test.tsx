@@ -8,6 +8,8 @@ import {
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 
+function noop(): void {}
+
 function styleExamples(): ReadonlyArray<HTMLElement> {
   return within(screen.getByRole("radiogroup", { name: "Style" })).getAllByRole(
     "radio",
@@ -47,13 +49,7 @@ describe("the Style block's example subject (L-10, I-06)", () => {
     // for a segment per provider and was masked off after the first two.
     expect(shown.length).toBeGreaterThan(1);
 
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
 
     const examples = styleExamples();
     expect(examples.length).toBeGreaterThan(1);
@@ -64,13 +60,7 @@ describe("the Style block's example subject (L-10, I-06)", () => {
 
   it("takes its specimen from the first provider the strip still shows", () => {
     const shown = useLayoutStore.getState().arrangement.usageProviders;
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
 
     act(() => {
       const arrangement = useLayoutStore.getState().arrangement;
@@ -86,13 +76,7 @@ describe("the Style block's example subject (L-10, I-06)", () => {
   });
 
   it("keeps drawing the region itself for every other region", () => {
-    render(
-      <RegionSection
-        regionId="contextUsage"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="contextUsage" onOpenProvider={noop} />);
 
     for (const example of styleExamples()) {
       expect(providerIdsIn(example)).toEqual([]);
@@ -103,40 +87,36 @@ describe("the Style block's example subject (L-10, I-06)", () => {
 
 describe("the providers list (I-12)", () => {
   it("gives every provider row a glyph of its own", () => {
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
 
     const rows = [...document.querySelectorAll("[data-sortable-id]")];
     expect(rows.length).toBeGreaterThan(1);
     for (const row of rows) {
-      // The grip and the row's own glyph. A provider row used to carry the
-      // grip and an eye toggle only, which read as bare text beside every
-      // other sortable list in the inspector (I-12).
+      // Named, not counted: the row's own glyph is the element in the icon
+      // slot, and it is a different element from the grip beside it. A count
+      // of the SVGs in the line passed for any two of them and would fail for
+      // a legitimate third - a changed dot drawn as an SVG, a chevron on an
+      // expandable row (R1-19).
       //
-      // The eye is gone with D5: a row in the dock's list carries no
+      // A provider row used to carry the grip and an eye toggle only, which
+      // read as bare text beside every other sortable list in the inspector
+      // (I-12). The eye is gone with D5: a row in the dock's list carries no
       // visibility control at all, because the section header above it owns
       // the one control the selected region has, and the provider's own level
-      // owns the one a provider has. Two controls for one value, in two
-      // vocabularies, is what that button was.
-      expect(row.querySelectorAll("svg")).toHaveLength(2);
+      // owns the one a provider has.
+      const icon = row.querySelector("[data-row-icon]");
+      const grip = row.querySelector("[data-row-grip]");
+      expect(icon).not.toBeNull();
+      expect(icon?.tagName.toLowerCase()).toBe("svg");
+      expect(grip).not.toBeNull();
+      expect(icon).not.toBe(grip);
     }
   });
 });
 
 describe("the per-row revert (L-20, I-04)", () => {
   it("draws exactly one revert on a changed unstacked row, not one per side", () => {
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
     expect(
       screen.queryByRole("button", { name: "Revert Position" }),
     ).toBeNull();
@@ -157,13 +137,7 @@ describe("the per-row revert (L-20, I-04)", () => {
   });
 
   it("draws exactly one revert on a stacked row too", () => {
-    render(
-      <RegionSection
-        regionId="runningAgents"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="runningAgents" onOpenProvider={noop} />);
 
     act(() => {
       const arrangement = useLayoutStore.getState().arrangement;
@@ -181,13 +155,7 @@ describe("the per-row revert (L-20, I-04)", () => {
 
 describe("one list, two hosts (L-03, L-95)", () => {
   it("filters by SELECTION rather than by drawing a list of its own", () => {
-    render(
-      <RegionSection
-        regionId="railAgents"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="railAgents" onOpenProvider={noop} />);
 
     const rows = [...document.querySelectorAll("[data-sortable-id]")];
     const ids = rows.map((node) => node.getAttribute("data-sortable-id") ?? "");

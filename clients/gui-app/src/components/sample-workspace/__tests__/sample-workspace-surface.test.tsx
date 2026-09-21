@@ -216,6 +216,46 @@ describe("SampleWorkspaceBody - content", () => {
   });
 });
 
+describe("SampleWorkspaceBody - a hidden dock member's ghost", () => {
+  afterEach(() => {
+    useLayoutEditorStore.getState().endSession();
+  });
+
+  // A member that is Hidden AND Chip draws nothing at rest and materialises
+  // while the editor points at it (L-14). The shape it materialises IN is the
+  // one it would take if it were shown, which for a Chip-sized member is the
+  // pill - so the picture the user judges their own setting by is the setting.
+  //
+  // It drew a full ROW instead: `folded` was derived from the stored `shown`
+  // alone while `planDockRow` asked `shown || ghost`, so the ghost slipped
+  // past the fold and landed in the joined frame. One derivation now
+  // (`dockMemberFolded`), read by this host and by the real tile.
+  it("materialises a Hidden + Chip member as its chip, not as a full row", () => {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      overrides: { changedFiles: { shown: "hidden", size: "chip" } },
+      layoutCarryDone: true,
+    });
+    renderBody();
+
+    // Hidden and unpointed-at: neither shape is on screen.
+    expect(screen.queryByTestId("chat-dock-chip-filesChanged")).toBeNull();
+    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+
+    act(() => {
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+      });
+      useLayoutEditorStore.getState().select("changedFiles");
+    });
+
+    expect(screen.getByTestId("chat-dock-chip-filesChanged")).not.toBeNull();
+    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+  });
+});
+
 describe("SampleWorkspaceBody - sample labelling", () => {
   afterEach(() => {
     useLayoutEditorStore.getState().endSession();
@@ -229,7 +269,6 @@ describe("SampleWorkspaceBody - sample labelling", () => {
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
         source: "direct_ui",
-        preferredInstanceId: null,
         startedAt: 0,
       });
     });

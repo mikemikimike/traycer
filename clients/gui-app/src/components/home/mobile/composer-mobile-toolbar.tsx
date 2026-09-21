@@ -172,11 +172,17 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
           Not `PermissionsPicker` itself: its dropdown would nest a Radix layer
           inside the vaul drawer. Deliberately not disabled by `settingsLocked`
           either - this is also the only route to the agent-mode rows, which
-          must stay reachable; the sheet's own rows carry the lock. */}
+          must stay reachable; the sheet's own rows carry the lock.
+
+          32px, not the desktop chip's 28: L-88's bordered chip row is about
+          the desktop composer, and this toolbar is the installed mobile app's
+          own - where the editor never opens (the width gate is 1100px) and the
+          only thing a smaller box changes is how easy the control is to hit
+          with a thumb. */}
       <ToolbarPillButton
         aria-label={`Permissions: ${permissionOption.label}`}
         data-testid="composer-mobile-options-trigger"
-        className="size-7 shrink-0 justify-center px-0"
+        className="size-8 shrink-0 justify-center px-0"
         onClick={() => {
           setOptionsOpen(true);
         }}

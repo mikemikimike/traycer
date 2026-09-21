@@ -35,7 +35,11 @@ import type {
   SizedValues,
   UsageLimitsValues,
 } from "@/lib/layout/layout-values";
-import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
+import type {
+  DockRegionId,
+  RailRegionId,
+  RegionId,
+} from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
 import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 
@@ -178,6 +182,54 @@ export function regionDepiction<K extends RegionId>(
   arrangement: LayoutArrangement,
 ): ReactNode {
   return depictRegion(region, values[region], arrangement, null);
+}
+
+/**
+ * Every full-size dock row in ONE joined frame (L-97).
+ *
+ * The real `ChatLowerDock` is one bordered surface tucked under the composer
+ * with its panels stacked inside it and a hairline between them - never a
+ * bordered card per row. Both pictures of the dock wrapped their rows in a
+ * frame of their own and then drew each row through `depictRegion`, which
+ * frames it again, so every row came out inside two joined frames and the
+ * "separate cards" treatment L-97 dropped was back in the two surfaces whose
+ * whole claim is that they are a real picture of the app (R1-01).
+ *
+ * It is here rather than in either picture because the frame belongs to this
+ * layer: `depictRegion` is deliberately the only way a region is drawn, so a
+ * caller cannot hold the leaf without the frame, and this is the one place
+ * that may put several leaves in one.
+ */
+export function depictDockRows(
+  rows: ReadonlyArray<DockRegionId>,
+  values: LayoutValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  return (
+    <HostContextFrame host="dock">
+      {rows.map((regionId, index) => (
+        <div
+          key={regionId}
+          // The same hairline `ChatLowerDock` gives a panel it draws below
+          // another one (`separated`), which is what tells two rows apart
+          // inside one frame now that the gap between two cards is gone.
+          className={cn(index === 0 ? null : "border-t border-border/50")}
+        >
+          {depictDockRow(regionId, values[regionId], arrangement)}
+        </div>
+      ))}
+    </HostContextFrame>
+  );
+}
+
+/** One dock row's leaf, without a frame of its own. Private for that reason. */
+function depictDockRow<K extends DockRegionId>(
+  regionId: K,
+  values: LayoutValues[K],
+  arrangement: LayoutArrangement,
+): ReactNode {
+  const depict = REGION_DEPICTIONS[regionId];
+  return depict(values, arrangement);
 }
 
 // ── Specimen data ───────────────────────────────────────────────────────────

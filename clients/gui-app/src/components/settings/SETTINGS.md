@@ -1473,9 +1473,9 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     connected later shows its tightest limit with no visit here. At least one
     entry stays checked: the last checked entry on screen is `disabled`,
     because a provider that draws nothing is what the provider switch above is
-    for. Store: `arrangement.providerLimits[providerId] = { automatic,
-limitKeys }`; the store refuses a write that would leave a selection drawing
-    nothing, whichever order the two are flipped in.
+    for. Store: `arrangement.providerLimits[providerId] = { limitKeys }`, where
+    an EMPTY list is automatic and the absent key means the same thing; the
+    store refuses a write that would leave a selection drawing nothing.
     Resolution happens in `useStatusBarRateLimitSegments`, not in the segment:
     the model carries `windows` (every live limit), `shown` (the selection
     resolved against them, falling back to the tightest when every pick has
@@ -1486,10 +1486,7 @@ limitKeys }`; the store refuses a write that would leave a selection drawing
     currently reported window. The automatic entry is therefore drawn CHECKED
     and held whenever nothing visible is checked - which is exactly what the
     resolved `shown` is standing in for - and nothing is written: the picks
-    return with the first reading. A pick made WHILE it is standing in writes
-    `automatic: true` through with the limit, so the entry a click can reach is
-    never the one about to be held and no click blurs a focused box to
-    `<body>`.
+    return with the first reading.
   - **A limit is NAMED on the strip only when the name disambiguates**
     (`windowLabelText`, `lib/rate-limits/status-bar-window-text.ts`). A
     provider with ONE visible limit reads `100% used 6d` - there is nothing to

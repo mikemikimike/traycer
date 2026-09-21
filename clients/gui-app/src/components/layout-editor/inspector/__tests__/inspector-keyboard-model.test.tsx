@@ -70,7 +70,6 @@ function Harness(props: { readonly onExit: () => void }): ReactNode {
         <RegionSection
           key={selected}
           regionId={selected}
-          host="inspector"
           onOpenProvider={(providerId) => {
             if (!isUsageProviderId(providerId)) return;
             useLayoutEditorStore
@@ -211,6 +210,31 @@ describe("the shared back row (L-89)", () => {
     // longer exists.
     expect(document.activeElement?.getAttribute("data-region-id")).toBe(
       "homeTab",
+    );
+  });
+
+  it("comes back to the row that was opened, not to the top of the list", () => {
+    // The memory is a SESSION's, so this is the one case that needs one: the
+    // index is only ever drawn inside a session, and a new visit starts at the
+    // top of the list rather than wherever the last one stopped.
+    useLayoutEditorStore.getState().beginSession({
+      entry: "keyboard",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+    render(<Harness onExit={() => {}} />);
+
+    // Any row but the first: the index unmounts with the selection and
+    // remounts on the way back, which used to put focus on row 0 whatever the
+    // user had opened - eight presses back down to Background, every time.
+    const opened = screen.getByRole("button", { name: /^Minimap/ });
+    fireEvent.click(opened);
+    expect(useLayoutEditorStore.getState().selected).toBe("minimap");
+
+    fireEvent.click(screen.getByRole("button", { name: "All regions" }));
+
+    expect(document.activeElement?.getAttribute("data-region-id")).toBe(
+      "minimap",
     );
   });
 

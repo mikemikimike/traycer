@@ -13,16 +13,11 @@ import {
 } from "@/lib/layout/test-support/fake-view-transition";
 import { LAYOUT_EDITOR_LEASE_KEY } from "@/lib/layout/editor-lease";
 import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
-import { SAMPLE_TILE_ID } from "@/components/sample-workspace/sample-workspace-scene";
 import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import type { SystemModalActive } from "@/stores/tabs/system-overlay-types";
-import {
-  preferredRegionInstance,
-  useLayoutEditorStore,
-  type RegionInstance,
-} from "@/stores/layout/layout-editor-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
@@ -111,27 +106,6 @@ function close(reason: "done" | "discard" | "tab-switch"): void {
  */
 function forceReducedMotion(): void {
   document.documentElement.setAttribute("data-reduce-panel-motion", "");
-}
-
-/**
- * One live region node, registered the way `useLayoutRegion` registers one.
- *
- * `instanceId` is what decides the anchor: the sample tile's own id, or a chat
- * tile in a tab the user is not looking at.
- */
-function registerRegion(
-  regionId: RegionId,
-  instanceId: string,
-): RegionInstance {
-  const instance: RegionInstance = {
-    key: `${regionId}@shell:${instanceId}`,
-    regionId,
-    sceneId: "shell",
-    instanceId,
-    node: document.createElement("div"),
-  };
-  useLayoutEditorStore.getState().registerInstance(instance);
-  return instance;
 }
 
 /**
@@ -366,23 +340,15 @@ describe("the canvas (L-87, 5.1)", () => {
     );
   });
 
-  it("anchors the decoration to the sample tile, not to a background tab's chat", () => {
-    // A retained background epic tab keeps registering its own chat regions
-    // for as long as it is open - `usePaneVisible` is about split panes, not
-    // about which TOP-LEVEL tab is on screen. Registered FIRST here, because
-    // "the first instance registered" is exactly the fallback that would put
-    // the travelling ring on a tile nobody can see.
-    open(null);
-    const background = registerRegion("mic", "background-tile");
-    const sampleTile = registerRegion("mic", SAMPLE_TILE_ID);
-
-    expect(
-      preferredRegionInstance(useLayoutEditorStore.getState(), "mic"),
-    ).toBe(sampleTile);
-    expect(
-      preferredRegionInstance(useLayoutEditorStore.getState(), "mic"),
-    ).not.toBe(background);
-  });
+  // Nothing here pins WHICH instance of a region the overlays follow, because
+  // a live session has one to choose from: `PaneVisibilityContext` is
+  // published by every top-level surface from its OWN visibility
+  // (`epic-surface.tsx`, `hosted-chat-surface-context-bridge.tsx`), not from
+  // split membership, so while the sample tab is the active item nothing else
+  // registers at all - and the sample tab cannot be in a split, being
+  // `splitEligibility: "ineligible"`. The gate itself is pinned where it
+  // lives: `use-layout-region.test.tsx`'s "leaves a hidden pane's copy out of
+  // the editor".
 
   it("preselects a deep-link target (5.3)", () => {
     open("minimap");

@@ -19,6 +19,7 @@ import type { ChatSessionState } from "@/stores/chats/chat-session-store";
 import { ChatDockCompactStrip } from "@/components/chat/chat-dock-compact-strip";
 import { useChatDockCompactStrip } from "@/components/chat/chat-dock-compact-context";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
+import { dockMemberMaterialised } from "@/components/chat/chat-dock-fold";
 import { cn } from "@/lib/utils";
 import type { ChatPinnedStackTopSpacing } from "@/components/chat/chat-pinned-stack";
 
@@ -68,7 +69,7 @@ export interface DockRowHotspot {
 const DOCK_FRAME_CLASS =
   "@container mx-3 -mb-px overflow-hidden rounded-t-lg border border-b-0 border-border bg-foreground/3 empty:hidden";
 
-interface LiveChatLowerDockProps {
+export interface ChatLowerDockProps {
   readonly snapshotLoaded: boolean;
   readonly epicId: string;
   /** The chat this dock belongs to - the strip's managed-command join key. */
@@ -135,8 +136,6 @@ interface LiveChatLowerDockProps {
   readonly onBackgroundSessionStop: () => string | null;
 }
 
-export type ChatLowerDockProps = LiveChatLowerDockProps;
-
 interface DockRowPlan {
   readonly section: ChatDockSection;
   readonly hotspot: DockRowHotspot;
@@ -146,17 +145,18 @@ interface DockRowPlan {
 /**
  * Whether a row draws.
  *
- * A hidden row draws nothing at rest and materialises while the editor points
- * at it (L-14). Sample fill inside a real chat is gone with the in-place scene
- * (L-87): the sample workspace mounts these same panels against sample data
- * (L-98), so there is one code path and no stand-in leaves.
+ * Sample fill inside a real chat is gone with the in-place scene (L-87): the
+ * sample workspace mounts these same panels against sample data (L-98), so
+ * there is one code path and no stand-in leaves.
  */
 function planDockRow(
   section: ChatDockSection,
   hotspot: DockRowHotspot,
   folded: ReadonlySet<ChatDockSection>,
 ): DockRowPlan {
-  const unfolded = (hotspot.shown || hotspot.ghost) && !folded.has(section);
+  const unfolded =
+    dockMemberMaterialised(hotspot.shown, hotspot.ghost) &&
+    !folded.has(section);
   return { section, hotspot, showRow: unfolded && hotspot.hasContent };
 }
 
@@ -237,7 +237,7 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
 function dockRows(props: {
   readonly rows: ReadonlyArray<DockRowPlan>;
   readonly separatedBefore: boolean;
-  readonly dock: LiveChatLowerDockProps;
+  readonly dock: ChatLowerDockProps;
 }): ReactNode {
   let separated = props.separatedBefore;
   const nodes: ReactNode[] = [];
@@ -264,7 +264,7 @@ function dockRow(props: {
   readonly editing: boolean;
   readonly hotspotRef: (node: HTMLElement | null) => void;
   readonly separated: boolean;
-  readonly dock: LiveChatLowerDockProps;
+  readonly dock: ChatLowerDockProps;
 }): ReactNode {
   const { dock } = props;
   const wrapperClass = props.editing ? "block min-w-0" : "contents";
@@ -323,7 +323,7 @@ function dockRow(props: {
 
 function QueueSection(props: {
   readonly visible: boolean;
-  readonly dock: LiveChatLowerDockProps;
+  readonly dock: ChatLowerDockProps;
 }) {
   if (!props.visible) return null;
   const { dock } = props;

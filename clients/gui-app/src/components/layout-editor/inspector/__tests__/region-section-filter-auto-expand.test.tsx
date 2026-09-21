@@ -32,15 +32,12 @@ afterEach(() => {
   useLayoutEditorStore.getState().endSession();
 });
 
+/** Nothing here opens the providers level; the section only has to draw it. */
+function noop(): void {}
+
 describe("Fine-tune auto-expand (L-07, fineTuneMatchesFilter)", () => {
   it("stays collapsed with no filter - Radix does not mount closed content", () => {
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
     // `@testing-library/jest-dom` is not wired into this repo's vitest setup,
     // so attribute/presence checks are read by hand rather than via
     // `toHaveAttribute`/`toBeInTheDocument`.
@@ -59,13 +56,7 @@ describe("Fine-tune auto-expand (L-07, fineTuneMatchesFilter)", () => {
     // auto-expand path specifically, not the ordinary "the region matched"
     // path a broader query would also satisfy.
     useLayoutEditorStore.setState({ filter: "percentage" });
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
     expect(
       screen
         .getByRole("button", { name: /Fine-tune \(\d+\)/ })
@@ -76,13 +67,7 @@ describe("Fine-tune auto-expand (L-07, fineTuneMatchesFilter)", () => {
 
   it("stays manually closeable, and the close does not silence the NEXT query (G1-20)", () => {
     useLayoutEditorStore.setState({ filter: "percentage" });
-    render(
-      <RegionSection
-        regionId="usageLimits"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
     const trigger = screen.getByRole("button", { name: /Fine-tune \(\d+\)/ });
     expect(trigger.getAttribute("data-state")).toBe("open");
 

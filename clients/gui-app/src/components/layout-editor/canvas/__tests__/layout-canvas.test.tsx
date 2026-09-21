@@ -9,6 +9,10 @@ import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 /**
  * The app column plus two regions, mounted the way ticket 07's shell will
@@ -24,7 +28,11 @@ function Canvas(props: {
   const [column, setColumn] = useState<HTMLElement | null>(null);
   useLayoutCanvas(column);
   return (
-    <div ref={setColumn} data-testid="column">
+    // `data-layout-column` exactly as `app-shell.tsx` writes it, on the node
+    // the hook is handed: the editing outline is one CSS rule on
+    // `[data-layout-column][data-layout-editing="1"]`, so the two attributes
+    // have to land on ONE element for it to ever draw.
+    <div ref={setColumn} data-layout-column data-testid="column">
       {props.regions.map((region) => (
         <Region key={region.testId} {...region} />
       ))}
@@ -48,12 +56,11 @@ function Region(props: {
   );
 }
 
-function openSession(preferredInstanceId: string | null): void {
+function openSession(): void {
   act(() => {
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
       source: "direct_ui",
-      preferredInstanceId,
       startedAt: 0,
     });
   });
@@ -102,6 +109,10 @@ async function flushFrames(count: number): Promise<void> {
 }
 
 beforeEach(() => {
+  useLayoutStore.setState({
+    ...DEFAULT_LAYOUT_SNAPSHOT,
+    layoutCarryDone: true,
+  });
   useLayoutEditorStore.getState().endSession();
   useLayoutEditorStore.setState({ instances: new Map() });
 });
@@ -127,7 +138,7 @@ describe("the session's canvas", () => {
       false,
     );
 
-    openSession("tile-a");
+    openSession();
 
     expect(chip()).not.toBeNull();
     expect(ring()).not.toBeNull();
@@ -146,8 +157,39 @@ describe("the session's canvas", () => {
     );
   });
 
+  // The editing outline (L-87) is ONE rule on
+  // `[data-layout-column][data-layout-editing="1"]`: `app-shell.tsx` writes
+  // the first attribute and hands that same node to this hook, which writes
+  // the second. `layout-editor-contrast.test.ts` reads the rule; this is the
+  // other half - the compound selector actually resolving to an element. It
+  // goes red for the whole family of "the marker landed somewhere else"
+  // mistakes: on the document element, on a wrapper, on a descendant.
+  it("marks the column itself, so the outline's selector resolves", () => {
+    const view = render(
+      <Canvas
+        regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
+      />,
+    );
+    const outlined = (): ReadonlyArray<Element> => [
+      ...document.querySelectorAll(
+        '[data-layout-column][data-layout-editing="1"]',
+      ),
+    ];
+    expect(outlined()).toEqual([]);
+
+    openSession();
+
+    expect(outlined()).toEqual([view.getByTestId("column")]);
+
+    act(() => {
+      useLayoutEditorStore.getState().endSession();
+    });
+
+    expect(outlined()).toEqual([]);
+  });
+
   it("resolves a pointer inside a region to the region, not to the node under it", () => {
-    openSession("tile-a");
+    openSession();
     const view = render(
       <Canvas
         regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
@@ -163,8 +205,30 @@ describe("the session's canvas", () => {
     expect(chip()?.hidden).toBe(false);
   });
 
+  // The chip names the state the region is in RIGHT NOW, so a write while the
+  // pointer is resting on the region has to move it. This is the one thing
+  // that can go wrong now that the label is remembered between paints instead
+  // of rebuilding all 22 regions' values on each one (R1-11).
+  it("moves the chip's state word when the layout is written under the pointer", () => {
+    openSession();
+    const view = render(
+      <Canvas
+        regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
+      />,
+    );
+    fireEvent.pointerMove(view.getByTestId("map-inner"), MOUSE);
+    expect(chip()?.textContent).toBe("Minimap · Right");
+
+    act(() => {
+      const layout = useLayoutStore.getState();
+      layout.setArrangement({ ...layout.arrangement, minimapSide: "left" });
+    });
+
+    expect(chip()?.textContent).toBe("Minimap · Left");
+  });
+
   it("refuses hover for a pointer that cannot rest on a region (C-09)", () => {
-    openSession("tile-a");
+    openSession();
     const view = render(
       <Canvas
         regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
@@ -181,7 +245,7 @@ describe("the session's canvas", () => {
   });
 
   it("drops the hover decoration off the region it just selected (C-08)", () => {
-    openSession("tile-a");
+    openSession();
     const view = render(
       <Canvas
         regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
@@ -202,7 +266,7 @@ describe("the session's canvas", () => {
   });
 
   it("drops the hover on a pointer over the column's own chrome", () => {
-    openSession("tile-a");
+    openSession();
     const view = render(
       <Canvas
         regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
@@ -218,7 +282,7 @@ describe("the session's canvas", () => {
   });
 
   it("leaves a hover the inspector set alone while the pointer is outside the column", () => {
-    openSession("tile-a");
+    openSession();
     render(
       <Canvas
         regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
@@ -234,7 +298,7 @@ describe("the session's canvas", () => {
   });
 
   it("puts a top-bar region's chip underneath it", () => {
-    openSession(null);
+    openSession();
     const view = render(
       <Canvas
         regions={[{ regionId: "homeTab", instanceId: null, testId: "home" }]}
@@ -247,7 +311,7 @@ describe("the session's canvas", () => {
   });
 
   it("selects the region under a pointer press and drops keyboard navigation", async () => {
-    openSession("tile-a");
+    openSession();
     useLayoutEditorStore.setState({ keyboardNav: true });
     const view = render(
       <Canvas
@@ -267,7 +331,7 @@ describe("the session's canvas", () => {
   // WERE, so a drag armed against it would measure boxes that are about to
   // move. The press still selects - that is L-69 - it just carries nothing.
   it("selects but arms no drag on a press while the session is leaving", () => {
-    openSession("tile-a");
+    openSession();
     const view = render(
       <Canvas
         regions={[
@@ -296,7 +360,7 @@ describe("the session's canvas", () => {
     // window resize fires, so every wake the parked loop listened for stays
     // silent - and the ring used to be left drawn around the inspector.
     document.documentElement.setAttribute("data-reduce-panel-motion", "");
-    openSession("tile-a");
+    openSession();
     const view = render(
       <Canvas
         regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
@@ -323,8 +387,8 @@ describe("the session's canvas", () => {
     expect(ring()?.style.transform).toBe("translate(377.00px, 117.00px)");
   });
 
-  it("puts the ring on the preferred tile's instance, and hides it with no selection", async () => {
-    openSession("tile-b");
+  it("puts the ring on one instance, and hides it with no selection", async () => {
+    openSession();
     const view = render(
       <Canvas
         regions={[
@@ -338,12 +402,13 @@ describe("the session's canvas", () => {
       useLayoutEditorStore.getState().select("minimap");
     });
 
-    // The ring is drawn around the preferred instance; every other instance
-    // carries the static outline instead (L-23).
-    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
+    // The ring is drawn around ONE instance - the first registered; every
+    // other instance carries the static outline instead (L-23).
+    expect(view.getByTestId("a").getAttribute("data-layout-anchor")).toBe(
       "selected",
     );
-    expect(view.getByTestId("a").getAttribute("data-selected")).toBe("1");
+    expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBeNull();
+    expect(view.getByTestId("b").getAttribute("data-selected")).toBe("1");
     await flushFrame();
     expect(ring()?.hidden).toBe(false);
 

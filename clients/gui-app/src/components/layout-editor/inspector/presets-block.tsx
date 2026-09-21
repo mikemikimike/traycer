@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Bell, History, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
 import { cn } from "@/lib/utils";
@@ -11,18 +11,19 @@ import {
 } from "@/lib/layout/layout-diff";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
-import type { RailEntry } from "@/lib/layout/rail";
-import { type LayoutValues } from "@/lib/layout/layout-values";
 import {
   LAYOUT_PRESET_IDS,
   PRESET_VALUES,
   type LayoutPresetId,
 } from "@/lib/layout/layout-presets";
 import {
-  depictRegion,
-  type HostContextId,
-} from "@/components/layout-editor/region-depiction";
-import type { RegionId, ToolbarRegionId } from "@/lib/layout/region-id";
+  type AppFrame,
+  AppFrameComposerStack,
+  AppFrameRailEntries,
+  AppFrameRegion,
+  AppFrameTopBar,
+} from "@/components/layout-editor/inspector/app-frame-chrome";
+import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   useLayoutSnapshot,
@@ -141,14 +142,29 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
  * floor, but the page is why it had to be built: with no session there is no
  * Undo, no Discard and no Cmd+Z (P-6), "Reset to Default" is values-only by
  * construction (L-57), and three arrangement fields had no revert anywhere at
- * all. Confirmed, because on this host it is irreversible.
+ * all.
+ *
+ * **The confirm belongs to the page and to nothing else (R1-07).** A modal
+ * that says "this cannot be undone here" is true on Settings and false in the
+ * docked inspector, where the write goes through `recordGesture` and Cmd+Z,
+ * the Undo button and Discard all put it back. A user inside a live session
+ * was being told their whole layout was about to be destroyed irreversibly,
+ * and backing out of a reversible action; the inspector's own safety net is
+ * the one the rest of its gestures already rely on, so the gesture applies
+ * there and the sentence stays true where it is shown.
  */
 function ResetEverythingButton(props: {
   readonly snapshot: LayoutSnapshot;
 }): ReactNode {
   const { snapshot } = props;
+  const irreversible = useLayoutFormHost() === "page";
   const [confirming, setConfirming] = useState(false);
   if (!anythingChanged(snapshot)) return null;
+  function reset(): void {
+    useLayoutEditorStore.getState().recordGesture(() => {
+      useLayoutStore.getState().replaceAll(resetEverything(snapshot));
+    });
+  }
   return (
     <>
       <Button
@@ -156,27 +172,31 @@ function ResetEverythingButton(props: {
         variant="muted"
         size="sm"
         onClick={() => {
-          setConfirming(true);
+          if (irreversible) {
+            setConfirming(true);
+            return;
+          }
+          reset();
         }}
       >
         Reset everything
       </Button>
-      <ConfirmDestructiveDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        title="Reset the whole layout?"
-        description="Every setting, and where everything sits, go back to how the app shipped. This cannot be undone here."
-        cascadeSummary={null}
-        actionLabel="Reset everything"
-        isPending={false}
-        blockedReason={null}
-        onConfirm={() => {
-          setConfirming(false);
-          useLayoutEditorStore.getState().recordGesture(() => {
-            useLayoutStore.getState().replaceAll(resetEverything(snapshot));
-          });
-        }}
-      />
+      {irreversible ? (
+        <ConfirmDestructiveDialog
+          open={confirming}
+          onOpenChange={setConfirming}
+          title="Reset the whole layout?"
+          description="Every setting, and where everything sits, go back to how the app shipped. This cannot be undone here."
+          cascadeSummary={null}
+          actionLabel="Reset everything"
+          isPending={false}
+          blockedReason={null}
+          onConfirm={() => {
+            setConfirming(false);
+            reset();
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -292,15 +312,6 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
   },
 ];
 
-/** The tabs beside the home tab, which are chrome rather than regions. */
-const MINIATURE_TABS: ReadonlyArray<{
-  readonly label: string;
-  readonly active: boolean;
-}> = [
-  { label: "Start page", active: false },
-  { label: "Sample chat", active: true },
-];
-
 /**
  * A faithful, uniformly-scaled miniature of the real app frame (L-43, L-62):
  * the preset's own values, drawn with the SAME `depictRegion` the specimen
@@ -312,7 +323,9 @@ const MINIATURE_TABS: ReadonlyArray<{
  * composer box and the status strip. That part is inert static markup, and it
  * is there because a card that was 60% empty `bg-card` read as a near-black
  * rectangle in every dark preset, where `--card` and `--background` are the
- * same colour (I-03).
+ * same colour (I-03). Everything in it that is not this card's own placement
+ * comes from `app-frame-chrome.tsx`, which the page's specimens draw from
+ * too, so the two pictures cannot disagree about the app (R1-04).
  *
  * Everything the arrangement decides is honoured, because the card's whole
  * claim is that it is a picture of the user's own frame under that density:
@@ -376,8 +389,9 @@ function PresetMiniature(props: {
           <MiniatureRail {...frame} />
           <div className="flex min-w-0 flex-1 flex-col">
             <MiniatureChatArea {...frame} />
-            <MiniatureDock {...frame} />
-            <MiniatureComposer {...frame} />
+            <div className="px-6 py-2">
+              <AppFrameComposerStack {...frame} />
+            </div>
             <MiniatureComposerFoot {...frame} />
           </div>
         </div>
@@ -387,72 +401,20 @@ function PresetMiniature(props: {
   );
 }
 
-/** Everything a miniature part needs: the preset's values and the arrangement. */
-interface MiniatureFrame {
-  readonly values: LayoutValues;
-  readonly arrangement: LayoutArrangement;
-}
-
-/**
- * The top bar, which under the `header` usage placement is where BOTH
- * status-bar regions live - exactly as `HeaderUsageControls` renders them
- * (L-51's `statusBarShown`).
- */
-function MiniatureTopBar({ values, arrangement }: MiniatureFrame): ReactNode {
-  const inHeader = arrangement.usageHost === "header";
+/** The app's own 40px bar, holding the frame chrome's top-bar row. */
+function MiniatureTopBar({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-      <MiniatureRegion
-        regionId="homeTab"
-        values={values}
-        arrangement={arrangement}
-        hostContext={null}
-      />
-      {/* The tab strip and the header's icon cluster are not regions and carry
-        no preset-specific state, so they are the frame's own chrome rather
-        than depictions - drawn with their real labels, because two blank
-        rectangles are not a picture of a top bar (I-03). */}
-      {MINIATURE_TABS.map((tab) => (
-        <span
-          key={tab.label}
-          className={cn(
-            "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm text-muted-foreground",
-            tab.active &&
-              "border border-border bg-foreground/5 text-foreground",
-          )}
-        >
-          {tab.label}
-        </span>
-      ))}
-      <span className="flex-1" />
-      {inHeader ? (
-        <>
-          <MiniatureRegion
-            regionId="usageLimits"
-            values={values}
-            arrangement={arrangement}
-            hostContext="top-bar"
-          />
-          <MiniatureRegion
-            regionId="resourceMonitor"
-            values={values}
-            arrangement={arrangement}
-            hostContext="top-bar"
-          />
-        </>
-      ) : null}
-      <History className="size-4 shrink-0 text-muted-foreground" />
-      <Bell className="size-4 shrink-0 text-muted-foreground" />
-      <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
+      <AppFrameTopBar values={values} arrangement={arrangement} />
     </div>
   );
 }
 
 /** The transcript, with the minimap on the side the arrangement puts it. */
-function MiniatureChatArea({ values, arrangement }: MiniatureFrame): ReactNode {
+function MiniatureChatArea({ values, arrangement }: AppFrame): ReactNode {
   const side = arrangement.minimapSide;
   const minimap = (
-    <MiniatureRegion
+    <AppFrameRegion
       regionId="minimap"
       values={values}
       arrangement={arrangement}
@@ -503,133 +465,10 @@ function MiniatureMessage(props: {
   );
 }
 
-/**
- * The dock, split the way the canvas splits it, and placed the way the app
- * places it (L-97).
- *
- * The full-size rows are ONE joined frame whose bottom edge disappears under
- * the composer - today's `ChatLowerDock`, which the owner kept - and the
- * chip-sized members are small pills above the composer's left edge, which is
- * the one thing L-97 took from the artifact. Drawn as separate cards, the
- * Compact card had nothing left to claim: the fold to chips IS the claim
- * (G1-02), so the two shapes have to look different from each other here.
- *
- * The pills go ABOVE the joined frame because the tuck only exists while the
- * frame touches the composer; both still sit above it, at its left edge.
- */
-function MiniatureDock({ values, arrangement }: MiniatureFrame): ReactNode {
-  const shown = arrangement.dock.filter(
-    (regionId) => values[regionId].shown === "shown",
-  );
-  const rows = shown.filter((regionId) => values[regionId].size === "full");
-  const chips = shown.filter((regionId) => values[regionId].size === "chip");
-  if (rows.length === 0 && chips.length === 0) return null;
-  return (
-    <div data-testid="preset-dock" className="flex flex-col gap-1.5 px-6 pt-2">
-      {chips.length === 0 ? null : (
-        <div
-          data-testid="preset-dock-chips"
-          className="flex items-center gap-1.5"
-        >
-          {chips.map((regionId) => (
-            <span key={regionId}>
-              {depictRegion(
-                regionId,
-                values[regionId],
-                arrangement,
-                "chip-strip",
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-      {rows.length === 0 ? null : (
-        // `-mb-px` over a frame with no bottom border: the seam between the
-        // dock and the composer is one line, not two touching ones.
-        <div
-          data-testid="preset-dock-frame"
-          className="-mb-px rounded-t-lg border border-b-0 border-border bg-foreground/3 px-3 py-2"
-        >
-          <div className="flex flex-col gap-1.5">
-            {rows.map((regionId) => (
-              <div key={regionId}>
-                {depictRegion(regionId, values[regionId], arrangement, null)}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * The composer: a box with the prompt line above its two toolbar clusters.
- *
- * A box and nothing more. The toolbar clusters were drawn loose on the frame,
- * so the preset's own composer buttons floated in empty space with no composer
- * around them (I-03); what the composer LOOKS like inside is the depictions'
- * business, and ticket C3 carries the new design into them.
- *
- * `bg-foreground/3` rather than `bg-card`, for the reason I-03 exists: every
- * dark preset defines `--card` as `--background`, so a `bg-card` box on this
- * frame is a border around nothing. It is also the real composer shell's own
- * material.
- */
-function MiniatureComposer({ values, arrangement }: MiniatureFrame): ReactNode {
-  return (
-    <div data-testid="preset-composer" className="px-6 pb-2">
-      <div className="rounded-xl border border-border bg-foreground/3 px-3 pt-2.5 pb-2">
-        <div className="pb-4 text-ui-sm text-muted-foreground">
-          Describe the next change...
-        </div>
-        <div className="flex items-center">
-          <MiniatureToolbarCluster
-            regionIds={arrangement.toolbarLeft}
-            values={values}
-            arrangement={arrangement}
-          />
-          <span className="flex-1" />
-          <MiniatureToolbarCluster
-            regionIds={arrangement.toolbarRight}
-            values={values}
-            arrangement={arrangement}
-          />
-          <span className="ml-1.5 size-6 shrink-0 rounded-full border border-border bg-foreground/10" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MiniatureToolbarCluster(props: {
-  readonly regionIds: ReadonlyArray<ToolbarRegionId>;
-  readonly values: LayoutValues;
-  readonly arrangement: LayoutArrangement;
-}): ReactNode {
-  const { regionIds, values, arrangement } = props;
-  return (
-    <div className="flex items-center gap-1.5">
-      {regionIds.map((regionId) => (
-        <MiniatureRegion
-          key={regionId}
-          regionId={regionId}
-          values={values}
-          arrangement={arrangement}
-          hostContext={null}
-        />
-      ))}
-    </div>
-  );
-}
-
-function MiniatureComposerFoot({
-  values,
-  arrangement,
-}: MiniatureFrame): ReactNode {
+function MiniatureComposerFoot({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div className="flex items-center justify-end px-6 pb-2">
-      <MiniatureRegion
+      <AppFrameRegion
         regionId="contextUsage"
         values={values}
         arrangement={arrangement}
@@ -643,13 +482,10 @@ function MiniatureComposerFoot({
  * The status strip, or nothing at all: under the `header` placement the strip
  * is not drawn and both of its regions have moved up (L-51).
  */
-function MiniatureStatusBar({
-  values,
-  arrangement,
-}: MiniatureFrame): ReactNode {
+function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
   if (arrangement.usageHost === "header") return null;
   const monitor = (
-    <MiniatureRegion
+    <AppFrameRegion
       regionId="resourceMonitor"
       values={values}
       arrangement={arrangement}
@@ -659,7 +495,7 @@ function MiniatureStatusBar({
   return (
     <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3">
       {arrangement.resourceSide === "left" ? monitor : null}
-      <MiniatureRegion
+      <AppFrameRegion
         regionId="usageLimits"
         values={values}
         arrangement={arrangement}
@@ -671,50 +507,11 @@ function MiniatureStatusBar({
   );
 }
 
-/**
- * One region, drawn only when this preset shows it - the single place the
- * miniature asks that question, so no part of the frame can forget to.
- */
-function MiniatureRegion<K extends RegionId>(props: {
-  readonly regionId: K;
-  readonly values: LayoutValues;
-  readonly arrangement: LayoutArrangement;
-  readonly hostContext: HostContextId | null;
-}): ReactNode {
-  const { regionId, values, arrangement, hostContext } = props;
-  const regionValues = values[regionId];
-  if (regionValues.shown !== "shown") return null;
-  return depictRegion(regionId, regionValues, arrangement, hostContext);
-}
-
-/** The real rail: the arrangement's own entries, dividers included (L-25). */
-function MiniatureRail({ values, arrangement }: MiniatureFrame): ReactNode {
+/** The app's own rail column, holding the frame chrome's entries (L-25). */
+function MiniatureRail({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-3">
-      {arrangement.rail.map((entry) => (
-        <MiniatureRailEntry
-          key={entry.id}
-          entry={entry}
-          values={values}
-          arrangement={arrangement}
-        />
-      ))}
+      <AppFrameRailEntries values={values} arrangement={arrangement} />
     </div>
   );
-}
-
-function MiniatureRailEntry(props: {
-  readonly entry: RailEntry;
-  readonly values: LayoutValues;
-  readonly arrangement: LayoutArrangement;
-}): ReactNode {
-  const { entry, values, arrangement } = props;
-  if (entry.kind === "divider") {
-    return <span className="my-1 h-px w-6 bg-border" />;
-  }
-  const railValues = values[entry.id];
-  // A panel the user hid leaves a gap in the miniature exactly as it leaves one
-  // in the rail; the density preset is not what hid it.
-  if (railValues.shown === "hidden") return null;
-  return <span>{depictRegion(entry.id, railValues, arrangement, null)}</span>;
 }

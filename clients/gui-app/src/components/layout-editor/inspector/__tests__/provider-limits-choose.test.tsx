@@ -1,11 +1,20 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
-import { AUTOMATIC_LIMIT_SELECTION } from "@/lib/layout/layout-arrangement";
+import {
+  AUTOMATIC_LIMIT_SELECTION,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
+import {
+  anythingChanged,
+  providerChanged,
+  usageProvidersChanged,
+} from "@/lib/layout/layout-diff";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
+  getLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 
@@ -42,11 +51,12 @@ function limitWindow(
   };
 }
 
+function arrangement(): LayoutArrangement {
+  return useLayoutStore.getState().arrangement;
+}
+
 function selection() {
-  return (
-    useLayoutStore.getState().arrangement.providerLimits[PROVIDER] ??
-    AUTOMATIC_LIMIT_SELECTION
-  );
+  return arrangement().providerLimits[PROVIDER] ?? AUTOMATIC_LIMIT_SELECTION;
 }
 
 function limitsMode(): string | null {
@@ -94,7 +104,7 @@ describe('the provider level\'s "Choose..." checklist (L-96, I-14)', () => {
     ).toEqual(["5h", "Weekly"]);
     // Seeded from what the strip was already drawing, so taking control of
     // the pick does not change the picture in the same gesture.
-    expect(selection()).toEqual({ automatic: false, limitKeys: ["5h"] });
+    expect(selection()).toEqual({ limitKeys: ["5h"] });
   });
 
   it("ticks a second limit into the selection, in catalog order", () => {
@@ -134,12 +144,47 @@ describe('the provider level\'s "Choose..." checklist (L-96, I-14)', () => {
     expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
   });
 
+  it("leaves NOTHING changed on the way back to Automatic (R1-03)", () => {
+    render(<ProviderLevel providerId={PROVIDER} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Choose..." }));
+    expect(providerChanged(arrangement(), PROVIDER)).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("radio", { name: "Automatic (recommended)" }),
+    );
+
+    // Byte-identical to the shipped layout, so there is nothing to revert, no
+    // dot to draw on the provider or on Usage limits, and no "Reset
+    // everything" - a confirmed, irreversible action - to offer.
+    expect(arrangement().providerLimits).toEqual({});
+    expect(providerChanged(arrangement(), PROVIDER)).toBe(false);
+    expect(usageProvidersChanged(arrangement())).toBe(false);
+    expect(anythingChanged(getLayoutSnapshot())).toBe(false);
+  });
+
+  it("keeps a pick the host no longer reports when another is ticked (R1-16)", () => {
+    // A stored selection naming a window this reading does not carry - a 7d
+    // limit the user picked on a reading they have since moved past.
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      providerLimits: {
+        [PROVIDER]: { limitKeys: ["5h", "7d"] },
+      },
+    });
+    render(<ProviderLevel providerId={PROVIDER} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Weekly" }));
+
+    // The live ones in catalog order, then the pick nobody can see - never a
+    // silent prune of what the user chose.
+    expect(selection().limitKeys).toEqual(["5h", "week", "7d"]);
+  });
+
   it("is one undoable gesture per tick", () => {
     render(<ProviderLevel providerId={PROVIDER} />);
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
       source: "direct_ui",
-      preferredInstanceId: null,
       startedAt: 0,
     });
 

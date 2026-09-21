@@ -20,8 +20,3 @@ export function chatChangesPanelHasContent(
     restore.undeliveredChangeCount > 0
   );
 }
-
-// `hasChatPinnedStackContent` and `chatPinnedStackVisible` lived here for the
-// pre-dock `ChatPinnedStack` wrapper. `ChatLowerDock` owns the frame now and
-// asks each panel's own predicate, and the wrapper is gone, so both had no
-// caller left.

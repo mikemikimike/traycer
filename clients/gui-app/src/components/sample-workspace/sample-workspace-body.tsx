@@ -7,6 +7,7 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
+import { dockMemberFolded } from "@/components/chat/chat-dock-fold";
 import { ChatDockCompactStripProvider } from "@/components/chat/chat-dock-compact-strip";
 import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
 import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
@@ -126,15 +127,28 @@ export function SampleWorkspaceBody() {
       ghost: background.ghost,
     },
   };
-  const chipSizes: Readonly<Record<ChatDockSection, boolean>> = {
-    filesChanged: changedFiles.size === "chip",
-    activeAgents: runningAgents.size === "chip",
-    background: backgroundValues.size === "chip",
+  // The same derivation the real tile folds on, ghost included: a member that
+  // is Hidden AND Chip has to materialise as the CHIP the editor is pointing
+  // at, not as the full row it never draws at rest.
+  const chipFolded: Readonly<Record<ChatDockSection, boolean>> = {
+    filesChanged: dockMemberFolded({
+      values: changedFiles,
+      ghost: files.ghost,
+      hasContent: true,
+    }),
+    activeAgents: dockMemberFolded({
+      values: runningAgents,
+      ghost: agents.ghost,
+      hasContent: true,
+    }),
+    background: dockMemberFolded({
+      values: backgroundValues,
+      ghost: background.ghost,
+      hasContent: true,
+    }),
   };
   const folded = new Set<ChatDockSection>(
-    dockOrder.filter(
-      (section) => chipSizes[section] && hotspots[section].shown,
-    ),
+    dockOrder.filter((section) => chipFolded[section]),
   );
   const chips = dockOrder.flatMap((section) => {
     const sample = SAMPLE_DOCK.find((item) => item.section === section);

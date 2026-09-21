@@ -48,7 +48,15 @@ export interface SortableRowDecoration {
 
 export type SortableRowDecorator = (id: string) => SortableRowDecoration;
 
-/** An undecorated row: what a host that decorates nothing leaves behind. */
+/**
+ * An undecorated row: what a host that decorates nothing leaves behind.
+ *
+ * Every builder below spreads the decoration FIRST and sets its own fields
+ * after it (R1-21). The two key sets are disjoint today, so the order is
+ * invisible - which is the point: a field added to
+ * {@link SortableRowDecoration} that happens to share a builder's name would
+ * otherwise overwrite what the builder had just decided, silently.
+ */
 export const BARE_ROW: SortableRowDecoration = {
   changed: false,
   hint: null,
@@ -77,8 +85,8 @@ export function regionRowItem<Id extends RegionId>(
   decorate: SortableRowDecorator | null,
 ): SortableListItem<Id> {
   const facts = regionFacts(regionId);
-  const decoration = decorate === null ? BARE_ROW : decorate(regionId);
   return {
+    ...(decorate === null ? BARE_ROW : decorate(regionId)),
     id: regionId,
     label: facts.name,
     icon: facts.icon,
@@ -86,7 +94,6 @@ export function regionRowItem<Id extends RegionId>(
     dimmed: readControlValue(values[regionId], "shown") === "hidden",
     onRemove: null,
     onActivate: null,
-    ...decoration,
   };
 }
 
@@ -96,6 +103,7 @@ export function dividerOrderItem(
   arrangement: LayoutArrangement,
 ): SortableListItem<string> {
   return {
+    ...BARE_ROW,
     id: entryId,
     label: "Divider",
     icon: null,
@@ -105,7 +113,6 @@ export function dividerOrderItem(
       writeArrangement(removeRailDivider(arrangement, entryId));
     },
     onActivate: null,
-    ...BARE_ROW,
   };
 }
 
@@ -124,6 +131,7 @@ export function providerOrderItems(
   decorate: SortableRowDecorator | null,
 ): ReadonlyArray<SortableListItem<RateLimitProviderId>> {
   return arrangement.usageProviders.map((providerId) => ({
+    ...(decorate === null ? BARE_ROW : decorate(providerId)),
     id: providerId,
     label: providerDisplayName(providerId),
     // The usage cluster's own glyph, so a provider row reads like every other
@@ -139,6 +147,5 @@ export function providerOrderItems(
         : () => {
             onOpenProvider(providerId);
           },
-    ...(decorate === null ? BARE_ROW : decorate(providerId)),
   }));
 }

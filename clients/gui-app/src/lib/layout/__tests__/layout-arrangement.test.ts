@@ -441,7 +441,10 @@ describe("resolvePersistedArrangement", () => {
     expect(arrangement.hiddenProviders).toEqual(["codex"]);
   });
 
-  it("keeps a drawable limit selection and repairs one that draws nothing", () => {
+  it("keeps a drawable limit selection and reads an empty pick list as Automatic", () => {
+    // The `automatic` booleans are what a record written before R1-15 carries.
+    // They are ignored rather than rejected: the only thing that field ever
+    // said was whether the list was empty, and the list says it.
     const arrangement = resolvePersistedArrangement({
       providerLimits: {
         codex: { automatic: false, limitKeys: ["weekly"] },
@@ -451,8 +454,8 @@ describe("resolvePersistedArrangement", () => {
     });
 
     expect(arrangement.providerLimits).toEqual({
-      codex: { automatic: false, limitKeys: ["weekly"] },
-      grok: { automatic: true, limitKeys: [] },
+      codex: { limitKeys: ["weekly"] },
+      grok: { limitKeys: [] },
     });
   });
 

@@ -113,7 +113,6 @@ describe("the usage cluster as one region", () => {
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
         source: "direct_ui",
-        preferredInstanceId: null,
         startedAt: 0,
       });
     });
@@ -127,7 +126,6 @@ describe("the usage cluster as one region", () => {
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
         source: "direct_ui",
-        preferredInstanceId: null,
         startedAt: 0,
       });
     });
@@ -151,7 +149,6 @@ describe("the usage cluster as one region", () => {
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
         source: "direct_ui",
-        preferredInstanceId: null,
         startedAt: 0,
       });
       useLayoutEditorStore.getState().select("usageLimits");

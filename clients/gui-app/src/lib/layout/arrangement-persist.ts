@@ -290,23 +290,18 @@ function persistedWindowKeys(value: unknown): ReadonlyArray<string> {
 }
 
 /**
- * One provider's picks. A shape hand-edited down to nothing drawable falls
- * back to the default rather than to an empty segment.
+ * One provider's picks: the key list and nothing else, since an empty list IS
+ * Automatic (R1-15). A record written before the field was dropped carries an
+ * `automatic` boolean; it is ignored rather than rejected, because the only
+ * thing it ever said was whether the list was empty, which the list says. The
+ * store is unreleased, so there is no migration to write.
  */
 function persistedLimitSelection(
   value: unknown,
 ): StatusBarProviderLimitSelection {
   const stored: Record<string, unknown> = isRecord(value) ? value : {};
-  const selection: StatusBarProviderLimitSelection = {
-    automatic:
-      typeof stored.automatic === "boolean"
-        ? stored.automatic
-        : AUTOMATIC_LIMIT_SELECTION.automatic,
-    limitKeys: persistedWindowKeys(stored.limitKeys),
-  };
-  return selection.automatic || selection.limitKeys.length > 0
-    ? selection
-    : AUTOMATIC_LIMIT_SELECTION;
+  const limitKeys = persistedWindowKeys(stored.limitKeys);
+  return limitKeys.length > 0 ? { limitKeys } : AUTOMATIC_LIMIT_SELECTION;
 }
 
 function persistedProviderLimits(value: unknown): StatusBarProviderLimits {

@@ -10,6 +10,7 @@ import { depictUsageProvider } from "@/components/layout-editor/region-depiction
 import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import {
   AUTOMATIC_LIMIT_SELECTION,
+  isAutomaticLimitSelection,
   type LayoutArrangement,
   type StatusBarProviderLimitSelection,
 } from "@/lib/layout/layout-arrangement";
@@ -194,10 +195,18 @@ function chosenSelection(
     drawnKeys.length > 0
       ? drawnKeys
       : windows.slice(0, 1).map((window) => window.windowKey);
-  return { automatic: false, limitKeys: seed };
+  return { limitKeys: seed };
 }
 
-/** One box ticked or cleared, kept in the catalog's own order. */
+/**
+ * One box ticked or cleared, kept in the catalog's own order.
+ *
+ * A pick the host no longer reports is KEPT, appended after the live ones: the
+ * comment above says a stale pick survives because demoting it would throw the
+ * pick away on a reading the user never saw, and filtering the whole list
+ * through the live keys made the next tick do exactly that (R1-16). The live
+ * ones lead so the stored order still reads as the catalog's.
+ */
 function togglePick(
   selection: StatusBarProviderLimitSelection,
   order: ReadonlyArray<string>,
@@ -208,7 +217,11 @@ function togglePick(
   if (checked) next.add(windowKey);
   else next.delete(windowKey);
   if (next.size === 0) return selection;
-  return { automatic: false, limitKeys: order.filter((key) => next.has(key)) };
+  const live = order.filter((key) => next.has(key));
+  const stale = selection.limitKeys.filter(
+    (key) => next.has(key) && !order.includes(key),
+  );
+  return { limitKeys: [...live, ...stale] };
 }
 
 function toggleHiddenProvider(
@@ -230,6 +243,11 @@ function toggleHiddenProvider(
  * One provider's whole selection, written through the existing
  * `providerLimits` arrangement seam as ONE recorded gesture - so a tick, a
  * clear and a mode switch are each one press of undo.
+ *
+ * Automatic is written by DELETING the key, exactly as `revertProvider` puts a
+ * provider back: the entry and its absence mean the same thing to every reader
+ * (`statusBarProviderLimitSelection`), so storing one was a mark on the
+ * arrangement with nothing behind it (R1-03).
  */
 function writeSelection(
   providerId: RateLimitProviderId,
@@ -237,12 +255,11 @@ function writeSelection(
   selection: StatusBarProviderLimitSelection,
 ): void {
   useLayoutEditorStore.getState().recordGesture(() => {
-    useLayoutStore.getState().setArrangement({
-      ...arrangement,
-      providerLimits: {
-        ...arrangement.providerLimits,
-        [providerId]: selection,
-      },
-    });
+    const providerLimits = { ...arrangement.providerLimits };
+    if (isAutomaticLimitSelection(selection)) delete providerLimits[providerId];
+    else providerLimits[providerId] = selection;
+    useLayoutStore
+      .getState()
+      .setArrangement({ ...arrangement, providerLimits });
   });
 }

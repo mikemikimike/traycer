@@ -176,7 +176,7 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
         ...DEFAULT_ARRANGEMENT,
         hiddenProviders: ["claude-code"],
         providerLimits: {
-          "claude-code": { automatic: false, limitKeys: ["five-hour"] },
+          "claude-code": { limitKeys: ["five-hour"] },
         },
         shownProfiles: { "host-1": { "claude-code": ["profile-a"] } },
       },

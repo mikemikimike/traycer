@@ -403,21 +403,21 @@ function liveWindows(
  * The user's selection, resolved against what the provider currently reports.
  *
  * A filter over the live list rather than a union of two lists, so the result
- * is in catalog order and a window the automatic entry and an explicit pick
- * both name appears once. An explicit pick that matches nothing live is
- * simply not there; when NONE of the selection is, the tightest stands in,
- * because a provider whose every pick has gone stale should still be judged
- * rather than disappear.
+ * is in catalog order and a picked window is drawn once. An explicit pick that
+ * matches nothing live is simply not there; when NONE of the selection is -
+ * which includes Automatic, whose pick list is empty (R1-15) - the tightest
+ * stands in, because a provider whose every pick has gone stale should still
+ * be judged rather than disappear.
  */
 function shownWindows(
   windows: ReadonlyArray<StatusBarRateLimitWindow>,
   selection: StatusBarProviderLimitSelection,
 ): ReadonlyArray<StatusBarRateLimitWindow> {
   const tightest = tightestRateLimitWindow(windows);
-  const shown = windows.filter(
-    (window) =>
-      (selection.automatic && window === tightest) ||
-      selection.limitKeys.includes(window.windowKey),
+  // An empty pick list IS Automatic (R1-15), so the tightest-only branch and
+  // the fallback below it are the same expression read twice.
+  const shown = windows.filter((window) =>
+    selection.limitKeys.includes(window.windowKey),
   );
   if (shown.length > 0) return shown;
   return tightest === null ? [] : [tightest];

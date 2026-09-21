@@ -6,6 +6,7 @@ import { useFloatingDock } from "@/components/layout-editor/inspector/dock-modes
 import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
 import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
+import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
@@ -154,7 +155,14 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
       }
       className="h-safe-dvh"
     >
-      <InspectorBody />
+      {/* Which host is drawing the form, published ONCE at the root of it
+        (L-03) - the same place and the same way `layout-settings-panel.tsx`
+        publishes `"page"`. It used to ride on `RegionSection`'s own `host`
+        prop, which only ever arrived here and only ever said `"inspector"`,
+        so the prop carried a branch the page never took. */}
+      <LayoutFormHostContext value="inspector">
+        <InspectorBody />
+      </LayoutFormHostContext>
     </div>
   );
 }
@@ -198,7 +206,6 @@ function InspectorBody(): ReactNode {
         <RegionSection
           key={selected}
           regionId={selected}
-          host="inspector"
           onOpenProvider={(providerId) => {
             if (!isUsageProviderId(providerId)) return;
             useLayoutEditorStore

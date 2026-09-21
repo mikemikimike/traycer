@@ -27,18 +27,15 @@ afterEach(() => {
   useLayoutEditorStore.getState().endSession();
 });
 
+/** No rail region has a providers row, so nothing here can reach this. */
+function noop(): void {}
+
 describe("rail region tri-state header (L-47)", () => {
   it("renders Auto/Shown/Hidden and the hint when the rail region has one", () => {
     const facts = regionFacts("railPullRequests");
     expect(facts.hint).not.toBeNull();
 
-    render(
-      <RegionSection
-        regionId="railPullRequests"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="railPullRequests" onOpenProvider={noop} />);
 
     // `@testing-library/jest-dom` is not wired into this repo's vitest
     // setup, so presence is read via `query*` + a plain null check.
@@ -64,13 +61,7 @@ describe("rail region tri-state header (L-47)", () => {
     const facts = regionFacts("railAgents");
     expect(facts.hint).toBeNull();
 
-    render(
-      <RegionSection
-        regionId="railAgents"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="railAgents" onOpenProvider={noop} />);
 
     // The value is three-state for all nine panels (L-47, I-10), so the
     // control is too: a two-position switch could not reach "pinned open".
@@ -89,13 +80,7 @@ describe("rail region tri-state header (L-47)", () => {
   });
 
   it("keeps Hidden reachable from the tri-state on a panel with no rule", () => {
-    render(
-      <RegionSection
-        regionId="railFileTree"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="railFileTree" onOpenProvider={noop} />);
 
     fireEvent.click(screen.getByRole("radio", { name: "Hidden" }));
 
@@ -105,13 +90,7 @@ describe("rail region tri-state header (L-47)", () => {
   });
 
   it("sets the rail region's shown value from Auto/Shown/Hidden without collapsing to a boolean", () => {
-    render(
-      <RegionSection
-        regionId="railComments"
-        host="inspector"
-        onOpenProvider={null}
-      />,
-    );
+    render(<RegionSection regionId="railComments" onOpenProvider={noop} />);
     const shownOption = screen.getByRole("radio", { name: "Shown" });
 
     fireEvent.click(shownOption);

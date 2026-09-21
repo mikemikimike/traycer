@@ -388,7 +388,6 @@ afterEach(() => {
 describe("useStatusBarRateLimitSegments", () => {
   describe("per-provider limit selection", () => {
     function codexSelection(selection: {
-      readonly automatic: boolean;
       readonly limitKeys: ReadonlyArray<string>;
     }): void {
       useLayoutStore.getState().setArrangement({
@@ -437,8 +436,8 @@ describe("useStatusBarRateLimitSegments", () => {
       expect(segment.tightest?.windowKey).toBe("codex:primary");
     });
 
-    it("shows the explicit picks alone when automatic is off, judged by the tightest of THOSE", () => {
-      codexSelection({ automatic: false, limitKeys: ["codex:secondary"] });
+    it("shows the explicit picks alone when there are any, judged by the tightest of THOSE", () => {
+      codexSelection({ limitKeys: ["codex:secondary"] });
 
       const { result } = renderSegments([
         configuredProvider({ providerId: "codex", lane: "ephemeralProcess" }),
@@ -449,8 +448,14 @@ describe("useStatusBarRateLimitSegments", () => {
       expect(segment.tightest?.windowKey).toBe("codex:secondary");
     });
 
-    it("unions automatic with an explicit pick, in catalog order rather than pick order", () => {
-      codexSelection({ automatic: true, limitKeys: ["codex:secondary"] });
+    // The two cases this used to cover - a union of the automatic entry with a
+    // pick, and the tightest being drawn once when it is also picked - were
+    // both about a selection that said `automatic: true` AND named a window.
+    // That selection no longer exists: an empty pick list IS Automatic
+    // (R1-15), so there is one list to draw and no union to de-duplicate. What
+    // survives of the pair is the ORDER claim, which is the filter's own.
+    it("draws explicit picks in catalog order rather than pick order", () => {
+      codexSelection({ limitKeys: ["codex:secondary", "codex:primary"] });
 
       const { result } = renderSegments([
         configuredProvider({ providerId: "codex", lane: "ephemeralProcess" }),
@@ -462,21 +467,8 @@ describe("useStatusBarRateLimitSegments", () => {
       ]);
     });
 
-    // The automatic entry and an explicit pick can name the same window; the
-    // strip draws it once.
-    it("draws the tightest once when it is also picked explicitly", () => {
-      codexSelection({ automatic: true, limitKeys: ["codex:primary"] });
-
-      const { result } = renderSegments([
-        configuredProvider({ providerId: "codex", lane: "ephemeralProcess" }),
-      ]);
-
-      expect(windowKeys(codexSegment(result).shown)).toEqual(["codex:primary"]);
-    });
-
     it("ignores a pick the provider is not reporting while another pick is live", () => {
       codexSelection({
-        automatic: false,
         limitKeys: ["codex:extra:gone:primary", "codex:secondary"],
       });
 
@@ -491,9 +483,8 @@ describe("useStatusBarRateLimitSegments", () => {
 
     // A provider whose every pick has gone stale is still judged rather than
     // vanishing from the strip with nothing in Settings saying why.
-    it("falls back to the tightest when no pick is live and automatic is off", () => {
+    it("falls back to the tightest when no pick is live", () => {
       codexSelection({
-        automatic: false,
         limitKeys: ["codex:extra:gone:primary"],
       });
 

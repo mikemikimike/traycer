@@ -117,6 +117,7 @@ import {
   subagentOpenInitializedScopes,
   useSubagentOpenStore,
 } from "@/stores/chats/subagent-open-store";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import { isEpicCanvasTileInstanceLive } from "@/stores/epics/canvas/tile-instance-liveness";
@@ -2788,17 +2789,22 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
   );
   const minimapSide = useArrangementValue("minimapSide");
   const isMobileViewport = useIsMobileViewport();
-  // No Customize registration here, and no ghost: a real chat tile is never
-  // the editor's canvas (L-87). The door opens the sample workspace tab and
-  // activates it, the session ends on any other tab becoming active
-  // (`editor-session.ts`), and that tab is `splitEligibility: "ineligible"`,
-  // so no epic surface is ever presented beside it. `epic-surface.tsx` and
-  // `hosted-chat-surface-context-bridge.tsx` both publish
-  // `PaneVisibilityContext = topLevelVisible`, which is what `useLayoutRegion`
-  // gates registration on - so this tile could only ever have registered an
-  // instance nothing on screen was drawn from. The sample workspace registers
-  // `minimap` itself, against the leaf it really draws.
-  const minimapShown = useRegionShown("minimap");
+  // This tile's `minimap` region, registered here because this is the
+  // component that draws it. Whether the registration actually reaches the
+  // editor is `useLayoutRegion`'s own pane-visibility gate to decide and not
+  // this file's - while a session is live the sample workspace is the only
+  // visible top-level surface, so every epic surface's
+  // `PaneVisibilityContext` is false and nothing here registers. The ref is
+  // handed to the rail unconditionally: `ChatTurnMinimap` renders nothing
+  // (and so attaches nothing) unless the rail is actually running.
+  const { ref: minimapHotspotRef, ghost: minimapGhost } = useLayoutRegion({
+    regionId: "minimap",
+    instanceId: taskId,
+  });
+  // A hidden minimap materialises in place while the editor points at it
+  // (L-14). It is a pure view over rows the transcript already has, so
+  // drawing one costs nothing the chat was not already paying.
+  const minimapShown = useRegionShown("minimap") || minimapGhost;
   const quoteSelection = useQuoteSelection({
     containerRef: transcriptContainerRef,
     enabled: quoteReplyEnabled && visible && !systemOverlayActive,
@@ -3946,6 +3952,7 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
           }) ? (
             <div className="contents max-md:hidden">
               <ChatTurnMinimap
+                ref={minimapHotspotRef}
                 rows={listRows}
                 transcriptWindow={transcriptWindow}
                 inViewRefreshRef={minimapInViewRefreshRef}

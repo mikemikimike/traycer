@@ -26,6 +26,7 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
+import { dockMemberFolded } from "@/components/chat/chat-dock-fold";
 import {
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
@@ -71,8 +72,8 @@ import {
   useHeldManagedCommandsForChat,
   useRunningManagedCommandsForChat,
 } from "@/stores/managed-commands/managed-commands-for-chat";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useArrangementValue, useRegionValues } from "@/lib/layout-overrides";
-import type { SizedValues } from "@/lib/layout/layout-values";
 import { cn } from "@/lib/utils";
 import type {
   PendingInterviewView,
@@ -619,43 +620,6 @@ interface ChatDockChromeInput {
 const NO_BACKGROUND_ITEMS: ReadonlyArray<BackgroundItem> = [];
 
 /**
- * Whether one dock section draws as a chip.
- *
- * Sample fill inside a real chat is gone with the in-place scene (L-87): the
- * editor always opens the sample workspace, which mounts these same panels
- * against sample data (L-98), so a chip here always stands for live content.
- *
- * A ghost is gone for the same reason, one step further on: a HIDDEN region
- * materialises while the index row points at it (L-14), and the index only
- * ever points at the sample workspace's own instances. A real tile is never
- * the canvas, so nothing here is ever asked to materialise.
- */
-function dockChipPlan(values: SizedValues, hasContent: boolean): boolean {
-  return values.shown === "shown" && values.size === "chip" && hasContent;
-}
-
-/**
- * The three fields a dock row carries only for the Customize canvas, in the
- * one state a REAL chat tile can be in: none of them (L-87).
- *
- * The editor's canvas is always the sample workspace, whose own dock supplies
- * real values for these (`sample-workspace-body.tsx`). A real tile cannot be
- * on screen while a session is live - the door activates the sample tab, the
- * session ends the moment any other item becomes active, and that tab is
- * `splitEligibility: "ineligible"` so nothing is ever presented beside it - and
- * `useLayoutRegion` registers nothing from a surface whose
- * `PaneVisibilityContext` is false, which is every backgrounded epic surface
- * and every hosted chat body (`epic-surface.tsx`,
- * `hosted-chat-surface-context-bridge.tsx`). So this tile registered three
- * instances that nothing could ever draw.
- */
-const NO_CUSTOMIZE_HOTSPOT = {
-  hotspotRef: () => undefined,
-  ghost: false,
-  editing: false,
-} satisfies Omit<DockRowHotspot, "shown" | "hasContent">;
-
-/**
  * Which dock rows are folded into a chip, what those chips say, and how the
  * user gets a row back.
  *
@@ -692,8 +656,33 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // The row's own content gate (self + descendants), not the chip's broader
   // one: a received-only queue item with no descendants keeps the chip alive
   // (see `agentsChip` below) but the panel this hotspot anchors has nothing of
-  // its own to draw, which is what decides whether the row is sample-filled.
+  // its own to draw.
   const activeAgentsHasContent = input.activeAgentsVisible;
+  // This tile's three dock regions, registered here because this is the
+  // component that DRAWS them. There is exactly one gate deciding whether a
+  // mounted component's region reaches the editor, and it is inside
+  // `useLayoutRegion`: it registers nothing from a surface whose
+  // `PaneVisibilityContext` is false. Every epic surface publishes that from
+  // its own top-level visibility (`epic-surface.tsx`,
+  // `hosted-chat-surface-context-bridge.tsx`), and the sample workspace is a
+  // plain top-level tab that is `splitEligibility: "ineligible"`, so while a
+  // session is live the sample tab is the only visible surface and a real tile
+  // registers nothing. That is the gate's job, not this file's: a per-site
+  // opt-out here would be a second answer to the same question, and the six
+  // other composer regions on this very tile (`mic`, `agent`, `access`,
+  // `model`, `attachImage`, `contextUsage`) have never had one.
+  const filesChangedHotspot = useLayoutRegion({
+    regionId: "changedFiles",
+    instanceId: input.chatId,
+  });
+  const activeAgentsHotspot = useLayoutRegion({
+    regionId: "runningAgents",
+    instanceId: input.chatId,
+  });
+  const backgroundHotspot = useLayoutRegion({
+    regionId: "background",
+    instanceId: input.chatId,
+  });
   // The root agent counts as running too when it is itself active, exactly as
   // `ActiveAgentsPanel`'s own header counts it.
   const agentsRunningCount =
@@ -769,15 +758,24 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // A chip exists for every compact section that HAS something to show, whether
   // or not its row is currently revealed - the chip is the way back, so it
   // cannot be the thing that disappears when the row appears.
-  const filesChip = dockChipPlan(changedFilesValues, changesPresent);
+  const filesChip = dockMemberFolded({
+    values: changedFilesValues,
+    ghost: filesChangedHotspot.ghost,
+    hasContent: changesPresent,
+  });
   // Received A2A rows follow this mode, so the chip is also owed when they are
   // the only thing folded: without it, folding would make them unreachable.
   const agentsHasContent = input.activeAgentsVisible || receivedAgentCount > 0;
-  const agentsChip = dockChipPlan(runningAgentsValues, agentsHasContent);
-  const backgroundChip = dockChipPlan(
-    backgroundValues,
-    input.backgroundVisible,
-  );
+  const agentsChip = dockMemberFolded({
+    values: runningAgentsValues,
+    ghost: activeAgentsHotspot.ghost,
+    hasContent: agentsHasContent,
+  });
+  const backgroundChip = dockMemberFolded({
+    values: backgroundValues,
+    ghost: backgroundHotspot.ghost,
+    hasContent: input.backgroundVisible,
+  });
 
   // A reveal belongs to a chip, so it dies with one. Per-tile stickiness is the
   // point - a revealed row stays revealed for as long as the tile lives - but
@@ -819,7 +817,14 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       models.push({
         section: "filesChanged",
         glyph: "filesChanged",
-        hotspotRef: null,
+        // The chip is the folded row's ONE anchor: while a section stands as a
+        // chip the row is not drawn, so the region's node is this pill. A
+        // REVEALED section draws both, and the row keeps the node - two
+        // elements registering the same region and instance share one key, so
+        // the later would silently displace the earlier (`ghost-region.tsx`).
+        hotspotRef: revealed.has("filesChanged")
+          ? null
+          : filesChangedHotspot.ref,
         working: false,
         // The file count leads and the line counts follow, the same order and
         // the same tones the panel's own header uses - the chip stands in for
@@ -841,7 +846,9 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       models.push({
         section: "activeAgents",
         glyph: "activeAgents",
-        hotspotRef: null,
+        hotspotRef: revealed.has("activeAgents")
+          ? null
+          : activeAgentsHotspot.ref,
         // Mid-turn is the live state here, exactly as the roster in `label`
         // words it - the chip draws it, the sentence says it.
         working: agentsWorking,
@@ -866,7 +873,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // The section's own mark whatever the rows are - activity lights it
         // rather than replacing it, and the kinds are the panel's to draw.
         glyph: "background",
-        hotspotRef: null,
+        hotspotRef: revealed.has("background") ? null : backgroundHotspot.ref,
         // The count IS the running count, so anything in it lights the chip -
         // and a shell whose process is alive is in that count whether or not it
         // is monitoring, since the host reports it as `running` either way
@@ -898,6 +905,10 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     agentsRoster,
     receivedAgentCount,
     backgroundRunning,
+    revealed,
+    filesChangedHotspot.ref,
+    activeAgentsHotspot.ref,
+    backgroundHotspot.ref,
   ]);
 
   const strip = useMemo<ChatDockCompactStripValue>(
@@ -907,17 +918,23 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
 
   const hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>> = {
     filesChanged: {
-      ...NO_CUSTOMIZE_HOTSPOT,
+      hotspotRef: filesChangedHotspot.ref,
+      editing: filesChangedHotspot.editing,
+      ghost: filesChangedHotspot.ghost,
       shown: changedFilesValues.shown === "shown",
       hasContent: changesPresent,
     },
     activeAgents: {
-      ...NO_CUSTOMIZE_HOTSPOT,
+      hotspotRef: activeAgentsHotspot.ref,
+      editing: activeAgentsHotspot.editing,
+      ghost: activeAgentsHotspot.ghost,
       shown: runningAgentsValues.shown === "shown",
       hasContent: activeAgentsHasContent,
     },
     background: {
-      ...NO_CUSTOMIZE_HOTSPOT,
+      hotspotRef: backgroundHotspot.ref,
+      editing: backgroundHotspot.editing,
+      ghost: backgroundHotspot.ghost,
       shown: backgroundValues.shown === "shown",
       hasContent: input.backgroundVisible,
     },

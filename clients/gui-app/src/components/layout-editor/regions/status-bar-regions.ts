@@ -97,7 +97,6 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
     "providers",
     "bar",
   ],
-  sampleFilled: false,
   rows: [
     {
       kind: "position-host",
@@ -179,7 +178,6 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
     "resource",
     "monitor",
   ],
-  sampleFilled: false,
   rows: [
     { kind: "position-side", description: "Which end of the status bar." },
     {

@@ -63,7 +63,6 @@ export interface RegionFacts {
   readonly whereByHost: Readonly<Record<UsageHost, string>> | null;
   readonly hint: string | null;
   readonly keywords: ReadonlyArray<string>;
-  readonly sampleFilled: boolean;
   readonly rows: ReadonlyArray<RegionRowFacts>;
   readonly quickVerbs: ReadonlyArray<QuickVerbId>;
 }

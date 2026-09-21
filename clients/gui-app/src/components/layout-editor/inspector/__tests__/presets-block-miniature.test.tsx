@@ -1,6 +1,13 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
+import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -17,6 +24,11 @@ function frameOf(miniature: HTMLElement): HTMLElement {
     throw new Error("expected the scaled frame inside the miniature box");
   }
   return frame;
+}
+
+/** The card for one preset, which is the control the miniature sits inside. */
+function card(preset: string): HTMLElement {
+  return screen.getByRole("button", { name: `${preset} preset` });
 }
 
 beforeEach(() => {
@@ -67,19 +79,19 @@ describe("the preset miniature (L-43, I-03, I-18)", () => {
   it("places the dock the way the app places it (L-97)", () => {
     render(<PresetsBlock onPreviewPreset={() => {}} />);
 
-    const docks = screen.getAllByTestId("preset-dock");
+    const docks = screen.getAllByTestId("app-frame-dock");
     expect(docks.length).toBeGreaterThan(0);
     let framed = 0;
     let chipped = 0;
     for (const dock of docks) {
-      // The rows are ONE frame, not a card each, and it is the last thing
-      // before the composer - which is what the tuck under it is made of.
-      const frames = within(dock).queryAllByTestId("preset-dock-frame");
+      // The rows are ONE frame, and it is the last thing before the composer -
+      // which is what the tuck under it is made of.
+      const frames = dock.querySelectorAll('[data-layout-depiction="dock"]');
       expect(frames.length).toBeLessThan(2);
       const composer = dock.nextElementSibling;
-      expect(composer?.getAttribute("data-testid")).toBe("preset-composer");
+      expect(composer?.getAttribute("data-testid")).toBe("app-frame-composer");
 
-      const chips = within(dock).queryAllByTestId("preset-dock-chips");
+      const chips = within(dock).queryAllByTestId("app-frame-dock-chips");
       if (frames.length === 1) {
         framed += 1;
         expect(dock.lastElementChild).toBe(frames[0]);
@@ -96,15 +108,88 @@ describe("the preset miniature (L-43, I-03, I-18)", () => {
     expect(chipped).toBeGreaterThan(0);
   });
 
-  it("draws at the seeded ratio when the box has not been measured", () => {
+  it("draws a multi-row dock as ONE joined frame, not a card per row (R1-01)", () => {
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    // Default shows all three dock members at full size, so this card is the
+    // one that had three bordered rounded-top boxes inside a fourth.
+    const dock = within(card("Default")).getByTestId("app-frame-dock");
+    const frames = dock.querySelectorAll('[data-layout-depiction="dock"]');
+    expect(frames).toHaveLength(1);
+    // The rows are that frame's own children, which is the other half of the
+    // claim: one frame drawn around nothing would pass the count alone.
+    expect(frames[0]?.childElementCount).toBe(3);
+  });
+
+  it("draws at a real ratio when the box has not been measured", () => {
     // jsdom reports `clientWidth` 0 for every element, which is the same
     // reading a collapsed group or a hidden tab gives in the browser. Taking
     // it would have been `scale(0)` - a card that renders nothing at all
-    // (I-18).
+    // (I-18). The seeded ratio itself is tunable; a card drawing SOMETHING is
+    // not.
     render(<PresetsBlock onPreviewPreset={() => {}} />);
 
     for (const miniature of miniatures()) {
-      expect(frameOf(miniature).style.transform).toBe("scale(0.081)");
+      const scale = Number(
+        /^scale\(([^)]+)\)$/.exec(frameOf(miniature).style.transform)?.[1],
+      );
+      expect(scale).toBeGreaterThan(0);
+      expect(scale).toBeLessThan(1);
     }
+  });
+});
+
+describe('"Reset everything" is confirmed only where it cannot be undone (L-20, R1-07)', () => {
+  function changeTheLayout(): void {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      basePreset: "compact",
+      layoutCarryDone: true,
+    });
+  }
+
+  function resetButton(): HTMLElement {
+    return screen.getByRole("button", { name: "Reset everything" });
+  }
+
+  it("asks first on the Settings page, where there is no Undo", () => {
+    changeTheLayout();
+    render(
+      <LayoutFormHostContext value="page">
+        <PresetsBlock onPreviewPreset={() => {}} />
+      </LayoutFormHostContext>,
+    );
+
+    fireEvent.click(resetButton());
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Reset the whole layout?")).toBeTruthy();
+    // Nothing has happened yet: the sentence the dialog shows is only true
+    // while the write is still in front of the user.
+    expect(useLayoutStore.getState().basePreset).toBe("compact");
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Reset everything" }),
+    );
+    expect(useLayoutStore.getState().basePreset).toBe("default");
+  });
+
+  it("applies straight away in the docked inspector, where Undo puts it back", () => {
+    changeTheLayout();
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+
+    fireEvent.click(resetButton());
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useLayoutStore.getState().basePreset).toBe("default");
+
+    // The safety net the modal was standing in for: one gesture, one step.
+    useLayoutEditorStore.getState().undo();
+    expect(useLayoutStore.getState().basePreset).toBe("compact");
   });
 });

@@ -42,7 +42,6 @@ function beginSampleSession() {
   useLayoutEditorStore.getState().beginSession({
     entry: "pointer",
     source: "direct_ui",
-    preferredInstanceId: null,
     startedAt: 0,
   });
   return useLayoutEditorStore.getState().session;

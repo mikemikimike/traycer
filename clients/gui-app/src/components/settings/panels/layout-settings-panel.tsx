@@ -172,7 +172,10 @@ function PageFilter(): ReactNode {
   const ref = useRef<HTMLInputElement | null>(null);
   return (
     <div className="-mx-3">
-      <RegionFilter ref={ref} onArrowDown={noop} onEnter={noop} />
+      {/* `null`, not a no-op: the page has no "first match" to open, so Enter
+        is left to the browser and to whatever is around this field (a form,
+        the Settings modal) rather than being taken and dropped. */}
+      <RegionFilter ref={ref} onArrowDown={noop} onEnter={null} />
     </div>
   );
 }

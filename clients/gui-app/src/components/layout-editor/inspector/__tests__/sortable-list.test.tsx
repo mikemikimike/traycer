@@ -1,13 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
+import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
+import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 
 /**
@@ -23,13 +27,43 @@ import type { RegionId } from "@/lib/layout/region-id";
 function section(regionId: RegionId, onExit: () => void): ReactNode {
   return (
     <InspectorShell onExit={onExit}>
-      <RegionSection
-        regionId={regionId}
-        host="inspector"
-        onOpenProvider={null}
-      />
+      <RegionSection regionId={regionId} onOpenProvider={vi.fn()} />
     </InspectorShell>
   );
+}
+
+/**
+ * The same list on the other host (L-03, L-95), where the rows carry their own
+ * controls: the Settings page draws a surface card with `onMove: null`, so its
+ * rows are unordered AND decorated, which is the combination R1-02 was about.
+ * Chat is the surface with no picture and no order group, so the card is its
+ * two rows and nothing else.
+ */
+function chatCard(
+  openRows: ReadonlyArray<string>,
+  onToggleRow: (rowId: string) => void,
+): ReactNode {
+  return (
+    <LayoutFormHostContext value="page">
+      <SurfaceSection
+        surface="chat"
+        snapshot={snapshot()}
+        filter=""
+        openRows={openRows}
+        onToggleRow={onToggleRow}
+        surfaceRows={null}
+      />
+    </LayoutFormHostContext>
+  );
+}
+
+function snapshot(): LayoutSnapshot {
+  const state = useLayoutStore.getState();
+  return {
+    basePreset: state.basePreset,
+    overrides: state.overrides,
+    arrangement: state.arrangement,
+  };
 }
 
 function row(id: string): HTMLElement {
@@ -66,7 +100,6 @@ beforeEach(() => {
   useLayoutEditorStore.getState().beginSession({
     entry: "keyboard",
     source: "direct_ui",
-    preferredInstanceId: null,
     startedAt: 0,
   });
 });
@@ -161,6 +194,76 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
 
     expect(dockOrder()).toEqual(start);
     expect(historyDepth()).toBe(0);
+  });
+});
+
+describe("what a row claims as its own (R1-02)", () => {
+  /** Anything a screen reader names as a control, or a Tab stop can land on. */
+  const INTERACTIVE =
+    'a[href], button, input, select, textarea, [tabindex], [role="button"], [role="radio"], [role="radiogroup"], [role="switch"], [role="checkbox"]';
+
+  /** The element carrying the row's operation, which is never the whole line. */
+  function grabOf(rowNode: HTMLElement): HTMLElement {
+    const node = rowNode.querySelector('[role="button"]');
+    if (!(node instanceof HTMLElement)) throw new Error("row has no grab");
+    return node;
+  }
+
+  function rows(): ReadonlyArray<HTMLElement> {
+    return [...document.querySelectorAll<HTMLElement>("[data-sortable-id]")];
+  }
+
+  it("keeps the dock's own row controls out of the grab", () => {
+    // The rail is the inspector's decorated list: every divider carries a real
+    // Remove button, which used to sit INSIDE the `role="button"` line.
+    render(section("railAgents", vi.fn()));
+
+    const decorated = rows().filter(
+      (node) => node.querySelectorAll(INTERACTIVE).length > 1,
+    );
+    expect(decorated.length).toBeGreaterThan(0);
+    for (const rowNode of rows()) {
+      expect(
+        grabOf(rowNode).querySelectorAll(INTERACTIVE),
+        rowNode.getAttribute("data-sortable-id") ?? "",
+      ).toHaveLength(0);
+    }
+  });
+
+  it("keeps the page's row controls out of the grab, and out of its name", () => {
+    render(chatCard([], vi.fn()));
+
+    const minimap = row("minimap");
+    // The row really does carry controls - a side choice and a Shown switch -
+    // so the emptiness asserted below is a place, not an absence.
+    expect(
+      minimap.querySelectorAll('[role="radio"], [role="switch"]').length,
+    ).toBeGreaterThan(1);
+    for (const rowNode of rows()) {
+      expect(grabOf(rowNode).querySelectorAll(INTERACTIVE)).toHaveLength(0);
+    }
+
+    // A composite widget names itself from its contents: the row is "Minimap",
+    // never "Minimap Left Right Show Minimap".
+    const facts = regionFacts("minimap");
+    expect(facts.hint).toBeNull();
+    expect(grabOf(minimap).textContent).toBe(facts.name);
+    const named = screen.getByRole("button", { name: facts.name });
+    expect(named).toBe(grabOf(minimap));
+  });
+
+  it("still opens an unordered row's disclosure from the keyboard", () => {
+    const toggled = vi.fn();
+    render(chatCard([], toggled));
+    // Context usage is the chat row with something behind it (Style and
+    // Fine-tune); the minimap row has no disclosure at all.
+    const grab = grabOf(row("contextUsage"));
+
+    fireEvent.keyDown(grab, { key: " " });
+    fireEvent.keyDown(grab, { key: "Enter" });
+
+    expect(toggled.mock.calls).toEqual([["contextUsage"], ["contextUsage"]]);
+    expect(grab.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

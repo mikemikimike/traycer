@@ -18,6 +18,7 @@ import {
 import { decoratedHoverRegion } from "@/components/layout-editor/use-layout-region";
 import { layoutTransitionRunning } from "@/lib/layout/editor-motion";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,
@@ -53,6 +54,32 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
     column.setAttribute("data-layout-editing", "1");
     const chip = createHoverChip();
     const ring = createSelectionRing();
+    // The chip's text, computed per hovered region and only when it can have
+    // moved. `paint` runs on EVERY editor-store notification - each pointer
+    // move that changes the hovered region, each filter keystroke, each
+    // selection change while the pointer rests on a region - and building the
+    // label means building the whole 22-region value set to read one region's
+    // state word (G1-04's rule, which `inspector-index.tsx` follows in this
+    // same commit). The label changes only when the pointer moves to another
+    // region or the layout is written, so those are the two things this
+    // remembers.
+    let lastLabel: {
+      readonly regionId: RegionId;
+      readonly snapshot: LayoutSnapshot;
+      readonly label: string;
+    } | null = null;
+    const labelFor = (regionId: RegionId): string => {
+      const snapshot = getLayoutSnapshot();
+      if (
+        lastLabel !== null &&
+        lastLabel.regionId === regionId &&
+        sameLayout(lastLabel.snapshot, snapshot)
+      )
+        return lastLabel.label;
+      const label = hoverChipLabel(regionId, snapshot);
+      lastLabel = { regionId, snapshot, label };
+      return label;
+    };
 
     const paint = (): void => {
       const state = useLayoutEditorStore.getState();
@@ -64,7 +91,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       if (hoveredRegion === null || hovered === null) chip.hide();
       else
         chip.show({
-          label: hoverChipLabel(hoveredRegion),
+          label: labelFor(hoveredRegion),
           node: hovered.node,
           placement: chipPlacement(hoveredRegion),
         });
@@ -187,13 +214,27 @@ function chipPlacement(regionId: RegionId): HoverChipPlacement {
  * separator is the app's own middle dot rather than the prototype's ASCII dash.
  *
  * Off the store rather than out of a render: the chip is a DOM element this
- * module owns, and a hover must not re-render a chat tile.
+ * module owns, and a hover must not re-render a chat tile. Takes the snapshot
+ * it is built from rather than reading one, so the caller's cache and this
+ * answer can never be about two different layouts.
  */
-function hoverChipLabel(regionId: RegionId): string {
-  const snapshot = getLayoutSnapshot();
+function hoverChipLabel(regionId: RegionId, snapshot: LayoutSnapshot): string {
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
   const state = regionStateWord(regionId, values, snapshot.arrangement);
   return `${regionFacts(regionId).name} · ${state}`;
+}
+
+/**
+ * Whether two snapshots are the same layout, by the identity of the three
+ * fields the store holds - never a deep compare. Each one is replaced whole on
+ * a write, so a reference match IS "nothing was written since".
+ */
+function sameLayout(left: LayoutSnapshot, right: LayoutSnapshot): boolean {
+  return (
+    left.basePreset === right.basePreset &&
+    left.overrides === right.overrides &&
+    left.arrangement === right.arrangement
+  );
 }
 
 /**

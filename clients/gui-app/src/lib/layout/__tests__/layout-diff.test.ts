@@ -9,6 +9,7 @@ import {
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
 import {
+  AUTOMATIC_LIMIT_SELECTION,
   DEFAULT_ARRANGEMENT,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
@@ -46,9 +47,23 @@ describe("one provider's own state", () => {
 
     const picked: LayoutArrangement = {
       ...DEFAULT_ARRANGEMENT,
-      providerLimits: { [PROVIDER]: { automatic: false, limitKeys: ["5h"] } },
+      providerLimits: { [PROVIDER]: { limitKeys: ["5h"] } },
     };
     expect(providerChanged(picked, PROVIDER)).toBe(true);
+  });
+
+  it("is measured by difference, so an entry equal to Automatic is none", () => {
+    // The writer deletes the key on the way back to Automatic; a map
+    // rehydrated from an older write can still carry one, and an entry that
+    // says exactly what the default says is not a change (R1-03).
+    const automatic: LayoutArrangement = {
+      ...DEFAULT_ARRANGEMENT,
+      providerLimits: { [PROVIDER]: AUTOMATIC_LIMIT_SELECTION },
+    };
+
+    expect(providerChanged(automatic, PROVIDER)).toBe(false);
+    expect(usageProvidersChanged(automatic)).toBe(false);
+    expect(anythingChanged(snapshotWith(automatic))).toBe(false);
   });
 
   it("reverts to shown and Automatic, leaving every other provider alone", () => {
@@ -56,8 +71,8 @@ describe("one provider's own state", () => {
       ...DEFAULT_ARRANGEMENT,
       hiddenProviders: [PROVIDER, OTHER_PROVIDER],
       providerLimits: {
-        [PROVIDER]: { automatic: false, limitKeys: ["5h"] },
-        [OTHER_PROVIDER]: { automatic: false, limitKeys: ["week"] },
+        [PROVIDER]: { limitKeys: ["5h"] },
+        [OTHER_PROVIDER]: { limitKeys: ["week"] },
       },
     };
 
@@ -81,7 +96,7 @@ describe("what the page can see as changed", () => {
     expect(
       usageProvidersChanged({
         ...DEFAULT_ARRANGEMENT,
-        providerLimits: { [PROVIDER]: { automatic: true, limitKeys: [] } },
+        providerLimits: { [PROVIDER]: { limitKeys: ["5h"] } },
       }),
     ).toBe(true);
     expect(
@@ -130,7 +145,7 @@ describe("Reset everything (L-20)", () => {
         resourceSide: "left",
         mobileFooter: true,
         hiddenProviders: [PROVIDER],
-        providerLimits: { [PROVIDER]: { automatic: false, limitKeys: ["5h"] } },
+        providerLimits: { [PROVIDER]: { limitKeys: ["5h"] } },
         dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
         usageProviders: [...DEFAULT_ARRANGEMENT.usageProviders].reverse(),
       },

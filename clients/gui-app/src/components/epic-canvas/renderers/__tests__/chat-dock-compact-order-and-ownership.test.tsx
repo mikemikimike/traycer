@@ -197,7 +197,6 @@ function startEditorSession(): void {
   useLayoutEditorStore.getState().beginSession({
     entry: "pointer",
     source: "direct_ui",
-    preferredInstanceId: null,
     startedAt: 0,
   });
 }

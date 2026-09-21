@@ -15,7 +15,6 @@ export const HOME_TAB_REGION: LayoutRegion<"homeTab"> = {
   whereByHost: null,
   hint: null,
   keywords: ["home", "start", "page", "tab"],
-  sampleFilled: false,
   rows: [],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,

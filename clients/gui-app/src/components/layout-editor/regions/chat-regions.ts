@@ -20,7 +20,6 @@ export const MINIMAP_REGION: LayoutRegion<"minimap"> = {
   whereByHost: null,
   hint: null,
   keywords: ["minimap", "overview", "scrollbar", "map", "transcript"],
-  sampleFilled: false,
   rows: [
     {
       kind: "position-side",
@@ -55,7 +54,6 @@ export const CONTEXT_USAGE_REGION: LayoutRegion<"contextUsage"> = {
     "ring",
     "breakdown",
   ],
-  sampleFilled: false,
   rows: [
     {
       kind: "style",
