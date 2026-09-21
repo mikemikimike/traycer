@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { useLayoutEditorFitsWindow } from "@/lib/layout/editor-width";
+import { openLayoutEditor } from "@/lib/layout/editor-session";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
 import {
@@ -40,6 +44,15 @@ export function LayoutSettingsPanel(): ReactNode {
     >
       <div className={cn("flex flex-col", compact ? "gap-3.5" : "gap-5")}>
         <SettingsGroup
+          group={LAYOUT.definitions.customize}
+          showTitle={false}
+          tone="default"
+          dataTestId="layout-customize-group"
+          fill={false}
+        >
+          <CustomizeLayoutRow />
+        </SettingsGroup>
+        <SettingsGroup
           group={LAYOUT.definitions.presets}
           showTitle
           tone="default"
@@ -54,6 +67,50 @@ export function LayoutSettingsPanel(): ReactNode {
         ))}
       </div>
     </SettingsPanelShell>
+  );
+}
+
+/**
+ * The way from this page into the canvas editor (5.1), and the only entry in
+ * Settings.
+ *
+ * It lives HERE rather than on Appearance because this page is the editor's own
+ * other half: the same section components, drawn full width, and the place the
+ * door itself lands when the window is too narrow for a canvas (L-03, L-64).
+ * Below that threshold the button is withheld rather than disabled - pressing
+ * it would navigate to the page the user is already reading - and the row stays,
+ * because it is still the thing these settings are, and it is the guide's final
+ * coachmark target (L-50).
+ */
+function CustomizeLayoutRow(): ReactNode {
+  const navigate = useNavigate();
+  const fits = useLayoutEditorFitsWindow();
+  return (
+    <SettingsRow
+      row={LAYOUT.definitions.customizeEntry}
+      control={
+        fits ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              openLayoutEditor({
+                source: "direct_ui",
+                entry: "pointer",
+                target: null,
+                navigate,
+              });
+            }}
+          >
+            Customize layout
+          </Button>
+        ) : (
+          <p className="text-ui-sm text-muted-foreground">
+            Needs a wider window
+          </p>
+        )
+      }
+    />
   );
 }
 

@@ -20,6 +20,7 @@ import {
   GhostRegion,
   GhostRegionPicture,
 } from "@/components/layout-editor/ghost-region";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
 
@@ -189,25 +190,30 @@ function HeaderUsageControls(): ReactNode {
   });
   if (!inHeader) return null;
   return (
-    <span ref={ref} className="contents">
-      {usageEnabled ? <RateLimitIconButton /> : null}
-      {/* Hidden and pointed at: the passive depiction in place, never the
-        live control - both of these fetch or stream (L-14, L-62). */}
-      {usageEnabled ? null : <GhostRegionPicture regionId="usageLimits" />}
-      {showGlobalResourceMonitor ? null : (
-        <GhostRegion regionId="resourceMonitor" />
-      )}
-      {showGlobalResourceMonitor ? (
-        // Unconditionally the owner of `app.resources.open`: this whole
-        // component is behind `inHeader`, so the strip's own popover is not
-        // mounted while this one is.
-        <ResourceMonitorPopover
-          trigger="header-button"
-          className={undefined}
-          claimsOpenAction
-        />
-      ) : null}
-    </span>
+    // The header cluster's own right-click (L-19). The cluster has no menu of
+    // its own, so this is the whole menu; it names `usageLimits` because that
+    // is the region this element registers.
+    <LayoutRegionContextMenu regionId="usageLimits">
+      <span ref={ref} className="contents">
+        {usageEnabled ? <RateLimitIconButton /> : null}
+        {/* Hidden and pointed at: the passive depiction in place, never the
+          live control - both of these fetch or stream (L-14, L-62). */}
+        {usageEnabled ? null : <GhostRegionPicture regionId="usageLimits" />}
+        {showGlobalResourceMonitor ? null : (
+          <GhostRegion regionId="resourceMonitor" />
+        )}
+        {showGlobalResourceMonitor ? (
+          // Unconditionally the owner of `app.resources.open`: this whole
+          // component is behind `inHeader`, so the strip's own popover is not
+          // mounted while this one is.
+          <ResourceMonitorPopover
+            trigger="header-button"
+            className={undefined}
+            claimsOpenAction
+          />
+        ) : null}
+      </span>
+    </LayoutRegionContextMenu>
   );
 }
 

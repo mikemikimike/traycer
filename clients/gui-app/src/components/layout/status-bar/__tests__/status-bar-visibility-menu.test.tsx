@@ -10,9 +10,11 @@ vi.mock("@/hooks/ui/use-mobile-viewport", () => ({
   useIsMobileViewport: () => viewport.mobile,
 }));
 
-const navigateToSettingsSectionMock = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/settings-navigation", () => ({
-  navigateToSettingsSection: navigateToSettingsSectionMock,
+const openLayoutEditorMock = vi.hoisted(() => vi.fn());
+const navigateMock = vi.hoisted(() => vi.fn());
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock }));
+vi.mock("@/lib/layout/editor-session", () => ({
+  openLayoutEditor: openLayoutEditorMock,
 }));
 
 import {
@@ -47,7 +49,7 @@ function openMenu(): void {
 beforeEach(resetStore);
 afterEach(() => {
   cleanup();
-  navigateToSettingsSectionMock.mockClear();
+  openLayoutEditorMock.mockClear();
   resetStore();
 });
 
@@ -115,15 +117,32 @@ describe("<StatusBarVisibilityMenu />", () => {
     ]);
   });
 
-  it("navigates to the layout settings section from 'Status bar settings…'", () => {
+  // The old "Status bar settings…" jump is gone: customizing goes through the
+  // one door, on the region this menu is anchored on (L-19).
+  it("opens the editor on the usage region from 'Customize layout...'", () => {
     renderMenu(PROVIDERS);
     openMenu();
 
     fireEvent.click(
-      screen.getByRole("menuitem", { name: "Status bar settings…" }),
+      screen.getByRole("menuitem", { name: "Customize layout..." }),
     );
 
-    expect(navigateToSettingsSectionMock).toHaveBeenCalledWith("layout");
+    expect(openLayoutEditorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ entry: "pointer", target: "usageLimits" }),
+    );
+  });
+
+  it("offers the bar's own region as a quick verb", () => {
+    renderMenu(PROVIDERS);
+    openMenu();
+
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Hide Usage limits" }),
+    );
+
+    expect(useLayoutStore.getState().overrides.usageLimits?.shown).toBe(
+      "hidden",
+    );
   });
 
   it("'Move to header' sets placement to header", () => {
@@ -154,7 +173,7 @@ describe("<StatusBarVisibilityMenu />", () => {
     ).toBeNull();
     // The gate is on that one item, not on the menu.
     expect(
-      screen.getByRole("menuitem", { name: "Status bar settings…" }),
+      screen.getByRole("menuitem", { name: "Customize layout..." }),
     ).not.toBeNull();
   });
 

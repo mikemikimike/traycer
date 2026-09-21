@@ -50,6 +50,7 @@ import { TabItem } from "@/components/layout/tabs/tab-strip-item";
 import { SplitTabItem } from "@/components/layout/tabs/split-tab-item";
 import { TabStripNewButton } from "@/components/layout/tabs/tab-strip-new-button";
 import { TabStripHomeItem } from "@/components/layout/tabs/tab-strip-home-item";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useHomeBadgeCount } from "@/components/home-focus/use-home-badge-count";
 import { useRegionShown } from "@/lib/layout-overrides";
 import { useRegionGhost } from "@/components/layout-editor/use-layout-region";
@@ -461,11 +462,16 @@ function HomeStripSlot(props: {
 }): ReactNode {
   const badgeCount = useHomeBadgeCount();
   return (
-    <TabStripHomeItem
-      isActive={props.isActive}
-      onActivate={props.onActivate}
-      badgeCount={badgeCount}
-    />
+    // The strip's right-click entry (L-19), on the Home item rather than on
+    // the strip: Home is the one layout region here, and the task tabs beside
+    // it own a menu of their own that a strip-wide trigger would fight.
+    <LayoutRegionContextMenu regionId="homeTab">
+      <TabStripHomeItem
+        isActive={props.isActive}
+        onActivate={props.onActivate}
+        badgeCount={badgeCount}
+      />
+    </LayoutRegionContextMenu>
   );
 }
 

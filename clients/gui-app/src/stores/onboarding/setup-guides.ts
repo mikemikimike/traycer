@@ -38,6 +38,13 @@ export interface SetupGuideStep {
    * having happened.
    */
   readonly completesOn?: SetupGuideEvent;
+  /**
+   * Whether the real chrome around Settings takes the layout editor's lit
+   * treatment while this step is up (L-50) - the canvas signal shown rather
+   * than entered. Closing the step ends the effect; nothing is entered and
+   * nothing is written.
+   */
+  readonly litChrome?: true;
 }
 
 export interface SetupGuide {
@@ -102,9 +109,21 @@ const SETUP_GUIDES = {
       {
         section: "layout",
         selector: `[data-settings-anchor="${LAYOUT.definitions.sidebar.anchor}"]`,
-        title: "Arrange the sidebar",
+        title: "Every piece has a section",
         content:
-          "Each panel has its own section here: show it, hide it, or move it in the rail.",
+          "One section per piece of chrome, grouped by where it sits: show it, hide it, or move it.",
+      },
+      // The guide ends by SHOWING the editor rather than entering it (L-50):
+      // the chrome around Settings dims the way it does on the canvas, so the
+      // signal is understood before the door is ever opened. Closing the card
+      // ends the effect and completes the guide.
+      {
+        section: "layout",
+        selector: `[data-settings-anchor="${LAYOUT.definitions.customizeEntry.anchor}"]`,
+        title: "Or point at the app itself",
+        content:
+          "The app dims around what you can change. Customize layout opens it beside your real workspace.",
+        litChrome: true,
       },
     ],
   },

@@ -196,7 +196,10 @@ describe("<TabStrip /> - Home placement", () => {
     const homeTab = await screen.findByTestId("tab-home");
     const tablist = screen.getByTestId("tab-strip");
     expect(tablist.getAttribute("role")).toBe("tablist");
-    expect(tablist.children[0]).toBe(homeTab);
+    // First in the tablist, through the `display: contents` wrapper its
+    // right-click menu hangs on - that wrapper generates no box, so Home is
+    // still the strip's own first flex item.
+    expect(tablist.children[0].contains(homeTab)).toBe(true);
 
     const scrollContainer = screen.getByTestId("header-tab-strip-scroll");
     expect(scrollContainer.contains(homeTab)).toBe(false);
@@ -300,7 +303,7 @@ describe("<TabStrip /> - Home placement", () => {
     const homeTab = await screen.findByTestId("tab-home");
     const tablist = screen.getByTestId("tab-strip");
     // Still the tablist's first child, and still ahead of the group's chip.
-    expect(tablist.children[0]).toBe(homeTab);
+    expect(tablist.children[0].contains(homeTab)).toBe(true);
     const chip = screen.getByRole("button", {
       name: "Work: collapse group",
     });

@@ -7,11 +7,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { LayoutRegionMenuItems } from "@/components/layout-editor/region-quick-verbs";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { trackSettingChanged } from "@/lib/analytics";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
-import { navigateToSettingsSection } from "@/lib/settings-navigation";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
@@ -113,14 +113,6 @@ export function StatusBarVisibilityMenu(
         >
           Resource monitor
         </ContextMenuCheckboxItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onSelect={() => {
-            navigateToSettingsSection("layout");
-          }}
-        >
-          Status bar settings…
-        </ContextMenuItem>
         {narrowViewport ? null : (
           <ContextMenuItem
             onSelect={() => {
@@ -134,6 +126,13 @@ export function StatusBarVisibilityMenu(
             Move to header
           </ContextMenuItem>
         )}
+        <ContextMenuSeparator />
+        {/* The bar's own quick verbs and the way in (L-19). The items above are
+            one per segment; what these add is the region this menu is anchored
+            on and "Customize layout...", which replaces the old jump to the
+            Layout settings page - customizing is the editor's job now, and the
+            door lands on that page by itself when the window is too narrow. */}
+        <LayoutRegionMenuItems regionId="usageLimits" />
       </ContextMenuContent>
     </ContextMenu>
   );

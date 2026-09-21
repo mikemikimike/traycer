@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ComposerAttachImageButton } from "@/components/home/toolbar/composer-attach-image-button";
 import { ComposerHarnessLabel } from "@/components/home/toolbar/composer-harness-label";
 import { ComposerMicSlot } from "@/components/home/toolbar/composer-mic-button";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import type { ComposerDictationControl } from "@/components/home/toolbar/composer-mic-button";
 import { PermissionsPicker } from "@/components/home/pickers/permissions-picker";
 import { HarnessModelPicker } from "@/components/home/pickers/harness-model-picker";
@@ -39,7 +40,28 @@ export interface ComposerToolbarItemsProps {
   readonly dictationPreparing: DictationPreparingStatus | null;
 }
 
+/**
+ * One toolbar item, with its own right-click menu (L-19).
+ *
+ * The menu is per ITEM rather than one for the whole toolbar, because this is
+ * where the region is known: the cluster components walk an order of
+ * `ToolbarRegionId`s and this switch is the one place that pairs an id with the
+ * control it draws, so a menu hung here names the thing the pointer is
+ * actually on. A presentation copy - the sample workspace's toolbar - gets no
+ * menu: it is a picture, and nothing in it is the user's to change.
+ */
 export function renderToolbarItem(
+  id: ToolbarRegionId,
+  props: ComposerToolbarItemsProps,
+): ReactNode {
+  const control = toolbarItemControl(id, props);
+  if (props.presentation === true) return control;
+  return (
+    <LayoutRegionContextMenu regionId={id}>{control}</LayoutRegionContextMenu>
+  );
+}
+
+function toolbarItemControl(
   id: ToolbarRegionId,
   props: ComposerToolbarItemsProps,
 ): ReactNode {

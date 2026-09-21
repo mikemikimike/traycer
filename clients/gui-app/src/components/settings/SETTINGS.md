@@ -90,8 +90,9 @@ The engine's mount point survives a section change (`SettingsPanelForSection` sw
 `SETUP_GUIDE_LENGTHS` is gone with it: `setupGuideLength(id)` is the step list's own length, never a number copied beside it.
 
 The three guides: agent selection is three steps on Agents (the editor shell, its Edit/Preview toggle, the Revert button).
-Appearance and layout is five, and it crosses surfaces: theme mode, wallpaper and interface font on Appearance, then the density preset and the sidebar panel arranger on Layout.
-Its last two steps point at Layout's presets block and its sidebar sections.
+Appearance and layout is six, and it crosses surfaces: theme mode, wallpaper and interface font on Appearance, then the density preset, the region sections and the Customize layout entry on Layout.
+Its final step is the one that SHOWS the editor instead of entering it (L-50): a step may carry `litChrome`, and while it is up `useLayoutLitMoment` puts `data-layout-lit` on the document element, which is the second selector on `layout-editor.css`'s passive-dim rules.
+The real chrome around Settings dims exactly as it does on the canvas; closing the step ends the effect and completes the guide, and nothing is entered, leased or written.
 The runner (`SettingsSetupGuide`) draws nothing while a layout-editor session is running - the editor owns the screen and its Escape - and resumes at the same step afterwards.
 Browser sign-ins is two steps on Browser: the "Save website sessions" switch, then the "Choose source…" button, which is action-required and is where the guide waits.
 It is also the one guide with a `requiresBrowserView` flag, because without the desktop browser bridge there is no way to finish it.
@@ -246,6 +247,13 @@ instead that each one names an existing region. (There is deliberately no third
 placement form on `defineSettingsSection`: nothing hand-writes a launch
 member - the registry is already the one list.) The result row wears a
 "Layout" badge.
+
+Selecting one does not navigate: it calls `openLayoutEditor` with that region
+as `target`, so the editor opens on that section (L-07, 5.3). The door owns
+what a narrow window means - below its threshold it lands on `Settings ▸
+Layout`, which is where an ordinary result would have gone. `entry` is
+`"keyboard"` for Enter and `"pointer"` for a click, because it gates the entry
+motion as well as being reported (L-30, L-54).
 
 **What is guaranteed, and by what.**
 
@@ -693,6 +701,10 @@ Supporting pieces, all viewport-agnostic where possible:
 - `panels/*.tsx` Route-mounted settings sections.
 - `src/components/layout-editor/layout-search.definitions.ts` The layout launch results,
   generated from the region registry (see Search ▸ Launch results).
+- `src/components/layout-editor/region-quick-verbs.tsx` The right-click menu on
+  the app's own chrome (L-19) - a region's quick verbs with their Undo toast,
+  plus the way in. `customize-layout-menu-item.tsx` is that last item alone,
+  for a menu that wants no verbs.
 - `controls/settings-select.tsx` Shared select wrapper used by settings rows.
 - `src/stores/settings/settings-store.ts` Persisted local settings state.
 - `src/providers/settings-density-context.ts` `SettingsDensityContext` /
@@ -1370,6 +1382,14 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
 - `Layout` (`panels/layout-settings-panel.tsx`, `/settings/layout`, seventh and
   last in the Application group, leader digit 7) Where the app's own chrome
   SITS and how much of it shows.
+  - **The way into the editor (5.1)** is the card at the top of this page, and
+    it is the only entry in Settings: this page is the editor's other half, and
+    the place the door itself lands when the window is too narrow for a canvas
+    (L-64). Below that threshold the button is withheld rather than disabled -
+    pressing it would navigate to the page already on screen - and the row
+    stays, because it is the guide's final coachmark target (L-50). Everywhere
+    else the entries are the palette's "Customize layout", the five chrome
+    context menus and a Settings-search launch result.
   - **One form, two hosts (L-03).** The layout form is a set of section
     components under `components/layout-editor/inspector/` - `PresetsBlock` and
     one `RegionSection` per region - and this page is the FULL-WIDTH host for

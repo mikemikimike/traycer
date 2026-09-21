@@ -1204,7 +1204,11 @@ vi.mock("@/stores/settings/settings-store", async (importOriginal) => {
     ...actual,
     useSettingsStore: Object.assign(
       (selector: (settingsState: typeof state) => unknown) => selector(state),
-      { getState: () => state },
+      {
+        getState: () => state,
+        // `theme-applier` subscribes at module load, and this graph reaches it.
+        subscribe: () => () => undefined,
+      },
     ),
   };
 });

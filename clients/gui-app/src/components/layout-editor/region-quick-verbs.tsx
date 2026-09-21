@@ -1,0 +1,185 @@
+import type { ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { Eye, EyeOff, Layers, PanelTop } from "lucide-react";
+import { toast } from "sonner";
+import { CustomizeLayoutMenuItem } from "@/components/layout-editor/customize-layout-menu-item";
+import { regionShownOnValue } from "@/components/layout-editor/layout-gestures";
+import {
+  readControlValue,
+  writeControlValue,
+  type RegionControlValue,
+} from "@/components/layout-editor/inspector/region-control-io";
+import {
+  offeredQuickVerbs,
+  quickVerbLabel,
+  quickVerbToast,
+  type WritingQuickVerb,
+} from "@/components/layout-editor/regions/quick-verbs";
+import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import type { LayoutRegionIcon } from "@/components/layout-editor/regions/region-grammar";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { useRegionValues } from "@/lib/layout-overrides";
+import { openLayoutEditor } from "@/lib/layout/editor-session";
+import type { RegionValueKey } from "@/lib/layout/layout-values";
+import type { RegionId } from "@/lib/layout/region-id";
+
+/**
+ * Right-click on a piece of the app's own chrome (L-19).
+ *
+ * Two things live here because they are the same offer made in two places:
+ * chrome that has no menu of its own gets {@link LayoutRegionContextMenu},
+ * and chrome that already has one renders {@link LayoutRegionMenuItems} inside
+ * it. Nesting a second Radix trigger on a subtree that already has one fires
+ * both menus for the same event, which is why the choice is the call site's.
+ *
+ * A quick verb does NOT enter the editor: it writes the same value the
+ * inspector's own switch writes, through the same `region-control-io` seam, and
+ * the toast is what reverses it. "Customize layout..." is the way in, and it
+ * always opens on the region that was right-clicked.
+ */
+
+/**
+ * One toast id for every quick verb, so a second verb REPLACES the first's
+ * toast rather than stacking beside it.
+ *
+ * That is what makes Undo exact with no history to consult: the only Undo on
+ * screen is the one belonging to the last verb, and it carries that verb's own
+ * previous value rather than a snapshot of the whole layout - so it cannot
+ * take back a change made between the verb and the press, from this menu or
+ * from anywhere else.
+ */
+const QUICK_VERB_TOAST_ID = "layout-quick-verb";
+
+/** The plan's frozen dismiss for this toast. */
+const QUICK_VERB_TOAST_DURATION_MS = 5000;
+
+const QUICK_VERB_ICON: Readonly<Record<WritingQuickVerb, LayoutRegionIcon>> = {
+  hide: EyeOff,
+  show: Eye,
+  chip: Layers,
+  full: PanelTop,
+};
+
+/** The region's own verbs, then the way into the editor on that region. */
+export function LayoutRegionMenuItems(props: {
+  readonly regionId: RegionId;
+}): ReactNode {
+  const { regionId } = props;
+  const facts = regionFacts(regionId);
+  const values = useRegionValues(regionId);
+  const navigate = useNavigate();
+
+  const hidden = readControlValue(values, "shown") === "hidden";
+  // Asked only of a region whose registry entry says it has a size; a region
+  // without one has no `size` leaf to read.
+  const sizeable = facts.quickVerbs.includes("chip");
+  const chip = sizeable && readControlValue(values, "size") === "chip";
+  const verbs = offeredQuickVerbs(facts.quickVerbs, { hidden, chip });
+
+  const run = (verb: WritingQuickVerb): void => {
+    const key = quickVerbKey(verb);
+    const previous = readControlValue(values, key);
+    writeControlValue(regionId, key, quickVerbValue(verb, regionId));
+    const message = quickVerbToast(verb, facts.name);
+    if (message === null) return;
+    toast(message, {
+      id: QUICK_VERB_TOAST_ID,
+      duration: QUICK_VERB_TOAST_DURATION_MS,
+      // Undo is the emphasised button and "Customize layout..." the quiet one,
+      // which is the reverse of sonner's own order: leaving the app for the
+      // editor is the larger of the two moves, and it must not be the one a
+      // reflex press lands on.
+      action: {
+        label: "Undo",
+        onClick: () => {
+          writeControlValue(regionId, key, previous);
+        },
+      },
+      cancel: {
+        label: "Customize layout...",
+        onClick: () => {
+          openLayoutEditor({
+            source: "direct_ui",
+            entry: "pointer",
+            target: regionId,
+            navigate,
+          });
+        },
+      },
+    });
+  };
+
+  return (
+    <>
+      {verbs.map((verb) => {
+        const Icon = QUICK_VERB_ICON[verb];
+        return (
+          <ContextMenuItem
+            key={verb}
+            data-testid={`layout-quick-verb-${regionId}-${verb}`}
+            onSelect={() => {
+              run(verb);
+            }}
+          >
+            <Icon aria-hidden />
+            {quickVerbLabel(verb, facts.name)}
+          </ContextMenuItem>
+        );
+      })}
+      {verbs.length > 0 ? <ContextMenuSeparator /> : null}
+      <CustomizeLayoutMenuItem target={regionId} />
+    </>
+  );
+}
+
+/** A region's menu, for chrome that has none of its own. */
+export function LayoutRegionContextMenu(props: {
+  readonly regionId: RegionId;
+  readonly children: ReactNode;
+}): ReactNode {
+  return (
+    <ContextMenu>
+      {/* `display: contents` generates no box, so the chrome this wraps keeps
+          its own place in its parent's flex or grid row; the span is only
+          somewhere for Radix to hang the trigger's handlers, which the real
+          control's own contextmenu event bubbles up to. Wrapping here rather
+          than at each call site means a site can hand this a COMPONENT - the
+          Home item, a toolbar picker - without that component having to
+          forward the trigger's props to a DOM node. */}
+      <ContextMenuTrigger asChild>
+        <span className="contents">{props.children}</span>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <LayoutRegionMenuItems regionId={props.regionId} />
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Which leaf a verb writes. */
+function quickVerbKey(verb: WritingQuickVerb): RegionValueKey {
+  return verb === "chip" || verb === "full" ? "size" : "shown";
+}
+
+/** What it writes there - `show` through the one tri-state rule (L-47). */
+function quickVerbValue(
+  verb: WritingQuickVerb,
+  regionId: RegionId,
+): RegionControlValue {
+  switch (verb) {
+    case "hide":
+      return "hidden";
+    case "show":
+      return regionShownOnValue(regionId);
+    case "chip":
+      return "chip";
+    case "full":
+      return "full";
+  }
+}

@@ -39,6 +39,7 @@ import {
   useLeftPanelRailDropPreview,
   useLeftPanelSectionDragSource,
 } from "@/components/epic-canvas/dnd/dnd-store";
+import { CustomizeLayoutMenuItem } from "@/components/layout-editor/customize-layout-menu-item";
 import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
 import {
@@ -426,6 +427,18 @@ function RailContextMenuContent(props: {
           </ContextMenuItem>
         </>
       ) : null}
+      <ContextMenuSeparator />
+      {/* The way in (L-19), on the panel the pointer was over so the editor
+          opens on that region's own section. No quick verbs beside it: this
+          menu's hide item and its checkbox list ALREADY are this rail's
+          show/hide verbs, and they write the same values a quick verb would. */}
+      <CustomizeLayoutMenuItem
+        target={
+          pointedEntry === null
+            ? null
+            : railRegionForLeftPanelId(pointedEntry.definition.id)
+        }
+      />
     </ContextMenuContent>
   );
 }

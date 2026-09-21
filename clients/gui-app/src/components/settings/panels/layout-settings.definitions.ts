@@ -32,6 +32,42 @@ export const LAYOUT = defineSettingsSection("layout", {
       "visibility",
     ],
   },
+  /**
+   * The card holding the way into the canvas editor (L-15, L-33), and the
+   * coachmark target the "Appearance and layout" guide ends on (L-50).
+   *
+   * The card contributes its words to the row inside it rather than owning an
+   * entry of its own: both say "Customize layout", and two results under one
+   * name on one page is a choice with no answer.
+   */
+  customize: {
+    kind: "group",
+    search: { contributesTo: "customizeEntry" },
+    label: "Customize layout",
+    description: null,
+    breadcrumb: null,
+    availableWhen: alwaysAvailable,
+    keywords: [],
+  },
+  customizeEntry: {
+    kind: "row",
+    group: "customize",
+    search: { anchor: "layout-customize" },
+    label: "Customize layout",
+    description:
+      "Point at the app's own chrome and change it where it lives. Everything below is the same set of settings.",
+    availableWhen: alwaysAvailable,
+    keywords: [
+      "customize",
+      "edit",
+      "editor",
+      "arrange",
+      "move",
+      "reorder",
+      "drag",
+      "visual",
+    ],
+  },
   // First on the page: the coarsest control here, and the one every section
   // below is measured against ("Compact + 3 changes").
   presets: {

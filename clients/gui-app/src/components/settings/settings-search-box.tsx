@@ -1,4 +1,5 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Search, X } from "lucide-react";
 import {
   InputGroup,
@@ -17,6 +18,8 @@ import {
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
 import { navigateToSettingsSection } from "@/lib/settings-navigation";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { openLayoutEditor } from "@/lib/layout/editor-session";
+import type { LayoutEditorEntryMethod } from "@/stores/layout/layout-editor-store";
 import { Badge } from "@/components/ui/badge";
 
 /** Scopes the highlight's scroll query to this list. See `moveHighlight`. */
@@ -55,6 +58,11 @@ export function SettingsSearch(props: SettingsSearchProps): ReactNode {
   // The shell decides which entries exist at all — a row this build never
   // draws must not be offered. The same context the panels gate their rows on.
   const availability = useSettingsAvailabilityContext();
+  // Only the layout launch branch needs it, and only so the door can open the
+  // sample workspace as a real tab; every other result still goes through
+  // `navigateToSettingsSection`, which is surface-agnostic because this box
+  // renders inside the settings modal as well as in the tab.
+  const navigate = useNavigate();
 
   const results = useMemo(
     () => searchSettings(query, availability),
@@ -67,8 +75,25 @@ export function SettingsSearch(props: SettingsSearchProps): ReactNode {
   const activeIndex =
     results.length === 0 ? -1 : Math.min(highlighted, results.length - 1);
 
-  const select = (result: SettingsSearchResult): void => {
+  const select = (
+    result: SettingsSearchResult,
+    entryMethod: LayoutEditorEntryMethod,
+  ): void => {
     const { entry } = result;
+    // A layout region is not a row on a page: it is a piece of the app's own
+    // chrome, so the result opens the editor on it rather than scrolling a
+    // form (L-07, 5.3). The door owns what that means on a narrow window -
+    // there it lands on `Settings > Layout`, which is where an ordinary result
+    // would have gone anyway.
+    if (entry.launch !== null) {
+      openLayoutEditor({
+        source: "direct_ui",
+        entry: entryMethod,
+        target: entry.launch,
+        navigate,
+      });
+      return;
+    }
     Analytics.getInstance().track(AnalyticsEvent.SettingsOpened, {
       source: "direct_ui",
       section: entry.section,
@@ -79,9 +104,9 @@ export function SettingsSearch(props: SettingsSearchProps): ReactNode {
     // (`anchor: null` scrolls the pane to its top): when the section is
     // already on screen, the navigation below moves nothing.
     requestReveal(entry.section, entry.anchor);
-    // The surface-agnostic navigator, not a router hook: this component is
-    // rendered by the sidebar in BOTH surfaces, and the modal one deliberately
-    // uses no router hooks at all. `navigateToSettingsSection` swaps the
+    // The surface-agnostic navigator, not the router: this component is
+    // rendered by the sidebar in BOTH surfaces, and the modal one has no route
+    // of its own to move. `navigateToSettingsSection` swaps the
     // section in place under the overlay and focuses the settings tab at that
     // section otherwise — the same path the leader-digit shortcuts take.
     navigateToSettingsSection(entry.section);
@@ -149,7 +174,7 @@ export function SettingsSearch(props: SettingsSearchProps): ReactNode {
               // its own statement that there is nothing to open.
               if (activeIndex < 0) return;
               event.preventDefault();
-              select(results[activeIndex]);
+              select(results[activeIndex], "keyboard");
               return;
             }
             if (event.key === "Escape" && active) {
@@ -225,7 +250,10 @@ function SettingsSearchResults(props: {
   readonly results: ReadonlyArray<SettingsSearchResult>;
   readonly activeIndex: number;
   readonly onHighlight: (index: number) => void;
-  readonly onSelect: (result: SettingsSearchResult) => void;
+  readonly onSelect: (
+    result: SettingsSearchResult,
+    entryMethod: LayoutEditorEntryMethod,
+  ) => void;
 }): ReactNode {
   if (props.results.length === 0) {
     return (
@@ -270,7 +298,10 @@ function SettingsSearchResultRow(props: {
   readonly index: number;
   readonly active: boolean;
   readonly onHighlight: (index: number) => void;
-  readonly onSelect: (result: SettingsSearchResult) => void;
+  readonly onSelect: (
+    result: SettingsSearchResult,
+    entryMethod: LayoutEditorEntryMethod,
+  ) => void;
 }): ReactNode {
   const { result, index, active } = props;
   return (
@@ -286,7 +317,7 @@ function SettingsSearchResultRow(props: {
       tabIndex={-1}
       onMouseDown={(event) => event.preventDefault()}
       onMouseEnter={() => props.onHighlight(index)}
-      onClick={() => props.onSelect(result)}
+      onClick={() => props.onSelect(result, "pointer")}
       className={cn(
         "flex w-full min-w-0 flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors",
         active
