@@ -213,6 +213,7 @@ let epicHandle: OpenedStoreForTest;
 function startEditorSession(): void {
   useLayoutEditorStore.getState().beginSession({
     scene: "in-place",
+    entry: "pointer",
     preferredInstanceId: null,
     startedAt: 0,
   });

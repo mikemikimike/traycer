@@ -1,9 +1,9 @@
 import {
   MAX_SPRING_STEP_SECONDS,
-  prefersReducedMotion,
   RING_SPRING,
   Spring,
 } from "@/components/layout-editor/canvas/spring";
+import { prefersReducedMotion } from "@/lib/layout/editor-motion";
 
 /**
  * The one selection ring, which travels between regions (L-29, 4.6).

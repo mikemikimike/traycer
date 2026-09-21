@@ -143,6 +143,7 @@ function openSession(): void {
   act(() => {
     useLayoutEditorStore.getState().beginSession({
       scene: "in-place",
+      entry: "pointer",
       preferredInstanceId: "tile-a",
       startedAt: 0,
     });

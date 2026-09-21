@@ -41,6 +41,7 @@ function seed(activeItemId: string): void {
 function beginSampleSession() {
   useLayoutEditorStore.getState().beginSession({
     scene: "sample",
+    entry: "pointer",
     preferredInstanceId: null,
     startedAt: 0,
   });
@@ -159,6 +160,7 @@ describe("S3 - a REAL exit still cleans up", () => {
     act(() => {
       useLayoutEditorStore.getState().beginSession({
         scene: "in-place",
+        entry: "pointer",
         preferredInstanceId: null,
         startedAt: 0,
       });

@@ -5,6 +5,7 @@ import {
 } from "@/lib/layout/editor-session";
 import { LAYOUT_EDITOR_LEASE_KEY } from "@/lib/layout/editor-lease";
 import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
+import { registerTileRect } from "@/lib/browser-view/tiles/tile-rect-registry";
 import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -31,6 +32,7 @@ vi.mock("@/lib/settings-navigation", async (importOriginal) => ({
 }));
 
 const navigate = vi.fn();
+let deregisterTile: (() => void) | null = null;
 const HISTORY_REF: TabRef = { kind: "history", id: "history" };
 const EPIC_REF: TabRef = { kind: "epic", id: "tab-a" };
 
@@ -45,7 +47,65 @@ function setViewportWidth(width: number): void {
 function open(target: RegionId | null): boolean {
   // The one door takes a `navigate` because the sample-workspace fallback is a
   // real tab; every other path ignores it.
-  return openLayoutEditor({ source: "direct_ui", target, navigate });
+  return openLayoutEditor({
+    source: "direct_ui",
+    entry: "pointer",
+    target,
+    navigate,
+  });
+}
+
+/** A tile registration that makes `aNativeTileIsPresented()` true (C-18). */
+function presentNativeTile(): void {
+  const surface = document.createElement("div");
+  surface.getBoundingClientRect = () => ({
+    left: 0,
+    top: 0,
+    right: 600,
+    bottom: 400,
+    width: 600,
+    height: 400,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+  deregisterTile = registerTileRect(
+    {
+      viewTabId: "view-1",
+      paneId: "pane-1",
+      tileInstanceId: "tile-1",
+      pageSessionId: "page-1",
+    },
+    surface,
+  );
+}
+
+/**
+ * The inspector as the fallback exit finds it: on screen, with an exit
+ * animation still playing. jsdom runs no animations at all, so a suite that
+ * does not stand one up can only ever see the immediate teardown.
+ */
+function mountAnimatedInspector(): { readonly finishSlideOut: () => void } {
+  const inspector = document.createElement("div");
+  inspector.setAttribute("data-layout-inspector", "");
+  document.body.append(inspector);
+  let settle: () => void = () => undefined;
+  const finished = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  Object.defineProperty(inspector, "getAnimations", {
+    configurable: true,
+    writable: true,
+    value: () => [{ finished }],
+  });
+  return { finishSlideOut: settle };
+}
+
+/** A macrotask tick, which drains every pending microtask chain. */
+function tick(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 /** A chat tile live in the active pane of the active Epic tab. */
@@ -100,6 +160,9 @@ beforeEach(() => {
 
 afterEach(() => {
   closeLayoutEditor("done");
+  deregisterTile?.();
+  deregisterTile = null;
+  document.body.replaceChildren();
   useTabsStore.setState({ ...emptyTabStripLayout(), stripOrder: [] });
 });
 
@@ -185,6 +248,21 @@ describe("choosing the scene (L-15, 5.1)", () => {
     );
   });
 
+  it("takes the sample workspace when a native browser tile is on screen (C-18)", () => {
+    // The chat is there and would be the canvas on its own. A `<webview>`
+    // guest paints outside the page, so it neither dims with the rest of the
+    // app nor travels with a shell snapshot, and the editor would be decorating
+    // a chat with an undimmed hole in it.
+    seedOpenChat("tile-7");
+    presentNativeTile();
+
+    expect(open(null)).toBe(true);
+
+    const session = useLayoutEditorStore.getState().session;
+    expect(session?.scene).toBe("sample");
+    expect(session?.preferredInstanceId).toBeNull();
+  });
+
   it("preselects a deep-link target (5.3)", () => {
     seedOpenChat("tile-7");
 
@@ -258,6 +336,84 @@ describe("leaving (5.3)", () => {
   it("is a no-op with no session open", () => {
     closeLayoutEditor("done");
     expect(useLayoutEditorStore.getState().session).toBeNull();
+  });
+});
+
+describe("the entry method (L-30, L-54)", () => {
+  it("records the gesture that reached the door on the session", () => {
+    seedOpenChat("tile-7");
+
+    open(null);
+    expect(useLayoutEditorStore.getState().session?.entry).toBe("pointer");
+
+    closeLayoutEditor("done");
+    openLayoutEditor({
+      source: "command_palette",
+      entry: "keyboard",
+      target: null,
+      navigate,
+    });
+
+    expect(useLayoutEditorStore.getState().session?.entry).toBe("keyboard");
+  });
+});
+
+describe("the exit's own motion (5.2)", () => {
+  it("keeps the session open until the inspector has slid out", async () => {
+    seedOpenChat("tile-7");
+    open("minimap");
+    const slideOut = mountAnimatedInspector();
+
+    closeLayoutEditor("done");
+
+    // Still rendering the section the user was in: an inspector torn down
+    // first would slide out as the empty index, which is the flash ticket 07
+    // deferred rather than shipped.
+    const state = useLayoutEditorStore.getState();
+    expect(state.session).not.toBeNull();
+    expect(state.selected).toBe("minimap");
+    expect(state.leaving).toBe(true);
+
+    slideOut.finishSlideOut();
+    await tick();
+
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+  });
+
+  it("lets the first reason stand when a second arrives mid-exit", async () => {
+    seedOpenChat("tile-7");
+    open(null);
+    useLayoutEditorStore.getState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+    const slideOut = mountAnimatedInspector();
+
+    closeLayoutEditor("done");
+    closeLayoutEditor("discard");
+    slideOut.finishSlideOut();
+    await tick();
+
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+    // `done` keeps what the session wrote; the `discard` that arrived while it
+    // was leaving did not quietly revert the user's changes.
+    expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
+  });
+
+  it("yields to a session opened while it was still sliding out", async () => {
+    seedOpenChat("tile-7");
+    open(null);
+    const slideOut = mountAnimatedInspector();
+    closeLayoutEditor("done");
+
+    expect(open("minimap")).toBe(true);
+    const reopened = useLayoutEditorStore.getState().session;
+    slideOut.finishSlideOut();
+    await tick();
+
+    // The teardown that was in flight belonged to the session before it.
+    expect(useLayoutEditorStore.getState().session).toBe(reopened);
+    expect(useLayoutEditorStore.getState().selected).toBe("minimap");
   });
 });
 

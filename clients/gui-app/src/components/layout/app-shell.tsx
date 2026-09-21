@@ -102,6 +102,12 @@ export function AppShell(props: AppShellProps) {
               are leaving sitting above the screen you are arriving at. */}
             <div
               ref={setAppColumn}
+              // Named for the stylesheet, which is the half of the entry and
+              // exit transition that has to exist before a session does (5.2):
+              // the editor's own `data-layout-editing` is written when a
+              // session opens, and the OLD snapshot of the column is captured
+              // before that.
+              data-layout-column
               className="relative flex h-safe-dvh min-w-0 flex-1 flex-col"
               {...{ [SWIPE_NAV_SCREEN_ATTRIBUTE]: "" }}
             >

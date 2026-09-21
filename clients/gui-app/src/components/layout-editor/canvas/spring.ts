@@ -70,15 +70,3 @@ export class Spring {
     );
   }
 }
-
-/**
- * Both reduced-motion gates, which the editor honours together (section 6):
- * the OS media query, and the app's own "Panel animations" switch, which
- * `theme-applier.ts` mirrors onto `<html data-reduce-panel-motion>`.
- */
-export function prefersReducedMotion(): boolean {
-  return (
-    document.documentElement.hasAttribute("data-reduce-panel-motion") ||
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}

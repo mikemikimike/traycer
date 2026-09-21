@@ -32,6 +32,7 @@ function instancesOf(
 function session(preferredInstanceId: string | null): void {
   useLayoutEditorStore.getState().beginSession({
     scene: "in-place",
+    entry: "pointer",
     preferredInstanceId,
     startedAt: 0,
   });

@@ -35,6 +35,7 @@ function mountColumn(): HTMLDivElement {
 function openSession(): void {
   useLayoutEditorStore.getState().beginSession({
     scene: "in-place",
+    entry: "pointer",
     preferredInstanceId: null,
     startedAt: 0,
   });

@@ -36,6 +36,16 @@ import {
 /** Whether the editor is decorating the user's own chat or the sample workspace (L-15). */
 export type LayoutEditorScene = "in-place" | "sample";
 
+/**
+ * The gesture that reached the door (L-30, L-54).
+ *
+ * A session fact rather than a property of the opening gesture, because both
+ * readers are at the other end of the session: the exit motion, which falls
+ * back for a session that was entered from the keyboard exactly as the entry
+ * did, and `layout_editor_session.entry` at exit.
+ */
+export type LayoutEditorEntryMethod = "pointer" | "keyboard";
+
 /** Where the inspector sits (L-38). `float` is the one mode allowed to overlap. */
 export type LayoutDockMode = "right" | "left" | "float";
 
@@ -51,6 +61,7 @@ export interface LayoutDockPosition {
 
 export interface LayoutEditorSession {
   readonly scene: LayoutEditorScene;
+  readonly entry: LayoutEditorEntryMethod;
   /**
    * The chat tile whose instance of a region wins when several are on screen
    * (L-23): it carries the anchor and the travelling ring, the others get a
@@ -86,6 +97,16 @@ export type LayoutEditorLock = "none" | "other-window";
 
 export interface LayoutEditorState {
   readonly session: LayoutEditorSession | null;
+  /**
+   * Whether an exit is already in flight (5.2). The fallback exit plays the
+   * inspector's slide-out BEFORE the teardown clears what it renders, so there
+   * is a window in which the session is still open and already leaving; a
+   * second reason to leave cannot change where the first one is going.
+   *
+   * Session state rather than a module flag in `editor-session.ts` so it dies
+   * with the session that raised it, the way everything else in this bag does.
+   */
+  readonly leaving: boolean;
   readonly instances: ReadonlyMap<RegionInstanceKey, RegionInstance>;
   readonly selected: RegionId | null;
   readonly level: InspectorLevel | null;
@@ -157,6 +178,7 @@ export interface LayoutEditorState {
 
 const SESSION_DEFAULTS = {
   session: null,
+  leaving: false,
   instances: new Map<RegionInstanceKey, RegionInstance>(),
   selected: null,
   level: null,

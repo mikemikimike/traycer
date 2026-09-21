@@ -16,6 +16,10 @@
   --layout-editor-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --layout-editor-dim-duration: 200ms;
   --layout-editor-ring-duration: 160ms;
+  /* Where the inspector comes from and goes back to. Declared on the root
+     rather than on the panel because the view transition's pseudo-elements
+     inherit from here and a side dock is the only thing that changes it. */
+  --layout-inspector-away: 100%;
   /* Above the app column, below a toast, which still has to reach the user. */
   --layout-editor-ring-z: 40;
   --layout-editor-chip-z: 41;
@@ -61,8 +65,18 @@
 }
 
 [data-layout-inspector][data-dock-mode="left"] {
+  --layout-inspector-away: -100%;
+
   order: -1;
   border-right: 1px solid var(--border);
+}
+
+/* The exit, faster than the entry (section 6). It plays while the session is
+   still open: the inspector renders session state, so `editor-session.ts`
+   holds the teardown until this animation reports finished, and an exit under
+   either reduced-motion gate has no animation to report and lands at once. */
+[data-layout-inspector][data-exiting="1"] {
+  animation: layout-inspector-out 140ms var(--layout-editor-ease) both;
 }
 
 /* The one mode allowed to overlap the canvas, because the user chose it and
@@ -102,7 +116,7 @@
 
 @keyframes layout-inspector-in {
   from {
-    transform: translateX(100%);
+    transform: translateX(var(--layout-inspector-away));
   }
 
   to {
@@ -110,24 +124,25 @@
   }
 }
 
-@keyframes layout-inspector-in-left {
+@keyframes layout-inspector-out {
   from {
-    transform: translateX(-100%);
+    transform: translateX(0);
   }
 
   to {
-    transform: translateX(0);
+    transform: translateX(var(--layout-inspector-away));
   }
-}
-
-[data-layout-inspector][data-dock-mode="left"] {
-  animation-name: layout-inspector-in-left;
 }
 
 /* A floating panel carries its position in the same `transform` the slide
-   would animate, so it arrives by fading rather than by moving. */
+   would animate, so it arrives and leaves by fading rather than by moving. */
 [data-layout-inspector][data-dock-mode="float"] {
   animation-name: layout-inspector-appear;
+}
+
+[data-layout-inspector][data-dock-mode="float"][data-exiting="1"] {
+  animation-name: layout-inspector-appear;
+  animation-direction: reverse;
 }
 
 @keyframes layout-inspector-appear {
@@ -138,6 +153,77 @@
   to {
     opacity: 1;
   }
+}
+
+/* ---------------------------------------------------------------
+   Entry and exit: the View Transition (L-30, 5.2, section 6)
+
+   Two named groups and no more: the app column, which glides narrower or
+   wider, and the inspector, which slides in over 220ms and back out over
+   140ms. Everything else - the transcript included - travels inside the
+   document's own `root` snapshot, so a streaming turn is captured ONCE, as
+   the static old bitmap, and cannot ghost against a live copy of itself.
+
+   The names are applied only while `editor-motion.ts` holds
+   `:root[data-layout-transition]`, and that attribute also carries the dock
+   side, because a custom property set on `:root` is what reaches the
+   view-transition pseudo tree. Naming a group permanently would enrol the app
+   column in every later transition, including the ones L-30 guards off.
+
+   The reduced-motion gate is here as well as in JS (C-14): a preference that
+   turns on between the guard and the capture still has no groups to animate,
+   and the transition degrades to the plain cross-fade the browser does for
+   the page as a whole.
+   --------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-layout-transition]:not([data-reduce-panel-motion])
+    [data-layout-column] {
+    view-transition-name: layout-shell;
+  }
+
+  :root[data-layout-transition]:not([data-reduce-panel-motion])
+    [data-layout-inspector] {
+    view-transition-name: layout-inspector;
+  }
+}
+
+:root[data-layout-transition="left"] {
+  --layout-inspector-away: -100%;
+}
+
+/* The panel's own slide would otherwise play INSIDE the snapshot that is
+   already carrying it. */
+:root[data-layout-transition] [data-layout-inspector] {
+  animation: none;
+}
+
+::view-transition-group(layout-shell) {
+  animation-duration: 220ms;
+  animation-timing-function: var(--layout-editor-ease);
+}
+
+/* The prototype fills the group with `height: 100%` alone, which squashes a
+   full-width bitmap into a 320px-narrower box and visibly compresses the app's
+   own text - the one thing P2 forbids. `cover` with equal heights scales by
+   1 and crops instead, so every glyph keeps its size and the right edge slides
+   under the arriving inspector (C-14). */
+::view-transition-old(layout-shell),
+::view-transition-new(layout-shell) {
+  height: 100%;
+  object-fit: cover;
+  object-position: left top;
+  animation-timing-function: var(--layout-editor-ease);
+}
+
+/* One side of the pair exists at a time - there is no inspector before the
+   session and none after it - so these two never animate against each other. */
+::view-transition-new(layout-inspector) {
+  animation: layout-inspector-in 220ms var(--layout-editor-ease) both;
+}
+
+::view-transition-old(layout-inspector) {
+  animation: layout-inspector-out 140ms var(--layout-editor-ease) both;
 }
 
 /* ---------------------------------------------------------------
@@ -345,7 +431,11 @@
    --------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
-  [data-layout-inspector] {
+  /* Both spellings, because the exit rule carries the higher specificity and
+     would otherwise outlive the preference. With no animation to wait for, the
+     session ends in the same frame. */
+  [data-layout-inspector],
+  [data-layout-inspector][data-exiting="1"] {
     animation: none;
   }
 
@@ -369,7 +459,8 @@
   }
 }
 
-:root[data-reduce-panel-motion] [data-layout-inspector] {
+:root[data-reduce-panel-motion] [data-layout-inspector],
+:root[data-reduce-panel-motion] [data-layout-inspector][data-exiting="1"] {
   animation: none;
 }
 
