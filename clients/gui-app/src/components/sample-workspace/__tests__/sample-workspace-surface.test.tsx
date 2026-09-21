@@ -182,6 +182,7 @@ describe("SampleWorkspaceBody - sample labelling", () => {
       useLayoutEditorStore.getState().beginSession({
         scene: "sample",
         entry: "pointer",
+        source: "direct_ui",
         preferredInstanceId: null,
         startedAt: 0,
       });
@@ -192,6 +193,7 @@ describe("SampleWorkspaceBody - sample labelling", () => {
       useLayoutEditorStore.getState().beginSession({
         scene: "in-place",
         entry: "pointer",
+        source: "direct_ui",
         preferredInstanceId: null,
         startedAt: 0,
       });

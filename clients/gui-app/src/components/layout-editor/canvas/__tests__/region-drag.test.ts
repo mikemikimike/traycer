@@ -116,6 +116,7 @@ beforeEach(() => {
   useLayoutEditorStore.getState().beginSession({
     scene: "in-place",
     entry: "pointer",
+    source: "direct_ui",
     preferredInstanceId: null,
     startedAt: 0,
   });

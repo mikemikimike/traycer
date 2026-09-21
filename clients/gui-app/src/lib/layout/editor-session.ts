@@ -1,6 +1,10 @@
 import type { UseNavigateResult } from "@tanstack/react-router";
 import { toast } from "sonner";
-import type { AnalyticsSource } from "@/lib/analytics";
+import {
+  Analytics,
+  AnalyticsEvent,
+  type AnalyticsSource,
+} from "@/lib/analytics";
 import { aNativeTileIsPresented } from "@/lib/browser-view/tiles/tile-rect-registry";
 import { runLayoutEditorMotion } from "@/lib/layout/editor-motion";
 import {
@@ -12,7 +16,12 @@ import {
   releaseLayoutEditorLease,
   startLayoutEditorHeartbeat,
 } from "@/lib/layout/editor-lease";
+import {
+  layoutDurationBucket,
+  layoutEditorSessionChangeSummary,
+} from "@/lib/layout/layout-diff";
 import type { RegionId } from "@/lib/layout/region-id";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import { navigateToSettingsSection } from "@/lib/settings-navigation";
 import { activateTabIntent } from "@/lib/tab-navigation";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
@@ -26,6 +35,7 @@ import {
   type LayoutEditorScene,
   type LayoutEditorSession,
 } from "@/stores/layout/layout-editor-store";
+import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 import { createLayoutItem, flattenLayoutRefs } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
@@ -130,6 +140,7 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
       useLayoutEditorStore.getState().beginSession({
         scene,
         entry: input.entry,
+        source: input.source,
         preferredInstanceId,
         startedAt: Date.now(),
       });
@@ -217,6 +228,18 @@ function endSession(
   stopWatchingSession();
   releaseLayoutEditorLease();
   const editor = useLayoutEditorStore.getState();
+  // Read before `discard()` puts the entry snapshot back: what the session
+  // built up before it was thrown away is the signal, not the zero a
+  // post-discard read would always report.
+  trackLayoutEditorSession({
+    session,
+    discarded: reason === "discard",
+    entrySnapshot: editor.entrySnapshot ?? getLayoutSnapshot(),
+    exitSnapshot: getLayoutSnapshot(),
+    undoCount: editor.undoCount,
+    firstChangeAt: editor.firstChangeAt,
+    now: Date.now(),
+  });
   if (reason === "discard") editor.discard();
   editor.endSession();
   // A sample tab that is already gone, or that the user navigated away from,
@@ -323,4 +346,46 @@ function watchSession(scene: LayoutEditorScene): void {
 function stopWatchingSession(): void {
   stopSessionWatch?.();
   stopSessionWatch = null;
+}
+
+/**
+ * `layout_editor_session`, fired once per session at the exit (L-46, L-54,
+ * tech-plan section 7). Assembled here, the one place a session's whole
+ * record - the gesture that opened it, its entry and exit snapshots, its
+ * undo count - is still in hand; `session.entry`/`.source` are carried on the
+ * session itself for exactly this call.
+ */
+function trackLayoutEditorSession(input: {
+  readonly session: LayoutEditorSession;
+  readonly discarded: boolean;
+  readonly entrySnapshot: LayoutSnapshot;
+  readonly exitSnapshot: LayoutSnapshot;
+  readonly undoCount: number;
+  readonly firstChangeAt: number | null;
+  readonly now: number;
+}): void {
+  const {
+    session,
+    discarded,
+    entrySnapshot,
+    exitSnapshot,
+    undoCount,
+    firstChangeAt,
+    now,
+  } = input;
+  const summary = layoutEditorSessionChangeSummary(entrySnapshot, exitSnapshot);
+  Analytics.getInstance().track(AnalyticsEvent.LayoutEditorSession, {
+    source: session.source,
+    scene: session.scene === "sample" ? "sample_workspace" : "in_place",
+    entry: session.entry,
+    session_duration_bucket: layoutDurationBucket(now - session.startedAt),
+    first_change_bucket:
+      firstChangeAt === null
+        ? null
+        : layoutDurationBucket(firstChangeAt - session.startedAt),
+    changed_count: summary.changedCount,
+    undo_count: undoCount,
+    regions_touched_count: summary.regionsTouchedCount,
+    discarded,
+  });
 }

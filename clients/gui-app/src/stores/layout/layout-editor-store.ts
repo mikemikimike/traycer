@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { AnalyticsSource } from "@/lib/analytics";
 import {
   EMPTY_LAYOUT_HISTORY,
   rebaseLayoutSnapshot,
@@ -62,6 +63,13 @@ export interface LayoutDockPosition {
 export interface LayoutEditorSession {
   readonly scene: LayoutEditorScene;
   readonly entry: LayoutEditorEntryMethod;
+  /**
+   * The gesture that reached the door (`OpenLayoutEditorInput.source`),
+   * carried on `layout_editor_session` at exit. Stored here rather than read
+   * from the door's own input at close time, because `closeLayoutEditor`
+   * only ever sees the session, never the call that opened it.
+   */
+  readonly source: AnalyticsSource;
   /**
    * The chat tile whose instance of a region wins when several are on screen
    * (L-23): it carries the anchor and the travelling ring, the others get a
@@ -129,6 +137,20 @@ export interface LayoutEditorState {
   readonly dockMode: LayoutDockMode;
   readonly floatPosition: LayoutDockPosition | null;
   readonly history: LayoutHistory;
+  /**
+   * How many times `undo` has actually travelled back this session
+   * (`layout_editor_session.undo_count`). Not derivable from the final
+   * history stacks alone: a redo, or a fresh gesture that drops the redo
+   * branch, both leave no trace of how many undos preceded them.
+   */
+  readonly undoCount: number;
+  /**
+   * When the first gesture landed, or `null` while nothing has
+   * (`layout_editor_session.first_change_bucket`). Set once and never moved,
+   * so a later undo back to the entry state does not erase that a change was
+   * made.
+   */
+  readonly firstChangeAt: number | null;
   /** The state Discard restores, rebased on every external write (L-18). */
   readonly entrySnapshot: LayoutSnapshot | null;
   /**
@@ -184,6 +206,8 @@ const SESSION_DEFAULTS = {
   filter: "",
   previewPreset: null,
   history: EMPTY_LAYOUT_HISTORY,
+  undoCount: 0,
+  firstChangeAt: null,
   entrySnapshot: null,
   dirty: false,
 } as const;
@@ -280,7 +304,10 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         // Undo that visibly does nothing is worse than no Undo.
         const after = getLayoutSnapshot();
         if (sameSnapshot(before, after)) return;
-        set({ history: recordLayoutChange(get().history, before) });
+        set({
+          history: recordLayoutChange(get().history, before),
+          firstChangeAt: get().firstChangeAt ?? Date.now(),
+        });
       },
       undo: () => {
         const travel = undoLayout(get().history, getLayoutSnapshot());
@@ -288,7 +315,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         applyAsEditorWrite(() => {
           useLayoutStore.getState().replaceAll(travel.snapshot);
         });
-        set({ history: travel.history });
+        set({ history: travel.history, undoCount: get().undoCount + 1 });
       },
       redo: () => {
         const travel = redoLayout(get().history, getLayoutSnapshot());

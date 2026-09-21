@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import {
   abandonLayoutEditorSession,
   closeLayoutEditor,
@@ -222,6 +223,10 @@ afterEach(() => {
   document.documentElement.removeAttribute("data-layout-transition");
   document.body.replaceChildren();
   useTabsStore.setState({ ...emptyTabStripLayout(), stripOrder: [] });
+  // `Analytics.getInstance()` is a module-level singleton, so a
+  // `vi.spyOn(..., "track")` left standing would keep accumulating calls
+  // across every later test in this file.
+  vi.restoreAllMocks();
 });
 
 describe("the width gate (L-02, 5.1)", () => {
@@ -527,6 +532,146 @@ describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
     expect(sampleTabPresent()).toBe(true);
     // And the new session holds the key the old one gave back.
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).not.toBeNull();
+  });
+});
+
+describe("layout_editor_session analytics (L-46, L-54)", () => {
+  it("fires once at exit with the session's own source, scene and entry", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    seedOpenChat("tile-7");
+    open(null);
+    expect(trackSpy).not.toHaveBeenCalled();
+
+    close("done");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({
+        source: "direct_ui",
+        scene: "in_place",
+        entry: "pointer",
+        discarded: false,
+      }),
+    );
+  });
+
+  it("reports the sample scene under its analytics spelling", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    open(null);
+
+    close("done");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({ scene: "sample_workspace" }),
+    );
+  });
+
+  it("reports discarded: true only when the exit reason is discard", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    seedOpenChat("tile-7");
+    open(null);
+
+    close("discard");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({ discarded: true }),
+    );
+  });
+
+  it("reports first_change_bucket as null for a session with no change", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    seedOpenChat("tile-7");
+    open(null);
+
+    close("done");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({
+        first_change_bucket: null,
+        changed_count: 0,
+        undo_count: 0,
+        regions_touched_count: 0,
+      }),
+    );
+  });
+
+  it("counts the value change made this session and the region it touched", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    seedOpenChat("tile-7");
+    open(null);
+    useLayoutEditorStore.getState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+
+    close("done");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({
+        changed_count: 1,
+        regions_touched_count: 1,
+        undo_count: 0,
+      }),
+    );
+  });
+
+  it("counts an undo that landed", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    seedOpenChat("tile-7");
+    open(null);
+    useLayoutEditorStore.getState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+    useLayoutEditorStore.getState().undo();
+
+    close("done");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({ undo_count: 1, changed_count: 0 }),
+    );
+  });
+
+  it("reports the entry method passed to the door", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+
+    openLayoutEditor({
+      source: "command_palette",
+      entry: "keyboard",
+      target: null,
+      navigate,
+    });
+    drainTransitions();
+    close("done");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({ source: "command_palette", entry: "keyboard" }),
+    );
+  });
+
+  it("counts what was built before a Discard, not the zero left after it", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    seedOpenChat("tile-7");
+    open(null);
+    useLayoutEditorStore.getState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+
+    close("discard");
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutEditorSession,
+      expect.objectContaining({
+        discarded: true,
+        changed_count: 1,
+        regions_touched_count: 1,
+      }),
+    );
+    expect(getLayoutSnapshot().overrides.mic).toBeUndefined();
   });
 });
 

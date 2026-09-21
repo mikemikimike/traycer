@@ -1,5 +1,4 @@
 import { useEffect, type ReactNode } from "react";
-import { trackSettingChanged } from "@/lib/analytics";
 import { ACTION_META } from "@/lib/keybindings/actions";
 import { registerDynamicActionHandler } from "@/lib/keybindings/dispatch";
 import { isMobileApp } from "@/lib/mobile-app";
@@ -29,7 +28,6 @@ export function StatusBarKeybindingBridge(): ReactNode {
       // Read at invocation, not at registration: the handler is registered
       // once and the arrangement changes underneath it.
       const arrangement = useLayoutStore.getState().arrangement;
-      trackSettingChanged("layout", "layout.statusBar.placement");
       setArrangement({
         ...arrangement,
         usageHost:

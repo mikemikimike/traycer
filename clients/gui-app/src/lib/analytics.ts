@@ -1,4 +1,10 @@
 import posthog, { type CaptureResult, type PostHogConfig } from "posthog-js";
+import {
+  LAYOUT_SETTING_PROPERTY_KEYS,
+  type LayoutDurationBucket,
+  type LayoutSnapshotProperties,
+} from "@/lib/layout/layout-diff";
+import type { RegionId } from "@/lib/layout/region-id";
 import { isMobileApp } from "@/lib/mobile-app";
 
 export type AnalyticsSource =
@@ -322,53 +328,6 @@ export type AnalyticsSetting =
   | "defaultServiceTier"
   | "diffViewerPreferences"
   | "homeTabEnabled"
-  // The Layout page's own controls. Dotted rather than camel-cased because
-  // they name a path into one persisted store's slice, not a flat
-  // `settings-store` key: the surface is the middle segment, so a second
-  // surface's rows read as siblings instead of colliding on a verb.
-  // One id per preset rather than one `layout.preset` carrying the choice as a
-  // property: `setting_changed` has a fixed payload (`source`, `section`,
-  // `setting`), and every id here already names what changed rather than what
-  // it became. Reset reports under `default`, which is what it applies.
-  | "layout.preset.compact"
-  | "layout.preset.default"
-  | "layout.preset.detailed"
-  | "layout.sidebar.panelOrder"
-  | "layout.sidebar.panelVisibility"
-  | "layout.sidebar.resetOrder"
-  | "layout.sidebar.resetVisibility"
-  | "layout.statusBar.placement"
-  | "layout.statusBar.mobileFooter"
-  | "layout.statusBar.rateLimits.enabled"
-  | "layout.statusBar.rateLimits.percentMode"
-  | "layout.statusBar.rateLimits.provider"
-  | "layout.statusBar.rateLimits.providerAutomatic"
-  | "layout.statusBar.rateLimits.providerLimits"
-  | "layout.statusBar.rateLimits.showBar"
-  | "layout.statusBar.rateLimits.showModeWord"
-  | "layout.statusBar.rateLimits.showTimer"
-  | "layout.statusBar.shownProfiles"
-  | "layout.statusBar.resources.enabled"
-  | "layout.statusBar.resources.metric"
-  | "layout.statusBar.resources.scope"
-  | "layout.composer.filesChanged"
-  | "layout.composer.activeAgents"
-  | "layout.composer.background"
-  | "layout.composer.attachImage"
-  | "layout.composer.access"
-  | "layout.composer.mic"
-  | "layout.composer.compactButton"
-  | "layout.composer.reasoningIndicator"
-  | "layout.composer.reasoningFooterControl"
-  // Element ORDER, one id per reorderable surface. Separate from the
-  // visibility ids above because a reorder and a hide answer different
-  // questions about the same element, and a single `layout.composer.mic`
-  // carrying both would make neither series readable.
-  | "layout.composer.toolbarOrder"
-  | "layout.composer.dockOrder"
-  | "layout.statusBar.segmentOrder"
-  | "layout.statusBar.resourceSide"
-  | "layout.sidebar.resourceMetrics"
   | "linkOpen"
   | "browserSearchEngine"
   | "pinContextUsageBreakdown"
@@ -564,8 +523,11 @@ export enum AnalyticsEvent {
   VoiceTranscriptionFailed = "voice_transcription_failed",
   SettingsOpened = "settings_opened",
   SettingChanged = "setting_changed",
-  LayoutEditorOpened = "layout_editor_opened",
-  LayoutEditorSearchUsed = "layout_editor_search_used",
+  // Layout is deliberately the one Settings section that fires no
+  // per-control `setting_changed` (C-47): these three replace it (L-46, L-54).
+  LayoutSnapshot = "layout_snapshot",
+  LayoutEditorSession = "layout_editor_session",
+  LayoutQuickVerb = "layout_quick_verb",
   UpdateDownloadStarted = "update_download_started",
   UpdateDownloadSucceeded = "update_download_succeeded",
   UpdateRestartRequested = "update_restart_requested",
@@ -1042,15 +1004,46 @@ export interface AnalyticsEventProperties {
     readonly setting: AnalyticsSetting;
   };
   /**
-   * A Customize session started. `source` is the entry point that started it;
-   * `scene` is what is being edited, which is a separate question - the same
-   * palette entry reaches the real app or the sample workspace depending on
-   * whether a chat exists to point at.
+   * At most once per 24h per device, on app launch, for every user including
+   * an untouched layout (the denominator) - L-46, L-54, L-55. One statically
+   * declared `layout_<region>_<key>` property per `LayoutValues` setting,
+   * ALWAYS present (`"default"` at the shipped Default) so `STRICT_EVENTS`
+   * never drops the event for a missing declared key, plus the base preset,
+   * how many settings differ from it, three arrangement enums and five
+   * reorder booleans. Built by `layoutSnapshotProperties` so the declared
+   * property set and the registry it is built from cannot drift.
    */
-  readonly [AnalyticsEvent.LayoutEditorOpened]: SourceProperties & {
+  readonly [AnalyticsEvent.LayoutSnapshot]: LayoutSnapshotProperties;
+  /**
+   * Once on Customize layout exit (L-46, L-54). `source` is the gesture that
+   * opened the session; `scene` is what it edited; `entry` is the one extra
+   * property L-54 adds, because it measures L-30's own gate. The rest is the
+   * session's change summary: `changed_count` is the value delta against the
+   * base preset at exit (what "Reset to <preset>" would revert, L-57),
+   * `regions_touched_count` is the distinct regions that moved between entry
+   * and exit, and `discarded` is whether the session ended in Discard rather
+   * than a separate exit-reason property.
+   */
+  readonly [AnalyticsEvent.LayoutEditorSession]: SourceProperties & {
     readonly scene: AnalyticsLayoutEditorScene;
+    readonly entry: "pointer" | "keyboard";
+    readonly session_duration_bucket: LayoutDurationBucket;
+    readonly first_change_bucket: LayoutDurationBucket | null;
+    readonly changed_count: number;
+    readonly undo_count: number;
+    readonly regions_touched_count: number;
+    readonly discarded: boolean;
   };
-  readonly [AnalyticsEvent.LayoutEditorSearchUsed]: null;
+  /**
+   * One right-click quick verb (L-19, L-46), sent when its toast resolves -
+   * undone, dismissed or left to expire - rather than as a second event, so a
+   * verb a user takes back costs no extra noise over one that stands.
+   */
+  readonly [AnalyticsEvent.LayoutQuickVerb]: {
+    readonly region: RegionId;
+    readonly verb: "hide" | "show" | "chip" | "full";
+    readonly undone: boolean;
+  };
   readonly [AnalyticsEvent.UpdateDownloadStarted]: SourceProperties;
   readonly [AnalyticsEvent.UpdateDownloadSucceeded]: null;
   readonly [AnalyticsEvent.UpdateRestartRequested]: SourceProperties;
@@ -1241,6 +1234,40 @@ const ANALYTICS_HARNESSES = new Set<string>([
   "traycer",
 ]);
 
+/**
+ * Every `RegionId`, built from a `satisfies Record<RegionId, true>` for the
+ * same reason `ANALYTICS_SETTINGS_SECTIONS` is: this is what validates
+ * `layout_quick_verb`'s `region` property, so a `RegionId` missing here would
+ * drop that verb's event silently, and the `satisfies` makes the omission a
+ * compile error instead.
+ */
+const ANALYTICS_LAYOUT_REGIONS = new Set<string>(
+  Object.keys({
+    homeTab: true,
+    usageLimits: true,
+    resourceMonitor: true,
+    minimap: true,
+    contextUsage: true,
+    runningAgents: true,
+    changedFiles: true,
+    background: true,
+    attachImage: true,
+    access: true,
+    agent: true,
+    model: true,
+    mic: true,
+    railAgents: true,
+    railTerminals: true,
+    railBrowsers: true,
+    railArtifacts: true,
+    railGitDiff: true,
+    railPullRequests: true,
+    railFileTree: true,
+    railSharing: true,
+    railComments: true,
+  } satisfies Record<RegionId, true>),
+);
+
 const ANALYTICS_PROVIDERS = new Set<string>([
   "amp",
   "antigravity",
@@ -1332,41 +1359,6 @@ const ANALYTICS_SETTINGS = new Set<string>(
     defaultServiceTier: true,
     diffViewerPreferences: true,
     homeTabEnabled: true,
-    "layout.preset.compact": true,
-    "layout.preset.default": true,
-    "layout.preset.detailed": true,
-    "layout.sidebar.panelOrder": true,
-    "layout.sidebar.panelVisibility": true,
-    "layout.sidebar.resetOrder": true,
-    "layout.sidebar.resetVisibility": true,
-    "layout.statusBar.placement": true,
-    "layout.statusBar.mobileFooter": true,
-    "layout.statusBar.rateLimits.enabled": true,
-    "layout.statusBar.rateLimits.percentMode": true,
-    "layout.statusBar.rateLimits.provider": true,
-    "layout.statusBar.rateLimits.providerAutomatic": true,
-    "layout.statusBar.rateLimits.providerLimits": true,
-    "layout.statusBar.rateLimits.showBar": true,
-    "layout.statusBar.rateLimits.showModeWord": true,
-    "layout.statusBar.rateLimits.showTimer": true,
-    "layout.statusBar.shownProfiles": true,
-    "layout.statusBar.resources.enabled": true,
-    "layout.statusBar.resources.metric": true,
-    "layout.statusBar.resources.scope": true,
-    "layout.composer.filesChanged": true,
-    "layout.composer.activeAgents": true,
-    "layout.composer.background": true,
-    "layout.composer.attachImage": true,
-    "layout.composer.access": true,
-    "layout.composer.mic": true,
-    "layout.composer.compactButton": true,
-    "layout.composer.reasoningIndicator": true,
-    "layout.composer.reasoningFooterControl": true,
-    "layout.composer.toolbarOrder": true,
-    "layout.composer.dockOrder": true,
-    "layout.statusBar.segmentOrder": true,
-    "layout.statusBar.resourceSide": true,
-    "layout.sidebar.resourceMetrics": true,
     linkOpen: true,
     browserSearchEngine: true,
     pinContextUsageBreakdown: true,
@@ -1501,6 +1493,44 @@ const ANALYTICS_RESOURCE_PRESSURE_TIERS = new Set<string>([
   "elevated",
   "high",
   "critical",
+]);
+
+/** {@link LayoutDurationBucket}'s runtime allowlist, shared by
+ * `layout_editor_session`'s `session_duration_bucket` and
+ * `first_change_bucket` - distinct property names, the same scale (C-42). */
+const ANALYTICS_LAYOUT_DURATION_BUCKETS = new Set<string>([
+  "under_10s",
+  "10s_to_1m",
+  "1m_to_5m",
+  "over_5m",
+]);
+
+/**
+ * Every value a `layout_<region>_<key>` property can carry: the "default"
+ * and "changed" sentinels, the boolean spelling, and the union of every enum
+ * value across every `LayoutValues` leaf. Shared by all ~40 property names
+ * rather than one set per key, the same way `ANALYTICS_HARNESSES` backs
+ * `from`/`to`/`harness` - the values are only ever produced by
+ * `layoutSnapshotProperties`, so this validates structure (a stray
+ * identifier), not per-key semantics.
+ */
+const ANALYTICS_LAYOUT_SETTING_VALUES = new Set<string>([
+  "default",
+  "changed",
+  "true",
+  "false",
+  "shown",
+  "hidden",
+  "auto",
+  "full",
+  "chip",
+  "text",
+  "bars",
+  "bars-text",
+  "ring",
+  "ring-only",
+  "used",
+  "remaining",
 ]);
 
 const ANALYTICS_EVENTS = new Set<string>(Object.values(AnalyticsEvent));
@@ -1803,7 +1833,40 @@ const EVENT_PROPERTY_KEYS = new Map<AnalyticsEvent, ReadonlyArray<string>>([
     [AnalyticsEvent.SettingChanged],
     ["source", "section", "setting"],
   ),
-  ...eventKeyEntries([AnalyticsEvent.LayoutEditorOpened], ["source", "scene"]),
+  ...eventKeyEntries(
+    [AnalyticsEvent.LayoutSnapshot],
+    [
+      "base_preset",
+      "changed_from_default_count",
+      "layout_usage_host",
+      "layout_minimap_side",
+      "layout_resource_side",
+      "layout_dock_reordered",
+      "layout_toolbar_left_reordered",
+      "layout_toolbar_right_reordered",
+      "layout_rail_reordered",
+      "layout_usage_providers_reordered",
+      ...LAYOUT_SETTING_PROPERTY_KEYS,
+    ],
+  ),
+  ...eventKeyEntries(
+    [AnalyticsEvent.LayoutEditorSession],
+    [
+      "source",
+      "scene",
+      "entry",
+      "session_duration_bucket",
+      "first_change_bucket",
+      "changed_count",
+      "undo_count",
+      "regions_touched_count",
+      "discarded",
+    ],
+  ),
+  ...eventKeyEntries(
+    [AnalyticsEvent.LayoutQuickVerb],
+    ["region", "verb", "undone"],
+  ),
   ...eventKeyEntries(
     [AnalyticsEvent.ReportIssueBlocked],
     ["report_type", "blocked_action"],
@@ -1857,7 +1920,6 @@ const EVENTS_WITHOUT_PROPERTIES = new Set<AnalyticsEvent>([
   AnalyticsEvent.CommentReopened,
   AnalyticsEvent.CommentDeleted,
   AnalyticsEvent.VoiceDictationCancelled,
-  AnalyticsEvent.LayoutEditorSearchUsed,
   AnalyticsEvent.UpdateDownloadSucceeded,
   AnalyticsEvent.ReportIssuePublicOpenAttempted,
 ]);
@@ -1911,16 +1973,23 @@ const EXACT_PROPERTY_VALUES: {
   ]),
   duration_bucket: new Set(["10_to_30s", "over_30s", "under_10s"]),
   editor: new Set(["cursor", "vscode", "windsurf", "zed"]),
+  entry: new Set(["pointer", "keyboard"]),
   format: new Set(["markdown", "pdf"]),
   from: ANALYTICS_HARNESSES,
   harness: ANALYTICS_HARNESSES,
   host_kind: new Set(["local", "remote"]),
   launch_reason: new Set(["normal", "update_restart"]),
   last_step: ANALYTICS_ONBOARDING_STEPS,
+  base_preset: new Set(["default", "compact", "detailed"]),
+  layout_usage_host: new Set(["status-bar", "header"]),
+  layout_minimap_side: new Set(["left", "right"]),
+  layout_resource_side: new Set(["left", "right"]),
   permission: new Set(["denied", "granted", "unavailable"]),
   pressure_tier: ANALYTICS_RESOURCE_PRESSURE_TIERS,
   provider: ANALYTICS_PROVIDERS,
+  region: ANALYTICS_LAYOUT_REGIONS,
   role: new Set(["editor", "owner", "viewer"]),
+  session_duration_bucket: ANALYTICS_LAYOUT_DURATION_BUCKETS,
   section: ANALYTICS_SETTINGS_SECTIONS,
   session_age_bucket: ANALYTICS_SESSION_AGE_BUCKETS,
   setting: ANALYTICS_SETTINGS,
@@ -1930,7 +1999,15 @@ const EXACT_PROPERTY_VALUES: {
   theme: ANALYTICS_THEMES,
   to: ANALYTICS_HARNESSES,
   unread_bucket: ANALYTICS_COUNT_BUCKETS,
+  verb: new Set(["hide", "show", "chip", "full"]),
   workspace_kind: new Set(["local", "unknown", "worktree"]),
+  // Every `layout_<region>_<key>` property name shares one value set: see
+  // `ANALYTICS_LAYOUT_SETTING_VALUES`.
+  ...Object.fromEntries(
+    LAYOUT_SETTING_PROPERTY_KEYS.map(
+      (key) => [key, ANALYTICS_LAYOUT_SETTING_VALUES] as const,
+    ),
+  ),
 };
 
 function eventValueEntries(
@@ -1975,7 +2052,7 @@ const EVENT_EXACT_PROPERTY_VALUES = new Map<string, ReadonlySet<string>>([
     new Set(["first_run", "replay"]),
   ),
   ...eventValueEntries(
-    [AnalyticsEvent.LayoutEditorOpened],
+    [AnalyticsEvent.LayoutEditorSession],
     "scene",
     new Set(["in_place", "sample_workspace"]),
   ),
@@ -2183,26 +2260,37 @@ const BOOLEAN_PROPERTY_KEYS = new Set<string>([
   "cascade",
   "cleanup_worktrees",
   "customized",
+  "discarded",
   "enabled",
   "has_mention",
   "include_history",
+  "layout_dock_reordered",
+  "layout_toolbar_left_reordered",
+  "layout_toolbar_right_reordered",
+  "layout_rail_reordered",
+  "layout_usage_providers_reordered",
   "restored_tabs",
   "revert_artifacts",
   "settings_changed",
+  "undone",
 ]);
 
 const COUNT_PROPERTY_KEYS = new Set<string>([
   "answer_count",
   "artifact_count",
   "attachment_count",
+  "changed_count",
+  "changed_from_default_count",
   "failed_count",
   "file_count",
   "group_count",
   "open_tabs",
+  "regions_touched_count",
   "requested_count",
   "script_count",
   "session_count",
   "succeeded_count",
+  "undo_count",
   "workspace_count",
 ]);
 
@@ -2261,10 +2349,86 @@ function isAnalyticsMeasure(value: unknown): boolean {
 const EVENT_SCOPED_PROPERTY_KEYS = new Set<string>([
   "blocker",
   "disposition_reason",
+  "first_change_bucket",
   "has_more",
   "result_count_bucket",
   "status",
   "this_task",
+]);
+
+/**
+ * One validator per {@link EVENT_SCOPED_PROPERTY_KEYS} entry, dispatched by
+ * key rather than chained through one big `if` ladder - the ladder's
+ * cyclomatic complexity grew past the lint ceiling the moment
+ * `first_change_bucket` (L-46, L-54) joined `blocker` and friends, and a
+ * table keeps each key's rule (and its own complexity) independent of how
+ * many other keys exist.
+ */
+const EVENT_SCOPED_PROPERTY_VALIDATORS = new Map<
+  string,
+  (event: AnalyticsEvent, value: unknown) => boolean
+>([
+  [
+    "blocker",
+    (event, value) => {
+      if (value === null) {
+        return (
+          event === AnalyticsEvent.WorktreeDeleted ||
+          event === AnalyticsEvent.ReportIssuePrivateSubmit
+        );
+      }
+      return typeof value === "string" && ANALYTICS_BLOCKERS.has(value);
+    },
+  ],
+  [
+    "disposition_reason",
+    (event, value) => {
+      if (value === null) return event === AnalyticsEvent.AgentTabSurfaced;
+      return (
+        typeof value === "string" &&
+        new Set(["mode-off", "manual-pip-active", "pip-epic-hidden"]).has(value)
+      );
+    },
+  ],
+  [
+    "first_change_bucket",
+    // `null` means the session ended with no change made - a legitimate
+    // outcome (completion-vs-regret is exactly what this measures), not a
+    // missing reading.
+    (event, value) => {
+      if (value === null) return event === AnalyticsEvent.LayoutEditorSession;
+      return (
+        typeof value === "string" &&
+        ANALYTICS_LAYOUT_DURATION_BUCKETS.has(value)
+      );
+    },
+  ],
+  [
+    "result_count_bucket",
+    (event, value) => {
+      if (value === null) {
+        return event === AnalyticsEvent.NotificationPageLoaded;
+      }
+      return typeof value === "string" && ANALYTICS_COUNT_BUCKETS.has(value);
+    },
+  ],
+  [
+    "has_more",
+    (event, value) => {
+      if (value === null) {
+        return event === AnalyticsEvent.NotificationPageLoaded;
+      }
+      return typeof value === "boolean";
+    },
+  ],
+  [
+    "this_task",
+    (event, value) => {
+      if (value === null) return event === AnalyticsEvent.DraftsFilterChanged;
+      return typeof value === "boolean";
+    },
+  ],
+  ["status", (_event, value) => isAnalyticsStatus(value)],
 ]);
 
 function isEventScopedPropertyValue(
@@ -2272,36 +2436,8 @@ function isEventScopedPropertyValue(
   key: string,
   value: unknown,
 ): boolean {
-  if (key === "blocker") {
-    if (value === null) {
-      return (
-        event === AnalyticsEvent.WorktreeDeleted ||
-        event === AnalyticsEvent.ReportIssuePrivateSubmit
-      );
-    }
-    return typeof value === "string" && ANALYTICS_BLOCKERS.has(value);
-  }
-  if (key === "disposition_reason") {
-    if (value === null) return event === AnalyticsEvent.AgentTabSurfaced;
-    return (
-      typeof value === "string" &&
-      new Set(["mode-off", "manual-pip-active", "pip-epic-hidden"]).has(value)
-    );
-  }
-  if (key === "result_count_bucket") {
-    if (value === null) return event === AnalyticsEvent.NotificationPageLoaded;
-    return typeof value === "string" && ANALYTICS_COUNT_BUCKETS.has(value);
-  }
-  if (key === "has_more") {
-    if (value === null) return event === AnalyticsEvent.NotificationPageLoaded;
-    return typeof value === "boolean";
-  }
-  if (key === "this_task") {
-    if (value === null) return event === AnalyticsEvent.DraftsFilterChanged;
-    return typeof value === "boolean";
-  }
-  if (key === "status") return isAnalyticsStatus(value);
-  return false;
+  const validator = EVENT_SCOPED_PROPERTY_VALIDATORS.get(key);
+  return validator === undefined ? false : validator(event, value);
 }
 
 function isAnalyticsPropertyValue(
@@ -2413,6 +2549,10 @@ const STRICT_EVENTS = new Set<AnalyticsEvent>([
   AnalyticsEvent.NotificationsMarkedAllRead,
   AnalyticsEvent.NotificationPageLoaded,
   AnalyticsEvent.NotificationNewRevealed,
+  // A stray identifier here must fail loudly rather than be silently
+  // trimmed: the ~40 declared properties are what keeps the denominator
+  // exact (C-49).
+  AnalyticsEvent.LayoutSnapshot,
 ]);
 
 export function sanitizeAnalyticsProperties(

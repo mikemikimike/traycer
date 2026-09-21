@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/context-menu";
 import { LayoutRegionMenuItems } from "@/components/layout-editor/region-quick-verbs";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
-import { trackSettingChanged } from "@/lib/analytics";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutStore } from "@/stores/layout/layout-store";
@@ -85,10 +84,6 @@ export function StatusBarVisibilityMenu(
             key={provider.providerId}
             checked={!hiddenProviders.includes(provider.providerId)}
             onCheckedChange={() => {
-              trackSettingChanged(
-                "layout",
-                "layout.statusBar.rateLimits.provider",
-              );
               // The whole arrangement is read at write time rather than
               // subscribed: this menu needs it only to spread it (G1-14).
               setArrangement({
@@ -105,7 +100,6 @@ export function StatusBarVisibilityMenu(
         <ContextMenuCheckboxItem
           checked={resourcesShown}
           onCheckedChange={(checked) => {
-            trackSettingChanged("layout", "layout.statusBar.resources.enabled");
             setRegionValues("resourceMonitor", {
               shown: checked ? "shown" : "hidden",
             });
@@ -116,7 +110,6 @@ export function StatusBarVisibilityMenu(
         {narrowViewport ? null : (
           <ContextMenuItem
             onSelect={() => {
-              trackSettingChanged("layout", "layout.statusBar.placement");
               setArrangement({
                 ...useLayoutStore.getState().arrangement,
                 usageHost: "header",

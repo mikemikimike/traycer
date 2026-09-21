@@ -497,6 +497,7 @@ function openLayoutSession(): void {
     useLayoutEditorStore.getState().beginSession({
       scene: "in-place",
       entry: "pointer",
+      source: "direct_ui",
       preferredInstanceId: CHAT_ID,
       startedAt: 0,
     });

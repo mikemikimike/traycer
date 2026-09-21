@@ -211,6 +211,7 @@ describe("SettingsSetupGuide", () => {
       session: {
         scene: "in-place",
         entry: "pointer",
+        source: "direct_ui",
         preferredInstanceId: null,
         startedAt: Date.now(),
       },

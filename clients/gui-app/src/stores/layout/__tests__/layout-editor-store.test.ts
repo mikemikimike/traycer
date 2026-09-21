@@ -33,6 +33,7 @@ function session(preferredInstanceId: string | null): void {
   useLayoutEditorStore.getState().beginSession({
     scene: "in-place",
     entry: "pointer",
+    source: "direct_ui",
     preferredInstanceId,
     startedAt: 0,
   });
@@ -140,6 +141,77 @@ describe("a gesture is one undo step", () => {
     }
 
     expect(editorState().history.past).toHaveLength(LAYOUT_HISTORY_CAP);
+  });
+});
+
+describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
+  it("counts only actual undo travel, not redo or a dropped redo branch", () => {
+    session(null);
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+    expect(editorState().undoCount).toBe(0);
+
+    editorState().undo();
+    expect(editorState().undoCount).toBe(1);
+
+    editorState().redo();
+    expect(editorState().undoCount).toBe(1);
+
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    });
+    editorState().undo();
+    expect(editorState().undoCount).toBe(2);
+  });
+
+  it("does not count an undo with nothing to travel to", () => {
+    session(null);
+    editorState().undo();
+    expect(editorState().undoCount).toBe(0);
+  });
+
+  it("sets firstChangeAt on the first gesture and never moves it again", () => {
+    session(null);
+    expect(editorState().firstChangeAt).toBeNull();
+
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+    const first = editorState().firstChangeAt;
+    expect(first).not.toBeNull();
+
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    });
+    expect(editorState().firstChangeAt).toBe(first);
+
+    editorState().undo();
+    expect(editorState().firstChangeAt).toBe(first);
+  });
+
+  it("leaves firstChangeAt null for a gesture that changed nothing", () => {
+    session(null);
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "shown" });
+    });
+    expect(editorState().firstChangeAt).toBeNull();
+  });
+
+  it("resets both on the next session", () => {
+    session(null);
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+    editorState().undo();
+    expect(editorState().undoCount).toBe(1);
+    expect(editorState().firstChangeAt).not.toBeNull();
+
+    editorState().endSession();
+    session(null);
+
+    expect(editorState().undoCount).toBe(0);
+    expect(editorState().firstChangeAt).toBeNull();
   });
 });
 

@@ -26,6 +26,7 @@ function openSession(preferredInstanceId: string | null): void {
     useLayoutEditorStore.getState().beginSession({
       scene: "in-place",
       entry: "pointer",
+      source: "direct_ui",
       preferredInstanceId,
       startedAt: 0,
     });

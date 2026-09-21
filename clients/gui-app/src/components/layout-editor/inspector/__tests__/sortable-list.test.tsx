@@ -66,6 +66,7 @@ beforeEach(() => {
   useLayoutEditorStore.getState().beginSession({
     scene: "in-place",
     entry: "keyboard",
+    source: "direct_ui",
     preferredInstanceId: null,
     startedAt: 0,
   });

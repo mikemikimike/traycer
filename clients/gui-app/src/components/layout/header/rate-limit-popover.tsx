@@ -101,11 +101,7 @@ import {
   sortProviderStatesByProviderOrder,
 } from "@/lib/provider-ordering";
 import { queryKeys } from "@/lib/query-keys";
-import {
-  Analytics,
-  AnalyticsEvent,
-  trackSettingChanged,
-} from "@/lib/analytics";
+import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import {
   PROVIDER_RATE_LIMITS_STALE_TIME_MS,
   isRateLimitProfileFetchEligible,
@@ -1972,10 +1968,6 @@ function ProfileRateLimitProviderBlock({
                 eyeHostId === null
                   ? null
                   : (shown) => {
-                      trackSettingChanged(
-                        "layout",
-                        "layout.statusBar.shownProfiles",
-                      );
                       // Read at write time rather than subscribed: this row
                       // needs the whole arrangement only to spread it, and a
                       // subscription to it re-renders the popover on every

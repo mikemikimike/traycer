@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, type UseNavigateResult } from "@tanstack/react-router";
 import { Eye, EyeOff, Layers, PanelTop } from "lucide-react";
 import { toast } from "sonner";
 import { CustomizeLayoutMenuItem } from "@/components/layout-editor/customize-layout-menu-item";
@@ -24,9 +24,10 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { useRegionValues } from "@/lib/layout-overrides";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
-import type { RegionValueKey } from "@/lib/layout/layout-values";
+import type { LayoutValues, RegionValueKey } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 
 /**
@@ -59,12 +60,101 @@ const QUICK_VERB_TOAST_ID = "layout-quick-verb";
 /** The plan's frozen dismiss for this toast. */
 const QUICK_VERB_TOAST_DURATION_MS = 5000;
 
+/**
+ * The verb whose toast is still on screen and unresolved, so `layout_quick_verb`
+ * can be sent once the toast resolves rather than once per keystroke (L-19,
+ * L-46). One slot, because one toast is ever up (`QUICK_VERB_TOAST_ID`): a
+ * second verb replaces the first's toast before it resolves either way, which
+ * is exactly the case {@link resolvePendingQuickVerb} at the top of
+ * {@link run} covers - the superseded verb stood, so it is reported
+ * `undone: false` right there rather than lost.
+ */
+let pendingQuickVerb: {
+  readonly regionId: RegionId;
+  readonly verb: WritingQuickVerb;
+} | null = null;
+
+function resolvePendingQuickVerb(undone: boolean): void {
+  const verb = pendingQuickVerb;
+  if (verb === null) return;
+  pendingQuickVerb = null;
+  Analytics.getInstance().track(AnalyticsEvent.LayoutQuickVerb, {
+    region: verb.regionId,
+    verb: verb.verb,
+    undone,
+  });
+}
+
 const QUICK_VERB_ICON: Readonly<Record<WritingQuickVerb, LayoutRegionIcon>> = {
   hide: EyeOff,
   show: Eye,
   chip: Layers,
   full: PanelTop,
 };
+
+/**
+ * The whole gesture behind a menu item's press, up to and including the
+ * pending-verb bookkeeping above (`react-hooks/globals` bans mutating
+ * module-scope state from inside a component or hook body, so this - the
+ * only piece of {@link LayoutRegionMenuItems} that does - lives outside it
+ * instead, called with everything it needs rather than closing over render
+ * state).
+ */
+function runQuickVerb(input: {
+  readonly regionId: RegionId;
+  readonly verb: WritingQuickVerb;
+  readonly regionName: string;
+  readonly values: LayoutValues[RegionId];
+  readonly navigate: UseNavigateResult<string>;
+}): void {
+  const { regionId, verb, regionName, values, navigate } = input;
+  // A verb still pending when a new one lands never gets its own
+  // dismiss/expire callback - its toast is replaced, not closed - so it is
+  // resolved right here as "stood" before the new one's toast opens.
+  resolvePendingQuickVerb(false);
+  const key = quickVerbKey(verb);
+  const previous = readControlValue(values, key);
+  writeControlValue(regionId, key, quickVerbValue(verb, regionId));
+  const message = quickVerbToast(verb, regionName);
+  if (message === null) return;
+  pendingQuickVerb = { regionId, verb };
+  toast(message, {
+    id: QUICK_VERB_TOAST_ID,
+    duration: QUICK_VERB_TOAST_DURATION_MS,
+    // Neither fires for an action/cancel click (sonner calls only that
+    // button's own `onClick`), only for an auto-expire or an explicit
+    // dismiss - which is exactly the "stood" half of `undone`.
+    onAutoClose: () => {
+      resolvePendingQuickVerb(false);
+    },
+    onDismiss: () => {
+      resolvePendingQuickVerb(false);
+    },
+    // Undo is the emphasised button and "Customize layout..." the quiet one,
+    // which is the reverse of sonner's own order: leaving the app for the
+    // editor is the larger of the two moves, and it must not be the one a
+    // reflex press lands on.
+    action: {
+      label: "Undo",
+      onClick: () => {
+        writeControlValue(regionId, key, previous);
+        resolvePendingQuickVerb(true);
+      },
+    },
+    cancel: {
+      label: "Customize layout...",
+      onClick: () => {
+        resolvePendingQuickVerb(false);
+        openLayoutEditor({
+          source: "direct_ui",
+          entry: "pointer",
+          target: regionId,
+          navigate,
+        });
+      },
+    },
+  });
+}
 
 /** The region's own verbs, then the way into the editor on that region. */
 export function LayoutRegionMenuItems(props: {
@@ -83,35 +173,12 @@ export function LayoutRegionMenuItems(props: {
   const verbs = offeredQuickVerbs(facts.quickVerbs, { hidden, chip });
 
   const run = (verb: WritingQuickVerb): void => {
-    const key = quickVerbKey(verb);
-    const previous = readControlValue(values, key);
-    writeControlValue(regionId, key, quickVerbValue(verb, regionId));
-    const message = quickVerbToast(verb, facts.name);
-    if (message === null) return;
-    toast(message, {
-      id: QUICK_VERB_TOAST_ID,
-      duration: QUICK_VERB_TOAST_DURATION_MS,
-      // Undo is the emphasised button and "Customize layout..." the quiet one,
-      // which is the reverse of sonner's own order: leaving the app for the
-      // editor is the larger of the two moves, and it must not be the one a
-      // reflex press lands on.
-      action: {
-        label: "Undo",
-        onClick: () => {
-          writeControlValue(regionId, key, previous);
-        },
-      },
-      cancel: {
-        label: "Customize layout...",
-        onClick: () => {
-          openLayoutEditor({
-            source: "direct_ui",
-            entry: "pointer",
-            target: regionId,
-            navigate,
-          });
-        },
-      },
+    runQuickVerb({
+      regionId,
+      verb,
+      regionName: facts.name,
+      values,
+      navigate,
     });
   };
 

@@ -1,8 +1,10 @@
 import {
   DEFAULT_ARRANGEMENT,
   ORDER_GROUP_IDS,
+  type EdgeSide,
   type LayoutArrangement,
   type OrderGroupId,
+  type UsageHost,
 } from "@/lib/layout/layout-arrangement";
 import { leftPanelGroupsFromRail } from "@/lib/layout/rail";
 import {
@@ -11,7 +13,11 @@ import {
   sameRegionValue,
   type LayoutValues,
 } from "@/lib/layout/layout-values";
-import { PRESET_VALUES } from "@/lib/layout/layout-presets";
+import {
+  effectiveLayoutValues,
+  PRESET_VALUES,
+  type LayoutPresetId,
+} from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 
@@ -121,4 +127,208 @@ const GROUP_BOUNDARY = "|";
 
 function defaultOrderIds(group: OrderGroupId): ReadonlyArray<string> {
   return orderIds(DEFAULT_ARRANGEMENT, group);
+}
+
+// ── Analytics (L-46, L-54, L-55, tech-plan section 7) ───────────────────────
+//
+// `layout_snapshot` and `layout_editor_session`'s change summary are built
+// here rather than assembled ad hoc at the firing site, for the same reason
+// the rest of this file exists: the shape is the model's, not a door's, and a
+// pure function is what a test can drive on real snapshots.
+
+function snakeCase(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+function layoutSettingPropertyName(region: string, key: string): string {
+  return `layout_${snakeCase(region)}_${snakeCase(key)}`;
+}
+
+/**
+ * Every `region.key` pair `LayoutValues` declares, walked off the shipped
+ * Default rather than hand-listed: a leaf added to any region's value bag
+ * widens `LayoutValues`, which is what `SHIPPED_DEFAULT_VALUES` (aka
+ * `PRESET_VALUES.default`) is typed against, so this list - and the
+ * `layout_<region>_<key>` property built from it - cannot drift from the
+ * registry it describes without failing that assignment first.
+ */
+function layoutSettingEntries(): ReadonlyArray<{
+  readonly region: RegionId;
+  readonly key: string;
+}> {
+  const regions = Object.keys(PRESET_VALUES.default) as ReadonlyArray<RegionId>;
+  return regions.flatMap((region) =>
+    Object.keys(PRESET_VALUES.default[region]).map((key) => ({ region, key })),
+  );
+}
+
+/**
+ * A region's value bag has no compile-time index signature - `LayoutValues`
+ * names each region's shape as its own interface, not `Record<RegionId,
+ * ...>` - so reading a runtime-computed key off it generically cannot be a
+ * cast: the union of every region's interface (`ContextUsageValues |
+ * ModelValues | ...`) does not "sufficiently overlap" with `Record<string,
+ * unknown>` for TypeScript's narrowing-cast check. `Reflect.get` reads it
+ * without one.
+ */
+function regionSettingValue(regionValues: object, key: string): unknown {
+  return Reflect.get(regionValues, key);
+}
+
+/**
+ * Every `layout_<region>_<key>` property name `layout_snapshot` declares, in
+ * the order {@link layoutSettingEntries} walks them. `lib/analytics.ts`
+ * allowlists exactly this list, so the declared property set and the
+ * registry it is built from cannot name a different set of settings.
+ */
+export const LAYOUT_SETTING_PROPERTY_KEYS: ReadonlyArray<string> =
+  layoutSettingEntries().map(({ region, key }) =>
+    layoutSettingPropertyName(region, key),
+  );
+
+export type LayoutSettingPropertyKey =
+  (typeof LAYOUT_SETTING_PROPERTY_KEYS)[number];
+
+/**
+ * One setting's reported value (L-54, L-55): `"default"` at the shipped
+ * Default, the literal value otherwise, `"true"`/`"false"` for a boolean leaf
+ * and `"changed"` for the one list leaf (`pinnedFields`) - a scalar either
+ * way, and never the list itself.
+ */
+function settingPropertyValue(
+  key: string,
+  value: unknown,
+  defaultValue: unknown,
+): string {
+  if (sameRegionValue(key, value, defaultValue)) return "default";
+  if (key === "pinnedFields") return "changed";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+/**
+ * `layout_snapshot`'s whole payload (L-46, L-54, L-55, tech-plan section 7):
+ * the ~40 per-setting properties, ALWAYS present so `STRICT_EVENTS` never
+ * drops the event for a missing declared key, plus the base preset, how many
+ * settings differ from it, three arrangement enums and five reorder
+ * booleans. `shownProfiles`, `providerLimits`, `hiddenProviders` and
+ * `limitKeys` have no field here: this type is built only from `LayoutValues`
+ * plus the five closed arrangement facts the plan names, so there is no
+ * property for them to reach (L-54, C-41).
+ */
+export interface LayoutSnapshotProperties {
+  // The ~40 `layout_<region>_<key>` properties are always strings
+  // (`settingPropertyValue`'s return type); this index signature has to
+  // cover the explicit properties below it too, so it is their union rather
+  // than `string` alone. `LAYOUT_SETTING_PROPERTY_KEYS` and the structural
+  // parity test in `layout-analytics.test.ts` are what keep the dynamic keys
+  // to exactly that set - TypeScript cannot express "every OTHER key" here.
+  readonly [key: string]: string | number | boolean;
+  readonly base_preset: LayoutPresetId;
+  readonly changed_from_default_count: number;
+  readonly layout_usage_host: UsageHost;
+  readonly layout_minimap_side: EdgeSide;
+  readonly layout_resource_side: EdgeSide;
+  readonly layout_dock_reordered: boolean;
+  readonly layout_toolbar_left_reordered: boolean;
+  readonly layout_toolbar_right_reordered: boolean;
+  readonly layout_rail_reordered: boolean;
+  readonly layout_usage_providers_reordered: boolean;
+}
+
+/** `layout_snapshot`'s payload, built from a whole snapshot. */
+export function layoutSnapshotProperties(
+  snapshot: LayoutSnapshot,
+): LayoutSnapshotProperties {
+  const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
+  const defaults = PRESET_VALUES.default;
+  let changedFromDefaultCount = 0;
+  const settingEntries = layoutSettingEntries().map(({ region, key }) => {
+    const propertyValue = settingPropertyValue(
+      key,
+      regionSettingValue(values[region], key),
+      regionSettingValue(defaults[region], key),
+    );
+    if (propertyValue !== "default") changedFromDefaultCount += 1;
+    return [layoutSettingPropertyName(region, key), propertyValue] as const;
+  });
+  const reordered = new Set(reorderedGroups(snapshot.arrangement));
+  return {
+    // Built from the same walk `LAYOUT_SETTING_PROPERTY_KEYS` is, so this is
+    // exactly that key set with a value per key - the structural test in
+    // `layout-analytics.test.ts` is what proves it rather than a second cast.
+    ...(Object.fromEntries(settingEntries) as Record<
+      LayoutSettingPropertyKey,
+      string
+    >),
+    base_preset: snapshot.basePreset,
+    changed_from_default_count: changedFromDefaultCount,
+    layout_usage_host: snapshot.arrangement.usageHost,
+    layout_minimap_side: snapshot.arrangement.minimapSide,
+    layout_resource_side: snapshot.arrangement.resourceSide,
+    layout_dock_reordered: reordered.has("dock"),
+    layout_toolbar_left_reordered: reordered.has("toolbarLeft"),
+    layout_toolbar_right_reordered: reordered.has("toolbarRight"),
+    layout_rail_reordered: reordered.has("rail"),
+    layout_usage_providers_reordered: reordered.has("usageProviders"),
+  };
+}
+
+export type LayoutDurationBucket =
+  | "under_10s"
+  | "10s_to_1m"
+  | "1m_to_5m"
+  | "over_5m";
+
+/**
+ * Buckets a millisecond duration for `layout_editor_session`'s two duration
+ * properties. Its own scale rather than the app-wide `duration_bucket`
+ * allowlist (`under_10s | 10_to_30s | over_30s`): an editor session routinely
+ * outruns that ceiling (C-42).
+ */
+export function layoutDurationBucket(durationMs: number): LayoutDurationBucket {
+  if (durationMs < 10_000) return "under_10s";
+  if (durationMs < 60_000) return "10s_to_1m";
+  if (durationMs < 300_000) return "1m_to_5m";
+  return "over_5m";
+}
+
+/**
+ * Every region whose EFFECTIVE value bag differs between two snapshots -
+ * what a session actually touched, independent of which base preset each
+ * snapshot carries (a preset switch mid-session still counts as touching
+ * whatever it visibly changed).
+ */
+export function touchedRegionIds(
+  from: LayoutSnapshot,
+  to: LayoutSnapshot,
+): ReadonlyArray<RegionId> {
+  const fromValues = effectiveLayoutValues(from.basePreset, from.overrides);
+  const toValues = effectiveLayoutValues(to.basePreset, to.overrides);
+  const regions = Object.keys(PRESET_VALUES.default) as ReadonlyArray<RegionId>;
+  return regions.filter(
+    (region) =>
+      JSON.stringify(fromValues[region]) !== JSON.stringify(toValues[region]),
+  );
+}
+
+export interface LayoutEditorSessionChangeSummary {
+  readonly changedCount: number;
+  readonly regionsTouchedCount: number;
+}
+
+/**
+ * `layout_editor_session`'s value-change facts (L-46, L-54, L-57):
+ * `changedCount` is {@link changeCount} at exit - the same delta "Reset to
+ * <preset>" reverts - and `regionsTouchedCount` is the distinct regions that
+ * moved between the session's entry snapshot and its exit snapshot.
+ */
+export function layoutEditorSessionChangeSummary(
+  entrySnapshot: LayoutSnapshot,
+  exitSnapshot: LayoutSnapshot,
+): LayoutEditorSessionChangeSummary {
+  return {
+    changedCount: changeCount(exitSnapshot),
+    regionsTouchedCount: touchedRegionIds(entrySnapshot, exitSnapshot).length,
+  };
 }

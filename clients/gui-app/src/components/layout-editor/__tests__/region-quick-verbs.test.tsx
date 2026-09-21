@@ -7,6 +7,7 @@ import {
   SHOW_HIDE_VERBS,
   SIZED_VERBS,
 } from "@/components/layout-editor/regions/region-grammar";
+import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
@@ -24,6 +25,8 @@ interface CapturedToast {
   readonly id: string;
   readonly action: CapturedToastAction;
   readonly cancel: CapturedToastAction;
+  readonly onAutoClose: (() => void) | undefined;
+  readonly onDismiss: (() => void) | undefined;
 }
 
 const openLayoutEditorMock = vi.hoisted(() => vi.fn());
@@ -45,6 +48,8 @@ vi.mock("sonner", () => ({
       readonly id: string;
       readonly action: CapturedToastAction;
       readonly cancel: CapturedToastAction;
+      readonly onAutoClose: (() => void) | undefined;
+      readonly onDismiss: (() => void) | undefined;
     },
   ) => {
     toasts.push({
@@ -52,6 +57,8 @@ vi.mock("sonner", () => ({
       id: options.id,
       action: options.action,
       cancel: options.cancel,
+      onAutoClose: options.onAutoClose,
+      onDismiss: options.onDismiss,
     });
   },
 }));
@@ -210,6 +217,93 @@ describe("<LayoutRegionContextMenu />", () => {
 
     expect(openLayoutEditorMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: "minimap" }),
+    );
+  });
+});
+
+describe("layout_quick_verb analytics (L-19, L-46)", () => {
+  it("sends one event with undone: true when Undo is clicked", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    render(<Harness regionId="minimap" />);
+    openMenu();
+    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
+    expect(trackSpy).not.toHaveBeenCalled();
+
+    toasts.at(-1)?.action.onClick();
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutQuickVerb,
+      { region: "minimap", verb: "hide", undone: true },
+    );
+  });
+
+  it("sends one event with undone: false when the toast auto-expires", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    render(<Harness regionId="minimap" />);
+    openMenu();
+    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
+
+    toasts.at(-1)?.onAutoClose?.();
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutQuickVerb,
+      { region: "minimap", verb: "hide", undone: false },
+    );
+  });
+
+  it("sends one event with undone: false when the toast is dismissed without Undo", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    render(<Harness regionId="minimap" />);
+    openMenu();
+    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
+
+    toasts.at(-1)?.onDismiss?.();
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutQuickVerb,
+      { region: "minimap", verb: "hide", undone: false },
+    );
+  });
+
+  it("sends undone: false for a verb whose toast a second verb replaces", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    render(<Harness regionId="access" />);
+
+    openMenu();
+    fireEvent.click(screen.getByTestId("layout-quick-verb-access-chip"));
+    expect(trackSpy).not.toHaveBeenCalled();
+
+    openMenu();
+    fireEvent.click(screen.getByTestId("layout-quick-verb-access-hide"));
+
+    // The first verb's toast was replaced before it ever resolved, so it is
+    // reported here - as "stood", never undone - rather than lost.
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutQuickVerb,
+      { region: "access", verb: "chip", undone: false },
+    );
+
+    toasts.at(-1)?.onAutoClose?.();
+
+    expect(trackSpy).toHaveBeenCalledTimes(2);
+    expect(trackSpy).toHaveBeenLastCalledWith(AnalyticsEvent.LayoutQuickVerb, {
+      region: "access",
+      verb: "hide",
+      undone: false,
+    });
+  });
+
+  it("sends undone: false when 'Customize layout...' is chosen instead of Undo", () => {
+    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+    render(<Harness regionId="minimap" />);
+    openMenu();
+    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
+
+    toasts.at(-1)?.cancel.onClick();
+
+    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+      AnalyticsEvent.LayoutQuickVerb,
+      { region: "minimap", verb: "hide", undone: false },
     );
   });
 });
