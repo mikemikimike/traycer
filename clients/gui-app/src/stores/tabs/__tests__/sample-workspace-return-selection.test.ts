@@ -13,9 +13,9 @@ import type { TabRef } from "@/stores/tabs/types";
  * what `withoutSampleWorkspace` / `repairLayout` do with it.
  *
  * The CAPTURE side - stamping the field when the editor's door opens the
- * sample tab - lives in that door (`lib/layout/editor-session.ts`, ticket 07)
- * and is not in the tree yet, so this file covers only the pure reducers: a
- * hand-built layout carrying (or lacking) the field in, and what comes out.
+ * sample tab - lives in that door (`lib/layout/editor-session.ts`) and is
+ * covered there, so this file covers only the pure reducers: a hand-built
+ * layout carrying (or lacking) the field in, and what comes out.
  */
 
 const SAMPLE_REF: TabRef = { kind: "sample-workspace", id: "sample-workspace" };

@@ -1,5 +1,4 @@
 import { Cpu, Gauge } from "lucide-react";
-import { REGION_DEPICTIONS } from "@/components/layout-editor/region-depiction";
 import {
   SHOW_HIDE_VERBS,
   type LayoutRegion,
@@ -160,7 +159,6 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
   ],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: usageLimitsStateWord,
-  depict: REGION_DEPICTIONS.usageLimits,
 };
 
 export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
@@ -208,5 +206,4 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: (values, arrangement) =>
     sideStateWord(values, arrangement.resourceSide),
-  depict: REGION_DEPICTIONS.resourceMonitor,
 };

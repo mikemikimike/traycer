@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { depictRegion } from "@/components/layout-editor/region-depiction";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import {
   SURFACE_GROUPS,
@@ -17,8 +18,8 @@ import type { RegionId } from "@/lib/layout/region-id";
 /**
  * The registry as a caller walking EVERY region can read it.
  *
- * `LayoutRegion<K>` has no useful supertype - `stateWord` and `depict` take
- * the region's own bag, so widening `K` to `RegionId` makes them uncallable -
+ * `LayoutRegion<K>` has no useful supertype - `stateWord` takes the region's
+ * own bag, so widening `K` to `RegionId` makes it uncallable -
  * which means a caller that walks all the regions (the index, the filter, the
  * search entries) reads them through this face, and a caller holding ONE id
  * indexes {@link LAYOUT_REGIONS} and gets the generic entry back.
@@ -110,15 +111,19 @@ export function regionStateWord<K extends RegionId>(
   return stateWord(values[region], arrangement);
 }
 
-/** {@link regionStateWord}, for the picture. */
+/**
+ * {@link regionStateWord}, for the picture.
+ *
+ * Goes through `depictRegion` rather than a second read of the depiction
+ * table, so the specimen stage and the Style examples get the SAME
+ * host-context frame the canvas ghosts and the preset miniatures get. Drawn
+ * without it, a status-bar segment inherits the inspector form's type scale
+ * and stops being a picture of the strip - the one thing P2 forbids.
+ */
 export function regionDepiction<K extends RegionId>(
   region: K,
   values: LayoutValues,
   arrangement: LayoutArrangement,
 ): ReactNode {
-  const depict: (
-    regionValues: LayoutValues[K],
-    regionArrangement: LayoutArrangement,
-  ) => ReactNode = LAYOUT_REGIONS[region].depict;
-  return depict(values[region], arrangement);
+  return depictRegion(region, values[region], arrangement, null);
 }

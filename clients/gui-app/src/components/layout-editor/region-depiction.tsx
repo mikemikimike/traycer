@@ -170,13 +170,27 @@ function noop(): void {}
 // ── Per-region renderers ────────────────────────────────────────────────────
 
 /**
- * One provider's usage segment, at the detail the values ask for.
+ * One provider's usage segment, framed in whichever surface the cluster is
+ * hosted on.
  *
- * Exported because two callers draw ONE segment rather than the cluster: the
- * Style examples, whose caption promises "the real segment, drawn at full
- * size", and a provider's own second level.
+ * Exported for the one caller that draws a SEGMENT rather than the cluster: a
+ * provider's own second level, whose stage is a picture of that provider's
+ * reading alone.
  */
-export function depictUsageProviderSegment(
+export function depictUsageProvider(
+  providerId: RateLimitProviderId,
+  values: UsageLimitsValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  return (
+    <HostContextFrame host={hostContextFor("usageLimits", arrangement)}>
+      {depictUsageProviderSegment(providerId, values)}
+    </HostContextFrame>
+  );
+}
+
+/** The segment itself, which the cluster repeats once per shown provider. */
+function depictUsageProviderSegment(
   providerId: RateLimitProviderId,
   values: UsageLimitsValues,
 ): ReactNode {
@@ -471,10 +485,11 @@ function depictRailPanel(regionId: RailRegionId): ReactNode {
 /**
  * Every region's picture, by id.
  *
- * The registry's `depict` field points at these entries rather than restating
- * them, which is also why the import runs registry -> depiction and never back.
+ * Private to this module: `depictRegion` is the only way in, so no caller can
+ * draw a region without the host-context frame that makes it a picture of the
+ * real surface. A region added without an entry is a compile error here.
  */
-export const REGION_DEPICTIONS: {
+const REGION_DEPICTIONS: {
   readonly [K in RegionId]: (
     values: LayoutValues[K],
     arrangement: LayoutArrangement,

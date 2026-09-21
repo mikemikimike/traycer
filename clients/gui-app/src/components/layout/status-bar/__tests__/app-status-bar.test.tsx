@@ -1037,12 +1037,12 @@ describe("<AppStatusBar /> resource action ownership", () => {
 
 // The rest of the old "Customize editing" / "disabled-usage provider ghosts
 // follow segmentOrder" suites were about the overlay/ghost/proxy technique
-// (`useCustomizeStore`, `CustomizeOverlay`, `trackLayoutSetting`, per-ghost
-// popover Move) - ticket 05 deletes that whole technique outright, with no
-// replacement in this ticket (the successor session store,
-// `useLayoutEditorStore`, is unwired until ticket 07). This ordering
-// assertion is the one survivor: it never touched the ghost machinery, only
-// `resourceSide` and plain DOM position.
+// the layout rework deleted outright: the editor decorates the app's OWN
+// elements now, so there is no overlay, proxy or per-ghost popover left to
+// assert about, and what replaced them is covered against the real canvas in
+// `components/layout-editor/`. This ordering assertion is the one survivor:
+// it never touched the ghost machinery, only `resourceSide` and plain DOM
+// position.
 describe("<AppStatusBar /> resource segment placement", () => {
   beforeEach(() => {
     scope = hostScopeFixture({});

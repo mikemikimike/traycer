@@ -1581,32 +1581,6 @@ describe("Layout page settings analytics", () => {
     ).toEqual({ source: "direct_ui", section: "layout" });
   });
 
-  it("tracks the relocated layout settings (chat, sidebar, Home tab, resource monitor rows) under the layout section", async () => {
-    const { AnalyticsEvent, sanitizeAnalyticsProperties } =
-      await import("@/lib/analytics");
-
-    // `homeTabEnabled` is here rather than under `general` because the row
-    // moved to the Layout page; the setting id itself never changed, which is
-    // what keeps its history joinable across the move.
-    const relocatedSettings = [
-      "chatTurnMinimapSide",
-      "homeTabEnabled",
-      "pinContextUsageBreakdown",
-      "showGlobalResourceMonitor",
-      "showNavigatorResourceStats",
-    ] as const;
-
-    for (const setting of relocatedSettings) {
-      expect(
-        sanitizeAnalyticsProperties(AnalyticsEvent.SettingChanged, {
-          source: "direct_ui",
-          section: "layout",
-          setting,
-        }),
-      ).toEqual({ source: "direct_ui", section: "layout", setting });
-    }
-  });
-
   // Home reported two Layout rows and reports neither now: the view switch
   // went with the flat reading, and the density segment went because the two
   // spacings were barely distinguishable (user ruling, 2026-09-12). Nothing
@@ -1620,7 +1594,19 @@ describe("Layout page settings analytics", () => {
   // C-47): Layout fires no per-control `setting_changed` at all now that
   // `layout_snapshot` reports it (`trackLayoutSetting` and every one of these
   // ids were deleted with the old visual editor's analytics).
+  //
+  // The five camelCase ids at the top are the LAST emitters of that shape to
+  // go. They were the old Layout page's relocated rows, and when the page
+  // went there was nothing left to fire them - a vocabulary the sanitizer
+  // still accepted and no site could produce. Deleting them from
+  // `AnalyticsSetting` is what makes a future emit a compile error; this is
+  // the runtime half.
   it.each([
+    "chatTurnMinimapSide",
+    "homeTabEnabled",
+    "pinContextUsageBreakdown",
+    "showGlobalResourceMonitor",
+    "showNavigatorResourceStats",
     "layout.home.density",
     "layout.home.view",
     "layout.preset.compact",

@@ -13,10 +13,12 @@ import {
   offeredQuickVerbs,
   quickVerbLabel,
   quickVerbToast,
-  type WritingQuickVerb,
 } from "@/components/layout-editor/regions/quick-verbs";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
-import type { LayoutRegionIcon } from "@/components/layout-editor/regions/region-grammar";
+import type {
+  LayoutRegionIcon,
+  QuickVerbId,
+} from "@/components/layout-editor/regions/region-grammar";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -71,7 +73,7 @@ const QUICK_VERB_TOAST_DURATION_MS = 5000;
  */
 let pendingQuickVerb: {
   readonly regionId: RegionId;
-  readonly verb: WritingQuickVerb;
+  readonly verb: QuickVerbId;
 } | null = null;
 
 function resolvePendingQuickVerb(undone: boolean): void {
@@ -85,7 +87,7 @@ function resolvePendingQuickVerb(undone: boolean): void {
   });
 }
 
-const QUICK_VERB_ICON: Readonly<Record<WritingQuickVerb, LayoutRegionIcon>> = {
+const QUICK_VERB_ICON: Readonly<Record<QuickVerbId, LayoutRegionIcon>> = {
   hide: EyeOff,
   show: Eye,
   chip: Layers,
@@ -102,7 +104,7 @@ const QUICK_VERB_ICON: Readonly<Record<WritingQuickVerb, LayoutRegionIcon>> = {
  */
 function runQuickVerb(input: {
   readonly regionId: RegionId;
-  readonly verb: WritingQuickVerb;
+  readonly verb: QuickVerbId;
   readonly regionName: string;
   readonly values: LayoutValues[RegionId];
   readonly navigate: UseNavigateResult<string>;
@@ -115,10 +117,8 @@ function runQuickVerb(input: {
   const key = quickVerbKey(verb);
   const previous = readControlValue(values, key);
   writeControlValue(regionId, key, quickVerbValue(verb, regionId));
-  const message = quickVerbToast(verb, regionName);
-  if (message === null) return;
   pendingQuickVerb = { regionId, verb };
-  toast(message, {
+  toast(quickVerbToast(verb, regionName), {
     id: QUICK_VERB_TOAST_ID,
     duration: QUICK_VERB_TOAST_DURATION_MS,
     // Neither fires for an action/cancel click (sonner calls only that
@@ -172,7 +172,7 @@ export function LayoutRegionMenuItems(props: {
   const chip = sizeable && readControlValue(values, "size") === "chip";
   const verbs = offeredQuickVerbs(facts.quickVerbs, { hidden, chip });
 
-  const run = (verb: WritingQuickVerb): void => {
+  const run = (verb: QuickVerbId): void => {
     runQuickVerb({
       regionId,
       verb,
@@ -230,13 +230,13 @@ export function LayoutRegionContextMenu(props: {
 }
 
 /** Which leaf a verb writes. */
-function quickVerbKey(verb: WritingQuickVerb): RegionValueKey {
+function quickVerbKey(verb: QuickVerbId): RegionValueKey {
   return verb === "chip" || verb === "full" ? "size" : "shown";
 }
 
 /** What it writes there - `show` through the one tri-state rule (L-47). */
 function quickVerbValue(
-  verb: WritingQuickVerb,
+  verb: QuickVerbId,
   regionId: RegionId,
 ): RegionControlValue {
   switch (verb) {

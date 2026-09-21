@@ -13,8 +13,7 @@ import { alwaysAvailable } from "@/lib/settings/settings-availability";
  *
  * Every entry has `anchor: null` and carries the region in `launch`. It is not
  * an anchor result: there is no per-region element on the page to scroll to,
- * and `launch` is what the result acts on (today, the Layout page; from the
- * entry-points ticket, the editor opened on that region).
+ * and `launch` is what the result acts on - the editor, opened on that region.
  *
  * `alwaysAvailable`, unlike the page rows that preceded them: the Layout host
  * renders every region in every shell, and a region that the current window is

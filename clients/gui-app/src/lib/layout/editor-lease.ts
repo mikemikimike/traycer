@@ -74,7 +74,7 @@ export function acquireLayoutEditorLease(): boolean {
   return !refreshLayoutEditorLock();
 }
 
-export function renewLayoutEditorLease(): boolean {
+function renewLayoutEditorLease(): boolean {
   if (refreshLayoutEditorLock()) return false;
   return acquireLayoutEditorLease();
 }

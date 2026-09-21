@@ -316,7 +316,6 @@ export type AnalyticsSetting =
   | "agentTabSurfacing"
   | "artifactIconColorMode"
   | "artifactIconColors"
-  | "chatTurnMinimapSide"
   | "codeFontFamily"
   | "codeFontSize"
   | "composerMode"
@@ -327,10 +326,8 @@ export type AnalyticsSetting =
   | "defaultSelection"
   | "defaultServiceTier"
   | "diffViewerPreferences"
-  | "homeTabEnabled"
   | "linkOpen"
   | "browserSearchEngine"
-  | "pinContextUsageBreakdown"
   | "pinnedContextBreakdownFields"
   // The ORDER of the pinned breakdown rows, which is a complete order over
   // every field and not the selected subset `pinnedContextBreakdownFields`
@@ -339,9 +336,7 @@ export type AnalyticsSetting =
   | "pointerCursors"
   | "preventSleepWhileRunning"
   | "quoteReplyEnabled"
-  | "showGlobalResourceMonitor"
   | "showGreeting"
-  | "showNavigatorResourceStats"
   | "showRecentHistory"
   | "startPageWallpaper"
   | "startPageWallpaperCurated"
@@ -1334,10 +1329,9 @@ const ANALYTICS_SETTINGS_SECTIONS = new Set<string>(
  * `ANALYTICS_SETTINGS_SECTIONS` is: this set is what
  * `sanitizeAnalyticsProperties` validates `setting` against, so a union member
  * missing here drops every one of its `setting_changed` events silently.
- * `chatTurnMinimapSide` went missing that way from the day its control
- * shipped, and `steerOnModEnterEnabled`, `summonHotkeyChord` and
- * `summonHotkeyEnabled` were missing alongside it. The `satisfies` makes the
- * next such omission a COMPILE error.
+ * `steerOnModEnterEnabled`, `summonHotkeyChord` and `summonHotkeyEnabled` all
+ * went missing that way from the day their controls shipped. The `satisfies`
+ * makes the next such omission a COMPILE error.
  */
 const ANALYTICS_SETTINGS = new Set<string>(
   Object.keys({
@@ -1347,7 +1341,6 @@ const ANALYTICS_SETTINGS = new Set<string>(
     allowPrereleaseUpdates: true,
     artifactIconColorMode: true,
     artifactIconColors: true,
-    chatTurnMinimapSide: true,
     codeFontFamily: true,
     codeFontSize: true,
     composerMode: true,
@@ -1358,18 +1351,14 @@ const ANALYTICS_SETTINGS = new Set<string>(
     defaultSelection: true,
     defaultServiceTier: true,
     diffViewerPreferences: true,
-    homeTabEnabled: true,
     linkOpen: true,
     browserSearchEngine: true,
-    pinContextUsageBreakdown: true,
     pinnedContextBreakdownFields: true,
     pinnedContextBreakdownOrder: true,
     pointerCursors: true,
     preventSleepWhileRunning: true,
     quoteReplyEnabled: true,
-    showGlobalResourceMonitor: true,
     showGreeting: true,
-    showNavigatorResourceStats: true,
     showRecentHistory: true,
     startPageWallpaper: true,
     startPageWallpaperCurated: true,

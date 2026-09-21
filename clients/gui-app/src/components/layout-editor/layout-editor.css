@@ -302,11 +302,18 @@
   outline-offset: 3px;
 }
 
+/* The OTHER instances of the selected region, which the travelling ring is not
+   drawn around. Foreground rather than `--ring`, and twice the hover's weight:
+   `--ring` is a soft grey in this app's light palettes and measures between
+   2.0:1 and 2.9:1 against the surfaces it lands on in nine of them, which is
+   under the 3:1 a non-text indicator owes (`layout-editor-contrast.test.ts`).
+   Weight carries "selected here too"; the accent stays on the one ring the
+   user is actually pointing at. */
 [data-layout-editing="1"]
   [data-layout-region][data-selected="1"]:not(
     [data-layout-anchor~="selected"]
   ) {
-  outline: 1px solid var(--ring);
+  outline: 2px solid var(--foreground);
   outline-offset: 3px;
 }
 
@@ -357,10 +364,16 @@
    enough to read as a preview rather than as a setting that came back on.
    The `filter` and `transform` here are on the region itself, never on an
    ancestor of one.
+
+   Above the passive dim, deliberately. A ghost appears among leaves the
+   session has already calmed, and at 0.4 it was the FAINTEST thing on the
+   canvas - a preview of a hidden region drawn quieter than the chrome the
+   user was told to ignore. It still reads as a preview, because everything
+   live around it is opaque (`layout-editor-contrast.test.ts`).
    --------------------------------------------------------------- */
 
 [data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
-  opacity: 0.4;
+  opacity: 0.55;
   animation: layout-region-materialise 180ms var(--layout-editor-ease) both;
 }
 
@@ -372,7 +385,7 @@
   }
 
   to {
-    opacity: 0.4;
+    opacity: 0.55;
     filter: blur(0);
     transform: scale(1);
   }
@@ -473,9 +486,16 @@
   z-index: var(--layout-editor-ring-z);
   pointer-events: none;
   border-radius: 7px;
+  /* Three bands, innermost first. The hairline is what makes the ring VISIBLE
+     rather than merely coloured: `--ring` is a soft grey in this app's light
+     palettes and bottoms out at 2.02:1 against them, so an accent-only ring
+     would be the primary indicator of this whole feature sitting under the
+     3:1 a non-text indicator owes. The foreground hairline clears it on every
+     palette and the accent band keeps the ring's identity. */
   box-shadow:
-    0 0 0 2px var(--ring),
-    0 0 0 5px color-mix(in srgb, var(--ring) 22%, transparent);
+    0 0 0 1px var(--foreground),
+    0 0 0 3px var(--ring),
+    0 0 0 6px color-mix(in srgb, var(--ring) 22%, transparent);
   opacity: 0;
   transition: opacity var(--layout-editor-ring-duration)
     var(--layout-editor-ease);
@@ -567,8 +587,12 @@
    --------------------------------------------------------------- */
 
 @media (prefers-reduced-transparency: reduce) {
+  /* The halo goes; the two solid bands stay, which is where the ring's whole
+     signal already lives. */
   [data-layout-selection-ring] {
-    box-shadow: 0 0 0 2px var(--ring);
+    box-shadow:
+      0 0 0 1px var(--foreground),
+      0 0 0 3px var(--ring);
   }
 
   /* The floating panel's translucent material is the one place the editor

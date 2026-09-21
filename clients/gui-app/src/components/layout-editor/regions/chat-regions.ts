@@ -1,6 +1,5 @@
 import { CircleGauge, Map as MapIcon } from "lucide-react";
 import { CONTEXT_USAGE_ROW_LABELS } from "@/components/chat/context-usage";
-import { REGION_DEPICTIONS } from "@/components/layout-editor/region-depiction";
 import {
   SHOW_HIDE_VERBS,
   type LayoutRegion,
@@ -31,7 +30,6 @@ export const MINIMAP_REGION: LayoutRegion<"minimap"> = {
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: (values, arrangement) =>
     sideStateWord(values, arrangement.minimapSide),
-  depict: REGION_DEPICTIONS.minimap,
 };
 
 const CONTEXT_USAGE_EXAMPLES: ReadonlyArray<StyleExample<"contextUsage">> = [
@@ -96,5 +94,4 @@ export const CONTEXT_USAGE_REGION: LayoutRegion<"contextUsage"> = {
   ],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: contextUsageStateWord,
-  depict: REGION_DEPICTIONS.contextUsage,
 };

@@ -172,7 +172,7 @@ export const DARK_THEME_SURFACES: Readonly<Record<string, ThemeSurfaces>> = {
 // the actual per-preset value (not the default gray).
 export const MUTED_FOREGROUND_LIGHT: Readonly<Record<string, string>> = {
   default: "oklch(0.556 0 0)",
-  amoled: "#7d7d7d",
+  amoled: "#717171",
   "traycer-green": "#666666",
   dracula: "#4f5d86",
   catppuccin: "#5c6074",

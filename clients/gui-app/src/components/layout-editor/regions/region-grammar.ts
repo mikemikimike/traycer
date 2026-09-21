@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import type {
   LayoutArrangement,
@@ -48,7 +47,7 @@ export const SURFACE_GROUPS: ReadonlyArray<{
  * the region ("Hide Minimap"), so which of the two is offered is a question
  * about the region's current state, not about which verbs it has.
  */
-export type QuickVerbId = "hide" | "show" | "chip" | "full" | "move";
+export type QuickVerbId = "hide" | "show" | "chip" | "full";
 
 export type LayoutRegionIcon = LucideIcon;
 
@@ -147,10 +146,6 @@ export interface LayoutRegion<K extends RegionId> {
     values: LayoutValues[K],
     arrangement: LayoutArrangement,
   ) => string;
-  readonly depict: (
-    values: LayoutValues[K],
-    arrangement: LayoutArrangement,
-  ) => ReactNode;
 }
 
 // ── Shared option sets ──────────────────────────────────────────────────────
@@ -177,15 +172,9 @@ export const NO_EXAMPLE_MATCH_COPY =
 // ── Shared verb sets ────────────────────────────────────────────────────────
 
 export const SHOW_HIDE_VERBS: ReadonlyArray<QuickVerbId> = ["hide", "show"];
-export const MOVABLE_VERBS: ReadonlyArray<QuickVerbId> = [
-  "hide",
-  "show",
-  "move",
-];
 export const SIZED_VERBS: ReadonlyArray<QuickVerbId> = [
   "hide",
   "show",
   "chip",
   "full",
-  "move",
 ];

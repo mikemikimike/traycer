@@ -45,9 +45,9 @@ import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
  * Every field it did not have to change keeps its INPUT identity, and an
  * arrangement it changed nothing about is returned as itself. Identity is the
  * only thing a selector subscribed to one arrangement field compares, so
- * rebuilding the arrays on every call made a no-op write - and, once ticket
- * 09's drag loop writes per frame, every frame of a drag - re-render the whole
- * status bar (G1-14).
+ * rebuilding the arrays on every call made a no-op write - and, since the drag
+ * loop writes per frame, every frame of a drag - re-render the whole status
+ * bar (G1-14).
  */
 export function normalizeArrangement(
   arrangement: LayoutArrangement,

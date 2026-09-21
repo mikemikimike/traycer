@@ -124,12 +124,6 @@ describe("offeredQuickVerbs", () => {
       offeredQuickVerbs(SIZED_VERBS, { hidden: true, chip: true }),
     ).toEqual(["show"]);
   });
-
-  it("never offers move: the menu's way in is what performs one", () => {
-    expect(
-      offeredQuickVerbs(SIZED_VERBS, { hidden: false, chip: false }),
-    ).not.toContain("move");
-  });
 });
 
 describe("<LayoutRegionContextMenu />", () => {

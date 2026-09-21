@@ -1,7 +1,6 @@
 import { getLeftPanelDefinition } from "@/components/epic-canvas/sidebar/left-panel-registry";
-import { REGION_DEPICTIONS } from "@/components/layout-editor/region-depiction";
 import {
-  MOVABLE_VERBS,
+  SHOW_HIDE_VERBS,
   type LayoutRegion,
 } from "@/components/layout-editor/regions/region-grammar";
 import { railStateWord } from "@/components/layout-editor/regions/region-state-words";
@@ -32,7 +31,7 @@ function railRegionBase(
   regionId: RailRegionId,
   keywords: ReadonlyArray<string>,
   hint: string | null,
-): Omit<LayoutRegion<RailRegionId>, "id" | "depict"> {
+): Omit<LayoutRegion<RailRegionId>, "id"> {
   const definition = getLeftPanelDefinition(leftPanelIdForRailRegion(regionId));
   return {
     name: definition.title,
@@ -44,7 +43,7 @@ function railRegionBase(
     keywords: [...keywords, "sidebar", "rail", "panel"],
     sampleFilled: false,
     rows: RAIL_ROWS,
-    quickVerbs: MOVABLE_VERBS,
+    quickVerbs: SHOW_HIDE_VERBS,
     stateWord: railStateWord,
   };
 }
@@ -52,31 +51,26 @@ function railRegionBase(
 export const RAIL_AGENTS_REGION: LayoutRegion<"railAgents"> = {
   id: "railAgents",
   ...railRegionBase("railAgents", ["chats", "conversations", "agents"], null),
-  depict: REGION_DEPICTIONS.railAgents,
 };
 
 export const RAIL_TERMINALS_REGION: LayoutRegion<"railTerminals"> = {
   id: "railTerminals",
   ...railRegionBase("railTerminals", ["terminals", "shell", "console"], null),
-  depict: REGION_DEPICTIONS.railTerminals,
 };
 
 export const RAIL_BROWSERS_REGION: LayoutRegion<"railBrowsers"> = {
   id: "railBrowsers",
   ...railRegionBase("railBrowsers", ["browsers", "web", "pages"], null),
-  depict: REGION_DEPICTIONS.railBrowsers,
 };
 
 export const RAIL_ARTIFACTS_REGION: LayoutRegion<"railArtifacts"> = {
   id: "railArtifacts",
   ...railRegionBase("railArtifacts", ["artifacts", "outputs", "files"], null),
-  depict: REGION_DEPICTIONS.railArtifacts,
 };
 
 export const RAIL_GIT_DIFF_REGION: LayoutRegion<"railGitDiff"> = {
   id: "railGitDiff",
   ...railRegionBase("railGitDiff", ["git", "diff", "changes"], null),
-  depict: REGION_DEPICTIONS.railGitDiff,
 };
 
 export const RAIL_PULL_REQUESTS_REGION: LayoutRegion<"railPullRequests"> = {
@@ -86,7 +80,6 @@ export const RAIL_PULL_REQUESTS_REGION: LayoutRegion<"railPullRequests"> = {
     ["pull", "requests", "pr", "review"],
     "Auto - appears when this repo has pull requests",
   ),
-  depict: REGION_DEPICTIONS.railPullRequests,
 };
 
 export const RAIL_FILE_TREE_REGION: LayoutRegion<"railFileTree"> = {
@@ -96,7 +89,6 @@ export const RAIL_FILE_TREE_REGION: LayoutRegion<"railFileTree"> = {
     ["file", "tree", "explorer", "folders"],
     null,
   ),
-  depict: REGION_DEPICTIONS.railFileTree,
 };
 
 export const RAIL_SHARING_REGION: LayoutRegion<"railSharing"> = {
@@ -106,7 +98,6 @@ export const RAIL_SHARING_REGION: LayoutRegion<"railSharing"> = {
     ["sharing", "invite", "collaborators"],
     null,
   ),
-  depict: REGION_DEPICTIONS.railSharing,
 };
 
 export const RAIL_COMMENTS_REGION: LayoutRegion<"railComments"> = {
@@ -116,5 +107,4 @@ export const RAIL_COMMENTS_REGION: LayoutRegion<"railComments"> = {
     ["comments", "notes", "feedback"],
     "Auto - appears when an artifact is open",
   ),
-  depict: REGION_DEPICTIONS.railComments,
 };

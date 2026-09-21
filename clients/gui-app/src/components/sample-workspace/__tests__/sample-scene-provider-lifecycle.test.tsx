@@ -35,8 +35,9 @@ function sampleTabCount(): number {
 
 /**
  * Sample tab retained in the strip, NOT the active item, with no surface
- * mounted - through the ordinary tab machinery rather than the editor's own
- * door, which is not open yet (that is ticket 07's `lib/layout/editor-session.ts`).
+ * mounted - built through the ordinary tab machinery rather than through the
+ * editor's door (`lib/layout/editor-session.ts`), so this file covers the
+ * provider's lifecycle and not the door's.
  */
 function seedBackgroundSampleTab(): void {
   useTabsStore.setState({

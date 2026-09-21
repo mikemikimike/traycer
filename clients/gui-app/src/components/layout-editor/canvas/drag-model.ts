@@ -34,7 +34,7 @@ export interface DragSlot {
 }
 
 /** How far a press travels before it is unmistakably a drag (section 6). */
-export const DRAG_ACTIVATION_DISTANCE = 6;
+const DRAG_ACTIVATION_DISTANCE = 6;
 
 /** How much of a pull past a clamp survives (section 6). */
 const RUBBER_BAND = 0.25;

@@ -201,6 +201,16 @@ if (runsFirstShard) {
       exitCode,
       runBrowserRegression("scripts/status-bar-usage-scroll-browser.mjs"),
     );
+    // The layout editor's parity rule (P2, L-11, L-53) is a claim about
+    // RESOLVED styles and laid-out rects - whether two pictures of the same
+    // region look the same, whether a preset card is a scaled app frame
+    // rather than a reflowed one, and where Chrome's anchor positioning
+    // actually paints the hover chip. jsdom has no cascade, no layout and no
+    // anchor positioning, so none of the four is decidable without a browser.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/layout-editor-browser.mjs"),
+    );
     // NOT here, deliberately, and each for its own reason:
     // - `scripts/window-host-modal-alignment-browser.mjs` measures the
     //   local-bootstrap body against ONE LEFT EDGE (A1/A2/A5/PC4) - the design

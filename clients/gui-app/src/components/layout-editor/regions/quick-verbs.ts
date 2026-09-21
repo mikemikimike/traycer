@@ -3,34 +3,27 @@ import type { QuickVerbId } from "@/components/layout-editor/regions/region-gram
 /** What the right-click menu on a customizable element says (L-19). */
 
 /**
- * The verbs a menu actually renders: the four that write a value and are
- * reversed by the toast. See {@link offeredQuickVerbs} for why `move` is not
- * one of them.
- */
-export type WritingQuickVerb = Exclude<QuickVerbId, "move">;
-
-/**
  * Which of a region's verbs its menu offers right now.
  *
- * Two of the five are a pair the region's current state picks between, so the
+ * Two of the four are a pair the region's current state picks between, so the
  * registry's list is what a region CAN do and this is what it can do from
  * here: `hide` and `show` are never both offered, and the size pair is offered
  * only while the region is there to be resized.
  *
- * `move` is deliberately not among them. Every other verb changes a value and
- * is reversed by the toast; a move is a drag on the canvas, which is the one
- * thing that cannot happen without entering - so the menu renders it as
- * "Customize layout...", which opens the editor on this very region (L-19),
- * rather than as a second item that would do the same thing under a different
- * word. This is also the owner-approved prototype's own menu.
+ * Every verb here changes a value and is reversed by the toast. Moving is not
+ * one of them: a move is a drag on the canvas, which is the one thing that
+ * cannot happen without entering - so the menu renders it as "Customize
+ * layout...", which opens the editor on this very region (L-19, L-72), rather
+ * than as a second item under a different word. This is also the
+ * owner-approved prototype's own menu.
  */
 export function offeredQuickVerbs(
   verbs: ReadonlyArray<QuickVerbId>,
   state: { readonly hidden: boolean; readonly chip: boolean },
-): ReadonlyArray<WritingQuickVerb> {
+): ReadonlyArray<QuickVerbId> {
   if (state.hidden) return verbs.includes("show") ? ["show"] : [];
-  const offered: Array<WritingQuickVerb> = [];
-  const sizeVerb: WritingQuickVerb = state.chip ? "full" : "chip";
+  const offered: Array<QuickVerbId> = [];
+  const sizeVerb: QuickVerbId = state.chip ? "full" : "chip";
   if (verbs.includes(sizeVerb)) offered.push(sizeVerb);
   if (verbs.includes("hide")) offered.push("hide");
   return offered;
@@ -47,19 +40,11 @@ export function quickVerbLabel(verb: QuickVerbId, regionName: string): string {
       return "Show as chip";
     case "full":
       return "Show as full row";
-    case "move":
-      return "Move";
   }
 }
 
-/**
- * What the toast says afterwards, or `null` for the verb that has nothing to
- * announce: `move` hands the region to the editor rather than changing it.
- */
-export function quickVerbToast(
-  verb: QuickVerbId,
-  regionName: string,
-): string | null {
+/** What the toast says afterwards, which undoes the verb. */
+export function quickVerbToast(verb: QuickVerbId, regionName: string): string {
   switch (verb) {
     case "hide":
       return `${regionName} hidden`;
@@ -69,7 +54,5 @@ export function quickVerbToast(
       return `${regionName} is a chip`;
     case "full":
       return `${regionName} is a full row`;
-    case "move":
-      return null;
   }
 }

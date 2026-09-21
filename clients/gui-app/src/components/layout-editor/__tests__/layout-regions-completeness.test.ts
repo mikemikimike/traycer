@@ -283,20 +283,11 @@ describe("quick verbs", () => {
     }
   });
 
-  it("offers move exactly where an order row exists", () => {
-    for (const id of LAYOUT_REGION_IDS) {
-      const entry = regionFacts(id);
-      const movable = entry.rows.some((row) => row.kind === "position-order");
-      expect(entry.quickVerbs.includes("move"), id).toBe(movable);
-    }
-  });
-
   it("names the region in the copy that reads better with it", () => {
     expect(quickVerbLabel("hide", "Minimap")).toBe("Hide Minimap");
     expect(quickVerbLabel("chip", "Access")).toBe("Show as chip");
     expect(quickVerbToast("chip", "Access")).toBe("Access is a chip");
     expect(quickVerbToast("full", "Access")).toBe("Access is a full row");
-    expect(quickVerbToast("move", "Access")).toBeNull();
   });
 });
 

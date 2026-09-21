@@ -8,9 +8,8 @@ import {
   Shield,
   SlidersHorizontal,
 } from "lucide-react";
-import { REGION_DEPICTIONS } from "@/components/layout-editor/region-depiction";
 import {
-  MOVABLE_VERBS,
+  SHOW_HIDE_VERBS,
   SIZED_VERBS,
   type LayoutRegion,
   type StyleExample,
@@ -78,7 +77,6 @@ export const RUNNING_AGENTS_REGION: LayoutRegion<"runningAgents"> = {
   rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
-  depict: REGION_DEPICTIONS.runningAgents,
 };
 
 export const CHANGED_FILES_REGION: LayoutRegion<"changedFiles"> = {
@@ -94,7 +92,6 @@ export const CHANGED_FILES_REGION: LayoutRegion<"changedFiles"> = {
   rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
-  depict: REGION_DEPICTIONS.changedFiles,
 };
 
 export const BACKGROUND_REGION: LayoutRegion<"background"> = {
@@ -110,7 +107,6 @@ export const BACKGROUND_REGION: LayoutRegion<"background"> = {
   rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
-  depict: REGION_DEPICTIONS.background,
 };
 
 export const ATTACH_IMAGE_REGION: LayoutRegion<"attachImage"> = {
@@ -124,9 +120,8 @@ export const ATTACH_IMAGE_REGION: LayoutRegion<"attachImage"> = {
   keywords: ["attach", "image", "screenshot", "paste", "upload"],
   sampleFilled: false,
   rows: [TOOLBAR_LEFT_ORDER_ROW],
-  quickVerbs: MOVABLE_VERBS,
+  quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,
-  depict: REGION_DEPICTIONS.attachImage,
 };
 
 export const ACCESS_REGION: LayoutRegion<"access"> = {
@@ -148,7 +143,6 @@ export const ACCESS_REGION: LayoutRegion<"access"> = {
   ],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
-  depict: REGION_DEPICTIONS.access,
 };
 
 export const AGENT_REGION: LayoutRegion<"agent"> = {
@@ -162,9 +156,8 @@ export const AGENT_REGION: LayoutRegion<"agent"> = {
   keywords: ["harness", "provider", "vendor", "model"],
   sampleFilled: false,
   rows: [TOOLBAR_LEFT_ORDER_ROW],
-  quickVerbs: MOVABLE_VERBS,
+  quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,
-  depict: REGION_DEPICTIONS.agent,
 };
 
 export const MODEL_REGION: LayoutRegion<"model"> = {
@@ -181,9 +174,8 @@ export const MODEL_REGION: LayoutRegion<"model"> = {
     { kind: "style", description: null, examples: MODEL_EXAMPLES },
     { ...TOOLBAR_RIGHT_ORDER_ROW, pinnedRight: true },
   ],
-  quickVerbs: MOVABLE_VERBS,
+  quickVerbs: SHOW_HIDE_VERBS,
   stateWord: modelStateWord,
-  depict: REGION_DEPICTIONS.model,
 };
 
 export const MIC_REGION: LayoutRegion<"mic"> = {
@@ -197,7 +189,6 @@ export const MIC_REGION: LayoutRegion<"mic"> = {
   keywords: ["microphone", "mic", "voice", "dictation", "speech"],
   sampleFilled: false,
   rows: [TOOLBAR_RIGHT_ORDER_ROW],
-  quickVerbs: MOVABLE_VERBS,
+  quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,
-  depict: REGION_DEPICTIONS.mic,
 };

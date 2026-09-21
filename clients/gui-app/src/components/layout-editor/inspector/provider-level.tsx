@@ -4,7 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
-import { depictUsageProviderSegment } from "@/components/layout-editor/region-depiction";
+import { depictUsageProvider } from "@/components/layout-editor/region-depiction";
 import {
   AUTOMATIC_LIMIT_SELECTION,
   type LayoutArrangement,
@@ -63,7 +63,7 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
         </button>
       ) : null}
       <SpecimenStage off={!shown}>
-        {depictUsageProviderSegment(providerId, values.usageLimits)}
+        {depictUsageProvider(providerId, values.usageLimits, arrangement)}
       </SpecimenStage>
       <div className="flex items-start gap-2.5 px-3.5 pt-3.5 pb-3">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground">

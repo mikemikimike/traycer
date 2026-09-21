@@ -1,5 +1,4 @@
 import { House } from "lucide-react";
-import { REGION_DEPICTIONS } from "@/components/layout-editor/region-depiction";
 import {
   SHOW_HIDE_VERBS,
   type LayoutRegion,
@@ -20,5 +19,4 @@ export const HOME_TAB_REGION: LayoutRegion<"homeTab"> = {
   rows: [],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: shownStateWord,
-  depict: REGION_DEPICTIONS.homeTab,
 };
