@@ -46,6 +46,19 @@ export const ORDER_GROUP_IDS: ReadonlyArray<OrderGroupId> = [
 ];
 
 /**
+ * The order groups a CANVAS drag can reorder: the ones whose every member
+ * draws its own element beside its siblings, which is what there is to pick up.
+ *
+ * The other two are reordered in the inspector's list only. `usageProviders`
+ * is a list of segments inside one region, so its members carry no region
+ * identity of their own on the canvas; and the sidebar rail draws one button
+ * per GROUP rather than per panel and draws no divider at all, so a drop
+ * between two icons could not say which group the panel landed in (L-25's
+ * dividers are items in the list, where they are visible).
+ */
+export type CanvasOrderGroupId = "dock" | "toolbarLeft" | "toolbarRight";
+
+/**
  * Which of one provider's limits its usage segment draws.
  *
  * `automatic` is the tightest limit at the moment of drawing, so it can name a
@@ -146,6 +159,32 @@ export const DEFAULT_TOOLBAR_RIGHT: ReadonlyArray<ToolbarRegionId> = [
   "mic",
 ];
 
+/**
+ * Which canvas order group a region's element belongs to, or `null` for a
+ * region the canvas cannot reorder.
+ *
+ * Membership is a MODEL fact rather than a registry one, and it is static:
+ * `normalizeArrangement` puts a toolbar region found in the wrong cluster back
+ * where it belongs, so a dock region is one because its id is a
+ * `DockRegionId`, and the default lists are where that is written down.
+ *
+ * It lives here rather than being read off the region registry's own
+ * `position-order` row for a second reason, which is load order:
+ * `useLayoutRegion` stamps the attribute this answers, and the registry
+ * reaches the app's real leaves through `region-depiction.tsx` - leaves that
+ * call `useLayoutRegion`. Asking the registry from the hook would close that
+ * circle and leave the depictions half-initialised.
+ */
+export function canvasOrderGroupForRegion(
+  regionId: string,
+): CanvasOrderGroupId | null {
+  if (DEFAULT_DOCK_ORDER.some((id) => id === regionId)) return "dock";
+  if (DEFAULT_TOOLBAR_LEFT.some((id) => id === regionId)) return "toolbarLeft";
+  if (DEFAULT_TOOLBAR_RIGHT.some((id) => id === regionId))
+    return "toolbarRight";
+  return null;
+}
+
 export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
   dock: DEFAULT_DOCK_ORDER,
   toolbarLeft: DEFAULT_TOOLBAR_LEFT,
@@ -217,6 +256,101 @@ export function statusBarShown(
     : arrangement.usageHost === "status-bar";
 }
 
+// ── Reordering ──────────────────────────────────────────────────────────────
+
+/**
+ * One item taken out of a list and put back at another index, clamped.
+ *
+ * The single reordering primitive: a keyboard nudge, a pointer drop in the
+ * inspector's list and a canvas drop all reduce to it, so "what does moving an
+ * item do" has one answer and one set of tests.
+ */
+export function movedWithin<T>(
+  list: ReadonlyArray<T>,
+  fromIndex: number,
+  toIndex: number,
+): ReadonlyArray<T> {
+  const item = list[fromIndex];
+  if (item === undefined) return list;
+  const remaining = list.filter((_entry, index) => index !== fromIndex);
+  const insertAt = Math.min(Math.max(toIndex, 0), remaining.length);
+  return [...remaining.slice(0, insertAt), item, ...remaining.slice(insertAt)];
+}
+
+/**
+ * One canvas drop written back into a group's FULL order (4.7).
+ *
+ * The canvas shows only the members that are currently drawn - a hidden region
+ * has no element - so a drop there reorders a SUBSET. The members that were
+ * not on screen keep the slots they had, which is what makes dragging two
+ * visible chips past each other leave a hidden third where its owner put it.
+ */
+export function moveCanvasOrderMember(input: {
+  readonly arrangement: LayoutArrangement;
+  readonly group: CanvasOrderGroupId;
+  /** The members that WERE on screen, in the order they were drawn. */
+  readonly visibleIds: ReadonlyArray<string>;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+}): LayoutArrangement {
+  const { arrangement, group, visibleIds, fromIndex, toIndex } = input;
+  switch (group) {
+    case "dock":
+      return {
+        ...arrangement,
+        dock: movedWithinVisible(
+          arrangement.dock,
+          visibleIds,
+          fromIndex,
+          toIndex,
+        ),
+      };
+    case "toolbarLeft":
+      return {
+        ...arrangement,
+        toolbarLeft: movedWithinVisible(
+          arrangement.toolbarLeft,
+          visibleIds,
+          fromIndex,
+          toIndex,
+        ),
+      };
+    case "toolbarRight":
+      return {
+        ...arrangement,
+        toolbarRight: movedWithinVisible(
+          arrangement.toolbarRight,
+          visibleIds,
+          fromIndex,
+          toIndex,
+        ),
+      };
+  }
+}
+
+/**
+ * The subset the canvas showed, reordered and written back into the slots it
+ * occupied. Typed in the group's own ids throughout: the visible ids arrive as
+ * strings off the DOM and are only ever used to SELECT from the stored list,
+ * never to build one, so a stray id narrows nothing away (G1-23).
+ */
+function movedWithinVisible<T extends string>(
+  full: ReadonlyArray<T>,
+  visibleIds: ReadonlyArray<string>,
+  fromIndex: number,
+  toIndex: number,
+): ReadonlyArray<T> {
+  const slots = full.flatMap((id, index) =>
+    visibleIds.includes(id) ? [index] : [],
+  );
+  const subset = slots.map((slot) => full[slot]);
+  const reordered = movedWithin(subset, fromIndex, toIndex);
+  const next = full.slice();
+  for (const [position, slot] of slots.entries())
+    next[slot] = reordered[position];
+  return next;
+}
+
 // ── The rail's writers ──────────────────────────────────────────────────────
 // Arrangement in, arrangement out. The rail's own shape is `rail.ts`, which
 // knows nothing of an arrangement; these are the three gestures that put a new
@@ -234,16 +368,10 @@ export function moveRailEntry(
 ): LayoutArrangement {
   const fromIndex = arrangement.rail.findIndex((entry) => entry.id === entryId);
   if (fromIndex < 0) return arrangement;
-  const remaining = arrangement.rail.filter(
-    (_entry, index) => index !== fromIndex,
-  );
-  const insertAt = Math.min(Math.max(toIndex, 0), remaining.length);
-  const rail = [
-    ...remaining.slice(0, insertAt),
-    arrangement.rail[fromIndex],
-    ...remaining.slice(insertAt),
-  ];
-  return { ...arrangement, rail };
+  return {
+    ...arrangement,
+    rail: movedWithin(arrangement.rail, fromIndex, toIndex),
+  };
 }
 
 /** A new group boundary at `index`, on an id no divider has held before. */

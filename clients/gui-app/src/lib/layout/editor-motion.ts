@@ -61,6 +61,18 @@ export function prefersReducedMotion(): boolean {
   );
 }
 
+/**
+ * Whether the door is mid-flight right now.
+ *
+ * Read by the gestures that must not start against a shell that is still
+ * moving: during a View Transition the app column on screen is a SNAPSHOT, so
+ * a drag armed against it would measure boxes that are not where the real
+ * elements are about to be.
+ */
+export function layoutTransitionRunning(): boolean {
+  return document.documentElement.hasAttribute(TRANSITION_ATTRIBUTE);
+}
+
 /** Enter or leave a session, with whatever motion this moment allows. */
 export function runLayoutEditorMotion(input: LayoutEditorMotionInput): void {
   const startViewTransition = viewTransitionStarter();

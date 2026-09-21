@@ -12,7 +12,7 @@ import {
 import {
   isRailRegionId,
   setRegionShown,
-} from "@/components/layout-editor/inspector/rows/region-section-writes";
+} from "@/components/layout-editor/layout-gestures";
 import { SizeRow } from "@/components/layout-editor/inspector/rows/size-row";
 import { StyleRow } from "@/components/layout-editor/inspector/rows/style-row";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
@@ -198,6 +198,7 @@ function GrammarRowView(props: {
           group={row.group}
           description={row.description}
           pinnedRight={row.pinnedRight}
+          dividers={row.dividers}
           values={values}
           arrangement={arrangement}
           snapshot={snapshot}

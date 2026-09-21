@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  canvasOrderGroupForRegion,
   DEFAULT_ARRANGEMENT,
   insertRailDivider,
+  moveCanvasOrderMember,
+  movedWithin,
   moveRailEntry,
   removeRailDivider,
+  TOOLBAR_REGION_IDS,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import {
@@ -183,6 +187,110 @@ describe("the rail's move helpers", () => {
 
     expect(arrangement.rail.at(-1)).toEqual(panel("railAgents"));
     expect(arrangement.rail).toHaveLength(DEFAULT_RAIL.length);
+  });
+});
+
+describe("movedWithin", () => {
+  it("takes an item out and puts it back at the index asked for", () => {
+    expect(movedWithin(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
+    expect(movedWithin(["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
+    expect(movedWithin(["a", "b", "c"], 1, 1)).toEqual(["a", "b", "c"]);
+  });
+
+  it("clamps either end, and leaves a list it cannot index alone", () => {
+    expect(movedWithin(["a", "b", "c"], 0, 99)).toEqual(["b", "c", "a"]);
+    expect(movedWithin(["a", "b", "c"], 2, -5)).toEqual(["c", "a", "b"]);
+    const list = ["a", "b"];
+    expect(movedWithin(list, 7, 0)).toBe(list);
+  });
+});
+
+describe("a canvas drop written back into the full order (4.7)", () => {
+  const arrangement: LayoutArrangement = {
+    ...DEFAULT_ARRANGEMENT,
+    toolbarLeft: ["attachImage", "access", "agent"],
+  };
+
+  it("reorders the group when every member was on screen", () => {
+    const next = moveCanvasOrderMember({
+      arrangement,
+      group: "toolbarLeft",
+      visibleIds: ["attachImage", "access", "agent"],
+      fromIndex: 0,
+      toIndex: 2,
+    });
+
+    expect(next.toolbarLeft).toEqual(["access", "agent", "attachImage"]);
+  });
+
+  it("leaves a member that was NOT on screen in the slot it had", () => {
+    // `access` is hidden, so the canvas showed the other two; dragging the
+    // first past the second must not drag the hidden one along with it.
+    const next = moveCanvasOrderMember({
+      arrangement,
+      group: "toolbarLeft",
+      visibleIds: ["attachImage", "agent"],
+      fromIndex: 0,
+      toIndex: 1,
+    });
+
+    expect(next.toolbarLeft).toEqual(["agent", "access", "attachImage"]);
+  });
+
+  it("selects by id rather than trusting the ids it is handed", () => {
+    const next = moveCanvasOrderMember({
+      arrangement,
+      group: "toolbarLeft",
+      visibleIds: ["attachImage", "somethingElse", "agent"],
+      fromIndex: 0,
+      toIndex: 1,
+    });
+
+    // The id this build does not know selected nothing, so the drop moved the
+    // first visible member past the second: `agent`.
+    expect(next.toolbarLeft).toEqual(["agent", "access", "attachImage"]);
+  });
+
+  it("writes back only the group the drop was in", () => {
+    const next = moveCanvasOrderMember({
+      arrangement,
+      group: "dock",
+      visibleIds: ["changedFiles", "runningAgents", "background"],
+      fromIndex: 0,
+      toIndex: 1,
+    });
+
+    expect(next.dock).toEqual(["runningAgents", "changedFiles", "background"]);
+    expect(next.toolbarLeft).toBe(arrangement.toolbarLeft);
+    expect(next.rail).toBe(arrangement.rail);
+  });
+});
+
+describe("which regions a canvas drag can pick up", () => {
+  it("puts every dock and toolbar region in its own cluster", () => {
+    for (const regionId of DEFAULT_ARRANGEMENT.dock)
+      expect(canvasOrderGroupForRegion(regionId)).toBe("dock");
+    for (const regionId of DEFAULT_ARRANGEMENT.toolbarLeft)
+      expect(canvasOrderGroupForRegion(regionId)).toBe("toolbarLeft");
+    for (const regionId of DEFAULT_ARRANGEMENT.toolbarRight)
+      expect(canvasOrderGroupForRegion(regionId)).toBe("toolbarRight");
+  });
+
+  it("names every toolbar region exactly once across the two clusters", () => {
+    expect(
+      [
+        ...DEFAULT_ARRANGEMENT.toolbarLeft,
+        ...DEFAULT_ARRANGEMENT.toolbarRight,
+      ].sort(),
+    ).toEqual([...TOOLBAR_REGION_IDS].sort());
+  });
+
+  it("refuses a region reordered in the inspector's list only", () => {
+    // The rail draws one button per GROUP and no divider at all, and the
+    // usage providers are segments inside one region.
+    expect(canvasOrderGroupForRegion("railAgents")).toBeNull();
+    expect(canvasOrderGroupForRegion("usageLimits")).toBeNull();
+    expect(canvasOrderGroupForRegion("minimap")).toBeNull();
   });
 });
 

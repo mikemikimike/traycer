@@ -5,11 +5,14 @@ import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
- * Every write a region's section makes, each as ONE recorded gesture.
+ * Every write an editor session makes, each as ONE recorded gesture.
  *
- * Shared by the row renderers rather than repeated in them, because a write
- * that skipped `recordGesture` would be a change the editor's undo stack never
- * saw - invisible until someone pressed undo and the wrong thing moved.
+ * One module above both surfaces rather than one per surface: the inspector's
+ * rows and the canvas's drag change the same two things, and a write that
+ * skipped `recordGesture` would be a change the undo stack never saw -
+ * invisible until someone pressed undo and the wrong thing moved. It is also
+ * what makes a whole drag one step: the reflow is paint, and the drop calls
+ * {@link writeArrangement} exactly once.
  */
 
 export function isRailRegionId(id: RegionId): id is RailRegionId {

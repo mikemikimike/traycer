@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
-import { writeArrangement } from "@/components/layout-editor/inspector/rows/region-section-writes";
+import { writeArrangement } from "@/components/layout-editor/layout-gestures";
 import {
   EDGE_SIDE_OPTIONS,
   USAGE_HOST_OPTIONS,
@@ -11,9 +13,10 @@ import {
   positionRowChanged,
   revertPositionRow,
 } from "@/components/layout-editor/regions/region-position-rows";
-import type {
-  LayoutArrangement,
-  OrderGroupId,
+import {
+  insertRailDivider,
+  type LayoutArrangement,
+  type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { LayoutValues } from "@/lib/layout/layout-values";
@@ -104,6 +107,8 @@ export function PositionOrderRow(props: {
   readonly group: OrderGroupId;
   readonly description: string;
   readonly pinnedRight: boolean;
+  /** Whether this group's boundaries are items of its own (L-25): the rail. */
+  readonly dividers: boolean;
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
   readonly snapshot: LayoutSnapshot;
@@ -113,6 +118,7 @@ export function PositionOrderRow(props: {
     group,
     description,
     pinnedRight,
+    dividers,
     values,
     arrangement,
     snapshot,
@@ -139,6 +145,25 @@ export function PositionOrderRow(props: {
             arrangement={arrangement}
             onOpenProvider={null}
           />
+          {dividers ? (
+            <Button
+              type="button"
+              variant="muted-outline"
+              size="xs"
+              className="self-start"
+              onClick={() => {
+                // Appended, so a new boundary never lands in the middle of a
+                // grouping the user has already made; dragging it up is the
+                // gesture that places it (L-25).
+                writeArrangement(
+                  insertRailDivider(arrangement, arrangement.rail.length),
+                );
+              }}
+            >
+              <Plus />
+              Add divider
+            </Button>
+          ) : null}
           {pinnedRight ? (
             <p className="text-ui-xs text-muted-foreground">
               The model chip stays on the right.

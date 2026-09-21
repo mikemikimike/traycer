@@ -23,6 +23,18 @@ export const MAX_SPRING_STEP_SECONDS = 1 / 30;
 /** The travelling selection ring (section 6). */
 export const RING_SPRING = { response: 0.35, zeta: 1 } as const;
 
+/** The siblings reflowing around a member being dragged past them (section 6). */
+export const DRAG_SIBLING_SPRING = { response: 0.34, zeta: 1 } as const;
+
+/**
+ * The release, which is the one spring in the editor allowed a little bounce -
+ * and only because the gesture that ended handed it momentum (L-29). Let go
+ * from a standstill it has no velocity and no distance to cover, so the same
+ * underdamped spring simply places the member. Under either reduced-motion
+ * gate the drop is placed outright and this never runs.
+ */
+export const DRAG_RELEASE_SPRING = { response: 0.32, zeta: 0.8 } as const;
+
 export class Spring {
   private current: number;
   private target: number;
@@ -43,6 +55,16 @@ export class Spring {
 
   setTarget(target: number): void {
     this.target = target;
+  }
+
+  /**
+   * Hand the spring the speed the gesture it continues was carrying (L-29).
+   *
+   * The whole difference between a release that is thrown and one that is
+   * merely placed, and the reason the drop is a spring rather than a tween.
+   */
+  setVelocity(velocity: number): void {
+    this.velocity = velocity;
   }
 
   /** Arrive instantly, with no momentum left over. Reduced motion, and first paint. */

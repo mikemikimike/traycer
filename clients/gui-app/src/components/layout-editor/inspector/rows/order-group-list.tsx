@@ -7,12 +7,15 @@ import { assertNever } from "@/components/layout-editor/inspector/rows/assert-ne
 import {
   setRegionShown,
   writeArrangement,
-} from "@/components/layout-editor/inspector/rows/region-section-writes";
+} from "@/components/layout-editor/layout-gestures";
 import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
-import type {
-  LayoutArrangement,
-  OrderGroupId,
+import {
+  movedWithin,
+  moveRailEntry,
+  removeRailDivider,
+  type LayoutArrangement,
+  type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type {
@@ -48,8 +51,11 @@ export function OrderGroupList(props: {
         <SortableList<DockRegionId>
           selectedId={selectedId}
           items={arrangement.dock.map((id) => regionOrderItem(id, values))}
-          onReorder={(dock) => {
-            writeArrangement({ ...arrangement, dock });
+          onMove={(id, toIndex) => {
+            writeArrangement({
+              ...arrangement,
+              dock: movedById(arrangement.dock, id, toIndex),
+            });
           }}
         />
       );
@@ -60,8 +66,11 @@ export function OrderGroupList(props: {
           items={arrangement.toolbarLeft.map((id) =>
             regionOrderItem(id, values),
           )}
-          onReorder={(toolbarLeft) => {
-            writeArrangement({ ...arrangement, toolbarLeft });
+          onMove={(id, toIndex) => {
+            writeArrangement({
+              ...arrangement,
+              toolbarLeft: movedById(arrangement.toolbarLeft, id, toIndex),
+            });
           }}
         />
       );
@@ -72,8 +81,11 @@ export function OrderGroupList(props: {
           items={arrangement.toolbarRight.map((id) =>
             regionOrderItem(id, values),
           )}
-          onReorder={(toolbarRight) => {
-            writeArrangement({ ...arrangement, toolbarRight });
+          onMove={(id, toIndex) => {
+            writeArrangement({
+              ...arrangement,
+              toolbarRight: movedById(arrangement.toolbarRight, id, toIndex),
+            });
           }}
         />
       );
@@ -82,8 +94,15 @@ export function OrderGroupList(props: {
         <SortableList<RateLimitProviderId>
           selectedId={selectedId}
           items={providerOrderItems(arrangement, onOpenProvider)}
-          onReorder={(usageProviders) => {
-            writeArrangement({ ...arrangement, usageProviders });
+          onMove={(id, toIndex) => {
+            writeArrangement({
+              ...arrangement,
+              usageProviders: movedById(
+                arrangement.usageProviders,
+                id,
+                toIndex,
+              ),
+            });
           }}
         />
       );
@@ -93,33 +112,30 @@ export function OrderGroupList(props: {
           selectedId={selectedId}
           items={arrangement.rail.map((entry) =>
             entry.kind === "divider"
-              ? {
-                  id: entry.id,
-                  label: "Divider",
-                  icon: null,
-                  shown: null,
-                  onToggleShown: null,
-                  onActivate: null,
-                }
+              ? dividerOrderItem(entry.id, arrangement)
               : regionOrderItem(entry.id, values),
           )}
-          onReorder={(ids) => {
-            // One lookup table rather than a `find` per id: ticket 09 drives
-            // this from a drag, where the list is walked every frame.
-            const byId = new Map(arrangement.rail.map((e) => [e.id, e]));
-            writeArrangement({
-              ...arrangement,
-              rail: ids.flatMap((id) => {
-                const entry = byId.get(id);
-                return entry === undefined ? [] : [entry];
-              }),
-            });
+          // Panels and dividers alike, which is the whole of L-25: dragging a
+          // divider is what splits and merges groups, and dragging a panel
+          // past one is what changes which group it is in.
+          onMove={(id, toIndex) => {
+            writeArrangement(moveRailEntry(arrangement, id, toIndex));
           }}
         />
       );
     default:
       return assertNever(group);
   }
+}
+
+/** One id's new index, with an id this list no longer holds left alone. */
+function movedById<Id extends string>(
+  list: ReadonlyArray<Id>,
+  id: Id,
+  toIndex: number,
+): ReadonlyArray<Id> {
+  const fromIndex = list.indexOf(id);
+  return fromIndex < 0 ? list : movedWithin(list, fromIndex, toIndex);
 }
 
 function regionOrderItem<Id extends RegionId>(
@@ -137,6 +153,25 @@ function regionOrderItem<Id extends RegionId>(
         regionId,
         readControlValue(values[regionId], "shown") === "hidden",
       );
+    },
+    onRemove: null,
+    onActivate: null,
+  };
+}
+
+/** A group boundary as a first-class row: draggable, and removable (L-25). */
+function dividerOrderItem(
+  entryId: string,
+  arrangement: LayoutArrangement,
+): SortableListItem<string> {
+  return {
+    id: entryId,
+    label: "Divider",
+    icon: null,
+    shown: null,
+    onToggleShown: null,
+    onRemove: () => {
+      writeArrangement(removeRailDivider(arrangement, entryId));
     },
     onActivate: null,
   };
@@ -162,6 +197,7 @@ function providerOrderItems(
     onToggleShown: () => {
       toggleHiddenProvider(providerId, arrangement);
     },
+    onRemove: null,
     onActivate:
       onOpenProvider === null
         ? null

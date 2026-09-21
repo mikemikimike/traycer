@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useEpicViewTabId } from "@/components/epic-canvas/view-tab-context";
 import { usePaneVisible } from "@/components/epic-tabs/pane-visibility-context";
 import { useRegionValue } from "@/lib/layout-overrides";
+import { canvasOrderGroupForRegion } from "@/lib/layout/layout-arrangement";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,
@@ -92,6 +93,14 @@ export function useLayoutRegion(input: {
     node.setAttribute("data-layout-region", regionId);
     if (instanceId !== null)
       node.setAttribute("data-layout-instance", instanceId);
+    // What a canvas drag picks up and reflows against (4.7). Stamped here
+    // rather than by hand at each of the thirty call sites: the element that
+    // draws a region inherits that region's group by being registered.
+    const group = canvasOrderGroupForRegion(regionId);
+    if (group !== null) {
+      node.setAttribute("data-layout-group", group);
+      node.setAttribute("data-layout-draggable", "1");
+    }
     state.registerInstance(instance);
     flag(node, "data-ghost", ghostRef.current);
     decorate(instance);
@@ -211,6 +220,8 @@ function strip(node: HTMLElement): void {
   node.removeAttribute("data-layout-region");
   node.removeAttribute("data-layout-instance");
   node.removeAttribute("data-layout-anchor");
+  node.removeAttribute("data-layout-group");
+  node.removeAttribute("data-layout-draggable");
   node.removeAttribute("data-hover");
   node.removeAttribute("data-selected");
   node.removeAttribute("data-ghost");

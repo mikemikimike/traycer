@@ -26,6 +26,16 @@
   /* Above both, because a floating panel the user placed there is the one
      thing that is allowed to cover the canvas it decorates (L-38). */
   --layout-editor-float-z: 42;
+  /* A member in hand is off the surface, which is the whole of what the lift
+     says; the prototype's `--shadow-lift`, which this app has no token for. */
+  --layout-editor-lift-shadow: 0 10px 24px rgb(0 0 0 / 18%);
+}
+
+/* Both spellings the app's own dark variant is defined over (`index.css`): a
+   preset theme carries `theme-base-dark` rather than `dark`. */
+:root.dark,
+:root.theme-base-dark {
+  --layout-editor-lift-shadow: 0 12px 28px rgb(0 0 0 / 65%);
 }
 
 /* ---------------------------------------------------------------
@@ -280,6 +290,39 @@
 [data-layout-editing="1"]
   [data-layout-region][data-selected="1"][data-layout-anchor~="selected"] {
   outline: none;
+}
+
+/* ---------------------------------------------------------------
+   Reordering (L-24, L-29, 4.7)
+
+   The element itself is picked up, so the affordance is on the element: a
+   grab cursor on anything the canvas can reorder, and a lift while one is in
+   hand. Every pixel of the movement is a `transform` written per frame by
+   `drag-engine.ts`; nothing here transitions, because a transition and a
+   spring fighting over the same property is the stutter L-29 exists to
+   prevent.
+   --------------------------------------------------------------- */
+
+[data-layout-editing="1"] [data-layout-region][data-layout-draggable="1"] {
+  cursor: grab;
+}
+
+[data-layout-dragging="1"] {
+  z-index: 40;
+  border-radius: 7px;
+  box-shadow: var(--layout-editor-lift-shadow);
+  cursor: grabbing;
+}
+
+/* The sortable list's rows are outside the canvas and outside the firewall,
+   so they carry the same two states on their own. */
+[data-sortable-id] {
+  cursor: grab;
+}
+
+[data-sortable-id][data-grabbed="1"] {
+  border-color: var(--ring);
+  box-shadow: var(--layout-editor-lift-shadow);
 }
 
 /* ---------------------------------------------------------------
