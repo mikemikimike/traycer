@@ -44,6 +44,15 @@ const EXITING_ATTRIBUTE = "data-exiting";
  */
 const ENTERED_ATTRIBUTE = "data-entered";
 
+/**
+ * `flushSync` with nothing of its own to do, which is how the fallback entry
+ * lands the work the door has already scheduled before it begins the session:
+ * `flushSync` flushes every pending root, not only what its callback writes.
+ */
+function noop(): void {
+  return undefined;
+}
+
 /** The transition whose names `:root` is currently holding, if any. */
 let runningTransition: ViewTransition | null = null;
 
@@ -110,8 +119,19 @@ export function runLayoutEditorMotion(input: LayoutEditorMotionInput): void {
     inspectorNode?.removeAttribute(EXITING_ATTRIBUTE);
   const startViewTransition = viewTransitionStarter();
   if (startViewTransition === undefined || !shellTransitionAllowed(input)) {
-    if (input.phase === "enter") input.apply();
-    else slideInspectorOut(input.apply);
+    if (input.phase === "enter") {
+      // Nothing is gliding here, so `apply` would otherwise run in the very
+      // task the door called it from - ahead of the commit for the work the
+      // door has already scheduled, which on the way in is the sample tab's
+      // activation. `beginSession` fires `useLayoutRegion`'s subscription
+      // synchronously, so against an uncommitted activation it reads the
+      // OUTGOING surface's `visible` and registers that tab's instances for a
+      // commit; a deep-link target then rings a node in the tab being hidden
+      // (R2-05). Landing that commit first is what the transition path gets
+      // for free by running a frame later.
+      flushSync(noop);
+      input.apply();
+    } else slideInspectorOut(input.apply);
     return;
   }
   const root = document.documentElement;

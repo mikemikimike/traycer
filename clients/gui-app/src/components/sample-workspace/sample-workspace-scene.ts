@@ -1,4 +1,5 @@
 import type { ComposerToolbarValues } from "@/stores/composer/composer-toolbar-store";
+import type { ComposerDictationControl } from "@/components/home/toolbar/composer-mic-button";
 import type { TokenUsage } from "@traycer/protocol/persistence/epic/foundation";
 import type { ChatTurnMinimapItem } from "@/components/chat/chat-turn-minimap-logic";
 import type { ChatDockCompactChipModel } from "@/components/chat/chat-dock-compact-context";
@@ -90,8 +91,8 @@ export const SAMPLE_CHANGE_TOTALS = { additions: 47, deletions: 9 };
  *
  * `accessRole: "owner"` with no active turn is what opens `revertGate`, so the
  * sample shows "Undo all" in its ENABLED state; the handler returns `null`,
- * the panel's own "handled, nothing to track", and the surrounding `inert`
- * means it is never reached anyway.
+ * the panel's own "handled, nothing to track", and the edit firewall swallows
+ * the gesture at the app column before it is ever reached (L-131).
  */
 export const SAMPLE_RESTORE: ChatRestoreContextValue = {
   accessRole: "owner",
@@ -222,6 +223,25 @@ export const SAMPLE_QUEUE: ChatQueueState = {
 
 /** Nothing in the sample dock has a stop in flight. */
 export const SAMPLE_NO_PENDING_STOPS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * The dictation control the mic slot needs before it draws anything (L-116).
+ *
+ * `ComposerMicSlot` returns null without one whatever Layout ▸ Microphone says,
+ * because withholding the control is how `voiceInputEnabled` turns the feature
+ * off - right for the real composer, wrong for a scene whose job is to depict
+ * the toolbar in each state (L-98). `idle` is the state the chip rests in, so
+ * the sample draws the plain mic the user is choosing to keep or remove, and
+ * `getStream` answers the recording bar's one question with "no stream" - a
+ * question it never asks, since nothing in this scene can start recording.
+ */
+export const SAMPLE_DICTATION: ComposerDictationControl = {
+  state: "idle",
+  onToggle: sampleNoop,
+  onStop: sampleNoop,
+  onCancel: sampleNoop,
+  getStream: sampleNoStream,
+};
 export const SAMPLE_TOOLBAR_VALUES: ComposerToolbarValues = {
   permission: "supervised",
   selection: {
@@ -335,12 +355,17 @@ export const SAMPLE_DOCK: ReadonlyArray<
 export function sampleNoop(): void {}
 
 /**
- * The stop-action string every inert dock handler returns.
+ * The stop-action string every sample dock handler returns.
  *
  * The real handlers answer with an action id the caller tracks, and `null` is
  * their "handled, nothing to track" - which is exactly what a sample gesture
  * is, so the sample passes `null` rather than inventing an id no store holds.
  */
 export function sampleNoopAction(): string | null {
+  return null;
+}
+
+/** The sample composer records nothing, so it holds no microphone stream. */
+export function sampleNoStream(): MediaStream | null {
   return null;
 }

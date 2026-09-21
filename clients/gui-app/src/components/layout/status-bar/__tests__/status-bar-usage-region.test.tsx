@@ -85,8 +85,18 @@ function renderCluster(): void {
   );
 }
 
+/**
+ * The editor's own registry, not the DOM. `data-layout-region` is the region's
+ * NAME and is on the element at rest too since L-129, because a right-click
+ * has to be able to resolve a region while the user is only using the app;
+ * what these tests are about is the REGISTRATION, which is still the one thing
+ * a session decides.
+ */
 function registered(): ReadonlyArray<Element> {
-  return [...document.querySelectorAll('[data-layout-region="usageLimits"]')];
+  const instances = [...useLayoutEditorStore.getState().instances.values()];
+  return instances
+    .filter((instance) => instance.regionId === "usageLimits")
+    .map((instance) => instance.node);
 }
 
 beforeEach(() => {

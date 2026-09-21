@@ -7,9 +7,16 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
+import {
+  focusFirstSortableRow,
+  focusSortableRowGrab,
+} from "@/components/layout-editor/inspector/first-row-focus";
+import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
-import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
+import {
+  PresetsBlock,
+  ResetEverythingButton,
+} from "@/components/layout-editor/inspector/presets-block";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import { UsageHostControl } from "@/components/layout-editor/inspector/region-controls";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
@@ -29,6 +36,7 @@ import { openLayoutEditor } from "@/lib/layout/editor-session";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { mobileFooterChanged } from "@/lib/layout/layout-diff";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import {
   readPendingLayoutRegion,
   subscribePendingLayoutRegion,
@@ -90,7 +98,7 @@ export function LayoutSettingsPanel(): ReactNode {
     [],
   );
 
-  useLayoutRegionLanding(paneRef, setOpenRows);
+  useLayoutRegionLanding({ paneRef, filter, openRows, setOpenRows });
 
   const surfaces = SURFACE_GROUPS.filter((group) =>
     surfaceMatchesFilter(group.id, filter),
@@ -129,11 +137,21 @@ export function LayoutSettingsPanel(): ReactNode {
             {/* No canvas here, so a preset hover previews nothing (L-43). */}
             <PresetsBlock onPreviewPreset={noop} />
           </SettingsGroup>
-          <PageFilter />
+          <PageFilter paneRef={paneRef} />
           {surfaces.length === 0 ? (
-            <p className="px-1 text-ui-sm text-muted-foreground">
-              No part of the app matches "{filter}".
-            </p>
+            <div className="flex flex-wrap items-center gap-2 px-1 text-ui-sm text-muted-foreground">
+              <p>No part of the app matches "{filter}".</p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  useLayoutEditorStore.getState().setFilter("");
+                }}
+              >
+                Clear filter
+              </Button>
+            </div>
           ) : (
             surfaces.map((group) => (
               <SettingsGroup
@@ -157,6 +175,7 @@ export function LayoutSettingsPanel(): ReactNode {
               </SettingsGroup>
             ))
           )}
+          <ResetEverythingCard snapshot={snapshot} />
         </div>
       </LayoutFormHostContext>
     </SettingsPanelShell>
@@ -164,19 +183,69 @@ export function LayoutSettingsPanel(): ReactNode {
 }
 
 /**
- * The index's filter field (L-07, I-11), which this page needed as soon as it
- * stopped being twenty-two sections: five cards of rows is still a page a
- * person arrives at knowing the word for what they want.
+ * The finder (L-07, I-11, L-125), which this page needed as soon as it stopped
+ * being twenty-two sections: six cards of rows is still a page a person
+ * arrives at knowing the word for what they want.
+ *
+ * **Sticky to the top of the settings pane**, so it is reachable from anywhere
+ * on a page five cards long. No border and no shadow: the cards scroll under
+ * it and the pane's own fill is the separation.
+ *
+ * It stays BETWEEN the presets and the surface cards rather than moving to the
+ * page top, because the finder belongs immediately above the thing it filters
+ * and the Settings modal's own search already occupies the top of the pane - a
+ * second field up there is the duplication this whole epic is about.
  */
-function PageFilter(): ReactNode {
+function PageFilter(props: {
+  readonly paneRef: { current: HTMLDivElement | null };
+}): ReactNode {
   const ref = useRef<HTMLInputElement | null>(null);
   return (
-    <div className="-mx-3">
-      {/* `null`, not a no-op: the page has no "first match" to open, so Enter
-        is left to the browser and to whatever is around this field (a form,
-        the Settings modal) rather than being taken and dropped. */}
-      <RegionFilter ref={ref} onArrowDown={noop} onEnter={null} />
+    <div className="sticky top-0 z-20 -mx-3 bg-background">
+      {/* ArrowDown lands on the first row on the page, which is the walk L-31
+        asks for and the thing this key was being taken and dropped for
+        (R2-04). `setKeyboardNav` is deliberately NOT written: that flag is a
+        fact about an editor SESSION, and this host has none.
+
+        `onEnter` is `null`, not a no-op: the page has no "first match" to
+        open, so Enter is left to the browser and to whatever is around this
+        field (a form, the Settings modal). */}
+      <RegionFilter
+        ref={ref}
+        onArrowDown={() => {
+          focusFirstSortableRow(props.paneRef.current);
+        }}
+        onEnter={null}
+      />
     </div>
+  );
+}
+
+/**
+ * The floor, last on the page and the only card with a tone (redesign 4.4,
+ * L-20).
+ *
+ * It renders whether or not anything has changed, with its button disabled on
+ * a layout nobody has touched: showing the floor and saying you are standing
+ * on it is clearer than a card that vanishes (5.8). The confirm inside the
+ * button stays, because this host has no Undo (L-108).
+ */
+function ResetEverythingCard(props: {
+  readonly snapshot: LayoutSnapshot;
+}): ReactNode {
+  return (
+    <SettingsGroup
+      group={LAYOUT.definitions.resetEverything}
+      showTitle
+      tone="danger"
+      dataTestId="layout-reset-group"
+      fill={false}
+    >
+      <SettingsRow
+        row={LAYOUT.definitions.resetEverythingAction}
+        control={<ResetEverythingButton snapshot={props.snapshot} />}
+      />
+    </SettingsGroup>
   );
 }
 
@@ -247,24 +316,36 @@ function StatusBarSurfaceRows(): ReactNode {
   );
 }
 
+/**
+ * A `SettingsRow`, not an `InspectorRow` (L-126).
+ *
+ * It was the last place on this page where the dock's scale sat at surface
+ * level beside a `SettingsRow` at the form's (P-4), and it carried no
+ * settings-search anchor, so "where does usage show" was unfindable. Its own
+ * definition fixes both.
+ */
 function UsageHostRow(): ReactNode {
   const arrangement = useLayoutStore((state) => state.arrangement);
   const moved = arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost;
   return (
-    <InspectorRow
-      label="Where these live"
-      description="Usage limits and Resource monitor move together. In the top bar there is no status bar left to draw."
-      onRevert={
-        moved
-          ? () => {
-              writeArrangement({
-                ...arrangement,
-                usageHost: DEFAULT_ARRANGEMENT.usageHost,
-              });
-            }
-          : undefined
+    <SettingsRow
+      row={LAYOUT.definitions.usageHost}
+      control={
+        <div className="flex items-center gap-1.5">
+          <UsageHostControl arrangement={arrangement} />
+          {moved ? (
+            <RevertButton
+              label="Revert where these live"
+              onRevert={() => {
+                writeArrangement({
+                  ...arrangement,
+                  usageHost: DEFAULT_ARRANGEMENT.usageHost,
+                });
+              }}
+            />
+          ) : null}
+        </div>
       }
-      control={<UsageHostControl arrangement={arrangement} />}
     />
   );
 }
@@ -334,19 +415,32 @@ function RevertMobileFooter(): ReactNode {
  *
  * The request OUTLIVES the call that made it, because the panel mounts after
  * the navigation commits - so it is read from the door's own slot rather than
- * passed in, and taking it is what ends it. Taking notifies, which is what
- * makes this effect run exactly twice: once with the request, once with
- * nothing left to do.
+ * passed in, and taking it is what ends it.
  *
- * Nothing is deferred to a later frame. The ROW exists as soon as its card
- * renders - the disclosure only decides whether its detail does - so the
- * scroll reads a box that is already laid out, at the one moment React
- * guarantees it: after the commit that put it there.
+ * **The request survives the renders that make the row exist** (5.9). A target
+ * inside a card the filter had taken off the page was silently dropped, so a
+ * result for "Minimap" landed on nothing whenever the field still held a word
+ * from a previous visit. Two writes can be what puts the row on the page -
+ * clearing that filter, and opening the row's own disclosure - and both of
+ * them re-render, so the row does not exist until React has committed them.
+ * The effect therefore makes those writes and RETURNS, leaving the request in
+ * its slot; it runs again in the commit they produce, where the page is in the
+ * state the row needs and the DOM is laid out. Nothing is deferred to a timer:
+ * re-running on the commit is React's own guarantee, not a guess about when
+ * one will happen. Taking the request is what ends it, and it is taken on the
+ * pass that could answer it whether or not a row was there to answer with - a
+ * landing that fired later, on an unrelated keystroke, would be a scroll
+ * nobody asked for.
  */
-function useLayoutRegionLanding(
-  paneRef: { current: HTMLDivElement | null },
-  setOpenRows: (update: (current: ReadonlyArray<string>) => string[]) => void,
-): void {
+function useLayoutRegionLanding(input: {
+  readonly paneRef: { current: HTMLDivElement | null };
+  readonly filter: string;
+  readonly openRows: ReadonlyArray<string>;
+  readonly setOpenRows: (
+    update: (current: ReadonlyArray<string>) => string[],
+  ) => void;
+}): void {
+  const { paneRef, filter, openRows, setOpenRows } = input;
   const pending = useSyncExternalStore(
     subscribePendingLayoutRegion,
     readPendingLayoutRegion,
@@ -355,25 +449,27 @@ function useLayoutRegionLanding(
 
   useEffect(() => {
     if (pending === null) return;
+    const regionId = pending.regionId;
+    const hidden = filter !== "";
+    const closed = !openRows.includes(regionId);
+    if (hidden) useLayoutEditorStore.getState().setFilter("");
+    if (closed) setOpenRows((current) => [...current, regionId]);
+    if (hidden || closed) return;
     takePendingLayoutRegion();
-    setOpenRows((current) =>
-      current.includes(pending.regionId)
-        ? [...current]
-        : [...current, pending.regionId],
-    );
     const row = paneRef.current?.querySelector(
-      layoutRegionRowSelector(pending.regionId),
+      layoutRegionRowSelector(regionId),
     );
-    // A card the filter has taken off the page has no row to land on, and the
-    // request is spent either way: a landing that fired later, on an unrelated
-    // filter keystroke, would be a scroll nobody asked for.
     if (row === null || row === undefined) return;
     scrollPaneToCenter(row, null);
+    // The scroll is for the eye; the focus is for the hands. A keyboard user
+    // used to land with focus wherever navigation had left it, looking at a
+    // flash they could not act on.
+    focusSortableRowGrab(row);
     row.setAttribute(LANDING_FLASH_ATTRIBUTE, "true");
     window.setTimeout(() => {
       row.removeAttribute(LANDING_FLASH_ATTRIBUTE);
     }, LANDING_FLASH_MS);
-  }, [pending, paneRef, setOpenRows]);
+  }, [pending, filter, openRows, paneRef, setOpenRows]);
 }
 
 /** The same mark every settings-search result leaves (`settings-search.css`). */

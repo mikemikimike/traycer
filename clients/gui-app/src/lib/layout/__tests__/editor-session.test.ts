@@ -17,6 +17,7 @@ import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import type { SystemModalActive } from "@/stores/tabs/system-overlay-types";
+import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -201,6 +202,7 @@ beforeEach(() => {
   toasts.info.mockReset();
   navigate.mockReset();
   publishModalApi(null);
+  useCommandPaletteStore.setState({ open: false });
   setViewportWidth(1440);
   useLayoutStore.setState({
     ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -396,6 +398,74 @@ describe("the system overlay the editor opens under (L-91)", () => {
     expect(open(null)).toBe(false);
 
     expect(overlay.close).not.toHaveBeenCalled();
+  });
+});
+
+describe("the command palette the door was reached from (L-134)", () => {
+  /**
+   * LV2-06. The palette dismisses itself AFTER the item it ran - a `finally`
+   * in `runCommandItem`, a microtask later still because `run` is awaited -
+   * and the sample tab's activation did not survive that: the editor docked
+   * over the tab the user came from, with the sample workspace beside it as a
+   * retained background tab registering nothing.
+   *
+   * The ordering is the whole fix, so the assertion is the ordering: what the
+   * palette was doing at the moment the activation ran.
+   */
+  it("is already dismissed when the activation runs", () => {
+    useCommandPaletteStore.setState({ open: true });
+    let paletteWasOpen: boolean | null = null;
+    navigation.activateTabIntent.mockImplementation(() => {
+      paletteWasOpen = useCommandPaletteStore.getState().open;
+    });
+
+    expect(
+      openLayoutEditor({
+        source: "command_palette",
+        entry: "keyboard",
+        target: null,
+        navigate,
+      }),
+    ).toBe(true);
+
+    expect(navigation.activateTabIntent).toHaveBeenCalledOnce();
+    expect(paletteWasOpen).toBe(false);
+    expect(useCommandPaletteStore.getState().open).toBe(false);
+  });
+
+  it("leaves the width-gate redirect without a session to dismiss for", () => {
+    // Below the gate there is no canvas to open, so the door redirects into
+    // Settings > Layout - and the palette's own dismissal is the palette's
+    // business on that path, not a layer the door has to put down first.
+    useCommandPaletteStore.setState({ open: true });
+    setViewportWidth(700);
+
+    expect(open(null)).toBe(false);
+
+    expect(useCommandPaletteStore.getState().open).toBe(true);
+  });
+});
+
+describe("asked again from inside a live session (L-19, L-129)", () => {
+  it("lands on the region the second request names", () => {
+    // Since quick verbs work inside a session, the menu's own "Customize
+    // layout..." is an ordinary gesture there. There is no second door to
+    // open, so what is left of the request is the region it named.
+    open(null);
+    const session = useLayoutEditorStore.getState().session;
+    expect(session).not.toBeNull();
+
+    expect(
+      openLayoutEditor({
+        source: "direct_ui",
+        entry: "pointer",
+        target: "minimap",
+        navigate,
+      }),
+    ).toBe(true);
+
+    expect(useLayoutEditorStore.getState().session).toBe(session);
+    expect(useLayoutEditorStore.getState().selected).toBe("minimap");
   });
 });
 

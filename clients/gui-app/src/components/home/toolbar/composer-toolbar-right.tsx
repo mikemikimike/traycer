@@ -60,8 +60,9 @@ function ComposerToolbarRightImpl(props: ComposerToolbarRightProps) {
 
   // One menu for the strip, naming whichever item the pointer was over
   // (G3-10); the send button is no region, so a right-click on it opens
-  // nothing. A presentation copy gets no menu at all.
-  if (props.presentation === true) return cluster;
+  // nothing. The presentation copy carries the menu too - it is the sample
+  // workspace's toolbar, which is the one the user right-clicks while
+  // customizing (L-129).
   return <LayoutClusterContextMenu>{cluster}</LayoutClusterContextMenu>;
 }
 

@@ -43,6 +43,16 @@ import { prefersReducedMotion } from "@/lib/layout/editor-motion";
 /** Clears the region's own edge without swallowing its neighbours. */
 const RING_PADDING = 3;
 
+/**
+ * How far the widest band paints OUTSIDE the ring's own box: the halo's spread
+ * in `layout-editor.css`.
+ *
+ * The ring is a `box-shadow`, so the thing the user sees is 6px larger on every
+ * side than the box measured here - which is why a box that merely touches the
+ * window edge is already clipped (LV2-16).
+ */
+const RING_BLEED = 6;
+
 /** The ring's own box in viewport pixels, which is the rect plus the padding. */
 interface RingBox {
   readonly x: number;
@@ -108,12 +118,12 @@ export function createSelectionRing(): SelectionRingController {
     frame = requestAnimationFrame(tick);
 
     const rect = node.getBoundingClientRect();
-    const target: RingBox = {
+    const target = insideWindow({
       x: rect.left - RING_PADDING,
       y: rect.top - RING_PADDING,
       width: rect.width + RING_PADDING * 2,
       height: rect.height + RING_PADDING * 2,
-    };
+    });
     // Nothing has moved, the ring has arrived and it is already lit: the rect
     // above is the whole cost of this frame.
     if (lit && aim !== null && sameBox(aim, target) && settled()) return;
@@ -187,6 +197,29 @@ export function createSelectionRing(): SelectionRingController {
       tracked = null;
     },
   };
+}
+
+/**
+ * The ring with every band it paints inside the window (LV2-16).
+ *
+ * Regions sit on the window's last pixel row - the status bar's usage row is
+ * one - so a padded box plus the halo's bleed puts the bottom band off screen,
+ * where the browser clips it and the selection reads as an open box rather
+ * than as a ring.
+ *
+ * Shrunk rather than moved: the ring says WHICH element is selected, so every
+ * edge it can show stays on the element's own edge. A region that has left the
+ * window entirely keeps its true box and travels off screen as before - there
+ * is nothing there to frame, and a collapsed box would draw a bar against the
+ * edge instead.
+ */
+function insideWindow(box: RingBox): RingBox {
+  const left = Math.max(box.x, RING_BLEED);
+  const top = Math.max(box.y, RING_BLEED);
+  const right = Math.min(box.x + box.width, window.innerWidth - RING_BLEED);
+  const bottom = Math.min(box.y + box.height, window.innerHeight - RING_BLEED);
+  if (right <= left || bottom <= top) return box;
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 function sameBox(left: RingBox, right: RingBox): boolean {

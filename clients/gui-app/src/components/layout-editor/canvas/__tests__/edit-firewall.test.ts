@@ -30,7 +30,10 @@ function mountColumn(): Column {
   document.body.append(column, inspector);
 
   const heard: Array<string> = [];
-  for (const type of [...FIREWALLED_EVENT_TYPES, "wheel"]) {
+  // `contextmenu` is no longer on the swallowed list (L-129) but is still a
+  // gesture this suite listens for, because whether the app hears it is now
+  // the question rather than a given.
+  for (const type of [...FIREWALLED_EVENT_TYPES, "contextmenu", "wheel"]) {
     control.addEventListener(type, () => {
       heard.push(type);
     });
@@ -77,6 +80,40 @@ describe("the edit firewall (4.4)", () => {
     ]) {
       expect(FIREWALLED_EVENT_TYPES).toContain(type);
     }
+  });
+
+  /**
+   * L-129. `contextmenu` used to be on the swallowed list, which made quick
+   * verbs - the mode-less half of the model (L-19) - unreachable from inside a
+   * session: the menu's own trigger never saw the event. The rule is now the
+   * region test, so these two are the halves of it.
+   */
+  it("lets a right-click on a named region reach its menu (L-129)", () => {
+    const { control, heard } = mountColumn();
+    control.setAttribute("data-layout-region", "mic");
+    // The deepest node under the pointer is usually the control's own glyph,
+    // not the named element itself, so the test is `closest` rather than the
+    // target's own attribute - and the menu's trigger is an ancestor besides.
+    const glyph = document.createElement("span");
+    control.append(glyph);
+
+    glyph.dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+
+    expect(heard).toEqual(["contextmenu", "column:contextmenu"]);
+  });
+
+  it("still swallows a right-click that is not on a region", () => {
+    // A chat message, a transcript, a text field: the app's own menu over the
+    // user's own content, which is what the firewall is for.
+    const { control, heard } = mountColumn();
+
+    control.dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+
+    expect(heard).toEqual([]);
   });
 
   it("lets the wheel through, so the app keeps scrolling (L-17)", () => {

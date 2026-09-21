@@ -5,14 +5,20 @@ import { readControlValue } from "@/components/layout-editor/inspector/region-co
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import {
   LAYOUT_REGION_LIST,
+  regionFacts,
   regionStateWord,
+  type RegionFacts,
 } from "@/components/layout-editor/regions/region-facts";
 import { regionMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
-import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
+import {
+  SURFACE_GROUPS,
+  type SurfaceGroupId,
+} from "@/components/layout-editor/regions/region-grammar";
 import { regionPositionMoved } from "@/components/layout-editor/regions/region-position-rows";
 import { regionChanged } from "@/lib/layout/layout-diff";
 import type { LayoutPresetId } from "@/lib/layout/layout-presets";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
+import type { RailEntry } from "@/lib/layout/rail";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   useLayoutEditorStore,
@@ -58,6 +64,69 @@ function rememberIndexFocus(): void {
       : { session, regionId: selected };
 }
 
+/**
+ * One line of the index: a region to open, or a group boundary to read.
+ *
+ * Only the sidebar has the second kind, because only the rail has boundaries
+ * of its own (L-25).
+ */
+type IndexEntry =
+  | { readonly kind: "region"; readonly region: RegionFacts }
+  | { readonly kind: "divider"; readonly id: string };
+
+/**
+ * The sidebar group's lines: the rail's own order, with its group breaks
+ * (LV2-09).
+ *
+ * The index used to list the nine panels in registry order while the canvas
+ * beside it drew them in `arrangement.rail`'s, so row 2 of the list was icon 5
+ * on the screen, and the dividers a user had added were invisible until they
+ * opened the section. The list IS the rail's picture in this host, so it is
+ * read off the rail.
+ *
+ * A divider is drawn as the break it is rather than as a row of its own: the
+ * rail draws a boundary as a gap between two icons, not as the word "Divider",
+ * and a row per divider would be seven extra lines in the shipped rail alone.
+ * The word, the remove button and the drag belong to the sortable list, which
+ * is where a divider is OPERATED.
+ */
+function railIndexEntries(
+  rail: ReadonlyArray<RailEntry>,
+  filter: string,
+): ReadonlyArray<IndexEntry> {
+  const entries: IndexEntry[] = [];
+  let pending: string | null = null;
+  for (const entry of rail) {
+    if (entry.kind === "divider") {
+      // Held, not drawn: a break needs a line on each side of it. One at
+      // either end of the rail - or the second of two in a row - separates
+      // nothing, which is exactly how inert it is in the rail itself
+      // (`leftPanelGroupsFromRail`), and under a filter the same rule drops
+      // the breaks whose neighbours have gone.
+      if (entries.length > 0) pending = entry.id;
+      continue;
+    }
+    if (!regionMatchesFilter(entry.id, filter)) continue;
+    if (pending !== null) {
+      entries.push({ kind: "divider", id: pending });
+      pending = null;
+    }
+    entries.push({ kind: "region", region: regionFacts(entry.id) });
+  }
+  return entries;
+}
+
+/** Every other surface: the registry's declaration order, filtered. */
+function surfaceIndexEntries(
+  surface: SurfaceGroupId,
+  filter: string,
+): ReadonlyArray<IndexEntry> {
+  return LAYOUT_REGION_LIST.filter(
+    (region) =>
+      region.surface === surface && regionMatchesFilter(region.id, filter),
+  ).map((region): IndexEntry => ({ kind: "region", region }));
+}
+
 interface InspectorIndexProps {
   /** Nothing selected (L-06): presets, then the region index. */
   readonly onPreviewPreset: (presetId: LayoutPresetId | null) => void;
@@ -66,6 +135,11 @@ interface InspectorIndexProps {
 /**
  * The empty state (L-06): presets, the filter, then every region grouped by
  * surface with state words and changed-dots. `buildIndex` in the prototype.
+ *
+ * Within a surface the registry's declaration order stands, except on the
+ * sidebar: the rail is the one surface whose order the user rearranges and the
+ * canvas draws, so that group is read off `arrangement.rail`, breaks included
+ * (LV2-09).
  *
  * The primary keyboard surface (L-31): arrows walk the rows with the ring
  * following (the ring itself is ticket 06's wiring; this component raises
@@ -80,16 +154,22 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Map<RegionId, HTMLButtonElement>>(new Map());
 
+  // A group with no region left has no divider left either, so one emptiness
+  // test covers both kinds of line.
   const groups = SURFACE_GROUPS.map((group) => ({
     group,
-    regions: LAYOUT_REGION_LIST.filter(
-      (region) =>
-        region.surface === group.id && regionMatchesFilter(region.id, filter),
-    ),
-  })).filter((entry) => entry.regions.length > 0);
+    entries:
+      group.id === "sidebar"
+        ? railIndexEntries(snapshot.arrangement.rail, filter)
+        : surfaceIndexEntries(group.id, filter),
+  })).filter((entry) => entry.entries.length > 0);
 
+  // The walk is over the rows that open something: a break is read, not
+  // operated, so an arrow steps straight over it.
   const orderedIds = groups.flatMap((entry) =>
-    entry.regions.map((region) => region.id),
+    entry.entries.flatMap((item) =>
+      item.kind === "divider" ? [] : [item.region.id],
+    ),
   );
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
 
@@ -154,7 +234,11 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
       <PresetsBlock onPreviewPreset={onPreviewPreset} />
       <RegionFilter
         ref={filterRef}
+        // The field takes the key; lighting the canvas's keyboard mode is
+        // THIS host's, because `keyboardNav` is a fact about a session and the
+        // page draws the same field without one (R2-04).
         onArrowDown={() => {
+          useLayoutEditorStore.getState().setKeyboardNav(true);
           focusRow(0);
         }}
         onEnter={() => {
@@ -173,7 +257,18 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
             <div className="px-3.5 pt-3 pb-1 text-overline text-muted-foreground uppercase">
               {entry.group.label}
             </div>
-            {entry.regions.map((region) => {
+            {entry.entries.map((item) => {
+              if (item.kind === "divider") {
+                return (
+                  <div
+                    key={item.id}
+                    role="separator"
+                    data-rail-divider={item.id}
+                    className="mx-3.5 my-1 h-px bg-border"
+                  />
+                );
+              }
+              const region = item.region;
               const changed =
                 regionChanged(snapshot, region.id) ||
                 regionPositionMoved(snapshot, region.id);

@@ -6,7 +6,10 @@ import {
   layoutDragActive,
 } from "@/components/layout-editor/canvas/drag-engine";
 import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas";
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
+import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { railDividerId } from "@/lib/layout/rail";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
@@ -52,6 +55,31 @@ function Region(props: {
   return (
     <div ref={ref} data-testid={props.testId}>
       <span data-testid={`${props.testId}-inner`}>inner</span>
+    </div>
+  );
+}
+
+/**
+ * The sidebar's icon column, with the real boundary element in it: the one
+ * member of a canvas order group that is NOT a region (L-115).
+ */
+function RailCanvas(): ReactElement {
+  const [column, setColumn] = useState<HTMLElement | null>(null);
+  useLayoutCanvas(column);
+  return (
+    <div ref={setColumn} data-layout-column data-testid="column">
+      <div {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}>
+        <Region regionId="railAgents" instanceId={null} testId="rail-agents" />
+        <LeftPanelRailDivider
+          dividerId={railDividerId(1)}
+          orientation="vertical"
+        />
+        <Region
+          regionId="railTerminals"
+          instanceId={null}
+          testId="rail-terminals"
+        />
+      </div>
     </div>
   );
 }
@@ -351,6 +379,21 @@ describe("the session's canvas", () => {
 
     expect(useLayoutEditorStore.getState().selected).toBe("attachImage");
     expect(layoutDragActive()).toBe(false);
+  });
+
+  // A rail boundary is a member of the rail's order and nothing else (L-115),
+  // so the press that picks it up cannot be resolved from a region - which is
+  // why "what was pressed" and "what can be dragged" are two questions here.
+  it("arms a drag on a rail boundary, which is a member and not a region", () => {
+    openSession();
+    const view = render(<RailCanvas />);
+
+    fireEvent.pointerDown(view.getByTestId("epic-rail-divider"), {
+      button: 0,
+    });
+
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+    expect(layoutDragActive()).toBe(true);
   });
 
   it("keeps the ring on a region the dock switch moved sideways (L-90)", async () => {

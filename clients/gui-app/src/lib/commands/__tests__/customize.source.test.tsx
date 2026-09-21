@@ -1,13 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import type { ReactNode } from "react";
+import {
+  CommandPaletteShell,
+  RootView,
+  type PaletteRootListProps,
+} from "@/components/command-palette/command-palette-shell";
 import { customizeSource } from "@/lib/commands/sources/customize.source";
 import type { CommandContext, CommandItem } from "@/lib/commands/types";
+import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
 const openLayoutEditorMock = vi.hoisted(() => vi.fn());
 const navigateMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock }));
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
+  useNavigate: () => navigateMock,
+}));
 
 vi.mock("@/lib/layout/editor-session", () => ({
   openLayoutEditor: openLayoutEditorMock,
@@ -48,13 +64,40 @@ function items(): ReadonlyArray<CommandItem> {
   return captured;
 }
 
+/** The palette as the app mounts it, with this source as its only one. */
+function PaletteRootList(props: PaletteRootListProps): ReactNode {
+  const items = customizeSource.useItems(props.ctx);
+  return <RootView {...props} items={items} loading={false} />;
+}
+
+function renderPalette(): void {
+  useCommandPaletteStore.setState({
+    open: true,
+    query: "",
+    recentIds: [],
+    pinnedIds: [],
+  });
+  render(<CommandPaletteShell ctx={ctx()} RootList={PaletteRootList} />);
+}
+
+function resetPalette(): void {
+  useCommandPaletteStore.setState({
+    open: false,
+    query: "",
+    recentIds: [],
+    pinnedIds: [],
+  });
+}
+
 beforeEach(() => {
+  resetPalette();
   useLayoutEditorStore.setState({ session: null, lockedBy: "none" });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  resetPalette();
   useLayoutEditorStore.setState({ session: null, lockedBy: "none" });
 });
 
@@ -102,5 +145,36 @@ describe("customizeSource", () => {
     void item.run(ctx());
 
     expect(openLayoutEditorMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * LV2-07 said a real left click on this row did nothing while Enter on the
+ * same row opened a session, so the row is driven here as a POINTER rather
+ * than through `item.run`: the palette mounted, the row found by its label,
+ * and an ordinary `click` on it.
+ */
+describe("the row under a mouse", () => {
+  it("runs the item and closes the palette on a click", async () => {
+    renderPalette();
+
+    fireEvent.click(await screen.findByText("Customize layout"));
+
+    expect(openLayoutEditorMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ source: "command_palette", target: null }),
+    );
+    await waitFor(() => {
+      expect(useCommandPaletteStore.getState().open).toBe(false);
+    });
+  });
+
+  it("does nothing when the row is the disabled one (L-32)", async () => {
+    useLayoutEditorStore.setState({ lockedBy: "other-window" });
+    renderPalette();
+
+    fireEvent.click(await screen.findByText("Customize layout"));
+
+    expect(openLayoutEditorMock).not.toHaveBeenCalled();
+    expect(useCommandPaletteStore.getState().open).toBe(true);
   });
 });

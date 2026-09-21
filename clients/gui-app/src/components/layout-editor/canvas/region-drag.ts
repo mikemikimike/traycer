@@ -4,11 +4,10 @@ import {
 } from "@/components/layout-editor/canvas/drag-engine";
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
 import {
-  canvasOrderGroupForRegion,
+  canvasOrderGroupOf,
   moveCanvasOrderMember,
   type CanvasOrderGroupId,
 } from "@/lib/layout/layout-arrangement";
-import type { RegionId } from "@/lib/layout/region-id";
 import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 
 /**
@@ -23,8 +22,9 @@ import { getLayoutSnapshot } from "@/stores/layout/layout-store";
  */
 
 /**
- * The box a surface lays one cluster of draggable regions out in: the dock's
- * rows card, the composer's compact chip strip, each composer toolbar cluster.
+ * The box a surface lays one cluster of draggable members out in: the dock's
+ * rows card, the composer's compact chip strip, each composer toolbar cluster,
+ * the sidebar's icon column.
  *
  * Stamped by the surface because only it knows which of its elements is that
  * box - see {@link resolveGroup}, which is the one reader.
@@ -32,18 +32,35 @@ import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 export const LAYOUT_CLUSTER_ATTRIBUTE = "data-layout-cluster";
 
 /**
- * Arm a drag on the region element under a press, if that region is one the
- * canvas can reorder. Returns whether it armed, which is what tells the caller
- * the press was only ever a selection.
+ * A member's own id, where it is not a region's.
+ *
+ * Every member of a canvas order group but one IS a region, and carries its id
+ * in `data-layout-region`. The exception is the rail's dividers (L-25, L-115):
+ * they are entries in `arrangement.rail` that the rail draws and a drop places
+ * by, and nothing else about them is a region - no name, no value bag, no row
+ * in the index - so they carry their entry id here instead of a region id
+ * `LAYOUT_REGION_IDS` would have to invent.
  */
-export function armRegionDrag(input: {
+export const LAYOUT_MEMBER_ATTRIBUTE = "data-layout-member";
+
+/**
+ * Arm a drag on the draggable member under a press.
+ *
+ * The group comes off the element rather than from the member's id, because
+ * the two kinds of member answer that question differently: a region's group
+ * is `canvasOrderGroupForRegion`, stamped by `useLayoutRegion`, and a rail
+ * divider's is stamped by the rail that draws it. By the time a press lands,
+ * both are the same attribute.
+ */
+export function armCanvasDrag(input: {
   readonly event: PointerEvent;
   readonly node: HTMLElement;
-  readonly regionId: RegionId;
-}): boolean {
-  const { event, node, regionId } = input;
-  const group = canvasOrderGroupForRegion(regionId);
-  if (group === null) return false;
+}): void {
+  const { event, node } = input;
+  const group = canvasOrderGroupOf(
+    node.getAttribute("data-layout-group") ?? "",
+  );
+  if (group === null) return;
   const resolve = (): LayoutDragTarget | null => resolveGroup(node, group);
   armLayoutDrag({
     event,
@@ -67,7 +84,6 @@ export function armRegionDrag(input: {
       );
     },
   });
-  return true;
 }
 
 /**
@@ -114,10 +130,15 @@ function resolveGroup(
 }
 
 /**
- * A member's region id off the element. Only ever used to SELECT from the
- * stored order, never to build one, so an id this build does not know selects
- * nothing rather than narrowing something away (G1-23).
+ * A member's id off the element: its own where it has one, otherwise the
+ * region's. Only ever used to SELECT from the stored order, never to build
+ * one, so an id this build does not know selects nothing rather than narrowing
+ * something away (G1-23).
  */
 function memberId(node: HTMLElement): string {
-  return node.getAttribute("data-layout-region") ?? "";
+  return (
+    node.getAttribute(LAYOUT_MEMBER_ATTRIBUTE) ??
+    node.getAttribute("data-layout-region") ??
+    ""
+  );
 }

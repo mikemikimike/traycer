@@ -1,18 +1,17 @@
 import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
-import {
-  minimizeRegionOverride,
-  type LayoutOverrides,
-  type LayoutValues,
-} from "@/lib/layout/layout-values";
-import type { RegionId } from "@/lib/layout/region-id";
+import type { LayoutOverrides, LayoutValues } from "@/lib/layout/layout-values";
 
 /**
  * The three densities, and the arithmetic that turns one of them plus a delta
  * into what the app draws.
  *
- * The values are held as a BASE PRESET plus a minimal override delta
- * (`LayoutOverrides`), so "Compact + 3 changes" is readable off the store
- * rather than re-derived, and a preset switch keeps the three changes.
+ * The values are held as a BASE PRESET plus the user's own override delta
+ * (`LayoutOverrides`), and a preset switch changes the preset ALONE (L-133):
+ * the delta is what a person picked, so it outlives a change of density and
+ * is theirs again the moment they switch back. What is "changed" is measured
+ * by difference against whichever base is current (`layout-diff.ts`), which is
+ * how "Compact + 3 changes" stays truthful without the store having to hold a
+ * delta that is minimal against the base.
  */
 
 export type LayoutPresetId = "default" | "compact" | "detailed";
@@ -198,76 +197,3 @@ export function effectiveLayoutValues(
     railComments: { ...base.railComments, ...overrides.railComments },
   };
 }
-
-/**
- * Every region's patch minimized, and a region left with nothing dropped.
- *
- * Spelled out region by region rather than walked: a walk over
- * `Object.entries` loses which region a patch belongs to, and writing it back
- * under a dynamic key can only be typed through a cast. The round-trip test
- * covers every region, so a region left out of this table fails there rather
- * than silently losing its overrides.
- */
-export function minimizeOverrides(
-  overrides: LayoutOverrides,
-  basePreset: LayoutPresetId,
-): LayoutOverrides {
-  const base = PRESET_VALUES[basePreset];
-  const minimized: MutableLayoutOverrides = {
-    homeTab: keptOverride(overrides.homeTab, base.homeTab),
-    usageLimits: keptOverride(overrides.usageLimits, base.usageLimits),
-    resourceMonitor: keptOverride(
-      overrides.resourceMonitor,
-      base.resourceMonitor,
-    ),
-    minimap: keptOverride(overrides.minimap, base.minimap),
-    contextUsage: keptOverride(overrides.contextUsage, base.contextUsage),
-    runningAgents: keptOverride(overrides.runningAgents, base.runningAgents),
-    changedFiles: keptOverride(overrides.changedFiles, base.changedFiles),
-    background: keptOverride(overrides.background, base.background),
-    attachImage: keptOverride(overrides.attachImage, base.attachImage),
-    access: keptOverride(overrides.access, base.access),
-    agent: keptOverride(overrides.agent, base.agent),
-    model: keptOverride(overrides.model, base.model),
-    mic: keptOverride(overrides.mic, base.mic),
-    railAgents: keptOverride(overrides.railAgents, base.railAgents),
-    railTerminals: keptOverride(overrides.railTerminals, base.railTerminals),
-    railBrowsers: keptOverride(overrides.railBrowsers, base.railBrowsers),
-    railArtifacts: keptOverride(overrides.railArtifacts, base.railArtifacts),
-    railGitDiff: keptOverride(overrides.railGitDiff, base.railGitDiff),
-    railPullRequests: keptOverride(
-      overrides.railPullRequests,
-      base.railPullRequests,
-    ),
-    railFileTree: keptOverride(overrides.railFileTree, base.railFileTree),
-    railSharing: keptOverride(overrides.railSharing, base.railSharing),
-    railComments: keptOverride(overrides.railComments, base.railComments),
-  };
-  // The table above states every region, so a region with nothing left is
-  // present and `undefined`; dropping those is what keeps `Object.keys` over
-  // the delta a count of the regions that actually changed.
-  const writable: Record<string, unknown> = minimized;
-  for (const region of Object.keys(writable)) {
-    if (writable[region] === undefined) delete writable[region];
-  }
-  return minimized;
-}
-
-/** One region's minimized patch, or `undefined` when nothing is left of it. */
-function keptOverride<Values extends object>(
-  patch: Partial<Values> | undefined,
-  base: Values,
-): Partial<Values> | undefined {
-  if (patch === undefined) return undefined;
-  const kept = minimizeRegionOverride(patch, base);
-  return hasOverrideKeys(kept) ? kept : undefined;
-}
-
-/** Whether a patch still carries anything after minimizing. */
-function hasOverrideKeys(patch: object): boolean {
-  return Object.keys(patch).length > 0;
-}
-
-type MutableLayoutOverrides = {
-  -readonly [K in RegionId]?: Partial<LayoutValues[K]>;
-};

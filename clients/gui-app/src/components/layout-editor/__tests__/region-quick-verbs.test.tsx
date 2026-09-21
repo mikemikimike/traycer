@@ -1,10 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LayoutClusterContextMenu,
   LayoutRegionContextMenu,
 } from "@/components/layout-editor/region-quick-verbs";
+import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { offeredQuickVerbs } from "@/components/layout-editor/regions/quick-verbs";
 import {
   SHOW_HIDE_VERBS,
@@ -103,6 +111,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  useLayoutEditorStore.getState().endSession();
   useLayoutStore.getState().replaceAll(DEFAULT_LAYOUT_SNAPSHOT);
 });
 
@@ -343,5 +352,74 @@ describe("<LayoutClusterContextMenu />", () => {
 
     expect(screen.queryByTestId("layout-quick-verb-access-chip")).toBeNull();
     expect(screen.queryByTestId("layout-quick-verb-minimap-hide")).toBeNull();
+  });
+});
+
+/**
+ * The same strip, with the regions named by the hook the app really uses
+ * instead of by hand (L-129).
+ *
+ * The suite above stamps `data-layout-region` itself, so it passed for three
+ * rounds while every cluster in the product answered a right-click with
+ * nothing: the hook only named a node inside an editor session, and quick
+ * verbs are a gesture for normal use (L-19). A cluster test that writes the
+ * attribute cannot see that, which is why this one does not.
+ */
+describe("<LayoutClusterContextMenu /> over regions the app named itself", () => {
+  function LiveItem(props: {
+    readonly regionId: RegionId;
+    readonly testId: string;
+  }): ReactNode {
+    const { ref } = useLayoutRegion({
+      regionId: props.regionId,
+      instanceId: null,
+    });
+    return (
+      <span ref={ref} data-testid={props.testId}>
+        <span data-testid={`${props.testId}-glyph`}>item</span>
+      </span>
+    );
+  }
+
+  function LiveCluster(): ReactNode {
+    return (
+      <LayoutClusterContextMenu>
+        <div data-testid="live-cluster">
+          <LiveItem regionId="minimap" testId="live-minimap" />
+          <LiveItem regionId="access" testId="live-access" />
+        </div>
+      </LayoutClusterContextMenu>
+    );
+  }
+
+  it("offers the pointed-at item's verbs at rest, with no session open", () => {
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+    render(<LiveCluster />);
+
+    // On the glyph, not on the named element: the pointer lands on whatever a
+    // control draws, and the region is its closest named ancestor.
+    fireEvent.contextMenu(screen.getByTestId("live-access-glyph"));
+
+    expect(
+      screen.queryByTestId("layout-quick-verb-access-chip"),
+    ).not.toBeNull();
+    expect(screen.queryByTestId("layout-quick-verb-minimap-hide")).toBeNull();
+  });
+
+  it("offers them inside a session too", () => {
+    render(<LiveCluster />);
+    act(() => {
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+      });
+    });
+
+    fireEvent.contextMenu(screen.getByTestId("live-minimap-glyph"));
+
+    expect(
+      screen.queryByTestId("layout-quick-verb-minimap-hide"),
+    ).not.toBeNull();
   });
 });

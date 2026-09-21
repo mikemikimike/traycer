@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
+import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { assertNever } from "@/components/layout-editor/inspector/rows/assert-never";
 import {
   dividerOrderItem,
@@ -10,7 +11,10 @@ import {
   type SortableRowDecorator,
 } from "@/components/layout-editor/inspector/rows/order-row-items";
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
-import { ORDER_GROUPS } from "@/components/layout-editor/regions/surface-groups";
+import {
+  ORDER_GROUPS,
+  orderGroupListLabel,
+} from "@/components/layout-editor/regions/surface-groups";
 import { Button } from "@/components/ui/button";
 import {
   insertRailDivider,
@@ -50,33 +54,32 @@ export function OrderGroupList(props: {
   readonly decorate: SortableRowDecorator | null;
 }): ReactNode {
   const { group, arrangement } = props;
+  const gutter = useSortableRowPadding();
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col">
       <OrderGroupRows {...props} />
       {ORDER_GROUPS[group].dividers ? (
-        <Button
-          type="button"
-          variant="muted-outline"
-          size="xs"
-          className="self-start"
-          onClick={() => {
-            // Appended, so a new boundary never lands in the middle of a
-            // grouping the user has already made; dragging it up is the
-            // gesture that places it (L-25).
-            writeArrangement(
-              insertRailDivider(arrangement, arrangement.rail.length),
-            );
-          }}
-        >
-          <Plus />
-          Add divider
-        </Button>
+        // In the rows' own gutter: it is the last line of the same list, not a
+        // button parked under a card (L-25).
+        <div className={gutter.row}>
+          <Button
+            type="button"
+            variant="muted-outline"
+            size="xs"
+            onClick={() => {
+              // Appended, so a new boundary never lands in the middle of a
+              // grouping the user has already made; dragging it up is the
+              // gesture that places it (L-25).
+              writeArrangement(
+                insertRailDivider(arrangement, arrangement.rail.length),
+              );
+            }}
+          >
+            <Plus />
+            Add divider
+          </Button>
+        </div>
       ) : null}
-      {ORDER_GROUPS[group].note === null ? null : (
-        <p className="text-ui-xs text-muted-foreground">
-          {ORDER_GROUPS[group].note}
-        </p>
-      )}
     </div>
   );
 }
@@ -95,6 +98,7 @@ function OrderGroupRows(props: {
     case "dock":
       return (
         <SortableList<DockRegionId>
+          label={orderGroupListLabel(group)}
           selectedId={selectedId}
           items={regionRowItems(arrangement.dock, values, decorate)}
           onMove={(id, toIndex) => {
@@ -108,6 +112,7 @@ function OrderGroupRows(props: {
     case "toolbarLeft":
       return (
         <SortableList<ToolbarRegionId>
+          label={orderGroupListLabel(group)}
           selectedId={selectedId}
           items={regionRowItems(arrangement.toolbarLeft, values, decorate)}
           onMove={(id, toIndex) => {
@@ -121,6 +126,7 @@ function OrderGroupRows(props: {
     case "toolbarRight":
       return (
         <SortableList<ToolbarRegionId>
+          label={orderGroupListLabel(group)}
           selectedId={selectedId}
           items={regionRowItems(arrangement.toolbarRight, values, decorate)}
           onMove={(id, toIndex) => {
@@ -134,6 +140,7 @@ function OrderGroupRows(props: {
     case "usageProviders":
       return (
         <SortableList<RateLimitProviderId>
+          label={orderGroupListLabel(group)}
           selectedId={selectedId}
           items={providerOrderItems(arrangement, onOpenProvider, decorate)}
           onMove={(id, toIndex) => {
@@ -151,6 +158,7 @@ function OrderGroupRows(props: {
     case "rail":
       return (
         <SortableList<string>
+          label={orderGroupListLabel(group)}
           selectedId={selectedId}
           items={arrangement.rail.map((entry) =>
             entry.kind === "divider"

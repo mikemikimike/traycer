@@ -5,8 +5,8 @@ import {
   UsageHostControl,
 } from "@/components/layout-editor/inspector/region-controls";
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
+import { orderGroupInstruction } from "@/components/layout-editor/regions/surface-groups";
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
-import { ORDER_GROUPS } from "@/components/layout-editor/regions/surface-groups";
 import {
   positionRowChanged,
   revertPositionRow,
@@ -101,7 +101,7 @@ export function PositionOrderRow(props: {
     <InspectorRow
       stacked
       label="Position"
-      description={ORDER_GROUPS[group].description}
+      description={orderGroupInstruction(group)}
       onRevert={
         positionRowChanged(snapshot, regionId)
           ? () => {

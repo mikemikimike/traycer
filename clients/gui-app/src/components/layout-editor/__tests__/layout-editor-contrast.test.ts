@@ -43,9 +43,19 @@ import {
  * calm chrome it appears among.
  */
 
-const CSS_FILE = path.join(
+const SRC_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..",
+  "../../..",
+);
+
+function read(relativePath: string): string {
+  return readFileSync(path.join(SRC_DIR, relativePath), "utf8");
+}
+
+const CSS_FILE = path.join(
+  SRC_DIR,
+  "components",
+  "layout-editor",
   "layout-editor.css",
 );
 
@@ -201,7 +211,10 @@ const DIM_OPACITY = Number(
   ),
 );
 const FLOAT_MATERIAL = cssValue(
-  topLevel((selector) => selector.includes('[data-dock-mode="float"]')),
+  topLevel(
+    (selector) =>
+      selector === '[data-layout-inspector][data-dock-mode="float"]',
+  ),
   "background",
 );
 const FLOAT_SURFACE = tokenName(FLOAT_MATERIAL);
@@ -220,20 +233,48 @@ const INSPECTOR_SURFACE = tokenName(
     "background",
   ),
 );
-const EDITING_OUTLINE_RULE = RULES.find(
+const EDITING_FRAME_RULE = RULES.find(
   (rule) =>
     rule.context === "" && rule.selector.includes("[data-layout-column]"),
 );
-const EDITING_OUTLINE = tokenName(
-  cssValue(
+
+/** A declaration of the frame drawn around the app column while editing. */
+function editingFrame(property: string): string {
+  return cssValue(
     topLevel((selector) => selector.includes("[data-layout-column]")),
-    "outline",
-  ),
-);
-const EDITING_OUTLINE_OFFSET = cssValue(
-  topLevel((selector) => selector.includes("[data-layout-column]")),
-  "outline-offset",
-);
+    property,
+  );
+}
+
+const EDITING_FRAME_COLOR = tokenName(editingFrame("border"));
+
+/** The value of a custom property declared on `:root`. */
+function rootValue(name: string): string {
+  return cssValue(
+    topLevel((selector) => selector === ":root"),
+    name,
+  );
+}
+
+/**
+ * The app header's own stacking layer, read from the markup that ships it.
+ *
+ * The header is what covered the whole top edge of the outline this frame
+ * replaced (LV2-04), so "above the header" is the claim with the measurement
+ * behind it - and it is read rather than restated so a header that climbs a
+ * layer fails here instead of quietly swallowing the frame again.
+ */
+const HEADER_LAYER = (() => {
+  const layers = [
+    ...read("components/layout/header/app-header.tsx").matchAll(
+      /(?:^|[\s:"'])z-(\d+)/g,
+    ),
+  ].map((match) => Number(match[1]));
+  if (layers.length === 0) {
+    throw new Error("app-header.tsx: no stacking layer to measure");
+  }
+  return Math.max(...layers);
+})();
 
 /**
  * The amber cap the sample tab ships, read out of the tab kind itself.
@@ -244,19 +285,7 @@ const EDITING_OUTLINE_OFFSET = cssValue(
  * to one of them fails here instead of drifting.
  */
 const SAMPLE_TAB_COLOR = (() => {
-  const source = readFileSync(
-    path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "stores",
-      "tabs",
-      "kinds",
-      "sample-workspace.tsx",
-    ),
-    "utf8",
-  );
+  const source = read("stores/tabs/kinds/sample-workspace.tsx");
   const value = /appearance:\s*\{\s*color:\s*"([^"]+)"/.exec(source)?.[1];
   if (value === undefined) {
     throw new Error("sample-workspace.tsx: no appearance colour to measure");
@@ -328,20 +357,49 @@ describe("layout-editor.css is read, not assumed", () => {
   });
 
   /**
-   * The outline is drawn INSIDE the column's box. An outset one on a
-   * `h-safe-dvh` column is clipped by the window edge on three sides, which
-   * reads as a stray hairline rather than as a frame around the screen.
+   * The frame is an OVERLAY on the column, not the column's own `outline`
+   * (L-130). An outline painted with the column's own content goes under every
+   * positioned descendant that paints an opaque background - measured live,
+   * that left 5% of it lit and the rest invisible (LV2-04) - and an OUTSET one
+   * on a `h-safe-dvh` column is clipped by the window edge on three sides.
+   * Inside the box, above the descendants, and never in the pointer's way,
+   * because the canvas under it is what the user points at.
    */
-  it("draws the editing outline inside the column, where nothing can clip it", () => {
-    expect(EDITING_OUTLINE_RULE?.selector).toContain(
-      '[data-layout-editing="1"]',
+  it("draws the editing frame over the column's children rather than under them", () => {
+    expect(EDITING_FRAME_RULE?.selector).toBe(
+      '[data-layout-column][data-layout-editing="1"]::after',
     );
-    expect(Number.parseFloat(EDITING_OUTLINE_OFFSET)).toBeLessThan(0);
+    expect(editingFrame("position")).toBe("absolute");
+    expect(editingFrame("inset")).toBe("0");
+    expect(editingFrame("pointer-events")).toBe("none");
+    const frameLayer = Number(rootValue(tokenName(editingFrame("z-index"))));
+    expect(frameLayer).toBeGreaterThan(HEADER_LAYER);
   });
 
-  /** One signal, so the tab's cap and the screen's outline are one token. */
-  it("paints the sample tab and the editing outline from the same token", () => {
-    expect(SAMPLE_TAB_COLOR).toBe(EDITING_OUTLINE);
+  /** One signal, so the tab's cap and the screen's frame are one token. */
+  it("paints the sample tab and the editing frame from the same token", () => {
+    expect(SAMPLE_TAB_COLOR).toBe(EDITING_FRAME_COLOR);
+  });
+
+  /**
+   * The other half of that one signal, and the reason it was unreadable: the
+   * cap sat inside the tab strip's passive dim, so the mark that says "you are
+   * customizing" was drawn at 45% opacity and 45% saturation (L-132). A dim
+   * cannot be undone from below, so the scroller dims its MEMBERS and the
+   * member carrying the session's mark is exempt - three artefacts that only
+   * work together.
+   */
+  it("keeps the session's own tab out of the passive dim", () => {
+    expect(DIM_RULE?.selector).toContain("[data-layout-passive-members]");
+    expect(DIM_RULE?.selector).toContain(
+      ":not(:has([data-layout-session-tab]))",
+    );
+    expect(read("components/layout/tabs/tab-strip.tsx")).toContain(
+      "data-layout-passive-members",
+    );
+    expect(read("components/layout/tabs/header-tab-visual.tsx")).toContain(
+      "data-layout-session-tab",
+    );
   });
 
   /**
@@ -368,21 +426,21 @@ describe("the canvas decoration across every built-in palette", () => {
   });
 
   /**
-   * The editing mode's own colour, measured as what it IS: a 2px dotted
-   * outline around the app column and a 1.5px cap on the sample tab, both
-   * non-text indicators owing 3:1 (1.4.11). `--warning` is the tint of the
-   * status pair and is a mid amber in the light palettes, which is why the
-   * pair's FOREGROUND is what ships here - the same reason L-78 took
-   * `--foreground` over `--ring` for the selection outline.
+   * The editing mode's own colour, measured as what it IS: a 2px dotted frame
+   * around the app column and a 3px cap on the sample tab, both non-text
+   * indicators owing 3:1 (1.4.11). `--warning` is the tint of the status pair
+   * and is a mid amber in the light palettes, which is why the pair's
+   * FOREGROUND is what ships here - the same reason L-78 took `--foreground`
+   * over `--ring` for the selection outline.
    *
    * Both halves land on the same surfaces: the tab strip sits on the app's
-   * header and the outline runs around a column that can show any of them.
+   * header and the frame runs around a column that can show any of them.
    */
-  it("holds 3:1 for the editing outline and the sample tab's cap", () => {
+  it("holds 3:1 for the editing frame and the sample tab's cap", () => {
     expect(
       violations((palette, need) => {
-        onSurfaces(palette, need, "editing outline", () =>
-          themeToken(palette.tokens, EDITING_OUTLINE),
+        onSurfaces(palette, need, "editing frame", () =>
+          themeToken(palette.tokens, EDITING_FRAME_COLOR),
         );
         onSurfaces(palette, need, "sample tab cap", () =>
           themeToken(palette.tokens, SAMPLE_TAB_COLOR),

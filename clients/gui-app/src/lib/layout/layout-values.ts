@@ -213,24 +213,6 @@ export function sameRegionValue(
 }
 
 /**
- * One region's patch with every key that agrees with the base preset removed,
- * which is the invariant the whole delta rests on.
- *
- * Generic over the VALUE BAG rather than the region id, so the base argument
- * infers it and a caller never spells out which region it is holding.
- */
-export function minimizeRegionOverride<Values extends object>(
-  patch: Partial<Values>,
-  base: Values,
-): Partial<Values> {
-  const minimized: Partial<Values> = { ...patch };
-  for (const key of overrideKeys(minimized)) {
-    if (sameRegionValue(key, minimized[key], base[key])) delete minimized[key];
-  }
-  return minimized;
-}
-
-/**
  * The keys a patch actually carries.
  *
  * A patch is only ever built from parsed values - a setter's argument, or the

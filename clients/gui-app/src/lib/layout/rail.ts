@@ -153,28 +153,67 @@ export const DEFAULT_RAIL: ReadonlyArray<RailEntry> = [
 export const DEFAULT_RAIL_DIVIDER_SEQ = 7;
 
 /**
- * The rail reduced to the sidebar's group view, which is what the rail and the
- * panel renderers still read.
+ * A run of panels the rail draws together, and the boundary that ends it.
  *
- * Lossy in this direction, deliberately: an empty group - two dividers in a
- * row, or a divider at either end - produces nothing, so a divider a user
- * parked at the edge is inert rather than an invisible empty column.
+ * The group view with the divider's own id kept, which is what a rail that
+ * DRAWS its boundaries needs (L-115): the element between two groups has to
+ * carry the id the drop places by, and `LeftPanelGroup` deliberately does not
+ * know about dividers at all.
  */
-export function leftPanelGroupsFromRail(
+export interface LeftPanelRun {
+  readonly panelIds: ReadonlyArray<LeftPanelId>;
+  /** The divider that ends this run, or `null` at the rail's end. */
+  readonly dividerId: string | null;
+}
+
+/**
+ * The rail read as runs of the panels a caller can see, each with the boundary
+ * after it.
+ *
+ * Lossy in this direction, deliberately: an empty run - two dividers in a row,
+ * a divider at either end, or a group whose every panel is hidden - produces
+ * nothing, so a divider a user parked at the edge is inert rather than an
+ * invisible empty column, and the rail never draws a boundary with nothing on
+ * one side of it.
+ */
+export function leftPanelRunsFromRail(
   rail: ReadonlyArray<RailEntry>,
-): ReadonlyArray<LeftPanelGroup> {
-  const groups: LeftPanelGroup[] = [];
+  isVisible: (panelId: LeftPanelId) => boolean,
+): ReadonlyArray<LeftPanelRun> {
+  const runs: LeftPanelRun[] = [];
   let current: LeftPanelId[] = [];
   for (const entry of rail) {
     if (entry.kind === "divider") {
-      if (current.length > 0) groups.push({ panelIds: current });
+      if (current.length > 0)
+        runs.push({ panelIds: current, dividerId: entry.id });
       current = [];
       continue;
     }
-    current.push(PANEL_BY_RAIL_REGION[entry.id]);
+    const panelId = PANEL_BY_RAIL_REGION[entry.id];
+    if (isVisible(panelId)) current.push(panelId);
   }
-  if (current.length > 0) groups.push({ panelIds: current });
-  return groups;
+  if (current.length > 0) runs.push({ panelIds: current, dividerId: null });
+  else {
+    // Every divider after the last drawn panel is one the rail has nothing to
+    // put on the far side of.
+    const last = runs.pop();
+    if (last !== undefined)
+      runs.push({ panelIds: last.panelIds, dividerId: null });
+  }
+  return runs;
+}
+
+/** Every panel there is, as the plain group view the sidebar's readers hold. */
+export function leftPanelGroupsFromRail(
+  rail: ReadonlyArray<RailEntry>,
+): ReadonlyArray<LeftPanelGroup> {
+  return leftPanelRunsFromRail(rail, everyPanel).map((run) => ({
+    panelIds: run.panelIds,
+  }));
+}
+
+function everyPanel(): boolean {
+  return true;
 }
 
 /**

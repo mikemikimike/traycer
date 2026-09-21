@@ -58,6 +58,12 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
     deviation: null,
   },
   {
+    // The tab strip's one marker is the `-members` spelling, which dims each
+    // tab rather than the scroller's own box: one of those tabs carries the
+    // amber cap that says which tab is being customized, and `opacity` on an
+    // ancestor cannot be undone below it (L-132). It is counted here because
+    // it is the same marker in the same place - what changed is which box the
+    // dim lands on, and the leaf rule is exactly why it had to change.
     item: "tab-strip.tsx: the tab items and the add button, not the Home item",
     files: {
       "components/layout/tabs/tab-strip.tsx": 1,

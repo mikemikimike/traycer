@@ -6,11 +6,15 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
+import {
+  PresetsBlock,
+  ResetEverythingButton,
+} from "@/components/layout-editor/inspector/presets-block";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
+  getLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 
@@ -152,11 +156,48 @@ describe('"Reset everything" is confirmed only where it cannot be undone (L-20, 
     return screen.getByRole("button", { name: "Reset everything" });
   }
 
-  it("asks first on the Settings page, where there is no Undo", () => {
+  it("leaves the presets card on the page, where it is the danger card's", () => {
     changeTheLayout();
     render(
       <LayoutFormHostContext value="page">
         <PresetsBlock onPreviewPreset={() => {}} />
+      </LayoutFormHostContext>,
+    );
+
+    // The one irreversible action on the page is last on it, in a
+    // `tone="danger"` card of its own (redesign 4.4) - not a `size="sm"`
+    // muted button beside "Reset to Compact". The page renders its own; the
+    // card and its placement are pinned in the panel's suite.
+    expect(
+      screen.queryByRole("button", { name: "Reset everything" }),
+    ).toBeNull();
+  });
+
+  it("keeps the benign counterpart on that card, in both hosts", () => {
+    changeTheLayout();
+    useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
+    render(
+      <LayoutFormHostContext value="page">
+        <PresetsBlock onPreviewPreset={() => {}} />
+      </LayoutFormHostContext>,
+    );
+
+    // "Reset to <preset>" is values-only and reversible, so it stays beside
+    // the preset it names - and it has something of its own to do now that a
+    // preset click no longer clears the delta (L-133).
+    expect(
+      screen.getByRole("button", { name: "Reset to Compact" }),
+    ).toBeTruthy();
+    expect(screen.getByTestId("preset-status-line").textContent).toBe(
+      "Compact + 1 change",
+    );
+  });
+
+  it("asks first on the Settings page, where there is no Undo", () => {
+    changeTheLayout();
+    render(
+      <LayoutFormHostContext value="page">
+        <ResetEverythingButton snapshot={getLayoutSnapshot()} />
       </LayoutFormHostContext>,
     );
 

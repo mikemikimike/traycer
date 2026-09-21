@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { useEpicViewTabId } from "@/components/epic-canvas/view-tab-context";
 import { usePaneVisible } from "@/components/epic-tabs/pane-visibility-context";
 import { useRegionValue } from "@/lib/layout-overrides";
@@ -26,6 +26,16 @@ import {
  * Decoration is written straight onto the node rather than returned as props:
  * the element belongs to the app, its props belong to whatever renders it, and
  * a hover must not re-render a chat tile.
+ *
+ * NAMING the element is a separate lifetime from registering it (L-129). The
+ * name - `data-layout-region`, plus the instance it belongs to - is on the
+ * element for as long as the element is a visible region, session or not,
+ * because a right-click has to be able to say which region it landed on while
+ * the user is only using the app (L-19): the cluster menu resolves the region
+ * from the DOM under the pointer, and with the name gated on a session every
+ * pixel of every cluster answered "nothing customizable here". Everything the
+ * EDITOR needs - the registry entry, the drag group, the decoration - stays
+ * gated on the session exactly as before.
  */
 export function useLayoutRegion(input: {
   regionId: RegionId;
@@ -49,6 +59,10 @@ export function useLayoutRegion(input: {
   const ghost = useRegionGhost(regionId);
   const nodeRef = useRef<HTMLElement | null>(null);
   const registered = useRef<RegionInstance | null>(null);
+  // The node this hook has NAMED, which outlives every session the node is on
+  // screen for - so it is tracked apart from the registration and taken off
+  // apart from it too.
+  const named = useRef<HTMLElement | null>(null);
   // Read by `sync`, which runs on registration rather than on a ghost change,
   // so a region that re-registers while materialised keeps its flag.
   const ghostRef = useRef(ghost);
@@ -59,6 +73,15 @@ export function useLayoutRegion(input: {
     const node = nodeRef.current;
     const sceneId = viewTabId ?? "shell";
     const key = `${regionId}@${sceneId}:${instanceId ?? "-"}`;
+    // A hidden pane's copy is named no more than it is registered (L-109): it
+    // cannot be pointed at, and naming it would put a second element with the
+    // same region name in the document for `closest` to find.
+    nameNode(
+      named,
+      node !== null && visible ? node : null,
+      regionId,
+      instanceId,
+    );
     const wanted = state.session !== null && node !== null && visible;
     // Idempotent, because it runs twice on mount by construction: the `ref`
     // callback fires before effects, and the mount effect below has to run it
@@ -90,9 +113,6 @@ export function useLayoutRegion(input: {
       node,
     };
     registered.current = instance;
-    node.setAttribute("data-layout-region", regionId);
-    if (instanceId !== null)
-      node.setAttribute("data-layout-instance", instanceId);
     // What a canvas drag picks up and reflows against (4.7). Stamped here
     // rather than by hand at each of the thirty call sites: the element that
     // draws a region inherits that region's group by being registered.
@@ -140,8 +160,9 @@ export function useLayoutRegion(input: {
           .unregisterInstance(instance.key, instance.node);
       }
       registered.current = null;
+      nameNode(named, null, regionId, instanceId);
     };
-  }, [sync]);
+  }, [sync, regionId, instanceId]);
 
   // After the commit that mounted the materialised control, not from the store
   // subscription above: the node the flag belongs on is the one this render
@@ -237,10 +258,38 @@ function flag(node: HTMLElement, attribute: string, on: boolean): void {
   else node.removeAttribute(attribute);
 }
 
-/** Leaves the app's own element exactly as it was found. */
-function strip(node: HTMLElement): void {
+/**
+ * Put the region's NAME on `node`, taking it off whichever node wore it
+ * before; `null` names nothing.
+ *
+ * Separate from {@link strip} because the two have different lifetimes: the
+ * name is a fact about the element (this is the mic chip), the rest is a fact
+ * about the session decorating it. Ending a session takes the decoration off
+ * and leaves the name, so the right-click that worked a moment ago still knows
+ * what it is over (L-129).
+ */
+function nameNode(
+  named: RefObject<HTMLElement | null>,
+  node: HTMLElement | null,
+  regionId: RegionId,
+  instanceId: string | null,
+): void {
+  const previous = named.current;
+  if (previous !== null && previous !== node) unname(previous);
+  named.current = node;
+  if (node === null) return;
+  node.setAttribute("data-layout-region", regionId);
+  if (instanceId === null) node.removeAttribute("data-layout-instance");
+  else node.setAttribute("data-layout-instance", instanceId);
+}
+
+function unname(node: HTMLElement): void {
   node.removeAttribute("data-layout-region");
   node.removeAttribute("data-layout-instance");
+}
+
+/** Leaves the app's own element wearing nothing but its name. */
+function strip(node: HTMLElement): void {
   node.removeAttribute("data-layout-anchor");
   node.removeAttribute("data-layout-group");
   node.removeAttribute("data-layout-draggable");

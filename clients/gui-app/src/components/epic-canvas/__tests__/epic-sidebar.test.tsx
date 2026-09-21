@@ -470,13 +470,22 @@ describe("<EpicLeftPanelRail />", () => {
         (element) => element.getAttribute("data-testid"),
       ),
     ).toEqual([
+      // Every group boundary is a real element now (L-115), and the last
+      // group draws none: Comments is not on screen, so there is nothing on
+      // the far side of the boundary after Sharing.
       "epic-rail-chats",
+      "epic-rail-divider",
       "epic-rail-terminals",
+      "epic-rail-divider",
       "epic-rail-panel-drop-line",
       "epic-rail-browsers",
+      "epic-rail-divider",
       "epic-rail-git-diff",
+      "epic-rail-divider",
       "epic-rail-pull-requests",
+      "epic-rail-divider",
       "epic-rail-file-tree",
+      "epic-rail-divider",
       "epic-rail-sharing",
     ]);
   });
@@ -983,10 +992,15 @@ describe("Browsers panel registration", () => {
     );
     expect(railIds).toEqual([
       "epic-rail-chats",
+      "epic-rail-divider",
       "epic-rail-terminals",
+      "epic-rail-divider",
       "epic-rail-browsers",
+      "epic-rail-divider",
       "epic-rail-git-diff",
+      "epic-rail-divider",
       "epic-rail-file-tree",
+      "epic-rail-divider",
       "epic-rail-sharing",
     ]);
     expect(

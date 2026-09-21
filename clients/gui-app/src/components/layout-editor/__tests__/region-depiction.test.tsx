@@ -246,7 +246,7 @@ describe("what a depiction draws", () => {
     expect(withoutWord.container.textContent).not.toContain("remaining");
   });
 
-  it("draws one segment per provider the arrangement still shows", () => {
+  it("draws a sample of the providers the arrangement still shows", () => {
     const visible = DEFAULT_ARRANGEMENT.usageProviders;
     const hiddenAll = render(
       depictRegion(
@@ -269,6 +269,42 @@ describe("what a depiction draws", () => {
     expect(
       oneHidden.container.querySelectorAll("[data-provider-id]"),
     ).toHaveLength(1);
+
+    // A sample, not the catalog: eight segments do not fit a 320px dock and
+    // nothing is learned from the fourth one (LV2-19).
+    const allShown = render(
+      depictRegion(
+        "usageLimits",
+        SHIPPED_DEFAULT_VALUES.usageLimits,
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+    expect(visible.length).toBeGreaterThan(3);
+    expect(
+      allShown.container.querySelectorAll("[data-provider-id]"),
+    ).toHaveLength(3);
+  });
+
+  it("gives each sampled provider a reading of its own", () => {
+    // The finding this replaces: every segment was drawn from ONE fixed
+    // window, so the strip printed the same "35% 5h" behind every icon and
+    // read as filler rather than as a picture of a status bar (LV2-19).
+    const { container } = render(
+      depictRegion(
+        "usageLimits",
+        { ...SHIPPED_DEFAULT_VALUES.usageLimits, percent: true, reset: true },
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+
+    const readings = [...container.querySelectorAll("[data-provider-id]")].map(
+      (segment) => segment.textContent,
+    );
+
+    expect(readings).toHaveLength(3);
+    expect(new Set(readings).size).toBe(readings.length);
   });
 });
 

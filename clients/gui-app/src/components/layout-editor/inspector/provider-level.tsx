@@ -6,6 +6,7 @@ import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row
 import { useProviderLimitWindows } from "@/components/layout-editor/inspector/provider-limit-windows";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
+import { toggleHiddenProvider } from "@/components/layout-editor/layout-gestures";
 import { depictUsageProvider } from "@/components/layout-editor/region-depiction";
 import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import {
@@ -50,18 +51,6 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
   const values = effectiveLayoutValues(basePreset, overrides);
   const providerName = providerDisplayName(providerId);
   const shown = !arrangement.hiddenProviders.includes(providerId);
-  const selection =
-    arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
-  // The two modes are exclusive by construction: `Automatic` is an empty pick
-  // list and `Choose...` is a non-empty one, so "switching back to Automatic
-  // clears the picks" (L-96) is not a second rule to keep - it is the only way
-  // back. A pick that no longer names a live window still counts as choosing:
-  // the strip falls back to the tightest for the drawing, and silently
-  // demoting the level to `Automatic` would throw the pick away on a reading
-  // the user never saw.
-  const choosing = selection.limitKeys.length > 0;
-  const picked = new Set(selection.limitKeys);
-  const pickingLimits = choosing && windows.length > 0;
 
   return (
     <div className="flex flex-col">
@@ -91,91 +80,129 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
           }}
         />
       </div>
-      <div className={!shown ? "pointer-events-none opacity-40" : undefined}>
-        <InspectorRow
-          top
-          // The two options read "Automatic (recommended)" and "Choose...",
-          // about 200px of a 292px content box: inline, the label column was
-          // handed what was left and broke at every space (I-05). A control
-          // too wide for its row goes on its own line, which is the
-          // prototype's own answer for the same shape (`.srow.stacked`).
-          stacked
-          label={USAGE_PROVIDER_LEVEL.limitsLabel}
-          description={USAGE_PROVIDER_LEVEL.limitsDescription}
-          control={
-            <div className="flex flex-col gap-2.5">
-              <SegmentedControl
-                ariaLabel={USAGE_PROVIDER_LEVEL.limitsLabel}
-                options={USAGE_PROVIDER_LEVEL.limitsOptions}
-                value={choosing ? "choose" : "automatic"}
-                onChange={(next) => {
-                  if (next !== "choose") {
-                    writeSelection(
-                      providerId,
-                      arrangement,
-                      AUTOMATIC_LIMIT_SELECTION,
-                    );
-                    return;
-                  }
-                  // Nothing reported yet: there is no list to open and an
-                  // empty pick would be a selection that draws nothing, so
-                  // the level stays on Automatic and says why (L-96).
-                  if (windows.length === 0) return;
+      <ProviderLimitsControl providerId={providerId} />
+    </div>
+  );
+}
+
+/**
+ * The Limits pick alone: `Automatic` or `Choose...` plus that provider's own
+ * window checklist, with nothing around it (L-96, L-123).
+ *
+ * The part both hosts draw, and the whole of what the PAGE draws: a provider
+ * row there already names the provider and carries its `Shown | Hidden`
+ * control, so a stage and an icon-tile header repeating both inside the row's
+ * own disclosure was the "page inside a row inside a row" that put a
+ * provider's limits five levels down. {@link ProviderLevel} is this plus the
+ * stage and the header, for the dock, where the level IS the screen.
+ *
+ * The dim belongs here rather than to either host: "everything below Shown is
+ * greyed" is the grammar's own rule (L-08), and it is the same rule whichever
+ * control above it wrote `hiddenProviders`.
+ */
+export function ProviderLimitsControl(props: ProviderLevelProps): ReactNode {
+  const { providerId } = props;
+  const arrangement = useLayoutStore((state) => state.arrangement);
+  const { windows, drawnKeys } = useProviderLimitWindows(providerId);
+  const shown = !arrangement.hiddenProviders.includes(providerId);
+  const selection =
+    arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
+  // The two modes are exclusive by construction: `Automatic` is an empty pick
+  // list and `Choose...` is a non-empty one, so "switching back to Automatic
+  // clears the picks" (L-96) is not a second rule to keep - it is the only way
+  // back. A pick that no longer names a live window still counts as choosing:
+  // the strip falls back to the tightest for the drawing, and silently
+  // demoting the level to `Automatic` would throw the pick away on a reading
+  // the user never saw.
+  const choosing = selection.limitKeys.length > 0;
+  const picked = new Set(selection.limitKeys);
+  const pickingLimits = choosing && windows.length > 0;
+
+  return (
+    <div inert={!shown} className={!shown ? "opacity-40" : undefined}>
+      <InspectorRow
+        top
+        // The two options read "Automatic (recommended)" and "Choose...",
+        // about 200px of a 292px content box: inline, the label column was
+        // handed what was left and broke at every space (I-05). A control
+        // too wide for its row goes on its own line, which is the
+        // prototype's own answer for the same shape (`.srow.stacked`).
+        stacked
+        label={USAGE_PROVIDER_LEVEL.limitsLabel}
+        description={USAGE_PROVIDER_LEVEL.limitsDescription}
+        control={
+          <div className="flex flex-col gap-2.5">
+            <SegmentedControl
+              ariaLabel={USAGE_PROVIDER_LEVEL.limitsLabel}
+              options={USAGE_PROVIDER_LEVEL.limitsOptions}
+              value={choosing ? "choose" : "automatic"}
+              onChange={(next) => {
+                if (next !== "choose") {
                   writeSelection(
                     providerId,
                     arrangement,
-                    chosenSelection(drawnKeys, windows),
+                    AUTOMATIC_LIMIT_SELECTION,
                   );
-                }}
-              />
-              {windows.length === 0 ? (
-                <p className="text-ui-xs text-muted-foreground">
-                  {USAGE_PROVIDER_LEVEL.limitsEmpty}
-                </p>
-              ) : null}
-              {pickingLimits ? (
-                <div
-                  role="group"
-                  aria-label={USAGE_PROVIDER_LEVEL.limitsPickLabel}
-                  className="flex flex-col gap-1.5"
-                >
-                  {windows.map((window) => {
-                    const checked = picked.has(window.windowKey);
-                    // The last one on screen cannot be unticked: a selection
-                    // that draws nothing is what the Shown switch above is
-                    // for, and the store refuses it anyway (L-96).
-                    const last = checked && picked.size <= 1;
-                    return (
-                      <label
-                        key={window.windowKey}
-                        className="flex items-center gap-2 text-ui-sm"
-                      >
-                        <Checkbox
-                          checked={checked}
-                          disabled={last}
-                          onCheckedChange={(next) => {
-                            writeSelection(
-                              providerId,
-                              arrangement,
-                              togglePick(
-                                selection,
-                                windows.map((entry) => entry.windowKey),
-                                window.windowKey,
-                                next === true,
-                              ),
-                            );
-                          }}
-                        />
-                        {window.label}
-                      </label>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          }
-        />
-      </div>
+                  return;
+                }
+                // Nothing reported yet: there is no list to open and an
+                // empty pick would be a selection that draws nothing, so
+                // the level stays on Automatic and says why (L-96).
+                if (windows.length === 0) return;
+                writeSelection(
+                  providerId,
+                  arrangement,
+                  chosenSelection(drawnKeys, windows),
+                );
+              }}
+            />
+            {windows.length === 0 ? (
+              <p className="text-ui-xs text-muted-foreground">
+                {USAGE_PROVIDER_LEVEL.limitsEmpty}
+              </p>
+            ) : null}
+            {pickingLimits ? (
+              <div
+                role="group"
+                aria-label={USAGE_PROVIDER_LEVEL.limitsPickLabel}
+                className="flex flex-col gap-1.5"
+              >
+                {windows.map((window) => {
+                  const checked = picked.has(window.windowKey);
+                  // The last one on screen cannot be unticked: a selection
+                  // that draws nothing is what the Shown switch above is
+                  // for, and the store refuses it anyway (L-96).
+                  const last = checked && picked.size <= 1;
+                  return (
+                    <label
+                      key={window.windowKey}
+                      className="flex items-center gap-2 text-ui-sm"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        disabled={last}
+                        onCheckedChange={(next) => {
+                          writeSelection(
+                            providerId,
+                            arrangement,
+                            togglePick(
+                              selection,
+                              windows.map((entry) => entry.windowKey),
+                              window.windowKey,
+                              next === true,
+                            ),
+                          );
+                        }}
+                      />
+                      {window.label}
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        }
+      />
     </div>
   );
 }
@@ -222,21 +249,6 @@ function togglePick(
     (key) => next.has(key) && !order.includes(key),
   );
   return { limitKeys: [...live, ...stale] };
-}
-
-function toggleHiddenProvider(
-  providerId: RateLimitProviderId,
-  arrangement: LayoutArrangement,
-  shown: boolean,
-): void {
-  useLayoutEditorStore.getState().recordGesture(() => {
-    const hidden = shown
-      ? arrangement.hiddenProviders.filter((entry) => entry !== providerId)
-      : [...arrangement.hiddenProviders, providerId];
-    useLayoutStore
-      .getState()
-      .setArrangement({ ...arrangement, hiddenProviders: hidden });
-  });
 }
 
 /**

@@ -69,18 +69,20 @@ export function InspectorRow(props: InspectorRowProps): ReactNode {
         word per line instead (I-05). The floor is the width the label and its
         description need to read as a sentence; a control that no longer fits
         beside it drops to the next line. */}
-      <div
-        className={cn(
-          "min-w-32 flex-1",
-          stacked && "flex items-center gap-1.5",
-        )}
-      >
-        <span className={page ? "font-medium" : "text-ui-sm"}>{label}</span>
-        {stacked ? revert : null}
+      <div className="min-w-32 flex-1">
+        {/* The label's own line, so a stacked row's description reads UNDER
+          the label exactly as an unstacked one's does. It used to be a flex
+          item beside the label, which put "Drag to reorder, here or on the
+          canvas." on the Position row's title line and wrapped it there
+          (LV2-15). */}
+        <div className={cn(stacked && "flex items-center gap-1.5")}>
+          <span className={page ? "font-medium" : "text-ui-sm"}>{label}</span>
+          {stacked ? revert : null}
+        </div>
         {description ? (
           <p
             className={cn(
-              "mt-0.5 text-muted-foreground",
+              "mt-0.5 max-w-[72ch] text-pretty text-muted-foreground",
               page ? "text-ui-sm" : "text-ui-xs",
             )}
           >

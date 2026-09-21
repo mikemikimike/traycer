@@ -156,8 +156,14 @@ describe("useLayoutStore", () => {
     ).toEqual(PRESET_VALUES.default);
   });
 
-  describe("the delta stays minimal", () => {
-    it("writes only the key that differs from the base preset", () => {
+  /**
+   * The delta is what a person PICKED, and "changed" is measured against
+   * whichever base is current (L-133). The two were the same thing while the
+   * store re-minimized on every write - and keeping them the same cost a
+   * preset click every pick the incoming preset happened to agree with.
+   */
+  describe("the delta is the user's picks", () => {
+    it("writes only the key the caller named", () => {
       useLayoutStore.getState().setRegionValues("model", { style: "bars" });
 
       expect(getLayoutSnapshot().overrides).toEqual({
@@ -168,36 +174,46 @@ describe("useLayoutStore", () => {
       ).toEqual({ shown: "shown", style: "bars" });
     });
 
-    it("drops a key set back to what the base preset says", () => {
+    it("keeps a key set back to the base's own value, and stops counting it", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("model", { style: "bars" });
       store.setRegionValues("model", { style: "text" });
 
-      expect(getLayoutSnapshot().overrides).toEqual({});
+      // The pick is on record - Compact draws this region as bars, so it is
+      // the user's answer again the moment they switch density.
+      expect(getLayoutSnapshot().overrides).toEqual({
+        model: { style: "text" },
+      });
+      // ... and it is NOT a change, because nothing about the picture differs
+      // from the base. That is the half the header, the dot and the revert
+      // read, and it is measured rather than stored.
+      expect(regionChanged(getLayoutSnapshot(), "model")).toBe(false);
+      expect(changeCount(getLayoutSnapshot())).toBe(0);
     });
 
-    it("drops a pinned-field list that matches the base, and keeps one that does not", () => {
+    it("counts a pinned-field list by its rows, not by its identity", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("contextUsage", {
         pinnedFields: [...CONTEXT_USAGE_ROW_KEYS],
       });
 
       // A fresh array with the same rows in the same order is not a change.
-      expect(getLayoutSnapshot().overrides).toEqual({});
+      expect(changeCount(getLayoutSnapshot())).toBe(0);
 
       store.setRegionValues("contextUsage", { pinnedFields: ["used"] });
 
       expect(getLayoutSnapshot().overrides).toEqual({
         contextUsage: { pinnedFields: ["used"] },
       });
+      expect(changeCount(getLayoutSnapshot())).toBe(1);
     });
   });
 
-  describe("the base preset", () => {
-    it("keeps the arrangement and the changes that are still changes", () => {
+  describe("the base preset (L-133)", () => {
+    it("changes the density and keeps every pick, in both directions", () => {
       const store = useLayoutStore.getState();
       store.setArrangement({ ...DEFAULT_ARRANGEMENT, minimapSide: "left" });
-      // Compact hides the microphone too, so this stops being a change.
+      // Compact hides the microphone too, so this stops being a CHANGE there.
       store.setRegionValues("mic", { shown: "hidden" });
       // Compact has no opinion about the Home tab, so this stays one.
       store.setRegionValues("homeTab", { shown: "shown" });
@@ -205,12 +221,39 @@ describe("useLayoutStore", () => {
       useLayoutStore.getState().setBasePreset("compact");
 
       expect(getLayoutSnapshot().overrides).toEqual({
+        mic: { shown: "hidden" },
         homeTab: { shown: "shown" },
       });
+      // Truthful without being lossy: one of the two picks differs from
+      // Compact, so the header reads "Compact + 1 change".
+      expect(changeCount(getLayoutSnapshot())).toBe(1);
       expect(getLayoutSnapshot().arrangement.minimapSide).toBe("left");
       expect(
         effectiveLayoutValues("compact", getLayoutSnapshot().overrides).mic,
       ).toEqual({ shown: "hidden" });
+
+      // And the round trip, which is the whole of what L-133 bought: under
+      // Detailed the mic is shown by the preset, so the pick becomes a change
+      // again - the count is re-measured against the base that is current, not
+      // carried over - and going back to Compact returns the user's own answer
+      // instead of the preset's.
+      useLayoutStore.getState().setBasePreset("detailed");
+      expect(changeCount(getLayoutSnapshot())).toBe(2);
+      useLayoutStore.getState().setBasePreset("compact");
+      expect(
+        effectiveLayoutValues("compact", getLayoutSnapshot().overrides).mic,
+      ).toEqual({ shown: "hidden" });
+    });
+
+    it("is what `Reset to <preset>` is for, and that still clears them", () => {
+      const store = useLayoutStore.getState();
+      store.setRegionValues("homeTab", { shown: "shown" });
+      store.setBasePreset("compact");
+
+      useLayoutStore.getState().replaceAll(resetToBase(getLayoutSnapshot()));
+
+      expect(getLayoutSnapshot().overrides).toEqual({});
+      expect(getLayoutSnapshot().basePreset).toBe("compact");
     });
   });
 
@@ -305,11 +348,12 @@ describe("useLayoutStore", () => {
   });
 
   describe("rehydration", () => {
-    it("drops a value this build has no case for, a region it does not know, and an override that agrees with the base", async () => {
+    it("drops a value this build has no case for and a region it does not know, and keeps a pick the base already makes", async () => {
       await rehydrateFrom({
         basePreset: "compact",
         overrides: {
-          // Compact's own model style: not a change, so not an override.
+          // Compact's own model style. Kept, because it is still a pick -
+          // and it costs nothing, since nothing measures presence (L-133).
           model: { style: "bars" },
           mic: { shown: "sideways" },
           nowhere: { shown: "hidden" },
@@ -321,8 +365,10 @@ describe("useLayoutStore", () => {
 
       expect(getLayoutSnapshot().basePreset).toBe("compact");
       expect(getLayoutSnapshot().overrides).toEqual({
+        model: { style: "bars" },
         homeTab: { shown: "shown" },
       });
+      expect(changeCount(getLayoutSnapshot())).toBe(1);
     });
 
     it("falls back to the defaults on a record it cannot read", async () => {

@@ -158,16 +158,19 @@ describe("ComposerToolbar presentation mode", () => {
     expect(screen.getByText("Sample model")).not.toBeNull();
   });
 
-  it("makes the toolbar row inert, but only in presentation mode", () => {
+  // L-131. The presentation toolbar used to be `inert`, which removed the whole
+  // strip from hit testing - and the one surface that renders it is the layout
+  // editor's canvas, where Attach image, Access, Agent, Model and Microphone
+  // are exactly what the user points at. Passivity is the leaves' own (the
+  // assertions below) plus the edit firewall on the app column; it is never a
+  // subtree the pointer cannot reach.
+  it("is pointable in presentation mode: nothing in the strip is inert", () => {
     const { container, unmount } = renderToolbar({
       presentation: true,
       runTargetHostId: null,
       onSubmit: vi.fn(),
     });
-    expect(container.querySelector("[inert]")).not.toBeNull();
-    expect(
-      screen.getByTestId("toolbar-item-send").closest("[inert]"),
-    ).not.toBeNull();
+    expect(container.querySelector("[inert]")).toBeNull();
     unmount();
 
     const live = renderToolbar({
@@ -176,6 +179,30 @@ describe("ComposerToolbar presentation mode", () => {
       onSubmit: vi.fn(),
     });
     expect(live.container.querySelector("[inert]")).toBeNull();
+  });
+
+  /**
+   * L-129. The presentation copy used to be handed back without its cluster
+   * menu at all ("it is a picture"), which is backwards: the sample
+   * workspace's toolbar is the ONE toolbar the user right-clicks while
+   * customizing, and a quick verb there writes the same value the inspector's
+   * own control writes.
+   */
+  it("answers a right-click with the pointed-at item's quick verbs", () => {
+    renderToolbar({
+      presentation: true,
+      runTargetHostId: null,
+      onSubmit: vi.fn(),
+    });
+
+    const attach = document.querySelector('[data-layout-region="attachImage"]');
+    if (attach === null) throw new Error("attach image region is not named");
+    fireEvent.contextMenu(attach);
+
+    expect(
+      screen.queryByTestId("layout-quick-verb-attachImage-hide"),
+    ).not.toBeNull();
+    expect(screen.queryByTestId("customize-layout-menu-item")).not.toBeNull();
   });
 
   it("registers no active-model-picker activation", () => {

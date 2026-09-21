@@ -3,9 +3,19 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
+import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
+import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
+import {
+  BARE_ROW,
+  regionRowItems,
+  type SortableRowDecoration,
+} from "@/components/layout-editor/inspector/rows/order-row-items";
+import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
+import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -71,6 +81,24 @@ function row(id: string): HTMLElement {
   if (!(node instanceof HTMLElement)) throw new Error(`no such row: ${id}`);
   return node;
 }
+
+function rows(): ReadonlyArray<HTMLElement> {
+  return [...document.querySelectorAll<HTMLElement>("[data-sortable-id]")];
+}
+
+/** The element carrying the row's operation, which is never the whole line. */
+function grabOf(rowNode: HTMLElement): HTMLElement {
+  const node = rowNode.querySelector('[role="button"]');
+  if (!(node instanceof HTMLElement)) throw new Error("row has no grab");
+  return node;
+}
+
+/** Anything a screen reader names as a control, or a Tab stop can land on. */
+const INTERACTIVE =
+  'a[href], button, input, select, textarea, [tabindex], [role="button"], [role="radio"], [role="radiogroup"], [role="switch"], [role="checkbox"]';
+
+/** A row's ONE state control, whatever shape its options take (L-121). */
+const STATE_CONTROL = '[role="radiogroup"], [role="switch"]';
 
 function rowOrder(): ReadonlyArray<string> {
   return [...document.querySelectorAll("[data-sortable-id]")].map(
@@ -198,21 +226,6 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
 });
 
 describe("what a row claims as its own (R1-02)", () => {
-  /** Anything a screen reader names as a control, or a Tab stop can land on. */
-  const INTERACTIVE =
-    'a[href], button, input, select, textarea, [tabindex], [role="button"], [role="radio"], [role="radiogroup"], [role="switch"], [role="checkbox"]';
-
-  /** The element carrying the row's operation, which is never the whole line. */
-  function grabOf(rowNode: HTMLElement): HTMLElement {
-    const node = rowNode.querySelector('[role="button"]');
-    if (!(node instanceof HTMLElement)) throw new Error("row has no grab");
-    return node;
-  }
-
-  function rows(): ReadonlyArray<HTMLElement> {
-    return [...document.querySelectorAll<HTMLElement>("[data-sortable-id]")];
-  }
-
   it("keeps the dock's own row controls out of the grab", () => {
     // The rail is the inspector's decorated list: every divider carries a real
     // Remove button, which used to sit INSIDE the `role="button"` line.
@@ -244,9 +257,10 @@ describe("what a row claims as its own (R1-02)", () => {
     }
 
     // A composite widget names itself from its contents: the row is "Minimap",
-    // never "Minimap Left Right Show Minimap".
+    // never "Minimap Left Right Show Minimap". Said of EVERY row in the card,
+    // hinted or not, because the precondition that used to stand here excluded
+    // the only rows the defect was ever about (R2-08).
     const facts = regionFacts("minimap");
-    expect(facts.hint).toBeNull();
     expect(grabOf(minimap).textContent).toBe(facts.name);
     const named = screen.getByRole("button", { name: facts.name });
     expect(named).toBe(grabOf(minimap));
@@ -264,6 +278,122 @@ describe("what a row claims as its own (R1-02)", () => {
 
     expect(toggled.mock.calls).toEqual([["contextUsage"], ["contextUsage"]]);
     expect(grab.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+/**
+ * The page row's own anatomy, built from the row builders rather than through
+ * a surface card: what is under test is the ROW - its one state control, the
+ * slot it reserves for a revert, where its presence rule lives and what it
+ * draws for a glyph - and which regions get which of those is the card's
+ * decision, on the other side of this seam.
+ */
+describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
+  /** One plain rail panel and one that carries a presence rule and a revert. */
+  const ROW_IDS: ReadonlyArray<RegionId> = ["railAgents", "railPullRequests"];
+  const CHANGED: RegionId = "railPullRequests";
+
+  function PageRowList(): ReactNode {
+    const snap = snapshot();
+    const values = effectiveLayoutValues(snap.basePreset, snap.overrides);
+
+    function decorate(id: string): SortableRowDecoration {
+      const regionId = ROW_IDS.find((candidate) => candidate === id);
+      if (regionId === undefined) return BARE_ROW;
+      const changed = regionId === CHANGED;
+      return {
+        ...BARE_ROW,
+        changed,
+        hint: regionFacts(regionId).hint,
+        // The real rail button, which is what the Sidebar card draws instead
+        // of the plinth the owner complained about (L-120).
+        glyph: regionDepiction(regionId, values, snap.arrangement),
+        control: <RegionDisplayControl regionId={regionId} values={values} />,
+        revert: changed ? (
+          <RevertButton
+            label={`Revert ${regionFacts(regionId).name}`}
+            onRevert={() => undefined}
+          />
+        ) : null,
+      };
+    }
+
+    return (
+      <LayoutFormHostContext value="page">
+        <SortableList
+          label="Sidebar panels"
+          selectedId={null}
+          items={regionRowItems(ROW_IDS, values, decorate)}
+          onMove={() => undefined}
+        />
+      </LayoutFormHostContext>
+    );
+  }
+
+  it("reserves the revert's slot on every row, filled on one of them", () => {
+    render(<PageRowList />);
+
+    // The box exists whether or not there is anything in it, which is what
+    // stops the control column moving when a value changes (LV2-11).
+    expect(
+      rows().map((node) => node.querySelectorAll("[data-revert-slot]").length),
+    ).toEqual([1, 1]);
+    expect(screen.getAllByRole("button", { name: /^Revert / })).toHaveLength(1);
+    expect(
+      row(CHANGED).querySelector("[data-revert-slot]")?.childElementCount,
+    ).toBe(1);
+    expect(
+      row("railAgents").querySelector("[data-revert-slot]")?.childElementCount,
+    ).toBe(0);
+  });
+
+  it("gives a row exactly one state control, outside its grab", () => {
+    render(<PageRowList />);
+
+    for (const node of rows()) {
+      expect(node.querySelectorAll(STATE_CONTROL)).toHaveLength(1);
+      // Still true with a real component drawn inside the grab: the glyph is
+      // `inert`, so the picture of a rail button is not a second button.
+      expect(grabOf(node).querySelectorAll(INTERACTIVE)).toHaveLength(0);
+    }
+    expect(
+      screen.getByRole("radiogroup", {
+        name: `${regionFacts("railAgents").name} display`,
+      }),
+    ).toBeDefined();
+  });
+
+  it("describes the row by its presence rule instead of naming itself from it", () => {
+    render(<PageRowList />);
+    const hint = regionFacts(CHANGED).hint;
+    const grab = grabOf(row(CHANGED));
+
+    expect(hint).not.toBeNull();
+    expect(grab.textContent).toBe(regionFacts(CHANGED).name);
+
+    const described = (grab.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id));
+    const rule = described.find((node) => node?.textContent === hint);
+    expect(rule).toBeDefined();
+    // A description is a SIBLING of the control it describes; inside it, it is
+    // part of the control's name instead (R2-08).
+    expect(grab.contains(rule ?? null)).toBe(false);
+    // The grab instructions are still there beside it.
+    expect(described.length).toBe(2);
+  });
+
+  it("draws the real component as the row's glyph, in place of the icon", () => {
+    render(<PageRowList />);
+    const glyph = row("railAgents").querySelector("[data-row-glyph]");
+
+    expect(glyph).not.toBeNull();
+    expect(glyph?.hasAttribute("inert")).toBe(true);
+    expect(glyph?.querySelector("svg")).not.toBeNull();
+    // One picture per row: the registry icon is not drawn beside it.
+    expect(row("railAgents").querySelectorAll("[data-row-icon]")).toHaveLength(
+      0,
+    );
   });
 });
 
@@ -297,6 +427,22 @@ describe("the rail's dividers as items (L-25)", () => {
     expect(railIds()).not.toContain(dividerId);
     expect(railIds()).toHaveLength(before.length - 1);
     expect(historyDepth()).toBe(1);
+  });
+
+  it("draws a rule on a divider row, which is the whole of what it is", () => {
+    render(section("railAgents", vi.fn()));
+    const dividerId = railIds().find((id) => id.startsWith("divider:")) ?? "";
+    const dividerRow = row(dividerId);
+
+    // A hairline spanning the row, and no state to speak of: the thing that
+    // represents a boundary used to be the emptiest item in the list (LV2-12).
+    expect(dividerRow.querySelector("[data-divider-rule]")).not.toBeNull();
+    expect(dividerRow.querySelectorAll(STATE_CONTROL)).toHaveLength(0);
+    // Its one verb sits in the same reserved slot a member's revert does, so
+    // the column does not move between the two kinds of row.
+    expect(
+      dividerRow.querySelector("[data-revert-slot]")?.querySelector("button"),
+    ).not.toBeNull();
   });
 
   it("moves a divider like any other item, which is what regroups the rail", () => {

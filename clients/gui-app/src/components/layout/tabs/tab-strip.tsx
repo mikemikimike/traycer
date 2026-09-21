@@ -362,10 +362,17 @@ function TabStripBody() {
               {/* The task tabs are non-editable chrome and dim while a layout
                   session is live (4.2). The marker is on the scroller rather
                   than on the strip root, which is an ancestor of the Home
-                  item's region. */}
+                  item's region.
+
+                  The `-members` spelling dims each tab rather than the
+                  scroller's own box, because one of those tabs is the
+                  session's own chrome: the amber cap under the sample
+                  workspace tab (L-87). `opacity` on this box could not be
+                  undone below it, so the one mark that says "you are
+                  customizing" was drawn at 45% of itself (L-132). */}
               <div
                 ref={trailingSlotRef}
-                data-layout-passive
+                data-layout-passive-members
                 data-testid="header-tab-strip-scroll"
                 onWheel={handleWheel}
                 className="no-scrollbar flex min-w-0 max-w-full flex-[0_1_auto] touch-pan-x items-end overflow-x-auto overscroll-x-contain [-webkit-app-region:no-drag]"

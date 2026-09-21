@@ -2,6 +2,7 @@ import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { RailVisibility } from "@/lib/layout/layout-values";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
@@ -46,4 +47,23 @@ export function writeArrangement(arrangement: LayoutArrangement): void {
   useLayoutEditorStore.getState().recordGesture(() => {
     useLayoutStore.getState().setArrangement(arrangement);
   });
+}
+
+/**
+ * One provider on or off the strip, as one recorded gesture.
+ *
+ * Here beside the other writes rather than in the dock's provider screen: the
+ * page's provider row asks the same question with a segmented control instead
+ * of a switch (L-121), and the CONTROL is the hosts' to differ on while the
+ * write is not.
+ */
+export function toggleHiddenProvider(
+  providerId: RateLimitProviderId,
+  arrangement: LayoutArrangement,
+  shown: boolean,
+): void {
+  const hiddenProviders = shown
+    ? arrangement.hiddenProviders.filter((entry) => entry !== providerId)
+    : [...arrangement.hiddenProviders, providerId];
+  writeArrangement({ ...arrangement, hiddenProviders });
 }

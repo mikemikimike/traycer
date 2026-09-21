@@ -152,6 +152,20 @@ describe("inspector keyboard model (L-31)", () => {
     ).toBeNull();
   });
 
+  it("lights keyboard mode when the walk starts in the filter", () => {
+    render(<Harness onExit={() => {}} />);
+    expect(useLayoutEditorStore.getState().keyboardNav).toBe(false);
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Filter regions" }), {
+      key: "ArrowDown",
+    });
+
+    // The FIELD takes the key and this host decides what it means: the flag is
+    // a fact about an editor session, and the same field is drawn on a page
+    // that has none (R2-04).
+    expect(useLayoutEditorStore.getState().keyboardNav).toBe(true);
+  });
+
   it("returns focus to the filter on ArrowUp from the first row", () => {
     render(<Harness onExit={() => {}} />);
     const filterInput = screen.getByRole("textbox", { name: "Filter regions" });

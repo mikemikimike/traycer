@@ -9,7 +9,10 @@ import {
   undoLayout,
   type LayoutHistory,
 } from "@/lib/layout/layout-history";
-import type { LayoutPresetId } from "@/lib/layout/layout-presets";
+import {
+  effectiveLayoutValues,
+  type LayoutPresetId,
+} from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { basePersistOptions, persistKey, STORE_KEYS } from "@/lib/persist";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
@@ -310,7 +313,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         // A gesture that landed on the value it already had is not a step: an
         // Undo that visibly does nothing is worse than no Undo.
         const after = getLayoutSnapshot();
-        if (sameSnapshot(before, after)) return;
+        if (sameDrawnLayout(before, after)) return;
         set({
           history: recordLayoutChange(get().history, before),
           firstChangeAt: get().firstChangeAt ?? Date.now(),
@@ -476,6 +479,36 @@ function sameSnapshot(
   right: LayoutSnapshot,
 ): boolean {
   return left !== null && JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Whether two snapshots DRAW the same app, which is a different question from
+ * whether they are the same record (L-133).
+ *
+ * The delta holds what a person picked, not what differs from the current
+ * preset, so a pick that the preset already makes changes the record and
+ * changes nothing on screen. The rule the record comparison used to state is
+ * about the screen and still binds: an Undo that visibly does nothing is worse
+ * than no Undo, and a `first_change_bucket` stamped by an invisible pick would
+ * report a change nobody could see. The pick itself is kept either way - it is
+ * the user's answer again the moment they switch preset.
+ *
+ * Only `recordGesture` asks this, once per gesture. The dirty flag keeps the
+ * cheap record comparison above: it runs inside the store subscription, on
+ * every one of the hundreds of layout writes a drag lands (G1-21), and its
+ * own question - is there anything Discard would put back - is about the
+ * record.
+ */
+function sameDrawnLayout(left: LayoutSnapshot, right: LayoutSnapshot): boolean {
+  return drawnLayout(left) === drawnLayout(right);
+}
+
+function drawnLayout(snapshot: LayoutSnapshot): string {
+  return JSON.stringify({
+    basePreset: snapshot.basePreset,
+    values: effectiveLayoutValues(snapshot.basePreset, snapshot.overrides),
+    arrangement: snapshot.arrangement,
+  });
 }
 
 function persistedDockMode(persistedState: unknown): LayoutDockMode {

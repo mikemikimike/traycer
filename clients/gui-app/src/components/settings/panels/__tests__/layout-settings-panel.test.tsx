@@ -7,6 +7,7 @@ import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-fa
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import type { RegionId } from "@/lib/layout/region-id";
 import { navigateToLayoutRegion } from "@/lib/settings-navigation";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
@@ -21,6 +22,16 @@ import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 vi.mock("@/lib/host", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/host")>()),
   useHostClient: () => null,
+}));
+
+// A provider row's disclosure draws `ProviderLimitsControl`, which reads the
+// windows the strip has already read (L-96, L-106) - through the watched host
+// scope, a profile selection and the segment model, none of which this page is
+// about. Mocked at the same one boundary `provider-limits-choose.test.tsx`
+// mocks, so the page is tested for its COMPOSITION and the control is tested
+// where it lives.
+vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
+  useProviderLimitWindows: () => ({ windows: [], drawnKeys: [] }),
 }));
 
 // The width gate reads the window, and the door is not what this suite is
@@ -47,7 +58,7 @@ afterEach(() => {
 });
 
 /** One region's effective value, which is what a row draws and writes. */
-function shownValue(regionId: "railAgents" | "railPullRequests"): string {
+function shownValue(regionId: RegionId): string {
   const snapshot = useLayoutStore.getState();
   return effectiveLayoutValues(snapshot.basePreset, snapshot.overrides)[
     regionId
@@ -72,6 +83,10 @@ function surface(id: string): HTMLElement {
   return screen.getByTestId(`layout-surface-${id}`);
 }
 
+function renderPanel(): void {
+  render(<LayoutSettingsPanel />);
+}
+
 /**
  * The full-width host of the one layout form (L-03), after L-92.
  *
@@ -83,7 +98,7 @@ function surface(id: string): HTMLElement {
  */
 describe("Settings - Layout", () => {
   it("renders one card per surface, with every region as a row inside its own", () => {
-    render(<LayoutSettingsPanel />);
+    renderPanel();
 
     for (const group of SURFACE_GROUPS) {
       expect(surface(group.id)).toBeTruthy();
@@ -94,7 +109,7 @@ describe("Settings - Layout", () => {
   });
 
   it("puts the presets block first", () => {
-    render(<LayoutSettingsPanel />);
+    renderPanel();
 
     const presets = screen.getByTestId("layout-presets-group");
     const firstSurface = surface(SURFACE_GROUPS[0].id);
@@ -106,7 +121,7 @@ describe("Settings - Layout", () => {
 
   describe("de-duplication (L-92, L-95)", () => {
     it("gives the Sidebar ONE list holding all nine panels plus its dividers", () => {
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       const sidebar = surface("sidebar");
       const panelRows = [...sidebar.querySelectorAll("[data-sortable-id]")].map(
@@ -128,7 +143,7 @@ describe("Settings - Layout", () => {
     });
 
     it("draws no region's row twice anywhere on the page", () => {
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       const ids = rowIds();
       for (const region of LAYOUT_REGION_LIST) {
@@ -139,36 +154,49 @@ describe("Settings - Layout", () => {
       }
     });
 
-    it("gives every region exactly one Shown control", () => {
-      render(<LayoutSettingsPanel />);
+    it("gives every region exactly one state control, in one vocabulary", () => {
+      renderPanel();
 
       for (const region of LAYOUT_REGION_LIST) {
-        const controls = [
-          ...screen.queryAllByRole("switch", { name: `Show ${region.name}` }),
-          ...screen.queryAllByRole("radiogroup", {
-            name: `${region.name} visibility`,
+        // One wording for all three option sets (L-121): the page used to
+        // carry two visibility vocabularies, a `Switch` and a tri-state, and
+        // a dock row carried a size control AND a switch for one value.
+        expect(
+          screen.queryAllByRole("radiogroup", {
+            name: `${region.name} display`,
           }),
-        ];
-        expect(controls, region.name).toHaveLength(1);
+          region.name,
+        ).toHaveLength(1);
+        expect(
+          screen.queryAllByRole("switch", { name: `Show ${region.name}` }),
+          region.name,
+        ).toEqual([]);
       }
     });
 
-    it("says the reorder instruction and the pinned-right note once each", () => {
-      render(<LayoutSettingsPanel />);
+    it("says each list's instruction once, with its rule joined to it", () => {
+      renderPanel();
 
       expect(
-        screen.getAllByText("Drag to reorder. Dividers are items too."),
+        screen.getAllByText(
+          "Drag to reorder, here or on the canvas. Dividers are items too.",
+        ),
       ).toHaveLength(1);
       expect(
         screen.getAllByText("Drag to reorder, here or on the canvas."),
-      ).toHaveLength(3);
-      expect(
-        screen.getAllByText("The model chip stays on the right."),
-      ).toHaveLength(1);
+      ).toHaveLength(2);
+      // The pinned-right note belongs to the Toolbar-right LIST, so it is part
+      // of that list header's one line rather than a footnote under the card
+      // (redesign 4.8). It is said once, and only there.
+      const pinned = screen.getAllByText(
+        "Drag to reorder, here or on the canvas. The model chip stays on the right.",
+      );
+      expect(pinned).toHaveLength(1);
+      expect(surface("composer").contains(pinned[0])).toBe(true);
     });
 
     it("hoists the usage host onto the Status bar card, off both its regions", () => {
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       const hosts = screen.getAllByRole("radiogroup", { name: "Position" });
 
@@ -176,7 +204,7 @@ describe("Settings - Layout", () => {
       // than to either of the regions it moves (D7).
       expect(hosts).toHaveLength(1);
       expect(
-        within(surface("statusBar")).getByText("Where these live"),
+        within(surface("statusBar")).getByText("Show these in"),
       ).toBeTruthy();
       expect(row("usageLimits").contains(hosts[0])).toBe(false);
       expect(row("resourceMonitor").contains(hosts[0])).toBe(false);
@@ -186,7 +214,7 @@ describe("Settings - Layout", () => {
   describe("the rail's tri-state (L-93, D5)", () => {
     it("writes auto, shown and hidden from the row's one control", async () => {
       const user = userEvent.setup();
-      render(<LayoutSettingsPanel />);
+      renderPanel();
       const agents = within(row("railAgents"));
 
       await user.click(agents.getByRole("radio", { name: "Shown" }));
@@ -203,7 +231,7 @@ describe("Settings - Layout", () => {
 
     it("keeps a pinned Shown pinned through any other interaction on the page", async () => {
       const user = userEvent.setup();
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       await user.click(
         within(row("railPullRequests")).getByRole("radio", { name: "Shown" }),
@@ -228,13 +256,129 @@ describe("Settings - Layout", () => {
     });
   });
 
-  it("writes the region's own value from its row's switch", async () => {
+  it("writes the region's own value from its row's state control", async () => {
     const user = userEvent.setup();
-    render(<LayoutSettingsPanel />);
+    renderPanel();
 
-    await user.click(screen.getByRole("switch", { name: "Show Minimap" }));
+    await user.click(
+      within(row("minimap")).getByRole("radio", { name: "Hidden" }),
+    );
 
     expect(useLayoutStore.getState().overrides.minimap?.shown).toBe("hidden");
+  });
+
+  describe("the pictures (L-120, redesign 3.2)", () => {
+    it("draws a band on Composer and Status bar, and nowhere else", () => {
+      renderPanel();
+
+      for (const group of SURFACE_GROUPS) {
+        const bands = within(surface(group.id)).queryAllByTestId(
+          "surface-band",
+        );
+        const expected =
+          group.id === "composer" || group.id === "statusBar" ? 1 : 0;
+        expect(bands, group.id).toHaveLength(expected);
+      }
+    });
+
+    it("opens the Sidebar card with its first row, not with a plinth", () => {
+      renderPanel();
+
+      const sidebar = surface("sidebar");
+      // The word the deleted plinth printed. Its absence is the complaint
+      // L-118 was filed about, and it is not a class-name assertion.
+      expect(within(sidebar).queryByText("Specimen")).toBeNull();
+      // The first thing that can be operated in the card is the first panel's
+      // own grab, so the list that changes the rail is the top of the card.
+      const focusable = sidebar.querySelector('[role="button"]');
+      const firstRow = sidebar.querySelector("[data-sortable-id]");
+      expect(firstRow?.contains(focusable ?? null)).toBe(true);
+    });
+
+    it("carries the real rail button on each Sidebar row, and only there", () => {
+      renderPanel();
+
+      for (const railId of RAIL_REGION_IDS) {
+        expect(
+          row(railId).querySelectorAll("[data-row-glyph]"),
+          railId,
+        ).toHaveLength(1);
+      }
+      // Every other list keeps the registry's icon: their depictions are
+      // either too wide to be a glyph or already inside the surface's band.
+      expect(
+        surface("composer").querySelectorAll("[data-row-glyph]"),
+      ).toHaveLength(0);
+    });
+  });
+
+  describe("usage providers are a Status bar list (L-123)", () => {
+    it("draws a row per provider, opening its Limits pick in place", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      const statusBar = within(surface("statusBar"));
+      for (const providerId of DEFAULT_ARRANGEMENT.usageProviders) {
+        expect(row(providerId), providerId).toBeTruthy();
+      }
+
+      const first = DEFAULT_ARRANGEMENT.usageProviders[0];
+      expect(
+        statusBar.queryByRole("radiogroup", { name: "Limits" }),
+      ).toBeNull();
+      await user.click(row(first));
+
+      // Two levels, not five: the provider's own limits are one disclosure
+      // below its row, with no second stage and no second header.
+      expect(
+        within(row(first)).getByRole("radiogroup", { name: "Limits" }),
+      ).toBeTruthy();
+    });
+
+    it("is absent while Usage limits is hidden", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      await user.click(
+        within(row("usageLimits")).getByRole("radio", { name: "Hidden" }),
+      );
+
+      expect(rowIds()).not.toContain(DEFAULT_ARRANGEMENT.usageProviders[0]);
+      expect(screen.queryByText("Providers")).toBeNull();
+    });
+  });
+
+  describe("choosing a preset keeps the per-region changes (L-133)", () => {
+    it("changes the base and leaves the picks alone", () => {
+      act(() => {
+        useLayoutStore.getState().setRegionValues("mic", { shown: "shown" });
+        useLayoutStore.getState().setBasePreset("compact");
+      });
+      renderPanel();
+
+      // `mic` is hidden under Compact, so the pick is a change and says so.
+      expect(screen.getByTestId("preset-status-line").textContent).toBe(
+        "Compact + 1 change",
+      );
+
+      act(() => {
+        useLayoutStore.getState().setBasePreset("detailed");
+      });
+
+      // Detailed shows the mic anyway, so the pick is no longer a CHANGE -
+      // and it is still the user's pick, so switching back restores it. The
+      // count is truthful at every step because it is measured by difference.
+      const state = useLayoutStore.getState();
+      expect(state.overrides.mic?.shown).toBe("shown");
+      expect(screen.getByTestId("preset-status-line").textContent).toBe(
+        "Detailed",
+      );
+
+      act(() => {
+        useLayoutStore.getState().setBasePreset("compact");
+      });
+      expect(shownValue("mic")).toBe("shown");
+    });
   });
 
   describe("the safety net (L-20, P-6)", () => {
@@ -257,7 +401,7 @@ describe("Settings - Layout", () => {
           dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
         });
       });
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       await user.click(
         screen.getByRole("button", { name: "Reset everything" }),
@@ -277,12 +421,23 @@ describe("Settings - Layout", () => {
       expect(state.arrangement.dock).toEqual(DEFAULT_ARRANGEMENT.dock);
     });
 
-    it("is not offered on a layout nothing has touched", () => {
-      render(<LayoutSettingsPanel />);
+    it("is the last card, toned danger, and inoperable on an untouched layout", () => {
+      renderPanel();
 
+      const card = screen.getByTestId("layout-reset-group");
+      const lastSurface = surface(SURFACE_GROUPS[SURFACE_GROUPS.length - 1].id);
       expect(
-        screen.queryByRole("button", { name: "Reset everything" }),
-      ).toBeNull();
+        lastSurface.compareDocumentPosition(card) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // Showing the floor and saying you are standing on it, rather than a
+      // card that vanishes (5.8).
+      expect(
+        within(card)
+          .getByRole("button", { name: "Reset everything" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("marks a moved region's row and gives it a revert", async () => {
@@ -293,7 +448,7 @@ describe("Settings - Layout", () => {
           minimapSide: "left",
         });
       });
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       expect(within(row("minimap")).getByTestId("changed-dot")).toBeTruthy();
 
@@ -319,7 +474,7 @@ describe("Settings - Layout", () => {
       promoteToTab: vi.fn(),
       isOverlayActive: () => true,
     });
-    render(<LayoutSettingsPanel />);
+    renderPanel();
     expect(
       within(row("contextUsage")).queryByRole("radiogroup", {
         name: "Style",
@@ -334,11 +489,63 @@ describe("Settings - Layout", () => {
     expect(
       within(row("contextUsage")).getByRole("radiogroup", { name: "Style" }),
     ).toBeTruthy();
+    // The scroll is for the eye; the focus is for the hands (5.9).
+    expect(row("contextUsage").querySelector('[role="button"]')).toBe(
+      document.activeElement,
+    );
+  });
+
+  it("clears an active filter so the landing has a row to land on", async () => {
+    setSystemTabModalApi({
+      active: null,
+      openSettings: vi.fn(),
+      openHistory: vi.fn(),
+      close: vi.fn(),
+      setSection: vi.fn(),
+      promoteToTab: vi.fn(),
+      isOverlayActive: () => true,
+    });
+    renderPanel();
+    act(() => {
+      // A word from a previous visit that hides the Chat card whole (L-103),
+      // which is what used to drop the request silently.
+      useLayoutEditorStore.getState().setFilter("terminals");
+    });
+    expect(rowIds()).not.toContain("minimap");
+
+    await act(async () => {
+      navigateToLayoutRegion("minimap");
+      await Promise.resolve();
+    });
+
+    expect(useLayoutEditorStore.getState().filter).toBe("");
+    expect(row("minimap").querySelector('[role="button"]')).toBe(
+      document.activeElement,
+    );
+  });
+
+  it("moves focus from the filter to the first row on ArrowDown", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const field = screen.getByRole("textbox", {
+      name: "Filter these settings",
+    });
+    await user.click(field);
+    await user.keyboard("{ArrowDown}");
+
+    const firstRow = document.querySelector("[data-sortable-id]");
+    expect(firstRow?.querySelector('[role="button"]')).toBe(
+      document.activeElement,
+    );
+    // `keyboardNav` is a fact about an editor SESSION, and this host has none
+    // (R2-04). The page must never write it.
+    expect(useLayoutEditorStore.getState().keyboardNav).toBe(false);
   });
 
   describe("the small-screen status bar row (L-51)", () => {
     it("is absent outside the installed mobile app", () => {
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       expect(
         screen.queryByRole("switch", {
@@ -350,7 +557,7 @@ describe("Settings - Layout", () => {
     it("writes the arrangement in the mobile app", async () => {
       setMobileApp(true);
       const user = userEvent.setup();
-      render(<LayoutSettingsPanel />);
+      renderPanel();
 
       await user.click(
         screen.getByRole("switch", {

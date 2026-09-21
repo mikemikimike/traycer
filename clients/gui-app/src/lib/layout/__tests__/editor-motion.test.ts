@@ -1,3 +1,6 @@
+import { createElement, useSyncExternalStore, type ReactNode } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   runLayoutEditorMotion,
@@ -382,5 +385,111 @@ describe("the fallback exit (5.2)", () => {
     });
 
     expect(apply).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * R2-05. `apply` begins the session, and `beginSession` fires
+ * `useLayoutRegion`'s store subscription synchronously - so what React has
+ * COMMITTED at that moment decides which surface's instances register. On the
+ * transition path that is settled for free, because the callback runs a frame
+ * after the door's own work. On the fallback path it is not, and the session
+ * used to begin against the outgoing tab's last committed render.
+ *
+ * What is observed here is a pending commit rather than a region registry: a
+ * render scheduled before the call, and whether the DOM shows it by the time
+ * `apply` runs. That is the fact the door depends on, and it is true of the
+ * tab activation without this suite having to stand one up.
+ */
+describe("the commit the fallback entry begins in (R2-05)", () => {
+  interface PendingRender {
+    readonly container: HTMLElement;
+    /** Schedules a render React has NOT committed when this returns. */
+    readonly schedule: (text: string) => void;
+    readonly unmount: () => void;
+  }
+
+  function mountPendingRender(): PendingRender {
+    let text = "outgoing";
+    const listeners = new Set<() => void>();
+    const subscribe = (listener: () => void): (() => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+    const read = (): string => text;
+    function Pane(): ReactNode {
+      return useSyncExternalStore(subscribe, read);
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root: Root = createRoot(container);
+    flushSync(() => {
+      root.render(createElement(Pane));
+    });
+    return {
+      container,
+      schedule: (next: string) => {
+        text = next;
+        for (const listener of listeners) listener();
+      },
+      unmount: () => {
+        flushSync(() => {
+          root.unmount();
+        });
+        container.remove();
+      },
+    };
+  }
+
+  /**
+   * React warns about updates made outside `act` when the flag is on, and an
+   * update this test needs to leave PENDING is exactly what `act` would flush.
+   */
+  let previousActFlag: unknown = undefined;
+
+  beforeEach(() => {
+    previousActFlag = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
+  });
+
+  afterEach(() => {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousActFlag);
+  });
+
+  it("lands the work the door already scheduled before apply runs", () => {
+    const pending = mountPendingRender();
+    pending.schedule("sample");
+    // The premise: without this the test could pass on a render that had
+    // already committed, which is not the case the fix is about.
+    expect(pending.container.textContent).toBe("outgoing");
+
+    let seenByApply: string | null = null;
+    runLayoutEditorMotion({
+      phase: "enter",
+      entry: "keyboard",
+      dockMode: "right",
+      apply: () => {
+        seenByApply = pending.container.textContent;
+      },
+    });
+
+    expect(seenByApply).toBe("sample");
+    pending.unmount();
+  });
+
+  it("leaves the transition path's old snapshot alone", () => {
+    // The transition captures the OLD state when it starts, and the app
+    // column's snapshot is the tab content: flushing here would swap the tab
+    // abruptly before the picture the transition is about to glide.
+    const pending = mountPendingRender();
+    pending.schedule("sample");
+
+    enter("right", () => undefined);
+
+    expect(pending.container.textContent).toBe("outgoing");
+    startedTransition().runUpdate();
+    pending.unmount();
   });
 });

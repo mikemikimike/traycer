@@ -13,6 +13,16 @@ interface SpecimenStageProps {
  * deviation from the prototype's own hand-placed clip). `.stage` in the
  * prototype.
  *
+ * **The DOCKED inspector's, and nothing else's**, since L-128 narrowed L-09 to
+ * the host the owner approved the artifact for. The full-width page draws at
+ * most one flush picture BAND per surface, in the house's own inset-card shape
+ * (`inspector/surface-section.tsx`), and none at all for Sidebar, Top bar and
+ * Chat. That is also what closed R2-07: the only child that could overflow a
+ * centred line in BOTH directions was a SURFACE root, and no surface is drawn
+ * on a stage any more. What is left here is always a leaf `HostContextFrame`,
+ * which carries `min-w-0 max-w-full` and shrinks to the wrapper with its left
+ * edge at the stage's and the mask fade on its right.
+ *
  * Centred, and left-aligned only where the picture is too wide to fit. Both
  * come out of the one `justify-center` below rather than a second measurement:
  * the wrapper is the stage's full width and centres what it holds, so a

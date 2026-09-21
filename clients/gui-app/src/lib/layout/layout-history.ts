@@ -107,7 +107,7 @@ export function rebaseLayoutSnapshot(
   );
   return {
     basePreset,
-    overrides: rebaseOverrides(entry, previous, next, basePreset),
+    overrides: rebaseOverrides(entry, previous, next),
     arrangement: rebaseArrangement(
       entry.arrangement,
       previous.arrangement,
@@ -120,7 +120,6 @@ function rebaseOverrides(
   entry: LayoutSnapshot,
   previous: LayoutSnapshot,
   next: LayoutSnapshot,
-  basePreset: LayoutSnapshot["basePreset"],
 ): LayoutSnapshot["overrides"] {
   const entryRegions: Record<string, unknown> = entry.overrides;
   const previousRegions: Record<string, unknown> = previous.overrides;
@@ -141,7 +140,7 @@ function rebaseOverrides(
   // Back through the persisted resolver rather than trusted: the map was
   // assembled from three sources under dynamic keys, and this is the same
   // total parse a rehydrate runs.
-  return resolvePersistedOverrides(rebased, basePreset);
+  return resolvePersistedOverrides(rebased);
 }
 
 function rebaseArrangement(

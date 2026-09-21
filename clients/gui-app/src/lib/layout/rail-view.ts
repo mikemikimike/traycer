@@ -6,6 +6,7 @@ import {
   railFromLeftPanelGroups,
   railRegionForLeftPanelId,
   railVisibilityFor,
+  type RailEntry,
 } from "@/lib/layout/rail";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
@@ -35,6 +36,21 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
 export function useLeftPanelGroups(): ReadonlyArray<LeftPanelGroup> {
   const rail = useLayoutStore((state) => state.arrangement.rail);
   return useMemo(() => leftPanelGroupsFromRail(rail), [rail]);
+}
+
+/**
+ * The rail's own entries, for the two surfaces that DRAW it rather than
+ * consume its group view: the epic sidebar's icon column and the sample
+ * workspace's copy of it.
+ *
+ * A boundary is an entry with an id of its own and the group view drops it
+ * (L-25, L-115), so a rail that draws its dividers has to see the entries. It
+ * is served here, beside the derivation, because this module is the rail's own
+ * ancestor seam - what it answers is which panels EXIST and in what order, and
+ * D11 keeps a specimen's preview out of a read that decides a mount.
+ */
+export function useLayoutRail(): ReadonlyArray<RailEntry> {
+  return useLayoutStore((state) => state.arrangement.rail);
 }
 
 /** The same, for the non-React commit layer (canvas DnD). */

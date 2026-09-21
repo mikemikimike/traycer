@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
-import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import {
-  RegionShownControl,
-  RegionSideControl,
-  RegionSizeControl,
-} from "@/components/layout-editor/inspector/region-controls";
+  type AppFrame,
+  AppFrameComposerStack,
+  AppFrameStatusBarRow,
+} from "@/components/layout-editor/inspector/app-frame-chrome";
+import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
+import { ProviderLimitsControl } from "@/components/layout-editor/inspector/provider-level";
+import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
 import { revertControlValues } from "@/components/layout-editor/inspector/region-control-io";
 import { GrammarRowView } from "@/components/layout-editor/inspector/region-section";
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
@@ -13,9 +15,15 @@ import {
   regionRowItems,
   type SortableRowDecoration,
 } from "@/components/layout-editor/inspector/rows/order-row-items";
+import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
-import { SurfaceSpecimen } from "@/components/layout-editor/inspector/surface-specimen";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
+import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
+import {
+  isRailRegionId,
+  toggleHiddenProvider,
+  writeArrangement,
+} from "@/components/layout-editor/layout-gestures";
+import { depictRegion } from "@/components/layout-editor/region-depiction";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import {
   LAYOUT_REGION_LIST,
@@ -23,7 +31,11 @@ import {
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";
 import { regionMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
-import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
+import {
+  SURFACE_GROUPS,
+  type SurfaceGroupId,
+} from "@/components/layout-editor/regions/region-grammar";
+import { Button } from "@/components/ui/button";
 import {
   regionPositionMoved,
   revertPositionRow,
@@ -31,26 +43,33 @@ import {
 import {
   looseSurfaceRegions,
   ORDER_GROUPS,
-  surfaceHasSpecimen,
+  orderGroupInstruction,
+  surfaceHasBand,
   SURFACE_ORDER_GROUPS,
 } from "@/components/layout-editor/regions/surface-groups";
 import {
+  providerChanged,
   regionChanged,
   reorderedGroups,
+  revertProvider,
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
-import type {
-  LayoutArrangement,
-  OrderGroupId,
+import {
+  DEFAULT_ARRANGEMENT,
+  type LayoutArrangement,
+  type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { LayoutValues } from "@/lib/layout/layout-values";
+import { providerDisplayName } from "@/lib/provider-ordering";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import type { RegionId } from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
- * One SURFACE's card body on the full-width host (L-92, L-95).
+ * One SURFACE's card body on the full-width host (L-92, L-95, L-118).
  *
  * The inspector can filter, because something is selected; the page has to
  * group, so the section is the surface and the region is a ROW inside it. That
@@ -60,11 +79,19 @@ import { cn } from "@/lib/utils";
  * divider", the pinned-right note, the usage host - has exactly one place to
  * live once the group itself is the section.
  *
- * The L-08 grammar survives inside a row: the stage is now the surface's,
- * Shown and Size sit inline because they are one control each, Position IS the
- * row's place in its list, and Style, Fine-tune and the providers list open
- * behind the row's own disclosure - one level deep and never off the page,
- * which is L-89 satisfied by never leaving it.
+ * **The page draws at most one picture per card, and only where the picture
+ * carries something the rows cannot** (L-120, redesign 3.2). Sidebar, Top bar
+ * and Chat draw none: the Sidebar's assembled shape IS its list order, and
+ * each of its rows carries the real rail button as its glyph, so the 660px
+ * plinth the owner named is deleted rather than shrunk. Composer and Status
+ * bar keep one flush band each, in the house's own inset-card shape rather
+ * than on a lit plinth - `SpecimenStage` is the DOCK's grammar now (L-09 as
+ * narrowed by L-128).
+ *
+ * The L-08 grammar survives inside a row: Shown and Size are ONE segmented
+ * control (L-121), Position IS the row's place in its list, and Side, Style
+ * and Fine-tune open behind the row's own disclosure - one level deep and
+ * never off the page, which is L-89 satisfied by never leaving it.
  *
  * Nothing here is a second form. The lists are the `OrderGroupList` the
  * inspector draws with `selectedId={regionId}`, asked for the same group with
@@ -89,20 +116,35 @@ export function SurfaceSection(props: {
     props;
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
   const arrangement = snapshot.arrangement;
+  const gutter = useSortableRowPadding();
 
   function decorate(id: string): SortableRowDecoration {
     const regionId = asRegionId(id);
-    if (regionId === null) return BARE_ROW;
+    if (regionId === null) {
+      return providerRowDecoration(id, arrangement, openRows, onToggleRow);
+    }
+    const changed = regionRowChanged(snapshot, regionId);
     return {
-      changed: regionRowChanged(snapshot, regionId),
+      ...BARE_ROW,
+      changed,
       hint: regionFacts(regionId).hint,
-      control: (
-        <RegionRowControls
-          regionId={regionId}
-          snapshot={snapshot}
-          values={values}
+      // The Sidebar's rows ARE the picture the card used to draw above them
+      // (L-120): the rail's own button, at 1:1, through the one entry point
+      // every depiction goes through (L-77). No other list gets one - their
+      // depictions are either too wide to be a glyph or already in the
+      // surface's band - and the list wraps it `inert` and dims it.
+      glyph: isRailRegionId(regionId)
+        ? depictRegion(regionId, values[regionId], arrangement, null)
+        : null,
+      control: <RegionDisplayControl regionId={regionId} values={values} />,
+      revert: changed ? (
+        <RevertButton
+          label={`Revert ${regionFacts(regionId).name}`}
+          onRevert={() => {
+            revertRegion(snapshot, regionId);
+          }}
         />
-      ),
+      ) : null,
       detail: (
         <RegionRowDetail
           regionId={regionId}
@@ -121,45 +163,100 @@ export function SurfaceSection(props: {
   const loose = looseSurfaceRegions(surface).filter((regionId) =>
     regionMatchesFilter(regionId, filter),
   );
-  const groups = SURFACE_ORDER_GROUPS[surface].filter((group) =>
-    groupMatchesFilter(group, filter),
+  const groups = SURFACE_ORDER_GROUPS[surface].filter(
+    (group) => groupMatchesFilter(group, filter) && groupIsDrawn(group, values),
   );
-  // Chat has no picture faithful enough to draw and no surface rows, so its
-  // first list is the top of the card and must not be ruled off from nothing.
-  const ruledFromTop = surfaceHasSpecimen(surface) || surfaceRows !== null;
+  const band = surfaceBand(surface, values, arrangement);
 
   return (
     <div className="flex flex-col">
-      <SurfaceSpecimen
-        surface={surface}
-        values={values}
-        arrangement={arrangement}
-      />
-      {surfaceRows}
-      {loose.length === 0 ? null : (
-        <div
-          className={cn(
-            "px-3.5 py-3",
-            ruledFromTop && "border-t border-border",
-          )}
-        >
-          <SortableList
-            selectedId={null}
-            items={regionRowItems(loose, values, decorate)}
-            onMove={null}
-          />
+      {band === null ? null : (
+        // The house's own inset-card shape, borrowed verbatim from
+        // `SettingsSubgroup`, in the row gutter so the picture sits in the
+        // same column as the rows under it. `bg-foreground/3` rather than
+        // `bg-card` or `bg-muted`, both of which collapse onto the surrounding
+        // card in every preset dark theme (the reason `AppFrameComposerBox`
+        // already uses it). `min-w-0 max-w-full` is R2-07's fix: an over-wide
+        // surface shrinks to the band and clips on the RIGHT only, under
+        // `HostContextFrame`'s existing mask fade, instead of overflowing a
+        // centred line in both directions and losing its leading edge.
+        // The gutter's own vertical padding is a ROW's; a band sits a little
+        // prouder at the top of the card and closer to the rows it describes,
+        // so the two `py` classes are displaced AFTER it rather than before.
+        <div className={cn(gutter.row, "pt-4 pb-1")}>
+          <div
+            data-testid="surface-band"
+            className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-foreground/3 px-3 py-2.5"
+          >
+            {band}
+          </div>
         </div>
       )}
-      {groups.map((group) => (
+      {surfaceRows}
+      {loose.length === 0 ? null : (
+        <SortableList
+          label={`${surfaceLabel(surface)} settings`}
+          selectedId={null}
+          items={regionRowItems(loose, values, decorate)}
+          onMove={null}
+        />
+      )}
+      {groups.map((group, index) => (
         <SurfaceOrderList
           key={group}
           group={group}
           snapshot={snapshot}
           values={values}
           decorate={decorate}
-          ruled={ruledFromTop || loose.length > 0 || group !== groups[0]}
+          ruled={
+            band !== null ||
+            surfaceRows !== null ||
+            loose.length > 0 ||
+            index > 0
+          }
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * The picture a surface card opens with, or `null` for the three that draw
+ * none (L-120).
+ *
+ * The composer runs horizontally and the strip is a strip, so both bands are
+ * one row of the real thing at 1:1 - the same `app-frame-chrome.tsx` the
+ * preset miniatures draw from, so the two pictures cannot disagree about the
+ * app (R1-04).
+ */
+function surfaceBand(
+  surface: SurfaceGroupId,
+  values: LayoutValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  if (!surfaceHasBand(surface)) return null;
+  if (surface === "composer") {
+    return <AppFrameComposerStack values={values} arrangement={arrangement} />;
+  }
+  return <StatusBarBand values={values} arrangement={arrangement} />;
+}
+
+/**
+ * The status strip, or the line that says where it went: under the `header`
+ * placement the strip is not drawn at all and both of its regions have moved
+ * up (L-51, D7).
+ */
+function StatusBarBand({ values, arrangement }: AppFrame): ReactNode {
+  if (arrangement.usageHost === "header") {
+    return (
+      <p className="text-ui-sm text-muted-foreground">
+        Both of these are in the top bar, so there is no status bar to draw.
+      </p>
+    );
+  }
+  return (
+    <div className="flex h-6 w-full min-w-0 items-center gap-3">
+      <AppFrameStatusBarRow values={values} arrangement={arrangement} />
     </div>
   );
 }
@@ -173,6 +270,14 @@ export function SurfaceSection(props: {
  * member of its group.
  */
 function groupMatchesFilter(group: OrderGroupId, filter: string): boolean {
+  // The providers list has no member REGION - a provider is a reading, not a
+  // region - so `regionMatchesFilter` answers nothing for its rows and the
+  // list would vanish under any filter at all. It belongs to Usage limits, so
+  // it follows that region's match, which is also the answer a person typing
+  // "limits" or "usage" expects.
+  if (group === "usageProviders") {
+    return regionMatchesFilter("usageLimits", filter);
+  }
   return LAYOUT_REGION_LIST.some(
     (region) =>
       region.rows.some(
@@ -182,13 +287,33 @@ function groupMatchesFilter(group: OrderGroupId, filter: string): boolean {
 }
 
 /**
- * One order group as a headed list, with the group's own revert beside its
- * name.
+ * Whether the list's own subject is on screen at all.
+ *
+ * The providers are the segments of ONE region, so a Providers list under a
+ * hidden Usage limits row would be a list of parts of something that is not
+ * there (redesign 5.4). Every other group is always drawn.
+ */
+function groupIsDrawn(group: OrderGroupId, values: LayoutValues): boolean {
+  return group !== "usageProviders" || values.usageLimits.shown === "shown";
+}
+
+/**
+ * One order group as a headed list: the list's name, how it is operated, and
+ * the group's own revert, in the house's row shape (L-127).
+ *
+ * `text-overline uppercase` is used zero times elsewhere in the settings tree,
+ * and the pinned-right note used to be drawn UNDER the list where it read as a
+ * footnote to the card rather than as a rule about this list - both fixed by
+ * making the header a row like every other row on the page (redesign 4.8,
+ * LV2-18).
  *
  * The revert belongs to the GROUP rather than to each member, because putting
  * a group back is what `revertPositionRow` has always done for a
  * `position-order` row - and the row it used to hang on does not exist on this
- * host. A member's own dot still says whether THAT member moved.
+ * host. A member's own dot still says whether THAT member moved. It is drawn
+ * with a visible label instead of an unlabelled glyph floating at the card's
+ * right edge, and every list that can be reordered gets one, which the
+ * Composer's three did not (LV2-18).
  */
 function SurfaceOrderList(props: {
   readonly group: OrderGroupId;
@@ -202,26 +327,40 @@ function SurfaceOrderList(props: {
   const facts = ORDER_GROUPS[group];
   const arrangement = snapshot.arrangement;
   const moved = reorderedGroups(arrangement).includes(group);
+  const gutter = useSortableRowPadding();
   return (
-    <div className={cn("px-3.5 py-3", ruled && "border-t border-border")}>
-      <div className="mb-2 flex items-center gap-2">
-        <div className="min-w-0 flex-1">
+    <div className="flex flex-col">
+      <div
+        className={cn(
+          "flex flex-wrap items-start justify-between gap-x-6 gap-y-2 border-b border-border/40",
+          ruled && "border-t border-border/40",
+          gutter.row,
+        )}
+      >
+        <div className="min-w-32 flex-1">
           {facts.label === null ? null : (
-            <div className="text-overline text-muted-foreground uppercase">
-              {facts.label}
-            </div>
+            <h3 className="font-medium text-foreground">{facts.label}</h3>
           )}
-          <p className="text-ui-sm text-muted-foreground">
-            {facts.description}
+          <p
+            className={cn(
+              "max-w-[72ch] text-pretty text-ui-sm text-muted-foreground",
+              facts.label === null ? null : "mt-0.5",
+            )}
+          >
+            {orderGroupInstruction(group)}
           </p>
         </div>
         {moved ? (
-          <RevertButton
-            label={`Revert ${facts.label ?? "order"}`}
-            onRevert={() => {
+          <Button
+            type="button"
+            variant="muted"
+            size="sm"
+            onClick={() => {
               writeArrangement(revertedOrderGroup(group, arrangement));
             }}
-          />
+          >
+            Revert order
+          </Button>
         ) : null}
       </div>
       <OrderGroupList
@@ -245,6 +384,14 @@ function revertedOrderGroup(
   group: OrderGroupId,
   arrangement: LayoutArrangement,
 ): LayoutArrangement {
+  // The providers list is the one group no region declares, so its revert is
+  // stated here rather than reached through a member.
+  if (group === "usageProviders") {
+    return {
+      ...arrangement,
+      usageProviders: DEFAULT_ARRANGEMENT.usageProviders,
+    };
+  }
   const member = LAYOUT_REGION_LIST.find((region) =>
     region.rows.some(
       (row) => row.kind === "position-order" && row.group === group,
@@ -256,49 +403,92 @@ function revertedOrderGroup(
 }
 
 /**
- * A region's inline controls, in L-08's order with Position taken out - on
- * this host Position is the row.
+ * One provider row: its `Shown | Hidden` state, its changed dot and revert,
+ * and its own Limits pick as the row's disclosure (L-123).
+ *
+ * Two levels instead of five. The stage and the icon-tile header that
+ * `ProviderLevel` draws in the dock are not repeated here, because the row
+ * above the disclosure already names the provider and carries its state.
  */
-function RegionRowControls(props: {
-  readonly regionId: RegionId;
-  readonly snapshot: LayoutSnapshot;
-  readonly values: LayoutValues;
-}): ReactNode {
-  const { regionId, snapshot, values } = props;
-  const rows = regionFacts(regionId).rows;
-  const hasSide = rows.some((row) => row.kind === "position-side");
-  const hasSize = rows.some((row) => row.kind === "size");
-  return (
-    <>
-      {hasSide ? (
-        <RegionSideControl
-          regionId={regionId}
-          arrangement={snapshot.arrangement}
-        />
-      ) : null}
-      {hasSize ? (
-        <RegionSizeControl
-          regionId={regionId}
-          regionValues={values[regionId]}
-        />
-      ) : null}
-      <RegionShownControl regionId={regionId} values={values} />
-      {regionRowChanged(snapshot, regionId) ? (
-        <RevertButton
-          label={`Revert ${regionFacts(regionId).name}`}
-          onRevert={() => {
-            revertRegion(snapshot, regionId);
-          }}
-        />
-      ) : null}
-    </>
-  );
+function providerRowDecoration(
+  id: string,
+  arrangement: LayoutArrangement,
+  openRows: ReadonlyArray<string>,
+  onToggleRow: (rowId: string) => void,
+): SortableRowDecoration {
+  const providerId = usageProviderId(arrangement, id);
+  if (providerId === null) return BARE_ROW;
+  const changed = providerChanged(arrangement, providerId);
+  const name = providerDisplayName(providerId);
+  return {
+    ...BARE_ROW,
+    changed,
+    control: <ProviderDisplayControl providerId={providerId} />,
+    revert: changed ? (
+      <RevertButton
+        label={`Revert ${name}`}
+        onRevert={() => {
+          writeArrangement(revertProvider(arrangement, providerId));
+        }}
+      />
+    ) : null,
+    detail: <ProviderLimitsControl providerId={providerId} />,
+    open: openRows.includes(id),
+    onToggleOpen: () => {
+      onToggleRow(id);
+    },
+  };
 }
 
 /**
- * What the row's disclosure opens: the region's remaining grammar rows, which
- * is Style, Fine-tune and - for Usage limits - the providers list, each
- * opening its own provider in place too (L-89, D6).
+ * A provider's `Shown | Hidden`, in the same segmented shape every other row
+ * on this page uses (L-121). The dock's level writes the same
+ * `hiddenProviders` field through a switch, which is the grammar the owner
+ * approved there (L-128).
+ */
+function ProviderDisplayControl(props: {
+  readonly providerId: RateLimitProviderId;
+}): ReactNode {
+  const { providerId } = props;
+  const arrangement = useLayoutStore((state) => state.arrangement);
+  const shown = !arrangement.hiddenProviders.includes(providerId);
+  return (
+    <SegmentedControl
+      ariaLabel={`${providerDisplayName(providerId)} display`}
+      options={PROVIDER_DISPLAY_OPTIONS}
+      value={shown ? "shown" : "hidden"}
+      onChange={(next) => {
+        toggleHiddenProvider(providerId, arrangement, next === "shown");
+      }}
+    />
+  );
+}
+
+const PROVIDER_DISPLAY_OPTIONS = [
+  { value: "shown", label: "Shown" },
+  { value: "hidden", label: "Hidden" },
+];
+
+/**
+ * The row's id back as a provider id, by looking it up in the list it came
+ * from - the same narrowing-by-selection the order lists use, rather than a
+ * predicate that only says an arbitrary string is one (G1-23).
+ */
+function usageProviderId(
+  arrangement: LayoutArrangement,
+  id: string,
+): RateLimitProviderId | null {
+  return arrangement.usageProviders.find((entry) => entry === id) ?? null;
+}
+
+/**
+ * What the row's disclosure opens: Side, Style and Fine-tune.
+ *
+ * Side moved OFF the row's line (redesign 4.1): a region's place on its
+ * surface is a Position fact, and Position already lives in the list or in the
+ * disclosure everywhere else - it was the third control on the two rows that
+ * could least afford one. The providers list left the disclosure altogether
+ * (L-123), which is what took a provider's limits from five levels to two.
  */
 function RegionRowDetail(props: {
   readonly regionId: RegionId;
@@ -335,15 +525,16 @@ function RegionRowDetail(props: {
 /**
  * The grammar rows a row's disclosure owns.
  *
- * Everything else is drawn by the row itself: `size` and `position-side` are
- * inline controls, `position-order` IS the list the row sits in, and
- * `position-host` belongs to the Status bar surface rather than to a region
- * (D7).
+ * Everything else is drawn by the row itself or by the card: `size` and
+ * `shown` are the row's one display control (L-121), `position-order` IS the
+ * list the row sits in, `position-host` belongs to the Status bar surface
+ * rather than to a region (D7), and `children` is the Providers list the card
+ * draws as a sibling (L-123).
  */
 const DETAIL_ROW_KINDS: ReadonlyArray<string> = [
+  "position-side",
   "style",
   "fine-tune",
-  "children",
 ];
 
 /**
@@ -376,8 +567,14 @@ function revertRegion(snapshot: LayoutSnapshot, regionId: RegionId): void {
 
 /**
  * A row id back as a region id, by asking the registry rather than asserting.
- * Divider rows and provider rows answer `null` and stay undecorated.
+ * Divider rows answer `null` and stay undecorated; a provider id answers
+ * `null` here and is decorated as a provider instead.
  */
 function asRegionId(id: string): RegionId | null {
   return LAYOUT_REGION_LIST.find((region) => region.id === id)?.id ?? null;
+}
+
+/** The card's own heading, for the `role="group"` around a list with no name. */
+function surfaceLabel(surface: SurfaceGroupId): string {
+  return SURFACE_GROUPS.find((group) => group.id === surface)?.label ?? "";
 }

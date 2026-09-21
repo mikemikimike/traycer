@@ -75,6 +75,28 @@ export function defaultFloatPosition(
 }
 
 /**
+ * Where a float OPENS: the remembered position, or a floating one.
+ *
+ * The clamp above is a drag-time rule - it has to let the panel reach the snap
+ * band, which is how a drag docks it - and a position remembered on a wider
+ * window clamps flush against the side on a narrower one. That is what put the
+ * panel exactly where the right dock sits, so choosing Float read as a no-op
+ * until the user dragged it (LV2-17). A remembered position inside either
+ * snap band is therefore not a floating position at all, and the panel opens
+ * where an unremembered one does.
+ */
+export function restingFloatPosition(
+  stored: LayoutDockPosition | null,
+  viewport: DockViewport,
+): LayoutDockPosition {
+  if (stored === null) return defaultFloatPosition(viewport);
+  const clamped = clampFloatPosition(stored, viewport);
+  if (edgeSnapDockMode(clamped, viewport) !== null)
+    return defaultFloatPosition(viewport);
+  return clamped;
+}
+
+/**
  * The side a release docks to, or `null` to stay floating. Measured from the
  * panel's own edges, so a panel clamped flush against a side always snaps.
  */
@@ -131,10 +153,7 @@ export function useFloatingDock(root: HTMLElement | null): LayoutDockPosition {
     };
   }, [floating]);
 
-  const position =
-    stored === null
-      ? defaultFloatPosition(viewport)
-      : clampFloatPosition(stored, viewport);
+  const position = restingFloatPosition(stored, viewport);
 
   useEffect(() => {
     if (!floating || root === null) return;

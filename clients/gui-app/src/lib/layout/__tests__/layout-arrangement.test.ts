@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canvasOrderGroupForRegion,
+  canvasOrderGroupOf,
   DEFAULT_ARRANGEMENT,
   insertRailDivider,
   moveCanvasOrderMember,
@@ -17,7 +18,9 @@ import {
 import {
   DEFAULT_RAIL,
   leftPanelGroupsFromRail,
+  leftPanelRunsFromRail,
   normalizeRail,
+  railDividerId,
   panelVisibilityOverridesFromValues,
   RAIL_REGION_BY_PANEL,
   railFromLeftPanelGroups,
@@ -98,6 +101,53 @@ describe("the rail and the sidebar's groups", () => {
     ]);
 
     expect(leftPanelGroupsFromRail(rail)).toEqual(DEFAULT_LEFT_PANEL_GROUPS);
+  });
+});
+
+/**
+ * What a rail that DRAWS its boundaries reads (L-115): the same runs, each
+ * naming the divider element that ends it.
+ */
+describe("the rail's runs and the boundary after each one", () => {
+  it("names the divider that ends every run but the last", () => {
+    expect(leftPanelRunsFromRail(DEFAULT_RAIL, () => true)).toEqual([
+      { panelIds: ["chats", "artifacts"], dividerId: railDividerId(1) },
+      { panelIds: ["terminals"], dividerId: railDividerId(2) },
+      { panelIds: ["browsers"], dividerId: railDividerId(3) },
+      { panelIds: ["git-diff"], dividerId: railDividerId(4) },
+      { panelIds: ["pull-requests"], dividerId: railDividerId(5) },
+      { panelIds: ["file-tree"], dividerId: railDividerId(6) },
+      { panelIds: ["sharing"], dividerId: railDividerId(7) },
+      { panelIds: ["comments"], dividerId: null },
+    ]);
+  });
+
+  it("draws no boundary with nothing on the far side of it", () => {
+    // Every panel after Terminals is hidden, so the dividers past it have no
+    // run to separate and the last drawn run ends the rail.
+    const shown = new Set(["chats", "artifacts", "terminals"]);
+
+    expect(
+      leftPanelRunsFromRail(DEFAULT_RAIL, (panelId) => shown.has(panelId)),
+    ).toEqual([
+      { panelIds: ["chats", "artifacts"], dividerId: railDividerId(1) },
+      { panelIds: ["terminals"], dividerId: null },
+    ]);
+  });
+
+  it("gives a run whose every panel is hidden no boundary of its own", () => {
+    const hidden = new Set(["terminals", "browsers"]);
+
+    expect(
+      leftPanelRunsFromRail(DEFAULT_RAIL, (panelId) => !hidden.has(panelId)),
+    ).toEqual([
+      { panelIds: ["chats", "artifacts"], dividerId: railDividerId(1) },
+      { panelIds: ["git-diff"], dividerId: railDividerId(4) },
+      { panelIds: ["pull-requests"], dividerId: railDividerId(5) },
+      { panelIds: ["file-tree"], dividerId: railDividerId(6) },
+      { panelIds: ["sharing"], dividerId: railDividerId(7) },
+      { panelIds: ["comments"], dividerId: null },
+    ]);
   });
 });
 
@@ -267,6 +317,51 @@ describe("a canvas drop written back into the full order (4.7)", () => {
     ).toBe(arrangement.toolbarLeft);
   });
 
+  it("moves a rail panel across a boundary, which changes its group", () => {
+    // Agents and Artifacts share the shipped rail's first group; dropping
+    // Artifacts past the divider that ends it puts it in with Terminals.
+    const next = moveCanvasOrderMember({
+      arrangement: DEFAULT_ARRANGEMENT,
+      group: "rail",
+      fromId: "railArtifacts",
+      toId: railDividerId(1),
+      placeAfter: true,
+    });
+
+    expect(groupsOf(next.rail)).toEqual([
+      "chats",
+      "artifacts,terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
+  });
+
+  it("moves a rail DIVIDER, which is how two groups merge", () => {
+    // The boundary between Terminals and Browsers dragged up past Terminals:
+    // Terminals joins the group before it and Browsers is left on its own.
+    const next = moveCanvasOrderMember({
+      arrangement: DEFAULT_ARRANGEMENT,
+      group: "rail",
+      fromId: railDividerId(2),
+      toId: "railTerminals",
+      placeAfter: false,
+    });
+
+    expect(groupsOf(next.rail)).toEqual([
+      "chats,artifacts",
+      "terminals,browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
+  });
+
   it("writes back only the group the drop was in", () => {
     const next = moveCanvasOrderMember({
       arrangement,
@@ -301,12 +396,27 @@ describe("which regions a canvas drag can pick up", () => {
     ).toEqual([...TOOLBAR_REGION_IDS].sort());
   });
 
+  it("puts every rail panel in the rail's cluster (L-115)", () => {
+    for (const entry of DEFAULT_RAIL) {
+      if (entry.kind !== "panel") continue;
+      expect(canvasOrderGroupForRegion(entry.id)).toBe("rail");
+    }
+  });
+
   it("refuses a region reordered in the inspector's list only", () => {
-    // The rail draws one button per GROUP and no divider at all, and the
-    // usage providers are segments inside one region.
-    expect(canvasOrderGroupForRegion("railAgents")).toBeNull();
+    // The usage providers are segments inside one region, so they carry no
+    // identity of their own on the canvas to place by.
     expect(canvasOrderGroupForRegion("usageLimits")).toBeNull();
     expect(canvasOrderGroupForRegion("minimap")).toBeNull();
+  });
+
+  it("reads a group back off an element, and refuses anything else", () => {
+    // The rail's dividers are members with no region id, so the group a press
+    // belongs to is read off the attribute rather than from a region.
+    expect(canvasOrderGroupOf("rail")).toBe("rail");
+    expect(canvasOrderGroupOf("dock")).toBe("dock");
+    expect(canvasOrderGroupOf("usageProviders")).toBeNull();
+    expect(canvasOrderGroupOf("")).toBeNull();
   });
 });
 

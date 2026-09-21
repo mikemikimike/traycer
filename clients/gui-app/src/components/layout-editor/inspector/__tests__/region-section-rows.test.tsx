@@ -173,7 +173,7 @@ describe("one list, two hosts (L-03, L-95)", () => {
     expect(ids).toHaveLength(DEFAULT_LAYOUT_SNAPSHOT.arrangement.rail.length);
 
     const selected = rows.filter((node) =>
-      node.className.includes("border-foreground"),
+      node.hasAttribute("data-sortable-selected"),
     );
     expect(
       selected.map((node) => node.getAttribute("data-sortable-id")),

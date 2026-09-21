@@ -1,4 +1,5 @@
 import {
+  sameRegionValue,
   type LayoutValues,
   type RegionValueKey,
 } from "@/lib/layout/layout-values";
@@ -73,14 +74,12 @@ export function writeControlValue(
   });
 }
 
-/** One control's value, put back to what the base preset says. */
+/** One control's own answer taken back, so the region follows the base again. */
 export function revertControlValue(
   region: RegionId,
   key: RegionValueKey,
 ): void {
-  const snapshot = getLayoutSnapshot();
-  const base = PRESET_VALUES[snapshot.basePreset][region];
-  writeControlValue(region, key, readControlValue(base, key));
+  revertControlValues(region, [key]);
 }
 
 /** Whether one control's key differs from the base preset (for its revert icon). */
@@ -104,10 +103,22 @@ export function changedControlKeys(
   region: RegionId,
   keys: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  const override = getLayoutSnapshot().overrides[region];
+  const snapshot = getLayoutSnapshot();
+  const override = snapshot.overrides[region];
   if (override === undefined) return [];
-  const changed = new Set(Object.keys(override));
-  return keys.filter((key) => changed.has(key));
+  // By DIFFERENCE against the current base, not by the key's presence in the
+  // delta (L-133). The delta records what a person picked, so a pick the
+  // current preset already makes is stored and is not a change: reading
+  // presence would put a revert affordance on a row with nothing to revert,
+  // and hand the multi-key revert below keys it must not touch.
+  const base = PRESET_VALUES[snapshot.basePreset][region];
+  const stored: Record<string, unknown> = override;
+  return keys.filter(
+    (key) =>
+      key in stored &&
+      key in base &&
+      !sameRegionValue(key, stored[key], Reflect.get(base, key)),
+  );
 }
 
 /** {@link changedControlKeys} put back, as ONE gesture and one undo step. */
@@ -116,12 +127,12 @@ export function revertControlValues(
   keys: ReadonlyArray<string>,
 ): void {
   const base = PRESET_VALUES[getLayoutSnapshot().basePreset][region];
-  const patch: Partial<LayoutValues[RegionId]> = {};
-  for (const key of keys) {
-    if (!(key in base)) continue;
-    Reflect.set(patch, key, Reflect.get(base, key));
-  }
+  // The membership test is a real one (`key in base`), not a predicate that
+  // only claims to be: a registry typo reverts nothing instead of reaching
+  // the store (G1-08).
+  const owned = keys.filter((key) => key in base);
+  if (owned.length === 0) return;
   useLayoutEditorStore.getState().recordGesture(() => {
-    useLayoutStore.getState().setRegionValues(region, patch);
+    useLayoutStore.getState().clearRegionValues(region, owned);
   });
 }

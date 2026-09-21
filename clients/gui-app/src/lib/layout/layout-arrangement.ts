@@ -4,6 +4,7 @@ import type { ContextBreakdownField } from "@/lib/layout/layout-values";
 import {
   DEFAULT_RAIL,
   DEFAULT_RAIL_DIVIDER_SEQ,
+  RAIL_REGION_IDS,
   railDividerId,
   type RailEntry,
 } from "@/lib/layout/rail";
@@ -49,14 +50,28 @@ export const ORDER_GROUP_IDS: ReadonlyArray<OrderGroupId> = [
  * The order groups a CANVAS drag can reorder: the ones whose every member
  * draws its own element beside its siblings, which is what there is to pick up.
  *
- * The other two are reordered in the inspector's list only. `usageProviders`
- * is a list of segments inside one region, so its members carry no region
- * identity of their own on the canvas; and the sidebar rail draws one button
- * per GROUP rather than per panel and draws no divider at all, so a drop
- * between two icons could not say which group the panel landed in (L-25's
- * dividers are items in the list, where they are visible).
+ * The rail is one of them since L-115 (which supersedes L-68 and L-82 and
+ * restores L-25): its icon column is the cluster, and every divider in
+ * `arrangement.rail` is drawn as a real element there, so a drop between two
+ * icons names the two entries it landed between and the boundary a panel
+ * crossed is unambiguous.
+ *
+ * `usageProviders` is still the inspector list's alone: it is a list of
+ * segments inside ONE region, so its members carry no identity of their own on
+ * the canvas to place by.
  */
-export type CanvasOrderGroupId = "dock" | "toolbarLeft" | "toolbarRight";
+export type CanvasOrderGroupId =
+  | "dock"
+  | "toolbarLeft"
+  | "toolbarRight"
+  | "rail";
+
+export const CANVAS_ORDER_GROUP_IDS: ReadonlyArray<CanvasOrderGroupId> = [
+  "dock",
+  "toolbarLeft",
+  "toolbarRight",
+  "rail",
+];
 
 /**
  * Which of one provider's limits its usage segment draws.
@@ -184,7 +199,18 @@ export function canvasOrderGroupForRegion(
   if (DEFAULT_TOOLBAR_LEFT.some((id) => id === regionId)) return "toolbarLeft";
   if (DEFAULT_TOOLBAR_RIGHT.some((id) => id === regionId))
     return "toolbarRight";
+  if (RAIL_REGION_IDS.some((id) => id === regionId)) return "rail";
   return null;
+}
+
+/**
+ * The same group read back off an element, for the half of a rail cluster that
+ * is NOT a region: a divider is a member of the rail's order with a member id
+ * and no region id, so the group a press belongs to is the one stamped on the
+ * element rather than one looked up from a region (L-115).
+ */
+export function canvasOrderGroupOf(value: string): CanvasOrderGroupId | null {
+  return CANVAS_ORDER_GROUP_IDS.find((id) => id === value) ?? null;
 }
 
 export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
@@ -302,6 +328,10 @@ export function movedWithin<T>(
  * (G3-01). Placing by id needs no correspondence between the two orders at
  * all: the member the user had hold of is the one that moves, and every other
  * member - drawn or not - keeps its place relative to its neighbours.
+ *
+ * In the rail the member may be a DIVIDER rather than a panel, which is how a
+ * group boundary is moved, split and merged on the canvas (L-25, L-115): the
+ * id is the entry's, and both kinds place the same way.
  */
 export function moveCanvasOrderMember(input: {
   readonly arrangement: LayoutArrangement;
@@ -313,54 +343,67 @@ export function moveCanvasOrderMember(input: {
   /** Which side of `toId` it landed on. */
   readonly placeAfter: boolean;
 }): LayoutArrangement {
-  const { arrangement, group, fromId, toId, placeAfter } = input;
+  const { arrangement, group } = input;
   switch (group) {
     case "dock":
       return {
         ...arrangement,
-        dock: placedBeside(arrangement.dock, fromId, toId, placeAfter),
+        dock: placedBeside(arrangement.dock, sameId, input),
       };
     case "toolbarLeft":
       return {
         ...arrangement,
-        toolbarLeft: placedBeside(
-          arrangement.toolbarLeft,
-          fromId,
-          toId,
-          placeAfter,
-        ),
+        toolbarLeft: placedBeside(arrangement.toolbarLeft, sameId, input),
       };
     case "toolbarRight":
       return {
         ...arrangement,
-        toolbarRight: placedBeside(
-          arrangement.toolbarRight,
-          fromId,
-          toId,
-          placeAfter,
-        ),
+        toolbarRight: placedBeside(arrangement.toolbarRight, sameId, input),
+      };
+    case "rail":
+      return {
+        ...arrangement,
+        rail: placedBeside(arrangement.rail, entryId, input),
       };
   }
+}
+
+/** Where a member was picked up and where it was put down. */
+interface CanvasOrderDrop {
+  readonly fromId: string;
+  readonly toId: string;
+  readonly placeAfter: boolean;
+}
+
+/** A list of ids is its own identity; the rail's entries carry theirs. */
+function sameId(id: string): string {
+  return id;
+}
+
+function entryId(entry: RailEntry): string {
+  return entry.id;
 }
 
 /**
  * One member taken out of the stored list and put back beside another.
  *
- * Typed in the group's own ids throughout: the two ids arrive as strings off
- * the DOM and are only ever used to SELECT from the stored list, never to
- * build one, so an id this build does not know moves nothing rather than
- * narrowing something away (G1-23).
+ * The ids arrive as strings off the DOM and are only ever used to SELECT from
+ * the stored list, never to build one, so an id this build does not know moves
+ * nothing rather than narrowing something away (G1-23). The member itself is
+ * whatever the list holds - a region id in three of the four groups, a rail
+ * entry in the fourth - which is why the id is read through a function rather
+ * than being the item.
  */
-function placedBeside<T extends string>(
+function placedBeside<T>(
   full: ReadonlyArray<T>,
-  fromId: string,
-  toId: string,
-  placeAfter: boolean,
+  idOf: (item: T) => string,
+  drop: CanvasOrderDrop,
 ): ReadonlyArray<T> {
-  const moved = full.find((id) => id === fromId);
+  const { fromId, toId, placeAfter } = drop;
+  const moved = full.find((item) => idOf(item) === fromId);
   if (moved === undefined || fromId === toId) return full;
-  const remaining = full.filter((id) => id !== moved);
-  const anchor = remaining.findIndex((id) => id === toId);
+  const remaining = full.filter((item) => item !== moved);
+  const anchor = remaining.findIndex((item) => idOf(item) === toId);
   if (anchor < 0) return full;
   const insertAt = placeAfter ? anchor + 1 : anchor;
   return [...remaining.slice(0, insertAt), moved, ...remaining.slice(insertAt)];

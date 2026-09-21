@@ -42,6 +42,7 @@ import {
   SAMPLE_BACKGROUND_ITEMS,
   SAMPLE_CHANGED_FILE,
   SAMPLE_CHAT_ID,
+  SAMPLE_DICTATION,
   SAMPLE_DOCK,
   SAMPLE_EPIC_ID,
   SAMPLE_HOST_ID,
@@ -170,111 +171,113 @@ export function SampleWorkspaceBody() {
               nothing of the user's own work. */}
           <TabHostContext.Provider value={SAMPLE_HOST_ID}>
             <ChatDiffTargetContext.Provider value={SAMPLE_DIFF_OPENER}>
-              <div inert className="contents">
-                <ChatDockCompactStripProvider
-                  value={{ chips, expanded: new Set(), onToggle: sampleNoop }}
-                >
-                  <ChatLowerDock
-                    snapshotLoaded
-                    epicId={SAMPLE_EPIC_ID}
-                    chatId={SAMPLE_CHAT_ID}
-                    viewTabId={SAMPLE_VIEW_TAB_ID}
-                    selfAgent={SAMPLE_SELF_AGENT}
-                    activeAgents={SAMPLE_AGENT_DESCENDANTS}
-                    todo={SAMPLE_TODO}
-                    restore={SAMPLE_RESTORE}
-                    queue={SAMPLE_QUEUE}
-                    folded={folded}
-                    dockOrder={dockOrder}
-                    hotspots={hotspots}
-                    backgroundItems={SAMPLE_BACKGROUND_ITEMS}
-                    runningManagedCommandCount={0}
-                    heldManagedCommandCount={0}
-                    backgroundStopPendingTaskIds={SAMPLE_NO_PENDING_STOPS}
-                    backgroundStopAllPending={false}
-                    backgroundSessionStopPending={false}
-                    activeTurnStatus={null}
-                    canAct
-                    queueResumeRequested={false}
-                    queueKeepPausedRequested={false}
-                    readOnly={false}
-                    editingQueueItemId={null}
-                    topSpacing="compact"
-                    scrollRegionMaxHeightClass="max-h-[min(24dvh,12rem)]"
-                    onQueuePause={sampleNoopAction}
-                    onQueueResume={sampleNoopAction}
-                    onQueueEdit={sampleNoop}
-                    onQueueCancel={sampleNoop}
-                    onQueueAbortSteer={sampleNoop}
-                    onQueueReorder={sampleNoop}
-                    onQueueSteerNow={sampleNoop}
-                    onBackgroundItemClick={sampleNoop}
-                    onBackgroundItemStop={sampleNoopAction}
-                    onBackgroundItemsStopAll={sampleNoopAction}
-                    onBackgroundSessionStop={sampleNoopAction}
-                  />
-                  <div className="shrink-0 px-4 pb-2">
-                    <div className="mx-auto w-full max-w-3xl">
-                      <ComposerShell
-                        pickerStore={pickerStore}
-                        onDragOver={sampleNoop}
-                        onDragEnter={sampleNoop}
-                        onDragLeave={sampleNoop}
-                        onDrop={sampleNoop}
-                        dragOverlayVariant={null}
-                        utilityRail={null}
-                        attachmentsStrip={null}
-                        editor={
-                          // No marker of its own: `ComposerShell` already
-                          // marks `data-composer-editor-frame`, which this
-                          // placeholder renders inside, and a second marker on
-                          // a descendant would dim it twice.
-                          <p className="pb-5 text-ui text-muted-foreground">
-                            Describe the next change…
-                          </p>
-                        }
-                        toolbar={
-                          <ComposerToolbar
-                            presentation
-                            store={toolbarStore}
-                            onAttachImages={sampleNoop}
-                            canSubmit={false}
-                            attachmentPending={false}
-                            onSubmit={sampleNoop}
-                            activeTurnStatus={null}
-                            stopDisabled
-                            onStopTurn={null}
-                            composerDisabledHint="Sample content"
-                            dictation={null}
-                            dictationPreparing={null}
-                            settingsLocked
-                            createProfileHostId={null}
-                            runTargetHostId={null}
-                            terminalLoginSurface={null}
-                            chatLineCarriesAutoMode={null}
+              <ChatDockCompactStripProvider
+                value={{ chips, expanded: new Set(), onToggle: sampleNoop }}
+              >
+                <ChatLowerDock
+                  snapshotLoaded
+                  epicId={SAMPLE_EPIC_ID}
+                  chatId={SAMPLE_CHAT_ID}
+                  viewTabId={SAMPLE_VIEW_TAB_ID}
+                  selfAgent={SAMPLE_SELF_AGENT}
+                  activeAgents={SAMPLE_AGENT_DESCENDANTS}
+                  todo={SAMPLE_TODO}
+                  restore={SAMPLE_RESTORE}
+                  queue={SAMPLE_QUEUE}
+                  folded={folded}
+                  dockOrder={dockOrder}
+                  hotspots={hotspots}
+                  backgroundItems={SAMPLE_BACKGROUND_ITEMS}
+                  runningManagedCommandCount={0}
+                  heldManagedCommandCount={0}
+                  backgroundStopPendingTaskIds={SAMPLE_NO_PENDING_STOPS}
+                  backgroundStopAllPending={false}
+                  backgroundSessionStopPending={false}
+                  activeTurnStatus={null}
+                  canAct
+                  queueResumeRequested={false}
+                  queueKeepPausedRequested={false}
+                  readOnly={false}
+                  editingQueueItemId={null}
+                  topSpacing="compact"
+                  scrollRegionMaxHeightClass="max-h-[min(24dvh,12rem)]"
+                  onQueuePause={sampleNoopAction}
+                  onQueueResume={sampleNoopAction}
+                  onQueueEdit={sampleNoop}
+                  onQueueCancel={sampleNoop}
+                  onQueueAbortSteer={sampleNoop}
+                  onQueueReorder={sampleNoop}
+                  onQueueSteerNow={sampleNoop}
+                  onBackgroundItemClick={sampleNoop}
+                  onBackgroundItemStop={sampleNoopAction}
+                  onBackgroundItemsStopAll={sampleNoopAction}
+                  onBackgroundSessionStop={sampleNoopAction}
+                />
+                <div className="shrink-0 px-4 pb-2">
+                  <div className="mx-auto w-full max-w-3xl">
+                    <ComposerShell
+                      pickerStore={pickerStore}
+                      onDragOver={sampleNoop}
+                      onDragEnter={sampleNoop}
+                      onDragLeave={sampleNoop}
+                      onDrop={sampleNoop}
+                      dragOverlayVariant={null}
+                      utilityRail={null}
+                      attachmentsStrip={null}
+                      editor={
+                        // No marker of its own: `ComposerShell` already marks
+                        // `data-composer-editor-frame`, which this placeholder
+                        // renders inside, and a second marker on a descendant
+                        // would dim it twice.
+                        <p className="pb-5 text-ui text-muted-foreground">
+                          Describe the next change…
+                        </p>
+                      }
+                      toolbar={
+                        <ComposerToolbar
+                          presentation
+                          store={toolbarStore}
+                          onAttachImages={sampleNoop}
+                          canSubmit={false}
+                          attachmentPending={false}
+                          onSubmit={sampleNoop}
+                          activeTurnStatus={null}
+                          stopDisabled
+                          onStopTurn={null}
+                          composerDisabledHint="Sample content"
+                          // The mic slot draws nothing without a control, so a
+                          // Microphone set to Shown had no chip to point at
+                          // (L-116). The scene's idle control is what the real
+                          // `ComposerMicButton` renders from.
+                          dictation={SAMPLE_DICTATION}
+                          dictationPreparing={null}
+                          settingsLocked
+                          createProfileHostId={null}
+                          runTargetHostId={null}
+                          terminalLoginSurface={null}
+                          chatLineCarriesAutoMode={null}
+                        />
+                      }
+                    />
+                    <ComposerWorkspaceRow
+                      workspaceControls={
+                        <>
+                          <span
+                            data-layout-passive
+                            className="min-w-0 text-ui-xs text-muted-foreground"
+                          >
+                            Sample workspace
+                          </span>
+                          <ContextUsageChip
+                            usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
+                            onCompact={sampleNoop}
                           />
-                        }
-                      />
-                      <ComposerWorkspaceRow
-                        workspaceControls={
-                          <>
-                            <span
-                              data-layout-passive
-                              className="min-w-0 text-ui-xs text-muted-foreground"
-                            >
-                              Sample workspace
-                            </span>
-                            <ContextUsageChip
-                              usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
-                              onCompact={sampleNoop}
-                            />
-                          </>
-                        }
-                      />
-                    </div>
+                        </>
+                      }
+                    />
                   </div>
-                </ChatDockCompactStripProvider>
-              </div>
+                </div>
+              </ChatDockCompactStripProvider>
             </ChatDiffTargetContext.Provider>
           </TabHostContext.Provider>
         </div>
@@ -346,7 +349,7 @@ function SampleTranscript() {
         className="h-full overflow-y-auto px-4"
         aria-label="Sample conversation"
       >
-        <div inert ref={content} className="mx-auto max-w-3xl space-y-8 py-6">
+        <div ref={content} className="mx-auto max-w-3xl space-y-8 py-6">
           {SAMPLE_TURNS.map((turn, index) => (
             <div key={turn.prompt} data-sample-turn className="space-y-4">
               <div className="ml-auto w-fit max-w-full">
@@ -388,37 +391,35 @@ function SampleTranscript() {
           ))}
         </div>
       </div>
-      <div inert className="contents">
-        {minimapCondition !== null ? (
-          <div
-            ref={minimapRef}
-            className={cn(
-              "absolute top-1/2 rounded border border-dashed p-2 text-ui-xs text-muted-foreground",
-              side === "left" ? "left-3" : "right-3",
-            )}
-          >
-            {minimapCondition}
-          </div>
-        ) : (
-          <ChatTurnMinimapView
-            items={SAMPLE_MINIMAP_ITEMS}
-            currentIndex={currentIndex}
-            cursorIndex={currentIndex}
-            maxVisibleItems={capacity}
-            bottomInset={0}
-            hitStripWidth={24}
-            side={side}
-            open={false}
-            ref={minimapRef}
-            hitStripRef={null}
-            onOpen={sampleNoop}
-            onFocus={sampleNoop}
-            onKeyDown={sampleNoop}
-            onCursorIndexChange={sampleNoop}
-            onSelect={sampleNoop}
-          />
-        )}
-      </div>
+      {minimapCondition !== null ? (
+        <div
+          ref={minimapRef}
+          className={cn(
+            "absolute top-1/2 rounded border border-dashed p-2 text-ui-xs text-muted-foreground",
+            side === "left" ? "left-3" : "right-3",
+          )}
+        >
+          {minimapCondition}
+        </div>
+      ) : (
+        <ChatTurnMinimapView
+          items={SAMPLE_MINIMAP_ITEMS}
+          currentIndex={currentIndex}
+          cursorIndex={currentIndex}
+          maxVisibleItems={capacity}
+          bottomInset={0}
+          hitStripWidth={24}
+          side={side}
+          open={false}
+          ref={minimapRef}
+          hitStripRef={null}
+          onOpen={sampleNoop}
+          onFocus={sampleNoop}
+          onKeyDown={sampleNoop}
+          onCursorIndexChange={sampleNoop}
+          onSelect={sampleNoop}
+        />
+      )}
     </div>
   );
 }

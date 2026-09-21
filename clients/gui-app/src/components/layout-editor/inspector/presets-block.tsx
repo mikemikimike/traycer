@@ -21,9 +21,11 @@ import {
   AppFrameComposerStack,
   AppFrameRailEntries,
   AppFrameRegion,
+  AppFrameStatusBarRow,
   AppFrameTopBar,
 } from "@/components/layout-editor/inspector/app-frame-chrome";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
+import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   useLayoutSnapshot,
@@ -56,7 +58,19 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
   const snapshot = useLayoutSnapshot();
   const basePreset = snapshot.basePreset;
   const count = changeCount(snapshot);
+  const gutter = useSortableRowPadding();
+  const dock = useLayoutFormHost() === "inspector";
 
+  /**
+   * A preset click changes the DENSITY and nothing else (L-133).
+   *
+   * It used to clear the per-region delta as well, which made the card a
+   * second "Reset to <preset>" wearing a density's clothes - and on this
+   * page, where there is no Undo (L-108), an unrecoverable one. Keeping the
+   * overrides is what leaves "Reset to <preset>" beside it a distinct action
+   * with something of its own to do, and the count next to it stays truthful
+   * because it is measured by DIFFERENCE against whichever base is current.
+   */
   function commitPreset(presetId: LayoutPresetId): void {
     props.onPreviewPreset(null);
     useLayoutEditorStore.getState().recordGesture(() => {
@@ -65,70 +79,108 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
   }
 
   return (
-    <div className="border-b border-border px-3.5 py-3.5">
-      {/* Capped rather than fluid, which is the one place on this page a width
-        cap is the right answer: a card is a PICTURE of a window, and at full
-        page width the three were ~470px each of mostly empty dark frame
-        immediately under the page title - the largest object on a page whose
-        subject is the list below it (P-2). The cap never binds in the 320px
-        dock, so the two hosts still draw the same card. */}
-      <div className="mx-auto grid w-full max-w-xl grid-cols-3 gap-1.5">
-        {LAYOUT_PRESET_IDS.map((presetId, index) => (
-          <PresetCard
-            key={presetId}
-            presetId={presetId}
-            arrangement={snapshot.arrangement}
-            on={basePreset === presetId}
-            onCommit={() => {
-              commitPreset(presetId);
-            }}
-            onPreview={() => {
-              props.onPreviewPreset(presetId);
-            }}
-            onClearPreview={() => {
-              props.onPreviewPreset(null);
-            }}
-            onArrowMove={(direction) => {
-              const next =
-                LAYOUT_PRESET_IDS[
-                  Math.min(
-                    Math.max(index + direction, 0),
-                    LAYOUT_PRESET_IDS.length - 1,
-                  )
-                ];
-              document.getElementById(`layout-preset-${next}`)?.focus();
-            }}
-          />
-        ))}
+    <div className="flex flex-col">
+      <div className={gutter.row}>
+        {/* Capped rather than fluid, which is the one place on this page a
+          width cap is the right answer: a card is a PICTURE of a window, and
+          at full page width the three were ~470px each of mostly empty dark
+          frame immediately under the page title - the largest object on a page
+          whose subject is the list below it (P-2). `max-w-md` rather than
+          `max-w-xl` (L-124): at 215px the thumbnails were already unreadable
+          and the three differ only by density, so the LABEL is what identifies
+          them and a smaller card reads as a chooser instead of a gallery. The
+          cap never binds in the 320px dock, so the two hosts still draw the
+          same card. */}
+        <div className="mx-auto grid w-full max-w-md grid-cols-3 gap-1.5">
+          {LAYOUT_PRESET_IDS.map((presetId, index) => (
+            <PresetCard
+              key={presetId}
+              presetId={presetId}
+              arrangement={snapshot.arrangement}
+              on={basePreset === presetId}
+              onCommit={() => {
+                commitPreset(presetId);
+              }}
+              onPreview={() => {
+                props.onPreviewPreset(presetId);
+              }}
+              onClearPreview={() => {
+                props.onPreviewPreset(null);
+              }}
+              onArrowMove={(direction) => {
+                const next =
+                  LAYOUT_PRESET_IDS[
+                    Math.min(
+                      Math.max(index + direction, 0),
+                      LAYOUT_PRESET_IDS.length - 1,
+                    )
+                  ];
+                document.getElementById(`layout-preset-${next}`)?.focus();
+              }}
+            />
+          ))}
+        </div>
       </div>
-      <p className="mt-2 text-ui-xs text-muted-foreground">
-        Presets change how much is shown, not where things are.
-      </p>
-      <div className="mt-2.5 flex items-center gap-2 text-ui-sm text-muted-foreground">
-        {/* `truncate`: the button beside it takes ~120px of a 292px row, so
-          any count at all wrapped the label onto a second line (I-13). */}
-        <span
-          data-testid="preset-status-line"
-          className="min-w-0 flex-1 truncate"
-        >
-          {PRESET_LABELS[basePreset]}
-          {count > 0 ? ` + ${count} ${count === 1 ? "change" : "changes"}` : ""}
-        </span>
-        {count > 0 ? (
-          <Button
-            type="button"
-            variant="muted"
-            size="sm"
-            onClick={() => {
-              useLayoutEditorStore.getState().recordGesture(() => {
-                useLayoutStore.getState().replaceAll(resetToBase(snapshot));
-              });
-            }}
-          >
-            Reset to {PRESET_LABELS[basePreset]}
-          </Button>
-        ) : null}
-        <ResetEverythingButton snapshot={snapshot} />
+      {/* The card's own row, in the row shape every other line on this page
+        uses (L-127): the state on the left with the same `bg-info` dot the
+        rows carry, the caption as its description, the benign counterpart
+        action on the right. It is hand-built rather than an `InspectorRow`
+        because the label is COMPOSITE - a preset name, a dot and a count -
+        and that row takes a string. The gutter is the shared one, so the line
+        sits in the same column as the rows of every other card. */}
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-border/40",
+          gutter.row,
+        )}
+      >
+        <div className="min-w-32 flex-1">
+          <div className="flex items-center gap-1.5">
+            {count > 0 ? (
+              <span
+                aria-hidden
+                data-testid="preset-changed-dot"
+                className="size-1.5 shrink-0 rounded-full bg-info"
+              />
+            ) : null}
+            {/* `truncate`: the button beside it takes ~120px of a 292px row,
+              so any count at all wrapped the label onto a second line
+              (I-13). */}
+            <span
+              data-testid="preset-status-line"
+              className="min-w-0 truncate font-medium text-foreground"
+            >
+              {PRESET_LABELS[basePreset]}
+              {count > 0
+                ? ` + ${count} ${count === 1 ? "change" : "changes"}`
+                : ""}
+            </span>
+          </div>
+          <p className="mt-0.5 max-w-[72ch] text-pretty text-ui-sm text-muted-foreground">
+            Presets change how much is shown, not where things are.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {count > 0 ? (
+            <Button
+              type="button"
+              variant="muted"
+              size="sm"
+              onClick={() => {
+                useLayoutEditorStore.getState().recordGesture(() => {
+                  useLayoutStore.getState().replaceAll(resetToBase(snapshot));
+                });
+              }}
+            >
+              Reset to {PRESET_LABELS[basePreset]}
+            </Button>
+          ) : null}
+          {/* The floor is beside the preset it resets past only where it is
+            REVERSIBLE (L-20's placement, redesign 4.4). On the page it is the
+            one irreversible action there is, so it leaves this card for a
+            `tone="danger"` card at the foot; the page renders its own. */}
+          {dock ? <ResetEverythingButton snapshot={snapshot} /> : null}
+        </div>
       </div>
     </div>
   );
@@ -152,14 +204,26 @@ export function PresetsBlock(props: PresetsBlockProps): ReactNode {
  * and backing out of a reversible action; the inspector's own safety net is
  * the one the rest of its gestures already rely on, so the gesture applies
  * there and the sentence stays true where it is shown.
+ *
+ * Exported because the two hosts now PLACE it differently (redesign 4.4): the
+ * dock keeps it on the presets card, beside the preset it resets past, where
+ * Undo is one keystroke away; the page draws it in a `tone="danger"` card at
+ * the foot of the page, which is where the house puts its one irreversible
+ * action. Placement is composition, which is the only kind of difference the
+ * two hosts are allowed (L-03, L-16).
  */
-function ResetEverythingButton(props: {
+export function ResetEverythingButton(props: {
   readonly snapshot: LayoutSnapshot;
 }): ReactNode {
   const { snapshot } = props;
   const irreversible = useLayoutFormHost() === "page";
   const [confirming, setConfirming] = useState(false);
-  if (!anythingChanged(snapshot)) return null;
+  const changed = anythingChanged(snapshot);
+  // In the dock this is one control on a crowded instrument line, so an
+  // inoperable one is noise and it stands down. On the page it is a card of
+  // its own, and a card that vanishes takes the floor's existence with it:
+  // showing the floor and saying you are standing on it is clearer (5.8).
+  if (!changed && !irreversible) return null;
   function reset(): void {
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().replaceAll(resetEverything(snapshot));
@@ -169,8 +233,9 @@ function ResetEverythingButton(props: {
     <>
       <Button
         type="button"
-        variant="muted"
+        variant={irreversible ? "destructive" : "muted"}
         size="sm"
+        disabled={!changed}
         onClick={() => {
           if (irreversible) {
             setConfirming(true);
@@ -481,28 +546,15 @@ function MiniatureComposerFoot({ values, arrangement }: AppFrame): ReactNode {
 /**
  * The status strip, or nothing at all: under the `header` placement the strip
  * is not drawn and both of its regions have moved up (L-51).
+ *
+ * The bar's BOX is this card's; what is in it and in what order is the frame
+ * chrome's one copy (R2-02).
  */
 function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
   if (arrangement.usageHost === "header") return null;
-  const monitor = (
-    <AppFrameRegion
-      regionId="resourceMonitor"
-      values={values}
-      arrangement={arrangement}
-      hostContext={null}
-    />
-  );
   return (
     <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3">
-      {arrangement.resourceSide === "left" ? monitor : null}
-      <AppFrameRegion
-        regionId="usageLimits"
-        values={values}
-        arrangement={arrangement}
-        hostContext={null}
-      />
-      <span className="flex-1" />
-      {arrangement.resourceSide === "right" ? monitor : null}
+      <AppFrameStatusBarRow values={values} arrangement={arrangement} />
     </div>
   );
 }

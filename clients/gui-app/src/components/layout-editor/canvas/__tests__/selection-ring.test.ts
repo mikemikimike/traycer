@@ -96,6 +96,28 @@ describe("the one shared ring", () => {
     expect(ringElement().getAttribute("data-on")).toBe("1");
   });
 
+  it("keeps every band it paints inside the window (LV2-16)", () => {
+    // A region on the window's last pixel row - the status bar's usage row is
+    // one - padded by 3 and painted with a 6px halo outside that puts the
+    // ring's bottom band 9px off screen, where the browser clips it and the
+    // selection reads as an open box. jsdom's window is 1024 x 768, and the
+    // region below sits flush on its bottom edge and 2px from its left one.
+    ring?.track(region({ x: 2, y: 746, width: 318, height: 22 }));
+    frames(2);
+
+    expect(ringBox()).toEqual({ x: 6, y: 743, width: 317, height: 19 });
+  });
+
+  it("lets a region that has left the window take the ring with it", () => {
+    // The clamp shrinks the ring onto the visible part of its region; with no
+    // visible part there is nothing to frame, and a box collapsed against the
+    // edge would draw a bar there instead of leaving with the region.
+    ring?.track(region({ x: 100, y: -400, width: 200, height: 30 }));
+    frames(2);
+
+    expect(ringBox()).toEqual({ x: 97, y: -403, width: 206, height: 36 });
+  });
+
   it("follows a region that MOVED without resizing, with nothing waking it (L-90)", () => {
     // The bug the owner reported: a dock-side switch moves the app column
     // 320px sideways without resizing anything, so the node's own

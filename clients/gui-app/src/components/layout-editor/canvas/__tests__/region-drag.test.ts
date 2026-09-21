@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cancelLayoutDrag } from "@/components/layout-editor/canvas/drag-engine";
 import {
-  armRegionDrag,
+  cancelLayoutDrag,
+  layoutDragActive,
+} from "@/components/layout-editor/canvas/drag-engine";
+import {
+  armCanvasDrag,
   LAYOUT_CLUSTER_ATTRIBUTE,
+  LAYOUT_MEMBER_ATTRIBUTE,
 } from "@/components/layout-editor/canvas/region-drag";
 import { DEFAULT_DOCK_ORDER } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_RAIL,
+  leftPanelGroupsFromRail,
+  type RailEntry,
+} from "@/lib/layout/rail";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
@@ -124,6 +133,54 @@ function mountDock(
   return nodes;
 }
 
+const RAIL_TILE = 36;
+const RAIL_DIVIDER = 8;
+const RAIL_GAP = 4;
+
+/**
+ * The sidebar's icon column: one element per rail ENTRY, panels and dividers
+ * alike, in one cluster (L-115). A divider carries its entry id as a member id
+ * rather than a region id, which is the whole of what makes it draggable
+ * without being a region.
+ */
+function mountRail(
+  entries: ReadonlyArray<RailEntry>,
+): ReadonlyArray<HTMLElement> {
+  const column = document.createElement("div");
+  column.setAttribute(LAYOUT_CLUSTER_ATTRIBUTE, "");
+  document.body.append(column);
+  let top = 0;
+  const nodes = entries.map((entry) => {
+    const node = document.createElement("div");
+    if (entry.kind === "panel")
+      node.setAttribute("data-layout-region", entry.id);
+    else node.setAttribute(LAYOUT_MEMBER_ATTRIBUTE, entry.id);
+    node.setAttribute("data-layout-group", "rail");
+    node.setAttribute("data-layout-draggable", "1");
+    node.setPointerCapture = () => undefined;
+    node.releasePointerCapture = () => undefined;
+    node.hasPointerCapture = () => true;
+    const height = entry.kind === "panel" ? RAIL_TILE : RAIL_DIVIDER;
+    stubRect(node, { left: 0, top, width: RAIL_TILE, height });
+    top += height + RAIL_GAP;
+    column.append(node);
+    return node;
+  });
+  stubRect(column, {
+    left: 0,
+    top: 0,
+    width: RAIL_TILE,
+    height: top - RAIL_GAP,
+  });
+  return nodes;
+}
+
+function railGroups(): ReadonlyArray<string> {
+  return leftPanelGroupsFromRail(
+    useLayoutStore.getState().arrangement.rail,
+  ).map((group) => group.panelIds.join(","));
+}
+
 /** One surface's own laid-out box, marked the way the real surfaces mark it. */
 function box(parent: HTMLElement, top: number, height: number): HTMLElement {
   const node = document.createElement("div");
@@ -157,16 +214,11 @@ function stubRect(
 
 function dragBy(
   node: HTMLElement,
-  regionId: RegionId,
   to: { readonly clientX?: number; readonly clientY?: number },
 ): void {
   const arm = (event: Event): void => {
     if (!(event instanceof PointerEvent)) return;
-    armRegionDrag({
-      event,
-      node,
-      regionId,
-    });
+    armCanvasDrag({ event, node });
   };
   node.addEventListener("pointerdown", arm);
   node.dispatchEvent(
@@ -230,7 +282,7 @@ describe("dragging a region on the canvas", () => {
 
     // Far enough right for the first chip's centre to pass the second's: the
     // chips are 30 wide and 4 apart, so the neighbour's centre is at 49.
-    dragBy(nodes[0], "attachImage", { clientX: 60 });
+    dragBy(nodes[0], { clientX: 60 });
 
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "access",
@@ -252,7 +304,7 @@ describe("dragging a region on the canvas", () => {
     // `access` is hidden, so the canvas shows two of the three.
     const nodes = mountToolbar(["attachImage", "agent"]);
 
-    dragBy(nodes[0], "attachImage", { clientX: 60 });
+    dragBy(nodes[0], { clientX: 60 });
 
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "access",
@@ -265,7 +317,7 @@ describe("dragging a region on the canvas", () => {
   it("writes nothing when the chip is let go where it started", () => {
     const nodes = mountToolbar(["attachImage", "access", "agent"]);
 
-    dragBy(nodes[0], "attachImage", { clientX: 12 });
+    dragBy(nodes[0], { clientX: 12 });
 
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "attachImage",
@@ -276,17 +328,85 @@ describe("dragging a region on the canvas", () => {
   });
 
   it("does not pick up a region that has no order of its own", () => {
+    // No `data-layout-group`, because `useLayoutRegion` stamps one only for a
+    // region a canvas drag can reorder.
     const node = document.createElement("div");
     node.setAttribute("data-layout-region", "minimap");
     document.body.append(node);
 
-    const armed = armRegionDrag({
+    armCanvasDrag({
       event: new PointerEvent("pointerdown", { pointerId: 1, button: 0 }),
       node,
-      regionId: "minimap",
     });
 
-    expect(armed).toBe(false);
+    expect(layoutDragActive()).toBe(false);
+  });
+});
+
+/**
+ * The sidebar rail, which L-115 restored to the canvas: nine icons and every
+ * divider in one cluster, and a drop placed by the entry's id.
+ */
+describe("dragging in the sidebar rail", () => {
+  it("moves a panel across a boundary, which changes the group it is in", () => {
+    // Artifacts sits at 40..76 and the boundary that ends its group at 80..88;
+    // 40px down carries its centre past the boundary's and no further.
+    const nodes = mountRail(DEFAULT_RAIL);
+
+    dragBy(nodes[1], { clientY: 48 });
+
+    expect(railGroups()).toEqual([
+      "chats",
+      "artifacts,terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
+  });
+
+  it("moves a DIVIDER, which is the gesture that merges two groups", () => {
+    // The boundary after Terminals dragged up past Terminals itself: a
+    // divider is an entry like any other, so the same drop places it.
+    const nodes = mountRail(DEFAULT_RAIL);
+
+    dragBy(nodes[4], { clientY: -32 });
+
+    expect(railGroups()).toEqual([
+      "chats,artifacts",
+      "terminals,browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
+  });
+
+  it("keeps a hidden panel beside the neighbours it had", () => {
+    // Browsers is hidden, so the rail draws every entry but that one; the
+    // boundaries around it are still drawn, and the stored rail keeps it.
+    const drawn = DEFAULT_RAIL.filter(
+      (entry) => !(entry.kind === "panel" && entry.id === "railBrowsers"),
+    );
+    const nodes = mountRail(drawn);
+
+    dragBy(nodes[1], { clientY: 48 });
+
+    expect(railGroups()).toEqual([
+      "chats",
+      "artifacts,terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
   });
 });
 
@@ -309,7 +429,7 @@ describe("a dock whose members are not all the same size", () => {
 
     // `background` is the second dock row; pulled a row and a half up, its
     // centre passes the first row's.
-    dragBy(nodes[2], "background", { clientY: -60 });
+    dragBy(nodes[2], { clientY: -60 });
 
     // `background` moved; `runningAgents`, drawn in the other container and no
     // part of this gesture, keeps its place after `changedFiles`.
@@ -330,7 +450,7 @@ describe("a dock whose members are not all the same size", () => {
 
     // The chips sit side by side, so this cluster runs on the other axis:
     // `background` is the second chip, pulled left past the first.
-    dragBy(nodes[2], "background", { clientX: -40 });
+    dragBy(nodes[2], { clientX: -40 });
 
     expect(useLayoutStore.getState().arrangement.dock).toEqual([
       "background",
@@ -351,7 +471,7 @@ describe("a dock whose members are not all the same size", () => {
       { regionId: "background", chip: true },
     ]);
 
-    dragBy(nodes[1], "runningAgents", { clientY: 200 });
+    dragBy(nodes[1], { clientY: 200 });
 
     expect(useLayoutStore.getState().arrangement.dock).toEqual(
       DEFAULT_DOCK_ORDER,

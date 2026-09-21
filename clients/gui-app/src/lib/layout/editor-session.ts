@@ -1,4 +1,5 @@
 import type { UseNavigateResult } from "@tanstack/react-router";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import {
   Analytics,
@@ -27,6 +28,7 @@ import {
   navigateToSettingsSection,
 } from "@/lib/settings-navigation";
 import { activateTabIntent } from "@/lib/tab-navigation";
+import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
 import {
   useLayoutEditorStore,
   type LayoutEditorEntryMethod,
@@ -118,7 +120,15 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
   const editor = useLayoutEditorStore.getState();
   // A session that is on its way out is not one to hand back: the user who
   // asked again during the slide-out asked for a new session.
-  if (editor.session !== null && !editor.leaving) return true;
+  if (editor.session !== null && !editor.leaving) {
+    // Asked again from inside a session, which since L-129 is an ordinary
+    // gesture rather than a stray press: the quick-verb menu works in a
+    // session too, and its "Customize layout..." names a region. There is no
+    // second door to open, so what is left of the request is the half that
+    // still means something - land on that region (L-19).
+    if (input.target !== null) editor.select(input.target);
+    return true;
+  }
   // And that session goes NOW rather than whenever its exit motion lands. On
   // the view-transition path both applies are deferred and the exit's runs
   // first, so a teardown left in flight would end the session this call is
@@ -149,6 +159,7 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
   // it belongs to the door for the same reason the lease and the width gate
   // do: a call site that forgets is a call site that reopens the bug.
   closeSystemOverlay();
+  dismissCommandPalette();
   // Before the session begins, so the activation this performs is not the tab
   // switch the session watcher exits on.
   openSampleWorkspace(input.navigate);
@@ -271,6 +282,35 @@ function endSession(
   ) {
     tabCommandCoordinator.closeRefAfterConfirmed({ ...SAMPLE_WORKSPACE_REF });
   }
+}
+
+/**
+ * Put the command palette away BEFORE anything navigates (L-134).
+ *
+ * The palette dismisses itself after the item it ran - `runCommandItem` closes
+ * it in a `finally`, and because `run` is awaited that lands a microtask later
+ * still, interleaved with the router's own promise chain. What this item does
+ * is activate a tab, and the activation did not survive that: opening the
+ * editor from the palette docked the inspector over the tab the user came
+ * from, with the sample workspace sitting beside it as a retained background
+ * tab and nothing registering from it (LV2-06).
+ *
+ * So the door dismisses it, for the same reason it dismisses the system
+ * overlays above: which layers have to be down before the app navigates is a
+ * fact about the door, not about whichever gesture reached it - and a call
+ * site that forgets is a call site that reopens the bug.
+ *
+ * The flush is the load-bearing half. A store write alone leaves the dialog
+ * mounted, and its unmount - with Radix's focus restore inside it - would land
+ * on React's next commit, which is after the navigation this returns to. The
+ * guard keeps it to the one entry point that has a palette open: every other
+ * door does no React work here at all.
+ */
+function dismissCommandPalette(): void {
+  if (!useCommandPaletteStore.getState().open) return;
+  flushSync(() => {
+    useCommandPaletteStore.getState().setOpen(false);
+  });
 }
 
 /**

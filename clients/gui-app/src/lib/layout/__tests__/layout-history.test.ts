@@ -124,9 +124,11 @@ describe("rebasing the entry snapshot on an external write", () => {
     const rebased = rebaseLayoutSnapshot(entry, previous, next);
 
     expect(rebased.basePreset).toBe("compact");
-    // Re-minimized against the new base, like any other write: Compact draws
-    // the model chip as bars already.
-    expect(rebased.overrides).toEqual({});
+    // The picks are untouched by a density change, here as everywhere
+    // (L-133): the other writer switched the base, not the entry's own
+    // answers, and Compact drawing the model chip as bars already is what
+    // makes this pick invisible rather than what makes it gone.
+    expect(rebased.overrides).toEqual({ model: { style: "bars" } });
   });
 
   it("changes nothing when the other writer changed nothing", () => {

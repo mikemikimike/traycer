@@ -40,7 +40,17 @@ import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 export interface SortableRowDecoration {
   readonly changed: boolean;
   readonly hint: string | null;
+  /**
+   * The real component as the row's glyph (L-120), or `null` for the
+   * registry's icon. Supplied by the HOST because it is the host that decides
+   * a list is the picture: the page's Sidebar card draws the rail's own
+   * buttons, and nothing else does.
+   */
+  readonly glyph: ReactNode;
+  /** The row's ONE state control (L-121). */
   readonly control: ReactNode;
+  /** The row's revert, for the slot the row reserves for it (L-122). */
+  readonly revert: ReactNode;
   readonly detail: ReactNode;
   readonly open: boolean;
   readonly onToggleOpen: (() => void) | null;
@@ -60,7 +70,9 @@ export type SortableRowDecorator = (id: string) => SortableRowDecoration;
 export const BARE_ROW: SortableRowDecoration = {
   changed: false,
   hint: null,
+  glyph: null,
   control: null,
+  revert: null,
   detail: null,
   open: false,
   onToggleOpen: null,

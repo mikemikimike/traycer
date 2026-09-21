@@ -4,6 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { LazyMotion, domAnimation } from "motion/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
 import { SampleSceneProvider } from "@/components/sample-workspace/sample-scene-provider";
 import { useSampleScene } from "@/components/sample-workspace/sample-scene-context";
 import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-workspace-body";
@@ -98,19 +99,65 @@ function renderBody() {
     traycerCli: undefined,
   });
   return render(
-    <RunnerHostProvider runnerHost={runnerHost}>
-      <QueryClientProvider client={queryClient}>
-        <LazyMotion features={domAnimation}>
-          <TooltipProvider>
-            <SampleSceneProvider>
-              <Probe />
-              <SampleWorkspaceBody />
-            </SampleSceneProvider>
-          </TooltipProvider>
-        </LazyMotion>
-      </QueryClientProvider>
-    </RunnerHostProvider>,
+    // The app column, exactly as `app-shell.tsx` writes it: the sample tab
+    // renders inside it, so it is the element the edit firewall installs on and
+    // the one ancestor between a sample control and the document.
+    <div data-layout-column data-testid="column">
+      <RunnerHostProvider runnerHost={runnerHost}>
+        <QueryClientProvider client={queryClient}>
+          <LazyMotion features={domAnimation}>
+            <TooltipProvider>
+              <SampleSceneProvider>
+                <Probe />
+                <SampleWorkspaceBody />
+              </SampleSceneProvider>
+            </TooltipProvider>
+          </LazyMotion>
+        </QueryClientProvider>
+      </RunnerHostProvider>
+    </div>,
   );
+}
+
+/**
+ * The sample tab exists only for a live session, so every canvas assertion
+ * below renders into one.
+ *
+ * The NAME (`data-layout-region`) is on the element at rest too since L-129 -
+ * a right-click has to resolve a region while the user is only using the app.
+ * What a session decides is the REGISTRATION and the decoration that hangs off
+ * it, which is what the canvas hovers, selects and drags.
+ */
+function renderSession() {
+  const rendered = renderBody();
+  act(() => {
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+  });
+  return rendered;
+}
+
+function regionNode(regionId: string): HTMLElement {
+  const node = document.querySelector<HTMLElement>(
+    `[data-layout-region="${regionId}"]`,
+  );
+  if (node === null) throw new Error(`no ${regionId} region on the canvas`);
+  return node;
+}
+
+/**
+ * A stand-in for what a pointer actually lands on: the innermost element the
+ * region draws. jsdom does no hit testing, so the assertion a test can make is
+ * the one the canvas itself makes of a hit - `closest("[data-layout-region]")`.
+ */
+function innermost(node: HTMLElement): HTMLElement {
+  let deepest = node;
+  while (deepest.firstElementChild instanceof HTMLElement)
+    deepest = deepest.firstElementChild;
+  return deepest;
 }
 
 beforeEach(() => {
@@ -192,27 +239,88 @@ describe("SampleWorkspaceBody - content", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("is passive: dock, composer and transcript text are inert, the scroller is not", () => {
+  // L-116: the mic slot draws nothing without a dictation control, whatever
+  // Microphone is set to, so a Shown microphone had no chip on the canvas to
+  // hover, select or drag - while the inspector's own specimen drew one.
+  it("draws the mic chip from the sample dictation control", () => {
     renderBody();
 
-    // Native scrolling must keep working, so the scroller itself is NOT inert...
+    expect(screen.getByLabelText("Start voice input")).not.toBeNull();
+  });
+});
+
+/**
+ * L-131 and LV2-01. The sample scene wrapped its dock, its transcript, its
+ * minimap and (inside `ComposerToolbar`) its toolbar in `inert`, which removes
+ * a subtree from hit testing - so not one region on the chat pane could be
+ * hovered, selected by pointing or dragged, which is the whole model (P3,
+ * L-01). The edit firewall is the one mechanism that keeps sample content from
+ * acting, and these three assertions are its two halves: the pointer reaches
+ * the region, and the gesture goes no further than the column.
+ */
+describe("SampleWorkspaceBody - pointable, under the edit firewall", () => {
+  afterEach(() => {
+    useLayoutEditorStore.getState().endSession();
+  });
+
+  it("puts no inert anywhere in the sample scene", () => {
+    renderSession();
+
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+    // The scroller keeps scrolling natively, which is the one passivity the
+    // scene never had to buy (L-17).
     expect(
       screen.getByLabelText("Sample conversation").hasAttribute("inert"),
     ).toBe(false);
-    // ...but the text inside it is, and so is everything from the dock down.
-    const turn = document.querySelector("[data-sample-turn]");
-    expect(turn?.closest("[inert]")).not.toBeNull();
-    expect(
-      screen.getByTestId("active-agents-panel").closest("[inert]"),
-    ).not.toBeNull();
-    expect(
-      screen.getByText("Describe the next change…").closest("[inert]"),
-    ).not.toBeNull();
-    // The inert minimap stays measurable; the editor reaches it through the
-    // region registration `useLayoutRegion` stamps on its node.
-    expect(
-      screen.getByTestId("chat-turn-minimap").closest("[inert]"),
-    ).not.toBeNull();
+  });
+
+  it("resolves a hit on every chat-pane region back to that region", () => {
+    renderSession();
+
+    // Every region the live audit found unpointable, plus the mic LV2-03 kept
+    // off the canvas entirely.
+    for (const regionId of [
+      "minimap",
+      "contextUsage",
+      "changedFiles",
+      "runningAgents",
+      "background",
+      "attachImage",
+      "access",
+      "agent",
+      "model",
+      "mic",
+    ]) {
+      const node = regionNode(regionId);
+      expect(node.closest("[inert]")).toBeNull();
+      expect(innermost(node).closest("[data-layout-region]")).toBe(node);
+    }
+  });
+
+  it("lets the firewall, not the markup, swallow a click on a region", () => {
+    renderSession();
+    const heard: string[] = [];
+    const target = innermost(regionNode("access"));
+    target.addEventListener("click", () => heard.push("access"));
+
+    const teardown = installEditFirewall({
+      column: screen.getByTestId("column"),
+      focusTarget: () => null,
+    });
+    const delivered = target.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+
+    expect(heard).toEqual([]);
+    expect(delivered).toBe(false);
+
+    // Control: the element IS reachable: without the firewall the same click
+    // lands on it, which is what the deleted `inert` made impossible.
+    teardown();
+    target.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    expect(heard).toEqual(["access"]);
   });
 });
 

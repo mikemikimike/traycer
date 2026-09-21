@@ -7,6 +7,7 @@ import {
   edgeSnapDockMode,
   floatDockHeight,
   FLOAT_DOCK_WIDTH,
+  restingFloatPosition,
   useFloatingDock,
 } from "@/components/layout-editor/inspector/dock-modes";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -101,6 +102,33 @@ describe("float geometry (5.4, section 6)", () => {
     );
     // Narrower than the panel: the default is flush left rather than negative.
     expect(defaultFloatPosition({ width: 240, height: 300 }).x).toBe(0);
+  });
+
+  it("opens a remembered float where it is floating, never on a dock's band (LV2-17)", () => {
+    // A position remembered on a wider window: the clamp puts it flush against
+    // the right edge, which is exactly where the right dock sits - so choosing
+    // Float looked like a no-op until the user dragged the panel off it. The
+    // clamp cannot refuse that band, because a drag reaches the snap zone
+    // through it; the RESTING position is where the distinction belongs.
+    const remembered = { x: 9000, y: 290 };
+    expect(clampFloatPosition(remembered, VIEWPORT).x).toBe(
+      VIEWPORT.width - FLOAT_DOCK_WIDTH,
+    );
+    expect(
+      edgeSnapDockMode(clampFloatPosition(remembered, VIEWPORT), VIEWPORT),
+    ).toBe("right");
+
+    expect(restingFloatPosition(remembered, VIEWPORT)).toEqual(
+      defaultFloatPosition(VIEWPORT),
+    );
+    // A position that is genuinely floating is still the user's own.
+    expect(restingFloatPosition({ x: 500, y: 200 }, VIEWPORT)).toEqual({
+      x: 500,
+      y: 200,
+    });
+    expect(restingFloatPosition(null, VIEWPORT)).toEqual(
+      defaultFloatPosition(VIEWPORT),
+    );
   });
 
   it("docks to the side a release lands near, and nowhere else", () => {

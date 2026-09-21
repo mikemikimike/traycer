@@ -136,6 +136,28 @@ export const LAYOUT = defineSettingsSection("layout", {
     keywords: ["footer", "strip", "usage", "resources"],
   },
   /**
+   * The other surface-tier row on the Status bar card (D7, L-126): `usageHost`
+   * moves Usage limits AND Resource monitor into the top bar and removes the
+   * strip, so it belongs to no region either.
+   *
+   * It has an entry of its own because it was the one setting on this page
+   * that Settings search could not find: it used to be an `InspectorRow` -
+   * the last instance of the dock's scale sitting at surface level on the page
+   * (P-4) - and an `InspectorRow` carries no anchor because a grammar row is
+   * fixed structure rather than a searchable setting. As a `SettingsRow` with
+   * this definition it is both.
+   */
+  usageHost: {
+    kind: "row",
+    group: "statusBar",
+    search: { anchor: "layout-usage-host" },
+    label: "Show these in",
+    description:
+      "Usage limits and Resource monitor move together. In the top bar there is no status bar left to draw.",
+    availableWhen: alwaysAvailable,
+    keywords: ["usage", "resources", "top bar", "status bar", "move", "header"],
+  },
+  /**
    * The grammar's surface tier (L-51): it belongs to no region, and it decides
    * whether the strip exists at all on a narrow viewport. Only the installed
    * mobile app withholds the footer by default, so only that build has the
@@ -149,5 +171,37 @@ export const LAYOUT = defineSettingsSection("layout", {
     description: null,
     availableWhen: isMobileFooterRowAvailable,
     keywords: ["footer", "phone", "mobile", "small screen", "status bar"],
+  },
+  /**
+   * Last on the page, and the only card with a tone (redesign 4.4).
+   *
+   * "Reset everything" used to be `variant="muted" size="sm"` on the same line
+   * as "Reset to Compact", inside the Presets card: the one irreversible
+   * action on the page, styled and placed as the least consequential of the
+   * three. The house orders groups by frequency and risk with destructive
+   * last, and has a `tone="danger"` group for exactly this. The confirm stays
+   * (L-108) - this host has no Undo.
+   */
+  resetEverything: {
+    kind: "group",
+    search: { anchor: "layout-reset-everything" },
+    label: "Reset everything",
+    description: null,
+    breadcrumb: null,
+    availableWhen: alwaysAvailable,
+    keywords: ["reset", "default", "start over", "restore", "undo all"],
+  },
+  resetEverythingAction: {
+    kind: "row",
+    group: "resetEverything",
+    // The card's own name and this row's are the same words, and two results
+    // under one name on one page is a choice with no answer - the same reason
+    // the Customize card folds into its row.
+    search: { contributesTo: "resetEverything" },
+    label: "Put the whole layout back",
+    description:
+      "Every setting, and where everything sits, go back to how the app shipped. This cannot be undone here.",
+    availableWhen: alwaysAvailable,
+    keywords: [],
   },
 });

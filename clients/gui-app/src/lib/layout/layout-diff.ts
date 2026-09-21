@@ -67,16 +67,32 @@ export function regionChanged(
  * (`positionRowChanged`).
  */
 export function changeCount(snapshot: LayoutSnapshot): number {
-  // No re-minimizing: `overrides` is invariantly minimal, because every write
-  // path into the store (`setRegionValues`, `setRegionValuesMany`,
-  // `setBasePreset`, `replaceAll`) and every rehydrate ends in the same
-  // resolver. Re-deriving it here allocated twenty-two objects on every filter
-  // keystroke to confirm what the store already guarantees (G1-21).
-  return Object.values(snapshot.overrides).reduce(
-    (total: number, patch: object | undefined) =>
-      total + (patch === undefined ? 0 : Object.keys(patch).length),
+  // By DIFFERENCE, through the same `changedKeys` the row's own dot reads
+  // (L-133). It used to count the delta's keys and rely on the store keeping
+  // that delta minimal against the base - an invariant bought by having a
+  // preset click delete every pick the incoming preset agreed with, which is
+  // the destruction L-133 closed. Counting is the cheap half of that trade:
+  // `changedKeys` returns early for a region with no patch, so the walk
+  // allocates only for the regions a person has actually touched, which is
+  // what G1-21 was about.
+  return layoutRegionIds().reduce(
+    (total, region) => total + changedKeys(snapshot, region).length,
     0,
   );
+}
+
+/**
+ * Every region id, from the one object that has to name them all.
+ *
+ * `PRESET_VALUES.default` is typed as `LayoutValues`, so adding a region
+ * widens that interface and this list follows without being written twice.
+ * One cast in one place rather than the three call sites that each had their
+ * own; `regions/region-facts.ts` has the same list from the registry, but this
+ * layer cannot reach it - `regions/region-position-rows.ts` imports THIS
+ * module, so the arrow only points one way.
+ */
+function layoutRegionIds(): ReadonlyArray<RegionId> {
+  return Object.keys(PRESET_VALUES.default) as ReadonlyArray<RegionId>;
 }
 
 /** Every order group whose order is no longer the default one. */
@@ -274,8 +290,7 @@ function layoutSettingEntries(): ReadonlyArray<{
   readonly region: RegionId;
   readonly key: string;
 }> {
-  const regions = Object.keys(PRESET_VALUES.default) as ReadonlyArray<RegionId>;
-  return regions.flatMap((region) =>
+  return layoutRegionIds().flatMap((region) =>
     Object.keys(PRESET_VALUES.default[region]).map((key) => ({ region, key })),
   );
 }
@@ -426,8 +441,7 @@ export function touchedRegionIds(
 ): ReadonlyArray<RegionId> {
   const fromValues = effectiveLayoutValues(from.basePreset, from.overrides);
   const toValues = effectiveLayoutValues(to.basePreset, to.overrides);
-  const regions = Object.keys(PRESET_VALUES.default) as ReadonlyArray<RegionId>;
-  return regions.filter(
+  return layoutRegionIds().filter(
     (region) =>
       JSON.stringify(fromValues[region]) !== JSON.stringify(toValues[region]),
   );

@@ -178,11 +178,16 @@ function ComposerToolbarView(
     dictationPreparing,
   };
 
+  // No `inert` on the presentation copy (L-131). The only surface that renders
+  // one is the layout editor's sample workspace, where the toolbar IS the thing
+  // being pointed at: `inert` removes the subtree from hit testing, so Attach
+  // image, Access, Agent, Model and Microphone could not be hovered, selected
+  // or dragged. The edit firewall on the app column is what keeps a sample
+  // gesture from acting, and every leaf here is already passive on its own -
+  // the model picker draws a trigger with no menu, Send is disabled, and the
+  // handlers the sample passes are no-ops.
   return (
-    <div
-      inert={props.presentation}
-      className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2.5 pb-2.5 pt-1"
-    >
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-2.5 pb-2.5 pt-1">
       {recordingDictation !== null ? (
         <div className="col-span-2 min-w-0">
           <DictationRecordingBar

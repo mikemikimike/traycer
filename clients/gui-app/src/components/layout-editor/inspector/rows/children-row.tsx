@@ -1,44 +1,50 @@
-import { useState, type ReactNode } from "react";
-import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
-import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
+import type { ReactNode } from "react";
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
+import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import {
-  BARE_ROW,
-  type SortableRowDecoration,
-} from "@/components/layout-editor/inspector/rows/order-row-items";
-import { ORDER_GROUPS } from "@/components/layout-editor/regions/surface-groups";
-import { providerChanged, revertProvider } from "@/lib/layout/layout-diff";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
-import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
+  ORDER_GROUPS,
+  orderGroupInstruction,
+} from "@/components/layout-editor/regions/surface-groups";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
-import { providerDisplayName } from "@/lib/provider-ordering";
-import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
- * Usage limits' own second level (L-26): the same provider list the
- * `usageProviders` order group draws, with each row opening that provider the
- * way THIS host opens a level (L-89).
+ * Usage limits' own second level in the DOCK (L-26): the provider list, each
+ * row opening that provider's own screen with a back row (L-89).
  *
- * In the dock a provider is its own screen with a back row, reached through
- * `onOpenProvider`. On the page there is nowhere to go, so the row's own
- * disclosure opens `ProviderLevel` in place - which is the branch the page
- * carried a dead prop for and never rendered, and the reason per-provider
- * limits were unreachable in any window too narrow for a canvas (D6, P-10).
+ * Dock-only now. On the page the same list is a headed list in the Status bar
+ * card, a sibling of the two region rows rather than a disclosure inside one
+ * of them (L-123): a provider's limits used to be five levels down - Usage
+ * limits row, disclosure, Providers list, provider row, disclosure - and are
+ * two now. That is why this component no longer has a host branch, a
+ * `useState` or a row decorator: they existed only for the in-place branch the
+ * page no longer takes.
  */
 export function ProvidersChildrenRow(props: {
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
+  /**
+   * How a provider's own screen is opened. Nullable because `GrammarRowView`'s
+   * prop is: the page composes that switch too, and passes `null` because it
+   * draws this list itself, a level up.
+   */
   readonly onOpenProvider: ((providerId: string) => void) | null;
 }): ReactNode {
   const { values, arrangement, onOpenProvider } = props;
-  const inPlace = useLayoutFormHost() === "page";
-  const [open, setOpen] = useState<ReadonlyArray<string>>([]);
-
+  const gutter = useSortableRowPadding();
   return (
-    <div className="border-t border-border px-3.5 py-3">
-      <div className="mb-2 text-overline text-muted-foreground uppercase">
-        {ORDER_GROUPS.usageProviders.label}
+    <div className="flex flex-col border-t border-border">
+      {/* The house's row shape rather than `text-overline uppercase`, which is
+        used nowhere else in the settings tree (L-127), and the operating
+        instruction as the header's description rather than a footnote under
+        the list. */}
+      <div className={gutter.row}>
+        <h3 className="font-medium text-foreground">
+          {ORDER_GROUPS.usageProviders.label}
+        </h3>
+        <p className="mt-0.5 max-w-[72ch] text-pretty text-ui-xs text-muted-foreground">
+          {orderGroupInstruction("usageProviders")}
+        </p>
       </div>
       <OrderGroupList
         group="usageProviders"
@@ -46,77 +52,14 @@ export function ProvidersChildrenRow(props: {
         values={values}
         arrangement={arrangement}
         onOpenProvider={
-          inPlace || onOpenProvider === null
+          onOpenProvider === null
             ? null
             : (providerId) => {
                 onOpenProvider(providerId);
               }
         }
-        decorate={
-          inPlace
-            ? (id) =>
-                providerRowDecoration({
-                  arrangement,
-                  id,
-                  open: open.includes(id),
-                  onToggleOpen: () => {
-                    setOpen((current) =>
-                      current.includes(id)
-                        ? current.filter((entry) => entry !== id)
-                        : [...current, id],
-                    );
-                  },
-                })
-            : null
-        }
+        decorate={null}
       />
-      <p className="mt-1.5 text-ui-xs text-muted-foreground">
-        {ORDER_GROUPS.usageProviders.description}
-      </p>
     </div>
   );
-}
-
-/**
- * One provider row on the page: the provider's own level as the row's
- * disclosure, plus the changed dot and revert its arrangement-only state has
- * never had anywhere (P-6, P-7).
- */
-function providerRowDecoration(input: {
-  readonly arrangement: LayoutArrangement;
-  readonly id: string;
-  readonly open: boolean;
-  readonly onToggleOpen: () => void;
-}): SortableRowDecoration {
-  const { arrangement, id, open, onToggleOpen } = input;
-  const providerId = usageProviderId(arrangement, id);
-  if (providerId === null) return BARE_ROW;
-  const changed = providerChanged(arrangement, providerId);
-  return {
-    changed,
-    hint: null,
-    control: changed ? (
-      <RevertButton
-        label={`Revert ${providerDisplayName(providerId)}`}
-        onRevert={() => {
-          writeArrangement(revertProvider(arrangement, providerId));
-        }}
-      />
-    ) : null,
-    detail: <ProviderLevel providerId={providerId} />,
-    open,
-    onToggleOpen,
-  };
-}
-
-/**
- * The row's id back as a provider id, by looking it up in the list it came
- * from - the same narrowing-by-selection the order lists use, rather than a
- * predicate that only says an arbitrary string is one (G1-23).
- */
-function usageProviderId(
-  arrangement: LayoutArrangement,
-  id: string,
-): RateLimitProviderId | null {
-  return arrangement.usageProviders.find((entry) => entry === id) ?? null;
 }

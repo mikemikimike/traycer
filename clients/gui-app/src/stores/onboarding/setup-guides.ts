@@ -111,7 +111,7 @@ const SETUP_GUIDES = {
         selector: `[data-settings-anchor="${LAYOUT.definitions.sidebar.anchor}"]`,
         title: "Every piece has a row",
         content:
-          "One row per piece of chrome, grouped by where it sits: show it, hide it, or drag it into place.",
+          "One row per piece of chrome, grouped by where it sits: show it, hide it, or move it. Each sidebar row carries the button it moves.",
       },
       // The guide ends by SHOWING the editor rather than entering it (L-50):
       // the chrome around Settings dims the way it does on the canvas, so the

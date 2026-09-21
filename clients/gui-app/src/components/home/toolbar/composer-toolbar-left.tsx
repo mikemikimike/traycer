@@ -27,9 +27,12 @@ function ComposerToolbarLeftImpl(props: ComposerToolbarItemsProps) {
   );
 
   // One menu for the strip, naming whichever item the pointer was over
-  // (G3-10). A presentation copy - the sample workspace's toolbar - gets none:
-  // it is a picture, and nothing in it is the user's to change.
-  if (props.presentation === true) return cluster;
+  // (G3-10) - including the presentation copy, which is the sample workspace's
+  // toolbar and therefore the one the user right-clicks while customizing
+  // (L-129). What `presentation` still turns off is the item's own behaviour
+  // (`registerActivation`), not the menu: a quick verb writes the same value
+  // the inspector's control writes, so it is exactly as true here as on the
+  // real composer.
   return <LayoutClusterContextMenu>{cluster}</LayoutClusterContextMenu>;
 }
 

@@ -42,21 +42,18 @@ afterEach(() => {
 });
 
 describe("registration", () => {
-  it("registers only while a session is live and stamps the node", () => {
+  it("registers only while a session is live", () => {
     const view = render(
       <Region regionId="minimap" instanceId="tile-a" testId="minimap" />,
     );
     const node = view.getByTestId("minimap");
 
-    expect(node.hasAttribute("data-layout-region")).toBe(false);
     expect(
       preferredRegionInstance(useLayoutEditorStore.getState(), "minimap"),
     ).toBeNull();
 
     openSession();
 
-    expect(node.getAttribute("data-layout-region")).toBe("minimap");
-    expect(node.getAttribute("data-layout-instance")).toBe("tile-a");
     expect(
       preferredRegionInstance(useLayoutEditorStore.getState(), "minimap")?.node,
     ).toBe(node);
@@ -65,10 +62,38 @@ describe("registration", () => {
       useLayoutEditorStore.getState().endSession();
     });
 
-    expect(node.hasAttribute("data-layout-region")).toBe(false);
+    expect(
+      preferredRegionInstance(useLayoutEditorStore.getState(), "minimap"),
+    ).toBeNull();
   });
 
-  it("leaves a hidden pane's copy out of the editor", () => {
+  /**
+   * L-129. The right-click menu resolves the region it landed on from the DOM,
+   * so a name that only exists inside a session is a menu that only exists
+   * inside a session - which is what made the quick verbs (L-19) unreachable
+   * everywhere in the product. The name is a fact about the element; only the
+   * registration is a fact about the session.
+   */
+  it("names the node at rest, before any session and after one ends", () => {
+    const view = render(
+      <Region regionId="minimap" instanceId="tile-a" testId="minimap" />,
+    );
+    const node = view.getByTestId("minimap");
+
+    expect(node.getAttribute("data-layout-region")).toBe("minimap");
+    expect(node.getAttribute("data-layout-instance")).toBe("tile-a");
+
+    openSession();
+    expect(node.getAttribute("data-layout-region")).toBe("minimap");
+
+    act(() => {
+      useLayoutEditorStore.getState().endSession();
+    });
+
+    expect(node.getAttribute("data-layout-region")).toBe("minimap");
+  });
+
+  it("leaves a hidden pane's copy out of the editor, and unnamed", () => {
     openSession();
     const view = render(
       <PaneVisibilityContext value={false}>
@@ -76,6 +101,8 @@ describe("registration", () => {
       </PaneVisibilityContext>,
     );
 
+    // Unnamed as well as unregistered: a second element carrying the same
+    // region name is one `closest` could resolve a menu to.
     expect(view.getByTestId("mic").hasAttribute("data-layout-region")).toBe(
       false,
     );

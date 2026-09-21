@@ -1,12 +1,9 @@
 import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import {
-  minimizeOverrides,
-  type LayoutPresetId,
-} from "@/lib/layout/layout-presets";
-import {
   isStringList,
   type ContextUsageValues,
   type LayoutOverrides,
+  type LayoutValues,
   type ModelValues,
   type RailValues,
   type ResourceMonitorValues,
@@ -14,6 +11,7 @@ import {
   type SizedValues,
   type UsageLimitsValues,
 } from "@/lib/layout/layout-values";
+import type { RegionId } from "@/lib/layout/region-id";
 
 /**
  * The override delta as some build of the app wrote it, key by key against
@@ -22,42 +20,61 @@ import {
  * Re-derived rather than shallow-merged for the reason every resolver in this
  * app is: each value picks a branch on a render path, so a hand-edited
  * `"compact"` on a row that only hides would ask a leaf for a shape it has no
- * case for. Minimized at the end through the same function the setters use, so
- * a key that agrees with the base preset cannot survive a rehydrate either.
+ * case for.
+ *
+ * **It does not minimize against the base preset, deliberately** (L-133). The
+ * delta is what the USER PICKED, not what happens to differ from whichever
+ * density is current, and those are two different facts: a pick that the
+ * current preset already makes is invisible today and is the user's answer
+ * again the moment they switch preset. Minimizing here is what made choosing a
+ * density silently destroy every per-region change that density happened to
+ * agree with - unrecoverably on the Settings page, which has no Undo (L-108).
+ * "Changed" is measured by DIFFERENCE instead, where it always was
+ * (`layout-diff.ts`), so a redundant pick costs a few stored bytes and nothing
+ * else: no dot, no revert, no count and no analytics property.
  */
-export function resolvePersistedOverrides(
-  value: unknown,
-  basePreset: LayoutPresetId,
-): LayoutOverrides {
+export function resolvePersistedOverrides(value: unknown): LayoutOverrides {
   const stored: Record<string, unknown> = isRecord(value) ? value : {};
-  return minimizeOverrides(
-    {
-      homeTab: shownPatch(stored.homeTab),
-      usageLimits: usageLimitsPatch(stored.usageLimits),
-      resourceMonitor: resourceMonitorPatch(stored.resourceMonitor),
-      minimap: shownPatch(stored.minimap),
-      contextUsage: contextUsagePatch(stored.contextUsage),
-      runningAgents: sizedPatch(stored.runningAgents),
-      changedFiles: sizedPatch(stored.changedFiles),
-      background: sizedPatch(stored.background),
-      attachImage: shownPatch(stored.attachImage),
-      access: sizedPatch(stored.access),
-      agent: shownPatch(stored.agent),
-      model: modelPatch(stored.model),
-      mic: shownPatch(stored.mic),
-      railAgents: railPatch(stored.railAgents),
-      railTerminals: railPatch(stored.railTerminals),
-      railBrowsers: railPatch(stored.railBrowsers),
-      railArtifacts: railPatch(stored.railArtifacts),
-      railGitDiff: railPatch(stored.railGitDiff),
-      railPullRequests: railPatch(stored.railPullRequests),
-      railFileTree: railPatch(stored.railFileTree),
-      railSharing: railPatch(stored.railSharing),
-      railComments: railPatch(stored.railComments),
-    },
-    basePreset,
-  );
+  const resolved: MutableLayoutOverrides = {
+    homeTab: shownPatch(stored.homeTab),
+    usageLimits: usageLimitsPatch(stored.usageLimits),
+    resourceMonitor: resourceMonitorPatch(stored.resourceMonitor),
+    minimap: shownPatch(stored.minimap),
+    contextUsage: contextUsagePatch(stored.contextUsage),
+    runningAgents: sizedPatch(stored.runningAgents),
+    changedFiles: sizedPatch(stored.changedFiles),
+    background: sizedPatch(stored.background),
+    attachImage: shownPatch(stored.attachImage),
+    access: sizedPatch(stored.access),
+    agent: shownPatch(stored.agent),
+    model: modelPatch(stored.model),
+    mic: shownPatch(stored.mic),
+    railAgents: railPatch(stored.railAgents),
+    railTerminals: railPatch(stored.railTerminals),
+    railBrowsers: railPatch(stored.railBrowsers),
+    railArtifacts: railPatch(stored.railArtifacts),
+    railGitDiff: railPatch(stored.railGitDiff),
+    railPullRequests: railPatch(stored.railPullRequests),
+    railFileTree: railPatch(stored.railFileTree),
+    railSharing: railPatch(stored.railSharing),
+    railComments: railPatch(stored.railComments),
+  };
+  // The table above states every region, so one the resolver found nothing
+  // valid in is present and empty; dropping those is what keeps `Object.keys`
+  // over the delta a count of the regions a user has actually picked on.
+  const writable: Record<string, unknown> = resolved;
+  for (const region of Object.keys(writable)) {
+    const patch = writable[region];
+    if (isRecord(patch) && Object.keys(patch).length === 0) {
+      delete writable[region];
+    }
+  }
+  return resolved;
 }
+
+type MutableLayoutOverrides = {
+  -readonly [K in RegionId]?: Partial<LayoutValues[K]>;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

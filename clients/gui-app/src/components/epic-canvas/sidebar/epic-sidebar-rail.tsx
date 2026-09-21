@@ -14,7 +14,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { Button } from "@/components/ui/button";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { railRegionForLeftPanelId } from "@/lib/layout/rail";
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
+import {
+  leftPanelRunsFromRail,
+  railRegionForLeftPanelId,
+  type RailEntry,
+} from "@/lib/layout/rail";
+import { useLayoutRail } from "@/lib/layout/rail-view";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -24,6 +30,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { DropLine } from "@/components/ui/drop-line";
+import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
 import {
   getLeftPanelRailDragId,
   getLeftPanelRailDropId,
@@ -54,7 +61,7 @@ import {
   useEpicLeftPanelStore,
   useMainPanelCollapsed,
 } from "@/stores/epics/left-panel-store";
-import { type LeftPanelGroup, type LeftPanelId } from "@/lib/left-panel-ids";
+import { type LeftPanelId } from "@/lib/left-panel-ids";
 import { useActiveEpicArtifactId } from "@/stores/epics/canvas/store";
 import {
   getLeftPanelDefinition,
@@ -104,24 +111,28 @@ interface EpicLeftPanelRailContentProps {
 interface VisibleLeftPanelGroup {
   readonly panelIds: ReadonlyArray<LeftPanelId>;
   readonly primaryPanel: LeftPanelMetadataDefinition;
+  /** The boundary drawn after this group, or `null` at the rail's end. */
+  readonly dividerId: string | null;
 }
 
+/**
+ * The groups this rail draws, each with the divider that ends it.
+ *
+ * Read off `arrangement.rail` rather than off the group view, because a
+ * boundary is an entry with an id of its own and the group view deliberately
+ * drops it (L-25): the rail draws that entry, so it has to name it.
+ */
 function getVisibleLeftPanelGroups(
-  groups: ReadonlyArray<LeftPanelGroup>,
+  rail: ReadonlyArray<RailEntry>,
   context: LeftPanelAvailabilityContext,
 ): ReadonlyArray<VisibleLeftPanelGroup> {
-  return groups.flatMap((group) => {
-    const panelIds = group.panelIds.filter((panelId) =>
-      isLeftPanelVisible(getLeftPanelDefinition(panelId), context),
-    );
-    if (panelIds.length === 0) return [];
-    return [
-      {
-        panelIds,
-        primaryPanel: getLeftPanelDefinition(panelIds[0]),
-      },
-    ];
-  });
+  return leftPanelRunsFromRail(rail, (panelId) =>
+    isLeftPanelVisible(getLeftPanelDefinition(panelId), context),
+  ).map((run) => ({
+    panelIds: run.panelIds,
+    primaryPanel: getLeftPanelDefinition(run.panelIds[0]),
+    dividerId: run.dividerId,
+  }));
 }
 
 function getRailBoundaryIndex(
@@ -178,6 +189,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
   const activePanelId = useActiveLeftPanelId(tabId);
   const collapsed = useMainPanelCollapsed(tabId);
   const panelGroups = useLeftPanelGroups();
+  const rail = useLayoutRail();
   const commentsPanelRevealed = useCommentsPanelRevealed(tabId);
   // The host the PR panel records presence under (see `EpicLeftPanelHost`).
   const canvasHostId = useCanvasHostId();
@@ -213,8 +225,8 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
     ],
   );
   const visibleGroups = useMemo(
-    () => getVisibleLeftPanelGroups(panelGroups, availabilityContext),
-    [availabilityContext, panelGroups],
+    () => getVisibleLeftPanelGroups(rail, availabilityContext),
+    [availabilityContext, rail],
   );
   // Which icon lights up. Resolved rather than compared against `activePanelId`
   // directly so a hidden active panel highlights whatever the body fell back
@@ -285,6 +297,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
             data-epic-sidebar-rail
             data-testid="epic-sidebar-rail"
             data-orientation={orientation}
+            {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
             className={cn(
               "relative flex items-center gap-1 bg-background",
               orientation === "vertical" &&
@@ -319,6 +332,12 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                       groupDropPosition === "combine" ? "combine" : null
                     }
                   />
+                  {group.dividerId === null ? null : (
+                    <LeftPanelRailDivider
+                      dividerId={group.dividerId}
+                      orientation={orientation}
+                    />
+                  )}
                   {railBoundaryIndex === groupIndex + 1 ? (
                     <RailBoundaryPreview
                       definition={panelSectionDropDefinition}

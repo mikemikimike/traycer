@@ -24,8 +24,16 @@ import {
   HostContextFrame,
   type HostContextId,
 } from "@/components/layout-editor/region-depiction-frame";
-import { type LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import { classifyProviderRateLimitWindow } from "@traycer/protocol/host/rate-limit";
+import {
+  USAGE_PROVIDER_IDS,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
+import {
+  formatCompactWindowDuration,
+  type RateLimitWindowKind,
+} from "@/lib/rate-limits/rate-limit-window-catalog";
 import { tightestRateLimitWindow } from "@/lib/rate-limits/tightest-window";
 import type {
   ContextUsageValues,
@@ -213,7 +221,10 @@ export function depictDockRows(
           // The same hairline `ChatLowerDock` gives a panel it draws below
           // another one (`separated`), which is what tells two rows apart
           // inside one frame now that the gap between two cards is gone.
-          className={cn(index === 0 ? null : "border-t border-border/50")}
+          //
+          // `undefined` and not `cn(null)`, which is the empty string: the
+          // first row was shipping a bare `class=""` (R2-10).
+          className={index === 0 ? undefined : "border-t border-border/50"}
         >
           {depictDockRow(regionId, values[regionId], arrangement)}
         </div>
@@ -243,19 +254,98 @@ function depictDockRow<K extends DockRegionId>(
  * something to change - a reading part-way through a window, a countdown that
  * has not expired, a diff with both signs, a context window with room left.
  */
-const SPECIMEN_USED_PERCENT = 35;
 const SPECIMEN_CONTEXT_PERCENT_LEFT = 36;
-const SPECIMEN_RESET_MS = 59 * 60 * 1000;
 
-function specimenWindow(): StatusBarRateLimitWindow {
-  return {
-    windowKey: "specimen",
-    label: "5h",
-    labelIsDuration: true,
+/**
+ * How many providers the status-bar picture prints.
+ *
+ * A SAMPLE of the strip rather than the whole catalog. Drawing every shown
+ * provider put all eight in a 320px dock, and - drawn from one fixed reading -
+ * eight segments saying "35% 5h" behind eight different icons, which reads as
+ * filler rather than as a picture of the user's own status bar (LV2-19).
+ * Three is what the picture has to show: that the cluster repeats once per
+ * provider, and that each repetition carries that provider's own reading.
+ */
+const SPECIMEN_STRIP_PROVIDERS = 3;
+
+interface SpecimenReading {
+  readonly durationMinutes: number;
+  readonly usedPercent: number;
+  /** How far off the reset is, so the countdown differs per window too. */
+  readonly resetsInMinutes: number;
+  readonly kind: RateLimitWindowKind;
+}
+
+/**
+ * The three readings a provider's specimen window is taken from, by rotation.
+ *
+ * One short window part-way through, one long one further along and one day
+ * window barely started: three different percentages, three different
+ * durations and three different countdowns, so no two segments of the strip
+ * can print the same string however they are ordered. All three stay under
+ * `classifyProviderRateLimitWindow`'s warning thresholds - a picture of the
+ * grammar is not a picture of a person about to run out.
+ */
+const SPECIMEN_READINGS: ReadonlyArray<SpecimenReading> = [
+  {
+    durationMinutes: 5 * 60,
+    usedPercent: 35,
+    resetsInMinutes: 59,
     kind: "session",
-    usedPercent: SPECIMEN_USED_PERCENT,
-    resetsAt: Date.now() + SPECIMEN_RESET_MS,
-    severity: "healthy",
+  },
+  {
+    durationMinutes: 7 * 24 * 60,
+    usedPercent: 78,
+    resetsInMinutes: 2 * 24 * 60 + 12 * 60,
+    kind: "weekly",
+  },
+  {
+    durationMinutes: 24 * 60,
+    usedPercent: 12,
+    resetsInMinutes: 6 * 60 + 20,
+    kind: "period",
+  },
+];
+
+/**
+ * One provider's specimen reading, by its place in the CATALOG.
+ *
+ * `USAGE_PROVIDER_IDS` and not `arrangement.usageProviders`: the reading is a
+ * fact about the provider, so dragging the strip into another order, or hiding
+ * one provider, must not renumber everybody else's picture.
+ */
+function specimenReadingFor(providerId: RateLimitProviderId): SpecimenReading {
+  const catalogIndex = USAGE_PROVIDER_IDS.indexOf(providerId);
+  const place = catalogIndex < 0 ? 0 : catalogIndex;
+  return SPECIMEN_READINGS[place % SPECIMEN_READINGS.length];
+}
+
+/**
+ * That reading as the window the real segment component draws.
+ *
+ * Worded and tinted through the catalog's own two functions -
+ * `formatCompactWindowDuration` writes every label the live strip prints, and
+ * `classifyProviderRateLimitWindow` decides every severity - so a picture of a
+ * reading says what that reading would say rather than something that merely
+ * looks like it.
+ */
+function specimenWindow(
+  providerId: RateLimitProviderId,
+): StatusBarRateLimitWindow {
+  const reading = specimenReadingFor(providerId);
+  const resetsAt = Date.now() + reading.resetsInMinutes * 60 * 1000;
+  return {
+    windowKey: `${providerId}:specimen`,
+    label: formatCompactWindowDuration(reading.durationMinutes),
+    labelIsDuration: true,
+    kind: reading.kind,
+    usedPercent: reading.usedPercent,
+    resetsAt,
+    severity: classifyProviderRateLimitWindow({
+      usedPercent: reading.usedPercent,
+      resetsAt,
+      durationMinutes: reading.durationMinutes,
+    }),
   };
 }
 
@@ -319,7 +409,9 @@ function depictUsageProviderSegment(
   windows: ReadonlyArray<StatusBarRateLimitWindow> | null,
 ): ReactNode {
   const drawn =
-    windows === null || windows.length === 0 ? [specimenWindow()] : windows;
+    windows === null || windows.length === 0
+      ? [specimenWindow(providerId)]
+      : windows;
   return (
     <StatusBarUsageReadings
       display={{
@@ -353,9 +445,9 @@ function depictUsageLimits(
   values: UsageLimitsValues,
   arrangement: LayoutArrangement,
 ): ReactNode {
-  const shownProviders = arrangement.usageProviders.filter(
-    (providerId) => !arrangement.hiddenProviders.includes(providerId),
-  );
+  const shownProviders = arrangement.usageProviders
+    .filter((providerId) => !arrangement.hiddenProviders.includes(providerId))
+    .slice(0, SPECIMEN_STRIP_PROVIDERS);
   return shownProviders.map((providerId) => (
     <span key={providerId} className="inline-flex shrink-0 items-center">
       {depictUsageProviderSegment(providerId, values, null)}

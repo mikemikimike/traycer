@@ -1398,8 +1398,13 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     group's list drawn `selectedId={regionId}`. This page cannot filter,
     because nothing is selected, so it groups: one `SettingsGroup` per SURFACE
     (Top bar · Sidebar · Chat · Composer · Status bar) whose body is a
-    `SurfaceSection` - one specimen of the surface, the surface's own rows, and
+    `SurfaceSection` - at most one picture BAND, the surface's own rows, and
     one `OrderGroupList` per order group it owns, drawn `selectedId={null}`.
+    **A surface gets a picture only where the picture carries something the
+    rows cannot** (L-120, `SURFACE_BANDS`): Composer and Status bar do, and
+    nothing else does. The Sidebar's assembled shape IS its list order and each
+    of its rows carries the real rail button as its glyph, so the card that
+    opened with a 660px plinth now opens with its first control.
     Same registry, same lists, same write seams (`layout-gestures.ts`,
     `inspector/region-control-io.ts`); no page-only row component.
     The index belongs to the dock, not here: an index exists to pick ONE
@@ -1407,29 +1412,50 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     took from it is the FILTER (L-07), which hides a surface card with no match
     and leaves an order list whole - filtering the members of a list a drag
     reorders would make a drop land between rows the user could not see.
-  - **A region is a ROW** (L-95). The L-08 grammar survives inside it: the
-    stage is the SURFACE's, `Shown` and `Size` sit inline because they are one
-    control each, Position IS the row's place in its list, and `Style`,
-    `Fine-tune` and the Providers list open behind the row's own disclosure -
-    one level deep, never off the page, which is L-89 satisfied by never
-    leaving it. Rail regions carry a three-state `Auto · Shown · Hidden`
-    (L-47, L-93), because a panel's own presence rule is what `auto` defers to.
+  - **A region is a ROW** (L-95). The L-08 grammar survives inside it, in ONE
+    state control (L-121, `RegionDisplayControl`): `Auto · Shown · Hidden` on a
+    rail panel (L-47, L-93, because a panel's own presence rule is what `auto`
+    defers to), `Full row · Chip · Hidden` where the region has a size, and
+    `Shown · Hidden` everywhere else. `Full row / Chip / Hidden` is not a new
+    value - it is `size` and `shown` read together and written apart, so a
+    hidden chip still materialises as a chip ghost (L-113) and comes back as a
+    chip. Position IS the row's place in its list; `Side`, `Style` and
+    `Fine-tune` open behind the row's own disclosure - one level deep, never
+    off the page, which is L-89 satisfied by never leaving it. The revert sits
+    in a slot the row RESERVES whether or not there is anything in it (L-122),
+    so the right-hand column never shifts when a value changes. **The docked
+    inspector keeps the artifact's grammar** (L-128): `Shown` and `Size` stay
+    two rows there, writing the same two stored values.
     `regions/surface-groups.ts` is the tier above the registry: which order
     groups a surface owns, and the facts that belong to a LIST rather than to a
     member (its heading, its reorder instruction, "Add divider", the
     pinned-right note). Those were the repeats L-92 was about - nine identical
     rail Position lists, three dock copies, three toolbar-left copies.
   - **Exactly one control per thing.** A region's visibility has one control on
-    either host (`RegionShownControl`), and the eye button the sortable rows
-    used to carry is gone: it wrote through `regionShownOnValue`, so two
-    presses anywhere turned a pinned `shown` back into `auto` without saying
-    so. `usageHost` is a SURFACE control - it moves Usage limits AND Resource
-    monitor and removes the strip - so the page draws it once on the Status bar
-    card ("Where these live"), not on a region.
+    either host, and the eye button the sortable rows used to carry is gone: it
+    wrote through `regionShownOnValue`, so two presses anywhere turned a pinned
+    `shown` back into `auto` without saying so. `usageHost` is a SURFACE
+    control - it moves Usage limits AND Resource monitor and removes the strip
+    - so the page draws it once on the Status bar card, as a `SettingsRow`
+      ("Show these in") with its own search anchor `layout-usage-host` (L-126),
+      not on a region and not at the dock's scale.
+  - **Usage providers are a headed list in the Status bar card** (L-123), a
+    sibling of the two region rows, rendered only while Usage limits is shown.
+    Each provider is an ordinary row with a `Shown | Hidden` control writing
+    `hiddenProviders`, and its disclosure holds `ProviderLimitsControl` alone -
+    the shared half of `ProviderLevel`, minus the stage and the icon-tile
+    header the row above already stands in for. That took a provider's limits
+    from five levels to two. The dock still opens a provider as its own screen
+    with a back row, through `rows/children-row.tsx`.
   - **The safety net.** There is no session here, so no Undo, no Discard and no
     Cmd+Z, and "Reset to <preset>" is values-only by construction (L-57).
-    `PresetsBlock` therefore carries **Reset everything** (L-20, confirmed
-    because it is irreversible here), and `lib/layout/layout-diff.ts` owns the
+    **Reset everything** (L-20) is therefore built, and on this host it is the
+    LAST card on the page, `tone="danger"`, with its confirm (L-108) - the
+    house orders groups by frequency and risk with destructive last. It renders
+    even on an untouched layout, with the button disabled: showing the floor
+    and saying you are standing on it beats a card that vanishes. The dock
+    keeps the same button on its presets card, where Undo is one keystroke
+    away. `lib/layout/layout-diff.ts` owns the
     pure builders behind it plus the predicates for the three arrangement
     fields nothing measured before - `hiddenProviders`, `providerLimits` and
     `mobileFooter`. Every region row has a changed dot and its own revert, and
@@ -1443,9 +1469,16 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     this panel - and NOT by a `data-settings-anchor`, because a region's search
     result is a LAUNCH entry (below) rather than an anchor on this page.
   - **One store.** `stores/layout/layout-store.ts` holds
-    `{ basePreset, overrides, arrangement }` - a density preset, the minimal
-    delta against it, and where things live - and every chrome surface reads it
+    `{ basePreset, overrides, arrangement }` - a density preset, the user's own
+    per-region delta, and where things live - and every chrome surface reads it
     through the override seam (`lib/layout-overrides.ts`), never directly.
+    **Choosing a preset changes `basePreset` alone** (L-133): the delta is what
+    a person PICKED, so it survives a change of density and is theirs again the
+    moment they switch back, and `Reset to <preset>` is what clears it. Which
+    picks are CHANGES is asked of the current base and answered by difference
+    in `lib/layout/layout-diff.ts` - the row's dot, its revert, the header
+    count and the analytics snapshot all read it there, so a pick that the
+    current preset already makes shows up nowhere.
     The four values that shipped before it (minimap side, the pinned context
     breakdown, the resource-monitor switch, the sidebar's panel groups) are
     carried into it once on first launch (L-49).
@@ -1464,29 +1497,30 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
   The rules below describe the CHROME these controls configure. They live here
   because the chrome has no other doc, not because this page owns them.
 
-  - **Which of a provider's limits the strip draws is ONE checkbox list per
-    provider**: `Tightest limit (automatic)` first, then one entry per limit
-    the provider currently reports, labelled from the window catalog (`5h`,
-    `wk`, `Fable`). The strip draws the UNION of the checked entries in catalog
-    order - automatic is whichever limit binds hardest at that moment, and a
-    limit both name is drawn once. Default is automatic alone, so a provider
-    connected later shows its tightest limit with no visit here. At least one
-    entry stays checked: the last checked entry on screen is `disabled`,
-    because a provider that draws nothing is what the provider switch above is
-    for. Store: `arrangement.providerLimits[providerId] = { limitKeys }`, where
-    an EMPTY list is automatic and the absent key means the same thing; the
-    store refuses a write that would leave a selection drawing nothing.
-    Resolution happens in `useStatusBarRateLimitSegments`, not in the segment:
-    the model carries `windows` (every live limit), `shown` (the selection
-    resolved against them, falling back to the tightest when every pick has
-    gone stale so the provider never vanishes for a renamed model) and
-    `tightest` (the tightest of `shown`).
-    **The list shows that resolution rather than re-deciding it.** The form
-    never fetches, so "no reading yet" is routine and a stored pick may name no
-    currently reported window. The automatic entry is therefore drawn CHECKED
-    and held whenever nothing visible is checked - which is exactly what the
-    resolved `shown` is standing in for - and nothing is written: the picks
-    return with the first reading.
+  - **Which of a provider's limits the strip draws is a TWO-MODE pick**
+    (L-96, L-110): a `SegmentedControl` reading `Automatic (recommended)` /
+    `Choose...`, and under `Choose...` one checkbox per limit the provider
+    currently reports, labelled from the window catalog (`5h`, `wk`, `Fable`).
+    There is no "automatic" checkbox and no union: **Automatic IS an empty pick
+    list**, so the two modes are exclusive by construction and "switching back
+    to Automatic clears the picks" is not a second rule to keep - it is the
+    only way back. Automatic draws the tightest limit, which is why a provider
+    connected later needs no visit here. At least one box stays ticked: the
+    last ticked box on screen is `disabled`, because a provider that draws
+    nothing is what the provider's own `Shown | Hidden` control is for. Store:
+    `arrangement.providerLimits[providerId] = { limitKeys }`, where an EMPTY
+    list is Automatic and the absent key means the same thing - returning to
+    Automatic DELETES the key, and "changed" is measured by difference rather
+    than by presence. Resolution happens in `useStatusBarRateLimitSegments`,
+    not in the segment: the model carries `windows` (every live limit), `shown`
+    (the selection filtered by the live windows, falling back to the tightest
+    when every pick has gone stale so the provider never vanishes for a renamed
+    model) and `tightest` (the tightest of `shown`).
+    A pick the host no longer reports is KEPT, appended after the live ones:
+    the form never fetches, so "no reading yet" is routine, and demoting the
+    level to Automatic would throw a pick away on a reading the user never saw.
+    With nothing reported at all the checklist is replaced by one muted line
+    and the mode stays Automatic.
   - **A limit is NAMED on the strip only when the name disambiguates**
     (`windowLabelText`, `lib/rate-limits/status-bar-window-text.ts`). A
     provider with ONE visible limit reads `100% used 6d` - there is nothing to

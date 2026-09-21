@@ -8,7 +8,11 @@ import {
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RailEntry } from "@/lib/layout/rail";
-import type { RegionId, ToolbarRegionId } from "@/lib/layout/region-id";
+import type {
+  RailRegionId,
+  RegionId,
+  ToolbarRegionId,
+} from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
 
 /**
@@ -229,6 +233,46 @@ function AppFrameToolbarCluster(props: {
 }
 
 /**
+ * The status strip's ordered children, and nothing else.
+ *
+ * The one part of the app frame R1-04 left behind in two copies: which of the
+ * two regions leads, where the spacer goes, and that `resourceSide` decides it
+ * is ASSEMBLY rather than placement, so a third status-bar region or a change
+ * to what `resourceSide` means had to be made in two files or the preset card
+ * and the Settings band disagreed about the strip (R2-02).
+ *
+ * The bar's own BOX stays with each caller, and so does each one's answer for
+ * the `header` placement, because those two genuinely differ: the miniature
+ * draws no strip at all, the page's band draws a sentence saying where it went.
+ */
+export function AppFrameStatusBarRow({
+  values,
+  arrangement,
+}: AppFrame): ReactNode {
+  const monitor = (
+    <AppFrameRegion
+      regionId="resourceMonitor"
+      values={values}
+      arrangement={arrangement}
+      hostContext={null}
+    />
+  );
+  return (
+    <>
+      {arrangement.resourceSide === "left" ? monitor : null}
+      <AppFrameRegion
+        regionId="usageLimits"
+        values={values}
+        arrangement={arrangement}
+        hostContext={null}
+      />
+      <span className="flex-1" />
+      {arrangement.resourceSide === "right" ? monitor : null}
+    </>
+  );
+}
+
+/**
  * The real rail: the arrangement's own entries, dividers included (L-25), in
  * the order the list beside them is in. Each panel brings its own rail frame,
  * so this adds no spacing of its own.
@@ -265,10 +309,22 @@ function AppFrameRailEntry(props: {
 }
 
 /**
- * One region, drawn only where the surface really draws it - the single place
- * either picture asks that question, so no part of a frame can forget to.
+ * One region, drawn only where the surface really draws it.
+ *
+ * There are exactly TWO askers of "is this drawn", and they ask different
+ * questions: this one, whose regions have a two-state `shown`, and
+ * `AppFrameRailEntry` above, because `RailValues.shown` is
+ * `auto | shown | hidden` and `auto` is the shipped default for all nine
+ * panels (L-93) - so `!== "shown"` would hide every panel nobody has touched.
+ *
+ * The parameter excludes `RailRegionId` for that reason (R2-06): the signature
+ * used to invite a caller to draw a rail panel through here, and every
+ * untouched panel would have vanished from that picture with nothing red
+ * anywhere.
  */
-export function AppFrameRegion<K extends RegionId>(props: {
+export function AppFrameRegion<
+  K extends Exclude<RegionId, RailRegionId>,
+>(props: {
   readonly regionId: K;
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;

@@ -8,7 +8,7 @@ import {
   createHoverChip,
   type HoverChipPlacement,
 } from "@/components/layout-editor/canvas/hover-chip";
-import { armRegionDrag } from "@/components/layout-editor/canvas/region-drag";
+import { armCanvasDrag } from "@/components/layout-editor/canvas/region-drag";
 import { createSelectionRing } from "@/components/layout-editor/canvas/selection-ring";
 import {
   LAYOUT_REGION_IDS,
@@ -127,15 +127,13 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       if (!(target instanceof Node) || !column.contains(target)) return;
       const state = useLayoutEditorStore.getState();
       state.setKeyboardNav(false);
-      const node = regionNodeUnder(target, column);
-      const regionId = regionIdOf(node);
-      state.select(regionId);
-      if (node === null || regionId === null) return;
+      state.select(regionUnder(target, column));
       // A session on its way out, or a shell still gliding, has boxes that are
       // about to move or are already a snapshot; neither is something to
       // measure a drag against.
       if (state.leaving || layoutTransitionRunning()) return;
-      armRegionDrag({ event, node, regionId });
+      const member = memberNodeUnder(target, column);
+      if (member !== null) armCanvasDrag({ event, node: member });
     };
 
     // Leaving the canvas drops the canvas's own hover. The inspector's rows
@@ -184,6 +182,23 @@ function regionNodeUnder(
 ): HTMLElement | null {
   const element = target instanceof Element ? target : target.parentElement;
   const node = element?.closest("[data-layout-region]") ?? null;
+  if (!(node instanceof HTMLElement) || !column.contains(node)) return null;
+  return node;
+}
+
+/**
+ * The nearest element a canvas drag can pick up, which is NOT the same
+ * question as which region is under the pointer: the sidebar rail's dividers
+ * are members of the rail's order without being regions of their own (L-115),
+ * so the member is resolved off the attribute the drag reads rather than off
+ * the region registration.
+ */
+function memberNodeUnder(
+  target: Node,
+  column: HTMLElement,
+): HTMLElement | null {
+  const element = target instanceof Element ? target : target.parentElement;
+  const node = element?.closest('[data-layout-draggable="1"]') ?? null;
   if (!(node instanceof HTMLElement) || !column.contains(node)) return null;
   return node;
 }

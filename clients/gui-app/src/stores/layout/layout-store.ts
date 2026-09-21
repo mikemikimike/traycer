@@ -20,7 +20,6 @@ import {
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import {
   LAYOUT_PRESET_IDS,
-  minimizeOverrides,
   PRESET_VALUES,
   type LayoutPresetId,
 } from "@/lib/layout/layout-presets";
@@ -43,8 +42,14 @@ import {
 
 /**
  * The one store the layout editor writes and every chrome surface reads
- * (L-21): a density preset, the minimal delta against it, and where things
+ * (L-21): a density preset, the user's own per-region delta and where things
  * live - the {@link LayoutSnapshot} triple, plus the writers for it.
+ *
+ * The delta is what a person PICKED, not what happens to differ from the
+ * current preset (L-133). Which of those picks is a CHANGE is a question
+ * about the base that is current right now, and `layout-diff.ts` answers it by
+ * difference at every point it is asked - the row's dot, its revert, the
+ * header count and the analytics snapshot.
  */
 export interface LayoutStoreState extends LayoutSnapshot {
   /**
@@ -58,6 +63,19 @@ export interface LayoutStoreState extends LayoutSnapshot {
     patch: Partial<LayoutValues[K]>,
   ) => void;
   readonly setRegionValuesMany: (patches: LayoutValuePatches) => void;
+  /**
+   * Those keys taken OUT of one region's delta, which is what a revert is
+   * (L-133).
+   *
+   * Distinct from writing the base preset's value back, and the difference is
+   * the whole of L-133: the delta holds what a person picked, so writing the
+   * base value records a pick for it - pinning the region to today's density
+   * rather than letting it follow the next one. Reverting removes the answer.
+   */
+  readonly clearRegionValues: (
+    region: RegionId,
+    keys: ReadonlyArray<string>,
+  ) => void;
   readonly setArrangement: (arrangement: LayoutArrangement) => void;
   readonly replaceAll: (next: LayoutSnapshot) => void;
 }
@@ -93,13 +111,15 @@ export const useLayoutStore = create<LayoutStoreState>()(
       setBasePreset: (basePreset) => {
         const state = get();
         if (state.basePreset === basePreset) return;
-        // Re-minimized against the NEW base: a change that the new preset
-        // happens to already make is no longer a change, and the header would
-        // otherwise read "Compact + 1 change" with nothing to revert.
-        set({
-          basePreset,
-          overrides: minimizeOverrides(state.overrides, basePreset),
-        });
+        // The preset, and NOTHING else (L-133). It used to re-minimize the
+        // delta against the new base, which reads as tidying and is a
+        // deletion: every per-region change the incoming preset happened to
+        // agree with was dropped, so switching density and switching back lost
+        // the user's own picks - and on the Settings page, which has no Undo
+        // (L-108), lost them for good. The picks stay; whether any of them is
+        // a CHANGE is a question about the current base and is answered by
+        // difference wherever it is asked (`layout-diff.ts`).
+        set({ basePreset });
       },
       setRegionValues: (region, patch) => {
         set(nextOverrides(get(), { [region]: patch }));
@@ -107,13 +127,32 @@ export const useLayoutStore = create<LayoutStoreState>()(
       setRegionValuesMany: (patches) => {
         set(nextOverrides(get(), patches));
       },
+      clearRegionValues: (region, keys) => {
+        const state = get();
+        const current = state.overrides[region];
+        if (current === undefined) return;
+        const kept: Record<string, unknown> = { ...current };
+        for (const key of keys) delete kept[key];
+        // Back through the same resolver every other write path ends in,
+        // which is also what drops the region entirely once nothing is left.
+        set({
+          overrides: resolvePersistedOverrides({
+            ...state.overrides,
+            [region]: kept,
+          }),
+        });
+      },
       setArrangement: (arrangement) => {
         set({ arrangement: normalizeArrangement(arrangement) });
       },
       replaceAll: (next) => {
         set({
           basePreset: next.basePreset,
-          overrides: minimizeOverrides(next.overrides, next.basePreset),
+          // Verbatim, because this is the seam Undo, Redo and Discard restore
+          // a whole snapshot through: minimizing here would make a history
+          // step that crosses a preset boundary lossy, which is the same
+          // defect L-133 closed one level up.
+          overrides: next.overrides,
           arrangement: normalizeArrangement(next.arrangement),
         });
       },
@@ -135,7 +174,7 @@ export const useLayoutStore = create<LayoutStoreState>()(
         return {
           ...currentState,
           basePreset,
-          overrides: resolvePersistedOverrides(persisted.overrides, basePreset),
+          overrides: resolvePersistedOverrides(persisted.overrides),
           arrangement: resolvePersistedArrangement(persisted.arrangement),
           layoutCarryDone:
             persisted.layoutCarryDone === true || SHIPPED_CARRY !== null,
@@ -170,7 +209,7 @@ function nextOverrides(
     const current = merged[region];
     merged[region] = { ...(isRecord(current) ? current : {}), ...patch };
   }
-  return { overrides: resolvePersistedOverrides(merged, state.basePreset) };
+  return { overrides: resolvePersistedOverrides(merged) };
 }
 
 /**
@@ -264,17 +303,22 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
   // Handed to the resolvers as UNPARSED values, which is the point: the carry
   // decides which five things move, and the resolvers decide what each of
   // them is allowed to be.
+  // Only what the old record actually DIFFERS on. It used to write `shown`
+  // for the minimap and the resource monitor unconditionally and lean on the
+  // delta being re-minimized afterwards; the delta is the user's own picks now
+  // (L-133), so a carry that writes the shipped value would put a preference
+  // on record for something nobody ever expressed one about.
   const overrides = {
-    minimap: {
-      shown: settings.chatTurnMinimapSide === "hide" ? "hidden" : "shown",
-    },
+    ...(settings.chatTurnMinimapSide === "hide"
+      ? { minimap: { shown: "hidden" } }
+      : {}),
     contextUsage: {
       pinBreakdown: settings.pinContextUsageBreakdown,
       pinnedFields: settings.pinnedContextBreakdownFields,
     },
-    resourceMonitor: {
-      shown: settings.showGlobalResourceMonitor === false ? "hidden" : "shown",
-    },
+    ...(settings.showGlobalResourceMonitor === false
+      ? { resourceMonitor: { shown: "hidden" } }
+      : {}),
     ...carriedRailVisibility(leftPanel.panelVisibilityOverrideById),
   };
   const arrangement = {
@@ -286,10 +330,7 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
   };
   const carried: LayoutSnapshot = {
     basePreset: DEFAULT_LAYOUT_SNAPSHOT.basePreset,
-    overrides: resolvePersistedOverrides(
-      overrides,
-      DEFAULT_LAYOUT_SNAPSHOT.basePreset,
-    ),
+    overrides: resolvePersistedOverrides(overrides),
     arrangement: resolvePersistedArrangement(arrangement),
   };
   try {
