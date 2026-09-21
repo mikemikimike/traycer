@@ -1,9 +1,7 @@
-import {
-  resolvePersistedArrangement,
-  type LayoutArrangement,
-} from "@/lib/layout/layout-arrangement";
-import { resolvePersistedOverrides } from "@/lib/layout/layout-values";
-import type { LayoutSnapshot } from "@/stores/layout/layout-store";
+import { type LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import { resolvePersistedArrangement } from "@/lib/layout/arrangement-persist";
+import { resolvePersistedOverrides } from "@/lib/layout/layout-values-persist";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 
 /**
  * Undo, Redo and Discard, as pure operations over whole snapshots (L-18).

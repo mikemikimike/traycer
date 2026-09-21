@@ -1,25 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import {
-  fineTuneMatchesFilter,
-  LAYOUT_REGION_IDS,
-  LAYOUT_REGIONS,
-  positionRowChanged,
   quickVerbLabel,
   quickVerbToast,
+} from "@/components/layout-editor/regions/quick-verbs";
+import {
+  LAYOUT_REGION_IDS,
   regionFacts,
-  regionMatchesFilter,
   regionStateWord,
+} from "@/components/layout-editor/regions/region-facts";
+import {
+  fineTuneMatchesFilter,
+  regionMatchesFilter,
+} from "@/components/layout-editor/regions/region-filter-match";
+import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
+import {
+  positionRowChanged,
   revertPositionRow,
-  SURFACE_GROUPS,
-} from "@/lib/layout/layout-regions";
+} from "@/components/layout-editor/regions/region-position-rows";
+import {
+  type LayoutOverrides,
+  type LayoutValues,
+} from "@/lib/layout/layout-values";
 import {
   effectiveLayoutValues,
   PRESET_VALUES,
   SHIPPED_DEFAULT_VALUES,
-  type LayoutOverrides,
-  type LayoutValues,
-} from "@/lib/layout/layout-values";
+} from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { DEFAULT_LAYOUT_SNAPSHOT } from "@/stores/layout/layout-store";
 

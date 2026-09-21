@@ -1,22 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ARRANGEMENT,
-  DEFAULT_RAIL,
   insertRailDivider,
-  leftPanelGroupsFromRail,
   moveRailEntry,
+  removeRailDivider,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
+import {
   normalizeArrangement,
+  resolvePersistedArrangement,
+} from "@/lib/layout/arrangement-persist";
+import {
+  DEFAULT_RAIL,
+  leftPanelGroupsFromRail,
   normalizeRail,
   panelVisibilityOverridesFromValues,
   RAIL_REGION_BY_PANEL,
   railFromLeftPanelGroups,
   railVisibilityFor,
-  removeRailDivider,
-  resolvePersistedArrangement,
-  type LayoutArrangement,
   type RailEntry,
-} from "@/lib/layout/layout-arrangement";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+} from "@/lib/layout/rail";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { DEFAULT_LEFT_PANEL_GROUPS } from "@/stores/epics/left-panel-store";
 
 function panel(id: RailEntry["id"]): RailEntry {

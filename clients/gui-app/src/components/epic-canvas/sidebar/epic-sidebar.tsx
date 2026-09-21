@@ -108,10 +108,9 @@ import {
   useEpicLeftPanelStore,
   useLeftPanelSectionCollapsed,
   useLocalRootCreatePending,
-  type LeftPanelGroup,
-  type LeftPanelId,
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
+import { type LeftPanelGroup, type LeftPanelId } from "@/lib/left-panel-ids";
 import {
   useLeftPanelGroups,
   usePanelVisibilityOverrides,

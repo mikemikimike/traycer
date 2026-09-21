@@ -7,8 +7,8 @@ import {
   STORE_KEYS,
 } from "@/lib/persist";
 import type { EpicArtifactKind } from "@traycer/protocol/common/registry";
-import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import { panelVisibilityOverridesFromValues } from "@/lib/layout/rail";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 // Imported for its module-load side effect, and for that reason only: the
 // shipped-key carry (L-49, L-61) reads this store's record RAW, and zustand's
 // `persist` rewrites that record through the current `partialize` the moment
@@ -17,6 +17,13 @@ import { effectiveLayoutValues } from "@/lib/layout/layout-values";
 import "@/lib/layout/legacy-layout-records";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 import {
+  isLeftPanelId,
+  LEFT_PANEL_IDS,
+  type LeftPanelGroup,
+  type LeftPanelId,
+  type PanelVisibilityOverrideById,
+} from "@/lib/left-panel-ids";
+import {
   DEFAULT_SORT_MODE,
   isDefaultSort,
   SORT_DIRECTION,
@@ -24,20 +31,6 @@ import {
   type SortField,
   type SortMode,
 } from "@/lib/epic-sort";
-
-export const LEFT_PANEL_IDS = [
-  "chats",
-  "terminals",
-  "browsers",
-  "artifacts",
-  "git-diff",
-  "pull-requests",
-  "file-tree",
-  "sharing",
-  "comments",
-] as const;
-
-export type LeftPanelId = (typeof LEFT_PANEL_IDS)[number];
 
 // The two panels that own a root-create affordance and a reparent drop target
 // (the chat/agent tree and the artifact tree). Kept as a runtime tuple so DnD
@@ -231,17 +224,10 @@ export interface LeftPanelAcknowledgedRootCreatePending {
   readonly name: string;
 }
 
-export interface LeftPanelGroup {
-  readonly panelIds: ReadonlyArray<LeftPanelId>;
-}
-
 type RootCreatePendingByPanel<T> = Readonly<
   Partial<Record<string, Readonly<Partial<Record<RootCreatePanelId, T>>>>>
 >;
 type PanelSectionCollapsedByPanelId = Readonly<
-  Partial<Record<LeftPanelId, boolean>>
->;
-export type PanelVisibilityOverrideById = Readonly<
   Partial<Record<LeftPanelId, boolean>>
 >;
 type PanelSectionWeightsByPanelId = Readonly<
@@ -350,10 +336,6 @@ interface LeftPanelStore {
 }
 
 const PERSIST_KEY = persistKey(STORE_KEYS.leftPanel);
-
-function isLeftPanelId(value: unknown): value is LeftPanelId {
-  return LEFT_PANEL_IDS.some((panelId) => panelId === value);
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -545,24 +527,6 @@ function currentPanelVisibilityOverrides(): PanelVisibilityOverrideById {
   const state = useLayoutStore.getState();
   return panelVisibilityOverridesFromValues(
     effectiveLayoutValues(state.basePreset, state.overrides),
-  );
-}
-
-export function areLeftPanelGroupsEqual(
-  left: ReadonlyArray<LeftPanelGroup>,
-  right: ReadonlyArray<LeftPanelGroup>,
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((group, groupIndex) => {
-      const rightGroup = right[groupIndex];
-      return (
-        group.panelIds.length === rightGroup.panelIds.length &&
-        group.panelIds.every(
-          (panelId, panelIndex) => rightGroup.panelIds[panelIndex] === panelId,
-        )
-      );
-    })
   );
 }
 

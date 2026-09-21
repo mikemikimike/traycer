@@ -1,19 +1,19 @@
 import {
   DEFAULT_ARRANGEMENT,
-  leftPanelGroupsFromRail,
   ORDER_GROUP_IDS,
   type LayoutArrangement,
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
+import { leftPanelGroupsFromRail } from "@/lib/layout/rail";
 import {
   overrideKeys,
-  PRESET_VALUES,
   sameFieldList,
   sameRegionValue,
   type LayoutValues,
 } from "@/lib/layout/layout-values";
+import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
-import type { LayoutSnapshot } from "@/stores/layout/layout-store";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 
 /**
  * What is different from the base preset, and the way back.

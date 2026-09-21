@@ -10,12 +10,12 @@ import {
   UserPlus,
   type LucideIcon,
 } from "lucide-react";
+import { DEFAULT_LEFT_PANEL_ID } from "@/stores/epics/left-panel-store";
 import {
-  DEFAULT_LEFT_PANEL_ID,
   type LeftPanelId,
   type LeftPanelGroup,
   type PanelVisibilityOverrideById,
-} from "@/stores/epics/left-panel-store";
+} from "@/lib/left-panel-ids";
 
 export interface LeftPanelAvailabilityContext {
   readonly commentsPanelRevealed: boolean;

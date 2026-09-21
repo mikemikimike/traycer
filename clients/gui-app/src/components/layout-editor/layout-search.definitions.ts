@@ -1,7 +1,5 @@
-import {
-  LAYOUT_REGION_LIST,
-  SURFACE_GROUPS,
-} from "@/lib/layout/layout-regions";
+import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
+import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import type { SettingsSearchEntry } from "@/lib/settings-search/settings-definitions";
 import { alwaysAvailable } from "@/lib/settings/settings-availability";
 

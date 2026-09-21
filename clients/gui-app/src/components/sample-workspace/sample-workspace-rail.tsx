@@ -1,5 +1,5 @@
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { railRegionForLeftPanelId } from "@/lib/layout/layout-arrangement";
+import { railRegionForLeftPanelId } from "@/lib/layout/rail";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import {
@@ -10,7 +10,7 @@ import {
   useLeftPanelGroups,
   usePanelVisibilityOverrides,
 } from "@/lib/layout/rail-view";
-import type { LeftPanelId } from "@/stores/epics/left-panel-store";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import { SAMPLE_RAIL_PRESENCE } from "./sample-workspace-scene";
 import { cn } from "@/lib/utils";
 

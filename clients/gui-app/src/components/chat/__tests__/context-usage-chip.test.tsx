@@ -22,7 +22,7 @@ import {
 } from "@/components/chat/context-usage";
 import { ContextUsageChip } from "@/components/chat/context-usage-chip";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,

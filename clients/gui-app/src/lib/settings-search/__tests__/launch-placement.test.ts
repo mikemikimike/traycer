@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { LAYOUT_LAUNCH_ENTRIES } from "@/lib/layout/layout-search.definitions";
-import { LAYOUT_REGION_LIST } from "@/lib/layout/layout-regions";
+import { LAYOUT_LAUNCH_ENTRIES } from "@/components/layout-editor/layout-search.definitions";
+import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
 import type { SettingsAvailabilityContext } from "@/lib/settings/settings-availability";
 import { SETTINGS_SEARCH_ENTRIES } from "@/lib/settings-search/settings-search-entries";
 import {

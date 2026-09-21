@@ -7,7 +7,7 @@ import {
   revertControlValues,
   writeControlValue,
 } from "@/components/layout-editor/inspector/region-control-io";
-import { PRESET_VALUES } from "@/lib/layout/layout-values";
+import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,

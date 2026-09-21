@@ -1,26 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CONTEXT_USAGE_ROW_KEYS } from "@/components/chat/context-usage";
-import {
-  DEFAULT_ARRANGEMENT,
-  leftPanelGroupsFromRail,
-} from "@/lib/layout/layout-arrangement";
+import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
+import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import { leftPanelGroupsFromRail } from "@/lib/layout/rail";
 import {
   changeCount,
   regionChanged,
   resetToBase,
 } from "@/lib/layout/layout-diff";
+import { type LayoutValues } from "@/lib/layout/layout-values";
 import {
   effectiveLayoutValues,
   PRESET_VALUES,
-  type LayoutValues,
-} from "@/lib/layout/layout-values";
+} from "@/lib/layout/layout-presets";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
   isHomeTabEnabled,
   useLayoutStore,
-  type LayoutSnapshot,
 } from "@/stores/layout/layout-store";
 
 const LAYOUT_KEY = persistKey(STORE_KEYS.layout);

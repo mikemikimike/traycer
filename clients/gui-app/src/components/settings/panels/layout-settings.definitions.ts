@@ -13,7 +13,7 @@ import { defineSettingsSection } from "@/lib/settings-search/settings-definition
  * that belongs to a surface rather than to a region (L-51).
  *
  * The regions themselves are not listed here. They come from
- * `lib/layout/layout-search.definitions.ts`, generated from the region
+ * `components/layout-editor/layout-search.definitions.ts`, generated from the region
  * registry, because the registry is already the one description of a region's
  * name and its keywords and a second copy here could only drift from it.
  */

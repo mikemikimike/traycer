@@ -62,8 +62,8 @@ import {
   type ChatArchiveVisibility,
   type ChatOwnershipFilter,
   type ChatOriginFilter,
-  type LeftPanelId,
 } from "@/stores/epics/left-panel-store";
+import { type LeftPanelId } from "@/lib/left-panel-ids";
 import {
   usePanelHeaderMenuOpen,
   usePanelHeaderMenuStore,

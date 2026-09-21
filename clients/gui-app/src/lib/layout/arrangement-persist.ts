@@ -1,0 +1,399 @@
+import { rateLimitCapableProviderIdSchema } from "@traycer/protocol/host/rate-limit";
+import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
+import {
+  AUTOMATIC_LIMIT_SELECTION,
+  DEFAULT_ARRANGEMENT,
+  DEFAULT_DOCK_ORDER,
+  DEFAULT_TOOLBAR_LEFT,
+  DEFAULT_TOOLBAR_RIGHT,
+  TOOLBAR_REGION_IDS,
+  USAGE_PROVIDER_IDS,
+  type EdgeSide,
+  type LayoutArrangement,
+  type StatusBarProviderLimits,
+  type StatusBarProviderLimitSelection,
+  type StatusBarShownProfiles,
+} from "@/lib/layout/layout-arrangement";
+import { sameFieldList } from "@/lib/layout/layout-values";
+import {
+  DEFAULT_RAIL,
+  highestDividerSeq,
+  normalizeRail,
+  RAIL_REGION_IDS,
+  type RailEntry,
+} from "@/lib/layout/rail";
+import type { ToolbarRegionId } from "@/lib/layout/region-id";
+import { mergeOrder } from "@/lib/order-merge";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+
+/**
+ * Both sides of the arrangement's durability boundary: the invariants any
+ * arrangement is held to, and the field-by-field read of one some build of the
+ * app wrote.
+ *
+ * One module rather than two, because the write path runs the same
+ * normalisation the rehydrate ends in - a drag that lands impossibly is
+ * repaired where a persisted blob would be, rather than only on the next start.
+ */
+
+/**
+ * An arrangement held to every invariant its type states: each toolbar region
+ * in exactly one cluster with `model` on the right, every dock row and every
+ * provider present once, every panel in the rail once, and a `dividerSeq`
+ * that has not fallen behind the ids the rail is already using.
+ *
+ * Every field it did not have to change keeps its INPUT identity, and an
+ * arrangement it changed nothing about is returned as itself. Identity is the
+ * only thing a selector subscribed to one arrangement field compares, so
+ * rebuilding the arrays on every call made a no-op write - and, once ticket
+ * 09's drag loop writes per frame, every frame of a drag - re-render the whole
+ * status bar (G1-14).
+ */
+export function normalizeArrangement(
+  arrangement: LayoutArrangement,
+): LayoutArrangement {
+  const toolbar = resolveToolbarClusters(
+    arrangement.toolbarLeft,
+    arrangement.toolbarRight,
+  );
+  const rail = keptEntries(arrangement.rail, normalizeRail(arrangement.rail));
+  const next: LayoutArrangement = {
+    ...arrangement,
+    dock: keptOrder(
+      arrangement.dock,
+      mergeOrder(arrangement.dock, DEFAULT_DOCK_ORDER),
+    ),
+    toolbarLeft: keptOrder(arrangement.toolbarLeft, toolbar.left),
+    toolbarRight: keptOrder(arrangement.toolbarRight, toolbar.right),
+    rail,
+    usageProviders: keptOrder(
+      arrangement.usageProviders,
+      mergeOrder(arrangement.usageProviders, USAGE_PROVIDER_IDS),
+    ),
+    pinnedContextFieldOrder: keptOrder(
+      arrangement.pinnedContextFieldOrder,
+      mergeOrder(arrangement.pinnedContextFieldOrder, CONTEXT_USAGE_ROW_KEYS),
+    ),
+    dividerSeq: Math.max(arrangement.dividerSeq, highestDividerSeq(rail)),
+  };
+  return sameArrangement(arrangement, next) ? arrangement : next;
+}
+
+/** The stored list when normalising did not move anything, so its identity survives. */
+function keptOrder<Id extends string>(
+  stored: ReadonlyArray<Id>,
+  normalized: ReadonlyArray<Id>,
+): ReadonlyArray<Id> {
+  return sameFieldList(stored, normalized) ? stored : normalized;
+}
+
+/** {@link keptOrder} for the rail, which is entries rather than ids. */
+function keptEntries(
+  stored: ReadonlyArray<RailEntry>,
+  normalized: ReadonlyArray<RailEntry>,
+): ReadonlyArray<RailEntry> {
+  const same =
+    stored.length === normalized.length &&
+    stored.every(
+      (entry, index) =>
+        entry.kind === normalized[index].kind &&
+        entry.id === normalized[index].id,
+    );
+  return same ? stored : normalized;
+}
+
+/**
+ * Whether normalising left every field exactly as it found it. Reference
+ * equality throughout, because each field above already reuses the input's
+ * identity when it did not change it.
+ */
+function sameArrangement(
+  left: LayoutArrangement,
+  right: LayoutArrangement,
+): boolean {
+  return (
+    left.dock === right.dock &&
+    left.toolbarLeft === right.toolbarLeft &&
+    left.toolbarRight === right.toolbarRight &&
+    left.rail === right.rail &&
+    left.usageProviders === right.usageProviders &&
+    left.pinnedContextFieldOrder === right.pinnedContextFieldOrder &&
+    left.hiddenProviders === right.hiddenProviders &&
+    left.providerLimits === right.providerLimits &&
+    left.shownProfiles === right.shownProfiles &&
+    left.usageHost === right.usageHost &&
+    left.resourceSide === right.resourceSide &&
+    left.minimapSide === right.minimapSide &&
+    left.mobileFooter === right.mobileFooter &&
+    left.dividerSeq === right.dividerSeq
+  );
+}
+
+/**
+ * The arrangement as some build of the app wrote it, field by field against
+ * the defaults - a hand-edited `usageHost` would otherwise mount neither
+ * surface, and a stale panel id would ask the rail for an icon it has no case
+ * for.
+ */
+export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
+  const stored: Record<string, unknown> = isRecord(value) ? value : {};
+  return normalizeArrangement({
+    dock: persistedIds(stored.dock, DEFAULT_DOCK_ORDER),
+    // Each cluster is read against EVERY toolbar region, so a region the user
+    // moved across stays where they put it, and the two are reconciled by
+    // `normalizeArrangement` rather than by this read.
+    toolbarLeft: persistedCluster(stored.toolbarLeft, DEFAULT_TOOLBAR_LEFT),
+    toolbarRight: persistedCluster(stored.toolbarRight, DEFAULT_TOOLBAR_RIGHT),
+    rail: persistedRail(stored.rail),
+    usageProviders: persistedProviderIds(stored.usageProviders),
+    hiddenProviders: persistedProviderIds(stored.hiddenProviders),
+    providerLimits: persistedProviderLimits(stored.providerLimits),
+    shownProfiles: persistedShownProfiles(stored.shownProfiles),
+    usageHost:
+      stored.usageHost === "header" || stored.usageHost === "status-bar"
+        ? stored.usageHost
+        : DEFAULT_ARRANGEMENT.usageHost,
+    resourceSide: persistedSide(
+      stored.resourceSide,
+      DEFAULT_ARRANGEMENT.resourceSide,
+    ),
+    minimapSide: persistedSide(
+      stored.minimapSide,
+      DEFAULT_ARRANGEMENT.minimapSide,
+    ),
+    pinnedContextFieldOrder: persistedIds(
+      stored.pinnedContextFieldOrder,
+      CONTEXT_USAGE_ROW_KEYS,
+    ),
+    mobileFooter:
+      typeof stored.mobileFooter === "boolean"
+        ? stored.mobileFooter
+        : DEFAULT_ARRANGEMENT.mobileFooter,
+    dividerSeq:
+      typeof stored.dividerSeq === "number" &&
+      Number.isFinite(stored.dividerSeq)
+        ? Math.max(0, Math.floor(stored.dividerSeq))
+        : 0,
+  });
+}
+
+/**
+ * Both clusters at once, holding the two invariants the type states: every
+ * toolbar region exactly once across them, and `model` on the right.
+ *
+ * `model` is STRIPPED from the left rather than swapped in place, which leaves
+ * it missing and therefore re-inserted into the right at its canonical
+ * position - the same path a genuinely absent region takes, so there is one
+ * rule to reason about rather than two.
+ */
+function resolveToolbarClusters(
+  storedLeft: ReadonlyArray<ToolbarRegionId>,
+  storedRight: ReadonlyArray<ToolbarRegionId>,
+): {
+  readonly left: ReadonlyArray<ToolbarRegionId>;
+  readonly right: ReadonlyArray<ToolbarRegionId>;
+} {
+  const claimed = new Set<ToolbarRegionId>();
+  const left = claimCluster(storedLeft, claimed).filter((id) => id !== "model");
+  const right = claimCluster(storedRight, claimed);
+  const present = new Set([...left, ...right]);
+  const missing = TOOLBAR_REGION_IDS.filter((id) => !present.has(id));
+  return {
+    left: resolveToolbarSide(left, missing, DEFAULT_TOOLBAR_LEFT),
+    right: resolveToolbarSide(right, missing, DEFAULT_TOOLBAR_RIGHT),
+  };
+}
+
+function claimCluster(
+  stored: ReadonlyArray<ToolbarRegionId>,
+  claimed: Set<ToolbarRegionId>,
+): ReadonlyArray<ToolbarRegionId> {
+  const items: ToolbarRegionId[] = [];
+  for (const id of stored) {
+    if (claimed.has(id)) continue;
+    claimed.add(id);
+    items.push(id);
+  }
+  return items;
+}
+
+/**
+ * One cluster, with the regions that belong here and are missing entirely
+ * merged back in at their canonical positions.
+ *
+ * The canonical sequence is built PER CLUSTER and per resolve: using the
+ * default cluster list directly would put back a region the user deliberately
+ * moved to the other side.
+ */
+function resolveToolbarSide(
+  stored: ReadonlyArray<ToolbarRegionId>,
+  missing: ReadonlyArray<ToolbarRegionId>,
+  defaults: ReadonlyArray<ToolbarRegionId>,
+): ReadonlyArray<ToolbarRegionId> {
+  const canonical = TOOLBAR_REGION_IDS.filter(
+    (id) =>
+      stored.includes(id) || (missing.includes(id) && defaults.includes(id)),
+  );
+  return mergeOrder(stored, canonical);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * A stored order reduced to ids this build knows. `mergeOrder` in
+ * `normalizeArrangement` does the re-insertion, so this is only the read.
+ */
+function persistedIds<Id extends string>(
+  value: unknown,
+  canonical: ReadonlyArray<Id>,
+): ReadonlyArray<Id> {
+  return Array.isArray(value) ? mergeOrder(value, canonical) : canonical;
+}
+
+/**
+ * One toolbar cluster as it was stored: known regions, in stored order, with
+ * no re-insertion - a region missing from BOTH clusters is put back by
+ * `normalizeArrangement`, which is the only place that can see both.
+ */
+function persistedCluster(
+  value: unknown,
+  fallback: ReadonlyArray<ToolbarRegionId>,
+): ReadonlyArray<ToolbarRegionId> {
+  if (!Array.isArray(value)) return fallback;
+  const ids: ToolbarRegionId[] = [];
+  for (const entry of value) {
+    const id = TOOLBAR_REGION_IDS.find((candidate) => candidate === entry);
+    if (id === undefined || ids.includes(id)) continue;
+    ids.push(id);
+  }
+  return ids;
+}
+
+function persistedProviderIds(
+  value: unknown,
+): ReadonlyArray<RateLimitProviderId> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): RateLimitProviderId[] => {
+    const parsed = rateLimitCapableProviderIdSchema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/** Opaque window keys: only non-strings and duplicates can be judged here. */
+function persistedWindowKeys(value: unknown): ReadonlyArray<string> {
+  if (!Array.isArray(value)) return [];
+  const keys = value.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
+  return [...new Set(keys)];
+}
+
+/**
+ * One provider's picks. A shape hand-edited down to nothing drawable falls
+ * back to the default rather than to an empty segment.
+ */
+function persistedLimitSelection(
+  value: unknown,
+): StatusBarProviderLimitSelection {
+  const stored: Record<string, unknown> = isRecord(value) ? value : {};
+  const selection: StatusBarProviderLimitSelection = {
+    automatic:
+      typeof stored.automatic === "boolean"
+        ? stored.automatic
+        : AUTOMATIC_LIMIT_SELECTION.automatic,
+    limitKeys: persistedWindowKeys(stored.limitKeys),
+  };
+  return selection.automatic || selection.limitKeys.length > 0
+    ? selection
+    : AUTOMATIC_LIMIT_SELECTION;
+}
+
+function persistedProviderLimits(value: unknown): StatusBarProviderLimits {
+  if (!isRecord(value)) return {};
+  const limits: Partial<
+    Record<RateLimitProviderId, StatusBarProviderLimitSelection>
+  > = {};
+  for (const [key, selection] of Object.entries(value)) {
+    const providerId = rateLimitCapableProviderIdSchema.safeParse(key);
+    if (!providerId.success) continue;
+    limits[providerId.data] = persistedLimitSelection(selection);
+  }
+  return limits;
+}
+
+/** Profile ids are opaque strings and `null` is the ambient login. */
+function persistedProfileIds(value: unknown): ReadonlyArray<string | null> {
+  if (!Array.isArray(value)) return [];
+  const ids = value.filter(
+    (entry): entry is string | null =>
+      entry === null || (typeof entry === "string" && entry.length > 0),
+  );
+  return [...new Set(ids)];
+}
+
+/**
+ * The whole two-level map, entry by entry: a host key is any non-empty string,
+ * a provider key has to be one the build knows, and an entry that resolves to
+ * nothing checked is dropped - absent and empty mean the same thing at read
+ * time, and only one of them should be able to exist.
+ */
+function persistedShownProfiles(value: unknown): StatusBarShownProfiles {
+  if (!isRecord(value)) return {};
+  const shownProfiles: Record<
+    string,
+    Partial<Record<RateLimitProviderId, ReadonlyArray<string | null>>>
+  > = {};
+  for (const [hostId, hostValue] of Object.entries(value)) {
+    if (hostId.length === 0 || !isRecord(hostValue)) continue;
+    const hostShown: Partial<
+      Record<RateLimitProviderId, ReadonlyArray<string | null>>
+    > = {};
+    for (const [key, ids] of Object.entries(hostValue)) {
+      const providerId = rateLimitCapableProviderIdSchema.safeParse(key);
+      if (!providerId.success) continue;
+      const profileIds = persistedProfileIds(ids);
+      if (profileIds.length === 0) continue;
+      hostShown[providerId.data] = profileIds;
+    }
+    if (Object.keys(hostShown).length === 0) continue;
+    shownProfiles[hostId] = hostShown;
+  }
+  return shownProfiles;
+}
+
+function persistedSide(value: unknown, fallback: EdgeSide): EdgeSide {
+  return value === "left" || value === "right" ? value : fallback;
+}
+
+/**
+ * The rail as it was stored. Structure only: `normalizeRail` decides which
+ * panels are missing and where they land.
+ *
+ * A stored list that survives as NOTHING - an empty array, or nine entries
+ * this build has no case for - falls back to the shipped rail rather than to
+ * `normalizeRail`'s answer for `[]`, which is all nine panels with no dividers
+ * at all and is not a grouping anybody chose (G1-22).
+ */
+function persistedRail(value: unknown): ReadonlyArray<RailEntry> {
+  if (!Array.isArray(value)) return DEFAULT_RAIL;
+  const entries = readRailEntries(value);
+  return entries.length === 0 ? DEFAULT_RAIL : entries;
+}
+
+function readRailEntries(
+  value: ReadonlyArray<unknown>,
+): ReadonlyArray<RailEntry> {
+  return value.flatMap((entry): RailEntry[] => {
+    if (!isRecord(entry) || typeof entry.id !== "string") return [];
+    if (entry.kind === "divider") {
+      return [{ kind: "divider", id: entry.id }];
+    }
+    if (entry.kind !== "panel") return [];
+    const regionId = RAIL_REGION_IDS.find(
+      (candidate) => candidate === entry.id,
+    );
+    return regionId === undefined ? [] : [{ kind: "panel", id: regionId }];
+  });
+}

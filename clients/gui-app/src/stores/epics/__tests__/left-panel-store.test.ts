@@ -19,10 +19,12 @@ import {
   useChatArchiveVisibility,
   type ArtifactFilter,
   type ChatFilter,
-  type LeftPanelGroup,
-  type LeftPanelId,
-  type PanelVisibilityOverrideById,
 } from "../left-panel-store";
+import type {
+  LeftPanelGroup,
+  LeftPanelId,
+  PanelVisibilityOverrideById,
+} from "@/lib/left-panel-ids";
 import {
   applyLeftPanelGroups,
   currentLeftPanelGroups,
@@ -30,8 +32,8 @@ import {
   setRailVisibilityOverride,
   useLeftPanelGroups,
 } from "@/lib/layout/rail-view";
-import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import { panelVisibilityOverridesFromValues } from "@/lib/layout/rail";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,

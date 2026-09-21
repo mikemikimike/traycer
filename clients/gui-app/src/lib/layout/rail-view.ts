@@ -6,18 +6,16 @@ import {
   railFromLeftPanelGroups,
   railRegionForLeftPanelId,
   railVisibilityFor,
-} from "@/lib/layout/layout-arrangement";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+} from "@/lib/layout/rail";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   areLeftPanelGroupsEqual,
   type LeftPanelGroup,
   type LeftPanelId,
   type PanelVisibilityOverrideById,
-} from "@/stores/epics/left-panel-store";
-import {
-  useLayoutStore,
-  type LayoutValuePatches,
-} from "@/stores/layout/layout-store";
+} from "@/lib/left-panel-ids";
+import type { LayoutValuePatches } from "@/lib/layout/layout-snapshot";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
  * The sidebar rail's shape, read and written where it actually lives.

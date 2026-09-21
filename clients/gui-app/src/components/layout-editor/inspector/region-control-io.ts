@@ -1,8 +1,8 @@
 import {
-  PRESET_VALUES,
   type LayoutValues,
   type RegionValueKey,
 } from "@/lib/layout/layout-values";
+import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {

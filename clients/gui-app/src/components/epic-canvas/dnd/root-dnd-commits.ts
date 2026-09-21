@@ -51,7 +51,6 @@ import {
   type ManagedCommandOutputTileRef,
 } from "@/stores/epics/canvas/types";
 import {
-  areLeftPanelGroupsEqual,
   moveLeftPanelGroup,
   moveLeftPanelGroupToEnd,
   moveLeftPanelGroupToPanelPosition,
@@ -59,10 +58,13 @@ import {
   moveLeftPanelToGroup,
   moveLeftPanelToGroupPosition,
   moveLeftPanelToPanelPosition,
-  type LeftPanelGroup,
-  type LeftPanelId,
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
+import {
+  areLeftPanelGroupsEqual,
+  type LeftPanelGroup,
+  type LeftPanelId,
+} from "@/lib/left-panel-ids";
 import {
   applyLeftPanelGroups,
   currentLeftPanelGroups,

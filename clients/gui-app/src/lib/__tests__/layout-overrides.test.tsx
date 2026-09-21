@@ -10,7 +10,7 @@ import {
   type LayoutOverride,
 } from "@/lib/layout-overrides";
 import { LayoutOverrideProvider } from "@/providers/layout-override-provider";
-import { PRESET_VALUES } from "@/lib/layout/layout-values";
+import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {

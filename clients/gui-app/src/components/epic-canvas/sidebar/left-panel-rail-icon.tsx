@@ -1,5 +1,5 @@
 import { getLeftPanelDefinition } from "./left-panel-registry";
-import type { LeftPanelId } from "@/stores/epics/left-panel-store";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import { cn } from "@/lib/utils";
 export function LeftPanelRailIcon({
   panelId,

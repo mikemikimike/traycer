@@ -21,11 +21,10 @@ import { parseTileRef } from "@/stores/epics/canvas/tile-schema";
 import { resolveSplitDropPosition } from "@/components/epic-canvas/dnd/pane-drop-geometry";
 import { resolvePaneCorridorPosition } from "@/components/epic-canvas/dnd/pane-corridor-geometry";
 import {
-  LEFT_PANEL_IDS,
   ROOT_CREATE_PANEL_IDS,
-  type LeftPanelId,
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
+import { LEFT_PANEL_IDS, type LeftPanelId } from "@/lib/left-panel-ids";
 import type { NodeFamily } from "@/lib/reparent-rules";
 
 /**

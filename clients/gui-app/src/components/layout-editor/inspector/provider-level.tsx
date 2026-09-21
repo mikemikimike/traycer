@@ -4,13 +4,13 @@ import { Switch } from "@/components/ui/switch";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
-import { depictUsageProviderSegment } from "@/lib/layout/region-depiction";
+import { depictUsageProviderSegment } from "@/components/layout-editor/region-depiction";
 import {
   AUTOMATIC_LIMIT_SELECTION,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
-import { USAGE_PROVIDER_LEVEL } from "@/lib/layout/layout-regions";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import { USAGE_PROVIDER_LEVEL } from "@/components/layout-editor/regions/usage-provider-level";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";

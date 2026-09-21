@@ -23,16 +23,16 @@ import {
   DEFAULT_LEFT_PANEL_ID,
   moveLeftPanelGroup,
   useLeftPanelStore,
-  type PanelVisibilityOverrideById,
 } from "@/stores/epics/left-panel-store";
+import { type PanelVisibilityOverrideById } from "@/lib/left-panel-ids";
 import {
   applyLeftPanelGroups,
   currentLeftPanelGroups,
   clearRailVisibilityOverrides,
   setRailVisibilityOverride,
 } from "@/lib/layout/rail-view";
-import { panelVisibilityOverridesFromValues } from "@/lib/layout/layout-arrangement";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import { panelVisibilityOverridesFromValues } from "@/lib/layout/rail";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,

@@ -2,7 +2,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
 import { regionChanged } from "@/lib/layout/layout-diff";
-import { LAYOUT_REGION_IDS } from "@/lib/layout/layout-regions";
+import { LAYOUT_REGION_IDS } from "@/components/layout-editor/regions/region-facts";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {

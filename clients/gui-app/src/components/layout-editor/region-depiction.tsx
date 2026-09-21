@@ -18,11 +18,9 @@ import { Collapsible } from "@/components/ui/collapsible";
 import {
   HostContextFrame,
   type HostContextId,
-} from "@/lib/layout/region-depiction-frame";
-import {
-  leftPanelIdForRailRegion,
-  type LayoutArrangement,
-} from "@/lib/layout/layout-arrangement";
+} from "@/components/layout-editor/region-depiction-frame";
+import { type LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
 import type {
   ContextUsageValues,
   LayoutValues,

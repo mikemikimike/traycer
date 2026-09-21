@@ -4,14 +4,14 @@ import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import {
   LAYOUT_REGION_LIST,
-  positionRowChanged,
-  regionMatchesFilter,
   regionStateWord,
-  SURFACE_GROUPS,
-} from "@/lib/layout/layout-regions";
+} from "@/components/layout-editor/regions/region-facts";
+import { regionMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
+import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
+import { positionRowChanged } from "@/components/layout-editor/regions/region-position-rows";
 import { regionChanged } from "@/lib/layout/layout-diff";
-import type { LayoutPresetId } from "@/lib/layout/layout-values";
-import { effectiveLayoutValues } from "@/lib/layout/layout-values";
+import type { LayoutPresetId } from "@/lib/layout/layout-presets";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutSnapshot } from "@/stores/layout/layout-store";

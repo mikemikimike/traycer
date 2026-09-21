@@ -1,11 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
-import { SHIPPED_DEFAULT_VALUES } from "@/lib/layout/layout-values";
+import { SHIPPED_DEFAULT_VALUES } from "@/lib/layout/layout-presets";
 import {
   depictRegion,
   type HostContextId,
-} from "@/lib/layout/region-depiction";
+} from "@/components/layout-editor/region-depiction";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";

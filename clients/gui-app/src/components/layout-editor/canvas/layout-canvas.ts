@@ -5,7 +5,10 @@ import {
   type HoverChipPlacement,
 } from "@/components/layout-editor/canvas/hover-chip";
 import { createSelectionRing } from "@/components/layout-editor/canvas/selection-ring";
-import { LAYOUT_REGION_IDS, regionFacts } from "@/lib/layout/layout-regions";
+import {
+  LAYOUT_REGION_IDS,
+  regionFacts,
+} from "@/components/layout-editor/regions/region-facts";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,

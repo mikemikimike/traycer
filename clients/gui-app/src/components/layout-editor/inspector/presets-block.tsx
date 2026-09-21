@@ -2,20 +2,18 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { changeCount, resetToBase } from "@/lib/layout/layout-diff";
-import type {
-  LayoutArrangement,
-  RailEntry,
-} from "@/lib/layout/layout-arrangement";
+import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import type { RailEntry } from "@/lib/layout/rail";
+import { type LayoutValues } from "@/lib/layout/layout-values";
 import {
   LAYOUT_PRESET_IDS,
   PRESET_VALUES,
   type LayoutPresetId,
-  type LayoutValues,
-} from "@/lib/layout/layout-values";
+} from "@/lib/layout/layout-presets";
 import {
   depictRegion,
   type HostContextId,
-} from "@/lib/layout/region-depiction";
+} from "@/components/layout-editor/region-depiction";
 import type { RegionId, ToolbarRegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {

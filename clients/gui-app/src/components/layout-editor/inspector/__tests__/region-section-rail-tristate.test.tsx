@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
-import { regionFacts } from "@/lib/layout/layout-regions";
+import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,

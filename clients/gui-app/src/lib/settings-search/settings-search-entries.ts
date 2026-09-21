@@ -28,7 +28,7 @@ import { PROVIDERS } from "@/components/settings/panels/providers-settings.defin
 import { SHELL } from "@/components/settings/panels/shell-settings.definitions";
 import { USAGE } from "@/components/settings/panels/usage-settings.definitions";
 import { WORKTREES } from "@/components/settings/panels/worktrees-settings.definitions";
-import { LAYOUT_LAUNCH_ENTRIES } from "@/lib/layout/layout-search.definitions";
+import { LAYOUT_LAUNCH_ENTRIES } from "@/components/layout-editor/layout-search.definitions";
 import {
   assembleSettingsSearchEntries,
   type AnySettingsSectionCollection,

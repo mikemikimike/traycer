@@ -3,10 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
 import { setMobileApp } from "@/lib/mobile-app";
-import {
-  LAYOUT_REGION_LIST,
-  SURFACE_GROUPS,
-} from "@/lib/layout/layout-regions";
+import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
+import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,

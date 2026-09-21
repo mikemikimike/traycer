@@ -8,14 +8,14 @@ import {
   undoLayout,
   type LayoutHistory,
 } from "@/lib/layout/layout-history";
-import type { LayoutPresetId } from "@/lib/layout/layout-values";
+import type { LayoutPresetId } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { basePersistOptions, persistKey, STORE_KEYS } from "@/lib/persist";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import {
   getLayoutSnapshot,
   useLayoutStore,
-  type LayoutSnapshot,
 } from "@/stores/layout/layout-store";
 
 /**

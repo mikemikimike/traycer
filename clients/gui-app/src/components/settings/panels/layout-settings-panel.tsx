@@ -7,11 +7,11 @@ import { SettingsRow } from "@/components/settings/settings-row";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { Switch } from "@/components/ui/switch";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
 import {
-  LAYOUT_REGION_LIST,
   SURFACE_GROUPS,
   type SurfaceGroupId,
-} from "@/lib/layout/layout-regions";
+} from "@/components/layout-editor/regions/region-grammar";
 import { cn } from "@/lib/utils";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";

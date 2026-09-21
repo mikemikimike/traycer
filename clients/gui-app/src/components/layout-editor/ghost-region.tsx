@@ -4,7 +4,7 @@ import {
   useRegionGhost,
 } from "@/components/layout-editor/use-layout-region";
 import { useRegionValues } from "@/lib/layout-overrides";
-import { depictRegion } from "@/lib/layout/region-depiction";
+import { depictRegion } from "@/components/layout-editor/region-depiction";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 

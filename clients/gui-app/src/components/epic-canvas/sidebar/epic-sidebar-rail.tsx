@@ -14,7 +14,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { Button } from "@/components/ui/button";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { railRegionForLeftPanelId } from "@/lib/layout/layout-arrangement";
+import { railRegionForLeftPanelId } from "@/lib/layout/rail";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -52,9 +52,8 @@ import {
   useCommentsPanelRevealed,
   useEpicLeftPanelStore,
   useMainPanelCollapsed,
-  type LeftPanelGroup,
-  type LeftPanelId,
 } from "@/stores/epics/left-panel-store";
+import { type LeftPanelGroup, type LeftPanelId } from "@/lib/left-panel-ids";
 import { useActiveEpicArtifactId } from "@/stores/epics/canvas/store";
 import {
   getLeftPanelDefinition,

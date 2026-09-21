@@ -231,7 +231,7 @@ predicates; it never imports the assembled index or the search consumer.
   same chord.
 
 **Launch results (Layout regions).** A query for a piece of chrome offers one
-result per layout REGION rather than per row: `lib/layout/layout-search.definitions.ts`
+result per layout REGION rather than per row: `components/layout-editor/layout-search.definitions.ts`
 generates one `SettingsSearchEntry` from every entry of the region registry
 (the region's name, where it lives and its keywords, `group` = its surface, so
 the two "Usage limits" results are told apart) and `settings-search-entries.ts`
@@ -691,7 +691,7 @@ Supporting pieces, all viewport-agnostic where possible:
   restrained-red card without a separate component.
 - `panels/*.definitions.ts` One section's search collection each - see Search.
 - `panels/*.tsx` Route-mounted settings sections.
-- `src/lib/layout/layout-search.definitions.ts` The layout launch results,
+- `src/components/layout-editor/layout-search.definitions.ts` The layout launch results,
   generated from the region registry (see Search ▸ Launch results).
 - `controls/settings-select.tsx` Shared select wrapper used by settings rows.
 - `src/stores/settings/settings-store.ts` Persisted local settings state.
@@ -1396,7 +1396,7 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     what search has to land on - the page, the presets block, one anchor per
     surface group, and the one row that belongs to a surface rather than to a
     region. The per-region search results are generated from the region
-    registry (`lib/layout/layout-search.definitions.ts`), so a region added
+    registry (`components/layout-editor/layout-search.definitions.ts`), so a region added
     without a hand-written entry is still findable.
   - **`Show the status bar on small screens`** (`arrangement.mobileFooter`,
     L-51) is the one row here that belongs to a SURFACE rather than to a
@@ -1613,7 +1613,7 @@ limitKeys }`; the store refuses a write that would leave a selection drawing
   - **The rail is one flat list** (L-25): `arrangement.rail` is panels and
     dividers in order, a divider ends the group before it, and
     `leftPanelGroupsFromRail` / `railFromLeftPanelGroups`
-    (`lib/layout/layout-arrangement.ts`) are the bijection every surface that
+    (`lib/layout/rail.ts`) are the bijection every surface that
     still speaks in groups reads through (`left-panel-store`, the rail itself,
     the canvas drop previews). A rail region's three-state `shown` maps onto
     the sparse show/hide map the sidebar already reads: `auto` leaves the panel

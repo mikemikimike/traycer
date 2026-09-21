@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SETTINGS_SEARCH_FIXTURES } from "@/components/settings/__tests__/settings-search-fixture-registry";
-import { LAYOUT_LAUNCH_ENTRIES } from "@/lib/layout/layout-search.definitions";
+import { LAYOUT_LAUNCH_ENTRIES } from "@/components/layout-editor/layout-search.definitions";
 import type {
   AnySettingsSectionCollection,
   SettingsDefinition,

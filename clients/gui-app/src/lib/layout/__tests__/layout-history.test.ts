@@ -9,10 +9,8 @@ import {
   undoLayout,
   type LayoutHistory,
 } from "@/lib/layout/layout-history";
-import {
-  DEFAULT_LAYOUT_SNAPSHOT,
-  type LayoutSnapshot,
-} from "@/stores/layout/layout-store";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import { DEFAULT_LAYOUT_SNAPSHOT } from "@/stores/layout/layout-store";
 
 function withModelStyle(style: "text" | "bars"): LayoutSnapshot {
   return {

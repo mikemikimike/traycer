@@ -4,28 +4,35 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import {
   DEFAULT_ARRANGEMENT,
+  statusBarShown,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
+import {
   normalizeArrangement,
+  resolvePersistedArrangement,
+} from "@/lib/layout/arrangement-persist";
+import {
   RAIL_REGION_BY_PANEL,
   railFromPanelIdGroups,
   railVisibilityFor,
-  resolvePersistedArrangement,
-  statusBarShown,
-  type LayoutArrangement,
   type RailEntry,
-} from "@/lib/layout/layout-arrangement";
+} from "@/lib/layout/rail";
+import type { LayoutValues } from "@/lib/layout/layout-values";
 import {
   LAYOUT_PRESET_IDS,
   minimizeOverrides,
   PRESET_VALUES,
-  resolvePersistedOverrides,
-  type LayoutOverrides,
   type LayoutPresetId,
-  type LayoutValues,
-} from "@/lib/layout/layout-values";
+} from "@/lib/layout/layout-presets";
+import { resolvePersistedOverrides } from "@/lib/layout/layout-values-persist";
 import {
   legacyLeftPanelRecord,
   legacySettingsRecord,
 } from "@/lib/layout/legacy-layout-records";
+import type {
+  LayoutSnapshot,
+  LayoutValuePatches,
+} from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   basePersistOptions,
@@ -37,26 +44,8 @@ import {
 /**
  * The one store the layout editor writes and every chrome surface reads
  * (L-21): a density preset, the minimal delta against it, and where things
- * live.
- *
- * Three fields rather than a slice per surface, because the editor's own
- * gestures are all three at once - a preset applies values and leaves the
- * arrangement alone, Discard restores a whole snapshot, and the header's
- * "Compact + 3 changes" is a count over the delta. Effective values are
- * computed (`effectiveLayoutValues`) rather than stored, so a preset switch
- * keeps every change a user made on top of it.
+ * live - the {@link LayoutSnapshot} triple, plus the writers for it.
  */
-export interface LayoutSnapshot {
-  readonly basePreset: LayoutPresetId;
-  readonly overrides: LayoutOverrides;
-  readonly arrangement: LayoutArrangement;
-}
-
-/** Several regions' patches applied as ONE write, one render and one undo step. */
-export type LayoutValuePatches = {
-  readonly [K in RegionId]?: Partial<LayoutValues[K]>;
-};
-
 export interface LayoutStoreState extends LayoutSnapshot {
   /**
    * Whether the one-shot carry of the five shipped values has run (L-49,
