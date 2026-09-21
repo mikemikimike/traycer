@@ -76,12 +76,8 @@ export function useLayoutRegion(input: {
     // A hidden pane's copy is named no more than it is registered (L-109): it
     // cannot be pointed at, and naming it would put a second element with the
     // same region name in the document for `closest` to find.
-    nameNode(
-      named,
-      node !== null && visible ? node : null,
-      regionId,
-      instanceId,
-    );
+    if (node === null || !visible) unnameNode(named);
+    else nameNode(named, node, regionId, instanceId);
     const wanted = state.session !== null && node !== null && visible;
     // Idempotent, because it runs twice on mount by construction: the `ref`
     // callback fires before effects, and the mount effect below has to run it
@@ -160,9 +156,15 @@ export function useLayoutRegion(input: {
           .unregisterInstance(instance.key, instance.node);
       }
       registered.current = null;
-      nameNode(named, null, regionId, instanceId);
+      unnameNode(named);
     };
-  }, [sync, regionId, instanceId]);
+    // `sync` and nothing else: it is a `useCallback` over exactly the inputs
+    // this effect would otherwise restate, so listing them again said "re-run
+    // when the region or the instance changes" twice and implied the cleanup
+    // depended on the CURRENT render's copies of them. It does not - taking a
+    // name off is a fact about the node that wore it, which the ref carries
+    // (R3-17).
+  }, [sync]);
 
   // After the commit that mounted the materialised control, not from the store
   // subscription above: the node the flag belongs on is the one this render
@@ -260,7 +262,7 @@ function flag(node: HTMLElement, attribute: string, on: boolean): void {
 
 /**
  * Put the region's NAME on `node`, taking it off whichever node wore it
- * before; `null` names nothing.
+ * before.
  *
  * Separate from {@link strip} because the two have different lifetimes: the
  * name is a fact about the element (this is the mic chip), the rest is a fact
@@ -270,17 +272,26 @@ function flag(node: HTMLElement, attribute: string, on: boolean): void {
  */
 function nameNode(
   named: RefObject<HTMLElement | null>,
-  node: HTMLElement | null,
+  node: HTMLElement,
   regionId: RegionId,
   instanceId: string | null,
 ): void {
   const previous = named.current;
   if (previous !== null && previous !== node) unname(previous);
   named.current = node;
-  if (node === null) return;
   node.setAttribute("data-layout-region", regionId);
   if (instanceId === null) node.removeAttribute("data-layout-instance");
   else node.setAttribute("data-layout-instance", instanceId);
+}
+
+/**
+ * Take the name off whichever node is wearing it, which is a fact about THAT
+ * node and needs nothing from the render that asks for it (R3-17).
+ */
+function unnameNode(named: RefObject<HTMLElement | null>): void {
+  const previous = named.current;
+  named.current = null;
+  if (previous !== null) unname(previous);
 }
 
 function unname(node: HTMLElement): void {

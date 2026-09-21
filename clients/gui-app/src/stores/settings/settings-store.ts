@@ -49,6 +49,10 @@ import {
 } from "@/lib/diff/diff-viewer-preferences";
 import { worktreeBranchPrefixError } from "@/lib/worktree/worktree-branch-prefix-validation";
 import {
+  CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
+  clampChatDockPanelHeightRatio,
+} from "@/lib/chat/chat-dock-panel-height";
+import {
   DEFAULT_NOTIFICATION_CHIME_SOUNDS,
   isNotificationChimeSound,
   NOTIFICATION_CHIME_EVENT_TYPES,
@@ -326,6 +330,17 @@ export interface SettingsState {
    * re-render every open diff.
    */
   workspaceFileWordWrap: boolean | null;
+  /**
+   * How tall an opened compact-dock pill panel stands, as a share of the chat
+   * pane it is attached to (L-142, L-145).
+   *
+   * One value for every pill panel rather than one per section: the pills are
+   * a switcher over a single slot attached to the composer, so a per-section
+   * height would make the composer hop as you moved between them. Device-local
+   * like the rest of this store, and one share rather than a per-pane size -
+   * a tile and a full tab of the same conversation read the same way.
+   */
+  chatDockPanelHeight: number;
   /** App-wide audible cues selected for each notification event type. */
   notificationChimeSounds: NotificationChimeSoundsByEvent;
   setTheme: (theme: ThemeMode) => void;
@@ -377,6 +392,7 @@ export interface SettingsState {
   setDiffViewerPreferences: (preferences: DiffViewerPreferences) => void;
   patchDiffViewerPreferences: (patch: DiffViewerPreferencesPatch) => void;
   setWorkspaceFileWordWrap: (value: boolean | null) => void;
+  setChatDockPanelHeight: (ratio: number) => void;
   setNotificationChimeSoundForEvent: (
     eventType: NotificationChimeEventType,
     value: NotificationChimeSound,
@@ -422,6 +438,7 @@ type PersistedSettingsState = Pick<
   | "steerOnModEnterEnabled"
   | "diffViewerPreferences"
   | "workspaceFileWordWrap"
+  | "chatDockPanelHeight"
   | "notificationChimeSounds"
 >;
 
@@ -498,6 +515,7 @@ function partializeSettingsState(state: SettingsState): PersistedSettingsState {
     steerOnModEnterEnabled: state.steerOnModEnterEnabled,
     diffViewerPreferences: state.diffViewerPreferences,
     workspaceFileWordWrap: state.workspaceFileWordWrap,
+    chatDockPanelHeight: state.chatDockPanelHeight,
     notificationChimeSounds: state.notificationChimeSounds,
   };
 }
@@ -545,6 +563,7 @@ export const useSettingsStore = create<SettingsState>()(
       steerOnModEnterEnabled: true,
       diffViewerPreferences: DEFAULT_DIFF_VIEWER_PREFERENCES,
       workspaceFileWordWrap: null,
+      chatDockPanelHeight: CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
       notificationChimeSounds: DEFAULT_NOTIFICATION_CHIME_SOUNDS,
       setTheme: makeSetter(set, "theme"),
       setThemePreset: (themePreset) => {
@@ -657,6 +676,12 @@ export const useSettingsStore = create<SettingsState>()(
         }));
       },
       setWorkspaceFileWordWrap: makeSetter(set, "workspaceFileWordWrap"),
+      // Clamped on the way IN, not only where the handle writes it: a record
+      // rehydrated from another version of this app (or hand-edited) must not
+      // be able to bury the transcript under a pane-high dock panel.
+      setChatDockPanelHeight: (ratio) => {
+        set({ chatDockPanelHeight: clampChatDockPanelHeightRatio(ratio) });
+      },
       setNotificationChimeSoundForEvent: (eventType, value) => {
         set((state) =>
           state.notificationChimeSounds[eventType] === value

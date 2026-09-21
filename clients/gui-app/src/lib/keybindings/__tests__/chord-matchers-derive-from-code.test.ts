@@ -135,14 +135,16 @@ const KEYBOARD_KEY_READS: Readonly<Record<string, number>> = {
   // Enter/Space on a row's overlay link, plus the search box's Escape (clears a
   // non-empty query; not a registered chord).
   "gui-app/src/components/epics/epics-list-panel.tsx": 3,
-  // The layout editor's index and its sortable list: arrows walk the rows and
-  // Enter/Space opens a section, Alt+arrows reorder a list item (L-31). All
-  // named keys, none of them a registered chord.
+  // The layout editor's index and its sortable list: arrows walk the rows,
+  // Enter and Space open a section or grab a row, Alt+arrows reorder a list
+  // item (L-31), and Escape cancels a grab. All named keys, none of them a
+  // registered chord.
   "gui-app/src/components/layout-editor/inspector/inspector-index.tsx": 4,
-  "gui-app/src/components/layout-editor/inspector/sortable-list.tsx": 3,
+  "gui-app/src/components/layout-editor/inspector/sortable-list.tsx": 5,
   // The editor's own Mod+Z / Mod+Shift+Z, matched by the letter the user
-  // reads - see PRINTABLE_CHARACTER_MATCHES.
-  "gui-app/src/components/layout-editor/layout-editor.tsx": 1,
+  // reads - see PRINTABLE_CHARACTER_MATCHES - plus the session's Escape, which
+  // pops one inspector level or closes the editor. Escape is a named key.
+  "gui-app/src/components/layout-editor/layout-editor.tsx": 2,
   "gui-app/src/components/layout/find-in-page-bar.tsx": 2,
   "gui-app/src/components/layout/header/desktop-menu-buttons.tsx": 3,
   "gui-app/src/components/layout/tabs/tab-group-chip.tsx": 4,

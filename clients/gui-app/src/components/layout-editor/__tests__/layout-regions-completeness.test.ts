@@ -72,9 +72,10 @@ const EVERY_REGION_HIDDEN: LayoutOverrides = {
   runningAgents: { shown: "hidden" },
   changedFiles: { shown: "hidden" },
   background: { shown: "hidden" },
+  queue: { shown: "hidden" },
+  todo: { shown: "hidden" },
   attachImage: { shown: "hidden" },
   access: { shown: "hidden" },
-  agent: { shown: "hidden" },
   model: { shown: "hidden" },
   mic: { shown: "hidden" },
   railAgents: { shown: "hidden" },
@@ -122,9 +123,9 @@ function keysReachableFromRows(region: RegionId): ReadonlyArray<string> {
 }
 
 describe("the region registry covers every region", () => {
-  it("lists all twenty-two regions, grouped by surface", () => {
-    expect(LAYOUT_REGION_IDS).toHaveLength(22);
-    expect(new Set(LAYOUT_REGION_IDS).size).toBe(22);
+  it("lists all twenty-three regions, grouped by surface", () => {
+    expect(LAYOUT_REGION_IDS).toHaveLength(23);
+    expect(new Set(LAYOUT_REGION_IDS).size).toBe(23);
     const surfaceOrder = LAYOUT_REGION_IDS.map(
       (id) => regionFacts(id).surface,
     ).map((surface) =>
@@ -144,6 +145,37 @@ describe("the region registry covers every region", () => {
       for (const keyword of entry.keywords) {
         expect(regionMatchesFilter(id, keyword), `${id}:${keyword}`).toBe(true);
       }
+    }
+  });
+
+  /**
+   * The dock's membership, asked of the registry rather than of the model
+   * (L-139, L-142). Todo and Message queue became members with exactly the
+   * semantics the other three have, so the claim is that nothing about their
+   * grammar reads differently - not that two more ids exist somewhere.
+   */
+  it("gives every dock member the same size-and-order grammar", () => {
+    const dockMembers = LAYOUT_REGION_IDS.filter((id) =>
+      regionFacts(id).rows.some(
+        (row) => row.kind === "position-order" && row.group === "dock",
+      ),
+    );
+    expect([...dockMembers].sort()).toEqual([
+      "background",
+      "changedFiles",
+      "queue",
+      "runningAgents",
+      "todo",
+    ]);
+    for (const id of dockMembers) {
+      const entry = regionFacts(id);
+      expect(entry.surface, id).toBe("composer");
+      expect(
+        entry.rows.some((row) => row.kind === "size"),
+        id,
+      ).toBe(true);
+      expect(entry.quickVerbs.includes("chip"), id).toBe(true);
+      expect(entry.quickVerbs.includes("full"), id).toBe(true);
     }
   });
 

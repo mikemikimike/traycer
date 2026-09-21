@@ -961,7 +961,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     );
   });
 
-  it("reveals a folded row already expanded on chip click, and folds it back to a chip on the second click", () => {
+  it("attaches the section's panel on pill click and closes it on the second", () => {
     useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
 
     renderSurfaces(
@@ -977,28 +977,28 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
 
     const chip = screen.getByTestId("chat-dock-chip-filesChanged");
     expect(chip.getAttribute("aria-pressed")).toBe("false");
-    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+    expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
 
     fireEvent.click(chip);
 
     expect(chip.getAttribute("aria-pressed")).toBe("true");
-    const panel = screen.getByTestId("accumulated-changes-panel");
-    // Seeded open by `useChatDockSectionRevealed` - a chip click asks for the
-    // panel, not for a second click to open it too.
-    expect(panel.getAttribute("data-state")).toBe("open");
+    // Attached above the composer with no collapsible header of its own
+    // (L-142): the pill is the header, so the rows are simply there.
+    const panel = screen.getByTestId("chat-dock-attached-panel");
+    expect(panel.getAttribute("data-dock-section")).toBe("filesChanged");
+    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
 
     fireEvent.click(chip);
 
     expect(chip.getAttribute("aria-pressed")).toBe("false");
-    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+    expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
   });
 
-  // Landed after the initial review: a reveal belongs to its chip and must
-  // not survive the chip disappearing. Otherwise the NEXT time the section
-  // has something to show, it would silently arrive pre-expanded rather than
-  // as a chip - the exact per-tile stickiness the reveal is supposed to grant
-  // only while the chip that earned it is still there.
-  it("prunes a stale reveal when its chip's predicate goes false, so the row comes back as a chip, not revealed", () => {
+  // A pill's open state belongs to its pill and must not survive the pill
+  // disappearing. Otherwise the NEXT time the section has something to show,
+  // it would silently arrive attached rather than as a resting pill - and
+  // nothing in this dock ever opens on its own.
+  it("forgets the open pill when its section empties, so the pill comes back closed", () => {
     useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
     const withChanges = surfacesProps({
       restoreContext: {
@@ -1018,20 +1018,20 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     fireEvent.click(screen.getByTestId("chat-dock-chip-filesChanged"));
     expect(
       screen
-        .getByTestId("accumulated-changes-panel")
-        .getAttribute("data-state"),
-    ).toBe("open");
+        .getByTestId("chat-dock-attached-panel")
+        .getAttribute("data-dock-section"),
+    ).toBe("filesChanged");
 
     rerender(tile(withoutChanges));
 
-    // The chip itself has nothing to show, so it disappears along with the row.
+    // The pill itself has nothing to show, so it disappears with the panel.
     expect(screen.queryByTestId("chat-dock-chip-filesChanged")).toBeNull();
-    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+    expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
 
     rerender(tile(withChanges));
 
-    // Back as a CHIP, not silently revealed by the stale reveal from before.
+    // Back as a resting PILL, not re-attached by the memory from before.
     expect(screen.getByTestId("chat-dock-chip-filesChanged")).not.toBeNull();
-    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+    expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
   });
 });

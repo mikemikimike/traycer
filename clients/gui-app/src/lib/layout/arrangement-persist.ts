@@ -255,6 +255,10 @@ function persistedIds<Id extends string>(
  * One toolbar cluster as it was stored: known regions, in stored order, with
  * no re-insertion - a region missing from BOTH clusters is put back by
  * `normalizeArrangement`, which is the only place that can see both.
+ *
+ * "Known" is `TOOLBAR_REGION_IDS`, so an id this build retired - `agent`,
+ * deleted by L-136 - is dropped here rather than migrated away, and the
+ * remaining members keep their stored order (P5).
  */
 function persistedCluster(
   value: unknown,

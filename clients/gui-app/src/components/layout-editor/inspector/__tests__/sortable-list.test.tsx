@@ -6,6 +6,7 @@ import { InspectorShell } from "@/components/layout-editor/inspector/inspector-s
 import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
+import { ProvidersChildrenRow } from "@/components/layout-editor/inspector/rows/children-row";
 import {
   BARE_ROW,
   regionRowItems,
@@ -15,6 +16,10 @@ import { SortableList } from "@/components/layout-editor/inspector/sortable-list
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import {
+  ORDER_GROUPS,
+  orderGroupInstruction,
+} from "@/components/layout-editor/regions/surface-groups";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
@@ -93,6 +98,20 @@ function grabOf(rowNode: HTMLElement): HTMLElement {
   return node;
 }
 
+/**
+ * The element a row's grab names as its presence rule: the second of the two
+ * descriptions, the first being the list's one shared line of grab
+ * instructions.
+ */
+function ruleOf(rowNode: HTMLElement): HTMLElement {
+  const ids = (grabOf(rowNode).getAttribute("aria-describedby") ?? "").split(
+    " ",
+  );
+  const node = document.getElementById(ids.at(-1) ?? "");
+  if (!(node instanceof HTMLElement)) throw new Error("row has no rule");
+  return node;
+}
+
 /** Anything a screen reader names as a control, or a Tab stop can land on. */
 const INTERACTIVE =
   'a[href], button, input, select, textarea, [tabindex], [role="button"], [role="radio"], [role="radiogroup"], [role="switch"], [role="checkbox"]';
@@ -152,13 +171,15 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
     fireEvent.keyDown(grabbed, { key: "ArrowDown" });
     fireEvent.keyDown(grabbed, { key: "ArrowDown" });
 
-    expect(rowOrder()).toEqual([start[1], start[2], start[0]]);
+    const movedDownTwo = [start[1], start[2], start[0], ...start.slice(3)];
+
+    expect(rowOrder()).toEqual(movedDownTwo);
     expect(dockOrder()).toEqual(start);
-    expect(announcement()).toContain("position 3 of 3");
+    expect(announcement()).toContain(`position 3 of ${String(start.length)}`);
 
     fireEvent.keyDown(grabbed, { key: " " });
 
-    expect(dockOrder()).toEqual([start[1], start[2], start[0]]);
+    expect(dockOrder()).toEqual(movedDownTwo);
     // Two arrow presses, one entry: undo puts the row back where it was.
     expect(historyDepth()).toBe(1);
     expect(announcement()).toContain("Dropped");
@@ -176,7 +197,7 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
 
     fireEvent.keyDown(grabbed, { key: " " });
     fireEvent.keyDown(grabbed, { key: "ArrowDown" });
-    expect(rowOrder()).toEqual([start[1], start[0], start[2]]);
+    expect(rowOrder()).toEqual([start[1], start[0], ...start.slice(2)]);
 
     fireEvent.keyDown(grabbed, { key: "Escape" });
 
@@ -210,7 +231,12 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
 
     fireEvent.keyDown(row(start[2]), { key: "ArrowUp", altKey: true });
 
-    expect(dockOrder()).toEqual([start[0], start[2], start[1]]);
+    expect(dockOrder()).toEqual([
+      start[0],
+      start[2],
+      start[1],
+      ...start.slice(3),
+    ]);
     expect(historyDepth()).toBe(1);
   });
 
@@ -293,7 +319,10 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   const ROW_IDS: ReadonlyArray<RegionId> = ["railAgents", "railPullRequests"];
   const CHANGED: RegionId = "railPullRequests";
 
-  function PageRowList(): ReactNode {
+  function PageRowList(props: {
+    /** Which rows are showing their disclosure, as the page owns it (L-89). */
+    readonly openIds: ReadonlyArray<string>;
+  }): ReactNode {
     const snap = snapshot();
     const values = effectiveLayoutValues(snap.basePreset, snap.overrides);
 
@@ -315,6 +344,9 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
             onRevert={() => undefined}
           />
         ) : null,
+        detail: <p data-testid={`${regionId}-detail`}>Style and fine-tune</p>,
+        open: props.openIds.includes(regionId),
+        onToggleOpen: () => undefined,
       };
     }
 
@@ -331,7 +363,7 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   }
 
   it("reserves the revert's slot on every row, filled on one of them", () => {
-    render(<PageRowList />);
+    render(<PageRowList openIds={[]} />);
 
     // The box exists whether or not there is anything in it, which is what
     // stops the control column moving when a value changes (LV2-11).
@@ -348,7 +380,7 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   });
 
   it("gives a row exactly one state control, outside its grab", () => {
-    render(<PageRowList />);
+    render(<PageRowList openIds={[]} />);
 
     for (const node of rows()) {
       expect(node.querySelectorAll(STATE_CONTROL)).toHaveLength(1);
@@ -364,7 +396,7 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   });
 
   it("describes the row by its presence rule instead of naming itself from it", () => {
-    render(<PageRowList />);
+    render(<PageRowList openIds={[]} />);
     const hint = regionFacts(CHANGED).hint;
     const grab = grabOf(row(CHANGED));
 
@@ -383,8 +415,44 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
     expect(described.length).toBe(2);
   });
 
+  /**
+   * One row height for a plain row and a hinted one (R3-08, LV2-11).
+   *
+   * Measured as the thing that CAUSED the difference rather than as a pixel
+   * count jsdom cannot give: the rule used to be an extra line inside the row's
+   * own padding box, so a list of nine panels had rows of two different heights
+   * depending on which of them happened to have a presence rule. It is the
+   * first line of the disclosure now, and while the row is closed it is present
+   * and described but takes no space at all.
+   */
+  it("keeps the presence rule out of the row's line, and in its disclosure", () => {
+    render(<PageRowList openIds={[]} />);
+    const hint = regionFacts(CHANGED).hint;
+    const closed = ruleOf(row(CHANGED));
+
+    // Still reachable without opening anything, and still costing no height.
+    expect(closed.className).toContain("sr-only");
+    // The line is the padding box every row draws, hinted or not, and the rule
+    // is outside it on both - which is the whole of the fix.
+    for (const node of rows()) {
+      const line = node.querySelector("[data-row-line]");
+      expect(line).not.toBeNull();
+      expect(line?.contains(closed)).toBe(false);
+    }
+
+    cleanup();
+    render(<PageRowList openIds={[CHANGED]} />);
+    const opened = ruleOf(row(CHANGED));
+    const detail = row(CHANGED).querySelector("[data-sortable-detail]");
+
+    // Opened, it is the first thing the row says about itself.
+    expect(detail?.firstElementChild).toBe(opened);
+    expect(opened.className).not.toContain("sr-only");
+    expect(opened.textContent).toBe(hint);
+  });
+
   it("draws the real component as the row's glyph, in place of the icon", () => {
-    render(<PageRowList />);
+    render(<PageRowList openIds={[]} />);
     const glyph = row("railAgents").querySelector("[data-row-glyph]");
 
     expect(glyph).not.toBeNull();
@@ -397,6 +465,91 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   });
 });
 
+/**
+ * One header component, composed by both hosts (R3-11).
+ *
+ * The page's surface card and the dock's Providers level each used to BUILD
+ * this header - the same gutter, the same `h3`, the same `max-w-[72ch]`
+ * paragraph - so a change to its shape had to be made in two files or the two
+ * stopped matching, which is the drift R1-04 named one layer down. What the two
+ * hosts are allowed to differ by is the row scale, and nothing else.
+ */
+describe("the list header, in both hosts (R3-11)", () => {
+  /** The Status bar card, whose one list is the providers (L-123). */
+  function statusBarCard(): ReactNode {
+    return (
+      <LayoutFormHostContext value="page">
+        <SurfaceSection
+          surface="statusBar"
+          snapshot={snapshot()}
+          filter=""
+          openRows={[]}
+          onToggleRow={vi.fn()}
+          surfaceRows={null}
+        />
+      </LayoutFormHostContext>
+    );
+  }
+
+  /** The same list in the dock, under Usage limits (L-26). */
+  function providersLevel(): ReactNode {
+    const snap = snapshot();
+    return (
+      <ProvidersChildrenRow
+        values={effectiveLayoutValues(snap.basePreset, snap.overrides)}
+        arrangement={snap.arrangement}
+        onOpenProvider={null}
+      />
+    );
+  }
+
+  /** What the two hosts may differ by: the row's own gutter and type scale. */
+  function shapeOf(
+    node: HTMLElement | null | undefined,
+  ): ReadonlyArray<string> {
+    return (node?.className ?? "")
+      .split(" ")
+      .filter(
+        (name) =>
+          name !== "" &&
+          !name.startsWith("px-") &&
+          !name.startsWith("py-") &&
+          !name.startsWith("text-ui"),
+      );
+  }
+
+  function headingOf(): HTMLElement {
+    return screen.getByRole("heading", {
+      name: ORDER_GROUPS.usageProviders.label ?? "",
+      level: 3,
+    });
+  }
+
+  it("draws one header shape wherever the list is drawn", () => {
+    const words = orderGroupInstruction("usageProviders");
+
+    render(statusBarCard());
+    const onPage = headingOf();
+    expect(onPage.nextElementSibling?.textContent).toBe(words);
+    const pageShape = [
+      shapeOf(onPage.parentElement),
+      shapeOf(onPage.parentElement?.parentElement),
+    ];
+
+    cleanup();
+    render(providersLevel());
+    const inDock = headingOf();
+
+    // Same words, said once, in the same box: the instruction is the header's
+    // description on both hosts rather than a footnote under one of them.
+    expect(inDock.nextElementSibling?.textContent).toBe(words);
+    expect([
+      shapeOf(inDock.parentElement),
+      shapeOf(inDock.parentElement?.parentElement),
+    ]).toEqual(pageShape);
+  });
+});
+
 describe("the rail's dividers as items (L-25)", () => {
   function railIds(): ReadonlyArray<string> {
     return useLayoutStore.getState().arrangement.rail.map((entry) => entry.id);
@@ -406,7 +559,7 @@ describe("the rail's dividers as items (L-25)", () => {
     render(section("railAgents", vi.fn()));
     const before = railIds();
 
-    fireEvent.click(screen.getByRole("button", { name: "Add divider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add group break" }));
 
     const after = railIds();
     expect(after).toHaveLength(before.length + 1);
@@ -421,7 +574,7 @@ describe("the rail's dividers as items (L-25)", () => {
     const dividerId = before.find((id) => id.startsWith("divider:")) ?? "";
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Remove divider" })[0],
+      screen.getAllByRole("button", { name: "Remove group break" })[0],
     );
 
     expect(railIds()).not.toContain(dividerId);

@@ -1490,8 +1490,21 @@ export function ChatTileSessionView(props: ChatTileSessionViewProps) {
              * get a definite height (h-full on LegendList needs a real
              * containing block all the way up). The overlay dock below is
              * absolutely positioned, so it does not participate in this flex
-             * layout regardless. */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+             * layout regardless.
+             *
+             * It is also THE CHAT PANE (L-145): the box that bounds the
+             * transcript, the dock and the composer, whether this chat is one
+             * tile among several or a full tab. An opened dock pill panel
+             * takes its height as a share of it (`chat-dock-panel-height.ts`),
+             * which needs a size container - safe here, and only here in this
+             * chain, because this element's height comes from `flex-1` in a
+             * definite-height column (the tile root is `h-full` inside a
+             * record the surface host sizes in pixels) and never from its
+             * contents, so containing its size changes nothing it measures. */}
+            <div
+              data-chat-pane=""
+              className="relative flex min-h-0 flex-1 flex-col [container-type:size]"
+            >
               <ChatSessionMessagesSurface
                 snapshotLoaded={view.snapshotLoaded}
                 connectionStatus={view.connectionStatus}

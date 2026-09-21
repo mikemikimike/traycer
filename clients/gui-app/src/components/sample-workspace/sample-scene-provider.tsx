@@ -2,6 +2,7 @@ import { useLayoutEditorFitsWindow } from "@/lib/layout/editor-width";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 import { useEffect, type ReactNode } from "react";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { TooltipsSuppressedProvider } from "@/components/ui/tooltip-wrapper";
 import { SampleSceneContext } from "./sample-scene-context";
 /** Covers the real shell as well as the sample body. */
 export function SampleSceneProvider({
@@ -26,7 +27,16 @@ export function SampleSceneProvider({
   const sample = useLayoutEditorStore((state) => state.session !== null);
   return (
     <SampleSceneContext.Provider value={sample}>
-      {children}
+      {/* The shell under a live session is being shown, not used, so its own
+          hover labels must not open over the canvas - see the wrapper's own
+          comment. Published here rather than around the sample BODY because
+          the canvas is the whole column: the status bar's segments, the tab
+          strip and the sidebar rail are regions too, and they are outside that
+          body. The inspector republishes `false` for itself; it is the
+          instrument, not the picture. */}
+      <TooltipsSuppressedProvider value={sample}>
+        {children}
+      </TooltipsSuppressedProvider>
     </SampleSceneContext.Provider>
   );
 }

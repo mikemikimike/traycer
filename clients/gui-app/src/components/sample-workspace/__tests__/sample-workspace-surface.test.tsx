@@ -1,6 +1,12 @@
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { LazyMotion, domAnimation } from "motion/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -287,7 +293,6 @@ describe("SampleWorkspaceBody - pointable, under the edit firewall", () => {
       "background",
       "attachImage",
       "access",
-      "agent",
       "model",
       "mic",
     ]) {
@@ -321,6 +326,124 @@ describe("SampleWorkspaceBody - pointable, under the edit firewall", () => {
       new MouseEvent("click", { bubbles: true, cancelable: true }),
     );
     expect(heard).toEqual(["access"]);
+  });
+});
+
+/**
+ * L-144. The dock's pills and rows and the minimap answered a right-click with
+ * nothing, because the quick-verb menu was mounted by five call sites and none
+ * of them was here - while this IS the canvas the editor opens (L-87), so it is
+ * the chrome a user customizing the composer actually points at.
+ *
+ * Every case goes through the real surface rather than a stand-in cluster: the
+ * region names come from `useLayoutRegion` as the app writes them, and the
+ * menu is resolved from the element a pointer would land on.
+ */
+describe("SampleWorkspaceBody - quick verbs on every pointable region", () => {
+  const QUICK_VERB_ID = /^layout-quick-verb-(.+)-(hide|show|chip|full)$/;
+
+  afterEach(() => {
+    useLayoutEditorStore.getState().endSession();
+  });
+
+  /** The regions the menu currently on screen offers verbs for. */
+  function menuNames(): ReadonlyArray<string> {
+    const named = screen.queryAllByTestId(QUICK_VERB_ID).map((item) => {
+      const match = QUICK_VERB_ID.exec(item.getAttribute("data-testid") ?? "");
+      return match === null ? "" : match[1];
+    });
+    return [...new Set(named)];
+  }
+
+  function rightClickRegion(regionId: string): void {
+    fireEvent.contextMenu(innermost(regionNode(regionId)));
+  }
+
+  it("offers a full dock row's own verbs, and only its own, at rest", () => {
+    renderBody();
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+
+    rightClickRegion("changedFiles");
+
+    expect(menuNames()).toEqual(["changedFiles"]);
+  });
+
+  it("offers the row beside it its own verbs, from the same one root", () => {
+    renderBody();
+
+    rightClickRegion("queue");
+
+    expect(menuNames()).toEqual(["queue"]);
+  });
+
+  it("offers a dock row's verbs inside a session too", () => {
+    renderSession();
+
+    rightClickRegion("runningAgents");
+
+    expect(menuNames()).toEqual(["runningAgents"]);
+  });
+
+  // The pills specifically, which is what the owner asked for (L-115): a
+  // chip-sized member stands in the strip above the composer, not in the
+  // frame, so it is a different cluster and needs its own root.
+  it("offers a compact pill's verbs", () => {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      overrides: { changedFiles: { size: "chip" } },
+      layoutCarryDone: true,
+    });
+    renderBody();
+    expect(screen.getByTestId("chat-dock-chip-filesChanged")).not.toBeNull();
+
+    rightClickRegion("changedFiles");
+
+    expect(menuNames()).toEqual(["changedFiles"]);
+  });
+
+  it("offers the minimap's verbs, at rest and in a session", () => {
+    renderBody();
+
+    rightClickRegion("minimap");
+    expect(menuNames()).toEqual(["minimap"]);
+
+    act(() => {
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+      });
+    });
+    rightClickRegion("minimap");
+
+    expect(menuNames()).toEqual(["minimap"]);
+  });
+
+  /**
+   * The other half of "in a session": the firewall swallows `contextmenu`
+   * everywhere except on a named region that has a trigger listening
+   * (L-129), and the wrappers above are what make that second half true for
+   * these regions. Dispatched as a real bubbling event rather than through
+   * `fireEvent`, because the firewall listens in the capture phase on the
+   * column and `stopImmediatePropagation` is what a synthetic dispatch would
+   * step over. The control - a press the firewall DOES swallow - is
+   * `edit-firewall.test.ts`'s own, said there once rather than restated here.
+   */
+  it("reaches the minimap's trigger through the edit firewall", () => {
+    renderSession();
+    const teardown = installEditFirewall({
+      column: screen.getByTestId("column"),
+      focusTarget: () => null,
+    });
+
+    act(() => {
+      innermost(regionNode("minimap")).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(menuNames()).toEqual(["minimap"]);
+    teardown();
   });
 });
 

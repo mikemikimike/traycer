@@ -258,7 +258,7 @@ describe("movedWithin", () => {
 describe("a canvas drop written back into the full order (4.7)", () => {
   const arrangement: LayoutArrangement = {
     ...DEFAULT_ARRANGEMENT,
-    toolbarLeft: ["attachImage", "access", "agent"],
+    toolbarLeft: ["attachImage", "access", "mic"],
   };
 
   it("puts the dragged member on the side of the anchor it was dropped", () => {
@@ -267,19 +267,19 @@ describe("a canvas drop written back into the full order (4.7)", () => {
         arrangement,
         group: "toolbarLeft",
         fromId: "attachImage",
-        toId: "agent",
+        toId: "mic",
         placeAfter: true,
       }).toolbarLeft,
-    ).toEqual(["access", "agent", "attachImage"]);
+    ).toEqual(["access", "mic", "attachImage"]);
     expect(
       moveCanvasOrderMember({
         arrangement,
         group: "toolbarLeft",
-        fromId: "agent",
+        fromId: "mic",
         toId: "attachImage",
         placeAfter: false,
       }).toolbarLeft,
-    ).toEqual(["agent", "attachImage", "access"]);
+    ).toEqual(["mic", "attachImage", "access"]);
   });
 
   it("keeps a member that was NOT on screen beside the neighbours it had", () => {
@@ -289,11 +289,11 @@ describe("a canvas drop written back into the full order (4.7)", () => {
       arrangement,
       group: "toolbarLeft",
       fromId: "attachImage",
-      toId: "agent",
+      toId: "mic",
       placeAfter: true,
     });
 
-    expect(next.toolbarLeft).toEqual(["access", "agent", "attachImage"]);
+    expect(next.toolbarLeft).toEqual(["access", "mic", "attachImage"]);
   });
 
   it("moves nothing for an id this build does not know", () => {
@@ -302,7 +302,7 @@ describe("a canvas drop written back into the full order (4.7)", () => {
         arrangement,
         group: "toolbarLeft",
         fromId: "somethingElse",
-        toId: "agent",
+        toId: "mic",
         placeAfter: true,
       }).toolbarLeft,
     ).toBe(arrangement.toolbarLeft);
@@ -371,7 +371,13 @@ describe("a canvas drop written back into the full order (4.7)", () => {
       placeAfter: true,
     });
 
-    expect(next.dock).toEqual(["runningAgents", "changedFiles", "background"]);
+    expect(next.dock).toEqual([
+      "queue",
+      "todo",
+      "runningAgents",
+      "changedFiles",
+      "background",
+    ]);
     expect(next.toolbarLeft).toBe(arrangement.toolbarLeft);
     expect(next.rail).toBe(arrangement.rail);
   });
@@ -432,11 +438,11 @@ describe("normalizeArrangement", () => {
   it("puts a toolbar region dropped into the wrong cluster back on the right", () => {
     const arrangement = normalizeArrangement({
       ...DEFAULT_ARRANGEMENT,
-      toolbarLeft: ["model", "attachImage", "access", "agent"],
+      toolbarLeft: ["model", "attachImage", "access"],
       toolbarRight: ["mic"],
     });
 
-    expect(arrangement.toolbarLeft).toEqual(["attachImage", "access", "agent"]);
+    expect(arrangement.toolbarLeft).toEqual(["attachImage", "access"]);
     // Re-inserted at its canonical position rather than appended after `mic`.
     expect(arrangement.toolbarRight).toEqual(["model", "mic"]);
   });
@@ -448,6 +454,8 @@ describe("normalizeArrangement", () => {
     });
 
     expect(arrangement.dock).toEqual([
+      "queue",
+      "todo",
       "changedFiles",
       "runningAgents",
       "background",
@@ -534,6 +542,72 @@ describe("resolvePersistedArrangement", () => {
     expect(arrangement.minimapSide).toBe("left");
     expect(arrangement.resourceSide).toBe(DEFAULT_ARRANGEMENT.resourceSide);
     expect(arrangement.mobileFooter).toBe(true);
+  });
+
+  /**
+   * The unreleased-feature rule in the one place a retired region can still
+   * arrive: a blob written while `agent` existed (L-136). Tolerant parsing,
+   * not migration - the id is simply not one `TOOLBAR_REGION_IDS` names, so it
+   * never reaches an arrangement, and the members around it keep the order the
+   * user gave them.
+   */
+  /**
+   * The other half of the same rule, in the direction L-142 opened: a dock
+   * order written before Todo and Message queue were members has three
+   * entries and this build has five. No migration exists and none is wanted
+   * (P5) - `mergeOrder` against `DEFAULT_DOCK_ORDER` is the whole of it.
+   *
+   * The two lead, because that is where `ChatLowerDock` already draws them
+   * and a stored order says nothing about members it never had: the person
+   * whose record this is has been looking at Queue above Todo above the rest,
+   * and nothing about opening a newer build should move them.
+   */
+  it("materialises the dock members a stored order predates", () => {
+    const arrangement = resolvePersistedArrangement({
+      dock: ["changedFiles", "runningAgents", "background"],
+    });
+
+    expect(arrangement.dock).toEqual([
+      "queue",
+      "todo",
+      "changedFiles",
+      "runningAgents",
+      "background",
+    ]);
+  });
+
+  /**
+   * And it is NEIGHBOUR placement rather than an append, which is the rule
+   * `mergeOrder` states for every order field this app stores: a member the
+   * stored list never had lands after the canonical id ahead of it that is
+   * actually present. Neither of these two HAS one - they open the canonical
+   * list - so both land at the front whatever the user did with the other
+   * three, and `queue` anchors `todo` in turn so the pair keeps its own order.
+   * A rearranged dock is what tells that apart from a plain append: the three
+   * rows below keep the order they were given.
+   */
+  it("lands them at the front of a rearranged dock, rows undisturbed", () => {
+    const arrangement = resolvePersistedArrangement({
+      dock: ["background", "changedFiles", "runningAgents"],
+    });
+
+    expect(arrangement.dock).toEqual([
+      "queue",
+      "todo",
+      "background",
+      "changedFiles",
+      "runningAgents",
+    ]);
+  });
+
+  it("drops a toolbar region this build retired and keeps the rest in stored order", () => {
+    const arrangement = resolvePersistedArrangement({
+      toolbarLeft: ["access", "agent", "attachImage"],
+      toolbarRight: ["model", "mic"],
+    });
+
+    expect(arrangement.toolbarLeft).toEqual(["access", "attachImage"]);
+    expect(arrangement.toolbarRight).toEqual(["model", "mic"]);
   });
 
   it("materialises every provider and keeps the order the stored pair had", () => {

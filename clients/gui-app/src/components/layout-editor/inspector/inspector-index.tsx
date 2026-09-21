@@ -41,27 +41,44 @@ let indexFocusMemory: {
   readonly regionId: RegionId;
 } | null = null;
 
-/** What the index was showing when it went away, if it is still the same visit. */
-function takeIndexFocusMemory(): RegionId | null {
+/**
+ * What the index was showing when it went away, if it is still the same visit.
+ *
+ * Read, not consumed: a mount that immediately unmounts and mounts again -
+ * StrictMode, a re-parented subtree - would otherwise clear the memory between
+ * its own two setups and land the second one on row 0 (R2-11). A memory from
+ * an earlier visit is dropped here instead, which is also the only place the
+ * closed session it holds is released.
+ */
+function readIndexFocusMemory(): RegionId | null {
   const memory = indexFocusMemory;
-  indexFocusMemory = null;
   if (memory === null) return null;
-  return memory.session === useLayoutEditorStore.getState().session
-    ? memory.regionId
-    : null;
+  if (memory.session !== useLayoutEditorStore.getState().session) {
+    indexFocusMemory = null;
+    return null;
+  }
+  return memory.regionId;
 }
 
 /**
- * Only inside a live session, which is the only place the index is drawn: a
- * memory written without one could not be told apart from the next session's,
- * and the session object is what tells two visits apart.
+ * The index goes away for two reasons and only one of them is a hand-off: a
+ * row was opened, which is what this remembers, or the session ended, which
+ * forgets everything rather than leaving a closed `LayoutEditorSession` held
+ * here until the next mount.
+ *
+ * Anything else - a double mount with nothing selected - leaves the memory
+ * exactly as it was found, because it is not evidence about where the cursor
+ * is. A memory written without a session could not be told apart from the next
+ * session's, and the session object is what tells two visits apart.
  */
 function rememberIndexFocus(): void {
   const { selected, session } = useLayoutEditorStore.getState();
-  indexFocusMemory =
-    selected === null || session === null
-      ? null
-      : { session, regionId: selected };
+  if (session === null) {
+    indexFocusMemory = null;
+    return;
+  }
+  if (selected === null) return;
+  indexFocusMemory = { session, regionId: selected };
 }
 
 /**
@@ -84,11 +101,11 @@ type IndexEntry =
  * opened the section. The list IS the rail's picture in this host, so it is
  * read off the rail.
  *
- * A divider is drawn as the break it is rather than as a row of its own: the
- * rail draws a boundary as a gap between two icons, not as the word "Divider",
- * and a row per divider would be seven extra lines in the shipped rail alone.
- * The word, the remove button and the drag belong to the sortable list, which
- * is where a divider is OPERATED.
+ * A group break is drawn as the break it is rather than as a row of its own:
+ * the rail draws a boundary as a gap between two icons, not as the words "Group
+ * break", and a row per break would be seven extra lines in the shipped rail
+ * alone. The words, the remove button and the drag belong to the sortable list,
+ * which is where a break is OPERATED.
  */
 function railIndexEntries(
   rail: ReadonlyArray<RailEntry>,
@@ -196,7 +213,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   // dark because a row's `onFocus` only lights it once the keyboard has been
   // used.
   useEffect(() => {
-    const remembered = takeIndexFocusMemory();
+    const remembered = readIndexFocusMemory();
     const row =
       remembered === null ? undefined : rowRefs.current.get(remembered);
     const target =
@@ -263,6 +280,11 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                   <div
                     key={item.id}
                     role="separator"
+                    // Named, because a bare separator is announced as nothing
+                    // at all and this one is a thing the user can add, move and
+                    // remove. "Group break" is the only name it has anywhere
+                    // (L-140), the same words the sortable list's own row uses.
+                    aria-label="Group break"
                     data-rail-divider={item.id}
                     className="mx-3.5 my-1 h-px bg-border"
                   />

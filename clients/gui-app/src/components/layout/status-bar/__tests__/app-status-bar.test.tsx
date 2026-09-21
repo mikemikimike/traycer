@@ -19,6 +19,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   dispatchAction,
   type KeybindingRouter,
@@ -143,24 +144,46 @@ vi.mock("@/lib/host", async (importOriginal) => ({
 // The popover owns the always-mounted `resources.subscribe` stream and a
 // panel with its own host model; here it stands in for "the resource surface
 // is mounted", with the segment it was handed rendered as its trigger.
-vi.mock("@/components/resources/resource-monitor-popover", () => ({
-  ResourceMonitorPopover: (props: {
-    readonly trigger: string;
-    readonly triggerNode?: React.ReactNode;
-    readonly contentSide?: string;
-    readonly claimsOpenAction: boolean;
-  }) => (
-    <div
-      data-testid="resource-monitor-popover"
-      data-side={props.contentSide}
-      // Whether THIS mount registers `app.resources.open` is the strip's
-      // decision, made here and honoured there; the popover's own suite owns
-      // the honouring half.
-      data-claims-open-action={String(props.claimsOpenAction)}
-    >
-      {props.triggerNode}
-    </div>
-  ),
+//
+// The trigger SEAM is reproduced rather than stubbed out: the real popover
+// hands `triggerNode` to `PopoverTrigger asChild`, and that composition is
+// what a wrapper placed between the two would break - the segment would still
+// be on screen and would no longer open anything. So the stand-in opens a real
+// popover from the node it was handed, and the left-click test below is a test
+// of the strip's own composition.
+vi.mock("@/components/resources/resource-monitor-popover", async () => {
+  const { Popover, PopoverContent, PopoverTrigger } =
+    await import("@/components/ui/popover");
+  return {
+    ResourceMonitorPopover: (props: {
+      readonly trigger: string;
+      readonly triggerNode: React.ReactElement;
+      readonly contentSide?: string;
+      readonly claimsOpenAction: boolean;
+    }) => (
+      <div
+        data-testid="resource-monitor-popover"
+        data-side={props.contentSide}
+        // Whether THIS mount registers `app.resources.open` is the strip's
+        // decision, made here and honoured there; the popover's own suite owns
+        // the honouring half.
+        data-claims-open-action={String(props.claimsOpenAction)}
+      >
+        <Popover>
+          <PopoverTrigger asChild>{props.triggerNode}</PopoverTrigger>
+          <PopoverContent data-testid="resource-monitor-panel" />
+        </Popover>
+      </div>
+    ),
+  };
+});
+
+// The quick-verb menu the resource segment now carries (L-144) reaches the
+// router for "Customize layout...". Everything else in the module stays real.
+const navigateMock = vi.hoisted(() => vi.fn());
+vi.mock("@tanstack/react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
+  useNavigate: () => navigateMock,
 }));
 
 // A projection and a desktop reading are the segment's data sources. Empty by
@@ -640,6 +663,7 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
     useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
+    useLayoutEditorStore.getState().endSession();
   });
 
   afterEach(() => {
@@ -648,6 +672,8 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
     useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
+    useLayoutEditorStore.getState().endSession();
+    navigateMock.mockClear();
   });
 
   function twoWindowedProviders(): ReadonlyArray<ConfiguredRateLimitProvider> {
@@ -692,13 +718,66 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("does not open from a right-click on the resource segment", () => {
+  /**
+   * The resource readout answers with its OWN verbs (L-144).
+   *
+   * The bar's menu stands down over it - it is the resource popover's trigger,
+   * and the bar's own quick verbs name `usageLimits`, the segment beside this
+   * one - so for as long as the segment had no menu of its own it was the one
+   * piece of the strip that answered no right-click at all.
+   *
+   * Nested Radix triggers do not both fire: the inner one defaults the shared
+   * event prevented before the outer trigger's composed opener runs.
+   */
+  it("answers a right-click on the resource segment with the resource monitor's verbs", () => {
     windowedProviders = twoWindowedProviders();
     render(<AppStatusBar />);
 
     fireEvent.contextMenu(screen.getByTestId("status-bar-resource-segment"));
 
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(
+      screen.getByTestId("layout-quick-verb-resourceMonitor-hide"),
+    ).not.toBeNull();
+    expect(screen.getByTestId("customize-layout-menu-item")).not.toBeNull();
+    // The bar's menu, not the segment's: its provider checkboxes and its own
+    // region's verbs are what must NOT be on screen here.
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Codex" }),
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("layout-quick-verb-usageLimits-hide"),
+    ).toBeNull();
+  });
+
+  it("answers the same right-click while the layout editor is open", () => {
+    // LV2-05 / L-129: the verbs are wanted in a session at least as much as at
+    // rest, and that is where they used to be firewalled.
+    windowedProviders = twoWindowedProviders();
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+    render(<AppStatusBar />);
+
+    fireEvent.contextMenu(screen.getByTestId("status-bar-resource-segment"));
+
+    expect(
+      screen.getByTestId("layout-quick-verb-resourceMonitor-hide"),
+    ).not.toBeNull();
+  });
+
+  it("leaves the left click on the resource segment to the panel", () => {
+    // The menu wraps the POPOVER, never the node the popover hands to
+    // `PopoverTrigger asChild` - a Radix root in that slot would swallow the
+    // trigger's props and the readout would open nothing.
+    windowedProviders = twoWindowedProviders();
+    render(<AppStatusBar />);
+    expect(screen.queryByTestId("resource-monitor-panel")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("status-bar-resource-segment"));
+
+    expect(screen.getByTestId("resource-monitor-panel")).not.toBeNull();
   });
 
   it("offers no providers for an unresolved pick, but still opens", () => {

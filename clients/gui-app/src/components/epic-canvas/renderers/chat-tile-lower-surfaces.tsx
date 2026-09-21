@@ -1,4 +1,12 @@
-import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Lock } from "lucide-react";
 import type {
   BackgroundItem,
@@ -12,6 +20,7 @@ import type {
 import type {
   HeldManagedCommandUpdate,
   ManagedCommand,
+  ManagedCommandStatus,
 } from "@traycer/protocol/host/managed-command/unary-schemas";
 import type { InterviewAnswer } from "@traycer/protocol/persistence/epic/schemas";
 import type { ChatForkMode } from "@/components/chat/chat-message";
@@ -34,6 +43,11 @@ import {
   type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
 import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
+import { CHAT_DOCK_FAILURE_PULSE_PREFIX } from "@/components/chat/chat-dock-compact-chip";
+import {
+  useChatDockOpenSection,
+  useChatDockOpenStore,
+} from "@/stores/chats/chat-dock-open-store";
 import { isReceivedAgentResponse } from "@/components/chat/chat-queue-utils";
 import {
   type ChatLowerSurfaceTopSpacing,
@@ -70,6 +84,7 @@ import type { WorkspaceComposerAvailability } from "@/lib/composer/workspace-com
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
 import {
   useHeldManagedCommandsForChat,
+  useManagedCommandsForChat,
   useRunningManagedCommandsForChat,
 } from "@/stores/managed-commands/managed-commands-for-chat";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
@@ -408,6 +423,20 @@ export function ChatLowerInteractionSurfaces(
     hostId: props.hostId,
   });
   const heldManagedCommandCount = heldManagedCommands.length;
+  // A third read of the same slice, for the one thing the running list cannot
+  // say: a shell that is no longer running because it FAILED. The Background
+  // pill's ring is the section's only channel while its row is folded away,
+  // and a failure is the one arrival on that strip that is not simply news, so
+  // it radiates the destructive tone instead of the primary one.
+  const managedCommands = useManagedCommandsForChat(
+    props.epicId,
+    props.chatId,
+    props.hostId,
+  );
+  const backgroundFailureToken = useMemo(
+    () => failedManagedCommandPulseToken(managedCommands),
+    [managedCommands],
+  );
   const backgroundVisible = chatBackgroundSectionVisible({
     backgroundItemCount: props.backgroundItems?.length ?? 0,
     runningManagedCommandCount,
@@ -426,25 +455,37 @@ export function ChatLowerInteractionSurfaces(
     backgroundItems: props.backgroundItems,
     runningManagedCommands,
     heldManagedCommands,
+    backgroundFailureToken,
     queue: props.queue.value,
+    todo: props.todo,
   });
+  // What each dock member DRAWS below the transcript: its full row inside the
+  // frame, or the one attached panel its open pill put there (L-142). The
+  // scroll budget and the composer's top spacing both ask this, and a pill
+  // panel is a scroll region exactly as a row is.
+  const drawsInDock = (
+    section: ChatDockSection,
+    hasContent: boolean,
+  ): boolean =>
+    (hasContent && !chrome.folded.has(section)) ||
+    chrome.openSection === section;
   const todoVisible = props.runtime.snapshotLoaded && props.todo !== null;
-  const dockFilesChangedVisible =
-    chrome.hotspots.filesChanged.hasContent &&
-    !chrome.folded.has("filesChanged");
+  const dockTodoVisible = drawsInDock("todo", todoVisible);
+  const dockFilesChangedVisible = drawsInDock(
+    "filesChanged",
+    chrome.hotspots.filesChanged.hasContent,
+  );
   // Kept as one boolean (rather than two) for the scroll-budget calc below,
   // which has always treated Todo and Files changed as a single pressure
   // unit - unchanged now that Files changed can render apart from Todo.
-  const pinnedStackVisible = todoVisible || dockFilesChangedVisible;
+  const pinnedStackVisible = dockTodoVisible || dockFilesChangedVisible;
   // Show the queue surface whenever it holds anything - user-typed sends and
   // received A2A responses alike (the latter render read-only). Received rows
-  // follow the Active agents mode, so a folded chip takes them with it and this
+  // follow the Active agents mode, so a folded pill takes them with it and this
   // reads the queue the dock will actually be handed.
-  const queueVisible = chrome.dockQueue.items.length > 0;
-  const dockAgentsVisible =
-    activeAgentsVisible && !chrome.folded.has("activeAgents");
-  const dockBackgroundVisible =
-    backgroundVisible && !chrome.folded.has("background");
+  const queueVisible = drawsInDock("queue", chrome.dockQueue.items.length > 0);
+  const dockAgentsVisible = drawsInDock("activeAgents", activeAgentsVisible);
+  const dockBackgroundVisible = drawsInDock("background", backgroundVisible);
   const approvalVisible = approvalSurfaceVisible(
     props.runtime.snapshotLoaded,
     props.access.isViewer,
@@ -592,8 +633,10 @@ export function ChatLowerInteractionSurfaces(
 }
 
 interface ChatDockChrome {
-  /** Sections standing as a chip right now, for the dock and for the spacing. */
+  /** Sections standing as a pill right now, for the dock and for the spacing. */
   readonly folded: ReadonlySet<ChatDockSection>;
+  /** The one pill whose panel is attached above the composer, or `null`. */
+  readonly openSection: ChatDockSection | null;
   /** The queue as the dock should render it - see `foldedQueue`. */
   readonly dockQueue: ChatSessionState["queue"];
   readonly strip: ChatDockCompactStripValue;
@@ -614,10 +657,59 @@ interface ChatDockChromeInput {
   readonly backgroundItems: ReadonlyArray<BackgroundItem> | undefined;
   readonly runningManagedCommands: ReadonlyArray<ManagedCommand>;
   readonly heldManagedCommands: ReadonlyArray<HeldManagedCommandUpdate>;
+  /**
+   * The Background pill's failure-flavoured pulse token, or `null` when the
+   * section's most recent news is not a failure.
+   */
+  readonly backgroundFailureToken: string | null;
   readonly queue: ChatSessionState["queue"];
+  readonly todo: PinnedTodoSnapshot | null;
 }
 
 const NO_BACKGROUND_ITEMS: ReadonlyArray<BackgroundItem> = [];
+
+/**
+ * The Background pill's pulse token while the last thing to have happened in
+ * the section is a shell that FAILED, else `null`.
+ *
+ * "Last thing to have happened" rather than "anything ever failed", because
+ * the token is what the pill is standing in for RIGHT NOW: a live shell
+ * outranks any finished one, and a failure the user has already seen must not
+ * hold the ring red over work that started since. Keyed on the failed
+ * command's id so a second failure is a second token and rings again, and a
+ * re-render of the same one does not.
+ */
+function failedManagedCommandPulseToken(
+  commands: ReadonlyArray<ManagedCommand>,
+): string | null {
+  let latest: ManagedCommand | null = null;
+  for (const command of commands) {
+    if (command.status.state === "running") return null;
+    if (latest === null || command.updatedAtMs > latest.updatedAtMs) {
+      latest = command;
+    }
+  }
+  if (latest === null || !managedCommandFailed(latest.status)) return null;
+  return `${CHAT_DOCK_FAILURE_PULSE_PREFIX}${latest.id}`;
+}
+
+/**
+ * A shell that ended badly. `stopped` is the user's own doing and never one;
+ * `interrupted` is the host dying under a running command; an exit is a
+ * failure unless it is a clean zero, which covers the killed-by-signal case
+ * and the lost-process case (`exitCode` and `signal` both null) together.
+ */
+function managedCommandFailed(status: ManagedCommandStatus): boolean {
+  switch (status.state) {
+    case "running":
+    case "stopped":
+      return false;
+    case "interrupted":
+      return true;
+    case "exited":
+      return status.exitCode !== 0 || status.signal !== null;
+  }
+}
 
 /**
  * Which dock rows are folded into a chip, what those chips say, and how the
@@ -633,20 +725,31 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   const changedFilesValues = useRegionValues("changedFiles");
   const runningAgentsValues = useRegionValues("runningAgents");
   const backgroundValues = useRegionValues("background");
+  const queueValues = useRegionValues("queue");
+  const todoValues = useRegionValues("todo");
   const dockOrder = useMemo(
     () => dockRegionOrder.map(chatDockSection),
     [dockRegionOrder],
   );
-  const [expanded, setExpanded] = useState<ReadonlySet<ChatDockSection>>(
-    () => new Set<ChatDockSection>(),
+  // Which pill this CHAT has open, remembered outside the React tree: a
+  // same-pane chat switch is a full remount, and losing the open panel to one
+  // is not what "I opened Files changed in this conversation" means. Nothing
+  // ever opens on its own - a chat with no entry has no panel attached.
+  const storedOpenSection = useChatDockOpenSection(input.chatId);
+  const toggleOpenSection = useChatDockOpenStore(
+    (state) => state.toggleSection,
   );
-  const onToggle = useCallback((section: ChatDockSection) => {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (!next.delete(section)) next.add(section);
-      return next;
-    });
-  }, []);
+  const closeOpenSection = useChatDockOpenStore((state) => state.closeSection);
+  const chatId = input.chatId;
+  const onToggle = useCallback(
+    (section: ChatDockSection) => {
+      toggleOpenSection(chatId, section);
+    },
+    [toggleOpenSection, chatId],
+  );
+  // One id per dock, for the open pill's `aria-controls` and the panel it
+  // names. `useId` because two chat tiles can be on screen at once.
+  const panelId = useId();
 
   const changesPresent =
     input.snapshotLoaded && chatChangesPanelHasContent(input.restore);
@@ -681,6 +784,14 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   });
   const backgroundHotspot = useLayoutRegion({
     regionId: "background",
+    instanceId: input.chatId,
+  });
+  const queueHotspot = useLayoutRegion({
+    regionId: "queue",
+    instanceId: input.chatId,
+  });
+  const todoHotspot = useLayoutRegion({
+    regionId: "todo",
     instanceId: input.chatId,
   });
   // The root agent counts as running too when it is itself active, exactly as
@@ -755,9 +866,9 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     input.restore.accumulatedFileChanges.length +
     input.restore.undeliveredChangeCount;
 
-  // A chip exists for every compact section that HAS something to show, whether
-  // or not its row is currently revealed - the chip is the way back, so it
-  // cannot be the thing that disappears when the row appears.
+  // A pill exists for every compact section that HAS something to show,
+  // whether or not its panel is open - the pill is the way back, so it cannot
+  // be the thing that disappears when the panel appears.
   const filesChip = dockMemberFolded({
     values: changedFilesValues,
     ghost: filesChangedHotspot.ghost,
@@ -777,39 +888,82 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     hasContent: input.backgroundVisible,
   });
 
-  // A reveal belongs to a chip, so it dies with one. Per-tile stickiness is the
-  // point - a revealed row stays revealed for as long as the tile lives - but
-  // stickiness across a section going EMPTY is a different thing: the user
-  // reverts every change, the chip goes away, and the next turn's changes would
-  // otherwise arrive as a full row in a chat configured to fold them.
-  // Adjusted during render, and the pruned set is what this render uses, so the
-  // correction never costs a painted frame.
+  // The queue minus its received-A2A rows while the Active agents pill stands
+  // for them, and the identical object otherwise - the dock's queue section
+  // and the surrounding spacing both key off this array's length, so handing
+  // back a fresh copy of an unchanged queue would churn both. An OPEN agents
+  // pill puts them back: that panel lists the agents, never the responses they
+  // queued, so nothing else would show them.
+  const agentsRowsFolded = agentsChip && storedOpenSection !== "activeAgents";
+  const dockQueue = useMemo(
+    () => foldedQueue(input.queue, agentsRowsFolded),
+    [input.queue, agentsRowsFolded],
+  );
+  const queuedCount = dockQueue.items.length;
+  const queueHasContent = queuedCount > 0;
+  const queueChip = dockMemberFolded({
+    values: queueValues,
+    ghost: queueHotspot.ghost,
+    hasContent: queueHasContent,
+  });
+
+  // Todo and the Message Queue are dock members too (L-139): same Full row /
+  // Chip / Hidden semantics, same reordering, same pill treatment.
+  const todo = input.todo;
+  const todoCounts = useMemo(() => {
+    if (todo === null) return null;
+    return {
+      done: todo.items.filter((item) => item.status === "completed").length,
+      total: todo.items.length,
+    };
+  }, [todo]);
+  const todoHasContent = input.snapshotLoaded && todo !== null;
+  const todoChip = dockMemberFolded({
+    values: todoValues,
+    ghost: todoHotspot.ghost,
+    hasContent: todoHasContent,
+  });
+
   const chipPresent: Readonly<Record<ChatDockSection, boolean>> = {
     filesChanged: filesChip,
     activeAgents: agentsChip,
     background: backgroundChip,
+    queue: queueChip,
+    todo: todoChip,
   };
-  const revealed = prunedReveals(expanded, chipPresent);
-  if (revealed !== expanded) setExpanded(revealed);
+  // The remembered pill only counts while its pill is actually there. Derived
+  // rather than written, so a chat whose snapshot has not landed yet keeps
+  // what it had open instead of having it erased by a loading frame.
+  const openSectionPillPresent =
+    storedOpenSection !== null && chipPresent[storedOpenSection];
+  const openSection = openSectionPillPresent ? storedOpenSection : null;
+  // A section that EMPTIES while the chat is loaded is a real close, and the
+  // memory goes with it: the user reverts every change, the pill goes away,
+  // and the next turn's changes must not re-open a panel nobody asked for.
+  useEffect(() => {
+    if (storedOpenSection === null) return;
+    if (!input.snapshotLoaded) return;
+    if (openSectionPillPresent) return;
+    closeOpenSection(chatId);
+  }, [
+    storedOpenSection,
+    input.snapshotLoaded,
+    openSectionPillPresent,
+    closeOpenSection,
+    chatId,
+  ]);
 
+  // Every pill-sized member is folded, open or not: an open pill's panel is
+  // the frame's topmost attached one, never a row in dock order (L-142).
   const folded = useMemo(() => {
     const sections = new Set<ChatDockSection>();
-    if (filesChip && !revealed.has("filesChanged")) {
-      sections.add("filesChanged");
-    }
-    if (agentsChip && !revealed.has("activeAgents")) {
-      sections.add("activeAgents");
-    }
-    if (backgroundChip && !revealed.has("background")) {
-      sections.add("background");
-    }
+    if (filesChip) sections.add("filesChanged");
+    if (agentsChip) sections.add("activeAgents");
+    if (backgroundChip) sections.add("background");
+    if (queueChip) sections.add("queue");
+    if (todoChip) sections.add("todo");
     return sections;
-  }, [filesChip, agentsChip, backgroundChip, revealed]);
-
-  const dockQueue = useMemo(
-    () => foldedQueue(input.queue, folded.has("activeAgents")),
-    [input.queue, folded],
-  );
+  }, [filesChip, agentsChip, backgroundChip, queueChip, todoChip]);
 
   const chips = useMemo<ReadonlyArray<ChatDockCompactChipModel>>(() => {
     const models: ChatDockCompactChipModel[] = [];
@@ -817,14 +971,12 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       models.push({
         section: "filesChanged",
         glyph: "filesChanged",
-        // The chip is the folded row's ONE anchor: while a section stands as a
-        // chip the row is not drawn, so the region's node is this pill. A
-        // REVEALED section draws both, and the row keeps the node - two
-        // elements registering the same region and instance share one key, so
-        // the later would silently displace the earlier (`ghost-region.tsx`).
-        hotspotRef: revealed.has("filesChanged")
-          ? null
-          : filesChangedHotspot.ref,
+        // The pill is the member's ONE anchor, open or closed (L-142). It is
+        // drawn whenever the member is pill-sized, and the panel it opens is
+        // content rather than a second registration - two elements registering
+        // the same region and instance share one key, so the later would
+        // silently displace the earlier (`ghost-region.tsx`).
+        hotspotRef: filesChangedHotspot.ref,
         working: false,
         // The file count leads and the line counts follow, the same order and
         // the same tones the panel's own header uses - the chip stands in for
@@ -846,9 +998,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       models.push({
         section: "activeAgents",
         glyph: "activeAgents",
-        hotspotRef: revealed.has("activeAgents")
-          ? null
-          : activeAgentsHotspot.ref,
+        hotspotRef: activeAgentsHotspot.ref,
         // Mid-turn is the live state here, exactly as the roster in `label`
         // words it - the chip draws it, the sentence says it.
         working: agentsWorking,
@@ -873,7 +1023,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // The section's own mark whatever the rows are - activity lights it
         // rather than replacing it, and the kinds are the panel's to draw.
         glyph: "background",
-        hotspotRef: revealed.has("background") ? null : backgroundHotspot.ref,
+        hotspotRef: backgroundHotspot.ref,
         // The count IS the running count, so anything in it lights the chip -
         // and a shell whose process is alive is in that count whether or not it
         // is monitoring, since the host reports it as `running` either way
@@ -886,7 +1036,47 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // all - so the sentence is the header's own summary, which names every
         // part rather than letting a bare `0` stand for "nothing here".
         label: `Background. ${backgroundSummary}.`,
-        pulseToken: backgroundRunning > 0 ? "running" : null,
+        // A failure outranks the plain arrival: it is the one thing this
+        // section can report that is not simply news, and the ring is the
+        // only channel it has while the row is folded into a pill.
+        pulseToken:
+          input.backgroundFailureToken ??
+          (backgroundRunning > 0 ? "running" : null),
+      });
+    }
+    if (queueChip) {
+      models.push({
+        section: "queue",
+        glyph: "queue",
+        hotspotRef: queueHotspot.ref,
+        // Never lit: a queued message is WAITING, not running, and a pill that
+        // shimmered for one would say the opposite of what the queue means.
+        // The count carries it - it takes the foreground tone every pill count
+        // takes, and the pulse below rings once for each message that lands.
+        working: false,
+        lineDeltas: null,
+        text: `${queuedCount}`,
+        label: `Message Queue. ${queuedCount} ${queuedCount === 1 ? "message" : "messages"} queued.`,
+        // Keyed on the count, so a message ARRIVING in the queue flicks the
+        // pill once - the folded queue's only other channel is the number
+        // itself, which nothing draws the eye to.
+        pulseToken: queuedCount > 0 ? `${queuedCount}` : null,
+      });
+    }
+    if (todoChip && todoCounts !== null) {
+      models.push({
+        section: "todo",
+        glyph: "todo",
+        hotspotRef: todoHotspot.ref,
+        working: false,
+        lineDeltas: null,
+        // `done/total`, the same measurement the full row prints at its right
+        // edge, in the same order.
+        text: `${todoCounts.done}/${todoCounts.total}`,
+        label: `Todo. ${todoCounts.done} of ${todoCounts.total} done.`,
+        // Constant: the list arriving is the news, and a pill that flicked on
+        // every completed item would ring through a whole plan.
+        pulseToken: "todo",
       });
     }
     return dockOrder.flatMap((section) =>
@@ -897,6 +1087,10 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     filesChip,
     agentsChip,
     backgroundChip,
+    queueChip,
+    todoChip,
+    todoCounts,
+    queuedCount,
     backgroundSummary,
     changeTotals,
     changedFileCount,
@@ -905,15 +1099,17 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     agentsRoster,
     receivedAgentCount,
     backgroundRunning,
-    revealed,
+    input.backgroundFailureToken,
     filesChangedHotspot.ref,
     activeAgentsHotspot.ref,
     backgroundHotspot.ref,
+    queueHotspot.ref,
+    todoHotspot.ref,
   ]);
 
   const strip = useMemo<ChatDockCompactStripValue>(
-    () => ({ chips, expanded: revealed, onToggle }),
-    [chips, revealed, onToggle],
+    () => ({ chips, openSection, panelId, onToggle }),
+    [chips, openSection, panelId, onToggle],
   );
 
   const hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>> = {
@@ -938,9 +1134,23 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       shown: backgroundValues.shown === "shown",
       hasContent: input.backgroundVisible,
     },
+    queue: {
+      hotspotRef: queueHotspot.ref,
+      editing: queueHotspot.editing,
+      ghost: queueHotspot.ghost,
+      shown: queueValues.shown === "shown",
+      hasContent: queueHasContent,
+    },
+    todo: {
+      hotspotRef: todoHotspot.ref,
+      editing: todoHotspot.editing,
+      ghost: todoHotspot.ghost,
+      shown: todoValues.shown === "shown",
+      hasContent: todoHasContent,
+    },
   };
 
-  return { folded, dockQueue, strip, dockOrder, hotspots };
+  return { folded, openSection, dockQueue, strip, dockOrder, hotspots };
 }
 
 /** How many agents the chip's sentence names before it starts counting. */
@@ -978,22 +1188,6 @@ function agentStateWord(activity: AgentRow["activity"]): string {
   }
   const unreachable: never = activity;
   return unreachable;
-}
-
-/**
- * `expanded` minus any section whose chip is no longer there, or `expanded`
- * itself when there is nothing to drop - identity is the loop guard, since this
- * runs during render and feeds its own state.
- */
-function prunedReveals(
-  expanded: ReadonlySet<ChatDockSection>,
-  chipPresent: Readonly<Record<ChatDockSection, boolean>>,
-): ReadonlySet<ChatDockSection> {
-  const stale = [...expanded].filter((section) => !chipPresent[section]);
-  if (stale.length === 0) return expanded;
-  const next = new Set(expanded);
-  for (const section of stale) next.delete(section);
-  return next;
 }
 
 /**

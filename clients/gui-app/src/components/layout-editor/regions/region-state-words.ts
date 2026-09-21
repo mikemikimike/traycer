@@ -14,9 +14,10 @@ import type {
 /**
  * The one word each region's row reads out beside its name (L-33, L-47).
  *
- * One per value SHAPE rather than one per region: eight of the twenty-two
- * regions are plain shown/hidden and nine are the rail's three-state, so the
- * tables beside this file point several regions at the same function.
+ * One per value SHAPE rather than one per region: of the twenty-three regions
+ * nine are the rail's three-state and six are the Full row / Chip pair (the
+ * five dock members and the Access pill), so the tables beside this file point
+ * several regions at the same function.
  */
 
 export function shownStateWord(values: ShownValues): string {

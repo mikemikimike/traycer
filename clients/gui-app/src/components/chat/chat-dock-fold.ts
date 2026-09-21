@@ -9,12 +9,16 @@ import type { SizedValues } from "@/lib/layout/layout-values";
  * `shown` alone, so a member that was Hidden AND Chip materialised as a full
  * ROW under the editor - the one picture of it the user was ever shown was the
  * one shape it never takes at rest.
+ *
+ * Named arguments, like its sibling below: two interchangeable booleans is a
+ * signature a caller can swap and still compile, which is the class of mistake
+ * this module exists to prevent (R2-09).
  */
-export function dockMemberMaterialised(
-  shown: boolean,
-  ghost: boolean,
-): boolean {
-  return shown || ghost;
+export function dockMemberMaterialised(input: {
+  readonly shown: boolean;
+  readonly ghost: boolean;
+}): boolean {
+  return input.shown || input.ghost;
 }
 
 /**
@@ -38,7 +42,10 @@ export function dockMemberFolded(input: {
   readonly hasContent: boolean;
 }): boolean {
   return (
-    dockMemberMaterialised(input.values.shown === "shown", input.ghost) &&
+    dockMemberMaterialised({
+      shown: input.values.shown === "shown",
+      ghost: input.ghost,
+    }) &&
     input.values.size === "chip" &&
     input.hasContent
   );

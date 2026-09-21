@@ -38,9 +38,15 @@ describe("the composer stack (L-97, L-99)", () => {
     const dock = screen.getByTestId("app-frame-dock");
     const frames = dock.querySelectorAll('[data-layout-depiction="dock"]');
     expect(frames).toHaveLength(1);
-    // Changed files and Active agents are inside that one frame - they used to
-    // be two bordered rounded-top boxes inside a third.
-    expect(frames[0]?.childElementCount).toBe(2);
+    // Every full-size member is inside that one frame - they used to be a
+    // bordered rounded-top box each, inside a further one. Counted off the
+    // arrangement rather than written out, so a dock member joining or
+    // leaving (L-142 added two) moves this claim with it.
+    const fullSizeMembers = DEFAULT_ARRANGEMENT.dock.filter(
+      (regionId) => MIXED_DOCK[regionId].size === "full",
+    );
+    expect(fullSizeMembers.length).toBeGreaterThan(1);
+    expect(frames[0]?.childElementCount).toBe(fullSizeMembers.length);
   });
 
   it("keeps the compact pills above the frame, at the composer's left edge", () => {

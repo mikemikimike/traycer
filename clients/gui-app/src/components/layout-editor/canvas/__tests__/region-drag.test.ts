@@ -14,7 +14,7 @@ import {
   leftPanelGroupsFromRail,
   type RailEntry,
 } from "@/lib/layout/rail";
-import type { RegionId } from "@/lib/layout/region-id";
+import type { RegionId, ToolbarRegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -77,6 +77,59 @@ function mountToolbar(
     node.releasePointerCapture = () => undefined;
     node.hasPointerCapture = () => true;
     wrapper.append(node);
+    return node;
+  });
+}
+
+/**
+ * A left cluster with a member on each side of the one being dragged.
+ *
+ * The shipped default is two members (`attachImage`, `access`) since the Agent
+ * label left the composer (L-136), and `mic` is a toolbar region a user can
+ * move across - which is the arrangement these cases describe.
+ */
+function setToolbarLeft(ids: ReadonlyArray<ToolbarRegionId>): void {
+  const arrangement = useLayoutStore.getState().arrangement;
+  useLayoutStore.setState({
+    arrangement: {
+      ...arrangement,
+      toolbarLeft: ids,
+      toolbarRight: arrangement.toolbarRight.filter((id) => !ids.includes(id)),
+    },
+  });
+}
+
+/**
+ * The composer as the real-Chrome driver measured it (L-143): a 28px
+ * `attachImage` beside a 120px `access`, in a cluster that ends where `access`
+ * does. The wide member leads nothing and has only the narrow one to pass, and
+ * the clamp gives it 32px to do it in - which is why the centre rule could not
+ * perform this move at all.
+ */
+function mountUnevenToolbar(): ReadonlyArray<HTMLElement> {
+  const cluster = document.createElement("div");
+  cluster.setAttribute(LAYOUT_CLUSTER_ATTRIBUTE, "");
+  document.body.append(cluster);
+  stubRect(cluster, { left: 0, top: 0, width: 152, height: 24 });
+  let left = 0;
+  const members: ReadonlyArray<{
+    readonly regionId: ToolbarRegionId;
+    readonly width: number;
+  }> = [
+    { regionId: "attachImage", width: 28 },
+    { regionId: "access", width: 120 },
+  ];
+  return members.map((member) => {
+    const node = document.createElement("div");
+    node.setAttribute("data-layout-region", member.regionId);
+    node.setAttribute("data-layout-group", "toolbarLeft");
+    node.setAttribute("data-layout-draggable", "1");
+    node.setPointerCapture = () => undefined;
+    node.releasePointerCapture = () => undefined;
+    node.hasPointerCapture = () => true;
+    stubRect(node, { left, top: 0, width: member.width, height: 24 });
+    left += member.width + CHIP_GAP;
+    cluster.append(node);
     return node;
   });
 }
@@ -278,7 +331,8 @@ afterEach(() => {
 
 describe("dragging a region on the canvas", () => {
   it("reorders its cluster as ONE history entry, and undo puts it back", () => {
-    const nodes = mountToolbar(["attachImage", "access", "agent"]);
+    setToolbarLeft(["attachImage", "access", "mic"]);
+    const nodes = mountToolbar(["attachImage", "access", "mic"]);
 
     // Far enough right for the first chip's centre to pass the second's: the
     // chips are 30 wide and 4 apart, so the neighbour's centre is at 49.
@@ -287,7 +341,7 @@ describe("dragging a region on the canvas", () => {
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "access",
       "attachImage",
-      "agent",
+      "mic",
     ]);
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
 
@@ -296,35 +350,60 @@ describe("dragging a region on the canvas", () => {
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "attachImage",
       "access",
-      "agent",
+      "mic",
     ]);
   });
 
   it("keeps a member that is not on the canvas beside its own neighbours", () => {
+    setToolbarLeft(["attachImage", "access", "mic"]);
     // `access` is hidden, so the canvas shows two of the three.
-    const nodes = mountToolbar(["attachImage", "agent"]);
+    const nodes = mountToolbar(["attachImage", "mic"]);
 
     dragBy(nodes[0], { clientX: 60 });
 
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "access",
-      "agent",
+      "mic",
       "attachImage",
     ]);
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
 
   it("writes nothing when the chip is let go where it started", () => {
-    const nodes = mountToolbar(["attachImage", "access", "agent"]);
+    setToolbarLeft(["attachImage", "access", "mic"]);
+    const nodes = mountToolbar(["attachImage", "access", "mic"]);
 
     dragBy(nodes[0], { clientX: 12 });
 
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
       "attachImage",
       "access",
-      "agent",
+      "mic",
     ]);
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(0);
+  });
+
+  /**
+   * The move the owner could not make (L-143): a member three times the width
+   * of the one leading its cluster, dragged in front of it.
+   *
+   * The pointer travels 40px left of the grab - the neighbour it is passing
+   * plus its gap, the whole ordinary gesture - and lands inside the clamp's
+   * own 32px of travel rather than deep in the rubber band. Under the centre
+   * rule `access` would still be claiming its own slot there, because its
+   * centre would be at 58 and `attachImage`'s is at 14.
+   */
+  it("drags a wide member in front of the narrow one leading its cluster", () => {
+    setToolbarLeft(["attachImage", "access"]);
+    const nodes = mountUnevenToolbar();
+
+    dragBy(nodes[1], { clientX: -32 });
+
+    expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
+      "access",
+      "attachImage",
+    ]);
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
 
   it("does not pick up a region that has no order of its own", () => {
@@ -349,11 +428,13 @@ describe("dragging a region on the canvas", () => {
  */
 describe("dragging in the sidebar rail", () => {
   it("moves a panel across a boundary, which changes the group it is in", () => {
-    // Artifacts sits at 40..76 and the boundary that ends its group at 80..88;
-    // 40px down carries its centre past the boundary's and no further.
+    // Artifacts sits at 40..76, the boundary that ends its group at 80..88 and
+    // Terminals at 92..128. A slot is claimed when the leading edge passes the
+    // neighbour's centre (L-143), so 24px down carries Artifacts' bottom edge
+    // to 100 - past the boundary's centre at 84, short of Terminals' at 110.
     const nodes = mountRail(DEFAULT_RAIL);
 
-    dragBy(nodes[1], { clientY: 48 });
+    dragBy(nodes[1], { clientY: 24 });
 
     expect(railGroups()).toEqual([
       "chats",
@@ -395,7 +476,7 @@ describe("dragging in the sidebar rail", () => {
     );
     const nodes = mountRail(drawn);
 
-    dragBy(nodes[1], { clientY: 48 });
+    dragBy(nodes[1], { clientY: 24 });
 
     expect(railGroups()).toEqual([
       "chats",
@@ -432,8 +513,14 @@ describe("a dock whose members are not all the same size", () => {
     dragBy(nodes[2], { clientY: -60 });
 
     // `background` moved; `runningAgents`, drawn in the other container and no
-    // part of this gesture, keeps its place after `changedFiles`.
+    // part of this gesture, keeps its place after `changedFiles`. `queue` and
+    // `todo` keep the front of the stored order although this scene draws
+    // nothing for either (L-142), which is the same claim one step further: a
+    // drop writes back the WHOLE stored order, and a member the canvas never
+    // showed cannot be moved by one.
     expect(useLayoutStore.getState().arrangement.dock).toEqual([
+      "queue",
+      "todo",
       "background",
       "changedFiles",
       "runningAgents",
@@ -453,6 +540,8 @@ describe("a dock whose members are not all the same size", () => {
     dragBy(nodes[2], { clientX: -40 });
 
     expect(useLayoutStore.getState().arrangement.dock).toEqual([
+      "queue",
+      "todo",
       "background",
       "changedFiles",
       "runningAgents",

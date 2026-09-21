@@ -2619,6 +2619,27 @@ export default tseslint.config(
     },
   },
   {
+    // "This component has committed at least once" is the one fact a render
+    // cannot compute, so the rule's cure - derive it during render instead -
+    // does not exist here. The dock's pill strip suppresses the attention
+    // ring of every pill that mounts in its FIRST commit (L-148: opening a
+    // chat with five pills fired five rings at once, for nothing that had
+    // happened) and rings every later arrival, and a chip reads the flag once
+    // in its own state initializer, so it has to be true during that first
+    // render and false in every render after it.
+    //
+    // The three shapes that would satisfy this rule are all worse and two are
+    // banned by their own rules: a `useRef` read in render trips
+    // `react-hooks/refs`, a mutable cell held in `useState` trips
+    // `react-hooks/immutability`, and a timer would make a deterministic
+    // mount fact into a race. The cost the rule is warning about is one extra
+    // render of a flex row of at most five pills.
+    files: ["src/components/chat/chat-dock-compact-strip.tsx"],
+    rules: {
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
+  {
     // Router -> store synchronization direction for an already-committed epic
     // route. This is the inverse of navigateToTabIntent's entry-point seam,
     // so it may read the store action directly while the rest of the app may

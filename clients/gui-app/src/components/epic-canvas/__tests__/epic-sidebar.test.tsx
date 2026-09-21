@@ -37,6 +37,8 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { PaneVisibilityContext } from "@/components/epic-tabs/pane-visibility-context";
 import {
   prPresenceScopeKey,
   usePrPresenceStore,
@@ -470,24 +472,86 @@ describe("<EpicLeftPanelRail />", () => {
         (element) => element.getAttribute("data-testid"),
       ),
     ).toEqual([
-      // Every group boundary is a real element now (L-115), and the last
-      // group draws none: Comments is not on screen, so there is nothing on
-      // the far side of the boundary after Sharing.
+      // A group boundary is a gap at rest and nothing else (L-140): the only
+      // extra child here is the drop line the live drag is drawing.
       "epic-rail-chats",
-      "epic-rail-divider",
       "epic-rail-terminals",
-      "epic-rail-divider",
       "epic-rail-panel-drop-line",
       "epic-rail-browsers",
-      "epic-rail-divider",
       "epic-rail-git-diff",
-      "epic-rail-divider",
       "epic-rail-pull-requests",
-      "epic-rail-divider",
       "epic-rail-file-tree",
-      "epic-rail-divider",
       "epic-rail-sharing",
     ]);
+  });
+
+  /**
+   * The boundary between two groups is drawn as the gap the rail already has
+   * (L-140), and it becomes a handle only for the rail the user is actually
+   * customizing (L-109, R3-06).
+   */
+  describe("group breaks", () => {
+    function renderRail(paneVisible: boolean) {
+      return render(
+        <PaneVisibilityContext value={paneVisible}>
+          <EpicLeftPanelRail
+            epicId={EPIC_ID}
+            tabId={TAB_ID}
+            orientation="vertical"
+          />
+        </PaneVisibilityContext>,
+      );
+    }
+
+    afterEach(() => {
+      useLayoutEditorStore.getState().endSession();
+    });
+
+    it("draws nothing between the groups at rest, so the rail is its buttons", () => {
+      renderRail(true);
+
+      const rail = screen.getByTestId("epic-sidebar-rail");
+      // Every child is a panel button: no boundary element, and therefore
+      // none of the box-plus-gap a boundary element would cost in a column
+      // that scrolls.
+      for (const child of rail.children) expect(child.tagName).toBe("BUTTON");
+      expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
+    });
+
+    it("becomes a draggable rail member while this pane is being customized", () => {
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+      });
+
+      renderRail(true);
+
+      const breaks = screen.getAllByTestId("epic-rail-divider");
+      expect(breaks.length).toBeGreaterThan(0);
+      for (const element of breaks) {
+        expect(element.getAttribute("data-layout-draggable")).toBe("1");
+        expect(element.getAttribute("data-layout-group")).toBe("rail");
+        expect(element.getAttribute("data-layout-member")).toMatch(/^divider:/);
+      }
+    });
+
+    it("marks nothing draggable in a hidden pane's rail during a session", () => {
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+      });
+
+      renderRail(false);
+
+      expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
+      expect(
+        screen
+          .getByTestId("epic-sidebar-rail")
+          .querySelectorAll("[data-layout-draggable]"),
+      ).toHaveLength(0);
+    });
   });
 
   describe("Pull Requests presence gate", () => {
@@ -992,15 +1056,10 @@ describe("Browsers panel registration", () => {
     );
     expect(railIds).toEqual([
       "epic-rail-chats",
-      "epic-rail-divider",
       "epic-rail-terminals",
-      "epic-rail-divider",
       "epic-rail-browsers",
-      "epic-rail-divider",
       "epic-rail-git-diff",
-      "epic-rail-divider",
       "epic-rail-file-tree",
-      "epic-rail-divider",
       "epic-rail-sharing",
     ]);
     expect(

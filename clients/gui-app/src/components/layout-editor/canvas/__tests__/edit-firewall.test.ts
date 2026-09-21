@@ -85,12 +85,15 @@ describe("the edit firewall (4.4)", () => {
   /**
    * L-129. `contextmenu` used to be on the swallowed list, which made quick
    * verbs - the mode-less half of the model (L-19) - unreachable from inside a
-   * session: the menu's own trigger never saw the event. The rule is now the
-   * region test, so these two are the halves of it.
+   * session: the menu's own trigger never saw the event. The rule is now a
+   * named region WITH a mounted menu, so these three are the halves of it.
    */
   it("lets a right-click on a named region reach its menu (L-129)", () => {
     const { control, heard } = mountColumn();
     control.setAttribute("data-layout-region", "mic");
+    // What `ContextMenuTrigger asChild` stamps on the element it takes over -
+    // here the composer cluster's own box, which is the region's ancestor.
+    control.setAttribute("data-slot", "context-menu-trigger");
     // The deepest node under the pointer is usually the control's own glyph,
     // not the named element itself, so the test is `closest` rather than the
     // target's own attribute - and the menu's trigger is an ancestor besides.
@@ -102,6 +105,34 @@ describe("the edit firewall (4.4)", () => {
     );
 
     expect(heard).toEqual(["contextmenu", "column:contextmenu"]);
+  });
+
+  it("still swallows a right-click on a region with no menu to open", () => {
+    // A dock row, the minimap, the sample rail's icons: named, so the canvas
+    // resolves them, and with no quick-verb trigger anywhere above them. The
+    // event used to pass straight through to Electron's own menu over sample
+    // content, which is the class of thing the firewall exists to prevent.
+    const { control, heard } = mountColumn();
+    control.setAttribute("data-layout-region", "changedFiles");
+
+    control.dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+
+    expect(heard).toEqual([]);
+  });
+
+  it("still swallows a right-click on a menu that is not about a region", () => {
+    // The app's own context menu over the user's own content is the app
+    // acting, trigger or no trigger.
+    const { control, heard } = mountColumn();
+    control.setAttribute("data-slot", "context-menu-trigger");
+
+    control.dispatchEvent(
+      new Event("contextmenu", { bubbles: true, cancelable: true }),
+    );
+
+    expect(heard).toEqual([]);
   });
 
   it("still swallows a right-click that is not on a region", () => {

@@ -1,7 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
-import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
+import {
+  ChatDockChipArrival,
+  ChatDockCompactChip,
+} from "@/components/chat/chat-dock-compact-chip";
 import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { DiffLineCounts } from "@/lib/file-change-diff-hunks";
@@ -14,6 +17,7 @@ interface ChipProps {
   readonly label: string;
   readonly pulseToken: string | null;
   readonly expanded: boolean;
+  readonly controls: string | null;
   readonly testId: string;
   readonly onClick: () => void;
 }
@@ -27,6 +31,7 @@ function baseProps(): ChipProps {
     label: "3 agents running. Show the active agents.",
     pulseToken: null,
     expanded: false,
+    controls: null,
     testId: "chip",
     onClick: vi.fn(),
   };
@@ -34,6 +39,22 @@ function baseProps(): ChipProps {
 
 function classesOf(element: Element): ReadonlyArray<string> {
   return element.getAttribute("class")?.split(/\s+/).filter(Boolean) ?? [];
+}
+
+/**
+ * The chip's number and its two delta groups, read off their own markers
+ * rather than by their text.
+ *
+ * `getByText` is no longer able to find them: each of the three is now a
+ * static sign or a tone beside a `<RollingNumber>`, and Testing Library's text
+ * matcher joins only an element's DIRECT text nodes - so the span wearing the
+ * tone reads as `+` and the span carrying the digits wears no tone at all.
+ * `textContent` is unchanged, which is what these read.
+ */
+function part(chip: HTMLElement, marker: string): Element {
+  const found = chip.querySelector(`[${marker}]`);
+  if (found === null) throw new Error(`chip has no ${marker}`);
+  return found;
 }
 
 function renderChip(props: ChipProps) {
@@ -92,12 +113,14 @@ describe("<ChatDockCompactChip />", () => {
 
     const chip = screen.getByTestId("chip");
     expect(chip.textContent).toBe("3+12−4");
-    expect(screen.getByText("+12").getAttribute("class")).toContain(
+    const additions = part(chip, "data-diff-additions");
+    const deletions = part(chip, "data-diff-deletions");
+    expect(additions.textContent).toBe("+12");
+    expect(additions.getAttribute("class")).toContain(
       "text-success-foreground",
     );
-    expect(screen.getByText("−4").getAttribute("class")).toContain(
-      "text-destructive",
-    );
+    expect(deletions.textContent).toBe("−4");
+    expect(deletions.getAttribute("class")).toContain("text-destructive");
   });
 
   it("omits a zero side, and the whole delta group for a chip with none", () => {
@@ -141,14 +164,17 @@ describe("<ChatDockCompactChip />", () => {
     });
 
     const chip = screen.getByTestId("chip");
-    expect(screen.getByText("1").getAttribute("class")).toContain(
+    // The tone is on the span that OWNS the number, never on the rolling
+    // number itself - it carries no colour, and inherits this one across the
+    // shadow boundary it draws its digits inside.
+    expect(part(chip, "data-chip-count").getAttribute("class")).toContain(
       "text-primary",
     );
     expect(chip.textContent).toBe("1");
 
     rerenderChip(rerender, { ...baseProps(), text: "1", working: false });
 
-    expect(screen.getByText("1").getAttribute("class")).not.toContain(
+    expect(part(chip, "data-chip-count").getAttribute("class")).not.toContain(
       "text-primary",
     );
   });
@@ -332,6 +358,33 @@ describe("<ChatDockCompactChip />", () => {
     expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBeNull();
   });
 
+  // A failure is the one arrival on this strip that is not simply news, so it
+  // rings in the destructive tone. The flavour rides the TOKEN rather than a
+  // second prop: the ring fires on the token changing, so a flavour that could
+  // move without it would be a ring that never ran.
+  it("rings a failure token in the destructive tone", () => {
+    const { rerender } = renderChip({
+      ...baseProps(),
+      pulseToken: "failed:cmd-1",
+    });
+
+    expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBe(
+      "failure",
+    );
+
+    // A second failure is a second token, so it rings again - and a shell
+    // merely running goes back to the plain ring.
+    fireAnimationEnd(screen.getByTestId("chip"));
+    rerenderChip(rerender, { ...baseProps(), pulseToken: "failed:cmd-2" });
+    expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBe(
+      "failure",
+    );
+
+    fireAnimationEnd(screen.getByTestId("chip"));
+    rerenderChip(rerender, { ...baseProps(), pulseToken: "running" });
+    expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBe("true");
+  });
+
   it("does not pulse again on a re-render with the same token once cleared", () => {
     const props = { ...baseProps(), pulseToken: "3" };
     const { rerender } = renderChip(props);
@@ -341,5 +394,72 @@ describe("<ChatDockCompactChip />", () => {
     rerenderChip(rerender, { ...props, pulseToken: "3" });
 
     expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBeNull();
+  });
+
+  // The strip's half of the first-paint rule. A chip mounted inside a
+  // suppressed arrival swallows its pulse once and for all: the flip that
+  // follows re-renders it, and a chip that was there for the chat opening must
+  // not ring a commit later instead.
+  describe("under a suppressed arrival", () => {
+    it("swallows the mount pulse, and keeps swallowing it after the flip", () => {
+      const props = { ...baseProps(), pulseToken: "3" };
+      const { rerender } = render(
+        <TooltipProvider delayDuration={0}>
+          <ChatDockChipArrival suppressed>
+            <ChatDockCompactChip {...props} />
+          </ChatDockChipArrival>
+        </TooltipProvider>,
+      );
+
+      expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBeNull();
+
+      rerender(
+        <TooltipProvider delayDuration={0}>
+          <ChatDockChipArrival suppressed={false}>
+            <ChatDockCompactChip {...props} />
+          </ChatDockChipArrival>
+        </TooltipProvider>,
+      );
+
+      expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBeNull();
+    });
+
+    // ...and the token still moving IS news, whenever the chip mounted.
+    it("still pulses when the token changes afterwards", () => {
+      const props = { ...baseProps(), pulseToken: "3" };
+      const { rerender } = render(
+        <TooltipProvider delayDuration={0}>
+          <ChatDockChipArrival suppressed>
+            <ChatDockCompactChip {...props} />
+          </ChatDockChipArrival>
+        </TooltipProvider>,
+      );
+
+      rerender(
+        <TooltipProvider delayDuration={0}>
+          <ChatDockChipArrival suppressed={false}>
+            <ChatDockCompactChip {...props} pulseToken="4" />
+          </ChatDockChipArrival>
+        </TooltipProvider>,
+      );
+
+      expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBe(
+        "true",
+      );
+    });
+  });
+
+  // The roll is per NUMBER, and only where the whole short form is numbers
+  // with known furniture between them. `+1 −2` and `99+` are printed as they
+  // stand: parsing them would roll pieces the caller never meant to expose.
+  describe("rolling counts", () => {
+    it("keeps every short form's text exactly as it reads", () => {
+      const shapes = ["3", "0", "2 · 1", "2/5", "99+", "+1 −2"];
+      for (const text of shapes) {
+        renderChip({ ...baseProps(), text });
+        expect(screen.getByTestId("chip").textContent, text).toBe(text);
+        cleanup();
+      }
+    });
   });
 });

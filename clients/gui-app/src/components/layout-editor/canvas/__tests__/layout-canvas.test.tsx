@@ -236,7 +236,7 @@ describe("the session's canvas", () => {
   // The chip names the state the region is in RIGHT NOW, so a write while the
   // pointer is resting on the region has to move it. This is the one thing
   // that can go wrong now that the label is remembered between paints instead
-  // of rebuilding all 22 regions' values on each one (R1-11).
+  // of rebuilding all 23 regions' values on each one (R1-11).
   it("moves the chip's state word when the layout is written under the pointer", () => {
     openSession();
     const view = render(

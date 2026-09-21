@@ -427,10 +427,13 @@ describe("touchedRegionIds and the session change summary", () => {
     const entry = DEFAULT_LAYOUT_SNAPSHOT;
     const exit: LayoutSnapshot = {
       ...DEFAULT_LAYOUT_SNAPSHOT,
-      overrides: { mic: { shown: "hidden" }, agent: { shown: "hidden" } },
+      overrides: { mic: { shown: "hidden" }, minimap: { shown: "hidden" } },
     };
 
-    expect([...touchedRegionIds(entry, exit)].sort()).toEqual(["agent", "mic"]);
+    expect([...touchedRegionIds(entry, exit)].sort()).toEqual([
+      "mic",
+      "minimap",
+    ]);
   });
 
   it("counts a region touched exactly once regardless of how many keys it changed", () => {

@@ -118,6 +118,7 @@ import {
   useSubagentOpenStore,
 } from "@/stores/chats/subagent-open-store";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import { isEpicCanvasTileInstanceLive } from "@/stores/epics/canvas/tile-instance-liveness";
@@ -3951,19 +3952,25 @@ function ChatMessagesInner(props: ChatMessagesInnerProps) {
             mobileViewport: isMobileViewport,
           }) ? (
             <div className="contents max-md:hidden">
-              <ChatTurnMinimap
-                ref={minimapHotspotRef}
-                rows={listRows}
-                transcriptWindow={transcriptWindow}
-                inViewRefreshRef={minimapInViewRefreshRef}
-                listRef={chatTimelineRef}
-                topOffsetAdjustmentRef={listTopOffsetAdjustmentRef}
-                viewportRef={transcriptContainerRef}
-                bottomInset={endInset}
-                onSelect={onMinimapItemSelect}
-                shown={minimapShown}
-                side={minimapSide}
-              />
+              {/* The minimap is a region with no chrome of its own to hang a
+                  menu on, so it takes one here (L-144). The wrapper is
+                  `display: contents`, so the rail's absolute placement is
+                  untouched. */}
+              <LayoutRegionContextMenu regionId="minimap">
+                <ChatTurnMinimap
+                  ref={minimapHotspotRef}
+                  rows={listRows}
+                  transcriptWindow={transcriptWindow}
+                  inViewRefreshRef={minimapInViewRefreshRef}
+                  listRef={chatTimelineRef}
+                  topOffsetAdjustmentRef={listTopOffsetAdjustmentRef}
+                  viewportRef={transcriptContainerRef}
+                  bottomInset={endInset}
+                  onSelect={onMinimapItemSelect}
+                  shown={minimapShown}
+                  side={minimapSide}
+                />
+              </LayoutRegionContextMenu>
             </div>
           ) : null}
           {hasContent ? (

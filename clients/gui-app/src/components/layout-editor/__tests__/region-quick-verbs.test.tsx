@@ -11,6 +11,12 @@ import {
   LayoutClusterContextMenu,
   LayoutRegionContextMenu,
 } from "@/components/layout-editor/region-quick-verbs";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { offeredQuickVerbs } from "@/components/layout-editor/regions/quick-verbs";
@@ -352,6 +358,57 @@ describe("<LayoutClusterContextMenu />", () => {
 
     expect(screen.queryByTestId("layout-quick-verb-access-chip")).toBeNull();
     expect(screen.queryByTestId("layout-quick-verb-minimap-hide")).toBeNull();
+  });
+
+  /**
+   * A cluster is a CONTAINER, and one may hold controls that own their own
+   * right-click - a file row in Changed files, a queue item (L-144).
+   *
+   * The innermost menu wins, and this is the measurement that says so rather
+   * than the module's old claim that both would fire: Radix composes the
+   * caller's handler ahead of its own opener and skips that opener once the
+   * event is default-prevented, and the inner trigger has already prevented it
+   * by the time the event reaches the cluster's. Nothing in
+   * `region-quick-verbs.tsx` arbitrates it, so this is the only thing that
+   * would notice if the primitive stopped behaving that way.
+   */
+  it("leaves a press on an inner control's own menu to that menu", () => {
+    render(
+      <LayoutClusterContextMenu>
+        <div data-testid="cluster">
+          <span data-layout-region="changedFiles" data-testid="row">
+            <ContextMenu>
+              <ContextMenuTrigger asChild>
+                <button type="button" data-testid="inner">
+                  a row with a menu
+                </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem data-testid="inner-item">
+                  Reveal in Finder
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
+            <span data-testid="row-header">3 files changed</span>
+          </span>
+        </div>
+      </LayoutClusterContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId("inner"));
+
+    expect(screen.queryByTestId("inner-item")).not.toBeNull();
+    expect(
+      screen.queryByTestId("layout-quick-verb-changedFiles-hide"),
+    ).toBeNull();
+
+    // And the row's own header, which nothing else is listening on, still
+    // gets the verbs.
+    fireEvent.contextMenu(screen.getByTestId("row-header"));
+
+    expect(
+      screen.queryByTestId("layout-quick-verb-changedFiles-hide"),
+    ).not.toBeNull();
   });
 });
 

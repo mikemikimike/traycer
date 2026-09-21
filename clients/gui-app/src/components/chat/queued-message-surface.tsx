@@ -72,6 +72,11 @@ import { useManagedCommandDoor } from "@/lib/managed-commands/use-managed-comman
 import { isOptimisticQueuedItem } from "@/stores/chats/optimistic-queue";
 import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
+import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
+import {
+  ChatDockAttachedPanelBody,
+  ChatDockPillActions,
+} from "@/components/chat/chat-dock-attached-panel";
 
 interface QueuedMessageRowActionState {
   readonly canReorder: boolean;
@@ -147,6 +152,8 @@ function queueItemAllowsReorder(item: ChatQueuedItem): boolean {
 }
 
 export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
+  // Attached above the composer because its pill is the open one (L-142).
+  const attached = useChatDockSectionAttached("queue");
   const [open, setOpen] = useState(true);
   // Render the queue in its true order, user-typed and received A2A items
   // alike. Received items render read-only (see QueuedMessageRow) - the user
@@ -196,6 +203,80 @@ export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
 
   if (items.length === 0) return null;
 
+  // The same two booleans the header derives, needed here because the pill
+  // row's copy of these controls has no header to ask.
+  const showResumeQueueButton = hasPausedItems && !props.readOnly;
+  const showPauseQueueButton =
+    !showResumeQueueButton && hasPausableHumanItems && !props.readOnly;
+
+  const list = (
+    <DndContext
+      sensors={sensors}
+      autoScroll={false}
+      collisionDetection={reorderDnd.collisionDetection}
+      modifiers={QUEUED_MESSAGE_DND_MODIFIERS}
+      onDragStart={reorderDnd.handleDragStart}
+      onDragMove={reorderDnd.handleDragMove}
+      onDragOver={reorderDnd.handleDragOver}
+      onDragEnd={reorderDnd.handleDragEnd}
+      onDragCancel={reorderDnd.handleDragCancel}
+    >
+      <SortableContext
+        items={[...reorderDnd.sortableItemIds]}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className="flex flex-col divide-y divide-border/40">
+          {items.map((item, index) => {
+            return (
+              <QueuedMessageRow
+                key={item.queueItemId}
+                item={item}
+                index={index}
+                orderKey={reorderDnd.orderKey}
+                queueStatus={queueStatus}
+                canReorder={reorderableCount > 1}
+                canAct={props.canAct}
+                readOnly={props.readOnly}
+                activeTurnStatus={props.activeTurnStatus}
+                hasSteerInFlight={hasSteerInFlight}
+                editing={props.editingQueueItemId === item.queueItemId}
+                dropPreview={reorderDnd.dropPreview}
+                itemCount={items.length}
+                registerRowElement={registerRowElement}
+                onEdit={props.onEdit}
+                onCancel={props.onCancel}
+                onAbortSteer={props.onAbortSteer}
+                onSteerNow={props.onSteerNow}
+              />
+            );
+          })}
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
+
+  if (attached) {
+    return (
+      <>
+        <ChatDockPillActions>
+          <QueuedMessageQueueControls
+            canAct={props.canAct}
+            readOnly={props.readOnly}
+            resumeRequested={props.resumeRequested}
+            keepPausedRequested={props.keepPausedRequested}
+            showResumeQueueButton={showResumeQueueButton}
+            showPauseQueueButton={showPauseQueueButton}
+            onPause={props.onPause}
+            onResume={props.onResume}
+          />
+        </ChatDockPillActions>
+        <ChatDockAttachedPanelBody section="queue" testId="queued-message-list">
+          {list}
+        </ChatDockAttachedPanelBody>
+      </>
+    );
+  }
+
   return (
     <Collapsible
       open={open}
@@ -230,49 +311,7 @@ export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
             props.scrollRegionMaxHeightClass,
           )}
         >
-          <DndContext
-            sensors={sensors}
-            autoScroll={false}
-            collisionDetection={reorderDnd.collisionDetection}
-            modifiers={QUEUED_MESSAGE_DND_MODIFIERS}
-            onDragStart={reorderDnd.handleDragStart}
-            onDragMove={reorderDnd.handleDragMove}
-            onDragOver={reorderDnd.handleDragOver}
-            onDragEnd={reorderDnd.handleDragEnd}
-            onDragCancel={reorderDnd.handleDragCancel}
-          >
-            <SortableContext
-              items={[...reorderDnd.sortableItemIds]}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="flex flex-col divide-y divide-border/40">
-                {items.map((item, index) => {
-                  return (
-                    <QueuedMessageRow
-                      key={item.queueItemId}
-                      item={item}
-                      index={index}
-                      orderKey={reorderDnd.orderKey}
-                      queueStatus={queueStatus}
-                      canReorder={reorderableCount > 1}
-                      canAct={props.canAct}
-                      readOnly={props.readOnly}
-                      activeTurnStatus={props.activeTurnStatus}
-                      hasSteerInFlight={hasSteerInFlight}
-                      editing={props.editingQueueItemId === item.queueItemId}
-                      dropPreview={reorderDnd.dropPreview}
-                      itemCount={items.length}
-                      registerRowElement={registerRowElement}
-                      onEdit={props.onEdit}
-                      onCancel={props.onCancel}
-                      onAbortSteer={props.onAbortSteer}
-                      onSteerNow={props.onSteerNow}
-                    />
-                  );
-                })}
-              </div>
-            </SortableContext>
-          </DndContext>
+          {list}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -363,7 +402,116 @@ function KeepPausedIcon(props: { readonly pending: boolean }) {
   return <Pause className="size-3.5" />;
 }
 
-function QueuedMessageHeader(props: {
+/**
+ * The queue's own controls: the live announcement, the viewer notice and
+ * Pause / Resume / Keep paused.
+ *
+ * A component rather than JSX inside the header because the queue is a dock
+ * member now (L-139) and can stand as a pill: while its pill is the open one
+ * the panel below has no header at all, and these controls are portalled to
+ * the right end of the pill row instead (L-142). One definition, two homes.
+ */
+function QueuedMessageQueueControls(props: {
+  readonly canAct: boolean;
+  readonly readOnly: boolean;
+  readonly resumeRequested: boolean;
+  readonly keepPausedRequested: boolean;
+  readonly showResumeQueueButton: boolean;
+  readonly showPauseQueueButton: boolean;
+  readonly onPause: () => string | null;
+  readonly onResume: () => string | null;
+}) {
+  const {
+    canAct,
+    readOnly,
+    resumeRequested,
+    keepPausedRequested,
+    showResumeQueueButton,
+    showPauseQueueButton,
+    onPause,
+    onResume,
+  } = props;
+  const showKeepPausedButton = resumeRequested || keepPausedRequested;
+  const resumePending = resumeRequested && !keepPausedRequested;
+  const announcement = queueHeaderAnnouncement({
+    resumeRequested,
+    keepPausedRequested,
+  });
+  return (
+    <>
+      <span className="sr-only" aria-live="polite">
+        {announcement}
+      </span>
+      {readOnly ? (
+        <span className="flex shrink-0 items-center px-3 text-ui-xs text-muted-foreground">
+          Owner manages queue
+        </span>
+      ) : null}
+      {showResumeQueueButton ? (
+        <div className="flex shrink-0 items-center gap-1 pr-1.5">
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            className="h-7 shrink-0"
+            disabled={!canAct || showKeepPausedButton}
+            onClick={() => {
+              onResume();
+            }}
+            data-testid="resume-queue-button"
+          >
+            <QueueResumeIcon pending={resumePending} />
+            Resume
+          </Button>
+          {showKeepPausedButton ? (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              className="h-7 shrink-0"
+              disabled={!canAct || keepPausedRequested}
+              onClick={() => {
+                onPause();
+              }}
+              data-testid="keep-paused-queue-button"
+            >
+              <KeepPausedIcon pending={keepPausedRequested} />
+              Keep paused
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {showPauseQueueButton ? (
+        <div className="flex shrink-0 items-center pr-1.5">
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            className="h-7 shrink-0"
+            disabled={!canAct}
+            onClick={() => {
+              onPause();
+            }}
+            data-testid="pause-queue-button"
+          >
+            <Pause className="size-3.5" />
+            Pause
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The queue row's header on its own - the collapsed strip with its count, its
+ * status word and its Pause/Resume controls.
+ *
+ * Exported for the layout editor's PICTURE of the Full-row queue, which wants
+ * the header and nothing under it: mounting the whole panel there would drag a
+ * `DndContext` and a sortable list into a specimen that can never be dragged.
+ */
+export function QueuedMessageHeader(props: {
   readonly open: boolean;
   readonly count: number;
   readonly queueStatus: ChatSessionState["queue"]["status"];
@@ -389,21 +537,9 @@ function QueuedMessageHeader(props: {
     onResume,
     open,
   } = props;
-  const handlePause = useCallback(() => {
-    onPause();
-  }, [onPause]);
-  const handleResume = useCallback(() => {
-    onResume();
-  }, [onResume]);
   const showResumeQueueButton = canResumeQueue && !readOnly;
   const showPauseQueueButton =
     !showResumeQueueButton && canPauseQueue && !readOnly;
-  const showKeepPausedButton = resumeRequested || keepPausedRequested;
-  const resumePending = resumeRequested && !keepPausedRequested;
-  const announcement = queueHeaderAnnouncement({
-    resumeRequested,
-    keepPausedRequested,
-  });
   const summary = queueHeaderSummary({
     count,
     resumeRequested,
@@ -419,9 +555,6 @@ function QueuedMessageHeader(props: {
 
   const header = (
     <div className="flex items-stretch" data-testid="queued-message-header">
-      <span className="sr-only" aria-live="polite">
-        {announcement}
-      </span>
       {/* On the collapse trigger, not the header strip: the strip also holds
           Resume/Pause, and a strip-wide trigger surfaced this queue-state text
           while hovering either of those buttons. */}
@@ -471,57 +604,16 @@ function QueuedMessageHeader(props: {
           </span>
         </CollapsibleTrigger>
       </TooltipWrapper>
-      {readOnly ? (
-        <span className="flex shrink-0 items-center px-3 text-ui-xs text-muted-foreground">
-          Owner manages queue
-        </span>
-      ) : null}
-      {showResumeQueueButton ? (
-        <div className="flex shrink-0 items-center gap-1 pr-1.5">
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            className="h-7 shrink-0"
-            disabled={!canAct || showKeepPausedButton}
-            onClick={handleResume}
-            data-testid="resume-queue-button"
-          >
-            <QueueResumeIcon pending={resumePending} />
-            Resume
-          </Button>
-          {showKeepPausedButton ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              className="h-7 shrink-0"
-              disabled={!canAct || keepPausedRequested}
-              onClick={handlePause}
-              data-testid="keep-paused-queue-button"
-            >
-              <KeepPausedIcon pending={keepPausedRequested} />
-              Keep paused
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      {showPauseQueueButton ? (
-        <div className="flex shrink-0 items-center pr-1.5">
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            className="h-7 shrink-0"
-            disabled={!canAct}
-            onClick={handlePause}
-            data-testid="pause-queue-button"
-          >
-            <Pause className="size-3.5" />
-            Pause
-          </Button>
-        </div>
-      ) : null}
+      <QueuedMessageQueueControls
+        canAct={canAct}
+        readOnly={readOnly}
+        resumeRequested={resumeRequested}
+        keepPausedRequested={keepPausedRequested}
+        showResumeQueueButton={showResumeQueueButton}
+        showPauseQueueButton={showPauseQueueButton}
+        onPause={onPause}
+        onResume={onResume}
+      />
     </div>
   );
 

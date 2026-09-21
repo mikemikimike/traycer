@@ -11,6 +11,7 @@ import {
   siblingOffsetOf,
   targetSlotOf,
   type DragRect,
+  type DragSlot,
 } from "@/components/layout-editor/canvas/drag-model";
 
 /** Three 20px rows, 4px apart: tops 0, 24, 48. */
@@ -25,6 +26,25 @@ const UNEVEN_ROW: ReadonlyArray<DragRect> = [
   { left: 0, top: 0, width: 10, height: 20 },
   { left: 14, top: 0, width: 40, height: 20 },
 ];
+
+/**
+ * The composer toolbar as the real-Chrome driver measured it (L-143):
+ * `attachImage` 28px wide at x 242.5, `access` 120px wide at x 274.5, the
+ * cluster ending at 394.5. These are the numbers the leftward drag was
+ * impossible on.
+ */
+const TOOLBAR: ReadonlyArray<DragRect> = [
+  { left: 242.5, top: 0, width: 28, height: 28 },
+  { left: 274.5, top: 0, width: 120, height: 28 },
+];
+const TOOLBAR_CLUSTER = { start: 242.5, end: 394.5 } as const;
+
+/** The same shape stacked: a tall dock row above a short one, 4px apart. */
+const UNEVEN_STACK: ReadonlyArray<DragRect> = [
+  { left: 0, top: 0, width: 200, height: 120 },
+  { left: 0, top: 124, width: 200, height: 28 },
+];
+const STACK_CLUSTER = { start: 0, end: 152 } as const;
 
 const rowSlots = dragSlotsOf(ROWS, "y");
 
@@ -48,17 +68,233 @@ describe("the axis, measured rather than declared", () => {
   });
 });
 
+/**
+ * The claim rule (L-143), as a table over the shapes the product actually
+ * draws: both axes, both directions, and every size relation between the
+ * dragged member and the one it is passing.
+ *
+ * Each row states the boundary from both sides - the last offset that has NOT
+ * claimed and the first that has - because a rule is only pinned by the pair.
+ */
+interface SlotCase {
+  readonly name: string;
+  readonly slots: ReadonlyArray<DragSlot>;
+  readonly index: number;
+  readonly offset: number;
+  readonly claims: number;
+}
+
+const rowSlotsX = dragSlotsOf(UNEVEN_ROW, "x");
+const toolbarSlots = dragSlotsOf(TOOLBAR, "x");
+const stackSlots = dragSlotsOf(UNEVEN_STACK, "y");
+
+const SLOT_CASES: ReadonlyArray<SlotCase> = [
+  // Equal sizes, vertical. The pitch is 24 and the neighbour's centre is half
+  // a box further on, so the claim lands at 14 rather than at the whole 24 the
+  // centre rule asked for: the same gesture, arriving sooner.
+  { name: "y equal, at rest", slots: rowSlots, index: 0, offset: 0, claims: 0 },
+  {
+    name: "y equal, down, short",
+    slots: rowSlots,
+    index: 0,
+    offset: 13,
+    claims: 0,
+  },
+  {
+    name: "y equal, down, past",
+    slots: rowSlots,
+    index: 0,
+    offset: 16,
+    claims: 1,
+  },
+  {
+    name: "y equal, down, two on",
+    slots: rowSlots,
+    index: 0,
+    offset: 60,
+    claims: 2,
+  },
+  {
+    name: "y equal, up, short",
+    slots: rowSlots,
+    index: 2,
+    offset: -12,
+    claims: 2,
+  },
+  {
+    name: "y equal, up, past",
+    slots: rowSlots,
+    index: 2,
+    offset: -16,
+    claims: 1,
+  },
+  {
+    name: "y equal, up, two back",
+    slots: rowSlots,
+    index: 2,
+    offset: -40,
+    claims: 0,
+  },
+  {
+    name: "y equal, middle at rest",
+    slots: rowSlots,
+    index: 1,
+    offset: 0,
+    claims: 1,
+  },
+
+  // Narrow dragged past wide, horizontal, towards the end: the 10px chip's END
+  // edge has to reach the 40px chip's centre at 34.
+  {
+    name: "x narrow-vs-wide, short",
+    slots: rowSlotsX,
+    index: 0,
+    offset: 23,
+    claims: 0,
+  },
+  {
+    name: "x narrow-vs-wide, past",
+    slots: rowSlotsX,
+    index: 0,
+    offset: 25,
+    claims: 1,
+  },
+
+  // Wide dragged past narrow, horizontal, towards the start: the 40px chip's
+  // START edge has to reach the 10px chip's centre at 5. Its own centre never
+  // could - that is the bug.
+  {
+    name: "x wide-vs-narrow, short",
+    slots: rowSlotsX,
+    index: 1,
+    offset: -8,
+    claims: 1,
+  },
+  {
+    name: "x wide-vs-narrow, past",
+    slots: rowSlotsX,
+    index: 1,
+    offset: -10,
+    claims: 0,
+  },
+
+  // The measured toolbar, leftwards: `access` claims `attachImage`'s slot from
+  // -18 on, and the clamp lets it reach -32.
+  {
+    name: "toolbar access left, short",
+    slots: toolbarSlots,
+    index: 1,
+    offset: -17,
+    claims: 1,
+  },
+  {
+    name: "toolbar access left, past",
+    slots: toolbarSlots,
+    index: 1,
+    offset: -19,
+    claims: 0,
+  },
+
+  // The same shape stacked and travelling the other way: a 120px dock row
+  // dropped past the 28px one below it.
+  {
+    name: "y tall-vs-short, short",
+    slots: stackSlots,
+    index: 0,
+    offset: 17,
+    claims: 0,
+  },
+  {
+    name: "y tall-vs-short, past",
+    slots: stackSlots,
+    index: 0,
+    offset: 19,
+    claims: 1,
+  },
+  {
+    name: "y short-vs-tall, short",
+    slots: stackSlots,
+    index: 1,
+    offset: -63,
+    claims: 1,
+  },
+  {
+    name: "y short-vs-tall, past",
+    slots: stackSlots,
+    index: 1,
+    offset: -65,
+    claims: 0,
+  },
+];
+
 describe("which slot the dragged member claims", () => {
-  it("stays put until its own centre passes a neighbour's", () => {
-    // The first row's centre is at 10; the second row's is at 34.
-    expect(targetSlotOf(rowSlots, 0, 23)).toBe(0);
-    expect(targetSlotOf(rowSlots, 0, 25)).toBe(1);
+  it.each(SLOT_CASES)("$name", (slotCase) => {
+    expect(targetSlotOf(slotCase.slots, slotCase.index, slotCase.offset)).toBe(
+      slotCase.claims,
+    );
   });
 
   it("claims the furthest neighbour it has passed, in both directions", () => {
     expect(targetSlotOf(rowSlots, 0, 60)).toBe(2);
     expect(targetSlotOf(rowSlots, 2, -60)).toBe(0);
     expect(targetSlotOf(rowSlots, 2, -25)).toBe(1);
+  });
+
+  /**
+   * The case the centre rule could not perform at all (L-143): a member wider
+   * than the one standing first in its cluster, pulled to the cluster's own
+   * leading edge. The clamp is the whole budget the pointer has, so if the
+   * claim is not inside it the move does not exist - which is what the driver
+   * measured on the real composer.
+   */
+  it("lets a wide member claim the leading slot from inside its own clamp", () => {
+    const bounds = clampBoundsOf(
+      toolbarSlots[1],
+      TOOLBAR_CLUSTER.start,
+      TOOLBAR_CLUSTER.end,
+    );
+
+    expect(bounds.min).toBe(-32);
+    expect(targetSlotOf(toolbarSlots, 1, bounds.min)).toBe(0);
+    // And the drop is exactly the clamp's own edge, so the release spring has
+    // somewhere to land rather than resting on a rubber band.
+    expect(restingOffsetOf(toolbarSlots, 1, 0)).toBe(bounds.min);
+  });
+
+  it("lets a tall row claim the trailing slot from inside its own clamp", () => {
+    const bounds = clampBoundsOf(
+      stackSlots[0],
+      STACK_CLUSTER.start,
+      STACK_CLUSTER.end,
+    );
+
+    expect(bounds.max).toBe(32);
+    expect(targetSlotOf(stackSlots, 0, bounds.max)).toBe(1);
+    expect(restingOffsetOf(stackSlots, 0, 1)).toBe(bounds.max);
+  });
+
+  /**
+   * No flicker under a stationary pointer.
+   *
+   * The claim reads the RESTING slots and the offset and nothing else, so it
+   * is a pure function of where the pointer is: the live reflow a claim starts
+   * moves the siblings' transforms, never these numbers, and a sweep across
+   * the cluster therefore walks the slots in one direction and never doubles
+   * back. Monotonicity is the property that says so, and it is asserted on the
+   * uneven pair, where the two boundaries are furthest apart.
+   */
+  it("walks the slots monotonically as the pointer sweeps", () => {
+    const claims: number[] = [];
+    for (let offset = -14; offset <= 40; offset += 1)
+      claims.push(targetSlotOf(rowSlotsX, 1, offset));
+
+    expect(claims[0]).toBe(0);
+    expect(claims.at(-1)).toBe(1);
+    for (const [step, claim] of claims.entries())
+      if (step > 0) expect(claim).toBeGreaterThanOrEqual(claims[step - 1]);
+    // Re-asking at the same offset answers the same slot, whatever was claimed
+    // in between: there is no state to settle.
+    expect(targetSlotOf(rowSlotsX, 1, -14)).toBe(0);
   });
 });
 

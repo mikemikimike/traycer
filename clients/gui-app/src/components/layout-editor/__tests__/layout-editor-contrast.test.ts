@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -106,7 +106,8 @@ function parseCss(css: string): ReadonlyArray<CssRule> {
   return rules;
 }
 
-const RULES = parseCss(readFileSync(CSS_FILE, "utf8"));
+const CSS_SOURCE = readFileSync(CSS_FILE, "utf8");
+const RULES = parseCss(CSS_SOURCE);
 
 /** The value of `property` in the first rule the predicate accepts. */
 function cssValue(
@@ -257,23 +258,84 @@ function rootValue(name: string): string {
 }
 
 /**
- * The app header's own stacking layer, read from the markup that ships it.
+ * Everything the app column draws, so the frame's layer can be measured
+ * against the ceiling its comment CLAIMS rather than against one file (R3-10).
  *
- * The header is what covered the whole top edge of the outline this frame
- * replaced (LV2-04), so "above the header" is the claim with the measurement
- * behind it - and it is read rather than restated so a header that climbs a
- * layer fails here instead of quietly swallowing the frame again.
+ * The column is `app-shell.tsx`'s `[data-layout-column]`: the header, the tab
+ * strip and the screen. So these are the header's and the strip's own
+ * directories plus the four screen subtrees - not the whole of
+ * `components/layout`, whose `dialogs/` and `bridges/` are app-level modals and
+ * viewport chrome drawn OUTSIDE the column, which is exactly why they sit at 60
+ * and 70.
  */
-const HEADER_LAYER = (() => {
-  const layers = [
-    ...read("components/layout/header/app-header.tsx").matchAll(
-      /(?:^|[\s:"'])z-(\d+)/g,
-    ),
-  ].map((match) => Number(match[1]));
+const COLUMN_DIRS: ReadonlyArray<string> = [
+  "components/layout/header",
+  "components/layout/tabs",
+  "components/epic-canvas",
+  "components/chat",
+  "components/home",
+  "components/sample-workspace",
+];
+
+/**
+ * The one layer inside the column that is ABOVE the frame, excluded by name.
+ *
+ * `epic-shell.tsx:119` is an `absolute inset-0 z-50` repoint-failure card,
+ * inside the column and therefore over the frame's border. It is 70% opaque and
+ * appears only in an error state the sample workspace cannot reach, so it is
+ * recorded as the deliberate exception here and in the stylesheet's own comment
+ * rather than moved.
+ */
+const IN_COLUMN_EXCEPTION = "components/epic-canvas/epic-shell.tsx";
+
+/** Every `.tsx` under `directory`, tests excluded. */
+function sourceFiles(directory: string): ReadonlyArray<string> {
+  return readdirSync(path.join(SRC_DIR, directory), { recursive: true })
+    .map((entry) => `${directory}/${String(entry)}`)
+    .filter(
+      (file) =>
+        file.endsWith(".tsx") &&
+        !file.includes("__tests__") &&
+        !file.includes(".test."),
+    );
+}
+
+/**
+ * The highest stacking layer the app column itself draws.
+ *
+ * Scanned rather than restated, because the claim being guarded is about the
+ * whole column: the old bar was `app-header.tsx` alone, which the frame cleared
+ * at 21 and which would not have noticed the canvas climbing to 42.
+ *
+ * A file that calls `createPortal` is SKIPPED, with the reason that its overlay
+ * is not in the column at all - the floating popovers under `chat/` and
+ * `epic-canvas/` portal to `body` and sit at 50 there, above the frame and
+ * correctly so, exactly as every `components/ui` overlay does. The rule is
+ * derived from the source rather than kept as a list, so a new popover is
+ * exempt by portalling and a new in-column layer is not exempt at all.
+ */
+const COLUMN_LAYER = (() => {
+  const layers = COLUMN_DIRS.flatMap(sourceFiles).flatMap((file) => {
+    if (file === IN_COLUMN_EXCEPTION) return [];
+    const source = read(file);
+    if (source.includes("createPortal")) return [];
+    return [...source.matchAll(/(?:^|[\s:"'])z-(\d+)/g)].map((match) =>
+      Number(match[1]),
+    );
+  });
   if (layers.length === 0) {
-    throw new Error("app-header.tsx: no stacking layer to measure");
+    throw new Error("the app column has no stacking layer to measure");
   }
-  return Math.max(...layers);
+  // The editor's own in-column layer: a region in hand, lifted on the canvas.
+  // It lives in the stylesheet rather than in a className, so the scan above
+  // cannot see it.
+  const inHand = Number(
+    cssValue(
+      topLevel((selector) => selector === '[data-layout-dragging="1"]'),
+      "z-index",
+    ),
+  );
+  return Math.max(...layers, inHand);
 })();
 
 /**
@@ -292,6 +354,16 @@ const SAMPLE_TAB_COLOR = (() => {
   }
   return tokenName(value);
 })();
+
+/**
+ * The FILL of that same tab (L-138), read as declared.
+ *
+ * The redesign made the editor's tab a solid object rather than an outline
+ * with a rectangle floating inside it, so the fill is now part of the signal
+ * and is measured beside the outline - as a dilution of the same token, never
+ * as a colour of its own.
+ */
+const SESSION_TAB_FILL = rootValue("--layout-session-tab-fill");
 
 // --- measuring --------------------------------------------------------------
 
@@ -370,15 +442,121 @@ describe("layout-editor.css is read, not assumed", () => {
       '[data-layout-column][data-layout-editing="1"]::after',
     );
     expect(editingFrame("position")).toBe("absolute");
-    expect(editingFrame("inset")).toBe("0");
     expect(editingFrame("pointer-events")).toBe("none");
+    // The bar is the column's own ceiling, not the header's. The floor under it
+    // is what says the scan measured something: the canvas's positioned chrome
+    // (the minimap, the PiP, the diff header, the composer shell) sits at 40,
+    // so a scan that quietly matched nothing fails here rather than passing.
+    expect(COLUMN_LAYER).toBeGreaterThanOrEqual(40);
     const frameLayer = Number(rootValue(tokenName(editingFrame("z-index"))));
-    expect(frameLayer).toBeGreaterThan(HEADER_LAYER);
+    expect(frameLayer).toBeGreaterThan(COLUMN_LAYER);
   });
 
-  /** One signal, so the tab's cap and the screen's frame are one token. */
-  it("paints the sample tab and the editing frame from the same token", () => {
+  /**
+   * The one thing above the frame inside the column, kept honest.
+   *
+   * The exception is excluded by NAME, so it has to keep being what the reason
+   * says it is: an overlay that is translucent (a hard fill would hide the
+   * canvas rather than dim it) and that only an error state reaches. If it ever
+   * becomes something else, this is where that shows up instead of in a
+   * screenshot.
+   */
+  it("names the one in-column overlay that paints over the frame", () => {
+    const shell = read(IN_COLUMN_EXCEPTION);
+    expect(shell).toContain("absolute inset-0 z-50");
+    expect(shell).toContain("bg-background/70");
+    // Said where the number is, so a reader of the stylesheet learns it too.
+    expect(CSS_SOURCE).toContain("epic-canvas/epic-shell.tsx");
+  });
+
+  /**
+   * The frame clears the WINDOW's rounded corners (L-137).
+   *
+   * At `inset: 0` with square corners it ran into the macOS window corner and
+   * was sliced off at the top-left and bottom-left - the two corners of the
+   * column that ARE window corners while the inspector is docked right.
+   *
+   * The geometry is one pair of numbers on `:root` rather than a platform
+   * branch, because Electron does not expose the OS window radius. An inset
+   * rounded rect with radius `r` at inset `i` lies strictly inside a window
+   * whose corner radius is `R` whenever `r + i >= R`, so what this measures is
+   * that the pair clears a window corner comfortably larger than the ~10pt
+   * macOS draws - with room for an OS that grows it - and that the numbers are
+   * UNIFORM, which is what makes the frame follow the column in all three dock
+   * modes and on a square-cornered platform with no rule of its own.
+   */
+  it("insets and rounds the editing frame clear of the window's corners", () => {
+    const inset = rootValue(tokenName(editingFrame("inset")));
+    const radius = rootValue(tokenName(editingFrame("border-radius")));
+    const px = (value: string): number => {
+      const measured = /^(\d+(?:\.\d+)?)px$/.exec(value.trim())?.[1];
+      if (measured === undefined) {
+        throw new Error(`the editing frame's geometry is not in px: ${value}`);
+      }
+      return Number(measured);
+    };
+    expect(px(inset)).toBeGreaterThan(0);
+    expect(px(radius)).toBeGreaterThan(0);
+    // The macOS corner measured off the owner's screenshot is ~10pt; clearing
+    // 16 leaves the margin an OS bump would eat.
+    expect(px(inset) + px(radius)).toBeGreaterThanOrEqual(16);
+    // Uniform: one `inset` and one `border-radius`, not four of either. A mix
+    // of square and round corners would need to know which corners are the
+    // window's, which is the platform fact this design refuses to guess.
+    expect(inset.trim().split(/\s+/)).toHaveLength(1);
+    expect(radius.trim().split(/\s+/)).toHaveLength(1);
+  });
+
+  /**
+   * One signal, one token (L-138): the frame is the hollow amber outline
+   * around the screen and the editor's own tab is the solid amber object
+   * inside it, and a reader who sees an amber tab and a differently-coloured
+   * screen outline learns nothing from either.
+   *
+   * Both the tab's OUTLINE and its FILL are measured against the frame,
+   * because the redesign added the second one. The fill is a dilution of the
+   * same token over `--background` rather than a colour of its own - and it is
+   * opaque, because the tab chrome uses it to cover the strip's baseline under
+   * the active tab, where a translucent fill would let the seam show through.
+   */
+  it("paints the editor's tab and the editing frame from the same token", () => {
     expect(SAMPLE_TAB_COLOR).toBe(EDITING_FRAME_COLOR);
+    expect(SESSION_TAB_FILL).toContain(EDITING_FRAME_COLOR);
+    expect(SESSION_TAB_FILL).toContain("--background");
+    expect(SESSION_TAB_FILL).not.toContain("transparent");
+    // The tab reads the token by name, so the two cannot drift apart in a
+    // rename that touches only one of them.
+    expect(read("components/layout/tabs/header-tab-visual.tsx")).toContain(
+      "--layout-session-tab-fill",
+    );
+  });
+
+  /**
+   * The inner wash rectangle is GONE (L-138).
+   *
+   * It was a `rounded-md` box inset inside a tab whose real silhouette is an
+   * S-curved trapezoid, washed with 16% of the colour and sitting behind the
+   * label - so on a dark palette it read as a stray brown box rather than as
+   * a signal, and it never touched the amber outline the same tab was already
+   * wearing. The active tab now fills its own shape instead, so nothing here
+   * should paint a second decoration on top of it.
+   */
+  it("leaves the active editor tab one treatment rather than two", () => {
+    const visual = read("components/layout/tabs/header-tab-visual.tsx");
+    expect(
+      RULES.some((rule) =>
+        rule.selector.includes('data-layout-session-tab="wash"'),
+      ),
+    ).toBe(false);
+    // One geometry on the marker, unconditionally: the two-shape className was
+    // the wash, and a conditional one is how a second decoration comes back.
+    expect(visual).toContain(
+      'className="pointer-events-none absolute inset-x-0 bottom-0"',
+    );
+    // The marker survives in both states, because the dim exemption reads it
+    // and a tab the user clicked away from still has to stay lit.
+    expect(visual).toContain('"filled"');
+    expect(visual).toContain('"rest"');
   });
 
   /**
@@ -427,8 +605,12 @@ describe("the canvas decoration across every built-in palette", () => {
 
   /**
    * The editing mode's own colour, measured as what it IS: a 2px dotted frame
-   * around the app column and a 3px cap on the sample tab, both non-text
-   * indicators owing 3:1 (1.4.11). `--warning` is the tint of the status pair
+   * around the app column and, on the editor's own tab, a 1.5px outline around
+   * the whole silhouette in use and a 3px cap at rest - all non-text
+   * indicators owing 3:1 (1.4.11). The tab's FILL is not measured here and
+   * owes nothing: it is a dilution of this same token toward `--background`,
+   * so it is a surface rather than an indicator, and the outline drawn on top
+   * of it is what carries the signal. `--warning` is the tint of the status pair
    * and is a mid amber in the light palettes, which is why the pair's
    * FOREGROUND is what ships here - the same reason L-78 took `--foreground`
    * over `--ring` for the selection outline.
@@ -436,13 +618,13 @@ describe("the canvas decoration across every built-in palette", () => {
    * Both halves land on the same surfaces: the tab strip sits on the app's
    * header and the frame runs around a column that can show any of them.
    */
-  it("holds 3:1 for the editing frame and the sample tab's cap", () => {
+  it("holds 3:1 for the editing frame and the editor tab's own stroke", () => {
     expect(
       violations((palette, need) => {
         onSurfaces(palette, need, "editing frame", () =>
           themeToken(palette.tokens, EDITING_FRAME_COLOR),
         );
-        onSurfaces(palette, need, "sample tab cap", () =>
+        onSurfaces(palette, need, "editor tab stroke", () =>
           themeToken(palette.tokens, SAMPLE_TAB_COLOR),
         );
       }),

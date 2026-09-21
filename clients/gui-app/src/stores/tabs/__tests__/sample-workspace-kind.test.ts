@@ -136,7 +136,11 @@ describe("sample-workspace kind - registration and descriptor", () => {
     const tab = sampleWorkspaceTabModule.build(null);
     expect(tab.kind).toBe("sample-workspace");
     expect(tab.id).toBe("sample-workspace");
-    expect(tab.name).toBe("Sample workspace");
+    // The MODE, not the content (L-87, L-138). Also short enough that the
+    // strip's overflow never cuts it, which is what left the old sixteen-
+    // character label rendering as "Sample" beside a half-drawn outline.
+    expect(tab.name).toBe("Customizing");
+    expect(tab.name.length).toBeLessThan("Sample workspace".length);
     expect(tab.canDuplicate).toBe(false);
     expect(tab.canOpenInNewWindow).toBe(false);
     expect(tab.route).toBe("/sample-workspace");

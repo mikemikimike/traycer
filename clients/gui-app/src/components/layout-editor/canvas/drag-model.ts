@@ -92,12 +92,39 @@ export function dragShiftOf(
 }
 
 /**
- * The slot the dragged member currently claims: the furthest neighbour its own
- * centre has passed.
+ * The slot the dragged member currently claims: the furthest neighbour whose
+ * centre its LEADING EDGE has passed (L-143).
  *
- * Centres rather than edges, so a member wider than its neighbour does not
- * claim a slot it is merely overlapping, and the claim is symmetric in both
- * directions however unequal the sizes are.
+ * The leading edge is the one facing the way the member is going, so it is
+ * decided per neighbour rather than from the sign of `offset`: the only way to
+ * reach a neighbour that sits BEFORE the dragged member is to travel towards
+ * the start, and the edge leading that travel is the member's own start edge;
+ * for a neighbour AFTER it, the end edge. There is no discontinuity at
+ * `offset === 0`, and at rest neither edge has passed anything, because the
+ * slots do not overlap: a preceding neighbour's centre is left of the dragged
+ * member's start, and a following one's is right of its end.
+ *
+ * Centres were the old rule, and they made a whole class of move impossible.
+ * `clampBoundsFor` pins every member inside its own cluster (L-71), so the
+ * furthest left a member's centre can ever get is `clusterStart + size / 2`.
+ * For a member WIDER than the one standing first in the cluster, that is still
+ * to the right of the leader's centre, so the slot could never be claimed
+ * however hard the pointer pulled - measured live, `access` (120px) could not
+ * be dragged in front of `attachImage` (28px). The same shape closed the
+ * trailing edge to a wide member and both edges of a vertical stack. Passing
+ * the neighbour's centre with the leading edge is the ordinary half-overlap
+ * rule instead: for equal sizes it claims at half a pitch rather than a whole
+ * one, which is the same gesture arriving sooner.
+ *
+ * Nothing oscillates under a stationary pointer. `slots` are the RESTING
+ * geometry, measured once when the drag crossed its threshold and never
+ * re-read: the live reflow that a claim starts moves the siblings' transforms,
+ * not the numbers compared here. So the claim is a pure, monotone function of
+ * `offset` - moving towards the start can only ever claim an EARLIER slot, and
+ * moving back releases it at the same boundary it was taken at - and a pointer
+ * that stops moving stops the claim exactly where it is. Comparing against the
+ * siblings' live rects is what would close the loop, and `drag-engine.ts`
+ * deliberately hands over no way to do it.
  */
 export function targetSlotOf(
   slots: ReadonlyArray<DragSlot>,
@@ -105,13 +132,16 @@ export function targetSlotOf(
   offset: number,
 ): number {
   const dragged = slots[index];
-  const centre = dragged.start + offset + dragged.size / 2;
+  const leadingStart = dragged.start + offset;
+  const leadingEnd = leadingStart + dragged.size;
   let target = index;
   for (const [member, slot] of slots.entries()) {
     if (member === index) continue;
     const neighbour = slot.start + slot.size / 2;
-    if (member < index && centre < neighbour) target = Math.min(target, member);
-    if (member > index && centre > neighbour) target = Math.max(target, member);
+    if (member < index && leadingStart < neighbour)
+      target = Math.min(target, member);
+    if (member > index && leadingEnd > neighbour)
+      target = Math.max(target, member);
   }
   return target;
 }

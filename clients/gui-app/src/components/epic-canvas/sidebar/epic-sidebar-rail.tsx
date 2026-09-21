@@ -1,10 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import {
   useDraggable,
   useDroppable,
@@ -14,23 +8,17 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { Button } from "@/components/ui/button";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
 import {
   leftPanelRunsFromRail,
   railRegionForLeftPanelId,
   type RailEntry,
 } from "@/lib/layout/rail";
-import { useLayoutRail } from "@/lib/layout/rail-view";
-import {
-  ContextMenu,
-  ContextMenuCheckboxItem,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
 import { DropLine } from "@/components/ui/drop-line";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
+import { useRailBreaksEditing } from "@/components/epic-canvas/sidebar/use-rail-breaks-editing";
 import {
   getLeftPanelRailDragId,
   getLeftPanelRailDropId,
@@ -46,12 +34,10 @@ import {
   useLeftPanelRailDropPreview,
   useLeftPanelSectionDragSource,
 } from "@/components/epic-canvas/dnd/dnd-store";
-import { CustomizeLayoutMenuItem } from "@/components/layout-editor/customize-layout-menu-item";
 import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
 import {
-  clearRailVisibilityOverrides,
-  setRailVisibilityOverride,
+  useLayoutRail,
   useLeftPanelGroups,
   usePanelVisibilityOverrides,
 } from "@/lib/layout/rail-view";
@@ -66,7 +52,6 @@ import { useActiveEpicArtifactId } from "@/stores/epics/canvas/store";
 import {
   getLeftPanelDefinition,
   isLeftPanelVisible,
-  LEFT_PANEL_DEFINITIONS,
   resolveActiveVisibleGroupIndex,
   retainDisplayedPrPanel,
   type LeftPanelAvailabilityContext,
@@ -190,6 +175,9 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
   const collapsed = useMainPanelCollapsed(tabId);
   const panelGroups = useLeftPanelGroups();
   const rail = useLayoutRail();
+  // Asked once for the whole rail (L-109): the breaks below are handles only
+  // while this rail is the one being customized, and elements at all only then.
+  const breaksEditing = useRailBreaksEditing();
   const commentsPanelRevealed = useCommentsPanelRevealed(tabId);
   // The host the PR panel records presence under (see `EpicLeftPanelHost`).
   const canvasHostId = useCanvasHostId();
@@ -318,6 +306,9 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                 railPanelDropPreview.panelId === group.primaryPanel.id
                   ? railPanelDropPreview.position
                   : null;
+              // At rest the boundary after this group is the spacing the rail
+              // already has and nothing else (L-140).
+              const breakId = breaksEditing ? group.dividerId : null;
               return (
                 <Fragment key={group.primaryPanel.id}>
                   <RailGroupButton
@@ -332,9 +323,9 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                       groupDropPosition === "combine" ? "combine" : null
                     }
                   />
-                  {group.dividerId === null ? null : (
+                  {breakId === null ? null : (
                     <LeftPanelRailDivider
-                      dividerId={group.dividerId}
+                      dividerId={breakId}
                       orientation={orientation}
                     />
                   )}
@@ -355,110 +346,6 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
         />
       </ContextMenu>
     </TooltipProvider>
-  );
-}
-
-/**
- * Rail context menu: every panel we have, each with a checkmark for whether it
- * is in the rail right now. Unchecking hides a panel; checking one reveals it -
- * including the presence-gated `pull-requests` / `comments`, where an explicit
- * check keeps the icon there even before the thing that would reveal it exists.
- *
- * A choice is stored only when it disagrees with the panel's own rule (see
- * `setPanelVisibilityOverride`), so checking an already-auto-visible panel
- * leaves it following that rule rather than pinning today's answer forever.
- *
- * The last visible panel cannot be unchecked: the sidebar body always renders
- * some panel, so an empty rail would leave the two disagreeing with no icon to
- * click back.
- */
-function RailContextMenuContent(props: {
-  readonly context: LeftPanelAvailabilityContext;
-  readonly contextPanelId: LeftPanelId | null;
-}): ReactNode {
-  const { context, contextPanelId } = props;
-  const visibility = LEFT_PANEL_DEFINITIONS.map((definition) => ({
-    definition,
-    visible: isLeftPanelVisible(definition, context),
-    autoVisible: definition.isAutoVisible(context),
-  }));
-  const visibleCount = visibility.filter((entry) => entry.visible).length;
-  const entries = visibility.map((entry) => ({
-    ...entry,
-    // The last one standing stays put; see the note above.
-    locked: entry.visible && visibleCount === 1,
-  }));
-  const hasOverrides = Object.keys(context.visibilityOverrideById).length > 0;
-  const pointedEntry =
-    entries.find((entry) => entry.definition.id === contextPanelId) ?? null;
-
-  return (
-    <ContextMenuContent
-      className="min-w-56"
-      data-testid="epic-rail-context-menu"
-    >
-      {pointedEntry !== null && visibleCount > 1 ? (
-        <>
-          <ContextMenuItem
-            onSelect={() =>
-              setRailVisibilityOverride(pointedEntry.definition.id, false)
-            }
-            data-testid="epic-rail-hide-pointed-panel"
-          >
-            {`Hide '${pointedEntry.definition.title}'`}
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-        </>
-      ) : null}
-      {entries.map((entry) => (
-        <ContextMenuCheckboxItem
-          key={entry.definition.id}
-          checked={entry.visible}
-          disabled={entry.locked}
-          onCheckedChange={(next) =>
-            setRailVisibilityOverride(
-              entry.definition.id,
-              next === entry.autoVisible ? null : next,
-            )
-          }
-          data-testid={`epic-rail-toggle-${entry.definition.id}`}
-        >
-          <entry.definition.icon
-            className="text-muted-foreground"
-            aria-hidden
-          />
-          {entry.definition.title}
-          {entry.visible && !entry.autoVisible ? (
-            <span className="ml-auto pl-4 text-ui-xs text-muted-foreground">
-              {entry.definition.forcedOnHint}
-            </span>
-          ) : null}
-        </ContextMenuCheckboxItem>
-      ))}
-      {hasOverrides ? (
-        <>
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            onSelect={clearRailVisibilityOverrides}
-            data-testid="epic-rail-reset-panel-visibility"
-          >
-            Reset panel visibility
-          </ContextMenuItem>
-        </>
-      ) : null}
-      <ContextMenuSeparator />
-      {/* The way in (L-19), on the panel the pointer was over so the editor
-          opens on that region's own section. No quick verbs beside it: this
-          menu's hide item and its checkbox list ALREADY are this rail's
-          show/hide verbs, and they write the same values a quick verb would. */}
-      <CustomizeLayoutMenuItem
-        target={
-          pointedEntry === null
-            ? null
-            : railRegionForLeftPanelId(pointedEntry.definition.id)
-        }
-      />
-    </ContextMenuContent>
   );
 }
 

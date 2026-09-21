@@ -1,4 +1,8 @@
 import {
+  LAYOUT_CLUSTER_ATTRIBUTE,
+  LAYOUT_MEMBER_ATTRIBUTE,
+} from "@/components/layout-editor/canvas/canvas-attributes";
+import {
   armLayoutDrag,
   type LayoutDragTarget,
 } from "@/components/layout-editor/canvas/drag-engine";
@@ -22,26 +26,12 @@ import { getLayoutSnapshot } from "@/stores/layout/layout-store";
  */
 
 /**
- * The box a surface lays one cluster of draggable members out in: the dock's
- * rows card, the composer's compact chip strip, each composer toolbar cluster,
- * the sidebar's icon column.
- *
- * Stamped by the surface because only it knows which of its elements is that
- * box - see {@link resolveGroup}, which is the one reader.
+ * The markers live in `canvas-attributes.ts`, a leaf with no imports, because
+ * the surfaces that stamp them are app surfaces and must not pull this module's
+ * graph in to read a string (R3-05). Re-exported here so the editor's own
+ * callers keep one import.
  */
-export const LAYOUT_CLUSTER_ATTRIBUTE = "data-layout-cluster";
-
-/**
- * A member's own id, where it is not a region's.
- *
- * Every member of a canvas order group but one IS a region, and carries its id
- * in `data-layout-region`. The exception is the rail's dividers (L-25, L-115):
- * they are entries in `arrangement.rail` that the rail draws and a drop places
- * by, and nothing else about them is a region - no name, no value bag, no row
- * in the index - so they carry their entry id here instead of a region id
- * `LAYOUT_REGION_IDS` would have to invent.
- */
-export const LAYOUT_MEMBER_ATTRIBUTE = "data-layout-member";
+export { LAYOUT_CLUSTER_ATTRIBUTE, LAYOUT_MEMBER_ATTRIBUTE };
 
 /**
  * Arm a drag on the draggable member under a press.

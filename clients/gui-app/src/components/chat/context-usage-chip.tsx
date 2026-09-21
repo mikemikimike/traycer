@@ -5,16 +5,10 @@ import {
   type CSSProperties,
   type Ref,
 } from "react";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useComposerTileId } from "@/components/home/composer/composer-tile-hooks";
 import { FoldVertical, Pin, PinOff } from "lucide-react";
-import {
-  animate,
-  useMotionValue,
-  useReducedMotion,
-  useTransform,
-} from "motion/react";
-import * as m from "motion/react-m";
 import type { TokenUsage } from "@traycer/protocol/persistence/epic/foundation";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +16,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { RollingNumber } from "@/components/ui/rolling-number";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import {
   buildContextUsageRows,
   computeEffectiveContextUsage,
@@ -62,10 +58,18 @@ type ContextUsageMeterStyle = CSSProperties & {
   readonly "--context-usage-percent": string;
 };
 
-const PINNED_NUMBER_TRANSITION = {
-  duration: 0.16,
-  ease: "easeOut",
-} as const;
+/**
+ * The arc's travel when the reading moves. 240ms is the longest value in the
+ * app's timing family that is still a UI response rather than a decay cue, and
+ * a sweep needs the extra frames a digit roll does not: the eye follows a ring
+ * around its whole circumference.
+ *
+ * Gated rather than written with `motion-reduce:`, because the class-level
+ * variant sees only the OS query and this app also has its own "Panel
+ * animations" switch - the exact gap `AnimatedPinnedInteger` shipped with.
+ */
+const RING_ARC_TRANSITION_CLASS_NAME =
+  "transition-[stroke-dashoffset] duration-240 ease-spring";
 
 export function ContextUsageChip(props: ContextUsageChipProps) {
   const tileId = useComposerTileId();
@@ -73,7 +77,25 @@ export function ContextUsageChip(props: ContextUsageChipProps) {
     regionId: "contextUsage",
     instanceId: tileId,
   });
-  return <ContextUsageChipView {...props} ref={ref} contextEditing={editing} />;
+  const chip = (
+    <ContextUsageChipView {...props} ref={ref} contextEditing={editing} />
+  );
+  // L-144: every pointable region offers its verbs on right-click. The one
+  // case that gets no menu root is the one with nothing to point AT - the
+  // chip hides itself outside an editing session when no turn has carried a
+  // usable rollup, and a `display: contents` trigger around nothing would
+  // still answer a press landing on whatever is behind it. The predicate is
+  // `ContextUsageChipView`'s own, asked of the same two inputs.
+  const drawsNothing =
+    !editing &&
+    (props.usage === null ||
+      computeEffectiveContextUsage(props.usage) === null);
+  if (drawsNothing) return chip;
+  return (
+    <LayoutRegionContextMenu regionId="contextUsage">
+      {chip}
+    </LayoutRegionContextMenu>
+  );
 }
 
 export function ContextUsageChipView({
@@ -200,7 +222,15 @@ export function ContextUsageChipView({
     >
       {indicatorStyle === "text" ? (
         <>
-          <span className="@max-[28rem]:sr-only">{percent}% context left</span>
+          <span className="@max-[28rem]:sr-only">
+            <RollingNumber
+              value={percent}
+              format={undefined}
+              className={undefined}
+              testId="context-usage-chip-percent-value"
+            />
+            % context left
+          </span>
           <span
             aria-hidden
             data-testid="context-usage-meter"
@@ -300,6 +330,12 @@ const RING_MINIMUM_FILL = 0.05;
  */
 function ContextUsageRing({ percent, style }: ContextUsageRingProps) {
   const filled = Math.max(RING_MINIMUM_FILL, percent / 100);
+  const motionEnabled = useMotionEnabled();
+  // A CSS transition never runs against a first computed value, so the arc is
+  // drawn where it belongs on the first paint and only sweeps on a change.
+  const arcClassName = motionEnabled
+    ? RING_ARC_TRANSITION_CLASS_NAME
+    : undefined;
   return (
     <span
       data-testid="context-usage-ring"
@@ -325,6 +361,7 @@ function ContextUsageRing({ percent, style }: ContextUsageRingProps) {
         <circle
           data-testid="context-usage-ring-arc"
           data-percent-left={percent}
+          className={arcClassName}
           cx="10"
           cy="10"
           r={RING_RADIUS}
@@ -347,7 +384,12 @@ function ContextUsageRing({ percent, style }: ContextUsageRingProps) {
             percent === 100 ? "text-[0.5rem]" : "text-[0.625rem]",
           )}
         >
-          {percent}
+          <RollingNumber
+            value={percent}
+            format={undefined}
+            className={undefined}
+            testId="context-usage-ring-percent-value"
+          />
         </span>
       ) : null}
     </span>
@@ -416,8 +458,17 @@ function ContextUsageBreakdown({
     <div className="flex flex-col gap-2 text-ui-xs">
       <div className="flex items-baseline justify-between gap-3 border-b border-border/40 pb-1.5">
         <span className="font-medium text-foreground">Context window</span>
-        <span className="font-mono tabular-nums">
-          {effective.percentLeft}% left
+        <span
+          data-testid="context-usage-breakdown-percent"
+          className="font-mono tabular-nums"
+        >
+          <RollingNumber
+            value={effective.percentLeft}
+            format={undefined}
+            className={undefined}
+            testId="context-usage-breakdown-percent-value"
+          />
+          % left
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
@@ -485,10 +536,11 @@ function ContextUsagePinnedStrip({
             )}
           >
             Context{" "}
-            <AnimatedPinnedInteger
+            <RollingNumber
               value={effective.percentLeft}
+              format={undefined}
+              className="inline-block min-w-[3ch] text-right"
               testId="context-usage-pinned-percent-value"
-              className="inline-block min-w-[3ch] text-right tabular-nums"
             />
             %<span className="@max-[34rem]:sr-only"> left</span>
           </span>
@@ -557,48 +609,6 @@ function PinnedUsageRow({ row }: UsageRowProps) {
         {formatContextUsageRowValue(row)}
       </span>
     </span>
-  );
-}
-
-interface AnimatedPinnedIntegerProps {
-  readonly value: number;
-  readonly testId: string;
-  readonly className: string;
-}
-
-function AnimatedPinnedInteger({
-  value,
-  testId,
-  className,
-}: AnimatedPinnedIntegerProps) {
-  const shouldReduceMotion = useReducedMotion() === true;
-  const animatedValue = useMotionValue(value);
-  const roundedValue = useTransform(animatedValue, (latest) =>
-    Math.round(latest).toString(),
-  );
-
-  useLayoutEffect(() => {
-    if (shouldReduceMotion) {
-      animatedValue.set(value);
-      return;
-    }
-
-    const controls = animate(animatedValue, value, PINNED_NUMBER_TRANSITION);
-    return () => controls.stop();
-  }, [animatedValue, shouldReduceMotion, value]);
-
-  if (shouldReduceMotion) {
-    return (
-      <span data-testid={testId} className={className}>
-        {value}
-      </span>
-    );
-  }
-
-  return (
-    <m.span data-testid={testId} className={className}>
-      {roundedValue}
-    </m.span>
   );
 }
 

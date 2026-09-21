@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 import { Bell } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -8,6 +10,8 @@ import {
 } from "@/components/ui/popover";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { NotificationsPopover } from "@/components/notifications/notifications-popover";
+import { RollingNumber } from "@/components/ui/rolling-number";
+import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import { useNotificationCenterGeometry } from "@/hooks/notifications/use-notification-center-geometry";
 import { useNotificationCenterOpenLifecycle } from "@/hooks/notifications/use-notification-center-open-lifecycle";
 import {
@@ -34,6 +38,25 @@ import {
 
 /** The center's own surface, marked by `NotificationsPopover`. */
 const NOTIFICATION_CENTER_SELECTOR = "[data-notification-center]";
+
+/**
+ * The badge's arrival and departure, at the `LeaderDigitBadge` values so every
+ * small appearing pill in the app shares one timing. `0.9` rather than `0`: a
+ * badge that grows from nothing reads as a pop, and the origin is the corner
+ * that overlaps the bell (`origin-bottom-left` against a `-top-1 -right-1`
+ * placement), so it grows out of the glyph rather than out of the page.
+ */
+const BADGE_HIDDEN = { opacity: 0, scale: 0.9 } as const;
+const BADGE_PRESENT = { opacity: 1, scale: 1 } as const;
+const BADGE_TRANSITION = { duration: 0.14, ease: "easeOut" } as const;
+
+/**
+ * The count keeps the exact digits it prints today. This badge is 16px tall
+ * and has no `99+` cap of its own (the phone button has one), so grouping a
+ * four-figure count into `1,234` would widen it by a separator that also has
+ * to roll in and out on the way past 999.
+ */
+const BADGE_COUNT_FORMAT = { useGrouping: false } as const;
 
 /**
  * Top-level notifications trigger in the app header. Shows an unread-count
@@ -176,6 +199,14 @@ export function NotificationsBell() {
     wasOpenRef.current = open;
   }, [open, bellState, hostState.isPartial, unreadCount]);
 
+  // The badge appears and disappears in a single frame under reduced motion,
+  // with the app's "Panel animations" switch off, or in a pane that is mounted
+  // but not painting. `initial={false}` is motion's own "start where you are";
+  // an absent `exit` resolves the moment `AnimatePresence` asks for it.
+  const motionEnabled = useMotionEnabled();
+  const badgeInitial = motionEnabled ? BADGE_HIDDEN : false;
+  const badgeExit = motionEnabled ? BADGE_HIDDEN : undefined;
+
   const ariaLabel = notificationBellAccessibleLabel(bellState);
   const bellTooltip = (state: NotificationBellState): string => {
     // The path forward the hollow `unknown` dot needs. Without it this is the
@@ -220,15 +251,27 @@ export function NotificationsBell() {
               className="size-4 text-muted-foreground group-hover/button:text-foreground"
               aria-hidden
             />
-            {bellState.kind === "attention" && (
-              <span
-                data-testid="notifications-attention-badge"
-                aria-hidden
-                className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-md bg-destructive px-1 text-overline font-semibold leading-none text-destructive-foreground tabular-nums shadow-sm ring-2 ring-background"
-              >
-                {bellState.count}
-              </span>
-            )}
+            <AnimatePresence initial={false}>
+              {bellState.kind === "attention" ? (
+                <m.span
+                  key="attention-badge"
+                  data-testid="notifications-attention-badge"
+                  aria-hidden
+                  initial={badgeInitial}
+                  animate={BADGE_PRESENT}
+                  exit={badgeExit}
+                  transition={BADGE_TRANSITION}
+                  className="absolute -right-1 -top-1 flex h-4 min-w-4 origin-bottom-left items-center justify-center rounded-md bg-destructive px-1 text-overline font-semibold leading-none text-destructive-foreground tabular-nums shadow-sm ring-2 ring-background"
+                >
+                  <RollingNumber
+                    value={bellState.count}
+                    format={BADGE_COUNT_FORMAT}
+                    className={undefined}
+                    testId="notifications-attention-count"
+                  />
+                </m.span>
+              ) : null}
+            </AnimatePresence>
             {bellState.kind === "quietDot" && (
               <span
                 data-testid="notifications-quiet-dot"

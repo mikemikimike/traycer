@@ -1,12 +1,11 @@
 import type { ReactNode } from "react";
-import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
-import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import {
-  ORDER_GROUPS,
-  orderGroupInstruction,
-} from "@/components/layout-editor/regions/surface-groups";
+  OrderGroupHeader,
+  OrderGroupList,
+} from "@/components/layout-editor/inspector/rows/order-group-list";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
  * Usage limits' own second level in the DOCK (L-26): the provider list, each
@@ -28,36 +27,24 @@ export function ProvidersChildrenRow(props: {
    * prop is: the page composes that switch too, and passes `null` because it
    * draws this list itself, a level up.
    */
-  readonly onOpenProvider: ((providerId: string) => void) | null;
+  readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
 }): ReactNode {
   const { values, arrangement, onOpenProvider } = props;
-  const gutter = useSortableRowPadding();
   return (
     <div className="flex flex-col border-t border-border">
-      {/* The house's row shape rather than `text-overline uppercase`, which is
-        used nowhere else in the settings tree (L-127), and the operating
-        instruction as the header's description rather than a footnote under
-        the list. */}
-      <div className={gutter.row}>
-        <h3 className="font-medium text-foreground">
-          {ORDER_GROUPS.usageProviders.label}
-        </h3>
-        <p className="mt-0.5 max-w-[72ch] text-pretty text-ui-xs text-muted-foreground">
-          {orderGroupInstruction("usageProviders")}
-        </p>
-      </div>
+      {/* The list's own header, drawn from the one component both hosts compose
+        (R3-11): the house's row shape rather than `text-overline uppercase`,
+        which is used nowhere else in the settings tree (L-127), and the
+        operating instruction as the header's description rather than a
+        footnote under the list. No verb beside it - a group revert belongs to
+        the page, where there is no Undo. */}
+      <OrderGroupHeader group="usageProviders" action={null} />
       <OrderGroupList
         group="usageProviders"
         selectedId={null}
         values={values}
         arrangement={arrangement}
-        onOpenProvider={
-          onOpenProvider === null
-            ? null
-            : (providerId) => {
-                onOpenProvider(providerId);
-              }
-        }
+        onOpenProvider={onOpenProvider}
         decorate={null}
       />
     </div>

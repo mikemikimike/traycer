@@ -1,5 +1,6 @@
 import { use, useEffect, useState, type ReactNode } from "react";
 import { GhostRegion } from "@/components/layout-editor/ghost-region";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { isHostScopeUsable } from "@/components/settings/host-scope/host-scope-status";
 import { useScopedHostBinding } from "@/components/settings/host-scope/use-scoped-host-binding";
@@ -160,20 +161,34 @@ function ScopedAppStatusBar(props: {
   const resources = !resourcesEnabled ? (
     <GhostRegion regionId="resourceMonitor" />
   ) : (
-    <ResourceMonitorPopover
-      trigger="custom"
-      contentSide="top"
-      claimsOpenAction={claimsResourcesAction}
-      triggerNode={
-        <StatusBarResourceSegment
-          {...{ [STATUS_BAR_MENU_EXEMPT_ATTRIBUTE]: "" }}
-          hostId={scope.hostId}
-          hostLabel={scope.hostLabel}
-          hasExplicitPick={props.hasExplicitPick}
-          interactive
-        />
-      }
-    />
+    // The segment's own quick verbs (L-144). It is the resource popover's
+    // trigger, so it carries the exemption that makes the strip's own menu
+    // stand down over it - and that menu names `usageLimits`, which is the
+    // segment BESIDE this one. Without a menu of its own the readout was the
+    // one piece of the strip that answered no right-click.
+    //
+    // Around the popover rather than inside its `triggerNode`: the popover
+    // hands that node straight to `PopoverTrigger asChild`, and a Radix root
+    // in that slot would swallow the trigger's props instead of forwarding
+    // them to the button, taking the left click with it. Wrapping out here
+    // leaves the trigger seam untouched and gives the context menu the
+    // `display: contents` span it hangs its own handlers on.
+    <LayoutRegionContextMenu regionId="resourceMonitor">
+      <ResourceMonitorPopover
+        trigger="custom"
+        contentSide="top"
+        claimsOpenAction={claimsResourcesAction}
+        triggerNode={
+          <StatusBarResourceSegment
+            {...{ [STATUS_BAR_MENU_EXEMPT_ATTRIBUTE]: "" }}
+            hostId={scope.hostId}
+            hostLabel={scope.hostLabel}
+            hasExplicitPick={props.hasExplicitPick}
+            interactive
+          />
+        }
+      />
+    </LayoutRegionContextMenu>
   );
 
   return (

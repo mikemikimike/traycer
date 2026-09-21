@@ -74,8 +74,10 @@ export function TabStripHomeItemView(
         )}
       >
         {/* No manual colour: Home is not a projected tab, so there is no
-          record to carry an appearance and nothing in the menu to set one. */}
-        <TabChrome isActive={isActive} color={null} />
+          record to carry an appearance and nothing in the menu to set one.
+          `session={false}` for the same reason - Home is a place, and the one
+          tab that is a MODE is the layout editor's own (L-87). */}
+        <TabChrome isActive={isActive} color={null} session={false} />
         <House className="relative z-20 size-4" />
         <HomeBadge count={badgeCount} />
       </button>

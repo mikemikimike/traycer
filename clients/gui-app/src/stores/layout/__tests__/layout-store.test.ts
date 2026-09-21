@@ -267,11 +267,7 @@ describe("useLayoutStore", () => {
 
       const { arrangement } = getLayoutSnapshot();
 
-      expect(arrangement.toolbarLeft).toEqual([
-        "attachImage",
-        "access",
-        "agent",
-      ]);
+      expect(arrangement.toolbarLeft).toEqual(["attachImage", "access"]);
       expect(arrangement.toolbarRight).toEqual(["model", "mic"]);
     });
   });
@@ -371,6 +367,77 @@ describe("useLayoutStore", () => {
       expect(changeCount(getLayoutSnapshot())).toBe(1);
     });
 
+    /**
+     * The retired region, end to end through the real persist path (L-136).
+     * The values table and `TOOLBAR_REGION_IDS` both name this build's regions
+     * only, so a blob written while `agent` existed rehydrates without a
+     * migration, a discard pass or an error - and without leaving a change the
+     * user cannot see or revert.
+     */
+    it("ignores a stored override and toolbar entry for a region this build retired", async () => {
+      await rehydrateFrom({
+        basePreset: "default",
+        overrides: {
+          agent: { shown: "hidden" },
+          homeTab: { shown: "shown" },
+        },
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          toolbarLeft: ["attachImage", "access", "agent"],
+        },
+        layoutCarryDone: true,
+      });
+
+      expect(getLayoutSnapshot().overrides).toEqual({
+        homeTab: { shown: "shown" },
+      });
+      expect(getLayoutSnapshot().arrangement.toolbarLeft).toEqual([
+        "attachImage",
+        "access",
+      ]);
+      expect(changeCount(getLayoutSnapshot())).toBe(1);
+    });
+
+    /**
+     * The whole of L-142's durability story, end to end through the real
+     * persist path: a record written before Todo and Message queue were dock
+     * members carries a three-entry dock and no value bag for either, and
+     * this build has to reach five members with the two leading the frame -
+     * where `ChatLowerDock` already draws them - on their preset's own
+     * defaults. No migration, no version bump, nothing to revert (P5).
+     *
+     * The Hidden-with-a-size half is the part a `shown`-only read would lose:
+     * a member switched off keeps the size it would come back at, so turning
+     * it on again returns the layout the user left rather than a full row
+     * they never asked for.
+     */
+    it("materialises the new dock members a stored record predates, sizes intact", async () => {
+      await rehydrateFrom({
+        basePreset: "default",
+        overrides: { todo: { shown: "hidden", size: "chip" } },
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          dock: ["changedFiles", "runningAgents", "background"],
+        },
+        layoutCarryDone: true,
+      });
+
+      const snapshot = getLayoutSnapshot();
+      expect(snapshot.arrangement.dock).toEqual([
+        "queue",
+        "todo",
+        "changedFiles",
+        "runningAgents",
+        "background",
+      ]);
+      const values = effectiveLayoutValues(
+        snapshot.basePreset,
+        snapshot.overrides,
+      );
+      expect(values.queue).toEqual({ shown: "shown", size: "full" });
+      expect(values.todo).toEqual({ shown: "hidden", size: "chip" });
+    });
+
     it("falls back to the defaults on a record it cannot read", async () => {
       await rehydrateFrom("not a layout record");
 
@@ -454,6 +521,50 @@ describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
     expect(state().arrangement.minimapSide).toBe(
       DEFAULT_ARRANGEMENT.minimapSide,
     );
+  });
+
+  it("carries nothing from a legacy record sitting on the shipped defaults", async () => {
+    // The carry runs for EVERY user on the first launch after it lands, not
+    // only for users who changed something. Under L-133 the delta is the
+    // user's own answers and nothing re-minimizes it, so a value equal to the
+    // shipped Default must not be recorded: it would win over a preset click
+    // forever and read as "Detailed + 1 change" on a layout nobody touched.
+    window.localStorage.setItem(
+      persistKey(STORE_KEYS.settings),
+      JSON.stringify({
+        state: {
+          chatTurnMinimapSide: DEFAULT_ARRANGEMENT.minimapSide,
+          pinContextUsageBreakdown:
+            PRESET_VALUES.default.contextUsage.pinBreakdown,
+          pinnedContextBreakdownFields: [...CONTEXT_USAGE_ROW_KEYS],
+          showGlobalResourceMonitor: true,
+        },
+        version: 1,
+      }),
+    );
+
+    const relaunched = await relaunchStore();
+
+    expect(relaunched.state().overrides).toEqual({});
+    expect(relaunched.carried()).toBe(true);
+  });
+
+  it("carries only the context-usage key that differs", async () => {
+    window.localStorage.setItem(
+      persistKey(STORE_KEYS.settings),
+      JSON.stringify({
+        state: {
+          pinContextUsageBreakdown: true,
+          // Equal to the Default's own list, so this half is not an answer.
+          pinnedContextBreakdownFields: [...CONTEXT_USAGE_ROW_KEYS],
+        },
+        version: 1,
+      }),
+    );
+
+    const { state } = await relaunchStore();
+
+    expect(state().overrides).toEqual({ contextUsage: { pinBreakdown: true } });
   });
 
   it("never runs a second time, so a later relaunch keeps the user's own value", async () => {

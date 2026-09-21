@@ -17,7 +17,7 @@ import {
   railVisibilityFor,
   type RailEntry,
 } from "@/lib/layout/rail";
-import type { LayoutValues } from "@/lib/layout/layout-values";
+import { sameRegionValue, type LayoutValues } from "@/lib/layout/layout-values";
 import {
   LAYOUT_PRESET_IDS,
   PRESET_VALUES,
@@ -312,10 +312,7 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
     ...(settings.chatTurnMinimapSide === "hide"
       ? { minimap: { shown: "hidden" } }
       : {}),
-    contextUsage: {
-      pinBreakdown: settings.pinContextUsageBreakdown,
-      pinnedFields: settings.pinnedContextBreakdownFields,
-    },
+    ...carriedContextUsage(settings),
     ...(settings.showGlobalResourceMonitor === false
       ? { resourceMonitor: { shown: "hidden" } }
       : {}),
@@ -348,6 +345,41 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
     // store's own first persist write records the flag.
   }
   return carried;
+}
+
+/**
+ * The two context-usage picks, by DIFFERENCE against the shipped Default -
+ * the same rule the minimap and the resource monitor follow above, and the
+ * one the carry's own comment states.
+ *
+ * It used to write both keys unconditionally and lean on `minimizeOverrides`
+ * erasing the redundant half afterwards. Nothing erases it now: the delta IS
+ * the user's own answers (L-133), so an unconditional carry would put a
+ * preference on record for something every upgrading user never expressed -
+ * and the Detailed preset, whose `pinBreakdown` is `true`, would then draw no
+ * pinned breakdown and read as "Detailed + 1 change" on a layout nobody has
+ * touched.
+ *
+ * Both values arrive UNPARSED, so each is tested for its own shape first: a
+ * non-boolean and a non-list are not preferences, and carrying one would hand
+ * the resolver a key it drops and leave a region behind that says nothing.
+ */
+function carriedContextUsage(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const base = PRESET_VALUES.default.contextUsage;
+  const pinBreakdown = settings.pinContextUsageBreakdown;
+  const pinnedFields = settings.pinnedContextBreakdownFields;
+  const picks = {
+    ...(typeof pinBreakdown === "boolean" && pinBreakdown !== base.pinBreakdown
+      ? { pinBreakdown }
+      : {}),
+    ...(Array.isArray(pinnedFields) &&
+    !sameRegionValue("pinnedFields", pinnedFields, base.pinnedFields)
+      ? { pinnedFields }
+      : {}),
+  };
+  return Object.keys(picks).length === 0 ? {} : { contextUsage: picks };
 }
 
 /**

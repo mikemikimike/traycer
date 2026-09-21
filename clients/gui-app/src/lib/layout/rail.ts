@@ -18,6 +18,10 @@ import type { RailRegionId } from "@/lib/layout/region-id";
  * the group before it. Group objects are gone, and with them drop-onto-to-
  * merge - dragging a divider IS the grouping gesture, in the rail and in the
  * inspector list alike.
+ *
+ * Everywhere the user reads it, a divider is called a "Group break" (L-140);
+ * `divider` stays the code's and the persisted record's word for the same
+ * entry, because renaming a stored shape buys nothing.
  */
 export type RailEntry =
   | { readonly kind: "panel"; readonly id: RailRegionId }
@@ -160,7 +164,7 @@ export const DEFAULT_RAIL_DIVIDER_SEQ = 7;
  * carry the id the drop places by, and `LeftPanelGroup` deliberately does not
  * know about dividers at all.
  */
-export interface LeftPanelRun {
+interface LeftPanelRun {
   readonly panelIds: ReadonlyArray<LeftPanelId>;
   /** The divider that ends this run, or `null` at the rail's end. */
   readonly dividerId: string | null;

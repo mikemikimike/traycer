@@ -9,7 +9,10 @@ import { ProviderLimitsControl } from "@/components/layout-editor/inspector/prov
 import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
 import { revertControlValues } from "@/components/layout-editor/inspector/region-control-io";
 import { GrammarRowView } from "@/components/layout-editor/inspector/region-section";
-import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
+import {
+  OrderGroupHeader,
+  OrderGroupList,
+} from "@/components/layout-editor/inspector/rows/order-group-list";
 import {
   BARE_ROW,
   regionRowItems,
@@ -42,8 +45,6 @@ import {
 } from "@/components/layout-editor/regions/region-position-rows";
 import {
   looseSurfaceRegions,
-  ORDER_GROUPS,
-  orderGroupInstruction,
   surfaceHasBand,
   SURFACE_ORDER_GROUPS,
 } from "@/components/layout-editor/regions/surface-groups";
@@ -324,44 +325,36 @@ function SurfaceOrderList(props: {
   readonly ruled: boolean;
 }): ReactNode {
   const { group, snapshot, values, decorate, ruled } = props;
-  const facts = ORDER_GROUPS[group];
   const arrangement = snapshot.arrangement;
   const moved = reorderedGroups(arrangement).includes(group);
-  const gutter = useSortableRowPadding();
   return (
     <div className="flex flex-col">
+      {/* The rules are the CARD's - where this list sits among the card's other
+        blocks - so they stay here while the header's own shape is the one
+        component both hosts compose (R3-11). */}
       <div
         className={cn(
-          "flex flex-wrap items-start justify-between gap-x-6 gap-y-2 border-b border-border/40",
+          "border-b border-border/40",
           ruled && "border-t border-border/40",
-          gutter.row,
         )}
       >
-        <div className="min-w-32 flex-1">
-          {facts.label === null ? null : (
-            <h3 className="font-medium text-foreground">{facts.label}</h3>
-          )}
-          <p
-            className={cn(
-              "max-w-[72ch] text-pretty text-ui-sm text-muted-foreground",
-              facts.label === null ? null : "mt-0.5",
-            )}
-          >
-            {orderGroupInstruction(group)}
-          </p>
-        </div>
-        {moved ? (
-          <Button
-            type="button"
-            variant="muted"
-            size="sm"
-            onClick={() => {
-              writeArrangement(revertedOrderGroup(group, arrangement));
-            }}
-          >
-            Revert order
-          </Button>
-        ) : null}
+        <OrderGroupHeader
+          group={group}
+          action={
+            moved ? (
+              <Button
+                type="button"
+                variant="muted"
+                size="sm"
+                onClick={() => {
+                  writeArrangement(revertedOrderGroup(group, arrangement));
+                }}
+              >
+                Revert order
+              </Button>
+            ) : null
+          }
+        />
       </div>
       <OrderGroupList
         group={group}

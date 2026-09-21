@@ -19,6 +19,8 @@ import {
   STATUS_TEXT_TONE,
 } from "@/lib/chat/todo-status-tones";
 import { cn } from "@/lib/utils";
+import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
+import { ChatDockAttachedPanelBody } from "@/components/chat/chat-dock-attached-panel";
 import type { SegmentTodoItem } from "@/stores/composer/chat-store";
 
 export type ChatLowerSurfaceTopSpacing = "normal" | "connected";
@@ -40,6 +42,8 @@ export function PinnedTodoPanel(props: {
   readonly separated: boolean;
 }) {
   const { todo } = props;
+  // Attached above the composer because its pill is the open one (L-142).
+  const attached = useChatDockSectionAttached("todo");
   const [open, setOpen] = useState(false);
   const counts = useMemo(() => todoCounts(todo.items), [todo.items]);
   const activeItem =
@@ -48,6 +52,24 @@ export function PinnedTodoPanel(props: {
     activeItem === null
       ? inactiveTodoSummary(counts)
       : (activeItem.activeForm ?? activeItem.text);
+
+  const list = (
+    <ul className="m-0 flex list-none flex-col gap-0.5 px-2 py-1.5">
+      {todo.items.map((item) => (
+        <PinnedTodoRow key={item.id} item={item} />
+      ))}
+    </ul>
+  );
+
+  if (attached) {
+    // No portalled actions: the Todo row has never had a header action, and
+    // its rows are read-only. The pill carries the count.
+    return (
+      <ChatDockAttachedPanelBody section="todo" testId="pinned-todo-list">
+        {list}
+      </ChatDockAttachedPanelBody>
+    );
+  }
 
   return (
     <Collapsible
@@ -106,15 +128,11 @@ export function PinnedTodoPanel(props: {
           data-testid="pinned-todo-list"
           data-native-scrollbar="true"
           className={cn(
-            "overflow-y-auto border-t border-border/50 px-2 py-1.5",
+            "overflow-y-auto border-t border-border/50",
             props.scrollRegionMaxHeightClass,
           )}
         >
-          <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-            {todo.items.map((item) => (
-              <PinnedTodoRow key={item.id} item={item} />
-            ))}
-          </ul>
+          {list}
         </div>
       </CollapsibleContent>
     </Collapsible>

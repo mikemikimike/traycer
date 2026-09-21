@@ -36,7 +36,8 @@ function renderRow() {
               pulseToken: null,
             },
           ],
-          expanded: new Set(),
+          openSection: null,
+          panelId: "dock-panel-1",
           onToggle: vi.fn(),
         }}
       >

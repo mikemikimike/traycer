@@ -2,7 +2,6 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { ShieldCheck } from "lucide-react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ComposerAttachImageTrigger } from "@/components/home/toolbar/composer-attach-image-button";
-import { ComposerHarnessLabel } from "@/components/home/toolbar/composer-harness-label";
 import { HarnessModelTrigger } from "@/components/home/pickers/harness-model-trigger";
 import { PermissionsTrigger } from "@/components/home/pickers/permissions-picker";
 import type { HarnessModelSelection } from "@/components/home/data/landing-options";
@@ -154,18 +153,5 @@ describe("composer toolbar chips (L-88)", () => {
       expect(classes).not.toContain("@max-lg:size-8");
       cleanup();
     }
-  });
-
-  it("leaves the provider label plain and measures it against the composer", () => {
-    render(<ComposerHarnessLabel label="Codex" />);
-
-    const classes = classesOf(screen.getByText("Codex"));
-    expect(classes).not.toContain("border");
-    expect(classes).not.toContain("bg-background");
-    expect(classes).toContain("text-muted-foreground");
-    expect(classes).not.toContain("text-muted-foreground/70");
-    // The composer's container query, not the window's width.
-    expect(classes).toContain("@max-lg:hidden");
-    expect(classes).not.toContain("lg:inline-block");
   });
 });

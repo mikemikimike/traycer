@@ -4,13 +4,14 @@ import {
 } from "@/components/layout-editor/regions/chat-regions";
 import {
   ACCESS_REGION,
-  AGENT_REGION,
   ATTACH_IMAGE_REGION,
   BACKGROUND_REGION,
   CHANGED_FILES_REGION,
   MIC_REGION,
   MODEL_REGION,
+  QUEUE_REGION,
   RUNNING_AGENTS_REGION,
+  TODO_REGION,
 } from "@/components/layout-editor/regions/composer-regions";
 import {
   RAIL_AGENTS_REGION,
@@ -40,8 +41,8 @@ import type { RegionId } from "@/lib/layout/region-id";
  * launch entries.
  *
  * An index rather than a table: each surface states its own regions in its own
- * file, and this map is where the twenty-two are joined so a caller holding an
- * id can look one up. A region missing from here is a compile error, which is
+ * file, and this map is where the twenty-three are joined so a caller holding
+ * an id can look one up. A region missing from here is a compile error, which is
  * what keeps the five per-surface files from drifting into a partial registry.
  *
  * The copy in those files is final (L-33, L-52) and matches the prototype
@@ -58,9 +59,10 @@ export const LAYOUT_REGIONS: {
   runningAgents: RUNNING_AGENTS_REGION,
   changedFiles: CHANGED_FILES_REGION,
   background: BACKGROUND_REGION,
+  queue: QUEUE_REGION,
+  todo: TODO_REGION,
   attachImage: ATTACH_IMAGE_REGION,
   access: ACCESS_REGION,
-  agent: AGENT_REGION,
   model: MODEL_REGION,
   mic: MIC_REGION,
   railAgents: RAIL_AGENTS_REGION,

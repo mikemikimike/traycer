@@ -170,7 +170,7 @@ function writeRailVisibility(regionId: RegionId, next: string): void {
  * undo step rather than two.
  *
  * `Reflect.set` for the same reason `region-control-io.ts` uses it: `keyof
- * LayoutValues[K]` collapses to the one field all twenty-two regions share
+ * LayoutValues[K]` collapses to the one field all twenty-three regions share
  * once the region is a plain `RegionId`, and `setRegionValues` parses the
  * merged patch through the same total resolver a rehydrate uses, so a wrong
  * key cannot persist. Shown goes through `regionShownOnValue` rather than the

@@ -9,7 +9,10 @@ import {
 import { ChevronRight, GripVertical, X, type LucideIcon } from "lucide-react";
 import { armLayoutDrag } from "@/components/layout-editor/canvas/drag-engine";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
-import { sortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
+import {
+  sortableRowPadding,
+  type SortableRowPadding,
+} from "@/components/layout-editor/inspector/sortable-row-padding";
 import { Button } from "@/components/ui/button";
 import { movedWithin } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
@@ -40,7 +43,14 @@ export interface SortableListItem<Id extends string> {
   readonly dimmed: boolean;
   /** Differs from what shipped - the row's own changed dot (L-20, P-7). */
   readonly changed: boolean;
-  /** The presence rule spelled out under the name (L-47), where one exists. */
+  /**
+   * The presence rule (L-47), where one exists. Drawn as the first line of the
+   * row's DISCLOSURE rather than under its name (R3-08): a hint that is
+   * sometimes there and sometimes not gave one list three row heights, and a
+   * rule about when a panel appears is exactly the kind of thing a row opens to
+   * explain. It stays the grab's description either way, so a screen reader
+   * still hears it without opening anything.
+   */
   readonly hint: string | null;
   /**
    * The row's ONE state control (L-121). `null` in the dock, where the section
@@ -318,52 +328,23 @@ export function SortableList<Id extends string>(
         className="flex flex-col"
       >
         {shown.map((item) => (
-          // The row carries the row's identity and nothing operable: the
-          // thing with `role="button"` is the NAME inside it, because a
-          // composite widget must not contain the controls it would otherwise
-          // name itself from (P-9's trap, R1-02). The focus indicator is on
-          // this box rather than on the grab, so what reads as focused is the
-          // whole row the keyboard operates (R2-03).
-          <div
+          <SortableRow
             key={item.id}
-            data-sortable-id={item.id}
-            data-sortable-selected={item.id === selectedId ? "1" : undefined}
-            data-grabbed={grab?.id === item.id ? "1" : undefined}
-            className={cn(
-              "relative border-b border-border/40 transition-[background-color,box-shadow] duration-100 ease-out last:border-b-0",
-              // `ring-inset`: the settings card clips its content
-              // (`settings-group.tsx`'s `overflow-clip`), so an outset ring on
-              // the first and last rows was cut off along the card's edge.
-              // Drawn inside the row it still reads at the dock's 320px.
-              "has-[[role=button]:focus-visible]:z-10 has-[[role=button]:focus-visible]:rounded-lg has-[[role=button]:focus-visible]:ring-3 has-[[role=button]:focus-visible]:ring-ring/50 has-[[role=button]:focus-visible]:ring-inset",
-              item.id === selectedId && "bg-foreground/6",
-              // In hand is `layout-editor.css`'s, beside the canvas rule for a
-              // region in hand: one lift, written once (`[data-grabbed]`).
-            )}
-            // On the row rather than on the grab line inside it: a focus
-            // leaving anything in this row - the grab line, a control, a
-            // control in its expanded detail - is a grab nobody is holding.
+            item={item}
+            instructionsId={ordered ? instructionsId : null}
+            page={page}
+            gutter={gutter}
+            reserveSlot={reserveSlot}
+            selected={item.id === selectedId}
+            grabbed={grab?.id === item.id}
+            onPointerDown={(event) => {
+              handlePointerDown(event, item.id);
+            }}
             onBlur={() => {
               if (grab !== null && grab.id === item.id)
                 cancelGrab(grab, item.label);
             }}
-          >
-            <SortableRowLine
-              item={item}
-              instructionsId={ordered ? instructionsId : null}
-              page={page}
-              padding={item.divider ? gutter.divider : gutter.row}
-              reserveSlot={reserveSlot}
-              onPointerDown={(event) => {
-                handlePointerDown(event, item.id);
-              }}
-            />
-            {item.detail !== null && item.open ? (
-              <div data-sortable-detail className="border-t border-border/40">
-                {item.detail}
-              </div>
-            ) : null}
-          </div>
+          />
         ))}
       </div>
       {ordered ? (
@@ -372,6 +353,136 @@ export function SortableList<Id extends string>(
         </p>
       ) : null}
     </>
+  );
+}
+
+/**
+ * One row: its line, its disclosure, and the presence rule that belongs to
+ * both.
+ *
+ * Its own component because the hint needs an `id` the GRAB points at and the
+ * DISCLOSURE draws, and those are on either side of the line - so the id has to
+ * be minted a level above both, which is a hook and therefore not something the
+ * list's `map` can do.
+ *
+ * The row carries the row's identity and nothing operable: the thing with
+ * `role="button"` is the NAME inside the line, because a composite widget must
+ * not contain the controls it would otherwise name itself from (P-9's trap,
+ * R1-02). The focus indicator is on this box rather than on the grab, so what
+ * reads as focused is the whole row the keyboard operates (R2-03) - written in
+ * `layout-editor.css` beside the grabbed row's lift, which is the file that
+ * owns this row's other states (R3-18).
+ */
+function SortableRow<Id extends string>(props: {
+  readonly item: SortableListItem<Id>;
+  readonly instructionsId: string | null;
+  readonly page: boolean;
+  readonly gutter: SortableRowPadding;
+  readonly reserveSlot: boolean;
+  readonly selected: boolean;
+  readonly grabbed: boolean;
+  readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  readonly onBlur: () => void;
+}): ReactNode {
+  const {
+    item,
+    instructionsId,
+    page,
+    gutter,
+    reserveSlot,
+    selected,
+    grabbed,
+    onPointerDown,
+    onBlur,
+  } = props;
+  const hintId = useId();
+  const open = item.detail !== null && item.open;
+  // Built once and placed in one of two ways, because it is ONE description
+  // whichever of them the row is showing: the first line of the open
+  // disclosure, or a line only a screen reader reaches while it is closed.
+  const hint =
+    item.hint === null ? null : (
+      <SortableRowHint
+        id={hintId}
+        hint={item.hint}
+        open={open}
+        page={page}
+        padding={gutter.row}
+      />
+    );
+  return (
+    <div
+      data-sortable-id={item.id}
+      data-sortable-selected={selected ? "1" : undefined}
+      data-grabbed={grabbed ? "1" : undefined}
+      className={cn(
+        "relative border-b border-border/40 transition-[background-color,box-shadow] duration-100 ease-out last:border-b-0",
+        selected && "bg-foreground/6",
+      )}
+      // On the row rather than on the grab line inside it: a focus leaving
+      // anything in this row - the grab line, a control, a control in its
+      // expanded detail - is a grab nobody is holding.
+      onBlur={onBlur}
+    >
+      <SortableRowLine
+        item={item}
+        instructionsId={instructionsId}
+        hintId={item.hint === null ? null : hintId}
+        padding={item.divider ? gutter.divider : gutter.row}
+        reserveSlot={reserveSlot}
+        onPointerDown={onPointerDown}
+      />
+      {open ? (
+        <div data-sortable-detail className="border-t border-border/40">
+          {hint}
+          {item.detail}
+        </div>
+      ) : (
+        hint
+      )}
+    </div>
+  );
+}
+
+/**
+ * The presence rule (L-47, R3-08).
+ *
+ * Open, it is the first thing the disclosure says - the row explaining itself
+ * on the line the user asked for. Closed, it is still in the document and still
+ * the grab's `aria-describedby` target, so the rule reaches a screen reader
+ * without the row being opened, and takes no height while it does: a hint that
+ * occupied a line only on the rows that have one is what gave one list three
+ * row heights (LV2-11).
+ */
+function SortableRowHint(props: {
+  readonly id: string;
+  readonly hint: string;
+  readonly open: boolean;
+  readonly page: boolean;
+  /** The row's own gutter, so the line starts in the rows' column. */
+  readonly padding: string;
+}): ReactNode {
+  const { id, hint, open, page, padding } = props;
+  if (!open) {
+    return (
+      <p id={id} className="sr-only">
+        {hint}
+      </p>
+    );
+  }
+  return (
+    <p
+      id={id}
+      className={cn(
+        "max-w-[72ch] text-pretty text-muted-foreground",
+        padding,
+        // After the gutter, which carries the row's own type scale: a
+        // description reads a notch under the name it belongs to.
+        page ? "text-ui-sm" : "text-ui-xs",
+      )}
+    >
+      {hint}
+    </p>
   );
 }
 
@@ -396,29 +507,31 @@ export function SortableList<Id extends string>(
  * The presence rule is outside the grab too, and for the same reason one rung
  * down: a `role="button"` names itself from everything it contains, so the
  * Pull requests row was announced as a button called "Pull requests Auto -
- * appears when this repo has pull requests" (R2-08). It is a sibling with an
- * id, pointed at by `aria-describedby` beside the grab instructions, which is
- * what a description IS.
+ * appears when this repo has pull requests" (R2-08). It is pointed at by
+ * `aria-describedby` beside the grab instructions, which is what a description
+ * IS, and it is drawn by the ROW rather than by the line, because it belongs to
+ * the disclosure now (R3-08).
  */
 function SortableRowLine<Id extends string>(props: {
   readonly item: SortableListItem<Id>;
   /** The static instructions to point at, or `null` in an unordered list. */
   readonly instructionsId: string | null;
-  readonly page: boolean;
+  /** The row's presence rule, wherever the row has drawn it, or `null`. */
+  readonly hintId: string | null;
   /** The row's own gutter and type scale, decided once by the list. */
   readonly padding: string;
   readonly reserveSlot: boolean;
   readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }): ReactNode {
-  const { item, instructionsId, page, padding, reserveSlot, onPointerDown } =
+  const { item, instructionsId, hintId, padding, reserveSlot, onPointerDown } =
     props;
-  const hintId = useId();
   const onRemove = item.onRemove;
-  const described = [instructionsId, item.hint === null ? null : hintId]
+  const described = [instructionsId, hintId]
     .filter((id): id is string => id !== null)
     .join(" ");
   return (
     <div
+      data-row-line
       className={cn("flex touch-none flex-col", padding)}
       onPointerDown={onPointerDown}
     >
@@ -507,20 +620,6 @@ function SortableRowLine<Id extends string>(props: {
           )}
         </div>
       </div>
-      {item.hint === null ? null : (
-        <p
-          id={hintId}
-          className={cn(
-            "mt-0.5 max-w-[72ch] text-pretty text-muted-foreground",
-            page ? "text-ui-sm" : "text-ui-xs",
-            // Under the name rather than under the row, where the grip column
-            // exists to put it.
-            instructionsId === null ? null : "ps-5.5",
-          )}
-        >
-          {item.hint}
-        </p>
-      )}
     </div>
   );
 }

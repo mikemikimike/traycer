@@ -988,14 +988,22 @@ describe("useLeftPanelStore", () => {
     });
   });
 
-  it("drops an override rather than storing the rule's own answer", () => {
+  it("puts a panel back on its own rule rather than flipping it to hidden", () => {
     // `null` is how the menu says "this matches the panel's own rule again",
-    // so the entry has to disappear - not flip to `false`.
+    // so the panel stops being overridden - it does not flip to `false`.
+    //
+    // The delta records `auto`, and that is L-133 rather than a leak: the
+    // stored overrides are what a person PICKED, not what happens to differ
+    // from the current preset, so nothing minimizes them against the base any
+    // more. Every preset's rail value is `auto`, so the recorded pick and the
+    // absent one resolve identically and neither reads as changed.
     setRailVisibilityOverride("pull-requests", true);
     setRailVisibilityOverride("pull-requests", null);
 
     expect(visibilityOverrides()).toEqual({});
-    expect(readPersistedLayoutOverrides()).toEqual({});
+    expect(readPersistedLayoutOverrides()).toEqual({
+      railPullRequests: { shown: "auto" },
+    });
   });
 
   it("refuses to activate a panel the user explicitly hid", () => {

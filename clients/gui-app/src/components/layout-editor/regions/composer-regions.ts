@@ -3,7 +3,8 @@ import {
   FileDiff,
   History,
   ImagePlus,
-  Layers,
+  ListChecks,
+  ListOrdered,
   Mic,
   Shield,
   SlidersHorizontal,
@@ -21,12 +22,17 @@ import {
 } from "@/components/layout-editor/regions/region-state-words";
 
 /**
- * The composer's eight regions: the three dock rows above the message box, and
- * the five toolbar elements below it.
+ * The composer's nine regions: the five dock rows above the message box, and
+ * the four toolbar elements below it.
  *
  * They share three row shapes, which is why they share a file: a dock row's
  * order, a toolbar cluster's order, and the full-row/chip size that only the
  * elements which shrink rather than disappear have.
+ *
+ * Todo and Message queue are dock rows like the other three (L-139, L-142) and
+ * so their entries are copies of `BACKGROUND_REGION` down to the row list: one
+ * rule for everything above the message box means there is nothing here that
+ * reads differently for them.
  */
 
 const DOCK_ORDER_ROW = { kind: "position-order", group: "dock" } as const;
@@ -94,6 +100,40 @@ export const BACKGROUND_REGION: LayoutRegion<"background"> = {
   stateWord: sizedStateWord,
 };
 
+/**
+ * `ListOrdered` is the glyph the real panel's own header prints beside
+ * "Message Queue", so the index row, the quick-verb menu and the compact pill
+ * all name the row with the mark a reader already associates with it.
+ */
+export const QUEUE_REGION: LayoutRegion<"queue"> = {
+  id: "queue",
+  name: "Message queue",
+  surface: "composer",
+  icon: ListOrdered,
+  where: "Composer - above the message box",
+  whereByHost: null,
+  hint: null,
+  keywords: ["queue", "queued", "messages", "pending", "next", "steer"],
+  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
+  quickVerbs: SIZED_VERBS,
+  stateWord: sizedStateWord,
+};
+
+/** `ListChecks` for the same reason: the Todo header's own resting glyph. */
+export const TODO_REGION: LayoutRegion<"todo"> = {
+  id: "todo",
+  name: "Todo",
+  surface: "composer",
+  icon: ListChecks,
+  where: "Composer - above the message box",
+  whereByHost: null,
+  hint: null,
+  keywords: ["todo", "todos", "tasks", "checklist", "plan", "progress"],
+  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
+  quickVerbs: SIZED_VERBS,
+  stateWord: sizedStateWord,
+};
+
 export const ATTACH_IMAGE_REGION: LayoutRegion<"attachImage"> = {
   id: "attachImage",
   name: "Attach image",
@@ -126,20 +166,6 @@ export const ACCESS_REGION: LayoutRegion<"access"> = {
   ],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
-};
-
-export const AGENT_REGION: LayoutRegion<"agent"> = {
-  id: "agent",
-  name: "Agent",
-  surface: "composer",
-  icon: Layers,
-  where: "Composer - toolbar, left",
-  whereByHost: null,
-  hint: null,
-  keywords: ["harness", "provider", "vendor", "model"],
-  rows: [TOOLBAR_LEFT_ORDER_ROW],
-  quickVerbs: SHOW_HIDE_VERBS,
-  stateWord: shownStateWord,
 };
 
 export const MODEL_REGION: LayoutRegion<"model"> = {

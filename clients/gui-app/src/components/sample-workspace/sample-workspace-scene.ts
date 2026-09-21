@@ -351,6 +351,24 @@ export const SAMPLE_DOCK: ReadonlyArray<
     label: "Sample: two background shells",
     pulseToken: null,
   },
+  {
+    section: "queue",
+    glyph: "queue",
+    working: false,
+    text: `${SAMPLE_QUEUE.items.length}`,
+    lineDeltas: null,
+    label: "Sample: one queued message",
+    pulseToken: null,
+  },
+  {
+    section: "todo",
+    glyph: "todo",
+    working: false,
+    text: `${SAMPLE_TODO.items.filter((item) => item.status === "completed").length}/${SAMPLE_TODO.items.length}`,
+    lineDeltas: null,
+    label: "Sample: one of three tasks done",
+    pulseToken: null,
+  },
 ];
 export function sampleNoop(): void {}
 
@@ -366,6 +384,6 @@ export function sampleNoopAction(): string | null {
 }
 
 /** The sample composer records nothing, so it holds no microphone stream. */
-export function sampleNoStream(): MediaStream | null {
+function sampleNoStream(): MediaStream | null {
   return null;
 }

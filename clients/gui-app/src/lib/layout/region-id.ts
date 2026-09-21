@@ -13,15 +13,22 @@
  */
 
 /** The composer toolbar's movable elements. Send is not one - it renders last. */
-export type ToolbarRegionId =
-  | "attachImage"
-  | "access"
-  | "agent"
-  | "model"
-  | "mic";
+export type ToolbarRegionId = "attachImage" | "access" | "model" | "mic";
 
-/** The three rows above the message box, which share one order. */
-export type DockRegionId = "runningAgents" | "changedFiles" | "background";
+/**
+ * The five rows above the message box, which share one order.
+ *
+ * Todo and Message queue joined the other three under L-139/L-142: everything
+ * above the composer obeys ONE rule - Full row, Chip or Hidden, reorderable in
+ * the dock, a pill in the compact strip - so there is no second kind of thing
+ * living up there for a reader to learn.
+ */
+export type DockRegionId =
+  | "runningAgents"
+  | "changedFiles"
+  | "background"
+  | "queue"
+  | "todo";
 
 /**
  * The sidebar rail's nine panels. Named for what they are rather than for the

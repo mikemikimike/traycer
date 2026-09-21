@@ -10,6 +10,7 @@ import {
   type ChatDockCompactChipModel,
   type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
+import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
 import { ComposerWorkspaceRow } from "@/components/home/composer/composer-workspace-mode-row";
 import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
@@ -19,6 +20,7 @@ import {
   type HostContextId,
 } from "@/components/layout-editor/region-depiction-frame";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { DEFAULT_DOCK_ORDER } from "@/lib/layout/layout-arrangement";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
 import {
@@ -160,11 +162,11 @@ function isTypeScaleClass(className: string): boolean {
 // ── The real surfaces ───────────────────────────────────────────────────────
 
 const TILE = "frame-parity-tile";
-const DOCK_SECTIONS: ReadonlyArray<ChatDockSection> = [
-  "filesChanged",
-  "activeAgents",
-  "background",
-];
+// Read off the arrangement rather than listed here: dock membership and its
+// order are model facts that have already changed twice (L-139, L-142), and a
+// list copied into a test is what goes stale while the test stays green.
+const DOCK_SECTIONS: ReadonlyArray<ChatDockSection> =
+  DEFAULT_DOCK_ORDER.map(chatDockSection);
 
 /**
  * One folded dock member, which is what keeps `ChatLowerDock` alive with no
@@ -214,7 +216,8 @@ function renderDock(): void {
       <ChatDockCompactStripProvider
         value={{
           chips: [CHIP],
-          expanded: new Set<ChatDockSection>(),
+          openSection: null,
+          panelId: "dock-panel-1",
           onToggle: () => undefined,
         }}
       >
@@ -234,6 +237,8 @@ function renderDock(): void {
             filesChanged: NO_HOTSPOT,
             activeAgents: NO_HOTSPOT,
             background: NO_HOTSPOT,
+            queue: NO_HOTSPOT,
+            todo: NO_HOTSPOT,
           }}
           backgroundItems={[]}
           runningManagedCommandCount={0}

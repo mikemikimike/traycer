@@ -66,7 +66,7 @@ export type CanvasOrderGroupId =
   | "toolbarRight"
   | "rail";
 
-export const CANVAS_ORDER_GROUP_IDS: ReadonlyArray<CanvasOrderGroupId> = [
+const CANVAS_ORDER_GROUP_IDS: ReadonlyArray<CanvasOrderGroupId> = [
   "dock",
   "toolbarLeft",
   "toolbarRight",
@@ -143,8 +143,24 @@ export interface LayoutArrangement {
 export const USAGE_PROVIDER_IDS: ReadonlyArray<RateLimitProviderId> =
   rateLimitCapableProviderIdSchema.options;
 
-/** Today's dock order, top to bottom. */
+/**
+ * Today's dock order, top to bottom.
+ *
+ * Message queue and Todo OPEN the list because that is where `ChatLowerDock`
+ * already draws them - the joined frame is Queue, then Todo, then the three
+ * rows that were reorderable before L-142 made all five so. A default is what
+ * a user who never opens the editor sees, so it has to be today's frame rather
+ * than the order the two happened to be added in.
+ *
+ * `mergeOrder` reads this as the canonical sequence. Neither of them has a
+ * canonical predecessor, so a dock order written before they existed
+ * rehydrates with the two at the FRONT, ahead of whatever arrangement the user
+ * had already made of the other three - which is both today's frame and the
+ * same neighbour rule every stored order in this app is read by.
+ */
 export const DEFAULT_DOCK_ORDER: ReadonlyArray<DockRegionId> = [
+  "queue",
+  "todo",
   "changedFiles",
   "runningAgents",
   "background",
@@ -159,7 +175,6 @@ export const DEFAULT_DOCK_ORDER: ReadonlyArray<DockRegionId> = [
 export const TOOLBAR_REGION_IDS: ReadonlyArray<ToolbarRegionId> = [
   "attachImage",
   "access",
-  "agent",
   "model",
   "mic",
 ];
@@ -167,7 +182,6 @@ export const TOOLBAR_REGION_IDS: ReadonlyArray<ToolbarRegionId> = [
 export const DEFAULT_TOOLBAR_LEFT: ReadonlyArray<ToolbarRegionId> = [
   "attachImage",
   "access",
-  "agent",
 ];
 
 /** `model` is always here: the picker anchors the footer controls. */

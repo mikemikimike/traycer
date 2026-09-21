@@ -197,7 +197,7 @@ function exampleKeys(
  * live values with just that one region swapped in.
  *
  * Written with `Reflect.set` for the same reason `region-control-io.ts` reads
- * a control's key that way: merging one branch of a twenty-two-branch union
+ * a control's key that way: merging one branch of a twenty-three-branch union
  * back into the whole map is exactly the case `RegionRowFacts`'s own comment
  * says cannot survive generically-typed. `example.patch` always names keys
  * from the SAME region's own registry entry, so the merge is sound even

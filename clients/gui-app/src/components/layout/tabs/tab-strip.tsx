@@ -7,8 +7,10 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   type ReactNode,
 } from "react";
+import { mergeRefs } from "@/lib/merge-refs";
 import { runHeaderStripCommitHandoff } from "./header-strip-commit-handoff";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { LayoutGroup } from "motion/react";
@@ -20,6 +22,7 @@ import {
   type HeaderTabSlotDropData,
 } from "@/components/layout/tabs/header-tab-dnd";
 import {
+  useEpicDndStore,
   useHeaderStripDropIndex,
   useHeaderStripOffsets,
 } from "@/components/epic-canvas/dnd/dnd-store";
@@ -127,6 +130,85 @@ function TabStripBody() {
   useLayoutEffect(() => {
     runHeaderStripCommitHandoff();
   });
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // The strip may not cut the tab that holds the selection in half.
+  //
+  // The scroller is `overflow-x-auto`, and nothing scrolled a tab into view -
+  // so with enough tabs open the layout editor's own tab was appended past the
+  // right edge and CLIPPED there. That single clip produced all three things
+  // the owner's third live pass reported as one broken tab: the label read
+  // "Sample" because the glyphs past the edge were gone, the amber outline
+  // covered only the left and the top because the right cap of the silhouette
+  // was past the edge, and the mark inside it ended on a razor edge. None of
+  // them was a paint bug; the tab was simply half off-screen.
+  //
+  // That fix was scoped to the session tab's marker, which left the general
+  // case - any tab that becomes active while clipped - exactly as broken, and
+  // worst where there is no pointer to say where the tab went: ⌘⌥→ through the
+  // strip, a leader chord, a palette jump, a tab activated by a close. The
+  // reveal is the selection's, not the editing indicator's (L-146).
+  //
+  // Instant, never smooth: activation is frequent and often held down on a
+  // keyboard, and an animated strip under a repeating chord is a strip that is
+  // permanently mid-flight and never at the tab the user is on.
+  const revealActiveMember = useCallback((): void => {
+    const scroller = scrollerRef.current;
+    if (scroller === null) return;
+    // Mid-drag the strip's geometry belongs to dnd-kit: members carry
+    // displacement transforms, the dragged tab follows the pointer, and the
+    // drag model re-reads this very `scrollLeft` as its content origin. A
+    // reveal here would measure a transient box AND move the ground under the
+    // gesture, so a drag is simply not a moment to reveal anything.
+    if (useEpicDndStore.getState().activeHeaderTab !== null) return;
+    // The selection as the strip PAINTED it - no second reading of
+    // `activeItemId` that could disagree with the tab that drew itself active.
+    // Exactly one node inside the scroller carries it: a split group's halves
+    // are `focused` only while the group itself holds the selection, and Home
+    // is drawn outside the scroller.
+    const selected = scroller.querySelector<HTMLElement>(
+      '[aria-selected="true"]',
+    );
+    if (selected === null) return;
+    // The strip MEMBER, not the selected node: inside a split group the
+    // selected node is one half of the member. Walking to the scroller's own
+    // child is what gets the element whose box is the whole tab.
+    let member: HTMLElement | null = selected;
+    while (member !== null && member.parentElement !== scroller) {
+      member = member.parentElement;
+    }
+    if (member === null) return;
+    const memberBox = member.getBoundingClientRect();
+    const viewBox = scroller.getBoundingClientRect();
+    const pastRight = memberBox.right - viewBox.right;
+    const pastLeft = viewBox.left - memberBox.left;
+    // Right first: a tab that overflows BOTH edges cannot be fully revealed,
+    // and its leading edge is the one carrying the icon and the label.
+    if (pastRight > 0) scroller.scrollLeft += pastRight;
+    else if (pastLeft > 0) scroller.scrollLeft -= pastLeft;
+  }, []);
+  // On the activation CHANGE, and in a layout effect so the reveal lands in
+  // the same paint as the newly active tab. Deliberately NOT on every render:
+  // the strip is a scroller the user also drives by hand, and a per-commit
+  // reveal would haul their position back on every unrelated re-render. The
+  // item count rides along because opening or closing a tab moves the active
+  // one without changing which tab it is.
+  useLayoutEffect(() => {
+    revealActiveMember();
+  }, [activeItemId, headerItemIds.length, revealActiveMember]);
+  // The other way a whole tab becomes a clipped one, with no activation to key
+  // on: the strip NARROWS under it - a window resize, a panel opening beside
+  // it. Writing `scrollLeft` changes no box, so this cannot re-enter.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller === null) return;
+    const observer = new ResizeObserver(() => {
+      revealActiveMember();
+    });
+    observer.observe(scroller);
+    return () => {
+      observer.disconnect();
+    };
+  }, [revealActiveMember]);
 
   const isLandingPage = activePathname === "/";
   const {
@@ -207,6 +289,13 @@ function TabStripBody() {
     id: HEADER_TAB_TRAILING_SLOT_DROP_ID,
     data: trailingSlotData,
   });
+  // Memoized, because a fresh callback ref on every render detaches and
+  // re-attaches the node on both owners every commit - which for dnd-kit means
+  // the drop slot is momentarily unregistered mid-drag.
+  const setScrollerNode = useMemo(
+    () => mergeRefs(trailingSlotRef, scrollerRef),
+    [trailingSlotRef],
+  );
 
   const handleNewTab = useCallback(() => {
     navigateToTabIntent(navigate, openNewEpicIntent(), undefined);
@@ -371,7 +460,9 @@ function TabStripBody() {
                   undone below it, so the one mark that says "you are
                   customizing" was drawn at 45% of itself (L-132). */}
               <div
-                ref={trailingSlotRef}
+                // Two owners, one node: dnd-kit's trailing drop slot, and the
+                // reveal above, which needs the scrolling box itself.
+                ref={setScrollerNode}
                 data-layout-passive-members
                 data-testid="header-tab-strip-scroll"
                 onWheel={handleWheel}

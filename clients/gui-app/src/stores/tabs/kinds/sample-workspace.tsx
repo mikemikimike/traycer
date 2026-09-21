@@ -12,21 +12,33 @@ const tab: Extract<HeaderTab, { kind: "sample-workspace" }> = {
   kind: "sample-workspace",
   id: "sample-workspace",
   route: "/sample-workspace",
-  name: "Sample workspace",
+  // The tab says the MODE, because that is what this tab is: it is not a place
+  // the user navigated to, it is the state the window is in (L-87). "Sample
+  // workspace" described the CONTENT under it - which the canvas already says
+  // twice, in its own banner and in its footer - and at sixteen characters it
+  // was also the longest label in the strip, so it was the first thing the
+  // strip's overflow cut in half (the owner's third live pass showed it
+  // rendered as "Sample"). One word, always whole, and it answers the question
+  // the amber is there to answer.
+  name: "Customizing",
   icon: PanelsTopLeft,
   canDuplicate: false,
   canOpenInNewWindow: false,
-  // The one tab that is a MODE rather than a place: while it is open the user
-  // is customizing the layout, and the amber cap says so in the app's own
-  // status vocabulary (L-87). The `warning` role, because nothing is broken
-  // and nothing is being destroyed - something is merely not ordinary. It
-  // pairs with the dotted frame `layout-editor.css` draws around the app
-  // column, which is the other half of "you are editing this screen" and uses
-  // this same token.
+  // The one tab that is a MODE rather than a place, and the colour that says
+  // so in the app's own status vocabulary (L-87). The `warning` role, because
+  // nothing is broken and nothing is being destroyed - something is merely not
+  // ordinary. It pairs with the dotted frame `layout-editor.css` draws around
+  // the app column, which is the other half of "you are editing this screen"
+  // and uses this same token.
   //
-  // This colour is the INPUT to that cap; `header-tab-visual.tsx` draws it
-  // (`SessionTabMark`), at a thickness that reads next to the frame and
-  // outside the passive dim that calms every other tab (L-132).
+  // ONE treatment across both halves (L-138): the frame is the hollow amber
+  // outline around the screen and this tab is the one SOLID amber object
+  // inside it - `header-tab-visual.tsx` fills the tab's real silhouette with
+  // `--layout-session-tab-fill`, derived from this same token, and outlines it
+  // in the token itself. At rest - the user clicked another tab mid-session -
+  // `SessionTabMark` wears it as a cap instead, at a thickness that reads next
+  // to the frame and outside the passive dim that calms every other tab
+  // (L-132).
   //
   // The pair's FOREGROUND rather than its tint: `--warning` measures 2.56:1 to
   // 2.95:1 against the surfaces this lands on in every light palette, under

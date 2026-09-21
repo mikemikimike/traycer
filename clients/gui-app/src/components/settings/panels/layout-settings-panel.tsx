@@ -184,7 +184,7 @@ export function LayoutSettingsPanel(): ReactNode {
 
 /**
  * The finder (L-07, I-11, L-125), which this page needed as soon as it stopped
- * being twenty-two sections: six cards of rows is still a page a person
+ * being twenty-three sections: six cards of rows is still a page a person
  * arrives at knowing the word for what they want.
  *
  * **Sticky to the top of the settings pane**, so it is reachable from anywhere

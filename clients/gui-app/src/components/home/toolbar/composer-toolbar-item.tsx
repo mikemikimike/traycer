@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { ComposerAttachImageButton } from "@/components/home/toolbar/composer-attach-image-button";
-import { ComposerHarnessLabel } from "@/components/home/toolbar/composer-harness-label";
 import { ComposerMicSlot } from "@/components/home/toolbar/composer-mic-button";
 import type { ComposerDictationControl } from "@/components/home/toolbar/composer-mic-button";
 import { PermissionsPicker } from "@/components/home/pickers/permissions-picker";
@@ -13,7 +12,7 @@ import type { ProviderTerminalLoginSurface } from "@/lib/providers/provider-term
 import type { ToolbarRegionId } from "@/lib/layout/region-id";
 
 /**
- * Every prop any of the five toolbar items could need, in one shape: since an
+ * Every prop any of the four toolbar items could need, in one shape: since an
  * item may sit in either cluster after a reorder, both `ComposerToolbarLeft`
  * and `ComposerToolbarRight` render through the same `renderToolbarItem`
  * and so both need the full set, not just the half each drew before D13's
@@ -75,8 +74,6 @@ export function renderToolbarItem(
           interactive
         />
       );
-    case "agent":
-      return <ComposerHarnessLabel label={props.harnessLabel} />;
     case "model":
       return (
         <HarnessModelPicker

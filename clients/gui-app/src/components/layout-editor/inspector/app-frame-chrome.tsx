@@ -301,7 +301,11 @@ function AppFrameRailEntry(props: {
 }): ReactNode {
   const { entry, values, arrangement } = props;
   if (entry.kind === "divider") {
-    return <span aria-hidden className="my-1 h-px w-6 bg-border" />;
+    // Nothing, which is the parity answer (L-11): a preset card is a picture of
+    // the app AT REST, and at rest a group break IS the rail's own `gap-1` and
+    // no element (L-140). The hairline drawn here was a picture of something
+    // the sidebar no longer draws.
+    return null;
   }
   const railValues = values[entry.id];
   if (railValues.shown === "hidden") return null;

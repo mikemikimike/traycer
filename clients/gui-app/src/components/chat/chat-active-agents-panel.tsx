@@ -6,7 +6,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { LivePulse } from "@/components/ui/live-pulse";
-import { useChatDockSectionRevealed } from "@/components/chat/chat-dock-compact-context";
+import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
+import { ChatDockAttachedPanelBody } from "@/components/chat/chat-dock-attached-panel";
 import { AgentStopList } from "@/components/chat/chat-agent-stop-list";
 import { AgentStopButton } from "@/components/chat/agent-stop-button";
 import type { AgentRow } from "@/hooks/agent/use-agent-stop-controls";
@@ -32,13 +33,40 @@ export function ActiveAgentsPanel(props: {
    *  dock's shared frame (L-97). */
   readonly separated: boolean;
 }) {
-  // Open on arrival when a chip click is what put this row back in the dock.
-  const revealedByChip = useChatDockSectionRevealed("activeAgents");
-  const [open, setOpen] = useState(revealedByChip);
+  // Attached above the composer because its pill is the open one (L-142).
+  const attached = useChatDockSectionAttached("activeAgents");
+  const [open, setOpen] = useState(false);
   // The root agent counts as running too when it is itself active (not just
   // idling while its sub-agents work).
   const runningCount =
     props.descendants.length + (props.self.activity === false ? 0 : 1);
+
+  const list = (
+    <AgentStopList
+      epicId={props.epicId}
+      viewTabId={props.viewTabId}
+      self={props.self}
+      descendants={props.descendants}
+      surface="composer-panel"
+    />
+  );
+
+  if (attached) {
+    // No portalled action, and that is this panel's own long-standing rule
+    // rather than an omission: "Stop all" is a COLLAPSED-header affordance,
+    // and an expanded list puts the same stop on the current chat's own row,
+    // where it sits beside the agent it acts on. An attached panel is expanded
+    // by construction, so lifting the header button into the pill row would
+    // show the same action twice.
+    return (
+      <ChatDockAttachedPanelBody
+        section="activeAgents"
+        testId="active-agents-list"
+      >
+        {list}
+      </ChatDockAttachedPanelBody>
+    );
+  }
 
   return (
     <Collapsible
@@ -75,13 +103,7 @@ export function ActiveAgentsPanel(props: {
             props.scrollRegionMaxHeightClass,
           )}
         >
-          <AgentStopList
-            epicId={props.epicId}
-            viewTabId={props.viewTabId}
-            self={props.self}
-            descendants={props.descendants}
-            surface="composer-panel"
-          />
+          {list}
         </div>
       </CollapsibleContent>
     </Collapsible>

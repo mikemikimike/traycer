@@ -124,7 +124,9 @@ describe("a gesture is one undo step", () => {
     expect(editorState().history.future).toHaveLength(1);
 
     editorState().recordGesture(() => {
-      useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("attachImage", { shown: "hidden" });
     });
     expect(editorState().history.future).toHaveLength(0);
   });
@@ -157,7 +159,9 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
     expect(editorState().undoCount).toBe(1);
 
     editorState().recordGesture(() => {
-      useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("attachImage", { shown: "hidden" });
     });
     editorState().undo();
     expect(editorState().undoCount).toBe(2);
@@ -180,7 +184,9 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
     expect(first).not.toBeNull();
 
     editorState().recordGesture(() => {
-      useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("attachImage", { shown: "hidden" });
     });
     expect(editorState().firstChangeAt).toBe(first);
 
@@ -215,7 +221,9 @@ describe("undo_count and first_change_bucket bookkeeping (L-46, L-54)", () => {
 
 describe("Discard and external writes (L-18)", () => {
   it("restores the state the session started from", () => {
-    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
     session();
     editorState().recordGesture(() => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
@@ -224,7 +232,9 @@ describe("Discard and external writes (L-18)", () => {
     editorState().discard();
 
     expect(getLayoutSnapshot().overrides.mic).toBeUndefined();
-    expect(getLayoutSnapshot().overrides.agent).toEqual({ shown: "hidden" });
+    expect(getLayoutSnapshot().overrides.attachImage).toEqual({
+      shown: "hidden",
+    });
     expect(editorState().history.past).toHaveLength(0);
   });
 
@@ -235,7 +245,9 @@ describe("Discard and external writes (L-18)", () => {
     });
 
     // Another window, or a settings surface outside the editor.
-    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
 
     expect(editorState().history.past).toHaveLength(1);
 
@@ -243,7 +255,9 @@ describe("Discard and external writes (L-18)", () => {
 
     // The editor's own change is gone; the external one survives Discard.
     expect(getLayoutSnapshot().overrides.mic).toBeUndefined();
-    expect(getLayoutSnapshot().overrides.agent).toEqual({ shown: "hidden" });
+    expect(getLayoutSnapshot().overrides.attachImage).toEqual({
+      shown: "hidden",
+    });
   });
 
   it("stops rebasing once the session ends", () => {
@@ -251,9 +265,11 @@ describe("Discard and external writes (L-18)", () => {
     const entry = editorState().entrySnapshot;
     editorState().endSession();
 
-    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
 
-    expect(entry?.overrides.agent).toBeUndefined();
+    expect(entry?.overrides.attachImage).toBeUndefined();
     expect(editorState().entrySnapshot).toBeNull();
   });
 });
@@ -442,10 +458,12 @@ describe("whether there is anything to discard", () => {
     // over a layout identical to the one it would restore.
     session();
 
-    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
 
     expect(editorState().dirty).toBe(false);
-    expect(editorState().entrySnapshot?.overrides.agent).toEqual({
+    expect(editorState().entrySnapshot?.overrides.attachImage).toEqual({
       shown: "hidden",
     });
   });
@@ -454,7 +472,9 @@ describe("whether there is anything to discard", () => {
     session();
     hideTheMic();
 
-    useLayoutStore.getState().setRegionValues("agent", { shown: "hidden" });
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
 
     expect(editorState().dirty).toBe(true);
   });

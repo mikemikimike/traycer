@@ -177,19 +177,42 @@
    Deliberately no reduced-motion override. The base layer already collapses
    every animation to 0.01ms, which still fires `animationend` - and that event
    is what takes `data-pulse` back off. `animation: none` would suppress it and
-   leave the attribute set for good, so the chip could never pulse again. */
+   leave the attribute set for good, so the chip could never pulse again.
+
+   Two knobs, both read off the animated element so a variant can set them with
+   one declaration. `--dock-chip-ring-duration` is the decay this ring is
+   allowed: 620ms is the value the whole app's timing family tops out at, and a
+   longer glow keeps a running animation beside the composer for that much
+   longer, so it is a variable rather than a literal precisely so the two can
+   be compared on pixels. It is a separate longhand after the shorthand on
+   purpose - a `var()` inside the `animation` shorthand makes the WHOLE
+   declaration invalid-at-computed-value if the variable ever is, which would
+   take `forwards` with it and leave `data-pulse` set for good.
+   `--dock-chip-ring-color` is the ring's tone; a background item that FAILED
+   radiates the destructive role instead of the primary one, because a failure
+   is the one arrival on this strip that is not simply news. */
 @keyframes chat-dock-chip-pulse {
   from {
     box-shadow: 0 0 0 0
-      color-mix(in srgb, var(--color-primary) 55%, transparent);
+      color-mix(
+        in srgb,
+        var(--dock-chip-ring-color, var(--color-primary)) 55%,
+        transparent
+      );
   }
   to {
     box-shadow: 0 0 0 5px transparent;
   }
 }
 
-[data-chat-dock-chip][data-pulse="true"] {
+[data-chat-dock-chip][data-pulse="true"],
+[data-chat-dock-chip][data-pulse="failure"] {
   animation: chat-dock-chip-pulse 620ms ease-out forwards;
+  animation-duration: var(--dock-chip-ring-duration, 620ms);
+}
+
+[data-chat-dock-chip][data-pulse="failure"] {
+  --dock-chip-ring-color: var(--color-destructive);
 }
 
 /* The thumb and fill share one response: quick eased follow while dragging,

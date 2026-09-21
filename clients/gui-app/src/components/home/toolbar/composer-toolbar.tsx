@@ -127,10 +127,11 @@ function ComposerToolbarView(
     store,
     (s) => s.supportedPermissionModes,
   );
-  const storedHarnessLabel = useStore(store, (s) => s.harnessLabel);
-  const harnessLabel = props.presentation
-    ? "Sample provider"
-    : storedHarnessLabel;
+  // The permission picker's only use for it: naming the provider that does
+  // not support a mode. The sample scene's own store answers it like any
+  // other, so there is no presentation override - the label the toolbar used
+  // to DRAW beside the access chip left the composer with L-136.
+  const harnessLabel = useStore(store, (s) => s.harnessLabel);
   const setPermission = useStore(store, (s) => s.setPermission);
   // The union across the WHOLE catalog, so the picker can tell "this host
   // predates `auto`" from "this provider declines it". Memoized on the
@@ -181,8 +182,8 @@ function ComposerToolbarView(
   // No `inert` on the presentation copy (L-131). The only surface that renders
   // one is the layout editor's sample workspace, where the toolbar IS the thing
   // being pointed at: `inert` removes the subtree from hit testing, so Attach
-  // image, Access, Agent, Model and Microphone could not be hovered, selected
-  // or dragged. The edit firewall on the app column is what keeps a sample
+  // image, Access, Model and Microphone could not be hovered, selected or
+  // dragged. The edit firewall on the app column is what keeps a sample
   // gesture from acting, and every leaf here is already passive on its own -
   // the model picker draws a trigger with no menu, Send is disabled, and the
   // handlers the sample passes are no-ops.

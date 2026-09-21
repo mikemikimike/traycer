@@ -40,11 +40,13 @@ import type { RegionId } from "@/lib/layout/region-id";
  *
  * Three things live here because they are the same offer made in three
  * places: chrome that has no menu of its own gets
- * {@link LayoutRegionContextMenu}, a STRIP of such chrome gets
+ * {@link LayoutRegionContextMenu}, a CONTAINER of such chrome gets
  * {@link LayoutClusterContextMenu}, and chrome that already has a menu renders
- * {@link LayoutRegionMenuItems} inside it. Nesting a second Radix trigger on a
- * subtree that already has one fires both menus for the same event, which is
- * why the choice is the call site's.
+ * {@link LayoutRegionMenuItems} inside it. The choice is the call site's
+ * because only it knows which of the three it is; what it must not do is give
+ * a piece of chrome TWO offers for the same press, which is a menu that names
+ * the region and a menu that names the row underneath it, whichever of the two
+ * happens to win.
  *
  * A quick verb does NOT enter the editor: it writes the same value the
  * inspector's own switch writes, through the same `region-control-io` seam, and
@@ -247,6 +249,18 @@ export function LayoutRegionContextMenu(props: {
  *
  * The child is the cluster's own box, taken `asChild`, so this adds no element
  * of its own.
+ *
+ * It is the right shape for any container of regions, not only a strip of
+ * small controls: the dock's pill row and the joined frame of full rows each
+ * take one (L-144), which is what gives every dock member its verbs for two
+ * roots per tile rather than one per member. A container holds controls that
+ * may own their own right-click (a file row, a queue item), and the innermost
+ * menu wins with nothing written here: Radix's trigger composes the caller's
+ * handler ahead of its own opener and SKIPS that opener once the event is
+ * default-prevented, which the inner trigger has already done by the time the
+ * event reaches this one. The quick verbs are left to the row's header and its
+ * empty space, where nothing else is listening
+ * (`region-quick-verbs.test.tsx` pins both halves).
  */
 export function LayoutClusterContextMenu(props: {
   readonly children: ReactNode;
@@ -259,9 +273,8 @@ export function LayoutClusterContextMenu(props: {
         onContextMenu={(event: MouseEvent<HTMLElement>) => {
           const region = regionUnder(event.target);
           // Nothing customizable under the pointer - the strip's own gaps.
-          // Radix composes this ahead of its own opener and skips that opener
-          // once the event is defaulted-prevented, so the gap keeps whatever
-          // menu an ancestor owns instead of claiming one for no region.
+          // The same composition rule as above: defaulting the event prevented
+          // leaves the gap to whatever menu an ancestor owns, or to none.
           if (region === null) event.preventDefault();
           else setRegionId(region);
         }}

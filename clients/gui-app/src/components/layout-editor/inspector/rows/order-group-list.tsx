@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
+import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { assertNever } from "@/components/layout-editor/inspector/rows/assert-never";
 import {
@@ -13,9 +14,11 @@ import {
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
 import {
   ORDER_GROUPS,
+  orderGroupInstruction,
   orderGroupListLabel,
 } from "@/components/layout-editor/regions/surface-groups";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   insertRailDivider,
   movedWithin,
@@ -76,10 +79,64 @@ export function OrderGroupList(props: {
             }}
           >
             <Plus />
-            Add divider
+            Add group break
           </Button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The header that introduces one of these lists: its name, how it is operated,
+ * and whatever verb belongs to the GROUP rather than to a member (R3-11).
+ *
+ * Beside {@link OrderGroupList} because it is the other half of the same thing
+ * and both hosts compose the pair: the page's surface card draws it above each
+ * of its lists with a `Revert order` button, and the dock's Providers level
+ * draws it above the one list it has with nothing beside it. It used to be
+ * hand-built in both of those files - the same gutter, the same `h3`, the same
+ * `max-w-[72ch]` paragraph - which is the drift R1-04 and R2-02 were each about
+ * one layer down, with the WORDS already unified into `surface-groups.ts` and
+ * only the markup left in two places.
+ *
+ * What the callers still own is how the header is ruled into the card around
+ * it: that is a fact about the card, and the two cards genuinely differ.
+ */
+export function OrderGroupHeader(props: {
+  readonly group: OrderGroupId;
+  /** The group's own verb beside the heading, or `null` for none. */
+  readonly action: ReactNode;
+}): ReactNode {
+  const { group, action } = props;
+  const facts = ORDER_GROUPS[group];
+  const gutter = useSortableRowPadding();
+  const page = useLayoutFormHost() === "page";
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-start justify-between gap-x-6 gap-y-2",
+        gutter.row,
+      )}
+    >
+      <div className="min-w-32 flex-1">
+        {facts.label === null ? null : (
+          <h3 className="font-medium text-foreground">{facts.label}</h3>
+        )}
+        <p
+          className={cn(
+            "max-w-[72ch] text-pretty text-muted-foreground",
+            // A notch under the row scale the gutter carries, on whichever
+            // host: the page reads at the Settings form's size and the dock at
+            // the instrument panel's (P-4).
+            page ? "text-ui-sm" : "text-ui-xs",
+            facts.label === null ? null : "mt-0.5",
+          )}
+        >
+          {orderGroupInstruction(group)}
+        </p>
+      </div>
+      {action}
     </div>
   );
 }

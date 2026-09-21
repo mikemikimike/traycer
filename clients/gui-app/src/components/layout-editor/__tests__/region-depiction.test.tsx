@@ -63,6 +63,8 @@ describe("the host context a depiction is drawn in", () => {
       ["minimap", "chat"],
       ["contextUsage", "composer-foot"],
       ["background", "dock"],
+      ["queue", "dock"],
+      ["todo", "dock"],
       ["access", "toolbar"],
       ["railComments", "rail"],
     ];
@@ -113,6 +115,36 @@ describe("the host context a depiction is drawn in", () => {
 });
 
 describe("what a depiction draws", () => {
+  it("draws the Message queue's full row as the collapsed header alone", () => {
+    const { container } = render(
+      depictRegion(
+        "queue",
+        { shown: "shown", size: "full" },
+        DEFAULT_ARRANGEMENT,
+        null,
+      ),
+    );
+
+    // The real header, with the count and the state word it prints live.
+    const header = container.querySelector(
+      '[data-testid="queued-message-header"]',
+    );
+    expect(header).not.toBeNull();
+    expect(header?.textContent).toContain("1");
+
+    // And nothing under it: the whole panel brought a `DndContext` and a
+    // sortable list into a picture that can never be dragged - three of them
+    // per preset card. What is left of its live region announces nothing.
+    expect(
+      container.querySelector('[data-testid="queued-message-list"]'),
+    ).toBeNull();
+    expect(
+      [...container.querySelectorAll("[aria-live]")].every(
+        (node) => node.textContent === "",
+      ),
+    ).toBe(true);
+  });
+
   it("reports only the metrics the values switched on", () => {
     const { container } = render(
       depictRegion(
@@ -246,7 +278,7 @@ describe("what a depiction draws", () => {
     expect(withoutWord.container.textContent).not.toContain("remaining");
   });
 
-  it("draws a sample of the providers the arrangement still shows", () => {
+  it("draws every provider the arrangement still shows", () => {
     const visible = DEFAULT_ARRANGEMENT.usageProviders;
     const hiddenAll = render(
       depictRegion(
@@ -270,8 +302,10 @@ describe("what a depiction draws", () => {
       oneHidden.container.querySelectorAll("[data-provider-id]"),
     ).toHaveLength(1);
 
-    // A sample, not the catalog: eight segments do not fit a 320px dock and
-    // nothing is learned from the fourth one (LV2-19).
+    // The catalog, not a sample of it (R3-03). A picture never lies, and on
+    // Settings ▸ Layout this band is the only feedback the providers list's
+    // Shown/Hidden control has: a picture that stopped after three said
+    // nothing when the fifth was hidden.
     const allShown = render(
       depictRegion(
         "usageLimits",
@@ -283,10 +317,24 @@ describe("what a depiction draws", () => {
     expect(visible.length).toBeGreaterThan(3);
     expect(
       allShown.container.querySelectorAll("[data-provider-id]"),
-    ).toHaveLength(3);
+    ).toHaveLength(visible.length);
+
+    const fifthHidden = render(
+      depictRegion(
+        "usageLimits",
+        SHIPPED_DEFAULT_VALUES.usageLimits,
+        { ...DEFAULT_ARRANGEMENT, hiddenProviders: [visible[4]] },
+        null,
+      ),
+    );
+    const drawn = [
+      ...fifthHidden.container.querySelectorAll("[data-provider-id]"),
+    ].map((segment) => segment.getAttribute("data-provider-id"));
+    expect(drawn).toHaveLength(visible.length - 1);
+    expect(drawn).not.toContain(visible[4]);
   });
 
-  it("gives each sampled provider a reading of its own", () => {
+  it("gives neighbouring providers readings of their own", () => {
     // The finding this replaces: every segment was drawn from ONE fixed
     // window, so the strip printed the same "35% 5h" behind every icon and
     // read as filler rather than as a picture of a status bar (LV2-19).
@@ -299,12 +347,23 @@ describe("what a depiction draws", () => {
       ),
     );
 
+    // The READING alone: a segment prints its provider's name first, so
+    // comparing whole strings would be satisfied by the names and say nothing
+    // about the numbers behind them ("Codex35% used 58m" -> "35% used 58m").
     const readings = [...container.querySelectorAll("[data-provider-id]")].map(
-      (segment) => segment.textContent,
+      (segment) => segment.textContent.replace(/^\D+/, ""),
     );
 
-    expect(readings).toHaveLength(3);
-    expect(new Set(readings).size).toBe(readings.length);
+    expect(readings).toHaveLength(DEFAULT_ARRANGEMENT.usageProviders.length);
+    expect(readings.every((reading) => reading.length > 0)).toBe(true);
+    // Three readings rotate across the catalog, so a strip longer than three
+    // repeats - but never beside its own twin, which is where the "eight
+    // identical strings" LV2-19 found was legible as filler.
+    const repeatedNeighbour = readings.filter(
+      (reading, index) => index > 0 && readings[index - 1] === reading,
+    );
+    expect(repeatedNeighbour).toHaveLength(0);
+    expect(new Set(readings).size).toBe(3);
   });
 });
 

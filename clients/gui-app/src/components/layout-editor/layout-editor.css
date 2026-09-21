@@ -24,10 +24,21 @@
   --layout-editor-ring-z: 40;
   --layout-editor-chip-z: 41;
   /* The editing frame (L-130), above every layer INSIDE the app column: the
-     canvas subtree carries positioned chrome up to `z-40` - the ceiling
-     `epic-shell.tsx` measured when it put its own overlay at `z-50` - and the
-     two editor overlays above stop at 41. Below that modal layer, which is
-     not part of the screen the frame is drawn around. */
+     canvas subtree carries positioned chrome up to `z-40` and the two editor
+     overlays above stop at 41. Below the modal layer, which is not part of the
+     screen the frame is drawn around.
+
+     `layout-editor-contrast.test.ts` measures that ceiling rather than taking
+     it on trust: it scans the column's own subtrees for `z-<n>`, skipping the
+     files that portal their overlay out of the column, and asserts this number
+     clears the highest one left.
+
+     ONE deliberate exception, excluded there by name:
+     `epic-canvas/epic-shell.tsx`'s repoint-failure overlay is `absolute inset-0
+     z-50` INSIDE the column, so it paints over this frame's border. It is a
+     70%-opaque card shown only in an error state that cannot arise in the
+     sample workspace, so the frame stays where it is and the exception is
+     recorded rather than designed around. */
   --layout-editor-frame-z: 43;
   /* Above all three, because a floating panel the user placed there is the one
      thing that is allowed to cover the canvas it decorates, frame included
@@ -36,6 +47,37 @@
   /* A member in hand is off the surface, which is the whole of what the lift
      says; the prototype's `--shadow-lift`, which this app has no token for. */
   --layout-editor-lift-shadow: 0 10px 24px rgb(0 0 0 / 18%);
+  /* The editing frame's geometry (L-137). Two numbers rather than a platform
+     branch, because Electron does not expose the OS window radius and the
+     renderer has no honest way to ask for it.
+
+     An inset rounded rect with radius `r` at inset `i` stays strictly inside a
+     window whose corner radius is `R` whenever `r + i >= R`. macOS draws its
+     window corners at ~10pt (measured off the owner's third-pass screenshot:
+     the arc leaves the straight edges ~18 device px in, at 2x), so 4 + 12
+     clears it with a margin big enough to absorb a future OS bump. On a
+     square-cornered window - Windows, Linux, and a maximised or fullscreen
+     macOS window - the same frame simply reads as a rounded frame inset from
+     the edge, which is the app's own card language. No dock mode and no
+     platform changes either number: all four corners are rounded, so the frame
+     is one shape rather than a mix of square and round corners that would read
+     as an accident wherever the two met. */
+  --layout-editor-frame-inset: 4px;
+  --layout-editor-frame-radius: 12px;
+  /* The other half of the one editing signal (L-138). The sample tab is the
+     one SOLID amber object in the window and the frame is the hollow one, both
+     struck from `--warning-foreground`, so a reader who sees them sees one
+     system rather than two decorations.
+
+     Mixed against `--background` rather than `transparent`: the tab chrome
+     paints this over the strip AND uses it to cover the strip's baseline under
+     the active tab, so a translucent fill would let the seam show through and
+     would read differently on every surface the strip happens to sit on. */
+  --layout-session-tab-fill: color-mix(
+    in srgb,
+    var(--warning-foreground) 14%,
+    var(--background)
+  );
 }
 
 /* Both spellings the app's own dark variant is defined over (`index.css`): a
@@ -335,27 +377,40 @@
     filter var(--layout-editor-dim-duration) var(--layout-editor-ease);
 }
 
-/* The session tab's own mark (L-87, L-132), the other half of the rule above:
-   the member that CONTAINS it stays lit, and this is what it contains.
+/* The session tab's own mark (L-87, L-132, L-138), the other half of the rule
+   above: the member that CONTAINS it stays lit, and this is what it contains.
 
-   Painted here rather than on the element, because the tab's colour is the
-   only runtime value in it - `header-tab-visual.tsx` hands that colour over as
-   `--layout-session-tab-color` and names the shape, and the geometry stays in
-   the element's own classes. Two shapes, because the tab has two. */
-[data-layout-session-tab="cap"] {
+   ONE element with one job - be the marker the dim exemption reads - and the
+   paint follows the state the tab is in, because the tab has two and only one
+   of them leaves the element anything to draw.
+
+   The previous version drew a second, unrelated decoration in the active
+   state: an inner `rounded-md` rectangle washed with 16% of the colour, inset
+   8px from a tab whose real silhouette is an S-curved trapezoid. It did not
+   follow the tab's shape, it did not touch the amber outline the same tab was
+   already wearing, and against a black palette it read as a stray brown box
+   behind the label - a rendering bug rather than a signal (the owner's third
+   live pass). It is gone. */
+
+/* At rest - the user clicked another tab while the session is live - the tab
+   wears the colour as a cap along its bottom edge, at a thickness that reads
+   beside a dotted frame around the whole screen (L-132). Painted here rather
+   than on the element because the tab's colour is the only runtime value in
+   it: `header-tab-visual.tsx` hands it over as `--layout-session-tab-color`
+   and names the state, and the geometry stays in the element's own classes. */
+[data-layout-session-tab="rest"] {
+  height: 3px;
   background: var(--layout-session-tab-color);
 }
 
-/* An active tab is already outlined in the colour and merges into the content
-   below it, so a stroke across its bottom would close a seam the design opens
-   on purpose: it takes a wash of the same colour on the inner shape the
-   strip's hover state already uses. */
-[data-layout-session-tab="wash"] {
-  background: color-mix(
-    in srgb,
-    var(--layout-session-tab-color) 16%,
-    transparent
-  );
+/* Active, the tab's OWN silhouette is the mark: `TabChrome` fills it with
+   `--layout-session-tab-fill` and outlines it in the same token, so the whole
+   tab is the solid amber object inside the hollow amber frame. There is
+   nothing left for a separate element to draw, and it draws nothing - it stays
+   in the tree because `:has()` matches a `display: none` element, so the dim
+   exemption above keeps working in both states off one marker. */
+[data-layout-session-tab="filled"] {
+  display: none;
 }
 
 /* The transcript dims with `opacity` alone. It is a virtualised, full-viewport
@@ -443,6 +498,23 @@
   border-radius: 8px;
   background: var(--card);
   box-shadow: var(--layout-editor-lift-shadow);
+}
+
+/* A focused row, written HERE for the same reason the lift above is: this file
+   owns the row's states, and the alternative was one arbitrary variant chained
+   five times on a single `className` - `has-[[role=button]:focus-visible]:` in
+   front of every declaration, a shape that appears nowhere else in this app
+   (R3-18). The indicator belongs to the ROW rather than to the grab inside it,
+   because the row is what the keyboard operates.
+
+   INSET, because the settings card clips its content
+   (`settings-group.tsx`'s `overflow-clip`) and an outset ring on the first or
+   last row was sliced off along the card's edge. At the dock's 320px an inset
+   3px band still reads. */
+[data-sortable-id]:has([role="button"]:focus-visible) {
+  z-index: 10;
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
 }
 
 /* ---------------------------------------------------------------
@@ -715,16 +787,32 @@
    the column's reflow in any of the three dock modes - the column is already
    `position: relative`, so it is the containing block.
 
-   Inside the column's box (`inset: 0`), because an outset frame on a
-   `h-safe-dvh` column is clipped by the window edge on three sides and reads
-   as a stray hairline - the same trap the full-bleed rows above document.
-   `pointer-events: none`, because the canvas under it is what the user points
-   at (P3, L-131).
+   Inside the column's box, because an outset frame on a `h-safe-dvh` column is
+   clipped by the window edge on three sides and reads as a stray hairline -
+   the same trap the full-bleed rows above document. `pointer-events: none`,
+   because the canvas under it is what the user points at (P3, L-131).
+
+   INSET AND ROUNDED (L-137), which is the whole of the third live pass's other
+   finding. At `inset: 0` with square corners the frame ran into the window's
+   own rounded corners and was sliced off at the top-left and bottom-left - the
+   two corners of the column that ARE window corners while the inspector is
+   docked right. The numbers are on `:root` with the reasoning; what matters
+   here is that they are uniform, so the frame follows the column's box in all
+   three dock modes with no JS and no per-mode rule: docked right the LEFT
+   corners are the window's, docked left the RIGHT ones are, floating all four
+   are, and a corner that is not a window corner is simply a rounded corner
+   against the inspector's divider.
+
+   `dotted` on a curve is Chromium's own dot distribution along the border
+   path. At a 2px stroke and a 12px radius each corner arc carries roughly four
+   dots, which reads as a curve rather than as a bunched joint; this is the one
+   thing here that a still image cannot settle, so it is named in the report as
+   an owner check.
 
    Static: the frame is a statement about the mode, not an event, so there
-   is nothing to animate and no reduced-motion gate to honour. The amber cap
-   on the sample tab (`stores/tabs/kinds/sample-workspace.tsx`) is the other
-   half of the same signal and uses the same token.
+   is nothing to animate and no reduced-motion gate to honour. The sample tab
+   (`stores/tabs/kinds/sample-workspace.tsx`) is the other half of the same
+   signal and uses the same token - solid where this is hollow.
 
    A region's own hover outline is `outline-offset: 3px` on a DIFFERENT
    element, so the two never compose into one thicker line.
@@ -734,8 +822,9 @@
   content: "";
   position: absolute;
   z-index: var(--layout-editor-frame-z);
-  inset: 0;
+  inset: var(--layout-editor-frame-inset);
   border: 2px dotted var(--warning-foreground);
+  border-radius: var(--layout-editor-frame-radius);
   pointer-events: none;
 }
 
@@ -783,5 +872,19 @@
      the whole of what says the screen is in an editing mode. */
   [data-layout-column][data-layout-editing="1"]::after {
     border-color: Highlight;
+  }
+
+  /* The signal's other half, on the same terms. The active tab's amber fill is
+     force-adjusted away with every other background, so at rest AND in use the
+     tab says "this one" with the system's own highlight - restated here
+     because the colour it was saying it with no longer exists. */
+  [data-layout-session-tab="rest"] {
+    background: Highlight;
+  }
+
+  [data-layout-session-tab="filled"] {
+    display: block;
+    height: 3px;
+    background: Highlight;
   }
 }

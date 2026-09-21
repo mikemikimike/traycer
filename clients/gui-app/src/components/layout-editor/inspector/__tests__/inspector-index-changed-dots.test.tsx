@@ -4,6 +4,7 @@ import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-i
 import { regionChanged, reorderedGroups } from "@/lib/layout/layout-diff";
 import { LAYOUT_REGION_IDS } from "@/components/layout-editor/regions/region-facts";
 import {
+  DEFAULT_ARRANGEMENT,
   insertRailDivider,
   moveRailEntry,
 } from "@/lib/layout/layout-arrangement";
@@ -182,19 +183,21 @@ describe("index changed-dots and the header count (L-57)", () => {
       const arrangement = useLayoutStore.getState().arrangement;
       useLayoutStore.getState().setArrangement({
         ...arrangement,
-        toolbarLeft: [...arrangement.toolbarLeft].reverse(),
+        dock: [...arrangement.dock].reverse(),
       });
     });
 
     const snapshot = getLayoutSnapshot();
     const dots = screen.getAllByTestId("changed-dot");
-    // The toolbarLeft trio is the only group with a `position-order` row
-    // here, and reversing three items leaves the MIDDLE one at its own index:
-    // it has not moved, so it carries no dot. Which is exactly the narrowing
-    // (I-17) - the group is reordered, this row is not.
+    // Reversing an odd-length list leaves the MIDDLE member at its own index:
+    // it has not moved, so it carries no dot, which is exactly the narrowing
+    // (I-17) - the group is reordered, that row is not. The dock has five
+    // members since L-142, so the middle one is `background`.
+    const dock = DEFAULT_ARRANGEMENT.dock;
+    const middle = dock[(dock.length - 1) / 2];
     const dotted = dots.map((dot) => rowRegionId(dot));
-    expect(dotted.length).toBe(2);
-    expect(dotted).not.toContain("access");
+    expect(dotted.length).toBe(dock.length - 1);
+    expect(dotted).not.toContain(middle);
     for (const regionId of dotted) {
       expect(regionChanged(snapshot, regionId)).toBe(false);
     }

@@ -22,6 +22,11 @@ import type { RegionId } from "@/lib/layout/region-id";
  * `"compact"` on a row that only hides would ask a leaf for a shape it has no
  * case for.
  *
+ * Re-deriving is also what makes a RETIRED region cost nothing: the table
+ * below names this build's regions, so a key it has never heard of - an
+ * `agent` override written before L-136 deleted that region - is simply not
+ * read. No migration, no discard pass, no version (P5).
+ *
  * **It does not minimize against the base preset, deliberately** (L-133). The
  * delta is what the USER PICKED, not what happens to differ from whichever
  * density is current, and those are two different facts: a pick that the
@@ -44,9 +49,10 @@ export function resolvePersistedOverrides(value: unknown): LayoutOverrides {
     runningAgents: sizedPatch(stored.runningAgents),
     changedFiles: sizedPatch(stored.changedFiles),
     background: sizedPatch(stored.background),
+    queue: sizedPatch(stored.queue),
+    todo: sizedPatch(stored.todo),
     attachImage: shownPatch(stored.attachImage),
     access: sizedPatch(stored.access),
-    agent: shownPatch(stored.agent),
     model: modelPatch(stored.model),
     mic: shownPatch(stored.mic),
     railAgents: railPatch(stored.railAgents),

@@ -754,6 +754,48 @@ describe("<StatusBarProviderSegment />", () => {
     });
   });
 
+  describe("arrival", () => {
+    // `AnimatePresence initial={false}` is what makes these two cases differ,
+    // and motion writes the enter styles onto the element itself, so the
+    // inline style is the observable: a reading present when the bar first
+    // paints is already at rest, and one that arrives starts from 0.97.
+    it("does not animate a reading that is already there on the status bar's first paint", () => {
+      const window = windowFixture({ windowKey: "codex:primary" });
+      renderSegment({
+        segment: segmentFixture({ windows: [window], tightest: window }),
+      });
+
+      const reading = screen.getByTestId("status-bar-provider-reading");
+      expect(reading.style.opacity).toBe("1");
+      expect(reading.style.transform).not.toContain("scale(0.97)");
+    });
+
+    it("animates the reading in when a cold provider first reports", () => {
+      const window = windowFixture({ windowKey: "codex:primary" });
+      const { rerender } = renderSegment({
+        segment: segmentFixture({ state: "cold" }),
+      });
+      expect(screen.queryByTestId("status-bar-provider-reading")).toBeNull();
+
+      rerender(
+        <TooltipProvider>
+          <StatusBarProviderSegment
+            segment={segmentFixture({ windows: [window], tightest: window })}
+            parts={{ modeWord: true, timer: false, bar: true, percent: true }}
+            percentMode="used"
+          />
+        </TooltipProvider>,
+      );
+
+      // The track leaves in the same commit the reading arrives in, so the row
+      // never holds both.
+      expect(screen.queryByTestId("status-bar-provider-cold-track")).toBeNull();
+      const reading = screen.getByTestId("status-bar-provider-reading");
+      expect(reading.style.opacity).toBe("0");
+      expect(reading.style.transform).toContain("scale(0.97)");
+    });
+  });
+
   describe("segment states", () => {
     it("cold renders the neutral track and no spinner-carrying element", () => {
       const segment = segmentFixture({ state: "cold" });
@@ -923,8 +965,10 @@ describe("<StatusBarProviderSegment />", () => {
         const percentSpan = screen.getByTestId(
           "status-bar-window-percent-codex:primary",
         );
+        // The tone plus the crossfade it crosses a threshold with, and nothing
+        // else: this span is the only tinted part of the reading.
         expect(percentSpan.className).toBe(
-          rateLimitWindowSeverityTextClassName(severity),
+          `${rateLimitWindowSeverityTextClassName(severity)} transition-colors duration-200 ease-out`,
         );
       },
     );

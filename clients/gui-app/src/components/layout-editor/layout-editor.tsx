@@ -10,6 +10,7 @@ import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layo
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import { TooltipsSuppressedProvider } from "@/components/ui/tooltip-wrapper";
 import {
   initializeLayoutEditorWindow,
   watchLayoutEditorLease,
@@ -20,8 +21,6 @@ import {
   closeLayoutEditor,
   type LayoutEditorExitReason,
 } from "@/lib/layout/editor-session";
-import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
-import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useDesktopWindowId } from "@/lib/windows/desktop-window-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
@@ -160,9 +159,18 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
         publishes `"page"`. It used to ride on `RegionSection`'s own `host`
         prop, which only ever arrived here and only ever said `"inspector"`,
         so the prop carried a branch the page never took. */}
-      <LayoutFormHostContext value="inspector">
-        <InspectorBody />
-      </LayoutFormHostContext>
+      {/* The panel's own controls are real controls, so their hover labels
+        open. `SampleSceneProvider` suppresses tooltips for the whole shell
+        while a session is live - the canvas is a picture of the app and a
+        label over it covers the hover chip - and it cannot exclude this
+        panel, which is a DOM sibling of the column but a React descendant of
+        that provider. Published beside the form host for the same reason it
+        is: once, at the root of the inspector. */}
+      <TooltipsSuppressedProvider value={false}>
+        <LayoutFormHostContext value="inspector">
+          <InspectorBody />
+        </LayoutFormHostContext>
+      </TooltipsSuppressedProvider>
     </div>
   );
 }
@@ -207,7 +215,6 @@ function InspectorBody(): ReactNode {
           key={selected}
           regionId={selected}
           onOpenProvider={(providerId) => {
-            if (!isUsageProviderId(providerId)) return;
             useLayoutEditorStore
               .getState()
               .openLevel({ kind: "usage-provider", providerId });
@@ -258,8 +265,4 @@ function ownsItsOwnEscape(target: EventTarget | null): boolean {
       '[data-radix-popper-content-wrapper],[role="dialog"],[role="menu"],[role="listbox"]',
     ) !== null
   );
-}
-
-function isUsageProviderId(id: string): id is RateLimitProviderId {
-  return USAGE_PROVIDER_IDS.some((candidate) => candidate === id);
 }

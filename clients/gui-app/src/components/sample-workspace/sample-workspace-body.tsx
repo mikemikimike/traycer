@@ -1,8 +1,9 @@
 import { useCoarsePointer } from "@/hooks/ui/use-coarse-pointer";
 import { resolveMinimapVisibleItemCapacity } from "@/components/minimap/minimap-track-geometry";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Wrench } from "lucide-react";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import {
   ChatLowerDock,
   type DockRowHotspot,
@@ -102,6 +103,20 @@ export function SampleWorkspaceBody() {
     regionId: "background",
     instanceId: SAMPLE_TILE_ID,
   });
+  // Five members since L-139: the Message Queue and Todo are dock regions with
+  // the same Full row / Chip / Hidden semantics as the other three, so the
+  // canvas has to draw them the same way.
+  const queueValues = useRegionValues("queue");
+  const todoValues = useRegionValues("todo");
+  const queue = useLayoutRegion({
+    regionId: "queue",
+    instanceId: SAMPLE_TILE_ID,
+  });
+  const todo = useLayoutRegion({
+    regionId: "todo",
+    instanceId: SAMPLE_TILE_ID,
+  });
+  const panelId = useId();
   // Every dock member HAS content here (L-98): the sample scene feeds the real
   // panels, so a row draws its own header, its actions and its body exactly as
   // a live chat's does rather than a look-alike header.
@@ -127,6 +142,20 @@ export function SampleWorkspaceBody() {
       hasContent: true,
       ghost: background.ghost,
     },
+    queue: {
+      hotspotRef: queue.ref,
+      editing: queue.editing,
+      shown: queueValues.shown === "shown",
+      hasContent: true,
+      ghost: queue.ghost,
+    },
+    todo: {
+      hotspotRef: todo.ref,
+      editing: todo.editing,
+      shown: todoValues.shown === "shown",
+      hasContent: true,
+      ghost: todo.ghost,
+    },
   };
   // The same derivation the real tile folds on, ghost included: a member that
   // is Hidden AND Chip has to materialise as the CHIP the editor is pointing
@@ -145,6 +174,16 @@ export function SampleWorkspaceBody() {
     background: dockMemberFolded({
       values: backgroundValues,
       ghost: background.ghost,
+      hasContent: true,
+    }),
+    queue: dockMemberFolded({
+      values: queueValues,
+      ghost: queue.ghost,
+      hasContent: true,
+    }),
+    todo: dockMemberFolded({
+      values: todoValues,
+      ghost: todo.ghost,
       hasContent: true,
     }),
   };
@@ -172,7 +211,15 @@ export function SampleWorkspaceBody() {
           <TabHostContext.Provider value={SAMPLE_HOST_ID}>
             <ChatDiffTargetContext.Provider value={SAMPLE_DIFF_OPENER}>
               <ChatDockCompactStripProvider
-                value={{ chips, expanded: new Set(), onToggle: sampleNoop }}
+                // Always closed on the canvas: the editor's firewall swallows
+                // clicks, so a pill never opens here and the picture the user
+                // customises is the resting one (L-142).
+                value={{
+                  chips,
+                  openSection: null,
+                  panelId,
+                  onToggle: sampleNoop,
+                }}
               >
                 <ChatLowerDock
                   snapshotLoaded
@@ -391,35 +438,41 @@ function SampleTranscript() {
           ))}
         </div>
       </div>
-      {minimapCondition !== null ? (
-        <div
-          ref={minimapRef}
-          className={cn(
-            "absolute top-1/2 rounded border border-dashed p-2 text-ui-xs text-muted-foreground",
-            side === "left" ? "left-3" : "right-3",
-          )}
-        >
-          {minimapCondition}
-        </div>
-      ) : (
-        <ChatTurnMinimapView
-          items={SAMPLE_MINIMAP_ITEMS}
-          currentIndex={currentIndex}
-          cursorIndex={currentIndex}
-          maxVisibleItems={capacity}
-          bottomInset={0}
-          hitStripWidth={24}
-          side={side}
-          open={false}
-          ref={minimapRef}
-          hitStripRef={null}
-          onOpen={sampleNoop}
-          onFocus={sampleNoop}
-          onKeyDown={sampleNoop}
-          onCursorIndexChange={sampleNoop}
-          onSelect={sampleNoop}
-        />
-      )}
+      {/* The minimap's own quick verbs (L-144), on both of the things this
+          site can draw: the rail itself, and the stand-in that explains why
+          there is none. The wrapper is `display: contents`, so neither one's
+          absolute placement moves. */}
+      <LayoutRegionContextMenu regionId="minimap">
+        {minimapCondition !== null ? (
+          <div
+            ref={minimapRef}
+            className={cn(
+              "absolute top-1/2 rounded border border-dashed p-2 text-ui-xs text-muted-foreground",
+              side === "left" ? "left-3" : "right-3",
+            )}
+          >
+            {minimapCondition}
+          </div>
+        ) : (
+          <ChatTurnMinimapView
+            items={SAMPLE_MINIMAP_ITEMS}
+            currentIndex={currentIndex}
+            cursorIndex={currentIndex}
+            maxVisibleItems={capacity}
+            bottomInset={0}
+            hitStripWidth={24}
+            side={side}
+            open={false}
+            ref={minimapRef}
+            hitStripRef={null}
+            onOpen={sampleNoop}
+            onFocus={sampleNoop}
+            onKeyDown={sampleNoop}
+            onCursorIndexChange={sampleNoop}
+            onSelect={sampleNoop}
+          />
+        )}
+      </LayoutRegionContextMenu>
     </div>
   );
 }

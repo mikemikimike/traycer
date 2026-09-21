@@ -7,7 +7,10 @@ import {
   revertControlValues,
   writeControlValue,
 } from "@/components/layout-editor/inspector/region-control-io";
-import { PRESET_VALUES } from "@/lib/layout/layout-presets";
+import {
+  effectiveLayoutValues,
+  PRESET_VALUES,
+} from "@/lib/layout/layout-presets";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -110,5 +113,48 @@ describe("writing and reverting", () => {
     writeControlValue("mic", "shown", "sideways");
 
     expect(getLayoutSnapshot().overrides).toEqual({});
+  });
+});
+
+/**
+ * The module's two exported questions have to BE the same question (L-133).
+ * The delta records what a person picked, so a pick the current base happens to
+ * agree with is stored and is not a change: it shows no revert affordance, and
+ * a revert must not take it away either. Reverting it wrote the store with no
+ * undo step - `recordGesture` records nothing when the app is drawn the same,
+ * which is this case by definition - and lost the answer the moment the base
+ * moved back.
+ */
+describe("reverting against a base the pick agrees with", () => {
+  it("keeps a stored pick the current preset happens to agree with", () => {
+    // Picked under Default, where `text` is the base value, so it is a real
+    // answer to a real question.
+    writeControlValue("model", "style", "bars");
+    // Compact's own value IS `bars`, so nothing is drawn differently.
+    useLayoutStore.getState().setBasePreset("compact");
+    expect(isControlValueChanged("model", "style")).toBe(false);
+
+    // A caller that does not pre-filter: `revertRegion` on the Settings page
+    // passes every key the registry declares for the region.
+    revertControlValue("model", "style");
+
+    expect(getLayoutSnapshot().overrides).toEqual({ model: { style: "bars" } });
+    // The consequence the pick exists for - the answer is still there when the
+    // base that disagrees with it comes back.
+    useLayoutStore.getState().setBasePreset("default");
+    expect(
+      effectiveLayoutValues("default", getLayoutSnapshot().overrides).model
+        .style,
+    ).toBe("bars");
+  });
+
+  it("leaves the region's agreeing picks behind when another key reverts", () => {
+    writeControlValue("model", "style", "bars");
+    writeControlValue("model", "shown", "hidden");
+    useLayoutStore.getState().setBasePreset("compact");
+
+    revertControlValues("model", ["style", "shown"]);
+
+    expect(getLayoutSnapshot().overrides).toEqual({ model: { style: "bars" } });
   });
 });

@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
 import { setMobileApp } from "@/lib/mobile-app";
-import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
+import {
+  LAYOUT_REGION_LIST,
+  regionFacts,
+} from "@/components/layout-editor/regions/region-facts";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
@@ -138,8 +141,37 @@ describe("Settings - Layout", () => {
       // whole rail - one list, not nine copies of it.
       expect(panelRows).toHaveLength(DEFAULT_ARRANGEMENT.rail.length);
       expect(
-        within(sidebar).getAllByRole("button", { name: "Add divider" }),
+        within(sidebar).getAllByRole("button", { name: "Add group break" }),
       ).toHaveLength(1);
+    });
+
+    /**
+     * The Composer card's dock list, after L-142 put Todo and Message queue
+     * in it. The claim is the one the ticket is about: five reorderable rows
+     * in the stored dock's order, with no row of a different kind mixed in -
+     * the page reads the arrangement, so a member that had to be spelled out
+     * per region somewhere would show up here as a missing or a stray row.
+     */
+    it("gives the Composer's dock list all five members, in the stored order", () => {
+      renderPanel();
+
+      const composerRows = [
+        ...surface("composer").querySelectorAll("[data-sortable-id]"),
+      ].map((node) => node.getAttribute("data-sortable-id") ?? "");
+      const dockRows = composerRows.filter((id) =>
+        DEFAULT_ARRANGEMENT.dock.some((member) => member === id),
+      );
+
+      expect(dockRows).toEqual([...DEFAULT_ARRANGEMENT.dock]);
+      expect(dockRows).toHaveLength(5);
+      for (const id of DEFAULT_ARRANGEMENT.dock) {
+        expect(
+          screen.queryAllByRole("radiogroup", {
+            name: `${regionFacts(id).name} display`,
+          }),
+          id,
+        ).toHaveLength(1);
+      }
     });
 
     it("draws no region's row twice anywhere on the page", () => {
@@ -179,7 +211,7 @@ describe("Settings - Layout", () => {
 
       expect(
         screen.getAllByText(
-          "Drag to reorder, here or on the canvas. Dividers are items too.",
+          "Drag to reorder, here or on the canvas. Group breaks are items too.",
         ),
       ).toHaveLength(1);
       expect(

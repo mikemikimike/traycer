@@ -633,6 +633,101 @@ async function flushNav(): Promise<void> {
   await new Promise<void>((r) => setTimeout(r, 0));
 }
 
+interface RevealBox {
+  readonly left: number;
+  readonly right: number;
+}
+
+interface RevealGeometryShim {
+  readonly scrolled: () => number;
+  readonly restore: () => void;
+}
+
+/**
+ * The strip's active-tab reveal, under a jsdom with no layout: the scroller's
+ * viewport box, the box of whichever member the strip painted selected, and
+ * storage for `scrollLeft` (jsdom's is a layout read that never keeps what is
+ * written to it) are all shimmed.
+ *
+ * What is NOT shimmed is the decision. The component reads those boxes and
+ * writes `scrollLeft` itself, and the amount it writes is the assertion.
+ *
+ * `selectedBox` is read per measurement so one test can move the selection
+ * from a member that fits to one that does not.
+ */
+function installRevealGeometry(
+  selectedBox: () => RevealBox,
+): RevealGeometryShim {
+  const realRect = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "getBoundingClientRect",
+  );
+  const box = (left: number, right: number): DOMRect =>
+    ({ left, right, width: right - left }) as DOMRect;
+  HTMLElement.prototype.getBoundingClientRect = function boxFor(
+    this: HTMLElement,
+  ): DOMRect {
+    // The scroller shows 0..200. Every ancestor of the node painted
+    // `aria-selected` takes the selected box, which covers the strip member
+    // whatever depth the selection is painted at.
+    if (this.hasAttribute("data-layout-passive-members")) return box(0, 200);
+    if (this.querySelector('[aria-selected="true"]') !== null) {
+      const selected = selectedBox();
+      return box(selected.left, selected.right);
+    }
+    return box(0, 0);
+  };
+  let scrolled = 0;
+  const realScrollLeft = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "scrollLeft",
+  );
+  Object.defineProperty(Element.prototype, "scrollLeft", {
+    configurable: true,
+    get: () => scrolled,
+    set: (value: number) => {
+      scrolled = value;
+    },
+  });
+  return {
+    scrolled: () => scrolled,
+    restore: () => {
+      if (realRect === undefined) {
+        Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
+      } else {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          realRect,
+        );
+      }
+      if (realScrollLeft === undefined) {
+        Reflect.deleteProperty(Element.prototype, "scrollLeft");
+      } else {
+        Object.defineProperty(Element.prototype, "scrollLeft", realScrollLeft);
+      }
+    },
+  };
+}
+
+function seedTwoEpicTabs(): { readonly alpha: TabRef; readonly beta: TabRef } {
+  openEpicFixture(EPIC_A);
+  openEpicFixture(EPIC_B);
+  const alpha: TabRef = { kind: "epic", id: EPIC_A.id };
+  const beta: TabRef = { kind: "epic", id: EPIC_B.id };
+  useTabsStore.setState({
+    version: 2,
+    items: [
+      { kind: "tab", id: tabItemId(alpha), ref: alpha },
+      { kind: "tab", id: tabItemId(beta), ref: beta },
+    ],
+    activeItemId: tabItemId(alpha),
+    stripOrder: [alpha, beta],
+    systemTabs: { history: null, settings: null },
+  });
+  return { alpha, beta };
+}
+
 // Reconciliation install is owned by `WindowsBridgeProvider` in
 // production. Test mounts skip the provider, so install once here.
 installTabSyncCoordinator({ readyPromise: Promise.resolve() });
@@ -692,7 +787,7 @@ describe("<TabStrip />", () => {
   });
 
   it("uses the project color for the active outline while keeping the neutral fill", () => {
-    render(<TabChrome isActive color="#12ab34" />);
+    render(<TabChrome isActive color="#12ab34" session={false} />);
 
     const center = screen.getByTestId("tab-chrome-center");
     expect(center.style.getPropertyValue("--swatch")).toBe(
@@ -703,12 +798,166 @@ describe("<TabStrip />", () => {
 
   it("keeps the project color on an inactive tab", () => {
     const { container } = render(
-      <TabChrome isActive={false} color="#12ab34" />,
+      <TabChrome isActive={false} color="#12ab34" session={false} />,
     );
 
     expect(
       container.querySelector("span[style]")?.getAttribute("style"),
     ).toContain("--swatch: #12ab34;");
+  });
+
+  /**
+   * The redesigned editing signal (L-87, L-138): the editor's own tab is the
+   * one SOLID amber object in the window and the frame around the screen is
+   * the hollow one, both struck from the same token. The fill lands on the
+   * tab's REAL silhouette - the same `--swatch` the caps, the top border and
+   * the baseline cover all read - which is what the deleted inner wash
+   * rectangle could never do.
+   */
+  it("fills the editor's own tab instead of outlining it like every other", () => {
+    render(<TabChrome isActive color="var(--warning-foreground)" session />);
+
+    const center = screen.getByTestId("tab-chrome-center");
+    expect(center.style.getPropertyValue("--swatch")).toBe(
+      "var(--layout-session-tab-fill, var(--color-background))",
+    );
+    expect(center.style.getPropertyValue("--swatch-border")).toBe(
+      "var(--warning-foreground)",
+    );
+    // The baseline cover takes the same fill, so the seam into the content
+    // below the tab is closed in the tint rather than in the app background.
+    expect(
+      screen
+        .getByTestId("tab-baseline-cover")
+        .style.getPropertyValue("--swatch"),
+    ).toBe("var(--layout-session-tab-fill, var(--color-background))");
+  });
+
+  /**
+   * At rest the cap is `SessionTabMark`'s, so `TabChrome` must not draw a
+   * second bar of the same colour underneath it: two strokes on one edge is
+   * the kind of stacked decoration this redesign exists to remove (L-138).
+   */
+  it("leaves the resting editor tab's bottom edge to the session mark", () => {
+    const { container } = render(
+      <TabChrome isActive={false} color="var(--warning-foreground)" session />,
+    );
+
+    expect(
+      container.querySelector("span[style]")?.getAttribute("style"),
+    ).toBeUndefined();
+  });
+
+  /**
+   * The strip may not cut the layout editor's own tab in half (L-87, L-138).
+   *
+   * The scroller is `overflow-x-auto` and nothing reveals a newly opened tab,
+   * so with enough tabs open the editor's tab was appended past the right edge
+   * and clipped there - which is the single cause of all three things the
+   * owner's third live pass reported as a broken tab: a label cut to "Sample",
+   * an amber outline covering only the left and the top (the right cap of the
+   * silhouette was past the edge), and a mark ending on a razor edge.
+   *
+   * jsdom has no layout, so the two boxes and the scroll position are shimmed.
+   * What is NOT shimmed is the decision: the component reads those boxes and
+   * writes `scrollLeft` itself, and the amount it writes is the assertion.
+   */
+  it("reveals the editor's own tab when the strip has scrolled it out", async () => {
+    const sampleRef: TabRef = {
+      kind: "sample-workspace",
+      id: "sample-workspace",
+    };
+    useTabsStore.setState({
+      version: 2,
+      items: [{ kind: "tab", id: tabItemId(sampleRef), ref: sampleRef }],
+      activeItemId: tabItemId(sampleRef),
+      stripOrder: [sampleRef],
+      systemTabs: { history: null, settings: null },
+    });
+    // The scroller shows 0..200; the tab's member box runs 120..320, so 120px
+    // of it - the trailing cap and the end of the label - is past the edge.
+    const geometry = installRevealGeometry(() => ({ left: 120, right: 320 }));
+    try {
+      const router = buildRouter("/sample-workspace");
+      render(<RouterProvider router={router} />);
+      await screen.findByTestId("header-tab-strip-scroll");
+
+      expect(geometry.scrolled()).toBe(120);
+    } finally {
+      geometry.restore();
+    }
+  });
+
+  /**
+   * The reveal is the SELECTION's, not the editing indicator's (L-146).
+   *
+   * The L-138 version above keyed on the session tab's own marker, so an
+   * ORDINARY tab activated behind the strip's right edge stayed there - worst
+   * for the keyboard paths, where there is no pointer to say where the tab
+   * went and the only evidence of the switch is the tab that should have
+   * appeared.
+   */
+  it("reveals an ordinary tab when it becomes the active one", async () => {
+    const { beta } = seedTwoEpicTabs();
+    // Alpha's member sits wholly inside the scroller's 0..200, so mounting on
+    // it must move nothing; Beta's runs 260..460, entirely past the edge.
+    let selected: RevealBox = { left: 0, right: 180 };
+    const geometry = installRevealGeometry(() => selected);
+    try {
+      const router = buildRouter("/epics/e-a/e-a");
+      render(<RouterProvider router={router} />);
+      await screen.findByTestId("tab-epic-e-b");
+      expect(geometry.scrolled()).toBe(0);
+
+      selected = { left: 260, right: 460 };
+      act(() => {
+        useTabsStore.setState({ activeItemId: tabItemId(beta) });
+      });
+
+      expect(geometry.scrolled()).toBe(260);
+    } finally {
+      geometry.restore();
+    }
+  });
+
+  /**
+   * Reordering is dnd-kit's gesture and the strip's scroll offset is its
+   * working surface: members carry displacement transforms and the drag model
+   * reads this scroller's `scrollLeft` as its content origin. A reveal fired
+   * mid-drag would measure a transient box and move the ground under the
+   * pointer, so a live drag is not a moment to reveal anything.
+   */
+  it("does not reveal while a header tab is being dragged", async () => {
+    const { alpha, beta } = seedTwoEpicTabs();
+    let selected: RevealBox = { left: 0, right: 180 };
+    const geometry = installRevealGeometry(() => selected);
+    try {
+      const router = buildRouter("/epics/e-a/e-a");
+      render(<RouterProvider router={router} />);
+      await screen.findByTestId("tab-epic-e-b");
+
+      act(() => {
+        useEpicDndStore.getState().headerTabDragStarted(
+          {
+            kind: "header-tab",
+            stripItemId: tabItemId(alpha),
+            tabKind: "epic",
+            tabId: EPIC_A.id,
+            index: 0,
+          },
+          120,
+          null,
+        );
+      });
+      selected = { left: 260, right: 460 };
+      act(() => {
+        useTabsStore.setState({ activeItemId: tabItemId(beta) });
+      });
+
+      expect(geometry.scrolled()).toBe(0);
+    } finally {
+      geometry.restore();
+    }
   });
 
   it("uses the manual color for a focused split member and retains the primary fallback", () => {
@@ -1278,25 +1527,31 @@ describe("<TabStrip />", () => {
     expect(newTaskButton).toBeDefined();
   });
 
+  /**
+   * Route activation, against the STRIP's reveal (L-146).
+   *
+   * The item's own `scrollIntoView` callback ref is gone: it had no drag gate,
+   * it revealed one half of a split group rather than the strip member, and it
+   * scrolled every scrollable ancestor. This is the case it covered that the
+   * cases above do not - a real router navigation rather than a store write -
+   * kept, and now asserted on the amount the strip scrolls its own scroller.
+   */
   it("scrolls the active header tab into view after any route activation", async () => {
-    const scrollTargets: Element[] = [];
-    const scrollSpy = vi
-      .spyOn(Element.prototype, "scrollIntoView")
-      .mockImplementation(function (this: Element) {
-        scrollTargets.push(this);
-      });
+    openEpicFixture(EPIC_A);
+    openEpicFixture(EPIC_B);
+    openEpicFixture(EPIC_C);
+    useTabsStore.setState({ activeItemId: "tab:epic:e-a" });
+    // Alpha's member fits inside the scroller's 0..200; Gamma's runs 300..500,
+    // entirely past the right edge.
+    let selected: RevealBox = { left: 0, right: 180 };
+    const geometry = installRevealGeometry(() => selected);
     try {
-      openEpicFixture(EPIC_A);
-      openEpicFixture(EPIC_B);
-      openEpicFixture(EPIC_C);
-      useTabsStore.setState({ activeItemId: "tab:epic:e-a" });
       const router = buildRouter("/epics/e-a/e-a");
       render(<RouterProvider router={router} />);
       await screen.findByTestId("tab-epic-e-a");
+      expect(geometry.scrolled()).toBe(0);
 
-      scrollTargets.length = 0;
-      scrollSpy.mockClear();
-
+      selected = { left: 300, right: 500 };
       await router.navigate({
         to: "/epics/$epicId/$tabId",
         params: { epicId: "e-c", tabId: "e-c" },
@@ -1309,17 +1564,15 @@ describe("<TabStrip />", () => {
           focusTileInstanceId: undefined,
         },
       });
-      useTabsStore.setState({ activeItemId: "tab:epic:e-c" });
+      act(() => {
+        useTabsStore.setState({ activeItemId: "tab:epic:e-c" });
+      });
       await flushNav();
 
-      const activeTab = screen.getByTestId("tab-epic-e-c");
-      expect(scrollTargets).toContain(activeTab);
-      expect(scrollSpy).toHaveBeenCalledWith({
-        block: "nearest",
-        inline: "nearest",
-      });
+      expect(screen.getByTestId("tab-epic-e-c")).toBeDefined();
+      expect(geometry.scrolled()).toBe(300);
     } finally {
-      scrollSpy.mockRestore();
+      geometry.restore();
     }
   });
 

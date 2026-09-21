@@ -113,7 +113,9 @@ describe("<ChatLowerDock />", () => {
     vi.clearAllMocks();
   });
 
-  it("renders queue, todo, and file changes in a stable top-down order", () => {
+  // Every member is a dock REGION now (L-139), so the frame's vertical order
+  // is the arrangement's, not a hardcoded queue-then-todo-then-rows.
+  it("renders the frame's rows in dock order", () => {
     renderDock({
       folded: undefined,
       queue: queueState([queuedItem("queue-1", "Queued prompt")]),
@@ -136,6 +138,7 @@ describe("<ChatLowerDock />", () => {
     expect(dock.contains(queue)).toBe(true);
     expect(dock.contains(todo)).toBe(true);
     expect(dock.contains(changes)).toBe(true);
+    // `DEFAULT_DOCK_ORDER`: queue, then todo, then the three rows.
     expect(queue.compareDocumentPosition(todo)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -502,12 +505,19 @@ interface DockInput {
   readonly selfAgent: AgentRow | null;
   readonly activeAgents: ReadonlyArray<AgentRow>;
   readonly folded: ReadonlySet<ChatDockSection> | undefined;
+  /** The pill whose panel is attached above the composer, if any (L-142). */
+  readonly openSection?: ChatDockSection;
   readonly onBackgroundItemClick: (item: BackgroundItem) => void;
   readonly onBackgroundItemStop: (taskId: string) => string | null;
   readonly onBackgroundItemsStopAll: () => string | null;
 }
 
+/** `DEFAULT_DOCK_ORDER` as the registry holds it: today's top-to-bottom frame
+ *  (Queue, Todo, then the three reorderable rows), so a user who never opens
+ *  the editor sees exactly the dock they see now. */
 const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
+  "queue",
+  "todo",
   "filesChanged",
   "activeAgents",
   "background",
@@ -540,6 +550,8 @@ function dockHotspotsFor(
       (input.backgroundItems?.length ?? 0) > 0 ||
         input.heldManagedCommandCount > 0,
     ),
+    queue: dockHotspot(input.queue.items.length > 0),
+    todo: dockHotspot(input.todo !== null),
   };
 }
 
@@ -582,7 +594,8 @@ function renderDock(input: DockInput) {
         <ChatDockCompactStripProvider
           value={{
             chips: input.chips ?? [],
-            expanded: new Set<ChatDockSection>(),
+            openSection: input.openSection ?? null,
+            panelId: "dock-panel-1",
             onToggle: () => undefined,
           }}
         >

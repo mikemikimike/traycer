@@ -36,6 +36,7 @@
     "@fontsource-variable/figtree": "catalog:",
     "@legendapp/list": "catalog:",
     "@lobehub/icons": "catalog:",
+    "@number-flow/react": "catalog:",
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "catalog:",
     "@sentry/browser": "catalog:",

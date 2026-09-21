@@ -513,6 +513,8 @@ function emptyQueue(): ChatSessionState["queue"] {
 }
 
 const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
+  "queue",
+  "todo",
   "filesChanged",
   "activeAgents",
   "background",
@@ -530,12 +532,14 @@ function dockHotspot(hasContent: boolean): DockRowHotspot {
   };
 }
 
-/** Fixture for a dock rendered with an empty restore/agents and one
+/** Fixture for a dock rendered with an empty restore/agents/queue/todo and one
  *  background item present - matches every `<ChatLowerDock>` call in this
  *  file. */
 const ONE_BACKGROUND_ITEM_DOCK_HOTSPOTS: Readonly<
   Record<ChatDockSection, DockRowHotspot>
 > = {
+  queue: dockHotspot(false),
+  todo: dockHotspot(false),
   filesChanged: dockHotspot(false),
   activeAgents: dockHotspot(false),
   background: dockHotspot(true),

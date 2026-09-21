@@ -1,16 +1,23 @@
+import { useState, type MouseEvent } from "react";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
-import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
+import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
+import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
+import { leftPanelIdForRailRegion, RAIL_REGION_IDS } from "@/lib/layout/rail";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
+import { useRailBreaksEditing } from "@/components/epic-canvas/sidebar/use-rail-breaks-editing";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import {
   getLeftPanelDefinition,
   isLeftPanelVisible,
 } from "@/components/epic-canvas/sidebar/left-panel-registry";
-import { usePanelVisibilityOverrides } from "@/lib/layout/rail-view";
+import {
+  useLayoutRail,
+  usePanelVisibilityOverrides,
+} from "@/lib/layout/rail-view";
 import type { RailRegionId } from "@/lib/layout/region-id";
-import { useLayoutRail } from "@/lib/layout/rail-view";
 import { SAMPLE_RAIL_PRESENCE } from "./sample-workspace-scene";
 import { cn } from "@/lib/utils";
 
@@ -18,31 +25,77 @@ import { cn } from "@/lib/utils";
  * The sample scene's icon rail: `arrangement.rail` drawn entry by entry.
  *
  * Flat rather than grouped, because the rail IS flat (L-25) - a panel, or a
- * divider that ends the group before it - and this is the surface a session
+ * group break that ends the group before it - and this is the surface a session
  * drags on (L-115). The `<aside>` is the cluster the drop resolves against,
  * so a rail member can be pulled past its neighbours and no further.
+ *
+ * The breaks are drawn only while this rail is being customized, which is the
+ * same rule the real sidebar follows (L-140): a break at rest is the spacing
+ * between two groups and nothing else.
+ *
+ * It answers a right-click with the REAL rail's menu (L-144), rendered from the
+ * one module both rails share: the editor always opens here (L-87), so this is
+ * the rail a user customizing the sidebar actually points at, and it offered
+ * nothing at all. Every item in that menu writes the layout store, which is
+ * exactly as true against sample icons as against real ones; what the sample
+ * has none of is the app behaviour beside it - switching the active panel -
+ * and that never lived in the menu.
  */
 export function SampleWorkspaceRail() {
   const rail = useLayoutRail();
-  return (
-    <aside
-      aria-label="Sample sidebar"
-      {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
-      className="hidden shrink-0 flex-col items-center gap-1 border-r p-2 md:flex"
-    >
-      {rail.map((entry) =>
-        entry.kind === "divider" ? (
-          <LeftPanelRailDivider
-            key={entry.id}
-            dividerId={entry.id}
-            orientation="vertical"
-          />
-        ) : (
-          <SampleRailTile key={entry.id} regionId={entry.id} />
-        ),
-      )}
-    </aside>
+  const breaksEditing = useRailBreaksEditing();
+  const visibilityOverrideById = usePanelVisibilityOverrides();
+  // The icon the pointer was over, or null for the rail's own empty space -
+  // which is still a menu, because it is the only way back to a panel with no
+  // icon left to aim at. Resolved from the element under the pointer rather
+  // than reported by each tile: the tiles already name their region for the
+  // canvas (`useLayoutRegion`), so there is nothing to thread.
+  const [contextPanelId, setContextPanelId] = useState<LeftPanelId | null>(
+    null,
   );
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        asChild
+        onContextMenu={(event: MouseEvent<HTMLElement>) => {
+          setContextPanelId(pointedPanelId(event.target));
+        }}
+      >
+        <aside
+          aria-label="Sample sidebar"
+          {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
+          className="hidden shrink-0 flex-col items-center gap-1 border-r p-2 md:flex"
+        >
+          {rail.map((entry) => {
+            if (entry.kind !== "divider")
+              return <SampleRailTile key={entry.id} regionId={entry.id} />;
+            if (!breaksEditing) return null;
+            return (
+              <LeftPanelRailDivider
+                key={entry.id}
+                dividerId={entry.id}
+                orientation="vertical"
+              />
+            );
+          })}
+        </aside>
+      </ContextMenuTrigger>
+      <RailContextMenuContent
+        context={{ ...SAMPLE_RAIL_PRESENCE, visibilityOverrideById }}
+        contextPanelId={contextPanelId}
+      />
+    </ContextMenu>
+  );
+}
+
+/** The rail panel under the pointer, read off the region the tile names. */
+function pointedPanelId(target: EventTarget): LeftPanelId | null {
+  if (!(target instanceof Element)) return null;
+  const named = target
+    .closest("[data-layout-region]")
+    ?.getAttribute("data-layout-region");
+  const regionId = RAIL_REGION_IDS.find((id) => id === named) ?? null;
+  return regionId === null ? null : leftPanelIdForRailRegion(regionId);
 }
 
 function SampleRailTile({ regionId }: { readonly regionId: RailRegionId }) {

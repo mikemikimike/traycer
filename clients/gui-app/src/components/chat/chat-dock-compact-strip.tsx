@@ -1,10 +1,29 @@
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { cn } from "@/lib/utils";
-import { useCallback, useRef, type ReactNode } from "react";
-import { Bot, FileDiff, type LucideIcon } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { AnimatePresence, useIsPresent } from "motion/react";
+import * as m from "motion/react-m";
+import {
+  Bot,
+  FileDiff,
+  ListChecks,
+  ListOrdered,
+  type LucideIcon,
+} from "lucide-react";
 import { MessageSquareClock } from "@/components/notifications/message-square-clock";
-import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
+import {
+  ChatDockChipArrival,
+  ChatDockCompactChip,
+} from "@/components/chat/chat-dock-compact-chip";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
+import { LayoutClusterContextMenu } from "@/components/layout-editor/region-quick-verbs";
+import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import {
   STATUS_ANIMATION_PULSE_CADENCE_MS,
   useStatusAnimation,
@@ -13,6 +32,7 @@ import {
   ChatDockCompactStripContext,
   useChatDockCompactStrip,
   type ChatDockCompactChipGlyph,
+  type ChatDockCompactChipModel,
   type ChatDockCompactStripValue,
 } from "@/components/chat/chat-dock-compact-context";
 
@@ -43,6 +63,11 @@ const GLYPH_ICONS: Readonly<Record<ChatDockCompactChipGlyph, LucideIcon>> = {
   // are is the panel's to draw, and whether a shell is held is stated in this
   // chip's sentence.
   background: MessageSquareClock,
+  // The queue's own mark, the one its full row's header already prints beside
+  // the count, and the todo's likewise: a pill and the row it folds have to be
+  // recognisable as the same member.
+  queue: ListOrdered,
+  todo: ListChecks,
 };
 
 /**
@@ -143,6 +168,86 @@ function ChipGlyph(props: {
 }
 
 /**
+ * A pill arriving and a pill leaving, in the values the rest of the window
+ * already keeps: the leader badge's 140ms `easeOut` on the way in, a touch
+ * shorter on the way out.
+ *
+ * `0.96` rather than `0` because a pill that grows from nothing reads as a
+ * thing being BUILT beside the input; 4% is the smallest amount that still
+ * says "this was not here a moment ago" while the pill stays the same object
+ * throughout. Only `transform` and `opacity` move, so nothing here reflows the
+ * composer underneath.
+ */
+const PILL_HIDDEN = { opacity: 0, scale: 0.96 } as const;
+const PILL_SHOWN = { opacity: 1, scale: 1 } as const;
+const PILL_ENTER_TRANSITION = { duration: 0.14, ease: "easeOut" } as const;
+const PILL_EXIT = {
+  ...PILL_HIDDEN,
+  transition: { duration: 0.11, ease: "easeOut" },
+} as const;
+
+/**
+ * What a pill does on the way out with motion turned off: goes, in the frame
+ * it was removed in. Not "the same exit with a zero duration written on the
+ * strip", because the exit's own duration is what holds the element in the
+ * document, and a pill that lingers invisibly is still a pill the pointer can
+ * be over.
+ */
+const PILL_EXIT_INSTANT = { opacity: 0, transition: { duration: 0 } } as const;
+
+/**
+ * One pill, and the element the Customize editor knows it by.
+ *
+ * The region marking is on the INNER span rather than on the animated one, and
+ * it is taken off the moment this pill starts leaving. That is the whole
+ * reason this is a component and not two lines in the map below: an exiting
+ * `popLayout` ghost is still in the document while it fades, and a ghost still
+ * wearing `data-layout-region` / `data-layout-group` is a member the canvas
+ * drag would reflow against and the editor's registry would hand a rect for -
+ * a dead member, out of flow, that the arrangement no longer contains.
+ * `useIsPresent` flips on the exit, React hands the old ref its `null`, and
+ * `useLayoutRegion` unnames and unregisters the node on the spot.
+ *
+ * The drag's own transforms are written on that inner span; the animated one
+ * is its parent and they compose rather than fight. Nothing arrives or leaves
+ * mid-drag anyway - a drag reorders the members that are there - so the two
+ * never run on the same element at the same time.
+ */
+function ChatDockCompactPill(props: {
+  readonly chip: ChatDockCompactChipModel;
+  readonly editing: boolean;
+  readonly expanded: boolean;
+  readonly controls: string | null;
+  readonly onToggle: () => void;
+}): ReactNode {
+  const present = useIsPresent();
+  return (
+    <span
+      // `contents` at rest, a real box while a session is live: the hotspot
+      // ref lands here, and a `display: contents` node has no rect for the
+      // hover outline or the travelling ring to measure (C-06).
+      className={cn(props.editing ? "inline-flex items-center" : "contents")}
+      ref={present ? props.chip.hotspotRef : null}
+    >
+      <ChatDockCompactChip
+        icon={
+          <ChipGlyph glyph={props.chip.glyph} working={props.chip.working} />
+        }
+        text={props.chip.text}
+        working={props.chip.working}
+        lineDeltas={props.chip.lineDeltas}
+        label={props.chip.label}
+        pulseToken={props.chip.pulseToken}
+        expanded={props.expanded}
+        controls={props.controls}
+        testId={`chat-dock-chip-${props.chip.section}`}
+        onClick={props.onToggle}
+      />
+    </span>
+  );
+}
+
+/**
  * The compact chips, side by side ABOVE the composer at its left edge (A12,
  * L-97) - the one thing the owner kept from the artifact's compact composer.
  *
@@ -157,41 +262,94 @@ function ChipGlyph(props: {
  *
  * Renders nothing outside a chat tile, and nothing inside one whose every row
  * is either on screen or empty.
+ *
+ * The pills are a SWITCHER (L-142): at most one of them has its panel attached
+ * above the composer, clicking another replaces it, and clicking the open one
+ * closes it. `actionsRef` is the node that open panel's actions are portalled
+ * into - it holds the row's right end, so pills never move when actions appear
+ * and never move back when they go.
+ *
+ * ONE quick-verb menu for the whole row (L-115, L-144), naming whichever pill
+ * the pointer was over. The pills are regions like any other piece of
+ * customizable chrome and the owner asked for them to answer a right-click
+ * like one; a root per pill would be five roots per tile for a gesture used a
+ * handful of times a session, which is the arithmetic G3-10 already settled.
  */
-export function ChatDockCompactStrip(): ReactNode {
+export function ChatDockCompactStrip(props: {
+  readonly actionsRef: (node: HTMLDivElement | null) => void;
+}): ReactNode {
+  // Destructured before it reaches a `ref=`: `react-hooks/refs` reads a ref
+  // callback taken off a props BAG as a ref access during render.
+  const { actionsRef } = props;
   const editing = useLayoutEditorStore((state) => state.session !== null);
   const value = useChatDockCompactStrip();
+  const motionEnabled = useMotionEnabled();
+  // The strip arms itself one commit after it mounts, and suppresses the pulse
+  // of every pill in that first commit. Opening a chat is not an arrival: five
+  // pills reaching their first paint together rang five rings at once beside
+  // the input, for nothing that had happened. A pill that arrives after this
+  // has flipped still rings exactly as before, because the chip reads it once
+  // in its own state initializer.
+  //
+  // "Has committed once" is the one fact a render cannot compute, which is why
+  // `react-hooks/set-state-in-effect` is turned off for this file in
+  // `eslint.config.mjs` rather than worked around; the reasoning is there.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    setSettled(true);
+  }, []);
   if (value === null || value.chips.length === 0) return null;
   return (
-    <div
-      data-testid="chat-dock-compact-strip"
-      {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
-      className="flex min-w-0 flex-wrap items-center gap-1.5"
-    >
-      {value.chips.map((chip) => (
-        <span
-          key={chip.section}
-          // `contents` at rest, a real box while a session is live: the
-          // hotspot ref lands here, and a `display: contents` node has no rect
-          // for the hover outline or the travelling ring to measure (C-06).
-          className={cn(editing ? "inline-flex items-center" : "contents")}
-          ref={chip.hotspotRef}
-        >
-          <ChatDockCompactChip
-            icon={<ChipGlyph glyph={chip.glyph} working={chip.working} />}
-            text={chip.text}
-            working={chip.working}
-            lineDeltas={chip.lineDeltas}
-            label={chip.label}
-            pulseToken={chip.pulseToken}
-            expanded={value.expanded.has(chip.section)}
-            testId={`chat-dock-chip-${chip.section}`}
-            onClick={() => {
-              value.onToggle(chip.section);
-            }}
-          />
-        </span>
-      ))}
-    </div>
+    <LayoutClusterContextMenu>
+      <div
+        data-testid="chat-dock-compact-strip"
+        {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
+        className="flex min-w-0 flex-wrap items-center gap-1.5"
+      >
+        <ChatDockChipArrival suppressed={!settled}>
+          {/* `initial={false}` is mandatory rather than stylistic: without it
+              a chat opening would animate every pill it opens with, which is
+              the same first-paint noise the pulse suppression above removes.
+              `popLayout` takes an exiting pill out of flow so the gap closes
+              in one frame exactly as it does today and only the ghost fades.
+              And no `layout` prop anywhere here: this row is `flex-wrap`
+              directly above the composer, so a layout animation across a wrap
+              boundary would move the input. */}
+          <AnimatePresence initial={false} mode="popLayout">
+            {value.chips.map((chip) => (
+              <m.span
+                key={chip.section}
+                className="inline-flex shrink-0 items-center"
+                initial={motionEnabled ? PILL_HIDDEN : false}
+                animate={PILL_SHOWN}
+                exit={motionEnabled ? PILL_EXIT : PILL_EXIT_INSTANT}
+                transition={PILL_ENTER_TRANSITION}
+              >
+                <ChatDockCompactPill
+                  chip={chip}
+                  editing={editing}
+                  expanded={value.openSection === chip.section}
+                  controls={
+                    value.openSection === chip.section ? value.panelId : null
+                  }
+                  onToggle={() => {
+                    value.onToggle(chip.section);
+                  }}
+                />
+              </m.span>
+            ))}
+          </AnimatePresence>
+        </ChatDockChipArrival>
+        {/* Always mounted, empty while nothing is open: `ml-auto` on an empty
+            box takes the row's slack and nothing else, so the pills sit where
+            they sat before the panel opened. It wraps with the pills on a
+            narrow tile rather than squeezing them. */}
+        <div
+          ref={actionsRef}
+          data-testid="chat-dock-pill-actions"
+          className="ml-auto flex shrink-0 items-center gap-1"
+        />
+      </div>
+    </LayoutClusterContextMenu>
   );
 }

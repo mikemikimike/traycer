@@ -143,9 +143,10 @@ export interface LayoutValues {
   readonly runningAgents: SizedValues;
   readonly changedFiles: SizedValues;
   readonly background: SizedValues;
+  readonly queue: SizedValues;
+  readonly todo: SizedValues;
   readonly attachImage: ShownValues;
   readonly access: SizedValues;
-  readonly agent: ShownValues;
   readonly model: ModelValues;
   readonly mic: ShownValues;
   readonly railAgents: RailValues;
@@ -173,7 +174,7 @@ export type LayoutOverrides = {
  * Every key some region's value bag has, as one union.
  *
  * The UNION and not the intersection, which is what `keyof LayoutValues[RegionId]`
- * gives (`shown`, the only key all twenty-two share). It is the type a caller
+ * gives (`shown`, the only key all twenty-three share). It is the type a caller
  * walking every region can still name a control's key with - the registry's
  * own `ControlSpec<K>.key` stays tied to its region - so `region-control-io.ts`
  * takes this rather than a bare `string` and a typo cannot be passed at all

@@ -27,6 +27,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useThemeLibraryStore } from "@/stores/settings/theme-library-store";
 import type { TokenUsage } from "@traycer/protocol/persistence/epic/foundation";
 
 const RELIABLE_USAGE: TokenUsage = {
@@ -141,6 +142,7 @@ function installReducedMotionPreference(matches: boolean): void {
 function resetContextUsageSettings(): void {
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+  useThemeLibraryStore.setState({ panelAnimations: true });
   restoreDefaultMatchMedia();
   resetMotionReducedMotionPreference();
 }
@@ -506,7 +508,9 @@ describe("ContextUsageChip", () => {
     );
 
     expect(await screen.findByText("Context window")).toBeTruthy();
-    expect(screen.getByText("75% left")).toBeTruthy();
+    expect(
+      screen.getByTestId("context-usage-breakdown-percent").textContent,
+    ).toBe("75% left");
     expect(screen.getByText("50K / 200K")).toBeTruthy();
     expect(screen.getByText("1.0k")).toBeTruthy();
     expect(screen.queryByTestId("context-usage-pinned-percent-value")).toBe(
@@ -664,6 +668,25 @@ describe("ContextUsageChip", () => {
     expect(
       screen.getByTestId("context-usage-pinned-details").className,
     ).toContain("@max-[34rem]:hidden");
+  });
+
+  // L-144. The chip had no right-click offer at rest or in a session, which
+  // made it the one pointable composer region a user could not reach its own
+  // verbs from. The `null` return above is the deliberate exception: a chip
+  // that draws nothing gets no trigger, which "renders nothing when usage is
+  // null" is now also the guard for - a wrapped null would leave a
+  // `display: contents` span behind.
+  it("offers the region's quick verbs on right-click", async () => {
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+
+    fireEvent.contextMenu(screen.getByTestId("context-usage-chip"));
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu).getByTestId("layout-quick-verb-contextUsage-hide")
+        .textContent,
+    ).toContain("Hide Context usage");
+    expect(within(menu).getByText("Customize layout...")).toBeTruthy();
   });
 
   it("omits the compact action entirely when the harness cannot compact on demand", () => {
@@ -971,6 +994,61 @@ describe("ContextUsageChip indicator styles", () => {
     },
   );
 
+  // The consistency this ticket exists to buy: one primitive at every place
+  // the percentage appears, so a turn that moves the reading moves all four
+  // the same way. Each site is asserted through the primitive's OWN test id,
+  // which is absent if a site went back to printing `{percent}` itself.
+  it("prints the same percentage through the shared primitive at all four number sites", async () => {
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+    expect(
+      screen.getByTestId("context-usage-chip-percent-value").textContent,
+    ).toBe("75");
+    fireEvent.click(screen.getByTestId("context-usage-chip"));
+    expect(
+      (await screen.findByTestId("context-usage-breakdown-percent-value"))
+        .textContent,
+    ).toBe("75");
+    cleanup();
+
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring" });
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+    expect(
+      screen.getByTestId("context-usage-ring-percent-value").textContent,
+    ).toBe("75");
+    cleanup();
+
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { pinBreakdown: true });
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+    expect(
+      screen.getByTestId("context-usage-pinned-percent-value").textContent,
+    ).toBe("75");
+  });
+
+  it("draws the arc without a transition on the app's own Panel-animations switch", () => {
+    // The gap `AnimatedPinnedInteger` shipped with: it read the OS query and
+    // nothing else, so turning this switch off left the context number
+    // animating. `useMotionEnabled` is what closed it, and the arc is the one
+    // output of that gate a jsdom run can see.
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { style: "ring" });
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+    expect(
+      screen.getByTestId("context-usage-ring-arc").getAttribute("class"),
+    ).toContain("transition-[stroke-dashoffset]");
+    cleanup();
+
+    useThemeLibraryStore.setState({ panelAnimations: false });
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+    expect(
+      screen.getByTestId("context-usage-ring-arc").getAttribute("class"),
+    ).toBe(null);
+  });
+
   it("opens the breakdown popover from the ring trigger", async () => {
     useLayoutStore
       .getState()
@@ -980,7 +1058,9 @@ describe("ContextUsageChip indicator styles", () => {
     fireEvent.click(screen.getByTestId("context-usage-chip"));
 
     expect(await screen.findByText("Context window")).toBeTruthy();
-    expect(screen.getByText("75% left")).toBeTruthy();
+    expect(
+      screen.getByTestId("context-usage-breakdown-percent").textContent,
+    ).toBe("75% left");
     expect(
       await screen.findByRole("button", { name: "Pin breakdown" }),
     ).toBeTruthy();

@@ -18,7 +18,7 @@ import {
  * `ControlSpec<K>.key` is `keyof LayoutValues[K] & string` for the region's
  * OWN `K`, which - as `RegionRowFacts`'s comment on `layout-regions.ts`
  * already states - cannot survive a walk over every region: `keyof` of a
- * union of the twenty-two regions' value shapes collapses to the one field
+ * union of the twenty-three regions' value shapes collapses to the one field
  * they all share (`shown`). Reading a section's rows generically off a plain
  * `RegionId` is exactly what keeps the grammar renderer un-written-per-region
  * (L-08), so this module reads and writes the dynamic key with `Reflect`
@@ -126,11 +126,17 @@ export function revertControlValues(
   region: RegionId,
   keys: ReadonlyArray<string>,
 ): void {
-  const base = PRESET_VALUES[getLayoutSnapshot().basePreset][region];
-  // The membership test is a real one (`key in base`), not a predicate that
-  // only claims to be: a registry typo reverts nothing instead of reaching
-  // the store (G1-08).
-  const owned = keys.filter((key) => key in base);
+  // The SAME question the revert affordance asked to appear: difference, not
+  // membership. A key the user picked that the current base already makes is
+  // stored (L-133) and is not a change, so reverting it deletes an answer
+  // while `recordGesture` records nothing - `sameDrawnLayout` sees the same
+  // app, by definition - leaving a write with no undo step and losing the
+  // pick the moment the base preset moves back. Membership let that through
+  // for any caller that did not pre-filter, which `revertRegion` on the page
+  // does not: it passes `regionFacts(...)` keys. Reverting nothing is the
+  // right answer for a registry typo too, since a key that is not in the
+  // base cannot differ from it.
+  const owned = changedControlKeys(region, keys);
   if (owned.length === 0) return;
   useLayoutEditorStore.getState().recordGesture(() => {
     useLayoutStore.getState().clearRegionValues(region, owned);

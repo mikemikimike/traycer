@@ -49,13 +49,30 @@ export const FIREWALLED_EVENT_TYPES = [
  *
  * Everywhere else it still does not. A right-click on a chat message, a
  * transcript or a text field is the app's own menu over the user's own
- * content, which is exactly what the firewall exists to keep quiet, so the
- * test is the one the menus themselves use: the closest named region, or
- * nothing.
+ * content, which is exactly what the firewall exists to keep quiet.
+ *
+ * So the test is "this press has somewhere to go", which is two facts and not
+ * one. A named region says the verbs would know what they are about; a mounted
+ * context-menu trigger says something is listening for the event. Only three
+ * hosts hang one (L-72): the composer's two clusters, the Home tab item and the
+ * header's usage cluster, plus the chrome that renders the verbs INSIDE a menu
+ * it already owns - the sidebar rail. Keyed on the region alone, every other
+ * named region - the dock rows, the minimap, the sample rail's icons, the
+ * resource monitor - passed the event to nothing, and it went on to Electron's
+ * own spell-check menu over sample content.
+ *
+ * `data-slot="context-menu-trigger"` is what `components/ui/context-menu.tsx`
+ * stamps on every trigger, `asChild` included, so a host that gains or loses a
+ * menu moves this test with it and nothing has to remember a second marker.
+ * The region half is what keeps the app's OWN context menus quiet: a menu on
+ * something that is not a customizable piece of chrome is the app acting.
  */
 function contextMenuIsTheAppsOwn(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return true;
-  return target.closest("[data-layout-region]") === null;
+  return (
+    target.closest("[data-layout-region]") === null ||
+    target.closest('[data-slot="context-menu-trigger"]') === null
+  );
 }
 
 export interface EditFirewallInput {

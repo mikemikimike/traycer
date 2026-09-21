@@ -3,7 +3,10 @@ import { Gauge } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
-import { useProviderLimitWindows } from "@/components/layout-editor/inspector/provider-limit-windows";
+import {
+  useProviderLimitWindows,
+  type ProviderLimitWindows,
+} from "@/components/layout-editor/inspector/provider-limit-windows";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import { toggleHiddenProvider } from "@/components/layout-editor/layout-gestures";
@@ -19,6 +22,7 @@ import { USAGE_PROVIDER_LEVEL } from "@/components/layout-editor/regions/usage-p
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+import { cn } from "@/lib/utils";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
@@ -41,13 +45,19 @@ interface ProviderLevelProps {
  * `Choose...` opens a checklist of this provider's OWN live windows, read
  * through `useProviderLimitWindows` - the strip's own read, observed
  * passively, never a query of this level's own (L-96).
+ *
+ * The level asks for those windows ONCE and hands them down (R3-15): the stage
+ * draws what the strip is drawing and the pick below it operates on the same
+ * list, so two subscriptions to the same provider were two answers to one
+ * question.
  */
 export function ProviderLevel(props: ProviderLevelProps): ReactNode {
   const { providerId } = props;
   const basePreset = useLayoutStore((state) => state.basePreset);
   const overrides = useLayoutStore((state) => state.overrides);
   const arrangement = useLayoutStore((state) => state.arrangement);
-  const { windows, drawnKeys } = useProviderLimitWindows(providerId);
+  const limits = useProviderLimitWindows(providerId);
+  const { windows, drawnKeys } = limits;
   const values = effectiveLayoutValues(basePreset, overrides);
   const providerName = providerDisplayName(providerId);
   const shown = !arrangement.hiddenProviders.includes(providerId);
@@ -80,7 +90,7 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
           }}
         />
       </div>
-      <ProviderLimitsControl providerId={providerId} />
+      <ProviderLimitsPick providerId={providerId} limits={limits} />
     </div>
   );
 }
@@ -99,11 +109,26 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
  * The dim belongs here rather than to either host: "everything below Shown is
  * greyed" is the grammar's own rule (L-08), and it is the same rule whichever
  * control above it wrote `hiddenProviders`.
+ *
+ * The PAGE's entry point, and the whole of what it draws: a provider row there
+ * has no stage above it to share a reading with, so this is where the windows
+ * are read for that host. {@link ProviderLevel} has a stage, so it reads them
+ * once itself and passes them straight to {@link ProviderLimitsPick} (R3-15).
  */
 export function ProviderLimitsControl(props: ProviderLevelProps): ReactNode {
   const { providerId } = props;
+  const limits = useProviderLimitWindows(providerId);
+  return <ProviderLimitsPick providerId={providerId} limits={limits} />;
+}
+
+/** The pick itself, over windows its caller has already read. */
+function ProviderLimitsPick(props: {
+  readonly providerId: RateLimitProviderId;
+  readonly limits: ProviderLimitWindows;
+}): ReactNode {
+  const { providerId, limits } = props;
+  const { windows, drawnKeys } = limits;
   const arrangement = useLayoutStore((state) => state.arrangement);
-  const { windows, drawnKeys } = useProviderLimitWindows(providerId);
   const shown = !arrangement.hiddenProviders.includes(providerId);
   const selection =
     arrangement.providerLimits[providerId] ?? AUTOMATIC_LIMIT_SELECTION;
@@ -119,7 +144,24 @@ export function ProviderLimitsControl(props: ProviderLevelProps): ReactNode {
   const pickingLimits = choosing && windows.length > 0;
 
   return (
-    <div inert={!shown} className={!shown ? "opacity-40" : undefined}>
+    // GREYED IN PLACE, which is what L-08 asks for and what `inert` was not
+    // (R3-16): `inert` takes the subtree out of the accessibility tree
+    // altogether, so a screen-reader user who turned a provider off could no
+    // longer read what its greyed limits say.
+    //
+    // A disabled `fieldset` is the one element that turns every control inside
+    // it off without hiding any of them: the mode pick's buttons and the window
+    // checkboxes stop being operable by pointer OR keyboard, and each is still
+    // announced, with its state. The four utilities undo the UA's own fieldset
+    // box, which Tailwind's preflight does not reset.
+    <fieldset
+      disabled={!shown}
+      aria-disabled={!shown}
+      className={cn(
+        "m-0 min-w-0 border-0 p-0",
+        !shown && "pointer-events-none opacity-40",
+      )}
+    >
       <InspectorRow
         top
         // The two options read "Automatic (recommended)" and "Choose...",
@@ -203,7 +245,7 @@ export function ProviderLimitsControl(props: ProviderLevelProps): ReactNode {
           </div>
         }
       />
-    </div>
+    </fieldset>
   );
 }
 

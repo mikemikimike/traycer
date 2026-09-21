@@ -1428,9 +1428,9 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     two rows there, writing the same two stored values.
     `regions/surface-groups.ts` is the tier above the registry: which order
     groups a surface owns, and the facts that belong to a LIST rather than to a
-    member (its heading, its reorder instruction, "Add divider", the
+    member (its heading, its reorder instruction, "Add group break", the
     pinned-right note). Those were the repeats L-92 was about - nine identical
-    rail Position lists, three dock copies, three toolbar-left copies.
+    rail Position lists, five dock copies, three toolbar-left copies.
   - **Exactly one control per thing.** A region's visibility has one control on
     either host, and the eye button the sortable rows used to carry is gone: it
     wrote through `regionShownOnValue`, so two presses anywhere turned a pinned
@@ -1635,14 +1635,15 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     `opacity-70` is dropped at the destructive threshold, so the chip is
     loudest when the window is nearly gone.
   - **Two option sets, and they are not interchangeable.** `Row / Chip` for
-    anything that carries a verb with no other home - the three dock rows own
-    Stop all / Review all / Undo all, and the Access pill reports the
+    anything that carries a verb with no other home - the five dock rows own
+    Stop all / Review all / Undo all / Pause, and the Access pill reports the
     permission the next send runs under. `Chip` is their floor: a row folds to
     a chip at the RIGHT end of the composer's bottom strip - after the host and
     workspace pickers, hard against the context-usage cluster - and one click
     opens the row again; the pill folds to its icon with the name on hover. A
-    chip always draws its own icon (`FileDiff`, `Bot`, and for Background the
-    section's own `MessageSquareClock`), and activity shows ON that icon rather
+    chip always draws its own icon (`FileDiff`, `Bot`, for Background the
+    section's own `MessageSquareClock`, `ListOrdered` for the Message queue and
+    `ListChecks` for Todo), and activity shows ON that icon rather
     than replacing it: the glyph and the count turn `primary`, and the glyph
     shimmers on the shared status clock. A chip is `[icon] N` at every width;
     the sentence lives in the tooltip and the accessible name. **Nothing is
@@ -1699,7 +1700,8 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     both the palette filter and `StatusBarKeybindingBridge` READ that flag
     rather than testing the build, so the pair follows from the field.
   - **The rail is one flat list** (L-25): `arrangement.rail` is panels and
-    dividers in order, a divider ends the group before it, and
+    dividers in order, a divider ends the group before it - the user reads it
+    as a "Group break" and the sidebar draws it as a gap at rest (L-140) - and
     `leftPanelGroupsFromRail` / `railFromLeftPanelGroups`
     (`lib/layout/rail.ts`) are the bijection every surface that
     still speaks in groups reads through (`left-panel-store`, the rail itself,

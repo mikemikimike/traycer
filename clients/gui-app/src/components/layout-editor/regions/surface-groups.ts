@@ -43,13 +43,13 @@ export const ORDER_GROUPS: Readonly<Record<OrderGroupId, OrderGroupFacts>> = {
     dividers: false,
   },
   toolbarLeft: {
-    label: "Toolbar, left",
+    label: "Toolbar left",
     description: "Drag to reorder, here or on the canvas.",
     note: null,
     dividers: false,
   },
   toolbarRight: {
-    label: "Toolbar, right",
+    label: "Toolbar right",
     description: "Drag to reorder, here or on the canvas.",
     // Said by the cluster the rule is about. It used to be drawn by the Model
     // region's own Position row, which meant the Microphone's copy of the same
@@ -62,7 +62,7 @@ export const ORDER_GROUPS: Readonly<Record<OrderGroupId, OrderGroupFacts>> = {
     // The rail's icons are canvas-draggable too now (L-115), so its line says
     // what the other three canvas groups' lines say.
     description:
-      "Drag to reorder, here or on the canvas. Dividers are items too.",
+      "Drag to reorder, here or on the canvas. Group breaks are items too.",
     note: null,
     dividers: true,
   },
@@ -176,10 +176,7 @@ export function surfaceMatchesFilter(
  * has two regions on two different surfaces, so there is no single row that
  * holds both and P-2 says to omit rather than approximate.
  */
-export const SURFACE_BANDS: ReadonlyArray<SurfaceGroupId> = [
-  "composer",
-  "statusBar",
-];
+const SURFACE_BANDS: ReadonlyArray<SurfaceGroupId> = ["composer", "statusBar"];
 
 /**
  * Whether this surface opens with a picture band, which is also what tells the

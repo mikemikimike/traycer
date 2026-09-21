@@ -18,6 +18,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RollingNumber } from "@/components/ui/rolling-number";
 import { StartTruncatedText } from "@/components/ui/start-truncated-text";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { cn } from "@/lib/utils";
@@ -31,7 +32,11 @@ import {
   type DiffRowClickHandlers,
 } from "@/components/chat/chat-diff-target";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
-import { useChatDockSectionRevealed } from "@/components/chat/chat-dock-compact-context";
+import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
+import {
+  ChatDockAttachedPanelBody,
+  ChatDockPillActions,
+} from "@/components/chat/chat-dock-attached-panel";
 import { DiffLineDeltas } from "@/components/chat/diff-line-deltas";
 import { FileChangeHeader } from "@/components/chat/segments/file-change-segment";
 import { RevertArtifactsCheckbox } from "@/components/chat/segments/revert-artifacts-checkbox";
@@ -69,9 +74,10 @@ export function ChatAccumulatedChangesPanel(
   const { restore } = props;
   const changes = restore.accumulatedFileChanges;
   const opener = useChatSnapshotDiffOpener();
-  // Open on arrival when a chip click is what put this row back in the dock.
-  const revealedByChip = useChatDockSectionRevealed("filesChanged");
-  const [open, setOpen] = useState(revealedByChip);
+  // Attached above the composer because its pill is the open one (L-142):
+  // no header of its own, actions in the pill row, body resizable.
+  const attached = useChatDockSectionAttached("filesChanged");
+  const [open, setOpen] = useState(false);
   const [confirmUndoAll, setConfirmUndoAll] = useState(false);
   const gate = useMemo(() => revertGate(restore), [restore]);
   // CONTENT-BEARING rows only. A `hasContents: false` summary has no
@@ -155,6 +161,118 @@ export function ChatAccumulatedChangesPanel(
 
   if (fileCount === 0) return null;
 
+  // The header's two actions, written once: in the dock's full row they close
+  // the header strip, and while this panel is the attached one they are
+  // portalled to the right end of the pill row (L-142). Same buttons, same
+  // gates, same pending spinner - only the node they land in differs.
+  const actions = (
+    <>
+      {reviewAll === null ? null : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          aria-label="Review all changes"
+          data-testid="accumulated-review-all"
+          onClick={(event) => {
+            event.stopPropagation();
+            reviewAll();
+          }}
+        >
+          Review all
+        </Button>
+      )}
+      <TooltipWrapper
+        label={hasUndoable ? gate.tooltip : undoableTooltip}
+        side="top"
+        sideOffset={undefined}
+        align={undefined}
+      >
+        <span className="inline-flex">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={!gate.enabled || !hasUndoable}
+            aria-label="Undo all changes"
+            data-testid="accumulated-undo-all"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!gate.enabled || !hasUndoable) return;
+              setConfirmUndoAll(true);
+            }}
+          >
+            {restore.restoreActionPending ? (
+              <AgentSpinningDots
+                className={undefined}
+                testId="accumulated-undo-all-spinner"
+                variant={undefined}
+              />
+            ) : (
+              <RotateCcw className="size-3" aria-hidden />
+            )}
+            Undo all
+          </Button>
+        </span>
+      </TooltipWrapper>
+    </>
+  );
+
+  const rows = (
+    <div className="flex flex-col gap-0.5 px-2 py-1.5">
+      {changes.map((change) => (
+        <AccumulatedChangeRow
+          key={change.filePath}
+          change={change}
+          counts={change.counts ?? { additions: 0, deletions: 0 }}
+          gate={gate}
+          pending={restore.restoreActionPending}
+          clickHandlers={rowClickHandlers(opener, change)}
+          onUndo={() =>
+            // A per-row Undo targets this exact path, so artifacts are
+            // always included (the opt-out is only for bulk reverts).
+            restore.revertFileChanges(null, [change.filePath], true)
+          }
+        />
+      ))}
+    </div>
+  );
+
+  const undoAllDialog = (
+    <UndoAllDialog
+      open={confirmUndoAll}
+      onOpenChange={setConfirmUndoAll}
+      isPending={restore.restoreActionPending}
+      // `null` while the set is a prefix: the opt-out defaults to CHECKED and
+      // "Undo all" reverts every file the host holds, so a count taken from
+      // the rows on screen would understate what is being opted out of.
+      artifactCount={
+        undelivered > 0 || !restore.accumulatedSetComplete
+          ? null
+          : artifactCount
+      }
+      onConfirm={(revertArtifacts) => {
+        restore.revertFileChanges(null, null, revertArtifacts);
+        setConfirmUndoAll(false);
+      }}
+    />
+  );
+
+  if (attached) {
+    return (
+      <>
+        <ChatDockPillActions>{actions}</ChatDockPillActions>
+        <ChatDockAttachedPanelBody
+          section="filesChanged"
+          testId="accumulated-changes-list"
+        >
+          {rows}
+        </ChatDockAttachedPanelBody>
+        {undoAllDialog}
+      </>
+    );
+  }
+
   return (
     <>
       <Collapsible
@@ -180,108 +298,43 @@ export function ChatAccumulatedChangesPanel(
                 chip (chevron, +/− counts, the action buttons), so if this
                 label could not give up width, a narrow viewport would push
                 the counts out of the trigger's box and under the buttons. */}
-            <span className="min-w-0 truncate text-ui-xs font-medium text-foreground/85">
-              {fileCount} {fileCount === 1 ? "file changed" : "files changed"}
+            <span
+              data-testid="accumulated-changes-summary"
+              className="min-w-0 truncate text-ui-xs font-medium text-foreground/85"
+            >
+              {/* The count rolls; the word after it does not. The header is a
+                  TOTAL that moves several times while a turn writes, which is
+                  what a roll is for - the per-file rows below keep plain text,
+                  because a turn touching twelve files would roll twelve of
+                  them at once. */}
+              <RollingNumber
+                value={fileCount}
+                format={undefined}
+                className={undefined}
+                testId={undefined}
+              />{" "}
+              {fileCount === 1 ? "file changed" : "files changed"}
             </span>
-            <DiffLineDeltas counts={totals} className={undefined} />
+            <DiffLineDeltas counts={totals} className={undefined} rolling />
             <span aria-hidden className="flex-1" />
           </CollapsibleTrigger>
           <div className="flex shrink-0 items-center gap-1 pr-1.5">
-            {reviewAll === null ? null : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                aria-label="Review all changes"
-                data-testid="accumulated-review-all"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  reviewAll();
-                }}
-              >
-                Review all
-              </Button>
-            )}
-            <TooltipWrapper
-              label={hasUndoable ? gate.tooltip : undoableTooltip}
-              side="top"
-              sideOffset={undefined}
-              align={undefined}
-            >
-              <span className="inline-flex">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  disabled={!gate.enabled || !hasUndoable}
-                  aria-label="Undo all changes"
-                  data-testid="accumulated-undo-all"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!gate.enabled || !hasUndoable) return;
-                    setConfirmUndoAll(true);
-                  }}
-                >
-                  {restore.restoreActionPending ? (
-                    <AgentSpinningDots
-                      className={undefined}
-                      testId="accumulated-undo-all-spinner"
-                      variant={undefined}
-                    />
-                  ) : (
-                    <RotateCcw className="size-3" aria-hidden />
-                  )}
-                  Undo all
-                </Button>
-              </span>
-            </TooltipWrapper>
+            {actions}
           </div>
         </div>
         <CollapsibleContent>
           <div
             data-native-scrollbar="true"
             className={cn(
-              "overflow-y-auto border-t border-border/50 px-2 py-1.5",
+              "overflow-y-auto border-t border-border/50",
               props.scrollRegionMaxHeightClass ?? "max-h-[min(40dvh,24rem)]",
             )}
           >
-            <div className="flex flex-col gap-0.5">
-              {changes.map((change) => (
-                <AccumulatedChangeRow
-                  key={change.filePath}
-                  change={change}
-                  counts={change.counts ?? { additions: 0, deletions: 0 }}
-                  gate={gate}
-                  pending={restore.restoreActionPending}
-                  clickHandlers={rowClickHandlers(opener, change)}
-                  onUndo={() =>
-                    // A per-row Undo targets this exact path, so artifacts are
-                    // always included (the opt-out is only for bulk reverts).
-                    restore.revertFileChanges(null, [change.filePath], true)
-                  }
-                />
-              ))}
-            </div>
+            {rows}
           </div>
         </CollapsibleContent>
       </Collapsible>
-      <UndoAllDialog
-        open={confirmUndoAll}
-        onOpenChange={setConfirmUndoAll}
-        isPending={restore.restoreActionPending}
-        // `null` while the set is a prefix: the opt-out defaults to CHECKED and
-        // "Undo all" reverts every file the host holds, so a count taken from
-        // the rows on screen would understate what is being opted out of.
-        artifactCount={
-          undelivered > 0 || !restore.accumulatedSetComplete
-            ? null
-            : artifactCount
-        }
-        onConfirm={(revertArtifacts) => {
-          restore.revertFileChanges(null, null, revertArtifacts);
-          setConfirmUndoAll(false);
-        }}
-      />
+      {undoAllDialog}
     </>
   );
 }
@@ -489,6 +542,7 @@ function ArtifactAccumulatedHeader(props: {
       <DiffLineDeltas
         counts={{ additions, deletions }}
         className="@max-[28rem]:hidden"
+        rolling={false}
       />
     </>
   );

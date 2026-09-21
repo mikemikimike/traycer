@@ -11,6 +11,7 @@ import {
   ResetEverythingButton,
 } from "@/components/layout-editor/inspector/presets-block";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
+import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -115,14 +116,16 @@ describe("the preset miniature (L-43, I-03, I-18)", () => {
   it("draws a multi-row dock as ONE joined frame, not a card per row (R1-01)", () => {
     render(<PresetsBlock onPreviewPreset={() => {}} />);
 
-    // Default shows all three dock members at full size, so this card is the
-    // one that had three bordered rounded-top boxes inside a fourth.
+    // Default shows every dock member at full size, so this card is the one
+    // that had a bordered rounded-top box per row inside a further one.
     const dock = within(card("Default")).getByTestId("app-frame-dock");
     const frames = dock.querySelectorAll('[data-layout-depiction="dock"]');
     expect(frames).toHaveLength(1);
     // The rows are that frame's own children, which is the other half of the
-    // claim: one frame drawn around nothing would pass the count alone.
-    expect(frames[0]?.childElementCount).toBe(3);
+    // claim: one frame drawn around nothing would pass the count alone. Read
+    // off the arrangement, so the two members L-142 added move it with them.
+    expect(frames[0]?.childElementCount).toBe(DEFAULT_ARRANGEMENT.dock.length);
+    expect(DEFAULT_ARRANGEMENT.dock.length).toBeGreaterThan(1);
   });
 
   it("draws at a real ratio when the box has not been measured", () => {

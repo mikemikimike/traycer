@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
 import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
@@ -7,8 +7,6 @@ import { InspectorShell } from "@/components/layout-editor/inspector/inspector-s
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
-import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
-import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -24,10 +22,6 @@ import {
 vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
   useProviderLimitWindows: () => ({ windows: [], drawnKeys: [] }),
 }));
-
-function isUsageProviderId(id: string): id is RateLimitProviderId {
-  return USAGE_PROVIDER_IDS.some((candidate) => candidate === id);
-}
 
 function popLevel(): void {
   useLayoutEditorStore.getState().popInspectorLevel();
@@ -71,7 +65,6 @@ function Harness(props: { readonly onExit: () => void }): ReactNode {
           key={selected}
           regionId={selected}
           onOpenProvider={(providerId) => {
-            if (!isUsageProviderId(providerId)) return;
             useLayoutEditorStore
               .getState()
               .openLevel({ kind: "usage-provider", providerId });
@@ -245,6 +238,35 @@ describe("the shared back row (L-89)", () => {
     fireEvent.click(opened);
     expect(useLayoutEditorStore.getState().selected).toBe("minimap");
 
+    fireEvent.click(screen.getByRole("button", { name: "All regions" }));
+
+    expect(document.activeElement?.getAttribute("data-region-id")).toBe(
+      "minimap",
+    );
+  });
+
+  /**
+   * The same hand-off through StrictMode's setup / cleanup / setup (R2-11).
+   *
+   * The memory used to be CONSUMED by the first setup and then cleared by the
+   * cleanup that follows it - nothing is selected while the index is the thing
+   * on screen - so the second setup found nothing and landed on row 0. It is
+   * read without consuming now, and written only when a row was actually
+   * opened.
+   */
+  it("survives a double mount of the index", () => {
+    useLayoutEditorStore.getState().beginSession({
+      entry: "keyboard",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+    render(
+      <StrictMode>
+        <Harness onExit={() => {}} />
+      </StrictMode>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Minimap/ }));
     fireEvent.click(screen.getByRole("button", { name: "All regions" }));
 
     expect(document.activeElement?.getAttribute("data-region-id")).toBe(

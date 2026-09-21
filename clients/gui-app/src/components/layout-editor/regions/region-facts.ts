@@ -36,7 +36,7 @@ export type AnyGrammarRow = (typeof LAYOUT_REGIONS)[RegionId]["rows"][number];
  * A region's row, with only what a caller walking EVERY region can ask about.
  *
  * Which keys a control writes is the part that cannot survive the walk, since
- * `keyof LayoutValues[K]` collapses to what all twenty-two regions share.
+ * `keyof LayoutValues[K]` collapses to what all twenty-three regions share.
  */
 export type RegionRowFacts =
   | {

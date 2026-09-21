@@ -9,7 +9,10 @@ import { createHoverChip } from "@/components/layout-editor/canvas/hover-chip";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
-import { regionDepiction } from "@/components/layout-editor/region-depiction";
+import {
+  depictRegion,
+  regionDepiction,
+} from "@/components/layout-editor/region-depiction";
 import { HostContextFrame } from "@/components/layout-editor/region-depiction-frame";
 import { LAYOUT_REGION_IDS } from "@/components/layout-editor/regions/region-facts";
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
@@ -20,6 +23,7 @@ import {
   SAMPLE_TILE_ID,
 } from "@/components/sample-workspace/sample-workspace-scene";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
@@ -49,9 +53,11 @@ import "@/components/layout-editor/layout-editor.css";
  * 2. **The live surfaces.** Three of them, and each is a mount the app itself
  *    makes. The sample workspace's rail is a real surface built from the app's
  *    own components, so each of the nine rail regions has a live node. The
- *    composer's toolbar in presentation mode carries the five toolbar regions.
- *    The dock's compact strip carries the three dock members at Chip size
- *    (L-98) - the size at which they mount with no host runtime behind them.
+ *    composer's toolbar in presentation mode carries the toolbar regions. The
+ *    dock's compact strip carries every dock member at Chip size (L-98) - the
+ *    size at which they mount with no host runtime behind them. Neither count
+ *    is written down here: both clusters have gained and lost members (L-136,
+ *    L-139, L-142), and a number in a comment is the thing that goes stale.
  * 3. **Uniform scaling only.** The preset miniature's frame is measured
  *    untransformed, with `offsetWidth`/`offsetHeight`, against the 1000x620
  *    it claims - a reflowed card would be any other size.
@@ -168,7 +174,7 @@ function LiveToolbar(): ReactNode {
 }
 
 /**
- * The dock's three members, live, as the pills they are at Chip size.
+ * The dock's members, live, as the pills they are at Chip size.
  *
  * They had no live node here at all while the rows mounted only inside a chat
  * tile's lower surfaces. L-98 moved the sample workspace onto the REAL dock, and
@@ -176,7 +182,8 @@ function LiveToolbar(): ReactNode {
  * `ChatDockCompactChip` fed a model, which is the same leaf the picture draws.
  * The full ROW still has none - `ActiveAgentsPanel` mounts `AgentStopButton`,
  * which resolves a host client and a mutation - so this fixture draws all three
- * at Chip size on both sides (see the store seed below).
+ * at Chip size on both sides (see the store seed below), all five of them
+ * since L-139/L-142 added the Message Queue and Todo.
  *
  * `working: false` on every chip, against the sample scene's own two: a working
  * glyph is `text-primary` under a per-frame opacity sweep, and the driver
@@ -196,12 +203,27 @@ function LiveDockChips(): ReactNode {
     regionId: "background",
     instanceId: SAMPLE_TILE_ID,
   });
+  // Five since L-139/L-142, and the count is load-bearing rather than
+  // incidental: `SAMPLE_DOCK` grew the Message Queue and Todo chips, and a
+  // `refs` table that still named three handed those two an `undefined`
+  // hotspot - so they drew a chip that registered no region, and the coverage
+  // claim below reported them as regions with no live leaf anywhere.
+  const queue = useLayoutRegion({
+    regionId: "queue",
+    instanceId: SAMPLE_TILE_ID,
+  });
+  const todo = useLayoutRegion({
+    regionId: "todo",
+    instanceId: SAMPLE_TILE_ID,
+  });
   const refs: Readonly<
     Record<ChatDockSection, (node: HTMLElement | null) => void>
   > = {
     filesChanged: files.ref,
     activeAgents: agents.ref,
     background: background.ref,
+    queue: queue.ref,
+    todo: todo.ref,
   };
   const chips = SAMPLE_DOCK.map((chip) => ({
     ...chip,
@@ -212,14 +234,56 @@ function LiveDockChips(): ReactNode {
     <ChatDockCompactStripProvider
       value={{
         chips,
-        expanded: new Set<ChatDockSection>(),
+        // Every pill at rest, for the same reason `working` is false above:
+        // the open pill is drawn selected, and what is compared here is the
+        // resting chip the picture draws.
+        openSection: null,
+        panelId: "layout-editor-browser-dock-panel",
         onToggle: () => undefined,
       }}
     >
       <HostContextFrame host="chip-strip">
-        <ChatDockCompactStrip />
+        <ChatDockCompactStrip actionsRef={() => undefined} />
       </HostContextFrame>
     </ChatDockCompactStripProvider>
+  );
+}
+
+/**
+ * The clip fade, on the one picture that can outgrow the inspector (LV2-14).
+ *
+ * The Usage limits picture draws EVERY shown provider since R3-03, and eight
+ * segments do not fit the 292px a docked stage gives them. That is what
+ * `HostContextFrame`'s measured `data-clipped` and its `CLIP_FADE` mask are
+ * for, and jsdom can decide neither: `scrollWidth`, `clientWidth` and a
+ * resolved `mask-image` are all real layout. The driver asserts on this node -
+ * `data-clipped="true"` and a computed `mask-image` other than `none` on the
+ * `[data-layout-depiction]` frame inside it.
+ *
+ * Its own arrangement rather than the store's, so the case is eight providers
+ * whatever this build ships as a default and whatever the preset rows above
+ * leave hidden.
+ */
+function ClipFadeCase(): ReactNode {
+  const basePreset = useLayoutStore((state) => state.basePreset);
+  const overrides = useLayoutStore((state) => state.overrides);
+  const arrangement = useLayoutStore((state) => state.arrangement);
+  const values = effectiveLayoutValues(basePreset, overrides);
+  return (
+    <div data-clip-case="usage-limits" style={{ width: 292 }}>
+      <SpecimenStage off={false}>
+        {depictRegion(
+          "usageLimits",
+          values.usageLimits,
+          {
+            ...arrangement,
+            usageProviders: USAGE_PROVIDER_IDS,
+            hiddenProviders: [],
+          },
+          null,
+        )}
+      </SpecimenStage>
+    </div>
   );
 }
 
@@ -263,6 +327,10 @@ export function Fixture(): ReactNode {
           ))}
         </section>
 
+        <section id="clip-fade">
+          <ClipFadeCase />
+        </section>
+
         <section id="presets" style={{ width: 320 }}>
           <PresetsBlock onPreviewPreset={() => undefined} />
         </section>
@@ -301,10 +369,15 @@ useLayoutEditorStore.getState().beginSession({
   startedAt: 0,
 });
 
-// The three dock members at Chip size, so the picture and the live leaf are
+// Every dock member at Chip size, so the picture and the live leaf are
 // pictures of the same thing (see `LiveDockChips`). Every other region is drawn
 // at whatever this build ships as its default.
-for (const regionId of ["changedFiles", "runningAgents", "background"] as const)
+//
+// Read off the arrangement rather than listed here: the dock's membership and
+// its order are model facts that have already changed twice (L-139, L-142),
+// and a list written down in a fixture is the thing that goes stale while the
+// coverage claim above still reports green.
+for (const regionId of useLayoutStore.getState().arrangement.dock)
   useLayoutStore.getState().setRegionValues(regionId, { size: "chip" });
 
 const container = document.getElementById("root");

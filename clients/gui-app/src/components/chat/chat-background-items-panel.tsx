@@ -15,7 +15,11 @@ import { LivePulse } from "@/components/ui/live-pulse";
 import { LiveElapsed } from "@/components/chat/segments/segment-elapsed";
 import { fallbackProviderLabelFor } from "@/components/chat/fallback/fallback-identity";
 import { formatWaitTime, useSampledNow } from "@/lib/relative-time";
-import { useChatDockSectionRevealed } from "@/components/chat/chat-dock-compact-context";
+import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
+import {
+  ChatDockAttachedPanelBody,
+  ChatDockPillActions,
+} from "@/components/chat/chat-dock-attached-panel";
 import { useTabHostId } from "@/components/epic-canvas/hooks/use-tab-host-id";
 import { ManagedCommandMonitorIcon } from "@/components/managed-commands/managed-command-monitor-icon";
 import { ManagedCommandStopAction } from "@/components/managed-commands/managed-command-lifecycle-actions";
@@ -630,9 +634,9 @@ export function BackgroundItemsPanel(props: {
   readonly onStopAll: () => string | null;
   readonly onStopSession: () => string | null;
 }) {
-  // Open on arrival when a chip click is what put this row back in the dock.
-  const revealedByChip = useChatDockSectionRevealed("background");
-  const [open, setOpen] = useState(revealedByChip);
+  // Attached above the composer because its pill is the open one (L-142).
+  const attached = useChatDockSectionAttached("background");
+  const [open, setOpen] = useState(false);
   const [committedRememberedByTaskId, setCommittedRememberedByTaskId] =
     useState<ReadonlyMap<string, RememberedBackgroundNode>>(() => new Map());
   // A harness background item is stopped over the chat's own stream, so it
@@ -797,6 +801,122 @@ export function BackgroundItemsPanel(props: {
     items.filter((item) => item.kind !== "wakeup").length +
     managedCommands.length;
 
+  const actions = (
+    <>
+      {heldManagedCommands.length > 0 ? (
+        <TooltipWrapper
+          label="Wake the agent now with the output Stop held back. Otherwise it arrives when the chat next wakes (a message or a resume)."
+          side="top"
+          sideOffset={undefined}
+          align={undefined}
+        >
+          <span className="inline-flex">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="shrink-0"
+              disabled={!managedDeliverable || deliverHeldPending}
+              data-testid="background-deliver-held"
+              onClick={() => {
+                // Null, not the rendered ids: Deliver means "everything you
+                // are holding for me", and naming the ids this panel happens
+                // to show would silently skip a hold installed between
+                // render and click.
+                deliverHeld.mutate({
+                  hostId,
+                  epicId: props.epicId,
+                  chatId: props.chatId,
+                  commandIds: null,
+                });
+              }}
+            >
+              {deliverHeldPending ? (
+                <AgentSpinningDots
+                  className={undefined}
+                  testId="background-deliver-held-spinner"
+                  variant={undefined}
+                />
+              ) : null}
+              {heldManagedCommands.length === 1
+                ? "Deliver"
+                : `Deliver ${heldManagedCommands.length}`}
+            </Button>
+          </span>
+        </TooltipWrapper>
+      ) : null}
+      <BackgroundStopButton
+        label="Stop all"
+        iconOnly={false}
+        disabled={stopAllDisabled}
+        testId="background-stop-all"
+        onClick={stopAll}
+      />
+    </>
+  );
+
+  const list = (
+    <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
+      {heldManagedCommands.map((held) => (
+        <HeldManagedCommandRow
+          key={`held-${held.commandId}`}
+          held={held}
+          command={runningManagedCommandById.get(held.commandId) ?? null}
+          epicId={props.epicId}
+          hostId={hostId}
+          stoppable={managedStoppable}
+          onOpen={openManagedCommand}
+        />
+      ))}
+      {runningOnlyManagedCommands.map((command) => (
+        <ManagedCommandRow
+          key={command.id}
+          command={command}
+          epicId={props.epicId}
+          hostId={hostId}
+          viewTabId={props.viewTabId}
+          stoppable={managedStoppable}
+          onOpen={openManagedCommand}
+        />
+      ))}
+      <BackgroundTreeRows
+        nodes={tree}
+        depth={0}
+        stoppable={stoppable}
+        pendingStopTaskIds={props.pendingStopTaskIds}
+        onItemClick={props.onItemClick}
+        onStopItem={props.onStopItem}
+      />
+    </ul>
+  );
+
+  const sessionStopDialog = (
+    <SessionStopConfirmDialog
+      escalation={sessionStopEscalation}
+      open={confirmingSessionStop}
+      onOpenChange={setConfirmingSessionStop}
+      itemCount={panelItemCount}
+      turnActive={props.turnActive}
+      isPending={props.sessionStopPending}
+      onConfirm={confirmSessionStop}
+    />
+  );
+
+  if (attached) {
+    return (
+      <>
+        <ChatDockPillActions>{actions}</ChatDockPillActions>
+        <ChatDockAttachedPanelBody
+          section="background"
+          testId="background-items-list"
+        >
+          {list}
+        </ChatDockAttachedPanelBody>
+        {sessionStopDialog}
+      </>
+    );
+  }
+
   return (
     <Collapsible
       open={open}
@@ -807,57 +927,7 @@ export function BackgroundItemsPanel(props: {
     >
       <div className="flex items-stretch">
         <BackgroundItemsHeader open={open} headerSummary={headerSummary} />
-        <div className="flex shrink-0 items-center gap-1 pr-1.5">
-          {heldManagedCommands.length > 0 ? (
-            <TooltipWrapper
-              label="Wake the agent now with the output Stop held back. Otherwise it arrives when the chat next wakes (a message or a resume)."
-              side="top"
-              sideOffset={undefined}
-              align={undefined}
-            >
-              <span className="inline-flex">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  className="shrink-0"
-                  disabled={!managedDeliverable || deliverHeldPending}
-                  data-testid="background-deliver-held"
-                  onClick={() => {
-                    // Null, not the rendered ids: Deliver means "everything you
-                    // are holding for me", and naming the ids this panel happens
-                    // to show would silently skip a hold installed between
-                    // render and click.
-                    deliverHeld.mutate({
-                      hostId,
-                      epicId: props.epicId,
-                      chatId: props.chatId,
-                      commandIds: null,
-                    });
-                  }}
-                >
-                  {deliverHeldPending ? (
-                    <AgentSpinningDots
-                      className={undefined}
-                      testId="background-deliver-held-spinner"
-                      variant={undefined}
-                    />
-                  ) : null}
-                  {heldManagedCommands.length === 1
-                    ? "Deliver"
-                    : `Deliver ${heldManagedCommands.length}`}
-                </Button>
-              </span>
-            </TooltipWrapper>
-          ) : null}
-          <BackgroundStopButton
-            label="Stop all"
-            iconOnly={false}
-            disabled={stopAllDisabled}
-            testId="background-stop-all"
-            onClick={stopAll}
-          />
-        </div>
+        <div className="flex shrink-0 items-center gap-1 pr-1.5">{actions}</div>
       </div>
       <CollapsibleContent>
         <div
@@ -868,49 +938,10 @@ export function BackgroundItemsPanel(props: {
             props.scrollRegionMaxHeightClass,
           )}
         >
-          <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
-            {heldManagedCommands.map((held) => (
-              <HeldManagedCommandRow
-                key={`held-${held.commandId}`}
-                held={held}
-                command={runningManagedCommandById.get(held.commandId) ?? null}
-                epicId={props.epicId}
-                hostId={hostId}
-                stoppable={managedStoppable}
-                onOpen={openManagedCommand}
-              />
-            ))}
-            {runningOnlyManagedCommands.map((command) => (
-              <ManagedCommandRow
-                key={command.id}
-                command={command}
-                epicId={props.epicId}
-                hostId={hostId}
-                viewTabId={props.viewTabId}
-                stoppable={managedStoppable}
-                onOpen={openManagedCommand}
-              />
-            ))}
-            <BackgroundTreeRows
-              nodes={tree}
-              depth={0}
-              stoppable={stoppable}
-              pendingStopTaskIds={props.pendingStopTaskIds}
-              onItemClick={props.onItemClick}
-              onStopItem={props.onStopItem}
-            />
-          </ul>
+          {list}
         </div>
       </CollapsibleContent>
-      <SessionStopConfirmDialog
-        escalation={sessionStopEscalation}
-        open={confirmingSessionStop}
-        onOpenChange={setConfirmingSessionStop}
-        itemCount={panelItemCount}
-        turnActive={props.turnActive}
-        isPending={props.sessionStopPending}
-        onConfirm={confirmSessionStop}
-      />
+      {sessionStopDialog}
     </Collapsible>
   );
 }

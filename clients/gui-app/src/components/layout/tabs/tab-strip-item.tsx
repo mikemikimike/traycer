@@ -249,16 +249,12 @@ export const TabItem = memo(function TabItem(props: TabItemProps) {
     isDragging,
   } = useHeaderTabDnd(tab.kind, tab.id, dnd, dragGhost);
   const tabRef = useRef<HTMLDivElement | null>(null);
-  const scrollActiveTabIntoView = useCallback(
-    (element: HTMLDivElement | null) => {
-      if (element === null || !isActive) return;
-      element.scrollIntoView({ block: "nearest", inline: "nearest" });
-    },
-    [isActive],
-  );
+  // No reveal of its own: the STRIP owns it (L-146). A per-item
+  // `scrollIntoView` had no drag gate, revealed one half of a split group
+  // rather than the member, and scrolled every scrollable ancestor with it.
   const combinedRef = useMemo(
-    () => mergeRefs<HTMLDivElement>(dndRef, tabRef, scrollActiveTabIntoView),
-    [dndRef, scrollActiveTabIntoView],
+    () => mergeRefs<HTMLDivElement>(dndRef, tabRef),
+    [dndRef],
   );
   const longPressTimerRef = useRef<number | null>(null);
   const modifier = useTabLeaderModifierForIndex(index);

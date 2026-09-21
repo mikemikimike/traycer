@@ -18,6 +18,7 @@ import {
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { LayoutValues } from "@/lib/layout/layout-values";
@@ -35,7 +36,7 @@ interface RegionSectionProps {
    * and opens the providers in place instead, which is where the nullable
    * shape below still belongs.
    */
-  readonly onOpenProvider: (providerId: string) => void;
+  readonly onOpenProvider: (providerId: RateLimitProviderId) => void;
 }
 
 /**
@@ -134,7 +135,7 @@ export function GrammarRowView(props: {
   readonly arrangement: LayoutArrangement;
   readonly snapshot: LayoutSnapshot;
   readonly filter: string;
-  readonly onOpenProvider: ((providerId: string) => void) | null;
+  readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
 }): ReactNode {
   const {
     row,

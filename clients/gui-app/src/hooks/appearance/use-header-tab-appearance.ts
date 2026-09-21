@@ -9,9 +9,17 @@ import type { HeaderTab } from "@/stores/tabs/types";
  * Three tiers, and the order is the whole of it. A group's colour wins,
  * because joining a group is the later and more deliberate choice; then the
  * tab's own customization; then the appearance the KIND was built with. That
- * last tier is what the sample workspace's amber cap rides on (L-87) - it is
+ * last tier is what the layout editor's own amber tab rides on (L-87) - it is
  * a fact about the tab kind rather than something a user picked, and a hook
  * that overwrote it would leave the kind's field silently dead.
+ *
+ * The colour this returns is the WHOLE of that tab's paint, not a tint beside
+ * it: `header-tab-visual.tsx` outlines the active tab's silhouette in it and
+ * fills that silhouette with `--layout-session-tab-fill`, derived from the
+ * same token (L-138). So the ordering above is load-bearing for the editor and
+ * not only for user colours: a tier that displaced the kind's colour would not
+ * merely retint this tab, it would replace the signal that says the window is
+ * in an editing mode.
  */
 export function useHeaderTabAppearance(
   tab: HeaderTab | null,

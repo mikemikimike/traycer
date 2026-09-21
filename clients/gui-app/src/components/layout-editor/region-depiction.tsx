@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
-import { Bot, Cpu, FileDiff, History, Mic, Shield } from "lucide-react";
+import {
+  Bot,
+  Cpu,
+  FileDiff,
+  History,
+  ListChecks,
+  ListOrdered,
+  Mic,
+  Shield,
+} from "lucide-react";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
 import { ActiveAgentsHeader } from "@/components/chat/chat-active-agents-panel";
@@ -9,8 +18,14 @@ import {
   type ChatSnapshotDiffOpener,
 } from "@/components/chat/chat-diff-target";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
+import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
+import { QueuedMessageHeader } from "@/components/chat/queued-message-surface";
 import { contextUsageTone } from "@/components/chat/context-usage";
-import { SAMPLE_RESTORE } from "@/components/sample-workspace/sample-workspace-scene";
+import {
+  SAMPLE_QUEUE,
+  SAMPLE_RESTORE,
+  SAMPLE_TODO,
+} from "@/components/sample-workspace/sample-workspace-scene";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { ComposerAttachImageTrigger } from "@/components/home/toolbar/composer-attach-image-button";
 import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
@@ -60,8 +75,8 @@ import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-ba
  * chrome is already split into an interactive mount and a drawing view -
  * `StatusBarUsageReadings`, `HarnessModelTrigger`, `PermissionsTrigger`,
  * `TabStripHomeItemView`, `MinimapRailTick`, `LeftPanelRailIcon`, the dock's
- * two headers, its changed-files panel and its compact chip all take what they
- * draw from props - and
+ * two headers, its changed-files, queue and todo panels and its compact chip
+ * all take what they draw from props - and
  * for those a depiction IS the shipping component under specimen data. The
  * four that read a preference through a hook of their own rather than from a
  * prop (the resource segment, the context chip, the mic button, the harness
@@ -133,9 +148,10 @@ const HOST_BY_REGION: Readonly<Record<RegionId, HostContextId>> = {
   runningAgents: "dock",
   changedFiles: "dock",
   background: "dock",
+  queue: "dock",
+  todo: "dock",
   attachImage: "toolbar",
   access: "toolbar",
-  agent: "toolbar",
   model: "toolbar",
   mic: "toolbar",
   railAgents: "rail",
@@ -256,18 +272,6 @@ function depictDockRow<K extends DockRegionId>(
  */
 const SPECIMEN_CONTEXT_PERCENT_LEFT = 36;
 
-/**
- * How many providers the status-bar picture prints.
- *
- * A SAMPLE of the strip rather than the whole catalog. Drawing every shown
- * provider put all eight in a 320px dock, and - drawn from one fixed reading -
- * eight segments saying "35% 5h" behind eight different icons, which reads as
- * filler rather than as a picture of the user's own status bar (LV2-19).
- * Three is what the picture has to show: that the cluster repeats once per
- * provider, and that each repetition carries that provider's own reading.
- */
-const SPECIMEN_STRIP_PROVIDERS = 3;
-
 interface SpecimenReading {
   readonly durationMinutes: number;
   readonly usedPercent: number;
@@ -350,6 +354,14 @@ function specimenWindow(
 }
 
 function noop(): void {}
+
+/**
+ * The same, for the queue's Pause and Resume, which report the id of the frame
+ * they dispatched. A picture dispatches none, which is what `null` says there.
+ */
+function noAction(): string | null {
+  return null;
+}
 
 /**
  * The scroll cap a dock panel takes from its tile. A picture never opens, so
@@ -441,13 +453,25 @@ function depictUsageProviderSegment(
   );
 }
 
+/**
+ * EVERY shown provider, in the arrangement's own order (P2, R3-03).
+ *
+ * Not a sample of them: on Settings ▸ Layout the band above the providers list
+ * is the only feedback that list's Shown/Hidden control has, so a picture that
+ * stopped after three said nothing when the fourth was hidden - and the preset
+ * miniatures drew a status bar that was not the reader's own. Eight segments
+ * are more than a 320px dock holds; that is what the host frame's clip fade is
+ * for (`region-depiction-frame.tsx`), and cutting the model to fit the frame
+ * is the wrong end of it. The readings stay varied per provider
+ * (`specimenReadingFor`), which is what LV2-19 actually asked for.
+ */
 function depictUsageLimits(
   values: UsageLimitsValues,
   arrangement: LayoutArrangement,
 ): ReactNode {
-  const shownProviders = arrangement.usageProviders
-    .filter((providerId) => !arrangement.hiddenProviders.includes(providerId))
-    .slice(0, SPECIMEN_STRIP_PROVIDERS);
+  const shownProviders = arrangement.usageProviders.filter(
+    (providerId) => !arrangement.hiddenProviders.includes(providerId),
+  );
   return shownProviders.map((providerId) => (
     <span key={providerId} className="inline-flex shrink-0 items-center">
       {depictUsageProviderSegment(providerId, values, null)}
@@ -601,6 +625,7 @@ function depictRunningAgents(values: SizedValues): ReactNode {
         label="Active agents"
         pulseToken={null}
         expanded={false}
+        controls={null}
         testId="layout-depiction-running-agents"
         onClick={noop}
       />
@@ -624,6 +649,7 @@ function depictChangedFiles(values: SizedValues): ReactNode {
         label="Changed files"
         pulseToken={null}
         expanded={false}
+        controls={null}
         testId="layout-depiction-changed-files"
         onClick={noop}
       />
@@ -662,6 +688,7 @@ function depictBackground(values: SizedValues): ReactNode {
         label="Background"
         pulseToken={null}
         expanded={false}
+        controls={null}
         testId="layout-depiction-background"
         onClick={noop}
       />
@@ -671,6 +698,98 @@ function depictBackground(values: SizedValues): ReactNode {
     <Collapsible open={false} variant="panel">
       <BackgroundItemsHeader open={false} headerSummary="1 running" />
     </Collapsible>
+  );
+}
+
+/**
+ * The real Message queue HEADER, fed the sample workspace's own queue.
+ *
+ * The same reading L-98 forced on the changed-files row - the queue's
+ * full-size shape is a collapsible panel with its count, its state word and
+ * its Pause/Resume actions, and a header look-alike would be a picture of
+ * something the app does not draw - but taken from `QueuedMessageHeader`
+ * rather than from the whole panel. Every other collapsed row here is drawn
+ * that way too, and the panel would bring a `DndContext` and the queue's rows
+ * into a specimen that can never be dragged, once per miniature (three per
+ * preset card).
+ *
+ * The header's own `aria-live` span does come along, and deliberately stays:
+ * a live region has to be in the DOM BEFORE its text changes to be announced,
+ * so gating it on a non-empty announcement would silence the real one. Empty
+ * and polite, it announces nothing here.
+ *
+ * Its callbacks go nowhere, exactly as the changed-files opener does: the
+ * picture stays complete and still acts on nothing (the passivity contract in
+ * this module's header, and the specimen stage is `inert` besides).
+ */
+function depictQueue(values: SizedValues): ReactNode {
+  if (values.size === "chip") {
+    return (
+      <ChatDockCompactChip
+        icon={<ListOrdered className="size-3.5" />}
+        text="1"
+        working={false}
+        lineDeltas={null}
+        label="Message queue"
+        pulseToken={null}
+        expanded={false}
+        controls={null}
+        testId="layout-depiction-queue"
+        onClick={noop}
+      />
+    );
+  }
+  return (
+    <Collapsible open={false} variant="panel">
+      <QueuedMessageHeader
+        open={false}
+        // The sample scene's own queue, so the picture and the canvas cannot
+        // disagree about how many items the Queue row is standing for.
+        count={SAMPLE_QUEUE.items.length}
+        queueStatus={SAMPLE_QUEUE.status}
+        // What a running queue of one human prompt offers: Pause, and no
+        // Resume beside it - the same two the panel derives from those items.
+        canPauseQueue
+        canResumeQueue={false}
+        canAct
+        resumeRequested={false}
+        keepPausedRequested={false}
+        readOnly={false}
+        onPause={noAction}
+        onResume={noAction}
+      />
+    </Collapsible>
+  );
+}
+
+/**
+ * The real Todo panel, fed the sample workspace's own todo list. It reads
+ * nothing of its own beyond the snapshot it is handed, so there is no inert
+ * wiring to do.
+ */
+function depictTodo(values: SizedValues): ReactNode {
+  if (values.size === "chip") {
+    return (
+      <ChatDockCompactChip
+        icon={<ListChecks className="size-3.5" />}
+        text="1"
+        working={false}
+        lineDeltas={null}
+        label="Todo"
+        pulseToken={null}
+        expanded={false}
+        controls={null}
+        testId="layout-depiction-todo"
+        onClick={noop}
+      />
+    );
+  }
+  return (
+    <PinnedTodoPanel
+      todo={SAMPLE_TODO}
+      scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+      separated={false}
+    />
   );
 }
 
@@ -727,6 +846,8 @@ const REGION_DEPICTIONS: {
   runningAgents: depictRunningAgents,
   changedFiles: depictChangedFiles,
   background: depictBackground,
+  queue: depictQueue,
+  todo: depictTodo,
   attachImage: () => <ComposerAttachImageTrigger />,
   access: (values) => (
     <PermissionsTrigger
@@ -734,19 +855,6 @@ const REGION_DEPICTIONS: {
       compact={values.size === "chip"}
       icon={<Shield className="size-4" />}
     />
-  ),
-  // `ComposerHarnessLabel`'s own span: that component binds itself to the
-  // composer's tile and its hotspot, neither of which a picture has.
-  //
-  // Its classes, to the letter, minus the one that cannot travel: `@max-lg`
-  // is the COMPOSER's container query (C1), and a picture is drawn in a 320px
-  // dock where that query would hide the label the stage exists to show. The
-  // tone is the plain `text-muted-foreground` C1 gave the real label - it was
-  // `/70` here for as long as it was there.
-  agent: () => (
-    <span className="inline-block shrink-0 truncate px-1 text-ui-xs text-muted-foreground">
-      Codex
-    </span>
   ),
   model: depictModel,
   // `ComposerMicButton`'s own button, which gates itself on the preference

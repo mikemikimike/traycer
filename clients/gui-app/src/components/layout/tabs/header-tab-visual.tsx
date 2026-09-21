@@ -42,7 +42,11 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
   return (
     <>
       {props.chrome === "own" ? (
-        <TabChrome isActive={props.isActive} color={color} />
+        <TabChrome
+          isActive={props.isActive}
+          color={color}
+          session={sessionColor !== null}
+        />
       ) : (
         <SplitMemberChrome focused={props.isActive} color={color} />
       )}
@@ -87,23 +91,24 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
 }
 
 /**
- * The mark on the one tab that is a MODE rather than a place (L-87): while the
- * sample workspace tab is open the user is customizing the layout, and this is
- * the editor's own chrome rather than another tab's colour.
+ * The marker on the one tab that is a MODE rather than a place (L-87): while
+ * the sample workspace tab is open the user is customizing the layout, and
+ * this is the editor's own chrome rather than another tab's colour.
  *
- * `data-layout-session-tab` is the half `layout-editor.css` reads: the tab
- * strip's scroller dims its members while a session is live, and the member
- * holding this mark is the one that stays lit. Without it the one signal that
- * says "you are customizing" was drawn at 45% opacity and 45% saturation, on a
- * 1.5px stroke (L-132).
+ * `data-layout-session-tab` is the half `layout-editor.css` reads, and it is
+ * the reason this element exists at all: the tab strip's scroller dims its
+ * members while a session is live, and the member holding this marker is the
+ * one that stays lit. Without it the one signal that says "you are
+ * customizing" was drawn at 45% opacity and 45% saturation (L-132). `:has()`
+ * matches a `display: none` element, so one marker covers both states.
  *
- * Two shapes, because the tab has two: an inactive tab wears its colour as a
- * cap along its bottom edge, so the mark is that cap at a thickness that reads
- * beside a dotted frame around the whole screen; an active tab is already
- * outlined in the colour and merges into the content below it, so a stroke
- * across its bottom would close a seam the design opens on purpose - it gets a
- * wash of the same colour instead, on the inner shape the strip's hover state
- * already uses.
+ * What it PAINTS depends on the state, because only one of the two leaves it
+ * anything to draw (L-138). At rest - the user clicked another tab mid-session
+ * - the tab wears the colour as a cap along its bottom edge, and this is that
+ * cap. Active, the tab's own silhouette is the mark: `TabChrome` fills the
+ * real S-curved shape with `--layout-session-tab-fill` and outlines it in the
+ * same token, so there is no second decoration to add and this element paints
+ * nothing.
  */
 function SessionTabMark(props: {
   readonly color: string;
@@ -112,17 +117,12 @@ function SessionTabMark(props: {
   return (
     <span
       aria-hidden
-      // The shape names itself and `layout-editor.css` paints it, beside the
+      // The state names itself and `layout-editor.css` paints it, beside the
       // dim rule that reads this same attribute. The tab's colour is the one
-      // runtime value here, so it travels as a custom property and the fill -
-      // the wash's dilution included - is a rule rather than a string built in
-      // JS.
-      data-layout-session-tab={props.isActive ? "wash" : "cap"}
-      className={
-        props.isActive
-          ? "pointer-events-none absolute inset-x-2 inset-y-1 rounded-md"
-          : "pointer-events-none absolute inset-x-0 bottom-0 h-0.75"
-      }
+      // runtime value here, so it travels as a custom property and every fill
+      // is a rule rather than a string built in JS.
+      data-layout-session-tab={props.isActive ? "filled" : "rest"}
+      className="pointer-events-none absolute inset-x-0 bottom-0"
       style={{ "--layout-session-tab-color": props.color } as CSSProperties}
     />
   );
@@ -171,11 +171,19 @@ export function SplitFillableMemberVisual(props: {
 export function TabChrome(props: {
   readonly isActive: boolean;
   readonly color: string | null;
+  /**
+   * The layout editor's own tab (L-87). It is the one tab whose colour is a
+   * MODE rather than an identity, so it is the one tab that fills its
+   * silhouette instead of merely outlining it - and the one whose bottom edge
+   * is drawn by `SessionTabMark` rather than here, so the two do not stack two
+   * bars of the same colour on one edge.
+   */
+  readonly session: boolean;
 }) {
   if (!props.isActive) {
     return (
       <>
-        {props.color !== null ? (
+        {props.color !== null && !props.session ? (
           <span
             aria-hidden
             className="pointer-events-none absolute inset-x-0 bottom-0 h-[1.5px] bg-[var(--swatch)]"
@@ -191,7 +199,19 @@ export function TabChrome(props: {
   }
   return (
     <TabChromeBackground
-      fill="var(--color-background)"
+      // The editor's tab is FILLED, which is the whole of the redesigned
+      // signal (L-138): the frame around the screen is a hollow amber outline
+      // and this is the one solid amber object inside it, both struck from
+      // `--warning-foreground`. The fill lands on the tab's real silhouette -
+      // S-curved caps, top border and baseline cover together - instead of an
+      // inner rectangle floating inside it, which is what read as a rendering
+      // bug. The fallback keeps a plain tab if `layout-editor.css` has not
+      // loaded yet, rather than an invalid colour.
+      fill={
+        props.session
+          ? "var(--layout-session-tab-fill, var(--color-background))"
+          : "var(--color-background)"
+      }
       borderColor={props.color ?? "var(--color-border)"}
       coversBaseline
       className="transition-opacity duration-300 ease-spring"

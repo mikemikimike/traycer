@@ -27,12 +27,20 @@ import {
 const live = vi.hoisted(() => ({
   windows: [] as ReadonlyArray<StatusBarRateLimitWindow>,
   drawnKeys: [] as ReadonlyArray<string>,
+  /** How many subscriptions the render under test opened (R3-15). */
+  reads: 0,
 }));
 vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
-  useProviderLimitWindows: () => live,
+  useProviderLimitWindows: () => {
+    live.reads += 1;
+    return live;
+  },
 }));
 
-import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
+import {
+  ProviderLevel,
+  ProviderLimitsControl,
+} from "@/components/layout-editor/inspector/provider-level";
 
 const PROVIDER: RateLimitProviderId = "claude-code";
 
@@ -70,6 +78,7 @@ function limitsMode(): string | null {
 beforeEach(() => {
   live.windows = [limitWindow("5h", "5h"), limitWindow("week", "Weekly")];
   live.drawnKeys = ["5h"];
+  live.reads = 0;
   window.localStorage.clear();
   useLayoutStore.setState({
     ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -212,5 +221,44 @@ describe('the provider level\'s "Choose..." checklist (L-96, I-14)', () => {
     expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
     expect(limitsMode()).toBe("Automatic (recommended)");
     expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
+  });
+});
+
+describe("what the level costs and what it hides (R3-15, R3-16)", () => {
+  it("asks for the provider's windows once, as the page's control does", () => {
+    render(<ProviderLimitsControl providerId={PROVIDER} />);
+    const onPage = live.reads;
+    expect(onPage).toBeGreaterThan(0);
+
+    cleanup();
+    live.reads = 0;
+    render(<ProviderLevel providerId={PROVIDER} />);
+
+    // The level draws the stage AND the pick from ONE reading. It used to
+    // subscribe for the stage and then let its child subscribe again for the
+    // same provider, which is two answers to one question.
+    expect(live.reads).toBe(onPage);
+  });
+
+  it("greys a hidden provider's limits in place rather than removing them", () => {
+    const arrangement = useLayoutStore.getState().arrangement;
+    useLayoutStore.setState({
+      arrangement: { ...arrangement, hiddenProviders: [PROVIDER] },
+    });
+    render(<ProviderLevel providerId={PROVIDER} />);
+
+    // Still readable. `inert` took the whole subtree out of the accessibility
+    // tree, so a screen-reader user who turned a provider off could no longer
+    // read what its greyed limits said - and L-08's rule is "greyed in place".
+    // (The stage above is `inert` and stays so: a PICTURE of a segment is not
+    // a control, which is L-77 rather than this.)
+    const mode = screen.getByRole("radiogroup", { name: "Limits" });
+    expect(mode.closest("[inert]")).toBeNull();
+
+    // And still not operable, which is the half `inert` was doing: a disabled
+    // fieldset turns off every control under it without hiding any of them.
+    const group = mode.closest("fieldset");
+    expect(group?.disabled).toBe(true);
+    expect(group?.getAttribute("aria-disabled")).toBe("true");
   });
 });
