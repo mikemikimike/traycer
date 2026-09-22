@@ -16,9 +16,10 @@ import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 // this module's body, which an import is and a bootstrap call is not.
 import "@/lib/layout/legacy-layout-records";
 import { useLayoutStore } from "@/stores/layout/layout-store";
-import type {
-  LeftPanelId,
-  PanelVisibilityOverrideById,
+import {
+  isLeftPanelId,
+  type LeftPanelId,
+  type PanelVisibilityOverrideById,
 } from "@/lib/left-panel-ids";
 import {
   DEFAULT_SORT_MODE,
@@ -214,10 +215,36 @@ type RootCreatePendingByPanel<T> = Readonly<
   Partial<Record<string, Readonly<Partial<Record<RootCreatePanelId, T>>>>>
 >;
 
+type PanelSectionCollapsedByPanelId = Readonly<
+  Partial<Record<LeftPanelId, boolean>>
+>;
+type PanelSectionWeightsByPanelId = Readonly<
+  Partial<Record<LeftPanelId, number>>
+>;
+
 interface LeftPanelStore {
   readonly activePanelIdByTabId: Readonly<Record<string, LeftPanelId>>;
   readonly mainCollapsedByTabId: Readonly<Record<string, boolean>>;
   readonly sidebarWidthPx: number;
+  /**
+   * Per-section collapse, for a panel that is one of a STACKED PAIR and only
+   * then (L-166). A collapsed section hands its space to its partner, so the
+   * sidebar body is never empty because of it - which is the defect R5R-01
+   * found when the body drew one section and still read this flag. A panel
+   * standing alone is never collapsible and draws no chevron; "collapse the
+   * sidebar" has one owner in {@link LeftPanelStore.mainCollapsedByTabId}.
+   */
+  readonly panelSectionCollapsedByPanelId: PanelSectionCollapsedByPanelId;
+  /**
+   * How a stacked pair splits the body, as a weight per panel.
+   *
+   * Arbitrary-sum numbers rather than a fraction, and keyed by panel rather
+   * than by stack, because that is the shape the SHIPPED build wrote and it is
+   * still in users' records: keeping it means a dogfooder who dragged the
+   * handle to give Artifacts two thirds of the column gets that split back
+   * with no migration at all.
+   */
+  readonly panelSectionWeightsByPanelId: PanelSectionWeightsByPanelId;
   readonly commentsPanelRevealedByTabId: Readonly<Record<string, boolean>>;
   readonly localRootCreatePendingByEpicPanel: RootCreatePendingByPanel<LeftPanelRootCreatePending>;
   readonly acknowledgedRootCreatePendingByEpicPanel: RootCreatePendingByPanel<LeftPanelAcknowledgedRootCreatePending>;
@@ -247,6 +274,10 @@ interface LeftPanelStore {
   readonly setMainCollapsed: (tabId: string, collapsed: boolean) => void;
   readonly toggleMainCollapsed: (tabId: string) => void;
   readonly setSidebarWidthPx: (widthPx: number) => void;
+  readonly togglePanelSectionCollapsed: (panelId: LeftPanelId) => void;
+  readonly setPanelSectionWeights: (
+    weights: ReadonlyArray<{ panelId: LeftPanelId; weight: number }>,
+  ) => void;
 
   readonly isCommentsPanelRevealed: (tabId: string) => boolean;
   readonly revealCommentsPanel: (tabId: string) => void;
@@ -373,6 +404,17 @@ export function migrateLeftPanelPersistedState(persisted: unknown): unknown {
   migrated.chatFilterByEpicId = chatFilterByEpicId;
   migrated.chatArchiveVisibilityByEpicId = archiveVisibilityByEpicId;
   return migrated;
+}
+
+function getPersistedPanelSectionCollapsed(
+  collapsedByPanelId: PanelSectionCollapsedByPanelId,
+): PanelSectionCollapsedByPanelId {
+  return Object.entries(collapsedByPanelId).reduce<
+    Partial<Record<LeftPanelId, boolean>>
+  >((next, [panelId, collapsed]) => {
+    if (isLeftPanelId(panelId) && collapsed) next[panelId] = true;
+    return next;
+  }, {});
 }
 
 function getPersistedActivePanelIds(
@@ -517,6 +559,8 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
       activePanelIdByTabId: {},
       mainCollapsedByTabId: {},
       sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
+      panelSectionCollapsedByPanelId: {},
+      panelSectionWeightsByPanelId: {},
       commentsPanelRevealedByTabId: {},
       localRootCreatePendingByEpicPanel: {},
       acknowledgedRootCreatePendingByEpicPanel: {},
@@ -559,8 +603,15 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           const currentPanelId =
             state.activePanelIdByTabId[tabId] ?? DEFAULT_LEFT_PANEL_ID;
           const currentCollapsed = state.mainCollapsedByTabId[tabId] ?? false;
+          // Focusing a panel un-collapses its SECTION too, which is what
+          // makes clicking either icon of a stacked pair open the stack with
+          // that panel showing (L-167) - and the way back out of a section
+          // the user collapsed and then navigated to.
+          const sectionCollapsed =
+            state.panelSectionCollapsedByPanelId[panelId] ?? false;
           const panelChanged = currentPanelId !== panelId;
-          if (!panelChanged && !currentCollapsed) return state;
+          if (!panelChanged && !currentCollapsed && !sectionCollapsed)
+            return state;
           return {
             activePanelIdByTabId: panelChanged
               ? { ...state.activePanelIdByTabId, [tabId]: panelId }
@@ -568,6 +619,9 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
             mainCollapsedByTabId: currentCollapsed
               ? { ...state.mainCollapsedByTabId, [tabId]: false }
               : state.mainCollapsedByTabId,
+            panelSectionCollapsedByPanelId: sectionCollapsed
+              ? { ...state.panelSectionCollapsedByPanelId, [panelId]: false }
+              : state.panelSectionCollapsedByPanelId,
           };
         });
       },
@@ -652,6 +706,32 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           const next = clampSidebarWidthPx(widthPx);
           if (next === state.sidebarWidthPx) return state;
           return { sidebarWidthPx: next };
+        });
+      },
+
+      togglePanelSectionCollapsed: (panelId) => {
+        set((state) => ({
+          panelSectionCollapsedByPanelId: {
+            ...state.panelSectionCollapsedByPanelId,
+            [panelId]: !(
+              state.panelSectionCollapsedByPanelId[panelId] ?? false
+            ),
+          },
+        }));
+      },
+
+      setPanelSectionWeights: (weights) => {
+        set((state) => {
+          const next = weights.reduce<PanelSectionWeightsByPanelId>(
+            (acc, { panelId, weight }) => {
+              const rounded = Math.round(weight * 100) / 100;
+              if (acc[panelId] === rounded) return acc;
+              return { ...acc, [panelId]: rounded };
+            },
+            state.panelSectionWeightsByPanelId,
+          );
+          if (next === state.panelSectionWeightsByPanelId) return state;
+          return { panelSectionWeightsByPanelId: next };
         });
       },
 
@@ -1006,6 +1086,12 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           state.mainCollapsedByTabId,
         ),
         sidebarWidthPx: state.sidebarWidthPx,
+        // Only the collapsed ones, so an expanded section is the absence of a
+        // record rather than a `false` in every user's blob.
+        panelSectionCollapsedByPanelId: getPersistedPanelSectionCollapsed(
+          state.panelSectionCollapsedByPanelId,
+        ),
+        panelSectionWeightsByPanelId: state.panelSectionWeightsByPanelId,
         chatFilterByEpicId: filterActiveByEpic(
           state.chatFilterByEpicId,
           isChatFilterActive,
@@ -1083,6 +1169,38 @@ export function useActiveLeftPanelId(tabId: string): LeftPanelId {
   return useLeftPanelStore(
     (s) => s.activePanelIdByTabId[tabId] ?? DEFAULT_LEFT_PANEL_ID,
   );
+}
+
+/**
+ * Both members of a new pair drawn open (L-170).
+ *
+ * Called wherever a join is MADE - the inspector's row action and the rail's
+ * combine drop - rather than wherever one is broken, because that is the one
+ * moment the rule can be stated as a fact about the result: a new stack opens
+ * with both sections showing.
+ *
+ * It matters because the flag outlives the pair. While two panels are apart
+ * neither draws a chevron, so a collapse recorded inside an old pair has no
+ * control that could clear it and would otherwise come back, persisted, on a
+ * rejoin the user made days later.
+ */
+export function expandJoinedPanelSections(
+  first: LeftPanelId,
+  second: LeftPanelId,
+): void {
+  useLeftPanelStore.setState((state) => {
+    const collapsed = state.panelSectionCollapsedByPanelId;
+    if (collapsed[first] !== true && collapsed[second] !== true) {
+      return state;
+    }
+    return {
+      panelSectionCollapsedByPanelId: {
+        ...collapsed,
+        [first]: false,
+        [second]: false,
+      },
+    };
+  });
 }
 
 export function useMainPanelCollapsed(tabId: string): boolean {

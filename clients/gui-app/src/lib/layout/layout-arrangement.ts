@@ -7,10 +7,15 @@ import {
   RAIL_REGION_IDS,
   railDividerId,
   railRegionForLeftPanelId,
+  railStackId,
   type RailEntry,
 } from "@/lib/layout/rail";
 import type { LeftPanelId } from "@/lib/left-panel-ids";
-import type { DockRegionId, ToolbarRegionId } from "@/lib/layout/region-id";
+import type {
+  DockRegionId,
+  RailRegionId,
+  ToolbarRegionId,
+} from "@/lib/layout/region-id";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
@@ -700,6 +705,84 @@ export function moveRailPanelBeside(
     toId: railRegionForLeftPanelId(targetPanelId),
     placeAfter,
   });
+}
+
+/**
+ * Two panels joined into a stack, which is what a drop onto the middle of a
+ * rail icon means (L-168).
+ *
+ * The SOURCE lands directly below the TARGET and a link is placed between
+ * them, so the panel the user aimed at keeps its place and the one they
+ * carried is the one that moves - the same promise every other rail drop
+ * makes. The inspector's row action calls it the other way round for that
+ * reason: there the panel the user pressed is the one that must stay put, so
+ * the panel BELOW is the source and the join costs no reorder at all.
+ *
+ * A source that is already half of a pair LEAVES that pair and joins the new
+ * one (L-170). Nothing extra is needed for it: a link is the pair its id
+ * names, the source moving away makes that pair non-adjacent, and
+ * `normalizeRail` drops the old join on the write. Refusing it instead would
+ * be the rail's own rule disagreeing with the drop bands, which light the
+ * middle of any target a source can reach.
+ *
+ * The TARGET is still refused when it is already half of a pair: a stack joins
+ * exactly two panels (L-166), and neither replacing a member nor growing a run
+ * of three is what the gesture asked for. The refusal is the arrangement
+ * itself, so the caller's own "did this change anything" guard makes it a
+ * no-op with no undo step spent on it, and the middle band draws no preview
+ * over such a target at all.
+ */
+export function stackRailPanels(
+  arrangement: LayoutArrangement,
+  sourcePanelId: LeftPanelId,
+  targetPanelId: LeftPanelId,
+): LayoutArrangement {
+  if (sourcePanelId === targetPanelId) return arrangement;
+  const sourceId = railRegionForLeftPanelId(sourcePanelId);
+  const targetId = railRegionForLeftPanelId(targetPanelId);
+  if (isStackedRailPanel(arrangement.rail, targetId)) return arrangement;
+  const moved = arrangement.rail.find(
+    (entry) => entry.kind === "panel" && entry.id === sourceId,
+  );
+  if (moved === undefined) return arrangement;
+  const remaining = arrangement.rail.filter((entry) => entry !== moved);
+  const anchor = remaining.findIndex(
+    (entry) => entry.kind === "panel" && entry.id === targetId,
+  );
+  if (anchor < 0) return arrangement;
+  return {
+    ...arrangement,
+    rail: [
+      ...remaining.slice(0, anchor + 1),
+      { kind: "stack", id: railStackId(targetId, sourceId) },
+      moved,
+      ...remaining.slice(anchor + 1),
+    ],
+  };
+}
+
+/** One stack link taken out; both panels stay where they are (L-168). */
+export function unstackRail(
+  arrangement: LayoutArrangement,
+  entryId: string,
+): LayoutArrangement {
+  const rail = arrangement.rail.filter(
+    (entry) => !(entry.kind === "stack" && entry.id === entryId),
+  );
+  if (rail.length === arrangement.rail.length) return arrangement;
+  return { ...arrangement, rail };
+}
+
+/** Whether this panel is one of a stacked pair right now. */
+export function isStackedRailPanel(
+  rail: ReadonlyArray<RailEntry>,
+  regionId: RailRegionId,
+): boolean {
+  const index = rail.findIndex(
+    (entry) => entry.kind === "panel" && entry.id === regionId,
+  );
+  if (index < 0) return false;
+  return rail[index - 1]?.kind === "stack" || rail[index + 1]?.kind === "stack";
 }
 
 /** The same panel onto the rail's end, which is the rail's own empty space. */

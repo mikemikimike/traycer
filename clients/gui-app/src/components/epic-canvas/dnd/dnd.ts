@@ -228,7 +228,15 @@ export interface ComposerAttachmentDropTargetData {
   readonly attach: (source: EpicCanvasDragSourceData) => void;
 }
 
-export type LeftPanelRailDropPosition = "before" | "after";
+/**
+ * What a drop on a rail icon means (L-168).
+ *
+ * `before` and `after` only reorder. `combine` is the middle band, and it is
+ * back: it joins the two panels into a STACK that shares the sidebar body
+ * (L-166), which is a thing the rail has again rather than the group model
+ * L-155 deleted.
+ */
+export type LeftPanelRailDropPosition = "before" | "after" | "combine";
 
 /**
  * Which way a rail lays its slots out. The drop bands run along that axis, so
@@ -273,6 +281,15 @@ export type EpicCanvasDropTargetData =
       readonly viewTabId?: string;
       readonly panelId: LeftPanelId;
       readonly orientation: LeftPanelRailOrientation;
+      /**
+       * This icon is already half of a stacked pair, so its middle band takes
+       * no drop: a stack joins exactly two panels (L-166), and neither growing
+       * a run of three nor silently replacing a member is what the gesture
+       * asked for. Carried on the TARGET because the rail is the surface that
+       * knows, and answering `null` here is what keeps a refused drop from
+       * highlighting anything.
+       */
+      readonly stacked: boolean;
     }
   | {
       readonly kind: "left-panel-rail-list";
@@ -310,6 +327,7 @@ type EpicCanvasLeftPanelDropTargetData =
       readonly viewTabId?: string;
       readonly panelId: LeftPanelId;
       readonly orientation: LeftPanelRailOrientation;
+      readonly stacked: boolean;
     }
   | {
       readonly kind: "left-panel-rail-list";
@@ -350,7 +368,8 @@ export type EpicCanvasDropPreview =
       readonly kind: "left-panel-section";
       readonly viewTabId?: string;
       readonly panelId: LeftPanelId;
-      readonly position: LeftPanelRailDropPosition;
+      /** The body has two bands, not three: a stack is made on the rail. */
+      readonly position: Exclude<LeftPanelRailDropPosition, "combine">;
     }
   | null;
 
@@ -858,6 +877,9 @@ function readLeftPanelDropTargetData(
       viewTabId: value.viewTabId,
       panelId: value.panelId,
       orientation: value.orientation,
+      // A rail written by an older build says nothing here, and "not stacked"
+      // is the right reading of silence: it is the shape every rail had.
+      stacked: value.stacked === true,
     };
   }
   if (value.kind === "left-panel-rail-list") {
@@ -940,15 +962,14 @@ export function getArtifactTabDropIndexFromPoint(
 }
 
 /**
- * Which side of a rail slot a drop landed on, along whichever axis the slots
- * are laid out on: the slot's own midpoint, and nothing in between.
+ * The rail's own drop bands, along whichever axis the slots are laid out on:
+ * the outer 30% at each end reorders, the middle 40% stacks (L-168).
  *
- * There is no third band any more (L-155). The middle used to mean "nest these
- * two panels into one rail group", and with the group concept gone a drop on a
- * rail icon can only mean "put the dragged panel on this side of it". Every
- * surface that lays those slots out resolves through here - the rail down a
- * column (`"y"`) or across a row (`"x"`) - so the same gesture reads the same
- * way wherever it is made.
+ * The third band is back because the thing it commits is back: not the group
+ * model L-155 deleted, but one explicit join between two adjacent panels
+ * (L-166). Every surface that lays those slots out resolves through here - the
+ * rail down a column (`"y"`) or across a row (`"x"`) - so the same gesture
+ * reads the same way wherever it is made.
  */
 export function getLeftPanelRailDropPositionOnAxis(
   point: PointLike,
@@ -957,32 +978,42 @@ export function getLeftPanelRailDropPositionOnAxis(
 ): LeftPanelRailDropPosition {
   const offset = axis === "x" ? point.x - rect.left : point.y - rect.top;
   const extent = axis === "x" ? rect.width : rect.height;
-  return offset < extent * 0.5 ? "before" : "after";
+  if (offset < extent * 0.3) return "before";
+  if (offset > extent * 0.7) return "after";
+  return "combine";
+}
+
+/** One drawn section of the sidebar body: which panel it is, and where. */
+export interface LeftPanelSectionRect {
+  readonly panelId: LeftPanelId;
+  readonly rect: RectLike;
 }
 
 /**
- * A drop of a rail icon onto the sidebar BODY, which draws exactly one panel
- * (L-155): the top half means "before that panel", the bottom half "after".
+ * A drop of a rail icon onto the sidebar BODY: the top half of the section
+ * under the pointer means "before that panel", the bottom half "after".
  *
- * The same midpoint rule the rail icons use, on a bigger target. It used to
- * pick the nearest of N+1 boundaries between stacked sections, which is a
- * shape the body no longer has (R5R-04).
+ * The same midpoint rule the rail icons use, on a bigger target. What the
+ * caller passes is the section the POINTER is in, not the one the body is
+ * focused on (L-170): a stacked pair draws two, and resolving both halves
+ * against the active panel put the boundary line on the wrong section and
+ * committed a placement that broke the pair.
  */
 export function getLeftPanelBodyDropPreview(
   target: Extract<
     EpicCanvasDropTargetData,
     { readonly kind: "left-panel-body" }
   >,
-  sectionRect: RectLike | null,
+  section: LeftPanelSectionRect | null,
   point: PointLike,
 ): EpicCanvasDropPreview {
-  if (sectionRect === null) return null;
+  if (section === null) return null;
   return {
     kind: "left-panel-section",
     viewTabId: target.viewTabId,
-    panelId: target.panelId,
+    panelId: section.panelId,
     position:
-      point.y < sectionRect.top + sectionRect.height / 2 ? "before" : "after",
+      point.y < section.rect.top + section.rect.height / 2 ? "before" : "after",
   };
 }
 
@@ -1038,15 +1069,20 @@ export function getEpicCanvasDropPreview(
     // read is a reorder the user did not aim, and `resolveRailForDrop`
     // already treats a null preview as "commit nothing".
     if (rect === null) return null;
+    const position = getLeftPanelRailDropPositionOnAxis(
+      point,
+      rect,
+      target.orientation === "horizontal" ? "x" : "y",
+    );
+    // An icon that is already half of a pair takes no combine: answering null
+    // rather than a side is what makes the refusal silent instead of turning
+    // an aimed stack into an unaimed reorder (L-166).
+    if (position === "combine" && target.stacked) return null;
     return {
       kind: "left-panel-rail",
       viewTabId: target.viewTabId,
       panelId: target.panelId,
-      position: getLeftPanelRailDropPositionOnAxis(
-        point,
-        rect,
-        target.orientation === "horizontal" ? "x" : "y",
-      ),
+      position,
     };
   }
   if (target.kind === "left-panel-rail-list") {

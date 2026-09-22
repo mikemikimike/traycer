@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { Rows2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
 import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
@@ -82,14 +83,16 @@ function rememberIndexFocus(): void {
 }
 
 /**
- * One line of the index: a region to open, or a divider to read.
+ * One line of the index: a region to open, or a rail entry to read - a divider
+ * (L-155) or a stack link (L-166).
  *
- * Only the sidebar has the second kind, because only the rail has dividers of
- * its own (L-155).
+ * Only the sidebar has the last two, because only the rail has entries that
+ * are not regions.
  */
 type IndexEntry =
   | { readonly kind: "region"; readonly region: RegionFacts }
-  | { readonly kind: "divider"; readonly id: string };
+  | { readonly kind: "divider"; readonly id: string }
+  | { readonly kind: "stack"; readonly id: string };
 
 /**
  * The sidebar group's lines: the rail's own order, with its dividers (LV2-09).
@@ -116,6 +119,9 @@ function railIndexEntries(
   return rail.flatMap((entry): IndexEntry[] => {
     if (entry.kind === "divider") {
       return filtering ? [] : [{ kind: "divider", id: entry.id }];
+    }
+    if (entry.kind === "stack") {
+      return filtering ? [] : [{ kind: "stack", id: entry.id }];
     }
     return regionMatchesFilter(entry.id, filter)
       ? [{ kind: "region", region: regionFacts(entry.id) }]
@@ -171,11 +177,11 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
         : surfaceIndexEntries(group.id, filter),
   })).filter((entry) => entry.entries.length > 0);
 
-  // The walk is over the rows that open something: a divider is read, not
-  // operated, so an arrow steps straight over it.
+  // The walk is over the rows that open something: a divider and a stack link
+  // are read, not operated, so an arrow steps straight over them.
   const orderedIds = groups.flatMap((entry) =>
     entry.entries.flatMap((item) =>
-      item.kind === "divider" ? [] : [item.region.id],
+      item.kind === "region" ? [item.region.id] : [],
     ),
   );
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
@@ -278,6 +284,25 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                     data-rail-divider={item.id}
                     className="mx-3.5 my-1 h-px bg-border"
                   />
+                );
+              }
+              if (item.kind === "stack") {
+                // A link rather than a rule: the two rows it sits between are
+                // one body, so the index says so in the same words the
+                // Position list's row uses (L-140's one-membership rule,
+                // L-166's name).
+                return (
+                  <div
+                    key={item.id}
+                    role="separator"
+                    aria-label="Stacked with the panel below"
+                    data-rail-stack-link={item.id}
+                    className="flex items-center gap-1.5 px-3.5 py-1 text-ui-xs text-muted-foreground"
+                  >
+                    <Rows2 aria-hidden className="size-3 shrink-0" />
+                    <span>Stacked</span>
+                    <span aria-hidden className="h-px flex-1 bg-border" />
+                  </div>
                 );
               }
               const region = item.region;

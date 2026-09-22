@@ -19,6 +19,9 @@ import {
   moveRailPanelBeside,
   moveRailPanelToEnd,
   removeRailDivider,
+  isStackedRailPanel,
+  stackRailPanels,
+  unstackRail,
   TOOLBAR_REGION_IDS,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
@@ -29,6 +32,9 @@ import {
 import {
   areRailsEqual,
   DEFAULT_RAIL,
+  railDisplayEntries,
+  railStackId,
+  railStackMembersFor,
   DEFAULT_RAIL_DIVIDER_SEQ,
   normalizeRail,
   railDividerId,
@@ -54,6 +60,22 @@ function divider(id: string): RailEntry {
   return { kind: "divider", id };
 }
 
+function stack(id: string): RailEntry {
+  return { kind: "stack", id };
+}
+
+/**
+ * The nine panels with no link and no divider.
+ *
+ * What the reorder tests below are about is `placedBeside`, which places ONE
+ * member by id; the shipped rail's stack (L-166) has its own describe, and
+ * carrying it through every reorder assertion would say nothing extra about
+ * the mover while making each expectation a line longer.
+ */
+const FLAT_RAIL: ReadonlyArray<RailEntry> = DEFAULT_RAIL.filter(
+  (entry) => entry.kind === "panel",
+);
+
 /** The rail as the ids it holds, panels and dividers alike, in order. */
 function idsOf(rail: ReadonlyArray<RailEntry>): ReadonlyArray<string> {
   return rail.map((entry) => entry.id);
@@ -68,10 +90,11 @@ function withRail(rail: ReadonlyArray<RailEntry>): LayoutArrangement {
   return { ...DEFAULT_ARRANGEMENT, rail };
 }
 
-describe("the shipped rail (L-155)", () => {
-  it("is the nine panels in order, with no dividers at all", () => {
+describe("the shipped rail (L-155, L-166)", () => {
+  it("is the nine panels in order, with one stack and no dividers", () => {
     expect(idsOf(DEFAULT_RAIL)).toEqual([
       "railAgents",
+      "stack:railAgents+railArtifacts",
       "railArtifacts",
       "railTerminals",
       "railBrowsers",
@@ -81,17 +104,32 @@ describe("the shipped rail (L-155)", () => {
       "railSharing",
       "railComments",
     ]);
-    expect(DEFAULT_RAIL.every((entry) => entry.kind === "panel")).toBe(true);
+    expect(DEFAULT_RAIL.filter((entry) => entry.kind === "divider")).toEqual(
+      [],
+    );
+    expect(DEFAULT_RAIL.filter((entry) => entry.kind === "stack")).toEqual([
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
+    ]);
+  });
+
+  it("joins Agents to Artifacts, and only those two", () => {
+    expect(isStackedRailPanel(DEFAULT_RAIL, "railAgents")).toBe(true);
+    expect(isStackedRailPanel(DEFAULT_RAIL, "railArtifacts")).toBe(true);
+    expect(isStackedRailPanel(DEFAULT_RAIL, "railTerminals")).toBe(false);
+  });
+
+  it("is already normal, so a rehydrate changes nothing about it", () => {
+    expect(idsOf(normalizeRail(DEFAULT_RAIL))).toEqual(idsOf(DEFAULT_RAIL));
   });
 
   it("has used no divider seq, so the first one a user adds is divider:1", () => {
     expect(DEFAULT_RAIL_DIVIDER_SEQ).toBe(0);
     expect(DEFAULT_ARRANGEMENT.dividerSeq).toBe(0);
 
-    const added = insertRailDivider(withRail(DEFAULT_RAIL), 2);
+    const added = insertRailDivider(withRail(DEFAULT_RAIL), 3);
 
     expect(added.dividerSeq).toBe(1);
-    expect(added.rail[2]).toEqual(divider("divider:1"));
+    expect(added.rail[3]).toEqual(divider("divider:1"));
   });
 
   it("reads back as the nine panel ids", () => {
@@ -133,7 +171,7 @@ describe("a panel moved within the rail", () => {
   it("lands on the side of the anchor it was dropped", () => {
     expect(
       idsOf(
-        moveRailPanelBeside(withRail(DEFAULT_RAIL), "comments", "chats", false)
+        moveRailPanelBeside(withRail(FLAT_RAIL), "comments", "chats", false)
           .rail,
       ),
     ).toEqual([
@@ -149,7 +187,7 @@ describe("a panel moved within the rail", () => {
     ]);
     expect(
       idsOf(
-        moveRailPanelBeside(withRail(DEFAULT_RAIL), "chats", "terminals", true)
+        moveRailPanelBeside(withRail(FLAT_RAIL), "chats", "terminals", true)
           .rail,
       ),
     ).toEqual([
@@ -169,9 +207,9 @@ describe("a panel moved within the rail", () => {
     // Terminals dragged in front of Agents crosses the divider the user put
     // between Artifacts and Terminals; the divider keeps its place.
     const rail = [
-      ...DEFAULT_RAIL.slice(0, 2),
+      ...FLAT_RAIL.slice(0, 2),
       divider("divider:1"),
-      ...DEFAULT_RAIL.slice(2),
+      ...FLAT_RAIL.slice(2),
     ];
 
     expect(
@@ -248,7 +286,7 @@ describe("areRailsEqual", () => {
     expect(
       areRailsEqual(
         DEFAULT_RAIL,
-        moveRailPanelBeside(withRail(DEFAULT_RAIL), "comments", "chats", false)
+        moveRailPanelBeside(withRail(FLAT_RAIL), "comments", "chats", false)
           .rail,
       ),
     ).toBe(false);
@@ -355,7 +393,7 @@ describe("normalizeRail", () => {
 
 describe("the rail's move helpers", () => {
   it("moves a panel to a new index, dividers and all", () => {
-    const withDivider = insertRailDivider(withRail(DEFAULT_RAIL), 2);
+    const withDivider = insertRailDivider(withRail(FLAT_RAIL), 2);
     const arrangement = moveRailEntry(withDivider, "railTerminals", 2);
 
     expect(idsOf(arrangement.rail).slice(0, 4)).toEqual([
@@ -367,10 +405,10 @@ describe("the rail's move helpers", () => {
   });
 
   it("removes a divider and leaves the panels where they were", () => {
-    const withDivider = insertRailDivider(withRail(DEFAULT_RAIL), 2);
+    const withDivider = insertRailDivider(withRail(FLAT_RAIL), 2);
     const arrangement = removeRailDivider(withDivider, "divider:1");
 
-    expect(idsOf(arrangement.rail)).toEqual(idsOf(DEFAULT_RAIL));
+    expect(idsOf(arrangement.rail)).toEqual(idsOf(FLAT_RAIL));
     // The seq does not go back: a removed id is never reissued.
     expect(arrangement.dividerSeq).toBe(1);
   });
@@ -482,7 +520,7 @@ describe("a canvas drop written back into the full order (4.7)", () => {
   });
 
   it("moves a rail panel past a divider the user placed", () => {
-    const withDivider = insertRailDivider(withRail(DEFAULT_RAIL), 2);
+    const withDivider = insertRailDivider(withRail(FLAT_RAIL), 2);
     const next = moveCanvasOrderMember({
       arrangement: withDivider,
       group: "rail",
@@ -500,7 +538,7 @@ describe("a canvas drop written back into the full order (4.7)", () => {
   });
 
   it("moves a rail DIVIDER, which is how a gap is re-placed", () => {
-    const withDivider = insertRailDivider(withRail(DEFAULT_RAIL), 2);
+    const withDivider = insertRailDivider(withRail(FLAT_RAIL), 2);
     const next = moveCanvasOrderMember({
       arrangement: withDivider,
       group: "rail",
@@ -1104,5 +1142,277 @@ describe("the status bar surface toggle (L-160)", () => {
     const round = toggleStatusBarSurface(toggleStatusBarSurface(sided));
 
     expect([round.usageSide, round.resourceSide]).toEqual(["right", "left"]);
+  });
+});
+
+describe("a stack link, normalised (L-166)", () => {
+  it("survives only between the two adjacent panels it joins", () => {
+    expect(idsOf(normalizeRail(DEFAULT_RAIL))).toContain(
+      "stack:railAgents+railArtifacts",
+    );
+  });
+
+  it("is dropped when one of its panels moves away", () => {
+    const moved = moveRailPanelBeside(
+      withRail(DEFAULT_RAIL),
+      "artifacts",
+      "comments",
+      true,
+    ).rail;
+
+    expect(idsOf(normalizeRail(moved))).toEqual([
+      "railAgents",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+      "railArtifacts",
+    ]);
+  });
+
+  it("is dropped when the pair it names is no longer adjacent", () => {
+    // Comments is last and Sharing is above it, so the pair this link names -
+    // Comments THEN Sharing - does not exist in that order anywhere.
+    expect(
+      idsOf(
+        normalizeRail([...FLAT_RAIL, stack("stack:railComments+railSharing")]),
+      ),
+    ).toEqual(idsOf(FLAT_RAIL));
+  });
+
+  it("is put back between its pair when the record left it somewhere else", () => {
+    // A link names the pair it joins, so where the stored blob happened to put
+    // the entry says nothing: the pair is still adjacent, so the join is the
+    // user's and survives, drawn where it belongs.
+    expect(
+      idsOf(
+        normalizeRail([stack("stack:railAgents+railArtifacts"), ...FLAT_RAIL]),
+      ),
+    ).toEqual(idsOf(DEFAULT_RAIL));
+  });
+
+  it("is broken by a divider between its two panels", () => {
+    const parted = [
+      FLAT_RAIL[0],
+      stack("stack:railAgents+railArtifacts"),
+      divider("divider:1"),
+      ...FLAT_RAIL.slice(1),
+    ];
+
+    expect(idsOf(normalizeRail(parted))).toEqual([
+      "railAgents",
+      "divider:1",
+      ...idsOf(FLAT_RAIL).slice(1),
+    ]);
+  });
+
+  it("refuses a run of three: the second link on a claimed panel is dropped", () => {
+    const three = [
+      FLAT_RAIL[0],
+      stack("stack:railAgents+railArtifacts"),
+      FLAT_RAIL[1],
+      stack("stack:railArtifacts+railTerminals"),
+      ...FLAT_RAIL.slice(2),
+    ];
+
+    expect(idsOf(normalizeRail(three))).toEqual(idsOf(DEFAULT_RAIL));
+  });
+
+  it("is dropped when its pair is adjacent only the other way round", () => {
+    // Sharing IS immediately above Comments, so the two are adjacent - but a
+    // link names its top and its bottom, and this one has them reversed. A
+    // reading that only asked "are these two next to each other" would keep
+    // it and draw Comments above Sharing in one capsule.
+    const reversed = [...FLAT_RAIL, stack("stack:railComments+railSharing")];
+
+    expect(idsOf(normalizeRail(reversed))).toEqual(idsOf(FLAT_RAIL));
+  });
+
+  it("is dropped when its id is not a pair this build can read", () => {
+    const foreign = [
+      FLAT_RAIL[0],
+      stack("stack:railAgents"),
+      ...FLAT_RAIL.slice(1),
+    ];
+
+    expect(idsOf(normalizeRail(foreign))).toEqual(idsOf(FLAT_RAIL));
+  });
+
+  it("survives a persisted round trip", () => {
+    const stored: unknown = JSON.parse(
+      JSON.stringify({ ...DEFAULT_ARRANGEMENT, rail: DEFAULT_RAIL }),
+    );
+
+    expect(idsOf(resolvePersistedArrangement(stored).rail)).toEqual(
+      idsOf(DEFAULT_RAIL),
+    );
+  });
+});
+
+describe("stacking and unstacking (L-168)", () => {
+  it("puts the dragged panel directly below the one it was dropped on", () => {
+    const stacked = stackRailPanels(
+      withRail(DEFAULT_RAIL),
+      "terminals",
+      "browsers",
+    );
+
+    expect(idsOf(normalizeRail(stacked.rail))).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+      "railBrowsers",
+      "stack:railBrowsers+railTerminals",
+      "railTerminals",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+  });
+
+  it("refuses a TARGET that is already half of a pair", () => {
+    const arrangement = withRail(DEFAULT_RAIL);
+
+    expect(stackRailPanels(arrangement, "terminals", "artifacts")).toBe(
+      arrangement,
+    );
+    expect(stackRailPanels(arrangement, "terminals", "chats")).toBe(
+      arrangement,
+    );
+    expect(stackRailPanels(arrangement, "chats", "chats")).toBe(arrangement);
+  });
+
+  it("lets a stacked SOURCE leave its pair and join a new one (L-170)", () => {
+    // Agents ships joined to Artifacts. Dropping it onto Terminals is the
+    // first stacking gesture most users will try, and it has to mean what it
+    // says: the old join goes, the new one arrives, Artifacts stands alone.
+    const joined = stackRailPanels(
+      withRail(DEFAULT_RAIL),
+      "chats",
+      "terminals",
+    );
+
+    expect(idsOf(normalizeRail(joined.rail))).toEqual([
+      "railArtifacts",
+      "railTerminals",
+      "stack:railTerminals+railAgents",
+      "railAgents",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+    expect(
+      isStackedRailPanel(normalizeRail(joined.rail), "railArtifacts"),
+    ).toBe(false);
+  });
+
+  it("takes the link out and leaves both panels where they are", () => {
+    const unstacked = unstackRail(
+      withRail(DEFAULT_RAIL),
+      "stack:railAgents+railArtifacts",
+    );
+
+    expect(idsOf(unstacked.rail)).toEqual(idsOf(FLAT_RAIL));
+  });
+
+  it("leaves a rail holding no such link untouched", () => {
+    const flat = withRail(FLAT_RAIL);
+
+    expect(unstackRail(flat, "stack:railAgents+railArtifacts")).toBe(flat);
+  });
+
+  it("is not what a before or after drop does", () => {
+    const before = moveRailPanelBeside(
+      withRail(DEFAULT_RAIL),
+      "terminals",
+      "browsers",
+      false,
+    ).rail;
+
+    expect(idsOf(normalizeRail(before))).toEqual(idsOf(DEFAULT_RAIL));
+    expect(
+      normalizeRail(before).some(
+        (entry) => entry.id === "stack:railBrowsers+railTerminals",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("what a rail SURFACE draws (L-166, L-167)", () => {
+  it("draws a stacked pair as one capsule and everything else as itself", () => {
+    expect(railDisplayEntries(DEFAULT_RAIL, () => true)).toEqual([
+      {
+        kind: "stack",
+        id: "stack:railAgents+railArtifacts",
+        top: "railAgents",
+        bottom: "railArtifacts",
+      },
+      ...idsOf(FLAT_RAIL)
+        .slice(2)
+        .map((id) => ({ kind: "panel", id })),
+    ]);
+  });
+
+  it("leaves the visible partner standing alone when one is hidden", () => {
+    const drawn = railDisplayEntries(
+      DEFAULT_RAIL,
+      (regionId) => regionId !== "railArtifacts",
+    );
+
+    expect(drawn[0]).toEqual({ kind: "panel", id: "railAgents" });
+    expect(drawn.some((entry) => entry.kind === "stack")).toBe(false);
+  });
+
+  it("tells the body which panels share it", () => {
+    expect(
+      railStackMembersFor(DEFAULT_RAIL, "railArtifacts", () => true),
+    ).toEqual(["railAgents", "railArtifacts"]);
+    expect(
+      railStackMembersFor(DEFAULT_RAIL, "railTerminals", () => true),
+    ).toEqual(["railTerminals"]);
+    expect(
+      railStackMembersFor(
+        DEFAULT_RAIL,
+        "railAgents",
+        (regionId) => regionId !== "railArtifacts",
+      ),
+    ).toEqual(["railAgents"]);
+  });
+
+  it("names a link after the panel above it", () => {
+    expect(railStackId("railAgents", "railArtifacts")).toBe(
+      "stack:railAgents+railArtifacts",
+    );
+  });
+});
+
+describe("where Add divider puts one when the rail ends in a stack", () => {
+  it("steps over the link rather than splitting the pair", () => {
+    const endsStacked = normalizeRail([
+      ...idsOf(FLAT_RAIL)
+        .slice(0, 7)
+        .map((id): RailEntry => panel(id)),
+      panel("railSharing"),
+      stack("stack:railSharing+railComments"),
+      panel("railComments"),
+    ]);
+
+    const at = railDividerInsertIndex(endsStacked);
+    const added = insertRailDivider(withRail(endsStacked), at);
+
+    expect(idsOf(normalizeRail(added.rail)).slice(-4)).toEqual([
+      "divider:1",
+      "railSharing",
+      "stack:railSharing+railComments",
+      "railComments",
+    ]);
   });
 });

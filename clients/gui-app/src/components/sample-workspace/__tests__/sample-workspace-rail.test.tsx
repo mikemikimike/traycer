@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getLeftPanelDefinition } from "@/components/epic-canvas/sidebar/left-panel-registry";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
 import { SampleWorkspaceRail } from "@/components/sample-workspace/sample-workspace-rail";
-import { insertRailDivider } from "@/lib/layout/layout-arrangement";
+import {
+  insertRailDivider,
+  unstackRail,
+} from "@/lib/layout/layout-arrangement";
 import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -49,12 +52,33 @@ function addDivider(index: number): void {
     .setArrangement(insertRailDivider(arrangement, index));
 }
 
+/** The rail with its one shipped stack taken apart, for a flat-rail case. */
+function unstackShippedPair(): void {
+  const { arrangement } = useLayoutStore.getState();
+  useLayoutStore
+    .getState()
+    .setArrangement(unstackRail(arrangement, "stack:railAgents+railArtifacts"));
+}
+
 describe("the sample workspace's icon rail", () => {
-  it("is nine icons and nothing else by default (L-155)", () => {
+  it("is nine icons and nothing else by default (L-155, L-166)", () => {
     render(<SampleWorkspaceRail />);
 
     const nodes = railEntries();
-    expect(nodes).toHaveLength(9);
+    // Eight things in the column, because the shipped stack draws its two
+    // icons inside ONE capsule (L-167) - nine icons all the same.
+    expect(nodes).toHaveLength(8);
+    expect(screen.getAllByTestId("epic-rail-stack")).toHaveLength(1);
+    expect(
+      screen
+        .getByTestId("epic-rail-stack")
+        .querySelectorAll("[data-layout-region]"),
+    ).toHaveLength(2);
+    expect(
+      screen
+        .getByLabelText("Sample sidebar")
+        .querySelectorAll("[data-layout-region]"),
+    ).toHaveLength(9);
     expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
     // The rail's own `gap-1` is the whole of the spacing: no icon carries a
     // margin of its own, so the rhythm is uniform down the column.
@@ -66,6 +90,9 @@ describe("the sample workspace's icon rail", () => {
   });
 
   it("draws a divider the user added as a gap at rest, and its panels in order", () => {
+    // On a flat rail, so the walk below is one entry per child: the capsule
+    // has its own case above.
+    unstackShippedPair();
     addDivider(2);
     render(<SampleWorkspaceRail />);
 
@@ -77,9 +104,9 @@ describe("the sample workspace's icon rail", () => {
       railEntries().map((node) => node.getAttribute("aria-label")),
     ).toEqual(
       rail.map((entry) =>
-        entry.kind === "divider"
-          ? null
-          : getLeftPanelDefinition(leftPanelIdForRailRegion(entry.id)).title,
+        entry.kind === "panel"
+          ? getLeftPanelDefinition(leftPanelIdForRailRegion(entry.id)).title
+          : null,
       ),
     );
     const dividers = screen.getAllByTestId("epic-rail-divider");

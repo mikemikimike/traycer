@@ -27,6 +27,7 @@ import {
   getEpicCanvasDropPreview,
   getLeftPanelBodyDropPreview,
   type EpicCanvasDragSourceData,
+  type LeftPanelSectionRect,
   type EpicCanvasDropPreview,
   type EpicCanvasDropTargetData,
   type PointLike,
@@ -49,12 +50,20 @@ import {
   type GitDiffTileRef,
   type ManagedCommandOutputTileRef,
 } from "@/stores/epics/canvas/types";
-import { type RootCreatePanelId } from "@/stores/epics/left-panel-store";
-import { type LeftPanelId } from "@/lib/left-panel-ids";
-import { areRailsEqual, type RailEntry } from "@/lib/layout/rail";
+import {
+  expandJoinedPanelSections,
+  type RootCreatePanelId,
+} from "@/stores/epics/left-panel-store";
+import { isLeftPanelId } from "@/lib/left-panel-ids";
+import {
+  areRailsEqual,
+  normalizeRail,
+  type RailEntry,
+} from "@/lib/layout/rail";
 import {
   moveRailPanelBeside,
   moveRailPanelToEnd,
+  stackRailPanels,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import { applyRail, currentLayoutArrangement } from "@/lib/layout/rail-view";
@@ -221,15 +230,46 @@ function getElementRect(element: Element): RectLike {
   };
 }
 
-/** The one section the sidebar body draws, measured where the drop aims. */
-function getLeftPanelSectionRect(
+/**
+ * The section of the sidebar body the pointer is in, measured (L-170).
+ *
+ * A stacked pair draws two, so the body cannot be resolved by the panel the
+ * target names. Read off the DOM rather than off the model because it is the
+ * drawn geometry the pointer is being compared against, and the element
+ * already names its own panel. A pointer outside every section - the gap the
+ * resize handle sits in - falls back to the NEAREST, so a drop on the seam
+ * still means something rather than nothing.
+ */
+function getPointedLeftPanelSection(
   bodyElement: Element,
-  panelId: LeftPanelId,
-): RectLike | null {
-  const sectionElement = bodyElement.querySelector(
-    `[data-left-panel-section-id="${panelId}"]`,
+  point: PointLike,
+): LeftPanelSectionRect | null {
+  const sections = [
+    ...bodyElement.querySelectorAll("[data-left-panel-section-id]"),
+  ].flatMap((element): LeftPanelSectionRect[] => {
+    const panelId = element.getAttribute("data-left-panel-section-id");
+    if (!isLeftPanelId(panelId)) return [];
+    return [{ panelId, rect: getElementRect(element) }];
+  });
+  if (sections.length === 0) return null;
+  const inside = sections.find(
+    (section) =>
+      point.y >= section.rect.top &&
+      point.y < section.rect.top + section.rect.height,
   );
-  return sectionElement === null ? null : getElementRect(sectionElement);
+  if (inside !== undefined) return inside;
+  return sections.reduce((nearest, section) =>
+    distanceToRect(point.y, section.rect) <
+    distanceToRect(point.y, nearest.rect)
+      ? section
+      : nearest,
+  );
+}
+
+function distanceToRect(y: number, rect: RectLike): number {
+  if (y < rect.top) return rect.top - y;
+  const bottom = rect.top + rect.height;
+  return y > bottom ? y - bottom : 0;
 }
 
 export interface ResolveCanvasDropPreviewInput {
@@ -255,15 +295,17 @@ export function resolveCanvasDropPreview(
   if (target.kind === "left-panel-body") {
     if (source.kind !== LEFT_PANEL_RAIL_ITEM_DND_TYPE) return null;
     if (targetElement === null) return null;
-    // A section dragged onto its own body is the one drop with nothing to
-    // say, since the only panel there to place it beside is itself.
-    if (source.origin === "panel-section" && source.panelId === target.panelId)
+    const section = getPointedLeftPanelSection(targetElement, point);
+    // A section dragged onto its OWN section is the one drop with nothing to
+    // say, since the only panel there to place it beside is itself. Compared
+    // against the section under the pointer, so on a stacked body the other
+    // half still takes the drop (L-170).
+    if (
+      source.origin === "panel-section" &&
+      source.panelId === section?.panelId
+    )
       return null;
-    return getLeftPanelBodyDropPreview(
-      target,
-      getLeftPanelSectionRect(targetElement, target.panelId),
-      point,
-    );
+    return getLeftPanelBodyDropPreview(target, section, point);
   }
   if (
     target.kind === "artifact-tab" &&
@@ -316,10 +358,11 @@ type LeftPanelRailDragSource = Extract<
  * rail (equal to `rail` for a no-op position) or null when the preview is not
  * a left-panel preview.
  *
- * The rail is one flat list of panels and dividers (L-155), so a drop can only
- * say "this panel goes on this side of that one" - and it says the same thing
- * whether the icon came off the rail or off the panel body's own section
- * header, which is why `source.origin` no longer parts the branches.
+ * A drop on a rail icon says one of three things (L-168): before it, after it,
+ * or INTO it, which stacks the two panels into one body (L-166). A drop on the
+ * sidebar body has the outer two only. It says the same thing whether the icon
+ * came off the rail or off the panel body's own section header, which is why
+ * `source.origin` does not part the branches.
  *
  * It resolves through the arrangement's own movers rather than a second copy
  * of them (R5R-06), so the app's rail drag and the editor's canvas drop place
@@ -330,21 +373,47 @@ export function resolveRailForDrop(
   preview: NonNullable<EpicCanvasDropPreview>,
   arrangement: LayoutArrangement,
 ): ReadonlyArray<RailEntry> | null {
+  if (preview.kind === "left-panel-rail" && preview.position === "combine") {
+    // The middle band joins the two into a stack (L-168). `stackRailPanels`
+    // returns the arrangement it was given when the join is refused - either
+    // panel already half of a pair - so a refused drop reaches the "did
+    // anything change" guard below and spends no undo step.
+    return normalizedRail(
+      stackRailPanels(arrangement, source.panelId, preview.panelId),
+    );
+  }
   if (
     preview.kind === "left-panel-rail" ||
     preview.kind === "left-panel-section"
   ) {
-    return moveRailPanelBeside(
-      arrangement,
-      source.panelId,
-      preview.panelId,
-      preview.position === "after",
-    ).rail;
+    return normalizedRail(
+      moveRailPanelBeside(
+        arrangement,
+        source.panelId,
+        preview.panelId,
+        preview.position === "after",
+      ),
+    );
   }
   if (preview.kind === "left-panel-rail-list") {
-    return moveRailPanelToEnd(arrangement, source.panelId).rail;
+    return normalizedRail(moveRailPanelToEnd(arrangement, source.panelId));
   }
   return null;
+}
+
+/**
+ * The rail a drop produces, held to the rail's own invariants.
+ *
+ * Normalised HERE rather than only in the store, because this function's other
+ * caller is the no-op guard: a panel dropped back where it already is takes a
+ * stack link out and puts it back in the same place, so comparing the raw
+ * mover output against the stored rail called an identical layout a change and
+ * spent an undo step on it (L-166).
+ */
+function normalizedRail(
+  arrangement: LayoutArrangement,
+): ReadonlyArray<RailEntry> {
+  return normalizeRail(arrangement.rail);
 }
 
 export function isLeftPanelDropNoop(
@@ -552,6 +621,16 @@ export function commitResolvedCanvasDrop(
     );
     if (nextRail !== null) {
       applyRail(nextRail);
+      // A new stack opens with both sections showing (L-170). Said at the
+      // COMMIT rather than inside the resolver, which is pure: the resolver
+      // answers what the rail becomes, and this is a fact about the two
+      // panels' own drawing state.
+      if (
+        drop.preview.kind === "left-panel-rail" &&
+        drop.preview.position === "combine"
+      ) {
+        expandJoinedPanelSections(drop.source.panelId, drop.preview.panelId);
+      }
       return true;
     }
     return false;

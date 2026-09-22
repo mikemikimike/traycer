@@ -401,12 +401,14 @@ describe("epic canvas dnd-kit data guards", () => {
         viewTabId: "tab-a",
         panelId: "artifacts",
         orientation: "vertical",
+        stacked: false,
       }),
     ).toEqual({
       kind: "left-panel-rail-item",
       viewTabId: "tab-a",
       panelId: "artifacts",
       orientation: "vertical",
+      stacked: false,
     });
     expect(
       readEpicCanvasDropTargetData({
@@ -414,12 +416,14 @@ describe("epic canvas dnd-kit data guards", () => {
         viewTabId: "tab-a",
         panelId: "artifacts",
         orientation: "horizontal",
+        stacked: true,
       }),
     ).toEqual({
       kind: "left-panel-rail-item",
       viewTabId: "tab-a",
       panelId: "artifacts",
       orientation: "horizontal",
+      stacked: true,
     });
     expect(
       readEpicCanvasDropTargetData({
@@ -635,7 +639,7 @@ describe("epic canvas dnd-kit data guards", () => {
 
 describe("getLeftPanelRailDropPositionOnAxis", () => {
   // Width (36) and height (30) deliberately differ, so a call site that reads
-  // the wrong extent for its axis lands on the wrong side instead of silently
+  // the wrong extent for its axis lands on the wrong band instead of silently
   // agreeing.
   const rect = {
     left: 0,
@@ -644,38 +648,51 @@ describe("getLeftPanelRailDropPositionOnAxis", () => {
     height: 30,
   };
 
-  it("splits the x axis at the rect's WIDTH midpoint, not its height", () => {
-    // Half the 36px width is 18; half the 30px height is 15. Offset 16 is
-    // past the height midpoint and short of the width one, so it only reads
-    // "before" when the width is what gets consulted.
+  it("splits the x axis at the rect's WIDTH bands, not its height", () => {
+    // 30% / 70% of the 36px width is 10.8 / 25.2; of the 30px height it is
+    // 9 / 21. Offset 10 sits in the width's "before" band but the height's
+    // "combine" band, and offset 22 sits in the width's "combine" band but
+    // the height's "after" band - so a call site that reads the wrong extent
+    // for its axis lands on the wrong band instead of silently agreeing.
     expect(
-      getLeftPanelRailDropPositionOnAxis({ x: 16, y: 25 }, rect, "x"),
+      getLeftPanelRailDropPositionOnAxis({ x: 10, y: 25 }, rect, "x"),
     ).toBe("before");
     expect(
-      getLeftPanelRailDropPositionOnAxis({ x: 20, y: 25 }, rect, "x"),
+      getLeftPanelRailDropPositionOnAxis({ x: 22, y: 25 }, rect, "x"),
+    ).toBe("combine");
+  });
+
+  it("splits the y axis at the rect's HEIGHT bands", () => {
+    expect(
+      getLeftPanelRailDropPositionOnAxis({ x: 10, y: rect.top + 5 }, rect, "y"),
+    ).toBe("before");
+    expect(
+      getLeftPanelRailDropPositionOnAxis(
+        { x: 10, y: rect.top + 25 },
+        rect,
+        "y",
+      ),
     ).toBe("after");
   });
 
-  it("splits the y axis at the rect's HEIGHT midpoint", () => {
-    expect(
-      getLeftPanelRailDropPositionOnAxis({ x: 10, y: 24 }, rect, "y"),
-    ).toBe("before");
-    expect(
-      getLeftPanelRailDropPositionOnAxis({ x: 10, y: 26 }, rect, "y"),
-    ).toBe("after");
-  });
-
-  it("has no third band: a drop on a rail icon never nests (L-155)", () => {
-    // The middle used to answer "combine", which merged two panels into one
-    // rail group. Every offset now answers one side or the other.
+  it("splits the y axis into three bands - before, combine, after (L-168)", () => {
+    // The rail's third band is back (L-166): the outer 30% at each end still
+    // reorders, and the middle 40% now answers "combine" - joining the two
+    // panels into a stack - rather than the nearer side.
+    function expectedBand(offset: number): "before" | "combine" | "after" {
+      if (offset < rect.height * 0.3) return "before";
+      if (offset > rect.height * 0.7) return "after";
+      return "combine";
+    }
     for (let offset = 0; offset < rect.height; offset += 1) {
+      const expected = expectedBand(offset);
       expect(
         getLeftPanelRailDropPositionOnAxis(
           { x: 10, y: rect.top + offset },
           rect,
           "y",
         ),
-      ).toBe(offset < rect.height / 2 ? "before" : "after");
+      ).toBe(expected);
     }
   });
 });
@@ -827,9 +844,10 @@ describe("getEpicCanvasDropPreview", () => {
           kind: "left-panel-rail-item",
           panelId: "artifacts",
           orientation: "vertical",
+          stacked: false,
         },
         rect,
-        { x: 20, y: 50 },
+        { x: 20, y: 80 },
         false,
       ),
     ).toEqual({
@@ -871,6 +889,7 @@ describe("getEpicCanvasDropPreview", () => {
           kind: "left-panel-rail-item",
           panelId: "artifacts",
           orientation: "vertical",
+          stacked: false,
         },
         null,
         { x: 20, y: 50 },
@@ -896,6 +915,7 @@ describe("getEpicCanvasDropPreview", () => {
             kind: "left-panel-rail-item",
             panelId: "artifacts",
             orientation: "horizontal",
+            stacked: false,
           },
           railSlot,
           { x, y },
@@ -917,6 +937,7 @@ describe("getEpicCanvasDropPreview", () => {
             kind: "left-panel-rail-item",
             panelId: "artifacts",
             orientation: "vertical",
+            stacked: false,
           },
           railSlot,
           { x, y },
@@ -930,6 +951,63 @@ describe("getEpicCanvasDropPreview", () => {
     }
   });
 
+  it("refuses a combine onto an already-stacked rail icon, but still commits its outer bands (L-166, L-168)", () => {
+    // The same middle point that answers "combine" for a lone icon answers no
+    // preview at all once the icon already has a partner: a stack joins
+    // exactly two panels, so there is nothing for a third member to combine
+    // into, and the caller must not turn an aimed stack into an unaimed
+    // reorder by falling back to a side.
+    expect(
+      getEpicCanvasDropPreview(
+        {
+          kind: "left-panel-rail-item",
+          panelId: "artifacts",
+          orientation: "vertical",
+          stacked: true,
+        },
+        railSlot,
+        { x: 18, y: 18 },
+        false,
+      ),
+    ).toBeNull();
+    // The outer bands still reorder - refusing the middle does not refuse
+    // the icon altogether.
+    expect(
+      getEpicCanvasDropPreview(
+        {
+          kind: "left-panel-rail-item",
+          panelId: "artifacts",
+          orientation: "vertical",
+          stacked: true,
+        },
+        railSlot,
+        { x: 18, y: 4 },
+        false,
+      ),
+    ).toEqual({
+      kind: "left-panel-rail",
+      panelId: "artifacts",
+      position: "before",
+    });
+    expect(
+      getEpicCanvasDropPreview(
+        {
+          kind: "left-panel-rail-item",
+          panelId: "artifacts",
+          orientation: "vertical",
+          stacked: true,
+        },
+        railSlot,
+        { x: 18, y: 32 },
+        false,
+      ),
+    ).toEqual({
+      kind: "left-panel-rail",
+      panelId: "artifacts",
+      position: "after",
+    });
+  });
+
   describe("getLeftPanelBodyDropPreview", () => {
     const target: Extract<
       EpicCanvasDropTargetData,
@@ -939,14 +1017,18 @@ describe("getEpicCanvasDropPreview", () => {
       viewTabId: "tab-a",
       panelId: "git-diff",
     };
-    // The body draws exactly one panel (R5R-04): the preview splits at that
-    // one section's own vertical midpoint rather than the nearest of several
-    // section boundaries.
-    const rect = { left: 0, top: 700, width: 320, height: 420 };
+    // The caller passes the SECTION the pointer is in (L-170), so the preview
+    // splits at that section's own vertical midpoint. The section names its
+    // own panel, which is how a stacked body's lower half stops resolving
+    // against the panel the body happens to be focused on.
+    const section = {
+      panelId: "git-diff",
+      rect: { left: 0, top: 700, width: 320, height: 420 },
+    } as const;
 
     it("resolves to before above the section's midpoint", () => {
       expect(
-        getLeftPanelBodyDropPreview(target, rect, { x: 20, y: 800 }),
+        getLeftPanelBodyDropPreview(target, section, { x: 20, y: 800 }),
       ).toEqual({
         kind: "left-panel-section",
         viewTabId: "tab-a",
@@ -958,7 +1040,7 @@ describe("getEpicCanvasDropPreview", () => {
     it("resolves to after at or below the section's midpoint", () => {
       // Below the midpoint (700 + 420 / 2 = 910).
       expect(
-        getLeftPanelBodyDropPreview(target, rect, { x: 20, y: 1000 }),
+        getLeftPanelBodyDropPreview(target, section, { x: 20, y: 1000 }),
       ).toEqual({
         kind: "left-panel-section",
         viewTabId: "tab-a",
@@ -967,7 +1049,7 @@ describe("getEpicCanvasDropPreview", () => {
       });
       // Exactly at the midpoint still reads as after.
       expect(
-        getLeftPanelBodyDropPreview(target, rect, { x: 20, y: 910 }),
+        getLeftPanelBodyDropPreview(target, section, { x: 20, y: 910 }),
       ).toEqual({
         kind: "left-panel-section",
         viewTabId: "tab-a",
@@ -976,7 +1058,26 @@ describe("getEpicCanvasDropPreview", () => {
       });
     });
 
-    it("returns no preview for a null rect", () => {
+    it("names the SECTION it was given, not the panel the target names", () => {
+      // A stacked body draws two sections, and the target still names the
+      // active one. A drop aimed at the other half has to resolve against the
+      // panel under the pointer or it silently places against - and unstacks -
+      // the wrong one (L-170).
+      expect(
+        getLeftPanelBodyDropPreview(
+          target,
+          { panelId: "artifacts", rect: section.rect },
+          { x: 20, y: 1000 },
+        ),
+      ).toEqual({
+        kind: "left-panel-section",
+        viewTabId: "tab-a",
+        panelId: "artifacts",
+        position: "after",
+      });
+    });
+
+    it("returns no preview when no section could be resolved", () => {
       expect(
         getLeftPanelBodyDropPreview(target, null, { x: 20, y: 800 }),
       ).toBeNull();

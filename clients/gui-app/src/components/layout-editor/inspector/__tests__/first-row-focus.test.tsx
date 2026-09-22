@@ -29,6 +29,7 @@ function row(id: RowId, label: string): SortableListItem<RowId> {
     icon: null,
     glyph: null,
     divider: false,
+    movable: true,
     dimmed: false,
     changed: false,
     hint: null,
@@ -42,6 +43,8 @@ function row(id: RowId, label: string): SortableListItem<RowId> {
     open: false,
     onToggleOpen: null,
     onRemove: null,
+    removeLabel: null,
+    onStack: null,
     onActivate: null,
   };
 }

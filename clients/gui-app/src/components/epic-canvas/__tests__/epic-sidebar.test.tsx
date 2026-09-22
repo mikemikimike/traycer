@@ -27,7 +27,11 @@ import {
   setRailVisibilityOverride,
 } from "@/lib/layout/rail-view";
 import { panelVisibilityOverridesFromValues } from "@/lib/layout/rail";
-import { moveRailPanelBeside } from "@/lib/layout/layout-arrangement";
+import {
+  moveRailPanelBeside,
+  stackRailPanels,
+  unstackRail,
+} from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -189,6 +193,25 @@ const testQueryClient = new QueryClient({
 });
 const HOST_ID = "epic-sidebar-host";
 
+/** The drop-target data one rail icon registered, for the bands' own rule. */
+function railDropTargetData(panelId: string): { readonly stacked: boolean } {
+  const input = testState.droppableInputs.find(
+    (candidate) =>
+      candidate.id === `left-panel-rail-target:${panelId}:pane:${TAB_ID}`,
+  );
+  if (input === undefined) throw new Error(`no rail drop target: ${panelId}`);
+  const data = input.data;
+  if (
+    data === null ||
+    typeof data !== "object" ||
+    !("stacked" in data) ||
+    typeof data.stacked !== "boolean"
+  ) {
+    throw new Error(`rail drop target ${panelId} named no stacked flag`);
+  }
+  return { stacked: data.stacked };
+}
+
 function resetLeftPanelStore(): void {
   window.localStorage.clear();
   useSurfaceHostSelectionStore.setState({ selections: {} });
@@ -196,6 +219,8 @@ function resetLeftPanelStore(): void {
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
+    panelSectionCollapsedByPanelId: {},
+    panelSectionWeightsByPanelId: {},
     commentsPanelRevealedByTabId: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},
@@ -320,7 +345,26 @@ describe("<EpicLeftPanelRail />", () => {
     ).not.toBeUndefined();
   });
 
-  it("draws the shipped rail as nine evenly spaced icons with no dividers", () => {
+  it("tells a drop target it is stacked from the MODEL, not from what it drew", () => {
+    // Artifacts hidden: Agents draws as a lone icon and is still half of a
+    // pair, because hiding a panel is not unstacking it (L-166). Reading the
+    // drawn shape instead let that icon offer a combine the writer refused,
+    // with a highlight and no result (L-170).
+    setRailVisibilityOverride("artifacts", false);
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(0);
+    expect(railDropTargetData("chats").stacked).toBe(true);
+    expect(railDropTargetData("terminals").stacked).toBe(false);
+  });
+
+  it("draws the shipped rail as eight direct children - the chats/artifacts capsule plus seven icons - with no dividers", () => {
     // "Every panel available": comments needs its own reveal + a commentable
     // artifact, same as `revealCommentsPanel` below.
     testState.activeArtifactId = "artifact-1";
@@ -336,13 +380,15 @@ describe("<EpicLeftPanelRail />", () => {
     );
 
     const rail = screen.getByTestId("epic-sidebar-rail");
+    // The shipped pair (chats + artifacts) draws as ONE capsule (L-166,
+    // L-167), so the rail's direct children are eight rather than nine: the
+    // capsule and the remaining seven panels.
     expect(
       Array.from(rail.children).map((child) =>
         child.getAttribute("data-testid"),
       ),
     ).toEqual([
-      "epic-rail-chats",
-      "epic-rail-artifacts",
+      "epic-rail-stack",
       "epic-rail-terminals",
       "epic-rail-browsers",
       "epic-rail-git-diff",
@@ -364,6 +410,75 @@ describe("<EpicLeftPanelRail />", () => {
     expect(
       screen.getByTestId("epic-rail-chats").getAttribute("aria-label"),
     ).toBe("Agents");
+  });
+
+  it("draws nine icons, with the shipped pair inside one capsule", () => {
+    testState.activeArtifactId = "artifact-1";
+    testState.activeArtifact = { kind: "spec" };
+    useLeftPanelStore.getState().revealCommentsPanel(TAB_ID);
+
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    for (const testId of [
+      "epic-rail-chats",
+      "epic-rail-artifacts",
+      "epic-rail-terminals",
+      "epic-rail-browsers",
+      "epic-rail-git-diff",
+      "epic-rail-pull-requests",
+      "epic-rail-file-tree",
+      "epic-rail-sharing",
+      "epic-rail-comments",
+    ]) {
+      expect(screen.getByTestId(testId)).not.toBeNull();
+    }
+
+    // Exactly one capsule on the rail, and it holds exactly the two members
+    // of the shipped pair - not a third icon, and not either of them loose.
+    expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(1);
+    const stack = screen.getByTestId("epic-rail-stack");
+    expect(stack.getAttribute("data-rail-stack")).toBe(
+      "stack:railAgents+railArtifacts",
+    );
+    expect(
+      Array.from(stack.querySelectorAll("button")).map((button) =>
+        button.getAttribute("data-testid"),
+      ),
+    ).toEqual(["epic-rail-chats", "epic-rail-artifacts"]);
+  });
+
+  it("clicking either member of the capsule focuses that panel", () => {
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
+
+    fireEvent.click(screen.getByTestId("epic-rail-artifacts"));
+
+    expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe(
+      "artifacts",
+    );
+    // The pair does not collapse to one icon when the other becomes active -
+    // both stay drawn inside the capsule (L-167).
+    expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
+    expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("epic-rail-chats"));
+
+    expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
+    expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
+    expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
   });
 
   it("namespaces duplicate Epic rail registrations by view tab", () => {
@@ -526,13 +641,15 @@ describe("<EpicLeftPanelRail />", () => {
 
     expect(screen.getAllByTestId("epic-rail-panel-drop-line")).toHaveLength(1);
     expect(screen.queryByTestId("epic-rail-panel-drop-slot")).toBeNull();
+    // The chats/artifacts capsule draws as ONE child (L-166, L-167), so the
+    // canonical boundary line lands between the capsule and pull-requests'
+    // neighbours rather than between two loose chats/artifacts icons.
     expect(
       Array.from(screen.getByTestId("epic-sidebar-rail").children).map(
         (element) => element.getAttribute("data-testid"),
       ),
     ).toEqual([
-      "epic-rail-chats",
-      "epic-rail-artifacts",
+      "epic-rail-stack",
       "epic-rail-terminals",
       "epic-rail-panel-drop-line",
       "epic-rail-browsers",
@@ -541,6 +658,36 @@ describe("<EpicLeftPanelRail />", () => {
       "epic-rail-file-tree",
       "epic-rail-sharing",
     ]);
+  });
+
+  it("puts a collapsed section back when its own rail icon is clicked (L-170)", () => {
+    // The lit icon usually toggles the whole sidebar (R5R-09), and it still
+    // does for every lone panel and every expanded stack member. The one
+    // exception is the state per-section collapse created: an active panel
+    // that is DISPLAYED and collapsed, where the click means "put this
+    // section back". Without it the icon the user reaches for collapses the
+    // whole column and the only way out is a chevron they have to find again.
+    useLeftPanelStore.getState().togglePanelSectionCollapsed("chats");
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("epic-rail-chats"));
+
+    expect(
+      useLeftPanelStore.getState().panelSectionCollapsedByPanelId.chats,
+    ).toBe(false);
+    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(false);
+
+    // A second click, now that the section is expanded, is the ordinary
+    // "collapse the sidebar" the lit icon has always meant.
+    fireEvent.click(screen.getByTestId("epic-rail-chats"));
+
+    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(true);
   });
 
   /**
@@ -579,9 +726,13 @@ describe("<EpicLeftPanelRail />", () => {
       renderRail(true);
 
       const rail = screen.getByTestId("epic-sidebar-rail");
-      // Every child is a panel button: no divider entry exists on the
-      // shipped rail, so there is nothing else to draw.
-      for (const child of rail.children) expect(child.tagName).toBe("BUTTON");
+      // Every child is a panel button or the shipped pair's capsule: no
+      // divider entry exists on the shipped rail, so there is nothing else to
+      // draw between them (L-155, L-167).
+      for (const child of rail.children) {
+        const isCapsule = child.getAttribute("data-rail-stack") !== null;
+        expect(isCapsule || child.tagName === "BUTTON").toBe(true);
+      }
       expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
     });
 
@@ -1082,9 +1233,11 @@ describe("the displayed panel is never collapsed (L-157)", () => {
     );
   }
 
-  it("draws the body for a panel a persisted collapse flag names", async () => {
-    // The shape the shipped build wrote: the flag is a key this store no
-    // longer has, so it must be inert rather than obeyed.
+  it("draws the body for a LONE panel a persisted collapse flag names", async () => {
+    // Collapse belongs to a stacked pair and to nothing else (L-157, L-166):
+    // a flag left in a record by a pair the user has since taken apart must be
+    // inert rather than obeyed, or the whole column is empty with no way back
+    // to it from the rail.
     window.localStorage.setItem(
       persistKey(STORE_KEYS.leftPanel),
       JSON.stringify({
@@ -1114,6 +1267,147 @@ describe("the displayed panel is never collapsed (L-157)", () => {
     // collapse lives on the rail, as `mainCollapsedByTabId`.
     expect(screen.queryByRole("button", { name: /^Collapse /u })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Expand /u })).toBeNull();
+  });
+});
+
+/**
+ * A stacked pair shares the body as two sections with a resize handle
+ * between them; a lone panel is the one section above (L-166). The lone-panel
+ * half is already covered by "offers no collapse control on the section
+ * header" above - this describes the split the OTHER shape draws, and that
+ * the same rail with its link removed collapses back to the lone shape.
+ *
+ * Terminals with Browsers rather than the shipped Agents-with-Artifacts pair,
+ * because those two panels' bodies render without an epic session - the same
+ * reason every other host case in this file activates Terminals. The join is
+ * made the way the inspector's row action makes it, with the panel BELOW as
+ * the source, so Terminals stays above Browsers and nothing is reordered
+ * (L-170).
+ */
+describe("a stacked pair vs a lone panel in the body (L-166)", () => {
+  beforeEach(() => {
+    resetLeftPanelStore();
+    resetDndStore();
+    resetTestState();
+    setPullRequestPresence(false);
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetLeftPanelStore();
+    resetDndStore();
+    resetTestState();
+  });
+
+  function renderHost(): void {
+    render(
+      <QueryClientProvider client={testQueryClient}>
+        <SidebarProvider>
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  function sectionIds(): ReadonlyArray<string | null> {
+    return Array.from(
+      screen
+        .getByTestId("epic-sidebar")
+        .querySelectorAll("[data-left-panel-section-id]"),
+    ).map((section) => section.getAttribute("data-left-panel-section-id"));
+  }
+
+  it("draws two sections with a handle for a stack and one uncollapsible section otherwise", () => {
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+    act(() => {
+      applyRail(
+        stackRailPanels(currentLayoutArrangement(), "browsers", "terminals")
+          .rail,
+      );
+    });
+    renderHost();
+
+    expect(sectionIds()).toEqual(["terminals", "browsers"]);
+    expect(screen.getByTestId("split-resize-handle")).not.toBeNull();
+    // Each half of the pair gets its own collapse control, because each has a
+    // partner to hand its space to.
+    expect(
+      screen.getByRole("button", { name: "Collapse Terminals" }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Collapse Browsers" }),
+    ).not.toBeNull();
+
+    cleanup();
+    // The link taken out: the same active panel now stands alone, with no
+    // partner to share the handle - or the collapse - with (L-157).
+    act(() => {
+      applyRail(
+        unstackRail(
+          currentLayoutArrangement(),
+          "stack:railTerminals+railBrowsers",
+        ).rail,
+      );
+    });
+    renderHost();
+
+    expect(sectionIds()).toEqual(["terminals"]);
+    expect(screen.queryByTestId("split-resize-handle")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Collapse /u })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Expand /u })).toBeNull();
+  });
+
+  it("offers no collapse to the last expanded member of a pair (L-170)", () => {
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+    act(() => {
+      applyRail(
+        stackRailPanels(currentLayoutArrangement(), "browsers", "terminals")
+          .rail,
+      );
+    });
+    renderHost();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Browsers" }));
+
+    // Collapsing the other one too would leave two title rows over an empty
+    // column, which is the promise "a collapsed section hands its space to
+    // its partner" could not keep. The control is not offered rather than
+    // offered and refused.
+    expect(
+      screen.queryByRole("button", { name: "Collapse Terminals" }),
+    ).toBeNull();
+    // The collapsed one keeps its control, because that control is its Expand.
+    expect(
+      screen.getByRole("button", { name: "Expand Browsers" }),
+    ).not.toBeNull();
+  });
+
+  it("hands a collapsed section's space to its partner", () => {
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+    act(() => {
+      applyRail(
+        stackRailPanels(currentLayoutArrangement(), "browsers", "terminals")
+          .rail,
+      );
+    });
+    renderHost();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Browsers" }));
+
+    // Both sections are still drawn - the collapsed one as its header alone,
+    // and the partner still with its body - so the column is never empty.
+    expect(sectionIds()).toEqual(["terminals", "browsers"]);
+    expect(
+      screen.getByTestId("epic-left-panel-section-browsers").className,
+    ).toContain("flex-none");
+    expect(
+      screen.getByTestId("epic-left-panel-section-terminals").className,
+    ).toContain("flex-1");
+    // No handle: there is nothing left to split.
+    expect(screen.queryByTestId("split-resize-handle")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Expand Browsers" }),
+    ).not.toBeNull();
   });
 });
 
@@ -1164,9 +1458,10 @@ describe("Browsers panel registration", () => {
     const railIds = Array.from(rail.children).map((child) =>
       child.getAttribute("data-testid"),
     );
+    // The chats/artifacts capsule draws as one direct child of the rail
+    // (L-166, L-167), not two loose icons.
     expect(railIds).toEqual([
-      "epic-rail-chats",
-      "epic-rail-artifacts",
+      "epic-rail-stack",
       "epic-rail-terminals",
       "epic-rail-browsers",
       "epic-rail-git-diff",

@@ -26,7 +26,10 @@ import {
   type HostRpcRegistry,
   type MessengerFactory,
 } from "@/lib/host";
-import { insertRailDivider } from "@/lib/layout/layout-arrangement";
+import {
+  insertRailDivider,
+  stackRailPanels,
+} from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
@@ -158,6 +161,14 @@ interface LayoutCanvasProbe {
    * including its id, which is `divider:1` on a rail that has used no seq.
    */
   readonly addRailDivider: () => void;
+  /**
+   * Terminals joined to Browsers the way the inspector's row action does it -
+   * the panel BELOW as the source, so the join moves nothing (L-170) - through
+   * the product's own writer and inside a recorded gesture, so the driver can
+   * assert the capsule the rail draws for a pair and the one history step the
+   * join costs (L-166, L-168).
+   */
+  readonly stackTerminalsWithBrowsers: () => void;
   readonly clearSelection: () => void;
   readonly snapshot: () => LayoutSnapshot;
   readonly historyDepth: () => number;
@@ -169,8 +180,17 @@ declare global {
   }
 }
 
-/** Between Artifacts and Terminals, which is where the rail plans aim. */
-const RAIL_DIVIDER_INDEX = 2;
+/**
+ * Between Artifacts and Terminals, which is where the rail plans aim.
+ *
+ * Index 3 rather than 2 since L-166: the shipped rail carries a stack LINK
+ * between Agents and Artifacts, so the entries are `railAgents`,
+ * `stack:railAgents+railArtifacts`, `railArtifacts`, `railTerminals`, and a
+ * divider at 2
+ * would land inside the stack rather than after it (where `normalizeRail`
+ * would then drop the join).
+ */
+const RAIL_DIVIDER_INDEX = 3;
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -281,6 +301,18 @@ function buildProbe(): LayoutCanvasProbe {
       useLayoutStore
         .getState()
         .setArrangement(insertRailDivider(arrangement, RAIL_DIVIDER_INDEX));
+    },
+    // Through `recordGesture`, unlike `addRailDivider`: this one IS the
+    // gesture under test, so its history step is the thing being counted.
+    stackTerminalsWithBrowsers: () => {
+      useLayoutEditorStore.getState().recordGesture(() => {
+        const { arrangement } = useLayoutStore.getState();
+        useLayoutStore
+          .getState()
+          .setArrangement(
+            stackRailPanels(arrangement, "browsers", "terminals"),
+          );
+      });
     },
     clearSelection: () => {
       useLayoutEditorStore.getState().select(null);

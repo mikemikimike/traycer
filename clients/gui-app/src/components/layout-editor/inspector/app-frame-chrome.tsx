@@ -12,7 +12,8 @@ import {
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
-import type { RailEntry } from "@/lib/layout/rail";
+import { railDisplayEntries } from "@/lib/layout/rail";
+import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
 import type {
   RailRegionId,
   RegionId,
@@ -291,43 +292,58 @@ function AppFrameBarCluster(props: {
 }
 
 /**
- * The real rail: the arrangement's own entries, dividers included (L-155), in
- * the order the list beside them is in. Each panel brings its own rail frame,
- * so this adds no spacing of its own.
+ * The real rail: the arrangement's own entries, dividers and stacks included
+ * (L-155, L-166), in the order the list beside them is in. Each panel brings
+ * its own rail frame, so this adds no spacing of its own.
+ *
+ * A stacked pair is drawn inside the same capsule the real rail draws, through
+ * the same component (L-11, L-167): the card is a picture of the app at rest,
+ * and at rest two joined icons are one object.
  *
  * A panel the user hid leaves a gap exactly as it leaves one in the rail;
- * `auto` is not off, so only `hidden` does.
+ * `auto` is not off, so only `hidden` does. It leaves its capsule too, which
+ * is what `railDisplayEntries` answers for every rail at once.
  */
 export function AppFrameRailEntries({
   values,
   arrangement,
 }: AppFrame): ReactNode {
-  return arrangement.rail.map((entry) => (
-    <AppFrameRailEntry
-      key={entry.id}
-      entry={entry}
-      values={values}
-      arrangement={arrangement}
-    />
-  ));
+  return railDisplayEntries(
+    arrangement.rail,
+    (regionId) => values[regionId].shown !== "hidden",
+  ).map((entry) => {
+    if (entry.kind === "divider") {
+      // The space a divider is at rest, and nothing else (L-11, L-140): a
+      // preset card is a picture of the app AT REST, and there a divider draws
+      // the column's own gap again rather than a line. The hairline this used
+      // to draw was a picture of something the sidebar never shows.
+      return <span key={entry.id} className="h-1 w-full shrink-0" />;
+    }
+    if (entry.kind === "stack") {
+      return (
+        <LeftPanelRailStack
+          key={entry.id}
+          stackId={entry.id}
+          orientation="vertical"
+          first={depictRailRegion(entry.top, values, arrangement)}
+          second={depictRailRegion(entry.bottom, values, arrangement)}
+        />
+      );
+    }
+    return (
+      <span key={entry.id}>
+        {depictRailRegion(entry.id, values, arrangement)}
+      </span>
+    );
+  });
 }
 
-function AppFrameRailEntry(props: {
-  readonly entry: RailEntry;
-  readonly values: LayoutValues;
-  readonly arrangement: LayoutArrangement;
-}): ReactNode {
-  const { entry, values, arrangement } = props;
-  if (entry.kind === "divider") {
-    // The space a divider is at rest, and nothing else (L-11, L-140): a preset
-    // card is a picture of the app AT REST, and there a divider draws the
-    // column's own gap again rather than a line. The hairline this used to
-    // draw was a picture of something the sidebar never shows.
-    return <span className="h-1 w-full shrink-0" />;
-  }
-  const railValues = values[entry.id];
-  if (railValues.shown === "hidden") return null;
-  return <span>{depictRegion(entry.id, railValues, arrangement)}</span>;
+function depictRailRegion(
+  regionId: RailRegionId,
+  values: LayoutValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  return depictRegion(regionId, values[regionId], arrangement);
 }
 
 /**
@@ -335,7 +351,7 @@ function AppFrameRailEntry(props: {
  *
  * There are exactly TWO askers of "is this drawn", and they ask different
  * questions: this one, whose regions have a two-state `shown`, and
- * `AppFrameRailEntry` above, because `RailValues.shown` is
+ * `AppFrameRailEntries` above, because `RailValues.shown` is
  * `auto | shown | hidden` and `auto` is the shipped default for all nine
  * panels (L-93) - so `!== "shown"` would hide every panel nobody has touched.
  *

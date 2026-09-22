@@ -3,9 +3,14 @@ import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
-import { leftPanelIdForRailRegion, RAIL_REGION_IDS } from "@/lib/layout/rail";
+import {
+  leftPanelIdForRailRegion,
+  railDisplayEntries,
+  RAIL_REGION_IDS,
+} from "@/lib/layout/rail";
 import type { LeftPanelId } from "@/lib/left-panel-ids";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
+import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
 import { useRailDividersEditing } from "@/components/epic-canvas/sidebar/use-rail-dividers-editing";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
@@ -30,7 +35,9 @@ import { cn } from "@/lib/utils";
  * be pulled past its neighbours and no further.
  *
  * A divider is drawn at rest as the space it is and in a session as the handle
- * it becomes, which is the same rule the real sidebar follows (L-140).
+ * it becomes, and a stacked pair is drawn inside the same joined capsule the
+ * real rail draws (L-140, L-167) - both through the components the real
+ * sidebar uses, so the two rails cannot drift on either.
  *
  * It answers a right-click with the REAL rail's menu (L-144), rendered from the
  * one module both rails share: the editor always opens here (L-87), so this is
@@ -65,9 +72,20 @@ export function SampleWorkspaceRail() {
           {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
           className="hidden shrink-0 flex-col items-center gap-1 border-r p-2 md:flex"
         >
-          {rail.map((entry) => {
-            if (entry.kind !== "divider")
+          {railDisplayEntries(rail, () => true).map((entry) => {
+            if (entry.kind === "panel")
               return <SampleRailTile key={entry.id} regionId={entry.id} />;
+            if (entry.kind === "stack") {
+              return (
+                <LeftPanelRailStack
+                  key={entry.id}
+                  stackId={entry.id}
+                  orientation="vertical"
+                  first={<SampleRailTile regionId={entry.top} />}
+                  second={<SampleRailTile regionId={entry.bottom} />}
+                />
+              );
+            }
             return (
               <LeftPanelRailDivider
                 key={entry.id}

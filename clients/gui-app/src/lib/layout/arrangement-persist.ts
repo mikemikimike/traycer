@@ -433,6 +433,11 @@ function readRailEntries(
     if (entry.kind === "divider") {
       return [{ kind: "divider", id: entry.id }];
     }
+    // A link's id is re-minted from its position by `normalizeRail`, so the
+    // stored one is read only to keep the entry in place (L-166).
+    if (entry.kind === "stack") {
+      return [{ kind: "stack", id: entry.id }];
+    }
     if (entry.kind !== "panel") return [];
     const regionId = RAIL_REGION_IDS.find(
       (candidate) => candidate === entry.id,

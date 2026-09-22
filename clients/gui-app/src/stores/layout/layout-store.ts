@@ -12,11 +12,14 @@ import {
   resolvePersistedArrangement,
 } from "@/lib/layout/arrangement-persist";
 import {
+  normalizeRail,
   RAIL_REGION_BY_PANEL,
   railFromPanelIdOrder,
+  railStackId,
   railVisibilityFor,
   type RailEntry,
 } from "@/lib/layout/rail";
+import type { RailRegionId } from "@/lib/layout/region-id";
 import { sameRegionValue, type LayoutValues } from "@/lib/layout/layout-values";
 import {
   LAYOUT_PRESET_IDS,
@@ -106,9 +109,13 @@ const LAYOUT_PERSIST_KEY = persistKey(STORE_KEYS.layout);
  * shipped rail put a divider between every panel, and a record written before
  * L-155 holds all seven whatever else it holds, so it needs translating rather
  * than discarding - discarding it would take the user's panel ORDER with it.
- * The five values that DID ship are carried separately, below.
+ * Version 4 is the same exception one ruling later (L-166): stacks did not
+ * exist between L-155 and L-166, so a v3 record names none, and left as it is
+ * a dogfooder would be the one user in the world whose sidebar never draws
+ * Agents and Artifacts together. The five values that DID ship are carried
+ * separately, below.
  */
-const LAYOUT_PERSIST_VERSION = 3;
+const LAYOUT_PERSIST_VERSION = 4;
 
 const SHIPPED_CARRY = carryShippedLayoutValues();
 
@@ -435,36 +442,75 @@ function carriedRailVisibility(value: unknown): Record<string, unknown> {
 }
 
 /**
- * The sidebar's persisted grouping, as the rail's panel ORDER (L-155).
+ * The sidebar's persisted grouping, as the rail's panel ORDER and its stacks
+ * (L-155, L-166).
  *
- * The order is the user's; the boundaries are not. The shipped sidebar put one
- * between every panel, so an upgrading user's record carries seven dividers
- * nobody placed - structure this build no longer has rather than a preference
- * to keep. The panels come across in the order they were in and the rail
- * starts with no dividers, exactly as a fresh install does.
+ * The order is the user's and so is a group that actually drew two panels
+ * together, which is what a stack IS. What does not come across is a group of
+ * ONE: the shipped sidebar put every lone panel in a group of its own and a
+ * divider between every pair, and neither of those was a thing anybody placed.
+ *
+ * A group of three or more carries its first two, because a stack joins
+ * exactly two panels (L-166) and the first two are the pair that was drawn at
+ * the top of that group's body. The rest of the group keeps its ORDER and
+ * simply stands alone, which is the same trade the divider drop made.
  */
 function carriedRail(value: unknown): ReadonlyArray<RailEntry> {
   if (!Array.isArray(value)) return DEFAULT_ARRANGEMENT.rail;
-  const panelIds = value.flatMap((group): string[] => {
-    if (!isRecord(group) || !Array.isArray(group.panelIds)) return [];
-    return group.panelIds.filter(
-      (panelId): panelId is string => typeof panelId === "string",
-    );
+  const groups = value.flatMap(
+    (group): ReadonlyArray<ReadonlyArray<string>> => {
+      if (!isRecord(group) || !Array.isArray(group.panelIds)) return [];
+      return [
+        group.panelIds.filter(
+          (panelId): panelId is string => typeof panelId === "string",
+        ),
+      ];
+    },
+  );
+  const panelIds = groups.flat();
+  if (panelIds.length === 0) return DEFAULT_ARRANGEMENT.rail;
+  const rail = railFromPanelIdOrder(panelIds);
+  const links = groups.flatMap((group): RailEntry[] => {
+    if (group.length < 2) return [];
+    const top = carriedRailRegion(group[0]);
+    const bottom = carriedRailRegion(group[1]);
+    if (top === null || bottom === null) return [];
+    return [{ kind: "stack", id: railStackId(top, bottom) }];
   });
-  return panelIds.length === 0
-    ? DEFAULT_ARRANGEMENT.rail
-    : railFromPanelIdOrder(panelIds);
+  // Appended rather than threaded in: a link IS the pair its id names, so
+  // `normalizeRail` puts each one where it belongs and drops any whose pair
+  // this build did not end up placing side by side.
+  return normalizeRail([...rail, ...links]);
+}
+
+/** One `panelGroups` id as a rail region, or `null` for one this build retired. */
+function carriedRailRegion(panelId: string): RailRegionId | null {
+  const match = Object.entries(RAIL_REGION_BY_PANEL).find(
+    ([candidate]) => candidate === panelId,
+  );
+  return match === undefined ? null : match[1];
 }
 
 /**
- * Every divider dropped from a rail written before L-155 (L-158).
+ * Two one-shot repairs of a stored rail, each for a ruling that changed what a
+ * rail entry means.
  *
- * The rail a version-2 record holds was written when the shipped default put
- * one divider between every panel, so those seven are structure this build no
- * longer has rather than spacers anyone placed - the same judgement the
- * one-shot carry makes about the shipped `panelGroups`. The user's panel ORDER
- * is theirs and stays.
+ * v3 (L-158): every divider dropped. The rail a version-2 record holds was
+ * written when the shipped default put one between every panel, so those seven
+ * are structure this build no longer has rather than spacers anyone placed -
+ * the same judgement the one-shot carry makes about the shipped `panelGroups`.
  *
+ * v4 (L-166): the default stack put back, and only where it still means what
+ * it meant. A v3 record was written in the window where stacking did not
+ * exist, so it names none, and nothing in it distinguishes "I never had a
+ * stack" from "I moved these two apart" - what it DOES say is whether Agents
+ * is still immediately followed by Artifacts. If it is, the record agrees with
+ * the shipped order at exactly the place the default stack joins, and the join
+ * is the default the user has simply never seen. If it is not, the user moved
+ * one of them, and inserting a link would either re-join two panels they had
+ * separated or join a pair they never chose - so that record gets none.
+ *
+ * The user's panel ORDER is theirs throughout and is never touched.
  * `dividerSeq` is left where it is on purpose: it is the counter that keeps a
  * new divider's id unique, and winding it back would reissue an id a removed
  * divider already used.
@@ -473,19 +519,43 @@ function migrateLayoutPersistedState(
   persistedState: unknown,
   version: number,
 ): unknown {
-  if (version >= 3) return persistedState;
+  if (version >= LAYOUT_PERSIST_VERSION) return persistedState;
   if (!isRecord(persistedState)) return persistedState;
   const arrangement = persistedState.arrangement;
   if (!isRecord(arrangement) || !Array.isArray(arrangement.rail)) {
     return persistedState;
   }
-  const rail = arrangement.rail.filter(
-    (entry) => !(isRecord(entry) && entry.kind === "divider"),
-  );
+  const withoutShippedDividers =
+    version >= 3
+      ? arrangement.rail
+      : arrangement.rail.filter(
+          (entry) => !(isRecord(entry) && entry.kind === "divider"),
+        );
+  const rail = withDefaultStack(withoutShippedDividers);
   return {
     ...persistedState,
     arrangement: { ...arrangement, rail },
   };
+}
+
+/** The default link, put in only where the default pair is still adjacent. */
+function withDefaultStack(
+  rail: ReadonlyArray<unknown>,
+): ReadonlyArray<unknown> {
+  const agents = rail.findIndex(
+    (entry) =>
+      isRecord(entry) && entry.kind === "panel" && entry.id === "railAgents",
+  );
+  if (agents < 0) return rail;
+  const next = rail[agents + 1];
+  if (!isRecord(next) || next.kind !== "panel" || next.id !== "railArtifacts") {
+    return rail;
+  }
+  return [
+    ...rail.slice(0, agents + 1),
+    { kind: "stack", id: railStackId("railAgents", "railArtifacts") },
+    ...rail.slice(agents + 1),
+  ];
 }
 
 /** This store's own persisted record, or `null` if it is not readable. */

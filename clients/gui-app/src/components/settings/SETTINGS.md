@@ -1732,24 +1732,66 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     collapses - it is the one `desktopOnly: true` entry in `ACTION_META`, and
     both the palette filter and `StatusBarKeybindingBridge` READ that flag
     rather than testing the build, so the pair follows from the field.
-  - **The rail is one flat list** (L-155): `arrangement.rail` is panels and
-    dividers in order, and a divider is a SPACER - the user reads it as a
-    "Divider", adds it, drags it and removes it, and the sidebar draws it as a
-    gap at rest (L-140).
-    There is no grouping concept: the shipped rail carries no dividers at all,
-    each panel gets its own rail icon, and the sidebar body draws the one panel
-    the rail says is active.
-    `visibleRailPanelIds` (`lib/layout/rail.ts`) is the one visibility filter
-    every sidebar surface reads the rail through - the icon column, the body's
-    choice of panel and the PR retention.
-    Writes go through `applyRail` (`lib/layout/rail-view.ts`) for the app's own
-    drag and through `moveRailEntry` / `insertRailDivider` / `removeRailDivider`
-    (`lib/layout/layout-arrangement.ts`) for the editor's list, with
-    `moveRailPanelBeside` / `moveRailPanelToEnd` the one mover both drags place
-    a panel by.
-    A rail region's three-state `shown` maps onto the sparse show/hide map the
-    sidebar already reads: `auto` leaves the panel absent from it and therefore
-    on its own presence rule.
+  - **The rail is one flat list** (L-155, L-166): `arrangement.rail` is panels,
+    dividers and stack links in order.
+    The three are independent of each other and there is still no grouping
+    concept - nothing owns a run of panels, and every panel has its own icon.
+    - A DIVIDER is a SPACER and nothing else.
+      The user reads it as a "Divider", adds it, drags it and removes it, and
+      the sidebar draws it as a gap at rest (L-140).
+      The shipped rail carries none.
+    - A STACK LINK is a join between the two ADJACENT panels it sits between:
+      those two share the sidebar body, top and bottom, with a resize handle
+      and a per-section collapse, and the rail draws their icons inside one
+      joined capsule (L-167, `left-panel-rail-stack.tsx`).
+      Clicking either icon opens the stack with that panel focused.
+      The shipped rail carries exactly one, Agents with Artifacts.
+      A stack joins exactly two panels: `normalizeRail` re-derives every link
+      from the pair it ends up between, so a panel dragged away from its
+      partner drops the join, a divider moved between them drops it, and a run
+      of three cannot exist because a panel already claimed by one link cannot
+      be claimed by a second.
+      A HIDDEN panel drops out of its stack for display only - the visible
+      partner stands alone on the rail and in the body, and showing the panel
+      again restores the pair.
+      A new stack always opens with both sections showing: the collapse flag
+      outlives the pair, and while two panels are apart neither draws a chevron
+      that could clear it (L-170).
+      Both members can never be collapsed at once, because a collapse hands its
+      space to the partner; the control is not offered to the last expanded
+      one.
+      `railDisplayEntries` (`lib/layout/rail.ts`) is what every rail SURFACE
+      walks - the icon column, the sample scene's copy and the preset card's
+      miniature - so the capsule rule and the hidden-partner rule are written
+      once; `visibleRailPanelIds` beside it is the one visibility filter for the
+      body's choice of panel and the PR retention.
+      Writes go through `applyRail` (`lib/layout/rail-view.ts`) for the app's own
+      drag and through `moveRailEntry` / `insertRailDivider` /
+      `removeRailDivider` / `stackRailPanels` / `unstackRail`
+      (`lib/layout/layout-arrangement.ts`) for the editor's list, with
+      `moveRailPanelBeside` / `moveRailPanelToEnd` the one mover both drags place
+      a panel by.
+      On the rail a drop has three bands (L-168): the outer 30% at each end
+      reorders, and the middle 40% stacks.
+      A source that is already half of a pair LEAVES that pair and joins the new
+      one (L-170) - the join it had is dropped by the same normalisation that
+      drops it when either panel moves away, so nothing extra is needed for it.
+      A TARGET that is already half of a pair is refused, with no preview at all,
+      because a stack joins exactly two panels.
+      "Already half of a pair" is read off the model rather than off what the
+      rail drew, so a panel whose partner is hidden refuses a drop on its middle
+      band the way its capsule would.
+      A drop on the sidebar BODY is resolved against the section under the
+      pointer, not the panel the body is focused on: a stacked pair draws two,
+      and the active one is not always the one being aimed at.
+      The split and the per-section collapse live in the PANEL store
+      (`panelSectionWeightsByPanelId`, `panelSectionCollapsedByPanelId`), not in
+      the arrangement: they are how a stack is drawn rather than whether it
+      exists, and keeping the shipped key means an upgrading user's split comes
+      back with no migration.
+      A rail region's three-state `shown` maps onto the sparse show/hide map the
+      sidebar already reads: `auto` leaves the panel absent from it and therefore
+      on its own presence rule.
   - **Home tab behaviour** - NOT a group on this page, and Home now owns no
     Settings row on it at all (`Home tab` above is the switch that draws the
     tab, not a preference about what is on it). Recorded here because this is

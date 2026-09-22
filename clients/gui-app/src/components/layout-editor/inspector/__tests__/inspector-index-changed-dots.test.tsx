@@ -22,8 +22,13 @@ function isRegionId(id: string): id is RegionId {
 }
 
 /** The rail's panels in order, which is what "moved" is measured on (I-17). */
+/**
+ * The rail's PANELS in order, which is what a changed dot can sit on: a
+ * divider and a stack link are lines the index draws, not rows with state
+ * (L-155, L-166).
+ */
 function railEntryIds(rail: ReadonlyArray<RailEntry>): ReadonlyArray<string> {
-  return rail.flatMap((entry) => (entry.kind === "divider" ? [] : [entry.id]));
+  return rail.flatMap((entry) => (entry.kind === "panel" ? [entry.id] : []));
 }
 
 /** The name span of one index row, which is what carries the muting (I-09). */

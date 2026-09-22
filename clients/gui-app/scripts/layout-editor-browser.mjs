@@ -355,9 +355,11 @@ const FRAME_QUARTER_LIT_FLOOR = 0.1;
  * `drag-model.ts` also floors the travel a claim needs at 12px (L-150(4)), so
  * every plan below has to clear that as well as the claim boundary itself.
  * The two rail plans are the tight ones and both do, on the rail's measured
- * geometry (36px icons, 4px gaps, an 8px divider at 80..88, Terminals
- * 92..128 - the rail those two plans build with `addRailDivider`, whose first
- * four entries are the four the old shipped default had in the same places).
+ * geometry, which L-166 leaves exactly where it was: Agents 0..36, the
+ * capsule's 4px seam 36..40, Artifacts 40..76, a 4px gap, the 8px divider at
+ * 80..88, a 4px gap, Terminals 92..128. The capsule adds a surface behind the
+ * two icons and a seam the width of the rail's own `gap-1`, so a stacked pair
+ * occupies the same 76px two loose icons did, and nothing below it moves.
  * "Rail icon across a divider" aims Terminals' top edge at 84 - 18 = 66 and
  * places the pointer half a member behind it, at 84, so the pointer travels
  * 110 - 84 = 26 and the member travels 26 - 6 = 20. "Rail divider itself"
@@ -529,12 +531,40 @@ const APP_ACTED_PROBE = `(() => {
  * first through the product's own add-divider action - between Artifacts and
  * Terminals, which is where `divider:1` sat in the rail this wave replaced, so
  * the measured geometry the overshoot is tuned on is unchanged.
+ *
+ * `stack:railAgents+railArtifacts` is the shipped rail's one stack LINK
+ * (L-166), named after the PAIR it joins. It is a member of the order like any
+ * other entry, so it is named here, and the capsule draws its two icons 4px
+ * apart - the rail's own `gap-1` - which is why the geometry below is the same
+ * as it was before stacks existed.
  */
 const TERMINALS_ABOVE_THE_DIVIDER = [
   "railAgents",
+  "stack:railAgents+railArtifacts",
   "railArtifacts",
   "railTerminals",
   "divider:1",
+  "railBrowsers",
+  "railGitDiff",
+  "railPullRequests",
+  "railFileTree",
+  "railSharing",
+  "railComments",
+];
+
+/**
+ * Terminals joined to Browsers by a link the user made (L-168).
+ *
+ * Terminals stays ABOVE Browsers and every panel keeps its place: the list's
+ * row action hands the panel BELOW to the writer as the source, so the join
+ * costs no reorder at all (L-170).
+ */
+const TERMINALS_STACKED_ABOVE_BROWSERS = [
+  "railAgents",
+  "stack:railAgents+railArtifacts",
+  "railArtifacts",
+  "railTerminals",
+  "stack:railTerminals+railBrowsers",
   "railBrowsers",
   "railGitDiff",
   "railPullRequests",
@@ -1197,7 +1227,7 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
     }
   }
 
-  // --- A5. Six real drags, each one history step ----------------------------
+  // --- A5. Six real drags and one join, each one history step ---------------
   const baseline = await evaluate(
     client,
     "window.__layoutCanvasProbe.snapshot()",
@@ -2033,6 +2063,39 @@ function buildDragPlans(toolbarLeft, dock) {
       expect: { kind: "rail", ids: TERMINALS_ABOVE_THE_DIVIDER },
     },
     {
+      // The one gesture on this rail that is not a reorder (L-168). The join
+      // is made through the product's own writer inside a recorded gesture,
+      // because the canvas drag engine has no middle band - `armLayoutDrag`
+      // resolves a SLOT, so a combine is the dnd-kit rail's gesture and the
+      // jsdom rail suite is where the pointer half is pinned. What this plan
+      // holds is the rest of it: the entry the writer adds, the one history
+      // step it costs, and the capsule the rail draws for a pair.
+      id: "stacking two rail icons draws one capsule",
+      setup: [
+        "window.__layoutCanvasProbe.reset()",
+        "window.__layoutCanvasProbe.stackTerminalsWithBrowsers()",
+      ],
+      kind: "state",
+      expect: { kind: "rail", ids: TERMINALS_STACKED_ABOVE_BROWSERS },
+      historyDelta: 1,
+      // Scoped to the app column, which is the rail the gesture acted on: the
+      // editor beside it draws a preset miniature per preset, each a real rail
+      // with real capsules and no registered icons, so a document-wide query
+      // reports four rails' worth of capsules for one gesture.
+      probe: `(() => {
+        const column = document.querySelector("[data-layout-column]");
+        const capsules = [...column.querySelectorAll("[data-rail-stack]")];
+        return capsules.map((node) => ({
+          id: node.getAttribute("data-rail-stack"),
+          icons: node.querySelectorAll("[data-layout-region]").length,
+        }));
+      })()`,
+      expectProbe: [
+        { id: "stack:railAgents+railArtifacts", icons: 2 },
+        { id: "stack:railTerminals+railBrowsers", icons: 2 },
+      ],
+    },
+    {
       id: "the clamp: a rail icon pulled far outside the column",
       setup: ["window.__layoutCanvasProbe.reset()"],
       memberId: "railComments",
@@ -2047,10 +2110,49 @@ function buildDragPlans(toolbarLeft, dock) {
 async function runDrag(client, plan) {
   const violations = [];
   const notes = [];
+  const depthAtSetup = await evaluate(
+    client,
+    "window.__layoutCanvasProbe.historyDepth()",
+  );
   for (const expression of plan.setup) await evaluate(client, expression);
   await flush(client);
   await delay(250);
   await flush(client);
+
+  // A plan with no pointer gesture: the setup IS the write, and what is
+  // asserted is the arrangement it produced, the history it cost and whatever
+  // the rail drew for it.
+  if (plan.kind === "state") {
+    const state = await evaluate(
+      client,
+      "window.__layoutCanvasProbe.snapshot()",
+    );
+    const depth = await evaluate(
+      client,
+      "window.__layoutCanvasProbe.historyDepth()",
+    );
+    const railIds = state.arrangement.rail.map((entry) => entry.id);
+    if (JSON.stringify(railIds) !== JSON.stringify(plan.expect.ids)) {
+      violations.push(
+        `A5 ${plan.id}: the layout store reads ${JSON.stringify(railIds)}, expected ${JSON.stringify(plan.expect.ids)}`,
+      );
+    }
+    if (depth - depthAtSetup !== plan.historyDelta) {
+      violations.push(
+        `A5 ${plan.id}: history went ${String(depthAtSetup)} -> ${String(depth)}; expected +${String(plan.historyDelta)}`,
+      );
+    }
+    const drawn = await evaluate(client, plan.probe);
+    if (JSON.stringify(drawn) !== JSON.stringify(plan.expectProbe)) {
+      violations.push(
+        `A5 ${plan.id}: the rail drew ${JSON.stringify(drawn)}, expected ${JSON.stringify(plan.expectProbe)}`,
+      );
+    }
+    notes.push(
+      `state "${plan.id}": ${JSON.stringify(railIds)}, capsules ${JSON.stringify(drawn)}, history +${String(depth - depthAtSetup)}`,
+    );
+    return { violations, notes };
+  }
 
   const member = await rectOf(client, plan.memberSelector);
   if (member === null) {

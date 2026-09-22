@@ -11,14 +11,16 @@ import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
 import {
   leftPanelIdForRailRegion,
+  railDisplayEntries,
   railRegionForLeftPanelId,
-  visibleRailPanelIds,
   type RailEntry,
 } from "@/lib/layout/rail";
+import { isStackedRailPanel } from "@/lib/layout/layout-arrangement";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
 import { DropLine } from "@/components/ui/drop-line";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
+import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
 import { useRailDividersEditing } from "@/components/epic-canvas/sidebar/use-rail-dividers-editing";
 import {
   getLeftPanelRailDragId,
@@ -28,6 +30,7 @@ import {
   LEFT_PANEL_RAIL_ITEM_DND_TYPE,
   type EpicCanvasDropTargetData,
   type EpicCanvasLeftPanelRailDragData,
+  type LeftPanelRailDropPosition,
 } from "@/components/epic-canvas/dnd/dnd";
 import { useDragSourceDisabled } from "@/components/epic-canvas/dnd/use-drag-source-disabled";
 import {
@@ -92,35 +95,60 @@ interface EpicLeftPanelRailContentProps {
 }
 
 /**
- * One thing the rail draws: a panel's icon, or a divider (L-155).
+ * One thing the rail draws: a panel's icon, a stacked PAIR of them in one
+ * capsule (L-167), or a divider (L-155).
  *
  * Every divider the rail holds is drawn, at rest as well as in a session: at
  * rest it is extra space and in a session a handle (L-140), and both of those
- * are `LeftPanelRailDivider`'s answer rather than this list's. A panel the
- * user hid is dropped here, which is what leaves its divider next to whatever
- * remains.
+ * are `LeftPanelRailDivider`'s answer rather than this list's. Which panels
+ * are drawn, and which pairs survive as pairs, is `railDisplayEntries`'
+ * answer, not a second copy of the rule here (R5R-05, L-166) - so a hidden
+ * panel leaves its partner standing alone on the rail and in the body by the
+ * same walk.
  */
 type RailItem =
   | { readonly kind: "panel"; readonly panel: LeftPanelMetadataDefinition }
+  | {
+      readonly kind: "stack";
+      readonly id: string;
+      readonly top: LeftPanelMetadataDefinition;
+      readonly bottom: LeftPanelMetadataDefinition;
+    }
   | { readonly kind: "divider"; readonly id: string };
 
 function railItems(
   rail: ReadonlyArray<RailEntry>,
   context: LeftPanelAvailabilityContext,
 ): ReadonlyArray<RailItem> {
-  // Which panels are drawn is `visibleRailPanelIds`' answer, not a second
-  // copy of it here (R5R-05); this walk only decides what each entry BECOMES.
-  const shown = new Set(
-    visibleRailPanelIds(rail, (panelId) =>
-      isLeftPanelVisible(getLeftPanelDefinition(panelId), context),
+  return railDisplayEntries(rail, (regionId) =>
+    isLeftPanelVisible(
+      getLeftPanelDefinition(leftPanelIdForRailRegion(regionId)),
+      context,
     ),
-  );
-  return rail.flatMap((entry): RailItem[] => {
-    if (entry.kind === "divider") return [{ kind: "divider", id: entry.id }];
-    const panelId = leftPanelIdForRailRegion(entry.id);
-    return shown.has(panelId)
-      ? [{ kind: "panel", panel: getLeftPanelDefinition(panelId) }]
-      : [];
+  ).map((entry): RailItem => {
+    if (entry.kind === "divider") return { kind: "divider", id: entry.id };
+    if (entry.kind === "panel") {
+      return {
+        kind: "panel",
+        panel: getLeftPanelDefinition(leftPanelIdForRailRegion(entry.id)),
+      };
+    }
+    return {
+      kind: "stack",
+      id: entry.id,
+      top: getLeftPanelDefinition(leftPanelIdForRailRegion(entry.top)),
+      bottom: getLeftPanelDefinition(leftPanelIdForRailRegion(entry.bottom)),
+    };
+  });
+}
+
+/** Every panel a rail item draws, so the highlight walks one list. */
+function railItemPanels(
+  items: ReadonlyArray<RailItem>,
+): ReadonlyArray<LeftPanelMetadataDefinition> {
+  return items.flatMap((item): LeftPanelMetadataDefinition[] => {
+    if (item.kind === "divider") return [];
+    return item.kind === "panel" ? [item.panel] : [item.top, item.bottom];
   });
 }
 
@@ -183,6 +211,9 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
   const toggleMainCollapsed = useEpicLeftPanelStore(
     (s) => s.toggleMainCollapsed,
   );
+  const collapsedById = useEpicLeftPanelStore(
+    (s) => s.panelSectionCollapsedByPanelId,
+  );
   const availabilityContext = useMemo<LeftPanelAvailabilityContext>(
     () =>
       retainDisplayedPrPanel(rail, activePanelId, {
@@ -208,7 +239,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
   // directly so a hidden active panel highlights whatever the body fell back
   // to, instead of leaving the rail with nothing marked.
   const displayedPanelId = resolveDisplayedPanelId(
-    items.flatMap((item) => (item.kind === "panel" ? [item.panel.id] : [])),
+    railItemPanels(items).map((panel) => panel.id),
     activePanelId,
   );
   // The icon the pointer was over when the menu opened, or null for empty rail
@@ -237,20 +268,54 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
       ? null
       : getLeftPanelDefinition(panelSectionDragSource.panelId);
   const dropAtRailEnd = railPanelDropPreview?.kind === "left-panel-rail-list";
+  // The band the drop is in, for whichever icon it is over. `combine` lights
+  // the icon itself, because the panel being carried is going INTO it (L-168);
+  // `before` and `after` draw a boundary slot beside it, because it is going
+  // next to it. The icon used to light on `isOver` alone, which said "into
+  // this one" for all three.
+  // Whether this panel's SECTION is collapsed the way the body draws it: the
+  // flag only means anything while the panel is half of a pair, which is the
+  // same reading `LeftPanelSectionContent` applies.
+  const sectionCollapsed = useCallback(
+    (panelId: LeftPanelId): boolean =>
+      collapsedById[panelId] === true &&
+      isStackedRailPanel(rail, railRegionForLeftPanelId(panelId)),
+    [collapsedById, rail],
+  );
+  const previewPositionFor = (
+    panelId: LeftPanelId,
+  ): LeftPanelRailDropPosition | null =>
+    railPanelDropPreview?.kind === "left-panel-rail" &&
+    railPanelDropPreview.panelId === panelId
+      ? railPanelDropPreview.position
+      : null;
 
   // Compared against the icon that is LIT, not against `activePanelId`
   // (R5R-09): when the active panel is hidden the rail lights the fallback,
   // and clicking the lit icon has to collapse the column the way clicking a
   // lit icon always does rather than silently re-selecting it.
+  //
+  // One exception, and it is the state per-section collapse created (L-170):
+  // the lit panel can be displayed AND collapsed, and there the click means
+  // "put this section back", not "collapse the sidebar". Without it the only
+  // way out of a collapsed active section is the chevron inside a header the
+  // user has to find again, and the icon they reach for instead collapses the
+  // whole column.
   const handleClick = useCallback(
     (panelId: LeftPanelId) => {
-      if (panelId === displayedPanelId) {
+      if (panelId === displayedPanelId && !sectionCollapsed(panelId)) {
         toggleMainCollapsed(tabId);
         return;
       }
       setActivePanelIdAndExpand(tabId, panelId);
     },
-    [displayedPanelId, setActivePanelIdAndExpand, tabId, toggleMainCollapsed],
+    [
+      displayedPanelId,
+      sectionCollapsed,
+      setActivePanelIdAndExpand,
+      tabId,
+      toggleMainCollapsed,
+    ],
   );
 
   return (
@@ -294,12 +359,47 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                   />
                 );
               }
+              if (item.kind === "stack") {
+                return (
+                  <LeftPanelRailStack
+                    key={item.id}
+                    stackId={item.id}
+                    orientation={orientation}
+                    first={
+                      <RailPanelButton
+                        tabId={tabId}
+                        panel={item.top}
+                        orientation={orientation}
+                        active={item.top.id === displayedPanelId && !collapsed}
+                        combining={
+                          previewPositionFor(item.top.id) === "combine"
+                        }
+                        stacked
+                        onClick={() => handleClick(item.top.id)}
+                        onContextMenu={setContextPanelId}
+                      />
+                    }
+                    second={
+                      <RailPanelButton
+                        tabId={tabId}
+                        panel={item.bottom}
+                        orientation={orientation}
+                        active={
+                          item.bottom.id === displayedPanelId && !collapsed
+                        }
+                        combining={
+                          previewPositionFor(item.bottom.id) === "combine"
+                        }
+                        stacked
+                        onClick={() => handleClick(item.bottom.id)}
+                        onContextMenu={setContextPanelId}
+                      />
+                    }
+                  />
+                );
+              }
               const panelId = item.panel.id;
-              const previewPosition =
-                railPanelDropPreview?.kind === "left-panel-rail" &&
-                railPanelDropPreview.panelId === panelId
-                  ? railPanelDropPreview.position
-                  : null;
+              const previewPosition = previewPositionFor(panelId);
               return (
                 <Fragment key={panelId}>
                   {previewPosition === "before" ? (
@@ -313,6 +413,15 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                     panel={item.panel}
                     orientation={orientation}
                     active={panelId === displayedPanelId && !collapsed}
+                    combining={previewPosition === "combine"}
+                    // Read off the MODEL, not off what this rail drew (L-170):
+                    // a panel whose partner is hidden draws as a lone icon and
+                    // is still half of a pair, so asking the drawn shape let it
+                    // offer a combine the writer then refused.
+                    stacked={isStackedRailPanel(
+                      rail,
+                      railRegionForLeftPanelId(panelId),
+                    )}
                     onClick={() => handleClick(panelId)}
                     onContextMenu={setContextPanelId}
                   />
@@ -399,13 +508,30 @@ interface RailPanelButtonProps {
   readonly panel: LeftPanelMetadataDefinition;
   readonly orientation: RailOrientation;
   readonly active: boolean;
+  /** The drop is aimed at this icon's MIDDLE band, which stacks the two. */
+  readonly combining: boolean;
+  /**
+   * Already half of a pair, which is what refuses a combine drop on it: the
+   * drop target carries it, so the middle band answers no preview and nothing
+   * is highlighted for a gesture that would commit nothing (L-166, L-168).
+   */
+  readonly stacked: boolean;
   readonly onClick: () => void;
   /** Reports the panel under the pointer to the rail-wide context menu. */
   readonly onContextMenu: (panelId: LeftPanelId) => void;
 }
 
 function RailPanelButton(props: RailPanelButtonProps) {
-  const { tabId, panel, orientation, active, onClick, onContextMenu } = props;
+  const {
+    tabId,
+    panel,
+    orientation,
+    active,
+    combining,
+    stacked,
+    onClick,
+    onContextMenu,
+  } = props;
   const handleContextMenu = useCallback((): void => {
     onContextMenu(panel.id);
   }, [onContextMenu, panel.id]);
@@ -438,10 +564,11 @@ function RailPanelButton(props: RailPanelButtonProps) {
       viewTabId: tabId,
       panelId: panel.id,
       orientation,
+      stacked,
     }),
-    [orientation, panel.id, tabId],
+    [orientation, panel.id, stacked, tabId],
   );
-  const { setNodeRef: dropRef, isOver } = useDroppable({
+  const { setNodeRef: dropRef } = useDroppable({
     id: getPaneScopedDndId(tabId, getLeftPanelRailDropId(panel.id)),
     data: dropData,
   });
@@ -459,7 +586,7 @@ function RailPanelButton(props: RailPanelButtonProps) {
       orientation={orientation}
       active={active}
       isDragSource={isDragging}
-      isDropTarget={isOver}
+      isDropTarget={combining}
       testId={`epic-rail-${panel.id}`}
       onClick={onClick}
       onContextMenu={handleContextMenu}

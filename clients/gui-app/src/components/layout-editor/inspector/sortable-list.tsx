@@ -6,7 +6,13 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { ChevronRight, GripVertical, X, type LucideIcon } from "lucide-react";
+import {
+  ChevronRight,
+  GripVertical,
+  Rows2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { armLayoutDrag } from "@/components/layout-editor/canvas/drag-engine";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import {
@@ -39,6 +45,16 @@ export interface SortableListItem<Id extends string> {
   readonly glyph: ReactNode;
   /** A divider (L-155) rather than a region: a rule, with no state. */
   readonly divider: boolean;
+  /**
+   * Whether this row can be picked up at all.
+   *
+   * `false` for the rail's stack link and nothing else (L-168): the link is
+   * not a member the user places, it is the join between the two panels around
+   * it, and it moves when they do. A row that cannot move carries no grab, no
+   * grip and no reorder keys, so the list never offers a gesture that would
+   * write nothing.
+   */
+  readonly movable: boolean;
   /** Drawn muted: the member is hidden. */
   readonly dimmed: boolean;
   /** Differs from what shipped - the row's own changed dot (L-20, P-7). */
@@ -70,8 +86,20 @@ export interface SortableListItem<Id extends string> {
   readonly detail: ReactNode;
   readonly open: boolean;
   readonly onToggleOpen: (() => void) | null;
-  /** Taking the item out of the list altogether: a rail divider, and only that. */
+  /** Taking the item out of the list altogether: a rail divider or a stack link. */
   readonly onRemove: (() => void) | null;
+  /**
+   * What the Remove button is CALLED, where "Remove <name>" does not read as
+   * English: the stack link's name is a sentence about the panel above it, so
+   * its verb names the thing being undone instead ("Remove stack").
+   */
+  readonly removeLabel: string | null;
+  /**
+   * Joining this row to the one below it, for the rail's panels (L-168): the
+   * counterpart of the link row's Remove, offered on the panel ABOVE where a
+   * link could go and nowhere else.
+   */
+  readonly onStack: (() => void) | null;
   /** Opening a second level as its own screen (the dock's provider level). */
   readonly onActivate: (() => void) | null;
 }
@@ -147,6 +175,13 @@ export function SortableList<Id extends string>(
   // LV2-11 measured. Every page row can be reverted, and a list with a
   // removable member (the rail's dividers) reserves it in the dock too.
   const reserveSlot = page || items.some((item) => item.onRemove !== null);
+  // The Stack verb is per-ROW - the two stacked panels have none and the last
+  // panel has none - so it gets a slot of its own on the same terms (L-122,
+  // L-170). Rendered inline it moved the whole control column by its own width
+  // on the rows that happened to carry it, and moved it again the moment a
+  // stack was made or removed, which is exactly the jump the Remove slot is
+  // reserved to prevent.
+  const reserveStackSlot = items.some((item) => item.onStack !== null);
   const gutter = sortableRowPadding(page, compact);
 
   // While an item is grabbed the list draws where it WOULD land. Nothing is
@@ -244,7 +279,10 @@ export function SortableList<Id extends string>(
       if (row === null) return;
       if (grab !== null && grab.id !== row.item.id) return;
       const arrow = arrowDelta(event.key);
-      if (event.key === " " && !ordered) {
+      // An unmovable row keeps Enter and its own activation and loses the
+      // reorder gestures entirely: the stack link moves with its panels.
+      const rowOrdered = ordered && row.item.movable;
+      if (event.key === " " && !rowOrdered) {
         // An unordered list has nothing to grab, so Space is the row's own
         // activation - the same thing Enter and a click do.
         event.preventDefault();
@@ -259,7 +297,11 @@ export function SortableList<Id extends string>(
         event.preventDefault();
         event.stopPropagation();
         cancelGrab(grab, row.item.label);
-      } else if (arrow !== null && ordered && (grab !== null || event.altKey)) {
+      } else if (
+        arrow !== null &&
+        rowOrdered &&
+        (grab !== null || event.altKey)
+      ) {
         // Without a grab the arrows belong to the index's own walk unless the
         // modifier L-31 names is held.
         event.preventDefault();
@@ -283,9 +325,10 @@ export function SortableList<Id extends string>(
 
   function handlePointerDown(
     event: ReactPointerEvent<HTMLDivElement>,
-    id: Id,
+    item: SortableListItem<Id>,
   ): void {
-    if (grab !== null || !ordered) return;
+    const id = item.id;
+    if (grab !== null || !ordered || !item.movable) return;
     // A control in the row is a control, not a handle.
     if (
       event.target instanceof Element &&
@@ -335,10 +378,11 @@ export function SortableList<Id extends string>(
             page={page}
             gutter={gutter}
             reserveSlot={reserveSlot}
+            reserveStackSlot={reserveStackSlot}
             selected={item.id === selectedId}
             grabbed={grab?.id === item.id}
             onPointerDown={(event) => {
-              handlePointerDown(event, item.id);
+              handlePointerDown(event, item);
             }}
             onBlur={() => {
               if (grab !== null && grab.id === item.id)
@@ -379,6 +423,7 @@ function SortableRow<Id extends string>(props: {
   readonly page: boolean;
   readonly gutter: SortableRowPadding;
   readonly reserveSlot: boolean;
+  readonly reserveStackSlot: boolean;
   readonly selected: boolean;
   readonly grabbed: boolean;
   readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -390,6 +435,7 @@ function SortableRow<Id extends string>(props: {
     page,
     gutter,
     reserveSlot,
+    reserveStackSlot,
     selected,
     grabbed,
     onPointerDown,
@@ -426,10 +472,11 @@ function SortableRow<Id extends string>(props: {
     >
       <SortableRowLine
         item={item}
-        instructionsId={instructionsId}
+        instructionsId={item.movable ? instructionsId : null}
         hintId={item.hint === null ? null : hintId}
         padding={item.divider ? gutter.divider : gutter.row}
         reserveSlot={reserveSlot}
+        reserveStackSlot={reserveStackSlot}
         onPointerDown={onPointerDown}
       />
       {open ? (
@@ -521,11 +568,20 @@ function SortableRowLine<Id extends string>(props: {
   /** The row's own gutter and type scale, decided once by the list. */
   readonly padding: string;
   readonly reserveSlot: boolean;
+  readonly reserveStackSlot: boolean;
   readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }): ReactNode {
-  const { item, instructionsId, hintId, padding, reserveSlot, onPointerDown } =
-    props;
+  const {
+    item,
+    instructionsId,
+    hintId,
+    padding,
+    reserveSlot,
+    reserveStackSlot,
+    onPointerDown,
+  } = props;
   const onRemove = item.onRemove;
+  const onStack = item.onStack;
   const described = [instructionsId, hintId]
     .filter((id): id is string => id !== null)
     .join(" ");
@@ -582,6 +638,32 @@ function SortableRowLine<Id extends string>(props: {
         </div>
         <div className="flex shrink-0 items-center gap-1.5 max-md:ml-auto">
           {item.control}
+          {/* The counterpart of the link row's Remove (L-168), on the panel
+            ABOVE where the link would go, in a slot the list reserves for the
+            whole column (L-122). Offered only where it can be taken: the
+            builder returns `null` unless the row below is a panel and neither
+            is already stacked. */}
+          {reserveStackSlot ? (
+            <div
+              data-stack-slot
+              className="flex size-6 shrink-0 items-center justify-center"
+            >
+              {onStack === null ? null : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Stack ${item.label.toLowerCase()} with the panel below`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStack();
+                  }}
+                >
+                  <Rows2 />
+                </Button>
+              )}
+            </div>
+          ) : null}
           {/* Fixed, and empty when there is nothing to put in it: the
             right-hand column of a list must not move because one row's value
             changed (L-122, LV2-11). A divider's Remove is the same slot - it
@@ -598,7 +680,9 @@ function SortableRowLine<Id extends string>(props: {
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={`Remove ${item.label.toLowerCase()}`}
+                  aria-label={
+                    item.removeLabel ?? `Remove ${item.label.toLowerCase()}`
+                  }
                   onClick={(event) => {
                     event.stopPropagation();
                     onRemove();

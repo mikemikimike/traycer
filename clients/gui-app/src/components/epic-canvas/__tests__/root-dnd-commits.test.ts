@@ -7,6 +7,7 @@ import {
   resolveRailForDrop,
 } from "@/components/epic-canvas/dnd/root-dnd-commits";
 import type { EpicCanvasDragSourceData } from "@/components/epic-canvas/dnd/dnd";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import { useLeftPanelStore } from "@/stores/epics/left-panel-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -254,7 +255,7 @@ function seedCanvasWithTerminalTile(): void {
 }
 
 function railSource(
-  panelId: "artifacts" | "git-diff" | "file-tree",
+  panelId: LeftPanelId,
   origin: "rail" | "panel-section",
 ): Extract<
   EpicCanvasDragSourceData,
@@ -354,6 +355,7 @@ describe("root dnd commits - left panel", () => {
       kind: "left-panel-rail-item",
       panelId: "terminals",
       orientation: "horizontal",
+      stacked: false,
     } as const;
     for (const y of [2, 18, 34]) {
       expect(
@@ -404,6 +406,7 @@ describe("root dnd commits - left panel", () => {
       kind: "left-panel-rail-item",
       panelId: "terminals",
       orientation: "vertical",
+      stacked: false,
     } as const;
     for (const x of [2, 18, 34]) {
       expect(
@@ -452,13 +455,62 @@ describe("root dnd commits - left panel", () => {
     ]);
   });
 
+  it("resolves a stacked body drop against the section under the pointer", () => {
+    // Agents active and stacked above Artifacts: the target still names the
+    // ACTIVE panel, and the pointer is in the LOWER section. Resolving both
+    // halves against the active panel put the boundary line on the wrong
+    // section and committed a placement that broke the pair (L-170).
+    const bodyElement = document.createElement("div");
+    bodyElement.append(
+      makeRectElement("chats", { x: 0, y: 0, width: 320, height: 400 }),
+      makeRectElement("artifacts", { x: 0, y: 400, width: 320, height: 400 }),
+    );
+    const source = railSource("file-tree", "rail");
+    const target = {
+      kind: "left-panel-body",
+      panelId: "chats",
+    } as const;
+
+    const preview = resolveCanvasDropPreview({
+      source,
+      target,
+      point: { x: 120, y: 700 },
+      targetRect: null,
+      targetElement: bodyElement,
+      activeRect: null,
+    });
+
+    expect(preview).toEqual({
+      kind: "left-panel-section",
+      viewTabId: undefined,
+      panelId: "artifacts",
+      position: "after",
+    });
+
+    commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
+
+    // Placed after Artifacts, so the pair survives the drop.
+    expect(currentLayoutArrangement().rail.map((entry) => entry.id)).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+      "railFileTree",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railSharing",
+      "railComments",
+    ]);
+  });
+
   it("inserts a panel at a section boundary via the body's section bounds", () => {
     const groupElement = document.createElement("div");
     groupElement.append(
       makeRectElement("chats", { x: 0, y: 0, width: 320, height: 900 }),
     );
     const source = railSource("file-tree", "rail");
-    // The body always draws exactly one panel now (L-155).
+    // A lone panel: the body draws one section and the target names it.
     const target = {
       kind: "left-panel-body",
       panelId: "chats",
@@ -643,6 +695,89 @@ describe("root dnd commits - left panel drop resolver", () => {
     ]);
   });
 
+  it("stacks the two panels for a drop in the middle band (L-168)", () => {
+    expect(
+      resolveRailForDrop(
+        railSource("terminals", "rail"),
+        {
+          kind: "left-panel-rail",
+          panelId: "browsers",
+          position: "combine",
+        },
+        DEFAULT_ARRANGEMENT,
+      ),
+    ).toEqual([
+      { kind: "panel", id: "railAgents" },
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "stack", id: "stack:railBrowsers+railTerminals" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+    ]);
+  });
+
+  it("only reorders for a drop in an outer band", () => {
+    const after = resolveRailForDrop(
+      railSource("terminals", "rail"),
+      { kind: "left-panel-rail", panelId: "browsers", position: "after" },
+      DEFAULT_ARRANGEMENT,
+    );
+
+    expect(after).not.toBeNull();
+    expect(after?.filter((entry) => entry.kind === "stack")).toEqual([
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
+    ]);
+    expect(after?.map((entry) => entry.id).slice(3, 5)).toEqual([
+      "railBrowsers",
+      "railTerminals",
+    ]);
+  });
+
+  it("lets a stacked SOURCE leave its old pair and join a new one (L-170)", () => {
+    // Agents ships joined to Artifacts, so this is the first stacking gesture
+    // most users will try. The middle band lights for it, so it has to mean
+    // something: the old join goes and Artifacts stands alone.
+    const next = resolveRailForDrop(
+      railSource("chats", "rail"),
+      { kind: "left-panel-rail", panelId: "terminals", position: "combine" },
+      DEFAULT_ARRANGEMENT,
+    );
+
+    expect(next?.map((entry) => entry.id)).toEqual([
+      "railArtifacts",
+      "railTerminals",
+      "stack:railTerminals+railAgents",
+      "railAgents",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+  });
+
+  it("refuses to stack onto a panel that is already half of a pair", () => {
+    // Artifacts is the shipped rail's one stacked panel: a stack joins exactly
+    // two (L-166), so the drop commits nothing rather than replacing a member.
+    expect(
+      resolveRailForDrop(
+        railSource("terminals", "rail"),
+        {
+          kind: "left-panel-rail",
+          panelId: "artifacts",
+          position: "combine",
+        },
+        DEFAULT_ARRANGEMENT,
+      ),
+    ).toEqual(DEFAULT_ARRANGEMENT.rail);
+  });
+
   it("returns null for non-left-panel previews", () => {
     expect(
       resolveRailForDrop(
@@ -679,6 +814,9 @@ describe("root dnd commits - left panel drop resolver", () => {
           kind: "left-panel-rail-item",
           panelId: "chats",
           orientation: "vertical",
+          // Agents ships joined to Artifacts (L-166); an outer-band reorder is
+          // offered on a stacked icon all the same.
+          stacked: true,
         },
         preview,
       },

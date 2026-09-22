@@ -121,7 +121,7 @@ function rowChanged(
   }
 }
 
-/** One order group's members, in order, dividers excluded. */
+/** One order group's REGIONS, in order; the rail's non-region entries out. */
 function groupRegionIds(
   arrangement: LayoutArrangement,
   group: OrderGroupId,
@@ -137,7 +137,7 @@ function groupRegionIds(
       return arrangement.usageProviders;
     case "rail":
       return arrangement.rail.flatMap((entry) =>
-        entry.kind === "divider" ? [] : [entry.id],
+        entry.kind === "panel" ? [entry.id] : [],
       );
   }
 }

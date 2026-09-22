@@ -12,7 +12,7 @@ import {
 
 /**
  * The sidebar group's lines in document order, each named by what it is: a
- * region row by its region id, a divider by its own id.
+ * region row by its region id, a divider or a stack link by its own id.
  *
  * Read off the DOM rather than off a test-only hook, because the order on
  * screen is the whole subject (LV2-09) - the index used to draw the nine
@@ -20,11 +20,13 @@ import {
  */
 function sidebarLineIds(): ReadonlyArray<string> {
   const lines = document.querySelectorAll<HTMLElement>(
-    '[data-region-id^="rail"], [data-rail-divider]',
+    '[data-region-id^="rail"], [data-rail-divider], [data-rail-stack-link]',
   );
   return [...lines].map((line) => {
     const divider = line.getAttribute("data-rail-divider");
     if (divider !== null) return divider;
+    const link = line.getAttribute("data-rail-stack-link");
+    if (link !== null) return link;
     const regionId = line.getAttribute("data-region-id");
     if (regionId === null) throw new Error("a sidebar line named nothing");
     return regionId;
@@ -36,7 +38,7 @@ function railLineIds(rail: ReadonlyArray<RailEntry>): ReadonlyArray<string> {
 }
 
 function railPanelIds(rail: ReadonlyArray<RailEntry>): ReadonlyArray<string> {
-  return rail.flatMap((entry) => (entry.kind === "divider" ? [] : [entry.id]));
+  return rail.flatMap((entry) => (entry.kind === "panel" ? [entry.id] : []));
 }
 
 /** What the index listed before it read the rail: the registry's own order. */
@@ -91,6 +93,37 @@ describe("the sidebar index follows the rail (LV2-09, LV4-05)", () => {
     );
   });
 
+  it("shows the shipped stack link between its two panels (L-166)", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+
+    // The same membership rule the divider follows: both lists are
+    // `arrangement.rail` in order (LV4-05).
+    expect(sidebarLineIds().slice(0, 3)).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+    ]);
+    const link = document.querySelector<HTMLElement>("[data-rail-stack-link]");
+    expect(link?.getAttribute("aria-label")).toBe(
+      "Stacked with the panel below",
+    );
+  });
+
+  it("steps an arrow over a stack link", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+
+    const row = document.querySelector<HTMLElement>(
+      '[data-region-id="railAgents"]',
+    );
+    if (row === null) throw new Error("no Agents row");
+    row.focus();
+    fireEvent.keyDown(row, { key: "ArrowDown" });
+
+    expect(document.activeElement?.getAttribute("data-region-id")).toBe(
+      "railArtifacts",
+    );
+  });
+
   it("shows EVERY divider the rail holds, wherever it sits", () => {
     render(<InspectorIndex onPreviewPreset={() => {}} />);
 
@@ -126,8 +159,8 @@ describe("the sidebar index follows the rail (LV2-09, LV4-05)", () => {
   });
 
   it("drops every divider while a filter is on", () => {
-    // A filtered index is a search result, not the rail's picture: a rule
-    // between two rows that are no longer adjacent would say something
+    // A filtered index is a search result, not the rail's picture: a rule or a
+    // link between two rows that are no longer adjacent would say something
     // untrue, so the one exception to the membership rule is stated here.
     setRail([
       { kind: "panel", id: "railAgents" },

@@ -211,7 +211,7 @@ describe("Settings - Layout", () => {
 
       expect(
         screen.getAllByText(
-          "Drag to reorder, here or on the canvas. Add a divider to space icons apart.",
+          "Drag to reorder, here or on the canvas. Drop one icon onto the middle of another to stack them in one panel. Add a divider to space icons apart.",
         ),
       ).toHaveLength(1);
       expect(

@@ -112,6 +112,8 @@ interface PersistedLeftPanelState {
     readonly activePanelIdByTabId: Readonly<Record<string, string>>;
     readonly mainCollapsedByTabId: Readonly<Record<string, boolean>>;
     readonly sidebarWidthPx: number;
+    readonly panelSectionCollapsedByPanelId: Readonly<Record<string, boolean>>;
+    readonly panelSectionWeightsByPanelId: Readonly<Record<string, number>>;
     readonly chatFilterByEpicId: Readonly<Record<string, ChatFilter>>;
     readonly chatArchiveVisibilityByEpicId: Readonly<Record<string, string>>;
     readonly artifactFilterByEpicId: Readonly<Record<string, ArtifactFilter>>;
@@ -131,6 +133,8 @@ function resetStore(): void {
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
     sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
+    panelSectionCollapsedByPanelId: {},
+    panelSectionWeightsByPanelId: {},
     commentsPanelRevealedByTabId: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},
@@ -220,6 +224,10 @@ describe("useLeftPanelStore", () => {
         activePanelIdByTabId: {},
         mainCollapsedByTabId: {},
         sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
+        // A stack's split and its per-section collapse persist here (L-166);
+        // both are empty until the user drags a handle or presses a chevron.
+        panelSectionCollapsedByPanelId: {},
+        panelSectionWeightsByPanelId: {},
         chatFilterByEpicId: {},
         chatArchiveVisibilityByEpicId: {},
         artifactFilterByEpicId: {},
@@ -771,5 +779,48 @@ describe("useLeftPanelStore", () => {
     const cleared = useLeftPanelStore.getState();
     clearRailVisibilityOverrides();
     expect(useLeftPanelStore.getState()).toBe(cleared);
+  });
+});
+
+describe("a stacked pair's split and collapse (L-166)", () => {
+  beforeEach(resetStore);
+  afterEach(resetStore);
+
+  it("persists a collapsed section and drops it again when it expands", () => {
+    useLeftPanelStore.getState().togglePanelSectionCollapsed("artifacts");
+
+    expect(
+      readPersistedLeftPanelState().state.panelSectionCollapsedByPanelId,
+    ).toEqual({ artifacts: true });
+
+    useLeftPanelStore.getState().togglePanelSectionCollapsed("artifacts");
+
+    // Only the collapsed ones are written: an expanded section is the absence
+    // of a record rather than a `false` in every user's blob.
+    expect(
+      readPersistedLeftPanelState().state.panelSectionCollapsedByPanelId,
+    ).toEqual({});
+  });
+
+  it("clears a section's collapse when that panel is focused", () => {
+    useLeftPanelStore.getState().togglePanelSectionCollapsed("artifacts");
+    useLeftPanelStore
+      .getState()
+      .setActivePanelIdAndExpand("tab-a", "artifacts");
+
+    expect(
+      useLeftPanelStore.getState().panelSectionCollapsedByPanelId.artifacts,
+    ).toBe(false);
+  });
+
+  it("persists the split the user dragged the handle to", () => {
+    useLeftPanelStore.getState().setPanelSectionWeights([
+      { panelId: "chats", weight: 33.333 },
+      { panelId: "artifacts", weight: 66.667 },
+    ]);
+
+    expect(
+      readPersistedLeftPanelState().state.panelSectionWeightsByPanelId,
+    ).toEqual({ chats: 33.33, artifacts: 66.67 });
   });
 });

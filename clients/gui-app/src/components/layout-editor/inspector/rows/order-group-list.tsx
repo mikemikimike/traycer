@@ -7,8 +7,9 @@ import { assertNever } from "@/components/layout-editor/inspector/rows/assert-ne
 import {
   dividerOrderItem,
   providerOrderItems,
-  regionRowItem,
+  railPanelOrderItem,
   regionRowItems,
+  stackOrderItem,
   type SortableRowDecorator,
 } from "@/components/layout-editor/inspector/rows/order-row-items";
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
@@ -221,13 +222,17 @@ function OrderGroupRows(props: {
         <SortableList<string>
           label={orderGroupListLabel(group)}
           selectedId={selectedId}
-          items={arrangement.rail.map((entry) =>
-            entry.kind === "divider"
-              ? dividerOrderItem(entry.id, arrangement)
-              : regionRowItem(entry.id, values, decorate),
-          )}
-          // Panels and dividers alike (L-155): the rail is one flat list and
-          // a divider is a member of it like any other.
+          items={arrangement.rail.map((entry) => {
+            if (entry.kind === "divider")
+              return dividerOrderItem(entry.id, arrangement);
+            if (entry.kind === "stack")
+              return stackOrderItem(entry.id, arrangement);
+            return railPanelOrderItem(entry.id, arrangement, values, decorate);
+          })}
+          // Panels, dividers and stack links alike (L-155, L-166): the rail is
+          // one flat list and the Position list is that list in order. Only
+          // the first two are draggable - a link moves with its panels, and
+          // the row says so by carrying no grab (L-168).
           onMove={(id, toIndex) => {
             writeArrangement(moveRailEntry(arrangement, id, toIndex));
           }}

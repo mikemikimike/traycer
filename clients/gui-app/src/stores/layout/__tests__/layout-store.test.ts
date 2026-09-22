@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { visibleRailPanelIds, type RailEntry } from "@/lib/layout/rail";
+import type { RailRegionId } from "@/lib/layout/region-id";
 import {
   changeCount,
   regionChanged,
@@ -22,7 +23,7 @@ import {
 } from "@/stores/layout/layout-store";
 
 const LAYOUT_KEY = persistKey(STORE_KEYS.layout);
-const LAYOUT_VERSION = 3;
+const LAYOUT_VERSION = 4;
 
 /** Every panel the rail holds, hiding nothing. */
 function everyRailPanelId(
@@ -167,6 +168,17 @@ function expectCarried(snapshot: LayoutSnapshot, label: string): void {
     snapshot.arrangement.rail.filter((entry) => entry.kind === "divider"),
     label,
   ).toEqual([]);
+  // A shipped group of two adjacent panels was two panels the sidebar drew
+  // TOGETHER, which is a stack (L-166); a group of one was every lone panel,
+  // which was structure. Both of this record's pairs carry, and nothing else
+  // does.
+  expect(
+    snapshot.arrangement.rail.filter((entry) => entry.kind === "stack"),
+    label,
+  ).toEqual([
+    { kind: "stack", id: "stack:railComments+railAgents" },
+    { kind: "stack", id: "stack:railArtifacts+railTerminals" },
+  ]);
 }
 
 describe("useLayoutStore", () => {
@@ -628,12 +640,14 @@ describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
 });
 
 /**
- * The record a dogfooder already has (L-158).
+ * The record a dogfooder already has (L-158, L-166).
  *
  * The one-shot carry above only runs for a machine that has NO layout record,
  * so it cannot reach anyone who opened this branch before L-155: their rail
  * holds the seven dividers the shipped default put between every panel, which
- * is structure this build no longer has rather than spacers they placed.
+ * is structure this build no longer has rather than spacers they placed - and
+ * then, after L-155 and before L-166, no stack at all, because stacks did not
+ * exist in that window.
  */
 describe("the version-3 migration off the shipped dividers (L-158)", () => {
   beforeEach(reset);
@@ -713,7 +727,7 @@ describe("the version-3 migration off the shipped dividers (L-158)", () => {
   });
 
   it("keeps a divider in a record this build already wrote", async () => {
-    // Version 3 is this build's own shape: a divider in it is one the user
+    // Version 4 is this build's own shape: a divider in it is one the user
     // placed, and the migration must not reach it.
     writeLayoutRecordAtVersion(
       {
@@ -730,7 +744,7 @@ describe("the version-3 migration off the shipped dividers (L-158)", () => {
         },
         layoutCarryDone: true,
       },
-      3,
+      4,
     );
     await useLayoutStore.persist.rehydrate();
 
@@ -739,5 +753,114 @@ describe("the version-3 migration off the shipped dividers (L-158)", () => {
         .getState()
         .arrangement.rail.filter((entry) => entry.kind === "divider"),
     ).toEqual([{ kind: "divider", id: "divider:1" }]);
+  });
+});
+
+/**
+ * The same record one ruling later (L-166).
+ *
+ * Stacking did not exist between L-155 and L-166, so a version-3 record names
+ * no stack and nothing in it distinguishes "I never had one" from "I moved
+ * those two apart". What it DOES say is whether the default pair is still
+ * adjacent, and that is the whole of the rule.
+ */
+describe("the version-4 migration back onto the default stack (L-166)", () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  /** The nine panels in some order, with no link and no divider. */
+  function flatRail(
+    order: ReadonlyArray<RailRegionId>,
+  ): ReadonlyArray<RailEntry> {
+    return order.map((id): RailEntry => ({ kind: "panel", id }));
+  }
+
+  async function rehydrateV3Rail(
+    rail: ReadonlyArray<RailEntry>,
+  ): Promise<void> {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: {},
+        arrangement: { ...DEFAULT_ARRANGEMENT, rail },
+        layoutCarryDone: true,
+      },
+      3,
+    );
+  }
+
+  it("gives the default stack to a rail whose default pair is still adjacent", async () => {
+    await rehydrateV3Rail(
+      flatRail([
+        "railAgents",
+        "railArtifacts",
+        "railTerminals",
+        "railBrowsers",
+        "railGitDiff",
+        "railPullRequests",
+        "railFileTree",
+        "railSharing",
+        "railComments",
+      ]),
+    );
+
+    expect(
+      useLayoutStore
+        .getState()
+        .arrangement.rail.filter((entry) => entry.kind === "stack"),
+    ).toEqual([{ kind: "stack", id: "stack:railAgents+railArtifacts" }]);
+  });
+
+  it("gives none to a rail where the user moved one of the two", async () => {
+    await rehydrateV3Rail(
+      flatRail([
+        "railAgents",
+        "railTerminals",
+        "railArtifacts",
+        "railBrowsers",
+        "railGitDiff",
+        "railPullRequests",
+        "railFileTree",
+        "railSharing",
+        "railComments",
+      ]),
+    );
+
+    const rail = useLayoutStore.getState().arrangement.rail;
+    expect(rail.filter((entry) => entry.kind === "stack")).toEqual([]);
+    expect(everyRailPanelId(rail)).toEqual([
+      "chats",
+      "terminals",
+      "artifacts",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
+  });
+
+  it("gives none when a divider the user placed sits between them", async () => {
+    await rehydrateV3Rail([
+      { kind: "panel", id: "railAgents" },
+      { kind: "divider", id: "divider:1" },
+      ...flatRail([
+        "railArtifacts",
+        "railTerminals",
+        "railBrowsers",
+        "railGitDiff",
+        "railPullRequests",
+        "railFileTree",
+        "railSharing",
+        "railComments",
+      ]),
+    ]);
+
+    const rail = useLayoutStore.getState().arrangement.rail;
+    expect(rail.filter((entry) => entry.kind === "stack")).toEqual([]);
+    expect(rail.filter((entry) => entry.kind === "divider")).toEqual([
+      { kind: "divider", id: "divider:1" },
+    ]);
   });
 });

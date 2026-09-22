@@ -60,9 +60,10 @@ export const ORDER_GROUPS: Readonly<Record<OrderGroupId, OrderGroupFacts>> = {
   rail: {
     label: null,
     // The rail's icons are canvas-draggable too now (L-115), so its line says
-    // what the other three canvas groups' lines say.
+    // what the other three canvas groups' lines say, plus the two things only
+    // this list can do (L-155, L-168).
     description:
-      "Drag to reorder, here or on the canvas. Add a divider to space icons apart.",
+      "Drag to reorder, here or on the canvas. Drop one icon onto the middle of another to stack them in one panel. Add a divider to space icons apart.",
     note: null,
     dividers: true,
   },
