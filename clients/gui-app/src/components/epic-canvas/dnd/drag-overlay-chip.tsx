@@ -24,6 +24,7 @@ import { managedCommandTitle } from "@/lib/managed-commands/managed-command-copy
 import { useManagedCommandOnHost } from "@/stores/managed-commands/managed-commands-for-chat";
 import { HeaderTabDragOverlay } from "@/components/layout/tabs/tab-strip-drag-overlay";
 import { SplitTabDragOverlay } from "@/components/layout/tabs/split-tab-drag-overlay";
+import { SideTabDragOverlay } from "@/components/layout/tabs/side-strip/side-tab-drag-overlay";
 import {
   useAppearanceHeaderStripItem,
   useHeaderTabs,
@@ -203,7 +204,23 @@ function HeaderTabOverlayChip(props: {
   const isActive = useTabsStore(
     (state) => state.activeItemId === props.tab.stripItemId,
   );
+  const axis = useEpicDndStore((state) => state.headerStripAxis);
+  const size = useEpicDndStore((state) => state.headerStripSourceSize);
   if (item === null) return null;
+  // A vertical strip's drag carries a row (or a row pair), not a tab.
+  if (axis === "y") {
+    return (
+      <HeaderTabOverlayIndicators>
+        <SideTabDragOverlay
+          item={item}
+          ghost={ghost}
+          size={size}
+          source={props.tab}
+          isActive={isActive}
+        />
+      </HeaderTabOverlayIndicators>
+    );
+  }
   if (item.kind === "tab" && ghost !== null) {
     return (
       <HeaderTabDragOverlay tab={item.tab} ghost={ghost} width={props.width} />

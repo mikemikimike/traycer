@@ -56,13 +56,21 @@ export interface SideTabRowClose {
   readonly onClose: () => void;
 }
 
+/**
+ * A row's (or a split pair's) element props: the div's own props plus its
+ * data attributes. No `style`: the row's inline style is its tint alone, and a
+ * strip moves a row through the frame around it.
+ */
+export type SideRowFrame = Omit<ComponentPropsWithRef<"div">, "style"> & {
+  readonly [key: `data-${string}`]: string | number | boolean;
+};
+
 export interface SideTabRowProps {
   /**
    * The row element's own props (role, aria, data-*, handlers, ref, drag
-   * listeners), spread onto it. No `style`: the row's inline style is its
-   * tint alone, and a strip moves a row through the frame around it.
+   * listeners), spread onto it.
    */
-  readonly frame: Omit<ComponentPropsWithRef<"div">, "style">;
+  readonly frame: SideRowFrame;
   readonly variant: SideTabRowVariant;
   readonly active: boolean;
   /** Set only on the sample-workspace tab: its session state (L-163). */
@@ -480,7 +488,7 @@ function TileContent(props: { readonly tile: SideTabTile }) {
 /**
  * The collapsed row's full title, on the side facing the content: left of a
  * right-edge strip, right of anything else. The edge is read from the
- * scroller's `data-strip-edge` as the pointer or focus arrives. Always
+ * strip's `data-edge` as the pointer or focus arrives. Always
  * mounted, so switching variants keeps the row element; closed whenever it is
  * not allowed (expanded, or the row is part of a drag).
  */
@@ -493,8 +501,8 @@ function SideTabRowHoverCard(props: {
   const [open, setOpen] = useState(false);
   const readSide = (event: { readonly currentTarget: Element }) => {
     const edge = event.currentTarget
-      .closest("[data-strip-edge]")
-      ?.getAttribute("data-strip-edge");
+      .closest("[data-edge]")
+      ?.getAttribute("data-edge");
     setSide(edge === "right" ? "left" : "right");
   };
   return (

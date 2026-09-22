@@ -4,10 +4,7 @@ import type { NotificationIndicatorState } from "@/stores/notifications/notifica
 import type { EpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import type { HeaderTabAppearance, TabIcon } from "@/stores/tabs/types";
 import { cn } from "@/lib/utils";
-
-const iconSegmenter = new Intl.Segmenter(undefined, {
-  granularity: "grapheme",
-});
+import { firstGraphemes } from "./side-strip/tab-monogram";
 
 /** Paints custom identity beside the resolved activity and notification state. */
 export function TabLeadingIcon(props: {
@@ -19,9 +16,7 @@ export function TabLeadingIcon(props: {
   readonly tabId: string;
 }) {
   const identity = props.identity;
-  const iconCharacters = Array.from(
-    iconSegmenter.segment(identity?.icon?.trim() ?? ""),
-  ).slice(0, 2);
+  const iconCharacters = firstGraphemes(identity?.icon ?? "", 2);
   let defaultIcon: React.ReactNode = null;
   if (props.titleGenerationPending) {
     defaultIcon = (
@@ -76,7 +71,7 @@ export function TabLeadingIcon(props: {
                 : "text-micro font-medium",
             )}
           >
-            {iconCharacters.map(({ segment }) => segment).join("")}
+            {iconCharacters.join("")}
           </span>
         </span>
       ) : null}

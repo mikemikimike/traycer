@@ -40,8 +40,17 @@ export function appColumnChrome(input: AppColumnChromeInput): AppColumnChrome {
   const { placement } = input;
   if (placement === "top") return { placement, titleBand: "header" };
   if (!input.frameless) return { placement, titleBand: "none" };
-  if (input.platform === "darwin" && placement === "left") {
-    return { placement, titleBand: "none" };
-  }
+  if (sideStripOwnsTitleBar(input)) return { placement, titleBand: "none" };
   return { placement, titleBand: "band" };
+}
+
+/**
+ * Whether a side strip's top block is the window's title bar (S-04): only on
+ * a frameless macOS window with the strip at the left, where no band is drawn
+ * and the strip's first row sits under the traffic lights.
+ */
+export function sideStripOwnsTitleBar(input: AppColumnChromeInput): boolean {
+  return (
+    input.frameless && input.platform === "darwin" && input.placement === "left"
+  );
 }

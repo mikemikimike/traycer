@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { appColumnChrome } from "@/components/layout/header/app-title-band-kind";
+import {
+  appColumnChrome,
+  sideStripOwnsTitleBar,
+} from "@/components/layout/header/app-title-band-kind";
 
 const PLATFORMS = ["darwin", "win32", "linux", null] as const;
 
@@ -53,4 +56,18 @@ describe("appColumnChrome", () => {
       }
     },
   );
+});
+
+describe("sideStripOwnsTitleBar", () => {
+  it("is true only on a frameless macOS window with the strip at the left", () => {
+    for (const placement of ["top", "left", "right"] as const) {
+      for (const platform of PLATFORMS) {
+        for (const frameless of [true, false]) {
+          expect(
+            sideStripOwnsTitleBar({ placement, platform, frameless }),
+          ).toBe(frameless && platform === "darwin" && placement === "left");
+        }
+      }
+    }
+  });
 });

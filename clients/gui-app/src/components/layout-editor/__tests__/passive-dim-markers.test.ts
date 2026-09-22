@@ -64,10 +64,15 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
     // ancestor cannot be undone below it (L-132). It is counted here because
     // it is the same marker in the same place - what changed is which box the
     // dim lands on, and the leaf rule is exactly why it had to change.
+    // The vertical strip is the same item in its other presentation: its row
+    // list dims each row the same way, and its collapse toggle sits beside
+    // the shared add button.
     item: "tab-strip.tsx: the tab items and the add button, not the Home item",
     files: {
       "components/layout/tabs/tab-strip.tsx": 1,
       "components/layout/tabs/tab-strip-new-button.tsx": 1,
+      "components/layout/tabs/side-strip/side-strip-row-list.tsx": 1,
+      "components/layout/tabs/side-strip/side-strip-top-block.tsx": 1,
     },
     deviation: null,
   },

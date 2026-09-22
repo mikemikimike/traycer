@@ -402,7 +402,7 @@ describe("SideTabRow collapsed", () => {
       ["right", "left"],
     ] as const) {
       render(
-        <div data-strip-edge={edge}>
+        <div data-edge={edge}>
           <SideTabRow
             {...baseProps()}
             variant="collapsed"

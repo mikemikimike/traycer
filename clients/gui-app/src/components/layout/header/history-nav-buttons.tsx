@@ -9,6 +9,14 @@ import {
 } from "@/lib/history-navigation";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { useBindingForAction } from "@/stores/settings/keybinding-store";
+import { cn } from "@/lib/utils";
+
+/** How the two arrows lay out: a row in a title bar, a column in the rail. */
+export type HistoryNavOrientation = "row" | "column";
+
+interface HistoryNavButtonsProps {
+  readonly orientation: HistoryNavOrientation;
+}
 
 /**
  * In-app back/forward arrows for the desktop title bar. Walk the global
@@ -21,12 +29,12 @@ import { useBindingForAction } from "@/stores/settings/keybinding-store";
  * router tree, where `useRouter()` is non-null; the `host-loading` header
  * renders above the router and never mounts these arrows.
  */
-export function HistoryNavButtons() {
+export function HistoryNavButtons(props: HistoryNavButtonsProps) {
   const available = useHistoryNavAvailable();
   if (!available) {
     return null;
   }
-  return <HistoryNavArrows />;
+  return <HistoryNavArrows orientation={props.orientation} />;
 }
 
 /**
@@ -37,7 +45,7 @@ export function HistoryNavButtons() {
  * for the life of a router (it is a property of the history that router was
  * built with), so this boundary is stable and costs no remount.
  */
-function HistoryNavArrows() {
+function HistoryNavArrows(props: HistoryNavButtonsProps) {
   const router = useRouter();
   const { canGoBack, canGoForward } = useHistoryNavState();
   const backChord = useBindingForAction("nav.back");
@@ -58,7 +66,10 @@ function HistoryNavArrows() {
     // the arrows stay clickable on frameless desktop.
     <div
       data-layout-passive
-      className="flex shrink-0 items-center [-webkit-app-region:no-drag]"
+      className={cn(
+        "flex shrink-0 items-center [-webkit-app-region:no-drag]",
+        props.orientation === "column" && "flex-col",
+      )}
     >
       {/* Tooltip trigger is the wrapping <span>, not the Button: a disabled
           Button receives no pointer events, so a tooltip attached directly to it

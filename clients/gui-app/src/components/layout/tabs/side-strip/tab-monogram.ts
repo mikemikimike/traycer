@@ -5,6 +5,19 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
 
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
+/** The first `count` graphemes of `text`, trimmed; empty for blank text. */
+export function firstGraphemes(
+  text: string,
+  count: number,
+): ReadonlyArray<string> {
+  const graphemes: string[] = [];
+  for (const { segment } of graphemeSegmenter.segment(text.trim())) {
+    if (graphemes.length === count) break;
+    graphemes.push(segment);
+  }
+  return graphemes;
+}
+
 /** The first grapheme of `word` that carries a letter or a digit. */
 function firstSignificantGrapheme(word: string): string | null {
   for (const { segment } of graphemeSegmenter.segment(word)) {

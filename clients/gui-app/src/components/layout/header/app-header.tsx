@@ -84,7 +84,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
       )}
     >
       <DesktopMenuBar />
-      {showTabStrip ? <HistoryNavButtons /> : null}
+      {showTabStrip ? <HistoryNavButtons orientation="row" /> : null}
       {/* The header's LEFT cluster (L-156): its own box, because the header
           row has no gap of its own and the right-hand cluster's box is the
           one this mirrors. It sits left of the tab strip and right of the

@@ -1578,7 +1578,8 @@ describe("<TabStrip />", () => {
 
     const tabRow = screen.getByTestId("header-tab-strip-scroll");
     const newTabButton = screen.getByTestId("tab-new");
-    const tabCluster = newTabButton.parentElement;
+    // The button sits in the strip's own placement box inside the cluster.
+    const tabCluster = newTabButton.parentElement?.parentElement ?? null;
     if (tabCluster === null) throw new Error("Expected tab cluster");
     Object.defineProperties(tabRow, {
       clientWidth: { configurable: true, value: 100 },

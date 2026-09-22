@@ -87,6 +87,21 @@ describe("stripRowsOf", () => {
     expect(rows.every((row) => !row.hidden)).toBe(true);
   });
 
+  it("names the group on every member, not only the first", () => {
+    const items = [tab(A), tab(B), tab(C)];
+    const groups: TabGroups = { g: group(false) };
+    const customizations = grouped([
+      [A, "g"],
+      [B, "g"],
+    ]);
+    const rows = stripRowsOf(ids(items), items, groups, customizations);
+    expect(rows.map((row) => row.group?.groupId ?? null)).toEqual([
+      "g",
+      "g",
+      null,
+    ]);
+  });
+
   it("hides the members of a collapsed group but keeps its start", () => {
     const items = [tab(A), tab(B), tab(C)];
     const groups: TabGroups = { g: group(true) };
@@ -103,6 +118,7 @@ describe("stripRowsOf", () => {
     const items = [tab(A)];
     const rows = stripRowsOf(ids(items), items, {}, grouped([[A, "missing"]]));
     expect(rows[0]?.groupStart).toBeNull();
+    expect(rows[0]?.group).toBeNull();
     expect(rows[0]?.hidden).toBe(false);
   });
 });

@@ -9,9 +9,15 @@ import { QuitInterceptBridge } from "@/components/layout/bridges/quit-intercept-
 import { MigrationBlockingModalHost } from "@/components/layout/dialogs/migration-blocking-modal-host";
 import { AppColumnFrame } from "@/components/layout/app-column-frame";
 import { AppHeader } from "@/components/layout/header/app-header";
-import { appColumnChrome } from "@/components/layout/header/app-title-band-kind";
+import {
+  appColumnChrome,
+  sideStripOwnsTitleBar,
+  type AppColumnChromeInput,
+} from "@/components/layout/header/app-title-band-kind";
 import { isFramelessDesktop } from "@/components/layout/header/title-bar-drag";
 import { useTabStripPlacement } from "@/components/layout/tabs/use-tab-strip-placement";
+import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
+import { TabStripKeybindingBridge } from "@/components/layout/tabs/tab-strip-keybinding-bridge";
 import { MobileNavDrawer } from "@/components/layout/shell/mobile-nav-drawer";
 import { useDragToDismissKeyboard } from "@/components/layout/shell/use-drag-to-dismiss-keyboard";
 import { SessionConnectivityStrip } from "@/components/layout/session-connectivity-strip";
@@ -35,6 +41,7 @@ import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { PrimaryFocusCoordinatorProvider } from "@/lib/focus/primary-focus-coordinator-provider";
 import { resolveDesktopPlatform } from "@/lib/windows/desktop-capabilities";
 import { useRunnerHostOrNull } from "@/providers/use-runner-host";
+import { sideTabStripEdge } from "@/lib/layout/layout-arrangement";
 import { useStatusBarShown } from "@/stores/layout/layout-store";
 
 interface AppShellProps {
@@ -94,11 +101,14 @@ export function AppShell(props: AppShellProps) {
   // the desktop chrome, so the header and the strip never both render.
   const placement = useTabStripPlacement();
   const runnerHost = useRunnerHostOrNull();
-  const chrome = appColumnChrome({
+  const frameless = isFramelessDesktop();
+  const chromeInput: AppColumnChromeInput = {
     placement,
     platform: runnerHost === null ? null : resolveDesktopPlatform(runnerHost),
-    frameless: isFramelessDesktop(),
-  });
+    frameless,
+  };
+  const chrome = appColumnChrome(chromeInput);
+  const stripEdge = sideTabStripEdge(placement);
 
   return (
     <PrimaryFocusCoordinatorProvider>
@@ -114,7 +124,14 @@ export function AppShell(props: AppShellProps) {
               columnRef={setAppColumn}
               {...chrome}
               header={<AppHeader variant="app" />}
-              strip={null}
+              strip={
+                stripEdge === null ? null : (
+                  <SideTabStrip
+                    edge={stripEdge}
+                    ownsTitleBar={sideStripOwnsTitleBar(chromeInput)}
+                  />
+                )
+              }
               banners={
                 <>
                   {/* Above the session strip: a wrong clock is the CAUSE of
@@ -183,6 +200,10 @@ export function AppShell(props: AppShellProps) {
                     installed mobile app, the same fact the palette reads to
                     drop its row. */}
                   <StatusBarKeybindingBridge />
+                  {/* App-wide, beside the status-bar bridge: the tabs are drawn
+                    by a different component in each placement, and "Toggle
+                    vertical tabs" has to exist in both. Mounted once. */}
+                  <TabStripKeybindingBridge />
                   <MigrationRunController />
                   <MigrationBlockingModalHost />
                   {isMobile ? <MobileNavDrawer /> : null}

@@ -23,6 +23,8 @@ export interface StripRow {
   readonly memberOffset: number;
   /** Set on the first item of a group, where the group header draws. */
   readonly groupStart: StripRowGroupStart | null;
+  /** The group this item belongs to, on every member of it. */
+  readonly group: StripRowGroupStart | null;
   /** A member of a collapsed group, drawn under its header only. */
   readonly hidden: boolean;
 }
@@ -49,12 +51,14 @@ export function stripRowsOf(
         : stripItemGroupId(layoutItem, customizations);
     const group = groupId === null ? undefined : groups?.[groupId];
     const firstInGroup = groupId !== null && previousGroupId !== groupId;
+    const membership =
+      groupId !== null && group !== undefined ? { groupId, group } : null;
     rows.push({
       itemId,
       stripIndex,
       memberOffset,
-      groupStart:
-        firstInGroup && group !== undefined ? { groupId, group } : null,
+      groupStart: firstInGroup ? membership : null,
+      group: membership,
       hidden: group?.collapsed === true,
     });
     previousGroupId = groupId;

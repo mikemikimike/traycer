@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useId, useState, type MouseEvent, type ReactNode } from "react";
 import { useNavigate, type UseNavigateResult } from "@tanstack/react-router";
 import { Eye, EyeOff, Layers, PanelTop } from "lucide-react";
 import { toast } from "sonner";
@@ -32,6 +32,7 @@ import {
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { useRegionValues } from "@/lib/layout-overrides";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
+import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store";
 import type { LayoutValues, RegionValueKey } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 
@@ -271,8 +272,13 @@ export function LayoutRegionContextMenuWithItems(props: {
   readonly extraItems: ReactNode | null;
   readonly children: ReactNode;
 }): ReactNode {
+  // The menu can open over a title-bar drag region (the vertical strip's top
+  // block and spacer, the header row); the drag regions stand down while it
+  // is open so its items and an outside click land in the renderer.
+  const [open, setOpen] = useState(false);
+  useTitleBarDragSuppression(`region-menu:${useId()}`, open);
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setOpen}>
       {/* `display: contents` generates no box, so the chrome this wraps keeps
           its own place in its parent's flex or grid row; the span is only
           somewhere for Radix to hang the trigger's handlers, which the real

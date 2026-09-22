@@ -1,0 +1,842 @@
+/**
+ * `SideTabStrip`, the vertical presentation of the task tabs, mounted over the
+ * real controller, the real per-tab hook and the real row kit. It pins what
+ * the strip owes the shell: it never disappears (the top block and the foot
+ * stand with no tabs and before hydration), one presentation registers the
+ * strip's keybindings exactly once, the rows carry every per-tab behaviour
+ * (leader badges, reveal, rename, menu, the waiting chip), the rail swaps rows
+ * for tiles, a split is one joined pair, there is no hidden-tabs menu, and the
+ * macOS title row appears only when the strip owns the title bar.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
+import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { EpicWaitingReason } from "@/hooks/epic/use-epic-activity-status";
+import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
+import type { ActionId } from "@/lib/keybindings/actions";
+import type { EdgeSide } from "@/lib/layout/layout-arrangement";
+import type { SurfaceNotificationIndicators } from "@/stores/notifications/notification-indicator-state";
+import { __resetTabNavigationControllerForTesting } from "@/lib/tab-navigation";
+import { installTabSyncCoordinator } from "@/lib/tab-sync/tab-sync-coordinator";
+import { KeybindingProvider } from "@/providers/keybinding-provider";
+import { WindowsBridgeContext } from "@/providers/windows-bridge-context";
+import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
+import { useLandingDraftStore } from "@/stores/home/landing-draft-store";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
+import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import { tabItemId, tabRefKey } from "@/stores/tabs/layout";
+import { useTabsStore } from "@/stores/tabs/store";
+import { useTitleBarDragStore } from "@/stores/layout/title-bar-drag-store";
+import type { TabRef } from "@/stores/tabs/types";
+
+/** Live registrations per action id, and the most ever live at once. */
+const registrations = vi.hoisted(
+  (): {
+    readonly live: Map<string, number>;
+    readonly peak: Map<string, number>;
+  } => ({ live: new Map(), peak: new Map() }),
+);
+
+vi.mock("@/lib/keybindings/dispatch", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/keybindings/dispatch")>();
+  return {
+    ...actual,
+    registerDynamicActionHandler: (
+      id: ActionId,
+      handler: () => void,
+    ): (() => void) => {
+      const live = (registrations.live.get(id) ?? 0) + 1;
+      registrations.live.set(id, live);
+      registrations.peak.set(
+        id,
+        Math.max(live, registrations.peak.get(id) ?? 0),
+      );
+      const unregister = actual.registerDynamicActionHandler(id, handler);
+      return () => {
+        registrations.live.set(id, (registrations.live.get(id) ?? 1) - 1);
+        unregister();
+      };
+    },
+  };
+});
+
+vi.mock("@/hooks/notifications/use-host-notification-indicators-query", () => ({
+  useHostNotificationIndicators: () => ({
+    data: { epics: {}, chats: {} },
+    isPending: false,
+    isFetching: false,
+    error: null,
+    refetch: () => Promise.resolve(),
+  }),
+}));
+
+// The strip's indicator batch, per epic: what a collapsed group's badge reads.
+const indicatorState = vi.hoisted(
+  (): { value: SurfaceNotificationIndicators } => ({
+    value: { epics: {}, chats: {} },
+  }),
+);
+vi.mock(
+  "@/hooks/notifications/use-notification-indicators-query",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/hooks/notifications/use-notification-indicators-query")
+      >();
+    return { ...actual, useNotificationIndicators: () => indicatorState.value };
+  },
+);
+
+// Motion is off in jsdom (no pane visibility); the easing case turns it on.
+const motion = vi.hoisted((): { enabled: boolean } => ({ enabled: false }));
+vi.mock("@/lib/animation/use-motion-enabled", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/animation/use-motion-enabled")>();
+  return { ...actual, useMotionEnabled: () => motion.enabled };
+});
+
+vi.mock("@/hooks/epic/use-epic-task-pinned-states-query", () => ({
+  useEpicTaskPinnedStates: () => new Map<string, TaskPinnedState>(),
+}));
+
+vi.mock("@/hooks/epic/use-epic-set-pinned-mutation", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/hooks/epic/use-epic-set-pinned-mutation")
+    >();
+  return {
+    ...actual,
+    useEpicSetPinned: () => ({ mutate: vi.fn() }),
+    usePendingSetPinnedEpicIds: () => new Set<string>(),
+  };
+});
+
+// The tab menu's pin row asks the epic's host; no host transport is mounted.
+vi.mock("@/hooks/host/use-host-client-for-host-id", () => ({
+  useHostClientForHostId: () => null,
+}));
+vi.mock("@/hooks/epic/use-epic-pin-local-home-support", () => ({
+  useEpicPinLocalHomeSupported: () => false,
+}));
+
+// The pin dispatch reads `useHostClient()`; no host runtime is mounted here.
+vi.mock("@/lib/host", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/host")>();
+  return {
+    ...actual,
+    useHostClient: () => ({ getActiveHostId: () => "host-a" }),
+  };
+});
+
+/** A warm chat session's gate facts, per epic: what the waiting chip names. */
+const waitingState = vi.hoisted(
+  (): { readonly byEpicId: Map<string, EpicWaitingReason> } => ({
+    byEpicId: new Map(),
+  }),
+);
+vi.mock("@/hooks/epic/use-epic-activity-status", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/hooks/epic/use-epic-activity-status")
+    >();
+  return {
+    ...actual,
+    useEpicWaitingReason: (epicId: string | null) =>
+      epicId === null ? null : (waitingState.byEpicId.get(epicId) ?? null),
+  };
+});
+
+// An owner's local-homed epic, so its title is editable with no session.
+vi.mock("@/lib/epic-selectors", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/epic-selectors")>();
+  return {
+    ...actual,
+    useRegisteredEpicPermissionRole: () => "owner",
+    useRegisteredEpicLocalHome: () => true,
+  };
+});
+
+// The foot's controls each bring a host, auth or runner dependency of their
+// own; what this suite asks of the foot is that it stands, in order.
+vi.mock("@/components/layout/header/header-actions", () => ({
+  HeaderBarCluster: (props: { readonly side: string }) => (
+    <span data-testid={`foot-cluster-${props.side}`} />
+  ),
+  HeaderNotificationsBell: () => <span data-testid="foot-bell" />,
+  HeaderIdentity: () => <span data-testid="foot-identity" />,
+}));
+vi.mock("@/components/layout/header/app-update-button", () => ({
+  AppUpdateHeaderButton: () => <span data-testid="foot-update" />,
+}));
+vi.mock("@/components/layout/header/history-button", () => ({
+  HistoryButton: () => <span data-testid="foot-history" />,
+}));
+
+installTabSyncCoordinator({ readyPromise: Promise.resolve() });
+
+const STRIP_KEYBINDING_IDS: ReadonlyArray<ActionId> = [
+  "tab.split.add",
+  "tab.split.swap",
+  "tab.split.separate",
+  "tab.split.close-left",
+  "tab.split.close-right",
+  "epic.close",
+];
+
+const FOOT_ORDER = [
+  "foot-update",
+  "foot-cluster-left",
+  "foot-cluster-right",
+  "foot-history",
+  "foot-bell",
+  "foot-identity",
+];
+
+let queryClient: QueryClient;
+
+interface StripOptions {
+  readonly edge: EdgeSide;
+  readonly ownsTitleBar: boolean;
+  readonly hydrated: boolean;
+}
+
+const LEFT_STRIP: StripOptions = {
+  edge: "left",
+  ownsTitleBar: false,
+  hydrated: true,
+};
+
+function buildRouter(initialPath: string, strip: StripOptions) {
+  const rootRoute = createRootRoute({
+    component: () => (
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <WindowsBridgeContext.Provider
+            value={{ bridge: null, hasHydrated: strip.hydrated }}
+          >
+            <SideTabStrip edge={strip.edge} ownsTitleBar={strip.ownsTitleBar} />
+          </WindowsBridgeContext.Provider>
+        </TooltipProvider>
+      </QueryClientProvider>
+    ),
+  });
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => null,
+  });
+  const epicTabRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/epics/$epicId/$tabId",
+    component: () => null,
+  });
+  const epicRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/epics/$epicId",
+    component: () => null,
+  });
+  const elsewhereRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/elsewhere",
+    component: () => null,
+  });
+  return createRouter({
+    routeTree: rootRoute.addChildren([
+      indexRoute,
+      epicTabRoute,
+      epicRoute,
+      elsewhereRoute,
+    ]),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
+  });
+}
+
+async function renderStrip(
+  initialPath: string,
+  strip: StripOptions,
+): Promise<HTMLElement> {
+  render(<RouterProvider router={buildRouter(initialPath, strip)} />);
+  return screen.findByTestId("side-tab-strip");
+}
+
+function setHomeTabEnabled(enabled: boolean): void {
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+  useLayoutStore
+    .getState()
+    .setRegionValues("homeTab", { shown: enabled ? "shown" : "hidden" });
+}
+
+function resetStores(): void {
+  __resetTabNavigationControllerForTesting();
+  useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
+  useEpicCanvasStore.getState().clearAllTitleGenerationPending();
+  useLandingDraftStore.setState({ drafts: [], activeDraftId: null });
+  useTabsStore.setState(useTabsStore.getInitialState(), true);
+  useSideTabStripStore.setState({ widthPx: 240, collapsed: false });
+}
+
+/** Opens one epic tab per name, the first one active. */
+function openEpicTabs(names: ReadonlyArray<string>): ReadonlyArray<TabRef> {
+  const refs = names.map((name): TabRef => {
+    const id = `e-${name.toLowerCase().replaceAll(" ", "-")}`;
+    useEpicCanvasStore.getState().seedEpic(id, { tabId: id, name }, []);
+    return { kind: "epic", id };
+  });
+  const firstRef = refs.at(0);
+  useTabsStore.setState({
+    version: 2,
+    items: refs.map((ref) => ({ kind: "tab", id: tabItemId(ref), ref })),
+    activeItemId: firstRef === undefined ? null : tabItemId(firstRef),
+    stripOrder: refs,
+    systemTabs: { history: null, settings: null },
+  });
+  return refs;
+}
+
+function openSplitPair(): void {
+  const left: TabRef = { kind: "epic", id: "e-alpha" };
+  const right: TabRef = { kind: "epic", id: "e-beta" };
+  useEpicCanvasStore
+    .getState()
+    .seedEpic(left.id, { tabId: left.id, name: "Alpha" }, []);
+  useEpicCanvasStore
+    .getState()
+    .seedEpic(right.id, { tabId: right.id, name: "Beta" }, []);
+  useTabsStore.setState({
+    version: 2,
+    items: [
+      {
+        kind: "split",
+        id: "split-a",
+        left: { kind: "tab", ref: left },
+        right: { kind: "tab", ref: right },
+        focusedSide: "left",
+        routeBackingSide: "left",
+        leftRatio: 0.5,
+      },
+    ],
+    activeItemId: "split-a",
+    stripOrder: [left, right],
+    systemTabs: { history: null, settings: null },
+  });
+}
+
+/**
+ * A group holding a tab and a full split, then an ungrouped tab:
+ * One, [Two | Three], Four.
+ */
+function openGroupWithTabAndSplit(): void {
+  const seed = (name: string): TabRef => {
+    const id = `e-${name.toLowerCase()}`;
+    useEpicCanvasStore.getState().seedEpic(id, { tabId: id, name }, []);
+    return { kind: "epic", id };
+  };
+  const one = seed("One");
+  const two = seed("Two");
+  const three = seed("Three");
+  const four = seed("Four");
+  const refs = [one, two, three, four];
+  const member = { color: null, icon: null, groupId: "g" };
+  useTabsStore.setState({
+    version: 2,
+    items: [
+      { kind: "tab", id: tabItemId(one), ref: one },
+      {
+        kind: "split",
+        id: "split-g",
+        left: { kind: "tab", ref: two },
+        right: { kind: "tab", ref: three },
+        focusedSide: "left",
+        routeBackingSide: "left",
+        leftRatio: 0.5,
+      },
+      { kind: "tab", id: tabItemId(four), ref: four },
+    ],
+    activeItemId: tabItemId(four),
+    stripOrder: refs,
+    systemTabs: { history: null, settings: null },
+    groups: { g: { name: "Work", color: "#8ab4f8", collapsed: false } },
+    customizations: {
+      [tabRefKey(one)]: member,
+      [tabRefKey(two)]: member,
+      [tabRefKey(three)]: member,
+    },
+  });
+}
+
+function expectTopBlockAndFoot(): void {
+  expect(screen.getByTestId("side-strip-top-block")).toBeDefined();
+  expect(screen.getByTestId("tab-new")).toBeDefined();
+  expect(screen.getByTestId("side-tab-strip-collapse")).toBeDefined();
+  const foot = screen.getByTestId("side-strip-foot");
+  expect(
+    Array.from(foot.querySelectorAll("[data-testid]")).map((node) =>
+      node.getAttribute("data-testid"),
+    ),
+  ).toEqual(FOOT_ORDER);
+}
+
+interface RevealShim {
+  readonly scrolled: () => number;
+  readonly restore: () => void;
+}
+
+/**
+ * jsdom has no layout: the scroller shows 0..300 on y, the member (the
+ * scroller's own child holding the selection) takes `memberBox()`, and
+ * `scrollTop` keeps what is written. The reveal's decision is not shimmed.
+ */
+function installRevealGeometry(
+  memberBox: () => { readonly top: number; readonly bottom: number },
+): RevealShim {
+  const realRect = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "getBoundingClientRect",
+  );
+  const realScrollTop = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "scrollTop",
+  );
+  const isScroller = (node: Element | null): boolean =>
+    node !== null && node.hasAttribute("data-layout-passive-members");
+  HTMLElement.prototype.getBoundingClientRect = function boxFor(
+    this: HTMLElement,
+  ): DOMRect {
+    if (isScroller(this)) return new DOMRect(0, 0, 200, 300);
+    const holdsSelection =
+      this.querySelector('[aria-selected="true"]') !== null ||
+      this.getAttribute("aria-selected") === "true";
+    if (!holdsSelection || !isScroller(this.parentElement)) {
+      return new DOMRect(0, 0, 0, 0);
+    }
+    const box = memberBox();
+    return new DOMRect(0, box.top, 200, box.bottom - box.top);
+  };
+  let scrolled = 0;
+  Object.defineProperty(Element.prototype, "scrollTop", {
+    configurable: true,
+    get: () => scrolled,
+    set: (value: number) => {
+      scrolled = value;
+    },
+  });
+  return {
+    scrolled: () => scrolled,
+    restore: () => {
+      if (realRect !== undefined) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          realRect,
+        );
+      }
+      if (realScrollTop === undefined) {
+        Reflect.deleteProperty(Element.prototype, "scrollTop");
+      } else {
+        Object.defineProperty(Element.prototype, "scrollTop", realScrollTop);
+      }
+    },
+  };
+}
+
+describe("<SideTabStrip />", () => {
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    registrations.live.clear();
+    registrations.peak.clear();
+    waitingState.byEpicId.clear();
+    indicatorState.value = { epics: {}, chats: {} };
+    motion.enabled = false;
+    setHomeTabEnabled(false);
+    resetStores();
+  });
+
+  afterEach(() => {
+    cleanup();
+    delete (window as { runnerHost?: unknown }).runnerHost;
+    queryClient.clear();
+    setHomeTabEnabled(false);
+    resetStores();
+  });
+
+  it("keeps the top block and the foot with no tabs, Home off, on the landing route", async () => {
+    const strip = await renderStrip("/", LEFT_STRIP);
+
+    expect(strip.getAttribute("data-edge")).toBe("left");
+    expect(strip.getAttribute("data-collapsed")).toBe("false");
+    expectTopBlockAndFoot();
+    expect(screen.queryByTestId("tab-home")).toBeNull();
+    const scroller = screen.getByTestId("header-tab-strip-scroll");
+    expect(scroller.querySelectorAll("[data-strip-item-id]")).toHaveLength(0);
+    // The drag spacer is the nav's own child, between the rows and the foot.
+    const spacer = screen.getByTestId("side-strip-drag-spacer");
+    expect(spacer.parentElement).toBe(strip);
+    expect(spacer.nextElementSibling).toBe(
+      screen.getByTestId("side-strip-foot"),
+    );
+  });
+
+  it("draws Home in the top block when it is shown", async () => {
+    setHomeTabEnabled(true);
+    await renderStrip("/", LEFT_STRIP);
+
+    const home = screen.getByTestId("tab-home");
+    expect(home.getAttribute("role")).toBe("tab");
+    expect(home.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("side-strip-top-block").contains(home)).toBe(
+      true,
+    );
+  });
+
+  it("reserves skeleton rows before hydration while the top block and the foot stay live", async () => {
+    openEpicTabs(["Alpha", "Beta"]);
+    await renderStrip("/elsewhere", { ...LEFT_STRIP, hydrated: false });
+
+    expect(screen.getAllByTestId("side-strip-skeleton-row")).toHaveLength(2);
+    expect(screen.queryByTestId("header-tab-strip-scroll")).toBeNull();
+    expectTopBlockAndFoot();
+  });
+
+  it("registers tab.split.* and epic.close exactly once", async () => {
+    openEpicTabs(["Alpha"]);
+    await renderStrip("/elsewhere", LEFT_STRIP);
+
+    for (const id of STRIP_KEYBINDING_IDS) {
+      expect(registrations.live.get(id)).toBe(1);
+      expect(registrations.peak.get(id)).toBe(1);
+    }
+    // The placement toggle is the shell's, mounted once for both placements.
+    expect(registrations.peak.get("app.tabs.vertical.toggle")).toBeUndefined();
+  });
+
+  it("stamps the vertical drag contract on the scroller", async () => {
+    openEpicTabs(["Alpha"]);
+    await renderStrip("/elsewhere", { ...LEFT_STRIP, edge: "right" });
+
+    const scroller = screen.getByTestId("header-tab-strip-scroll");
+    expect(scroller.getAttribute("data-strip-axis")).toBe("y");
+    expect(scroller.getAttribute("data-strip-edge")).toBe("right");
+    const frame = screen
+      .getByTestId("tab-epic-e-alpha")
+      .closest("[data-strip-item-id]");
+    expect(frame?.getAttribute("data-strip-item-id")).toBe(
+      tabItemId({ kind: "epic", id: "e-alpha" }),
+    );
+    expect(frame?.getAttribute("data-strip-item-mergeable")).toBe("true");
+  });
+
+  it("shows the Alt-digit badges in leader mode", async () => {
+    openEpicTabs(["Alpha", "Beta"]);
+    const router = buildRouter("/elsewhere", LEFT_STRIP);
+    render(
+      <KeybindingProvider router={router}>
+        <RouterProvider router={router} />
+      </KeybindingProvider>,
+    );
+    await screen.findByTestId("tab-epic-e-alpha");
+
+    vi.useFakeTimers();
+    try {
+      expect(screen.queryByTestId("tab-digit-1")).toBeNull();
+      fireEvent.keyDown(window, {
+        code: "MetaLeft",
+        key: "Meta",
+        metaKey: true,
+      });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      const alpha = screen.getByTestId("tab-epic-e-alpha");
+      expect(within(alpha).getByTestId("tab-digit-1")).toBeDefined();
+      expect(
+        within(screen.getByTestId("tab-epic-e-beta")).getByTestId(
+          "tab-digit-2",
+        ),
+      ).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("scrolls a row that becomes active while clipped into view", async () => {
+    const refs = openEpicTabs(["Alpha", "Beta"]);
+    let selected = { top: 0, bottom: 32 };
+    const geometry = installRevealGeometry(() => selected);
+    try {
+      await renderStrip("/elsewhere", LEFT_STRIP);
+      await screen.findByTestId("tab-epic-e-beta");
+      expect(geometry.scrolled()).toBe(0);
+
+      // Beta's row sits 100px past the scroller's 300px bottom edge.
+      selected = { top: 368, bottom: 400 };
+      const beta = refs.at(1);
+      if (beta === undefined) throw new Error("expected two tabs");
+      act(() => {
+        useTabsStore.setState({ activeItemId: tabItemId(beta) });
+      });
+
+      expect(geometry.scrolled()).toBe(100);
+    } finally {
+      geometry.restore();
+    }
+  });
+
+  it("renames a row from its context menu", async () => {
+    openEpicTabs(["Alpha"]);
+    await renderStrip("/elsewhere", LEFT_STRIP);
+
+    fireEvent.contextMenu(screen.getByTestId("tab-epic-e-alpha"));
+    expect(await screen.findByText("Close Other Tabs")).toBeDefined();
+    fireEvent.click(screen.getByText("Edit Title"));
+
+    const input = await screen.findByTestId("tab-title-input-epic-e-alpha");
+    expect((input as HTMLInputElement).value).toBe("Alpha");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("tab-title-input-epic-e-alpha")).toBeNull();
+  });
+
+  it("switches to monogram tiles on collapse and back", async () => {
+    openEpicTabs(["Alpha Beta", "Gamma"]);
+    const strip = await renderStrip("/elsewhere", LEFT_STRIP);
+    const toggle = screen.getByTestId("side-tab-strip-collapse");
+    expect(toggle.getAttribute("aria-label")).toBe("Collapse tabs");
+
+    fireEvent.click(toggle);
+
+    expect(strip.getAttribute("data-collapsed")).toBe("true");
+    const row = screen.getByTestId("tab-epic-e-alpha-beta");
+    expect(row.getAttribute("data-side-tab")).toBe("collapsed");
+    expect(row.getAttribute("data-tile-kind")).toBe("monogram");
+    expect(row.textContent).toBe("AB");
+    expect(
+      screen.getByTestId("side-tab-strip-collapse").getAttribute("aria-label"),
+    ).toBe("Expand tabs");
+
+    fireEvent.click(screen.getByTestId("side-tab-strip-collapse"));
+
+    expect(strip.getAttribute("data-collapsed")).toBe("false");
+    expect(
+      screen.getByTestId("tab-epic-e-alpha-beta").getAttribute("data-side-tab"),
+    ).toBe("expanded");
+  });
+
+  it("renders a split as one joined pair, left member first, with no quick actions", async () => {
+    openSplitPair();
+    await renderStrip("/elsewhere", LEFT_STRIP);
+
+    const pair = screen.getByTestId("split-tab-group-split-a");
+    expect(pair.getAttribute("data-side-split-pair")).toBe("expanded");
+    const members = within(pair).getAllByRole("tab");
+    expect(members.map((node) => node.getAttribute("data-testid"))).toEqual([
+      "tab-epic-e-alpha",
+      "tab-epic-e-beta",
+    ]);
+    expect(members.map((node) => node.getAttribute("aria-selected"))).toEqual([
+      "true",
+      "false",
+    ]);
+    expect(
+      pair
+        .closest("[data-strip-item-id]")
+        ?.getAttribute("data-strip-item-mergeable"),
+    ).toBe("false");
+    expect(screen.queryByTestId("split-quick-actions-split-a")).toBeNull();
+  });
+
+  it("shows the waiting chip on a row whose agent waits for a reply", async () => {
+    openEpicTabs(["Alpha", "Beta"]);
+    waitingState.byEpicId.set("e-beta", "reply");
+    await renderStrip("/elsewhere", LEFT_STRIP);
+
+    const beta = screen.getByTestId("tab-epic-e-beta");
+    expect(within(beta).getByTestId("side-tab-waiting-chip").textContent).toBe(
+      "Reply",
+    );
+    expect(
+      within(screen.getByTestId("tab-epic-e-alpha")).queryByTestId(
+        "side-tab-waiting-chip",
+      ),
+    ).toBeNull();
+  });
+
+  it("has no hidden-tabs menu, however many rows there are", async () => {
+    openEpicTabs(["One", "Two", "Three", "Four", "Five", "Six", "Seven"]);
+    await renderStrip("/elsewhere", LEFT_STRIP);
+
+    expect(screen.getAllByRole("tab")).toHaveLength(7);
+    expect(document.querySelector("[data-hidden-tabs-control]")).toBeNull();
+  });
+
+  it("adds the traffic-light title row only when the strip owns the title bar", async () => {
+    await renderStrip("/", { ...LEFT_STRIP, ownsTitleBar: true });
+
+    const titleRow = screen.getByTestId("side-strip-title-row");
+    expect(titleRow.className).toContain("h-10");
+    expect(titleRow.className).toContain(
+      "wco:pl-[var(--window-leading-inset)]",
+    );
+    expect(titleRow.contains(screen.getByTestId("tab-new"))).toBe(true);
+    cleanup();
+
+    await renderStrip("/", LEFT_STRIP);
+    expect(screen.queryByTestId("side-strip-title-row")).toBeNull();
+  });
+
+  it("keeps the rail no narrower than the traffic lights when it owns the title bar", async () => {
+    useSideTabStripStore.setState({ collapsed: true });
+    const strip = await renderStrip("/", {
+      ...LEFT_STRIP,
+      ownsTitleBar: true,
+    });
+
+    expect(strip.style.width).toBe("56px");
+    expect(strip.className).toContain(
+      "wco:min-w-[var(--window-leading-inset)]",
+    );
+  });
+
+  it("keeps the expanded strip wide enough for the title row only when it owns the title bar", async () => {
+    const titleRowFloor =
+      "wco:min-w-[calc(var(--window-leading-inset)+8.5rem)]";
+    const owning = await renderStrip("/", {
+      ...LEFT_STRIP,
+      ownsTitleBar: true,
+    });
+    expect(owning.className).toContain(titleRowFloor);
+    expect(owning.className).toContain("max-w-[40vw]");
+    cleanup();
+
+    const notOwning = await renderStrip("/", LEFT_STRIP);
+    expect(notOwning.className).not.toContain(titleRowFloor);
+    cleanup();
+
+    useSideTabStripStore.setState({ collapsed: true });
+    const rail = await renderStrip("/", { ...LEFT_STRIP, ownsTitleBar: true });
+    expect(rail.className).not.toContain(titleRowFloor);
+    expect(rail.className).not.toContain("max-w-[40vw]");
+  });
+
+  it("drops the window drag region while a row's menu is open", async () => {
+    // A frameless desktop window.
+    (window as { runnerHost?: unknown }).runnerHost = {};
+    openEpicTabs(["Alpha"]);
+    const strip = await renderStrip("/elsewhere", LEFT_STRIP);
+    expect(strip.className).toContain("[-webkit-app-region:drag]");
+
+    fireEvent.contextMenu(screen.getByTestId("tab-epic-e-alpha"));
+    await screen.findByText("Close Other Tabs");
+
+    expect(strip.className).toContain("[-webkit-app-region:no-drag]");
+    expect(strip.className).not.toContain("[-webkit-app-region:drag]");
+    expect(useTitleBarDragStore.getState().suppressors.size).toBe(1);
+
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    await vi.waitFor(() => {
+      expect(strip.className).toContain("[-webkit-app-region:drag]");
+    });
+  });
+
+  it("eases the width only for the collapse toggle, until that transition ends", async () => {
+    motion.enabled = true;
+    openEpicTabs(["Alpha"]);
+    const strip = await renderStrip("/elsewhere", LEFT_STRIP);
+    const easingClass = "transition-[width]";
+    expect(strip.className).not.toContain(easingClass);
+
+    fireEvent.click(screen.getByTestId("side-tab-strip-collapse"));
+    expect(strip.getAttribute("data-collapsed")).toBe("true");
+    expect(strip.className).toContain(easingClass);
+    endWidthTransition(strip);
+    expect(strip.className).not.toContain(easingClass);
+
+    // Out of the rail through the handle, then a nudge: neither eases.
+    const handle = screen.getByTestId("side-tab-strip-resize-handle");
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(strip.getAttribute("data-collapsed")).toBe("false");
+    expect(strip.className).not.toContain(easingClass);
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(useSideTabStripStore.getState().widthPx).toBe(264);
+    expect(strip.className).not.toContain(easingClass);
+  });
+
+  it("counts, lines and folds a group holding a tab and a split", async () => {
+    openGroupWithTabAndSplit();
+    indicatorState.value = {
+      epics: {
+        "e-three": {
+          unreadFailure: true,
+          unreadDone: false,
+          pendingApproval: false,
+          pendingInterview: false,
+          pendingFork: false,
+        },
+      },
+      chats: {},
+    };
+    await renderStrip("/elsewhere", LEFT_STRIP);
+
+    const header = screen.getByTestId("side-tab-group-header-g");
+    expect(within(header).getByTestId("side-tab-group-count").textContent).toBe(
+      "3",
+    );
+    for (const id of ["e-one", "e-two", "e-three"]) {
+      expect(
+        within(screen.getByTestId(`tab-epic-${id}`)).queryByTestId(
+          "side-tab-group-line",
+        ),
+      ).not.toBeNull();
+    }
+    expect(
+      within(screen.getByTestId("tab-epic-e-four")).queryByTestId(
+        "side-tab-group-line",
+      ),
+    ).toBeNull();
+    expect(screen.queryByTestId("side-tab-group-badge")).toBeNull();
+
+    fireEvent.click(header);
+
+    for (const id of ["e-one", "e-two", "e-three"]) {
+      expect(screen.queryByTestId(`tab-epic-${id}`)).toBeNull();
+    }
+    expect(screen.getByTestId("tab-epic-e-four")).toBeDefined();
+    expect(screen.getByTestId("side-tab-group-header-g")).toBeDefined();
+    expect(
+      screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
+    ).toBe("failed");
+  });
+});
+
+/** The nav's own width transition finishing, as the browser reports it. */
+function endWidthTransition(strip: HTMLElement): void {
+  const event = createEvent.transitionEnd(strip);
+  Object.defineProperty(event, "propertyName", { value: "width" });
+  fireEvent(strip, event);
+}

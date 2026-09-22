@@ -54,10 +54,14 @@ function seedPersistentHistory(
 }
 
 function renderButtons(router: AppRouter) {
+  return renderButtonsIn(router, "row");
+}
+
+function renderButtonsIn(router: AppRouter, orientation: "row" | "column") {
   return render(
     <RouterContextProvider router={router}>
       <TooltipProvider>
-        <HistoryNavButtons />
+        <HistoryNavButtons orientation={orientation} />
       </TooltipProvider>
     </RouterContextProvider>,
   );
@@ -82,6 +86,22 @@ describe("HistoryNavButtons", () => {
     );
     expect(screen.getByRole("button", { name: "Go back" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Go forward" })).toBeTruthy();
+  });
+
+  it("stacks the arrows in a column for the rail and lays them in a row otherwise", () => {
+    const history = ["/draft/d1", "/settings/general"];
+    renderButtonsIn(makeRouter(seedPersistentHistory(history, 1)), "column");
+    const column = screen
+      .getByTestId("history-nav-back")
+      .closest("[data-layout-passive]");
+    expect(column?.className).toContain("flex-col");
+    cleanup();
+
+    renderButtonsIn(makeRouter(seedPersistentHistory(history, 1)), "row");
+    const row = screen
+      .getByTestId("history-nav-back")
+      .closest("[data-layout-passive]");
+    expect(row?.className).not.toContain("flex-col");
   });
 
   it("shows the current navigation shortcuts in the arrow tooltips", async () => {

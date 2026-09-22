@@ -31,7 +31,7 @@ export function TabStripNewButton(
         data-testid="tab-new"
         aria-label={NEW_TAB_PLACEHOLDER}
         onClick={onNewTab}
-        className="ml-1 flex size-7 shrink-0 items-center justify-center self-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground [-webkit-app-region:no-drag]"
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground [-webkit-app-region:no-drag]"
       >
         <Plus className="size-4" />
       </button>

@@ -1,6 +1,6 @@
-import type { ComponentPropsWithRef, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { SideTabRowVariant } from "./side-tab-row";
+import type { SideRowFrame, SideTabRowVariant } from "./side-tab-row";
 import {
   SIDE_SPLIT_PAIR_CLASS,
   SIDE_SPLIT_PAIR_COLLAPSED_HAIRLINE_CLASS,
@@ -10,8 +10,8 @@ import {
 } from "./side-strip-tokens";
 
 export interface SideSplitRowPairProps {
-  /** The strip item frame: data-strip-item-id, data-strip-item-mergeable="false", ref, style. */
-  readonly frame: ComponentPropsWithRef<"div">;
+  /** The pair's own element props: its role and aria. */
+  readonly frame: SideRowFrame;
   readonly variant: SideTabRowVariant;
   /** `split-tab-group-<id>`. */
   readonly testId: string;

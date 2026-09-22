@@ -3,6 +3,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
+import type { IRunnerHost } from "@traycer-clients/shared/platform/runner-host";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import type { BarHost } from "@/lib/layout/layout-arrangement";
 import {
@@ -21,8 +22,41 @@ function setViewportWidth(width: number): void {
   });
 }
 
+// The platform the shell reads from its runner host. `null` defers to the
+// real reading (the mock runner host carries no menu bridge, so no platform).
+const desktopPlatform = vi.hoisted(
+  (): { override: "darwin" | "win32" | "linux" | null } => ({
+    override: null,
+  }),
+);
+
+vi.mock("@/lib/windows/desktop-capabilities", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/windows/desktop-capabilities")>();
+  return {
+    ...actual,
+    resolveDesktopPlatform: (runnerHost: IRunnerHost) =>
+      desktopPlatform.override ?? actual.resolveDesktopPlatform(runnerHost),
+  };
+});
+
 vi.mock("@/components/layout/tabs/tab-strip", () => ({
   TabStrip: () => <div data-testid="tab-strip" />,
+}));
+
+// Router-dependent like TabStrip. Its own suite owns its contents; these cases
+// ask only where the shell mounts it and with which props.
+vi.mock("@/components/layout/tabs/side-strip/side-tab-strip", () => ({
+  SideTabStrip: (props: {
+    readonly edge: string;
+    readonly ownsTitleBar: boolean;
+  }) => (
+    <nav
+      data-testid="side-tab-strip"
+      data-edge={props.edge}
+      data-owns-title-bar={String(props.ownsTitleBar)}
+    />
+  ),
 }));
 
 // Router-dependent like TabStrip: the app-variant header mounts these arrows
@@ -251,6 +285,7 @@ describe("<AppShell />", () => {
     queryClient?.clear();
     queryClient = undefined;
     delete windowHost.runnerHost;
+    desktopPlatform.override = null;
     setMobileApp(false);
     useAuthStore.getState().setSignedOut();
     useLayoutStore.setState({
@@ -443,6 +478,107 @@ describe("<AppShell />", () => {
       statusBar.compareDocumentPosition(probe) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  function selectTabStripPlacement(placement: "top" | "left" | "right"): void {
+    const { arrangement } = useLayoutStore.getState();
+    useLayoutStore
+      .getState()
+      .setArrangement({ ...arrangement, tabStripPlacement: placement });
+  }
+
+  it("mounts the side strip at the left edge in place of the header", async () => {
+    selectTabStripPlacement("left");
+
+    queryClient = renderAppShell();
+
+    await screen.findByTestId("app-shell-child");
+
+    const strip = screen.getByTestId("side-tab-strip");
+    expect(strip.getAttribute("data-edge")).toBe("left");
+    // A frameless window whose platform is not macOS keeps the slim band, so
+    // the strip's top block is not the title bar.
+    expect(strip.getAttribute("data-owns-title-bar")).toBe("false");
+    expect(screen.queryByTestId("app-header")).toBeNull();
+    const main = screen.getByTestId("route-adapter-layer").closest("main");
+    if (main === null) throw new Error("the shell rendered no <main>");
+    expect(
+      strip.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("hands the title bar to a left strip on a frameless macOS window", async () => {
+    desktopPlatform.override = "darwin";
+    selectTabStripPlacement("left");
+
+    queryClient = renderAppShell();
+
+    await screen.findByTestId("app-shell-child");
+
+    expect(
+      screen.getByTestId("side-tab-strip").getAttribute("data-owns-title-bar"),
+    ).toBe("true");
+  });
+
+  it("keeps the title bar from a right strip on a frameless macOS window", async () => {
+    desktopPlatform.override = "darwin";
+    selectTabStripPlacement("right");
+
+    queryClient = renderAppShell();
+
+    await screen.findByTestId("app-shell-child");
+
+    expect(
+      screen.getByTestId("side-tab-strip").getAttribute("data-owns-title-bar"),
+    ).toBe("false");
+  });
+
+  it("mounts the side strip after the content at the right edge", async () => {
+    selectTabStripPlacement("right");
+
+    queryClient = renderAppShell();
+
+    await screen.findByTestId("app-shell-child");
+
+    const strip = screen.getByTestId("side-tab-strip");
+    expect(strip.getAttribute("data-edge")).toBe("right");
+    const main = screen.getByTestId("route-adapter-layer").closest("main");
+    if (main === null) throw new Error("the shell rendered no <main>");
+    expect(
+      main.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("mounts no side strip at the top placement", async () => {
+    queryClient = renderAppShell();
+
+    await screen.findByTestId("app-shell-child");
+
+    expect(screen.queryByTestId("side-tab-strip")).toBeNull();
+    expect(screen.getByTestId("tab-strip")).not.toBeNull();
+  });
+
+  it("registers the vertical-tabs toggle in either placement", async () => {
+    queryClient = renderAppShell();
+
+    await screen.findByTestId("app-shell-child");
+
+    act(() => {
+      expect(dispatchAction("app.tabs.vertical.toggle", NOOP_ROUTER)).toBe(
+        true,
+      );
+    });
+    expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
+      "left",
+    );
+    expect(screen.getByTestId("side-tab-strip")).not.toBeNull();
+
+    act(() => {
+      expect(dispatchAction("app.tabs.vertical.toggle", NOOP_ROUTER)).toBe(
+        true,
+      );
+    });
+    expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe("top");
   });
 
   it("ignores the status-bar placement on a mobile viewport", async () => {

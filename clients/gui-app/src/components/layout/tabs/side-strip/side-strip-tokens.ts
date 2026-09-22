@@ -8,8 +8,17 @@
 export const SIDE_STRIP_DEFAULT_WIDTH_PX = 240;
 export const SIDE_STRIP_MIN_WIDTH_PX = 192;
 export const SIDE_STRIP_MAX_WIDTH_PX = 400;
-/** The expanded strip never takes more than this share of the window. */
-export const SIDE_STRIP_MAX_WIDTH_VW = 40;
+/** The expanded strip never takes more than 40% of the window. */
+export const SIDE_STRIP_MAX_WIDTH_CLASS = "max-w-[40vw]";
+/**
+ * When the strip owns the title bar (macOS, left) the expanded strip is never
+ * narrower than the traffic-light inset plus the title row's controls (S-43):
+ * back and forward, New task, the collapse toggle, their gaps and the 8px
+ * trailing inset. It follows the inset, so it shrinks when the inspector docks
+ * left and takes the lights.
+ */
+export const SIDE_STRIP_TITLE_ROW_MIN_WIDTH_CLASS =
+  "wco:min-w-[calc(var(--window-leading-inset)+8.5rem)]";
 /** The collapsed, icon-only rail. */
 export const SIDE_STRIP_RAIL_WIDTH_PX = 56;
 /** A handle drag below this width snaps to the rail: the midpoint of the minimum and the rail. */
@@ -66,3 +75,23 @@ export const SIDE_SPLIT_PAIR_SEAM_CLASS = "h-1";
 export const SIDE_SPLIT_PAIR_HAIRLINE_CLASS = "h-px bg-border/60";
 export const SIDE_SPLIT_PAIR_EXPANDED_HAIRLINE_CLASS = "mx-2 flex-1";
 export const SIDE_SPLIT_PAIR_COLLAPSED_HAIRLINE_CLASS = "w-5";
+/** The inline rename input in an expanded row's title slot. */
+export const SIDE_TAB_TITLE_INPUT_CLASS =
+  "min-w-0 flex-1 rounded-sm border border-border bg-background px-1 text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring";
+/** A group header's colour pill holding the group name; the colour arrives as `--side-tab-group-color`. */
+export const SIDE_TAB_GROUP_PILL_CLASS =
+  "rounded-md bg-(--side-tab-group-color) px-1.5 text-ui-xs font-medium text-black";
+/** A row's footprint before hydration: the expanded row's height and radius. */
+export const SIDE_TAB_ROW_PLACEHOLDER_CLASS = "h-8 w-full rounded-lg";
+/** The 8px inline inset of the top block's rows. */
+export const SIDE_STRIP_INSET_CLASS = "px-2";
+/** The foot: 8px around and between its controls. */
+export const SIDE_STRIP_FOOT_CLASS = "gap-2 p-2";
+/** A custom icon's glyphs on a 16px tile: one grapheme, or two. */
+export const SIDE_TAB_CUSTOM_ICON_SINGLE_CLASS = "text-xs leading-none";
+export const SIDE_TAB_CUSTOM_ICON_PAIR_CLASS =
+  "text-micro font-medium leading-none";
+/** A group header's member count. */
+export const SIDE_TAB_GROUP_COUNT_CLASS = "text-ui-xs tabular-nums";
+/** The dragged row or pair: an opaque, raised copy of the source. */
+export const SIDE_TAB_DRAG_OVERLAY_CLASS = "rounded-lg bg-canvas shadow-lg";
