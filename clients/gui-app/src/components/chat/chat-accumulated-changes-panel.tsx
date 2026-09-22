@@ -309,7 +309,6 @@ export function ChatAccumulatedChangesPanel(
                   them at once. */}
               <RollingNumber
                 value={fileCount}
-                format={undefined}
                 className={undefined}
                 testId={undefined}
               />{" "}

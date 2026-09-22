@@ -85,7 +85,8 @@ describe("the sample workspace's icon rail", () => {
    *
    * The items are the REAL rail's, from the one module both draw: the same
    * "Hide '<panel>'", the same checkbox list, the same way in. They write the
-   * layout store, which is as true here as on the real rail.
+   * layout store through the same gesture recording every other writer of
+   * those values uses.
    */
   it("offers the real rail's menu for the icon the pointer was over", () => {
     render(<SampleWorkspaceRail />);
@@ -118,6 +119,52 @@ describe("the sample workspace's icon rail", () => {
 
     expect(screen.getByTestId("epic-rail-context-menu")).not.toBeNull();
     expect(screen.queryByTestId("epic-rail-hide-pointed-panel")).toBeNull();
+  });
+
+  /**
+   * A hide made from this menu during a session is an ordinary layout gesture
+   * (L-18, L-150(1)).
+   *
+   * The three things that go wrong when it is not are all measured here, and
+   * the third is the quiet one: a write made outside the editor's own depth is
+   * read by `watchExternalLayoutWrites` as ANOTHER WINDOW's and REBASES the
+   * entry snapshot onto it, so "Discard changes" would come back with the
+   * panel still hidden and nothing on screen to say why.
+   */
+  it("records a hide as a gesture, so Undo and Discard both take it back", () => {
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+    const entry = useLayoutEditorStore.getState().entrySnapshot;
+    render(<SampleWorkspaceRail />);
+
+    // One other gesture first, so Undo has somewhere to go past the hide and
+    // the order of the two is observable.
+    useLayoutEditorStore.getState().recordGesture(() => {
+      useLayoutStore.getState().setBasePreset("compact");
+    });
+    fireEvent.contextMenu(screen.getByLabelText("Browsers"));
+    fireEvent.click(screen.getByTestId("epic-rail-hide-pointed-panel"));
+
+    expect(useLayoutStore.getState().overrides.railBrowsers).toEqual({
+      shown: "hidden",
+    });
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(2);
+    // The entry snapshot did NOT move: the write was the editor's own.
+    expect(useLayoutEditorStore.getState().entrySnapshot).toEqual(entry);
+
+    useLayoutEditorStore.getState().undo();
+
+    // The hide came back first, and the earlier gesture still stands.
+    expect(useLayoutStore.getState().overrides.railBrowsers).toBeUndefined();
+    expect(useLayoutStore.getState().basePreset).toBe("compact");
+
+    useLayoutEditorStore.getState().discard();
+
+    expect(useLayoutStore.getState().basePreset).toBe("default");
+    expect(useLayoutStore.getState().overrides).toEqual({});
   });
 
   it("makes every entry a draggable member of the rail in a session", () => {

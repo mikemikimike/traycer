@@ -51,14 +51,6 @@ const BADGE_PRESENT = { opacity: 1, scale: 1 } as const;
 const BADGE_TRANSITION = { duration: 0.14, ease: "easeOut" } as const;
 
 /**
- * The count keeps the exact digits it prints today. This badge is 16px tall
- * and has no `99+` cap of its own (the phone button has one), so grouping a
- * four-figure count into `1,234` would widen it by a separator that also has
- * to roll in and out on the way past 999.
- */
-const BADGE_COUNT_FORMAT = { useGrouping: false } as const;
-
-/**
  * Top-level notifications trigger in the app header. Shows an unread-count
  * badge and opens the `NotificationsPopover` on click. Native toast/chime
  * emission is owned by `NotificationEmissionController` so all sources share
@@ -265,7 +257,6 @@ export function NotificationsBell() {
                 >
                   <RollingNumber
                     value={bellState.count}
-                    format={BADGE_COUNT_FORMAT}
                     className={undefined}
                     testId="notifications-attention-count"
                   />

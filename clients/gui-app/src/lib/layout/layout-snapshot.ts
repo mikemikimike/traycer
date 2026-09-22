@@ -30,3 +30,16 @@ export interface LayoutSnapshot {
 export type LayoutValuePatches = {
   readonly [K in RegionId]?: Partial<LayoutValues[K]>;
 };
+
+/**
+ * The same shape for a REVERT: which of each region's keys to take back out of
+ * the delta (L-133), as one write.
+ *
+ * Stringly-typed keys for the same reason `clearRegionValues` takes them: a
+ * caller's keys come from a patch or a registry row rather than from one
+ * region's declared value shape, and the resolver on the write path is what
+ * keeps the result sound.
+ */
+export type LayoutValueKeysByRegion = {
+  readonly [K in RegionId]?: ReadonlyArray<string>;
+};

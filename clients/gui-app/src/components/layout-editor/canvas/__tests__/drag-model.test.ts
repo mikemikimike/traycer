@@ -46,7 +46,22 @@ const UNEVEN_STACK: ReadonlyArray<DragRect> = [
 ];
 const STACK_CLUSTER = { start: 0, end: 152 } as const;
 
+/**
+ * The sidebar rail on its real numbers: 36px icons 4px apart with an 8px group
+ * break among them (L-140). Chats, Artifacts, the break, Terminals.
+ *
+ * It is the one shape where a member is a fraction of its neighbours' size,
+ * which is what makes it the shape the claim floor is about.
+ */
+const RAIL: ReadonlyArray<DragRect> = [
+  { left: 0, top: 0, width: 36, height: 36 },
+  { left: 0, top: 40, width: 36, height: 36 },
+  { left: 0, top: 80, width: 36, height: 8 },
+  { left: 0, top: 92, width: 36, height: 36 },
+];
+
 const rowSlots = dragSlotsOf(ROWS, "y");
+const railSlots = dragSlotsOf(RAIL, "y");
 
 describe("arming", () => {
   it("waits for the six pixels that tell a drag from a click", () => {
@@ -163,18 +178,23 @@ const SLOT_CASES: ReadonlyArray<SlotCase> = [
   // Wide dragged past narrow, horizontal, towards the start: the 40px chip's
   // START edge has to reach the 10px chip's centre at 5. Its own centre never
   // could - that is the bug.
+  //
+  // This is the one pair in the table the 12px floor separates rather than the
+  // half-overlap rule: a 10px neighbour 4px away is claimed at 9px of travel,
+  // which is inside the floor (L-150(4)). The far side still fails under the
+  // superseded centre rule, which is what the pair is here for.
   {
     name: "x wide-vs-narrow, short",
     slots: rowSlotsX,
     index: 1,
-    offset: -8,
+    offset: -11,
     claims: 1,
   },
   {
     name: "x wide-vs-narrow, past",
     slots: rowSlotsX,
     index: 1,
-    offset: -10,
+    offset: -13,
     claims: 0,
   },
 
@@ -224,6 +244,57 @@ const SLOT_CASES: ReadonlyArray<SlotCase> = [
     index: 1,
     offset: -65,
     claims: 0,
+  },
+
+  // The sidebar rail on its real numbers, which is the shape the floor exists
+  // for and the one size relation the rest of this table does not carry: an
+  // 8px group break between two 36px icons is claimed at 8px of travel by the
+  // half-overlap rule alone, so a click that slips would regroup a panel
+  // (L-150(4)). The floor puts it at 12, and the panel BEYOND the break is
+  // still where the rule puts it, at 34.
+  {
+    name: "rail break, wobble",
+    slots: railSlots,
+    index: 1,
+    offset: 11,
+    claims: 1,
+  },
+  {
+    name: "rail break, claimed",
+    slots: railSlots,
+    index: 1,
+    offset: 12,
+    claims: 2,
+  },
+  {
+    name: "rail next panel, short",
+    slots: railSlots,
+    index: 1,
+    offset: 34,
+    claims: 2,
+  },
+  {
+    name: "rail next panel, past",
+    slots: railSlots,
+    index: 1,
+    offset: 35,
+    claims: 3,
+  },
+  // And upward, so the floor is measured in both directions on this shape too:
+  // Terminals' own start edge reaches the break's centre at -8.
+  {
+    name: "rail break upward, wobble",
+    slots: railSlots,
+    index: 3,
+    offset: -11,
+    claims: 3,
+  },
+  {
+    name: "rail break upward, claimed",
+    slots: railSlots,
+    index: 3,
+    offset: -12,
+    claims: 2,
   },
 ];
 

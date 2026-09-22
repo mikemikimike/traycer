@@ -645,37 +645,49 @@ interface RevealGeometryShim {
 
 /**
  * The strip's active-tab reveal, under a jsdom with no layout: the scroller's
- * viewport box, the box of whichever member the strip painted selected, and
- * storage for `scrollLeft` (jsdom's is a layout read that never keeps what is
- * written to it) are all shimmed.
+ * viewport box, the box of the MEMBER the strip painted selected, and storage
+ * for `scrollLeft` (jsdom's is a layout read that never keeps what is written
+ * to it) are all shimmed.
  *
  * What is NOT shimmed is the decision. The component reads those boxes and
  * writes `scrollLeft` itself, and the amount it writes is the assertion.
  *
- * `selectedBox` is read per measurement so one test can move the selection
- * from a member that fits to one that does not.
+ * Two boxes, not one, and the pair is what makes the production walk
+ * measurable (R4B-05). `tab-strip.tsx` deliberately climbs from the selected
+ * NODE to the scroller's own child, because inside a split group the selected
+ * node is one HALF of the member - so the shim gives the scroller's child the
+ * member box and gives anything nested below it the member's leading half.
+ * Handing every ancestor the same rect made the walk unobservable: replacing
+ * it with `const member = selected` produced the same numbers in all four
+ * cases, and the split group L-146 was written against would have scrolled by
+ * the half's overflow and left the other half cut.
+ *
+ * `memberBox` is read per measurement so one test can move the selection from
+ * a member that fits to one that does not.
  */
-function installRevealGeometry(
-  selectedBox: () => RevealBox,
-): RevealGeometryShim {
+function installRevealGeometry(memberBox: () => RevealBox): RevealGeometryShim {
   const realRect = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
     "getBoundingClientRect",
   );
   const box = (left: number, right: number): DOMRect =>
     ({ left, right, width: right - left }) as DOMRect;
+  const isScroller = (node: Element | null): boolean =>
+    node !== null && node.hasAttribute("data-layout-passive-members");
   HTMLElement.prototype.getBoundingClientRect = function boxFor(
     this: HTMLElement,
   ): DOMRect {
-    // The scroller shows 0..200. Every ancestor of the node painted
-    // `aria-selected` takes the selected box, which covers the strip member
-    // whatever depth the selection is painted at.
-    if (this.hasAttribute("data-layout-passive-members")) return box(0, 200);
-    if (this.querySelector('[aria-selected="true"]') !== null) {
-      const selected = selectedBox();
-      return box(selected.left, selected.right);
-    }
-    return box(0, 0);
+    // The scroller shows 0..200.
+    if (isScroller(this)) return box(0, 200);
+    const holdsSelection =
+      this.getAttribute("aria-selected") === "true" ||
+      this.querySelector('[aria-selected="true"]') !== null;
+    if (!holdsSelection) return box(0, 0);
+    const member = memberBox();
+    // The scroller's own child IS the member; anything below it is a half of
+    // one, and a half is strictly narrower and flush with the member's start.
+    if (isScroller(this.parentElement)) return box(member.left, member.right);
+    return box(member.left, (member.left + member.right) / 2);
   };
   let scrolled = 0;
   const realScrollLeft = Object.getOwnPropertyDescriptor(

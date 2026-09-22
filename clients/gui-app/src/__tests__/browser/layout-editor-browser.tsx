@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import {
   ChatDockCompactStrip,
   ChatDockCompactStripProvider,
-  type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { createHoverChip } from "@/components/layout-editor/canvas/hover-chip";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
@@ -243,7 +243,7 @@ function LiveDockChips(): ReactNode {
       }}
     >
       <HostContextFrame host="chip-strip">
-        <ChatDockCompactStrip actionsRef={() => undefined} />
+        <ChatDockCompactStrip actionsRef={() => undefined} snapshotLoaded />
       </HostContextFrame>
     </ChatDockCompactStripProvider>
   );

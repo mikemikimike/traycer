@@ -50,7 +50,6 @@ export function DiffLineDeltas(props: {
           {props.rolling ? (
             <RollingNumber
               value={additions}
-              format={undefined}
               className={undefined}
               testId={undefined}
             />
@@ -65,7 +64,6 @@ export function DiffLineDeltas(props: {
           {props.rolling ? (
             <RollingNumber
               value={deletions}
-              format={undefined}
               className={undefined}
               testId={undefined}
             />

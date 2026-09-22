@@ -226,7 +226,7 @@ export function LayoutRegionContextMenu(props: {
           than at each call site means a site can hand this a COMPONENT - the
           Home item, a toolbar picker - without that component having to
           forward the trigger's props to a DOM node. */}
-      <ContextMenuTrigger asChild>
+      <ContextMenuTrigger asChild ref={REGION_TRIGGER_REF}>
         <span className="contents">{props.children}</span>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -253,14 +253,25 @@ export function LayoutRegionContextMenu(props: {
  * It is the right shape for any container of regions, not only a strip of
  * small controls: the dock's pill row and the joined frame of full rows each
  * take one (L-144), which is what gives every dock member its verbs for two
- * roots per tile rather than one per member. A container holds controls that
- * may own their own right-click (a file row, a queue item), and the innermost
- * menu wins with nothing written here: Radix's trigger composes the caller's
- * handler ahead of its own opener and SKIPS that opener once the event is
- * default-prevented, which the inner trigger has already done by the time the
- * event reaches this one. The quick verbs are left to the row's header and its
- * empty space, where nothing else is listening
- * (`region-quick-verbs.test.tsx` pins both halves).
+ * roots per tile rather than one per member.
+ *
+ * What a container must NOT do is answer a press that belongs to something
+ * else, and the dock is mounted in the real chat for every user at rest, so
+ * "something else" is mostly the operating system: a selected file path, a
+ * link in a Background item, a text field. {@link osOwnsContextMenu} names
+ * those and {@link CLUSTER_TRIGGER_REF} stands down on them, along with a
+ * press that resolves to no region at all - the frame's own padding, which
+ * used to be a dead gesture that opened nothing and suppressed the app's menu
+ * as well.
+ *
+ * A container MAY also hold a control with a menu of its own, and the
+ * innermost one wins with nothing written here: Radix's trigger composes the
+ * caller's handler ahead of its own opener and SKIPS that opener once the
+ * event is default-prevented, which the inner trigger has already done by the
+ * time the event reaches this one. Nothing in the dock nests one today, so
+ * that half is a property of the primitive rather than a defence the product
+ * exercises; `region-quick-verbs.test.tsx` measures it so it cannot quietly
+ * stop being true.
  */
 export function LayoutClusterContextMenu(props: {
   readonly children: ReactNode;
@@ -270,13 +281,11 @@ export function LayoutClusterContextMenu(props: {
     <ContextMenu>
       <ContextMenuTrigger
         asChild
+        ref={CLUSTER_TRIGGER_REF}
         onContextMenu={(event: MouseEvent<HTMLElement>) => {
-          const region = regionUnder(event.target);
-          // Nothing customizable under the pointer - the strip's own gaps.
-          // The same composition rule as above: defaulting the event prevented
-          // leaves the gap to whatever menu an ancestor owns, or to none.
-          if (region === null) event.preventDefault();
-          else setRegionId(region);
+          // Only ever reached with a region under the pointer: the refusal
+          // above has already taken the event out of React's reach otherwise.
+          setRegionId(regionUnder(event.target));
         }}
       >
         {props.children}
@@ -290,13 +299,82 @@ export function LayoutClusterContextMenu(props: {
   );
 }
 
-function regionUnder(target: EventTarget): RegionId | null {
+function regionUnder(target: EventTarget | null): RegionId | null {
   if (!(target instanceof Element)) return null;
   const value = target
     .closest("[data-layout-region]")
     ?.getAttribute("data-layout-region");
   return LAYOUT_REGION_IDS.find((id) => id === value) ?? null;
 }
+
+/**
+ * What the operating system's own menu is for: a link, an editable field, or
+ * text the user has selected.
+ *
+ * Electron answers those with Copy, Copy Link and the spell-check suggestions
+ * (`clients/desktop/src/electron-main/app/spell-check.ts`), and it only ever
+ * hears about the press because Chromium sent `ShowContextMenu`, which it does
+ * not do for an event something called `preventDefault` on.
+ *
+ * The selection test asks whether the selection is UNDER the pointer, not
+ * whether one exists: a selection left behind in the transcript is not what a
+ * right-click on a dock row is about.
+ */
+function osOwnsContextMenu(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(OS_MENU_CONTENT_SELECTOR) !== null) return true;
+  const selection = target.ownerDocument.defaultView?.getSelection() ?? null;
+  if (selection === null || selection.isCollapsed) return false;
+  return Array.from({ length: selection.rangeCount }, (_, index) =>
+    selection.getRangeAt(index),
+  ).some((range) => range.intersectsNode(target));
+}
+
+const OS_MENU_CONTENT_SELECTOR =
+  'input, textarea, [contenteditable=""], [contenteditable="true"], a[href]';
+
+/**
+ * A press this menu stands down from, refused AT the trigger before Radix can
+ * take it.
+ *
+ * There is no way to stand down from inside a handler passed to the trigger.
+ * Radix composes the caller's `onContextMenu` ahead of its own opener and
+ * skips that opener only when the event is already default-prevented - and
+ * default-prevented is exactly the state that removes the native menu. So the
+ * refusal has to stop the event from reaching React's dispatch at all, which
+ * leaves `defaultPrevented` false for Chromium to act on.
+ *
+ * A native capture listener rather than `onContextMenuCapture`, and the
+ * ordering is the whole reason: React dispatches its capture phase from the
+ * ROOT container, which is above the editor's app column, so a React capture
+ * handler would run BEFORE `canvas/edit-firewall.ts`'s own capture listener
+ * and take decisions that belong to the firewall - a press on the sample
+ * scene's padding during a session, say, which the firewall swallows and this
+ * hands to the OS. Bound on the trigger, this runs after the firewall and only
+ * on presses the firewall let by.
+ */
+function standDownRef(
+  standsDown: (target: EventTarget | null) => boolean,
+): (node: HTMLElement | null) => (() => void) | undefined {
+  const refuse = (event: Event): void => {
+    if (standsDown(event.target)) event.stopPropagation();
+  };
+  return (node) => {
+    if (node === null) return undefined;
+    node.addEventListener("contextmenu", refuse, true);
+    return () => {
+      node.removeEventListener("contextmenu", refuse, true);
+    };
+  };
+}
+
+/** A region's own menu stands down only for the OS: it names one region. */
+const REGION_TRIGGER_REF = standDownRef(osOwnsContextMenu);
+
+/** A cluster's also stands down where the press names no region at all. */
+const CLUSTER_TRIGGER_REF = standDownRef(
+  (target) => osOwnsContextMenu(target) || regionUnder(target) === null,
+);
 
 /** Which leaf a verb writes. */
 function quickVerbKey(verb: QuickVerbId): RegionValueKey {

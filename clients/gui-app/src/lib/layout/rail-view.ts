@@ -15,7 +15,8 @@ import {
   type LeftPanelId,
   type PanelVisibilityOverrideById,
 } from "@/lib/left-panel-ids";
-import type { LayoutValuePatches } from "@/lib/layout/layout-snapshot";
+import type { LayoutValueKeysByRegion } from "@/lib/layout/layout-snapshot";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
@@ -30,6 +31,22 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
  * ownership - a reader of the panel store believed it held rail shape - and
  * one of them, "clear every override", looped nine separate writes, which is
  * nine renders and, once a gesture is recorded, nine undo steps (G1-09).
+ *
+ * The two WRITERS go through `recordGesture`, like every other writer of the
+ * same values (`inspector/region-control-io.ts`, `region-quick-verbs.tsx`).
+ * That is not decoration: `watchExternalLayoutWrites` reads a write made
+ * outside the editor's own depth as ANOTHER WINDOW's and rebases the entry
+ * snapshot onto it, so a hide made from the rail's menu during a session was
+ * neither undoable nor discardable (L-18, L-150(1)). `recordGesture` with no
+ * session open is a pass-through, so the real sidebar's behaviour at rest is
+ * exactly what it was.
+ *
+ * That the editor store is imported from here rather than the write being
+ * recorded at the menu is the layering this module already sits in:
+ * `lib/layout/editor-session.ts` and `editor-lease.ts` are the session's own
+ * seams and import the same store, and putting the recording at the two menu
+ * call sites instead would leave the next caller of these functions with the
+ * same hole.
  */
 
 /** The rail as the sidebar's group view, subscribed to the rail alone. */
@@ -97,23 +114,38 @@ export function applyLeftPanelGroups(
  * One panel's Hide/Show, or `null` to put it back on its own presence rule
  * (L-47). Callers pass `null` whenever the value they are setting already
  * matches that rule, keeping the delta to real preferences.
+ *
+ * `null` is not a pick, it is the ABSENCE of one, so it is a revert and takes
+ * the answer out of the delta (L-133): recording `auto` would store a pick
+ * that pins the panel against the day a preset sets a rail region to anything
+ * else, and would put nine such records in a user's delta every time they
+ * reset panel visibility.
  */
 export function setRailVisibilityOverride(
   panelId: LeftPanelId,
   override: boolean | null,
 ): void {
-  useLayoutStore.getState().setRegionValues(railRegionForLeftPanelId(panelId), {
-    shown: railVisibilityFor(override),
+  const regionId = railRegionForLeftPanelId(panelId);
+  useLayoutEditorStore.getState().recordGesture(() => {
+    if (override === null) {
+      useLayoutStore.getState().clearRegionValues(regionId, ["shown"]);
+      return;
+    }
+    useLayoutStore
+      .getState()
+      .setRegionValues(regionId, { shown: railVisibilityFor(override) });
   });
 }
 
 /** Every panel back on its own rule, as ONE write and one undo step. */
 export function clearRailVisibilityOverrides(): void {
-  const patches: LayoutValuePatches = Object.fromEntries(
+  const keysByRegion: LayoutValueKeysByRegion = Object.fromEntries(
     Object.values(RAIL_REGION_BY_PANEL).map((regionId) => [
       regionId,
-      { shown: "auto" },
+      ["shown"],
     ]),
   );
-  useLayoutStore.getState().setRegionValuesMany(patches);
+  useLayoutEditorStore.getState().recordGesture(() => {
+    useLayoutStore.getState().clearRegionValuesMany(keysByRegion);
+  });
 }

@@ -454,7 +454,19 @@ describe("<ChatDockCompactChip />", () => {
   // stand: parsing them would roll pieces the caller never meant to expose.
   describe("rolling counts", () => {
     it("keeps every short form's text exactly as it reads", () => {
-      const shapes = ["3", "0", "2 · 1", "2/5", "99+", "+1 −2"];
+      // The four-figure shapes are the ones that pin it: the rolling branch
+      // formats through `Intl.NumberFormat`, which would otherwise print
+      // `1,234` where the panel this pill stands in for prints `1234`.
+      const shapes = [
+        "3",
+        "0",
+        "2 · 1",
+        "2/5",
+        "99+",
+        "+1 −2",
+        "1234",
+        "1234/5678",
+      ];
       for (const text of shapes) {
         renderChip({ ...baseProps(), text });
         expect(screen.getByTestId("chip").textContent, text).toBe(text);

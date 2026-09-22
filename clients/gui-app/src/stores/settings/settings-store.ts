@@ -676,9 +676,14 @@ export const useSettingsStore = create<SettingsState>()(
         }));
       },
       setWorkspaceFileWordWrap: makeSetter(set, "workspaceFileWordWrap"),
-      // Clamped on the way IN, not only where the handle writes it: a record
-      // rehydrated from another version of this app (or hand-edited) must not
-      // be able to bury the transcript under a pane-high dock panel.
+      // Clamped on write as well as on read. This setter is only the write
+      // half: the persist middleware merges a stored value straight into
+      // state, so a record rehydrated from another version of this app (or
+      // hand-edited) reaches the store unclamped. What keeps it from burying
+      // the transcript under a pane-high dock panel is the READ-side clamp in
+      // `ChatDockAttachedPanelBody`, which is the half
+      // `chat-dock-panel-height.ts` documents - do not delete it as
+      // redundant.
       setChatDockPanelHeight: (ratio) => {
         set({ chatDockPanelHeight: clampChatDockPanelHeightRatio(ratio) });
       },

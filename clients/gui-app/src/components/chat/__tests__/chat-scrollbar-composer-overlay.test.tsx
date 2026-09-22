@@ -28,7 +28,7 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import type { ChatDockSection } from "@/components/chat/chat-dock-compact-strip";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { ChatTimeline } from "@/components/chat/chat-timeline";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import { TabHostProvider } from "@/components/epic-canvas/tab-host-provider";

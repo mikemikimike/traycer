@@ -1500,7 +1500,18 @@ export function ChatTileSessionView(props: ChatTileSessionViewProps) {
              * chain, because this element's height comes from `flex-1` in a
              * definite-height column (the tile root is `h-full` inside a
              * record the surface host sizes in pixels) and never from its
-             * contents, so containing its size changes nothing it measures. */}
+             * contents, so containing its size changes nothing it measures.
+             *
+             * `container-type: size` also computes `contain: layout style`,
+             * which has two effects beyond sizing. The pane becomes a
+             * containing block for `position: fixed` descendants, so a fixed
+             * overlay rendered inline under the transcript or the composer
+             * would be positioned against this tile rather than against the
+             * viewport - the app's overlay primitives portal out of the tree
+             * by rule, and anything new that does not must. And it becomes a
+             * stacking context, which `position: relative` alone was not, so
+             * the lower-surfaces overlay's `z-10` below is scoped to the pane
+             * instead of competing with anything outside it. */}
             <div
               data-chat-pane=""
               className="relative flex min-h-0 flex-1 flex-col [container-type:size]"

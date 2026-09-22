@@ -9,11 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useChatDockCompactStrip } from "@/components/chat/chat-dock-compact-context";
 import {
   CHAT_DOCK_SECTION_NAME,
-  useChatDockCompactStrip,
   type ChatDockSection,
-} from "@/components/chat/chat-dock-compact-context";
+} from "@/lib/chat/chat-dock-sections";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,

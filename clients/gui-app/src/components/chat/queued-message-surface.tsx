@@ -585,7 +585,7 @@ export function QueuedMessageHeader(props: {
             />
           ) : null}
           <span className="shrink-0 text-ui-xs font-medium text-foreground/85">
-            Message Queue
+            Message queue
           </span>
           <span
             aria-hidden

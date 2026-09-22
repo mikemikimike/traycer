@@ -8,8 +8,8 @@ import {
 import {
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
-  type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import {
   useChatDockOpenSection,
   useChatDockOpenStore,

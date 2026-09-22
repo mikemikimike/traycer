@@ -21,8 +21,8 @@ import {
 import {
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
-  type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
@@ -240,6 +240,36 @@ describe("<ChatLowerDock />", () => {
       .getByTestId("chat-lower-dock")
       .querySelector(".rounded-t-lg");
     expect(frame?.childElementCount).toBe(0);
+  });
+
+  // A pill exists on a WIDER predicate than its panel does: Active agents
+  // keeps its pill on received A2A rows alone, while the panel declines to
+  // draw without a self record. Clicking that pill used to leave three wrong
+  // outputs behind - a pressed pill, an `aria-controls` naming an id no
+  // element carries, and the frame's first row drawing a separator under
+  // nothing. Everything now follows the NODE the dock built, so a panel that
+  // renders nothing is not open. Mutation check: derive `separatedBefore` and
+  // the strip's `openSection` from the pill again and all three go red.
+  it("claims nothing is open when the open pill's panel renders nothing", () => {
+    renderDock({
+      ...emptyDock(),
+      // No self record, so `dockPanelContent` draws no Active agents panel.
+      selfAgent: null,
+      activeAgents: [],
+      changes: [fileChange()],
+      folded: new Set(["activeAgents"]),
+      chips: [compactChip("activeAgents")],
+      openSection: "activeAgents",
+    });
+
+    expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
+    const pill = screen.getByTestId("chat-dock-chip-activeAgents");
+    expect(pill.getAttribute("aria-pressed")).toBe("false");
+    expect(pill.getAttribute("aria-controls")).toBeNull();
+    // The first full row is still flush to the frame's rounded top.
+    expect(
+      screen.getByTestId("accumulated-changes-panel").className,
+    ).not.toContain("border-t");
   });
 
   it("renders background items and dispatches item actions", () => {

@@ -17,9 +17,24 @@ const ROLL_TIMING: EffectTiming = {
 /** Digits entering and leaving fade a touch faster than they travel. */
 const OPACITY_TIMING: EffectTiming = { duration: 140, easing: "ease-out" };
 
+/**
+ * A count that keeps the exact digits the app prints everywhere else.
+ *
+ * `Intl.NumberFormat` groups by default - `1234` becomes `1,234` - while a
+ * plain `{count}` beside it is `1234`, so a total that rolls would gain a
+ * separator the identical number next to it does not have: the accumulated
+ * panel's header against its own per-file rows, the pill against the header it
+ * stands in for. A separator also has to roll in and out on the way past 999,
+ * which widens a 16px badge for a character that carries no information at
+ * these magnitudes.
+ *
+ * Every surface that rolls a number wants exactly this, so it is the
+ * component's only formatting rather than a prop each call site restates.
+ */
+const UNGROUPED_COUNT_FORMAT: Format = { useGrouping: false };
+
 interface RollingNumberProps {
   readonly value: number;
-  readonly format: Format | undefined;
   readonly className: string | undefined;
   readonly testId: string | undefined;
 }
@@ -39,7 +54,7 @@ interface RollingNumberProps {
  * that only exists in a browser, and our own gate already covers reduced
  * motion better than the package can.
  *
- * Both branches format through `Intl.NumberFormat` with the same `format`, so
+ * Both branches format through `Intl.NumberFormat` with the same options, so
  * the plain text and the rolled digits can never disagree about the string.
  * In jsdom neither `Element.prototype.animate` nor the `CSS` global exists, so
  * `useIsSupported()` is false for the whole suite and this renders the plain
@@ -60,7 +75,6 @@ interface RollingNumberProps {
  */
 export function RollingNumber({
   value,
-  format,
   className,
   testId,
 }: RollingNumberProps) {
@@ -70,7 +84,7 @@ export function RollingNumber({
   if (!supported || !motionEnabled) {
     return (
       <span data-testid={testId} className={cn("tabular-nums", className)}>
-        {new Intl.NumberFormat(undefined, format).format(value)}
+        {new Intl.NumberFormat(undefined, UNGROUPED_COUNT_FORMAT).format(value)}
       </span>
     );
   }
@@ -78,7 +92,7 @@ export function RollingNumber({
   return (
     <NumberFlow
       value={value}
-      format={format}
+      format={UNGROUPED_COUNT_FORMAT}
       data-testid={testId}
       className={cn("tabular-nums", className)}
       transformTiming={ROLL_TIMING}

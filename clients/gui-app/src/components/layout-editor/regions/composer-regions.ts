@@ -102,7 +102,7 @@ export const BACKGROUND_REGION: LayoutRegion<"background"> = {
 
 /**
  * `ListOrdered` is the glyph the real panel's own header prints beside
- * "Message Queue", so the index row, the quick-verb menu and the compact pill
+ * "Message queue", so the index row, the quick-verb menu and the compact pill
  * all name the row with the mark a reader already associates with it.
  */
 export const QUEUE_REGION: LayoutRegion<"queue"> = {

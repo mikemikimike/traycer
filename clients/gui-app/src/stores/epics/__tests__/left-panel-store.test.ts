@@ -988,22 +988,20 @@ describe("useLeftPanelStore", () => {
     });
   });
 
-  it("puts a panel back on its own rule rather than flipping it to hidden", () => {
-    // `null` is how the menu says "this matches the panel's own rule again",
-    // so the panel stops being overridden - it does not flip to `false`.
+  it("takes the pick OUT of the delta when a panel goes back on its own rule", () => {
+    // `null` is how the menu says "this matches the panel's own rule again".
+    // It is the absence of a pick, not a pick of Automatic, so it REMOVES the
+    // answer rather than recording one (L-133, L-150(3)).
     //
-    // The delta records `auto`, and that is L-133 rather than a leak: the
-    // stored overrides are what a person PICKED, not what happens to differ
-    // from the current preset, so nothing minimizes them against the base any
-    // more. Every preset's rail value is `auto`, so the recorded pick and the
-    // absent one resolve identically and neither reads as changed.
+    // What that buys is the day a preset sets a rail region to `shown` or
+    // `hidden`: a recorded `auto` would be a real pick pinning the panel
+    // against that preset, and "Reset panel visibility" would write nine of
+    // them for a user who had overridden one.
     setRailVisibilityOverride("pull-requests", true);
     setRailVisibilityOverride("pull-requests", null);
 
     expect(visibilityOverrides()).toEqual({});
-    expect(readPersistedLayoutOverrides()).toEqual({
-      railPullRequests: { shown: "auto" },
-    });
+    expect(readPersistedLayoutOverrides()).toEqual({});
   });
 
   it("refuses to activate a panel the user explicitly hid", () => {
@@ -1032,13 +1030,17 @@ describe("useLeftPanelStore", () => {
     );
   });
 
-  it("clears every override at once", () => {
+  it("clears every override at once, leaving no record of any of them", () => {
+    // "Reset panel visibility" is a revert across all nine regions, so it
+    // REMOVES the picks (L-133) instead of writing nine `auto` records into
+    // the delta of a user who had overridden one.
     setRailVisibilityOverride("chats", false);
     setRailVisibilityOverride("comments", true);
 
     clearRailVisibilityOverrides();
 
     expect(visibilityOverrides()).toEqual({});
+    expect(readPersistedLayoutOverrides()).toEqual({});
   });
 
   it("keeps slice identity when an override is set to its current value", () => {

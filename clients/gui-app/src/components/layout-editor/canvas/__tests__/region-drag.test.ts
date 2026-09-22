@@ -334,8 +334,9 @@ describe("dragging a region on the canvas", () => {
     setToolbarLeft(["attachImage", "access", "mic"]);
     const nodes = mountToolbar(["attachImage", "access", "mic"]);
 
-    // Far enough right for the first chip's centre to pass the second's: the
-    // chips are 30 wide and 4 apart, so the neighbour's centre is at 49.
+    // Far enough right for the first chip's LEADING EDGE to pass the second's
+    // centre (L-143): the chips are 30 wide and 4 apart, so that centre is at
+    // 49 and the edge starts at 30, which is 19px of travel.
     dragBy(nodes[0], { clientX: 60 });
 
     expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
@@ -432,6 +433,9 @@ describe("dragging in the sidebar rail", () => {
     // Terminals at 92..128. A slot is claimed when the leading edge passes the
     // neighbour's centre (L-143), so 24px down carries Artifacts' bottom edge
     // to 100 - past the boundary's centre at 84, short of Terminals' at 110.
+    // The engine's grab point is the move that crossed the 6px activation
+    // distance, which this helper sends at 8, so the member travels 16: above
+    // the 12px claim floor as well (L-150(4)).
     const nodes = mountRail(DEFAULT_RAIL);
 
     dragBy(nodes[1], { clientY: 24 });

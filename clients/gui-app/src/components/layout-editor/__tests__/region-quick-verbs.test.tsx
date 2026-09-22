@@ -413,6 +413,136 @@ describe("<LayoutClusterContextMenu />", () => {
 });
 
 /**
+ * What the menu does NOT answer (L-150(2)).
+ *
+ * The real chat dock is wrapped in a cluster menu for every user at rest, and
+ * a dock row is a named region, so every descendant of one resolved to it:
+ * selecting a file path and right-clicking it opened the quick verbs and took
+ * Electron's Copy away. The same held for a link inside a Background item and
+ * for any editable that lands in the dock, and a press on the frame's own
+ * padding suppressed the app's menu and opened nothing at all.
+ *
+ * The presses below are NATIVE bubbling `contextmenu` events, because what is
+ * being measured is `defaultPrevented` at the end of the dispatch - which is
+ * the only thing Chromium consults before sending `ShowContextMenu`, and the
+ * only thing that decides whether Electron's `context-menu` ever fires.
+ */
+describe("a press the operating system's own menu serves", () => {
+  function press(node: HTMLElement): MouseEvent {
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      node.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  function renderDock(): void {
+    render(
+      <LayoutClusterContextMenu>
+        <div data-testid="dock">
+          <span data-layout-region="changedFiles" data-testid="row">
+            <span data-testid="row-header">3 files changed</span>
+            <span data-testid="path">src/app.ts</span>
+            <a href="https://example.com" data-testid="link">
+              open
+            </a>
+            <input data-testid="field" defaultValue="note" />
+          </span>
+          <span data-testid="padding">the frame&apos;s own padding</span>
+        </div>
+      </LayoutClusterContextMenu>,
+    );
+  }
+
+  function verbsShowing(): boolean {
+    return screen.queryByTestId("layout-quick-verb-changedFiles-hide") !== null;
+  }
+
+  it("leaves a link and an editable field inside a named row alone", () => {
+    renderDock();
+
+    for (const testId of ["link", "field"]) {
+      const event = press(screen.getByTestId(testId));
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(verbsShowing()).toBe(false);
+    }
+  });
+
+  it("leaves a press inside a text selection alone", () => {
+    renderDock();
+    const path = screen.getByTestId("path");
+    const range = document.createRange();
+    range.selectNodeContents(path);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const event = press(path);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(verbsShowing()).toBe(false);
+
+    // And with the selection gone, the same press is the editor's again.
+    selection?.removeAllRanges();
+    const again = press(path);
+
+    expect(again.defaultPrevented).toBe(true);
+    expect(verbsShowing()).toBe(true);
+  });
+
+  it("leaves the cluster's own padding to whatever owns it", () => {
+    renderDock();
+
+    const event = press(screen.getByTestId("padding"));
+
+    // Not a dead gesture: nothing opens AND nothing is prevented, so the app's
+    // own menu still raises where it used to.
+    expect(event.defaultPrevented).toBe(false);
+    expect(verbsShowing()).toBe(false);
+  });
+
+  it("still opens the verbs on the row's own header", () => {
+    renderDock();
+
+    const event = press(screen.getByTestId("row-header"));
+
+    expect(verbsShowing()).toBe(true);
+    // Radix's trigger prevents the event itself once it opens, which is what
+    // keeps the native menu from arriving on top of the verbs.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("stands down for a region menu too, which wraps chrome the same way", () => {
+    render(
+      <LayoutRegionContextMenu regionId="minimap">
+        <span data-testid="chrome">
+          <a href="https://example.com" data-testid="chrome-link">
+            open
+          </a>
+          <span data-testid="chrome-body">body</span>
+        </span>
+      </LayoutRegionContextMenu>,
+    );
+
+    const onLink = press(screen.getByTestId("chrome-link"));
+
+    expect(onLink.defaultPrevented).toBe(false);
+    expect(screen.queryByTestId("layout-quick-verb-minimap-hide")).toBeNull();
+
+    const onBody = press(screen.getByTestId("chrome-body"));
+
+    expect(onBody.defaultPrevented).toBe(true);
+    expect(
+      screen.queryByTestId("layout-quick-verb-minimap-hide"),
+    ).not.toBeNull();
+  });
+});
+
+/**
  * The same strip, with the regions named by the hook the app really uses
  * instead of by hand (L-129).
  *

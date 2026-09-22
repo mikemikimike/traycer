@@ -18,8 +18,8 @@ import {
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
   type ChatDockCompactStripValue,
-  type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 function chip(
@@ -78,18 +78,26 @@ function shimmerGlyph(section: string): HTMLElement | SVGElement | null {
     : null;
 }
 
-function stripUi(value: ChatDockCompactStripValue) {
+/**
+ * `snapshotLoaded` is explicit at every call rather than defaulted, because it
+ * is half of what decides whether a pill's arrival counts as news: the strip
+ * arms itself one commit after it has drawn a pill over SETTLED data.
+ */
+function stripUi(value: ChatDockCompactStripValue, snapshotLoaded: boolean) {
   return (
     <TooltipProvider delayDuration={0}>
       <ChatDockCompactStripProvider value={value}>
-        <ChatDockCompactStrip actionsRef={() => undefined} />
+        <ChatDockCompactStrip
+          actionsRef={() => undefined}
+          snapshotLoaded={snapshotLoaded}
+        />
       </ChatDockCompactStripProvider>
     </TooltipProvider>
   );
 }
 
 function renderStrip(value: ChatDockCompactStripValue) {
-  return render(stripUi(value));
+  return render(stripUi(value, true));
 }
 
 function stripValue(
@@ -125,7 +133,7 @@ describe("<ChatDockCompactStrip />", () => {
   it("renders nothing outside a provider", () => {
     const { container } = render(
       <TooltipProvider delayDuration={0}>
-        <ChatDockCompactStrip actionsRef={() => undefined} />
+        <ChatDockCompactStrip actionsRef={() => undefined} snapshotLoaded />
       </TooltipProvider>,
     );
 
@@ -495,6 +503,7 @@ describe("<ChatDockCompactStrip />", () => {
             { ...unitChip("filesChanged"), pulseToken: "changed" },
             { ...unitChip("activeAgents"), pulseToken: "running" },
           ]),
+          true,
         ),
       );
 
@@ -512,6 +521,85 @@ describe("<ChatDockCompactStrip />", () => {
       ).toBeNull();
     });
 
+    // The same failure through the other door, and the hole the first version
+    // of the suppression left: `ChatLowerDock` mounts this strip whenever the
+    // dock renders at all, so a chat whose members are a full Todo row and
+    // three pill-sized ones mounts an EMPTY strip. "Has committed once" was
+    // true one commit later, over no pills at all, and the first burst a turn
+    // brought - files changed, an agent started, a message queued - rang three
+    // rings at once. Mutation check: drop the `hasChips` term from the effect
+    // in `chat-dock-compact-strip.tsx` and this goes red.
+    it("rings no pill in the first burst after an empty mount", () => {
+      const BURST: ReadonlyArray<ChatDockSection> = [
+        "filesChanged",
+        "activeAgents",
+        "queue",
+      ];
+      const burst = BURST.map((section) => ({
+        ...unitChip(section),
+        pulseToken: `${section}-arrived`,
+      }));
+      const { rerender } = renderStrip(stripValue([]));
+
+      rerender(stripUi(stripValue(burst), true));
+
+      for (const section of BURST) {
+        expect(
+          screen
+            .getByTestId(`chat-dock-chip-${section}`)
+            .getAttribute("data-pulse"),
+          section,
+        ).toBeNull();
+      }
+
+      // And the strip is armed from there: the next pill to arrive is news.
+      rerender(
+        stripUi(
+          stripValue([...burst, { ...unitChip("todo"), pulseToken: "todo" }]),
+          true,
+        ),
+      );
+
+      expect(
+        screen.getByTestId("chat-dock-chip-todo").getAttribute("data-pulse"),
+      ).toBe("true");
+    });
+
+    // The other half of the same condition. The pills are built from five
+    // independently arriving sources, and two of them (Changed files, Todo)
+    // are gated on the chat's snapshot while the queue and the background rows
+    // are not - so a strip can hold a pill before the snapshot lands, and
+    // would then be armed for the burst the snapshot itself brings. Mutation
+    // check: drop the `snapshotLoaded` term from the effect and this goes red.
+    it("rings no pill in the burst the snapshot brings", () => {
+      const { rerender } = render(
+        stripUi(
+          stripValue([{ ...unitChip("queue"), pulseToken: "queued-1" }]),
+          false,
+        ),
+      );
+
+      rerender(
+        stripUi(
+          stripValue([
+            { ...unitChip("queue"), pulseToken: "queued-1" },
+            { ...unitChip("filesChanged"), pulseToken: "changed" },
+            { ...unitChip("todo"), pulseToken: "todo" },
+          ]),
+          true,
+        ),
+      );
+
+      for (const section of ["queue", "filesChanged", "todo"]) {
+        expect(
+          screen
+            .getByTestId(`chat-dock-chip-${section}`)
+            .getAttribute("data-pulse"),
+          section,
+        ).toBeNull();
+      }
+    });
+
     // `initial={false}` on the `AnimatePresence`, read off the paint rather
     // than off the prop: a pill present at the first commit is rendered AT its
     // resting values, and a pill that arrives later starts at the hidden ones
@@ -525,6 +613,7 @@ describe("<ChatDockCompactStrip />", () => {
       rerender(
         stripUi(
           stripValue([unitChip("filesChanged"), unitChip("activeAgents")]),
+          true,
         ),
       );
 
@@ -553,14 +642,14 @@ describe("<ChatDockCompactStrip />", () => {
     ];
     const { rerender } = render(
       <LazyMotion features={domAnimation}>
-        {stripUi(stripValue(chips))}
+        {stripUi(stripValue(chips), true)}
       </LazyMotion>,
     );
     expect(seen.filter((node) => node === null)).toHaveLength(0);
 
     rerender(
       <LazyMotion features={domAnimation}>
-        {stripUi(stripValue([chips[0]]))}
+        {stripUi(stripValue([chips[0]]), true)}
       </LazyMotion>,
     );
 
@@ -605,17 +694,29 @@ describe("the strip's motion contract", () => {
   );
 
   it("pops an exiting pill out of flow rather than closing the gap over it", () => {
-    expect(source).toContain(
-      '<AnimatePresence initial={false} mode="popLayout">',
-    );
+    // The two props, read off the opening tag rather than off one exact line,
+    // so the claim survives the formatter wrapping it. The empty-match guard
+    // is what keeps the two assertions below from passing vacuously.
+    const openingTag = /<AnimatePresence[^>]*>/.exec(source)?.[0] ?? "";
+
+    expect(openingTag).not.toBe("");
+    expect(openingTag).toContain("initial={false}");
+    expect(openingTag).toContain('mode="popLayout"');
   });
 
   // The row is `flex-wrap` directly above the composer, so a layout animation
   // across a wrap boundary would animate the position of the input itself -
   // the one element on screen whose response has to be instant.
   it("animates no layout anywhere in the strip", () => {
+    // Scoped to a motion element's OPENING TAG rather than to the whole file,
+    // because `layout` is an ordinary English word this file's prose uses. The
+    // previous spelling asked for `{` or end-of-line after the name, which
+    // `<m.span layout className="...">` - the way the prop is normally written
+    // - matched neither, so the one edit most likely to introduce it passed
+    // silently. `[^>]*` cannot cross out of the tag, so a mention in a comment
+    // below one is not a hit.
     expect(source).not.toMatch(
-      /\blayout(?:Id|Root|Dependency)?[=\s]*(?:\{|$)/m,
+      /<m\.[a-z]+[^>]*\blayout(?:Id|Root|Dependency)?\b/,
     );
   });
 });

@@ -283,6 +283,22 @@ const FRAME_LIT_FLOOR = 0.15;
 const FRAME_LIT_CEILING = 0.8;
 
 /**
+ * The same question asked of each QUARTER of an edge's straight run.
+ *
+ * The band above cannot fail for a HALF-covered edge, which is the defect the
+ * frame was rebuilt for (L-130): an edge that loses 40% of its lit positions
+ * to an opaque descendant still lands inside 15-80%. An opaque child covers a
+ * CONTIGUOUS stretch, so it empties whole quarters; a stroke that is merely
+ * phased differently does not, because the dot pitch is 4px and a quarter of
+ * the shortest edge is far longer than that.
+ *
+ * Floored well under the measured 25% baseline (50% on the top edge) rather
+ * than beside it, because a quarter is a quarter of the sample and the phase
+ * is decided per edge by where the rounded path's dots land.
+ */
+const FRAME_QUARTER_LIT_FLOOR = 0.1;
+
+/**
  * How far past a neighbour's centre a drag is aimed.
  *
  * `drag-engine.ts` takes its grab point at the move that CROSSES the 6px
@@ -300,6 +316,17 @@ const FRAME_LIT_CEILING = 0.8;
  * past the anchor - otherwise a 36px rail icon aimed 18px past an 8px group
  * break carries its top edge 44px, which is past the panel above the break as
  * well, and one gesture claims two slots.
+ *
+ * `drag-model.ts` also floors the travel a claim needs at 12px (L-150(4)), so
+ * every plan below has to clear that as well as the claim boundary itself.
+ * The two rail plans are the tight ones and both do, on the rail's measured
+ * geometry (36px icons, 4px gaps, an 8px break at 80..88, Terminals 92..128).
+ * "Rail icon across a divider" aims Terminals' top edge at 84 - 18 = 66 and
+ * places the pointer half a member behind it, at 84, so the pointer travels
+ * 110 - 84 = 26 and the member travels 26 - 6 = 20. "Rail divider itself"
+ * aims the 8px break's centre at 110 + 18 = 128, so the pointer travels 44 and
+ * the member 38. Every other plan passes an ordinary neighbour, whose own
+ * boundary is already above the floor.
  */
 const DROP_OVERSHOOT = 18;
 
@@ -398,6 +425,11 @@ const INSTALL_PIXEL_TOOLS = `(() => {
     const along = horizontal ? width : height;
     const across = horizontal ? height : width;
     let lit = 0;
+    // Also per QUARTER of the run: one number for a whole edge cannot fail
+    // for an edge that is half covered, which is the defect class the frame
+    // was rebuilt for (L-130, R4B-07).
+    const quarters = [0, 0, 0, 0];
+    const quarterAlong = [0, 0, 0, 0];
     for (let a = 0; a < along; a += 1) {
       let hit = false;
       for (let b = 0; b < across && !hit; b += 1) {
@@ -410,9 +442,21 @@ const INSTALL_PIXEL_TOOLS = `(() => {
           Math.abs(data[i + 2] - target[2]);
         if (distance <= tolerance && data[i + 3] > 200) hit = true;
       }
-      if (hit) lit += 1;
+      const quarter = Math.min(3, Math.floor((a * 4) / Math.max(1, along)));
+      quarterAlong[quarter] += 1;
+      if (hit) {
+        lit += 1;
+        quarters[quarter] += 1;
+      }
     }
-    return { lit, along };
+    return {
+      lit,
+      along,
+      quarters: quarters.map((count, index) => ({
+        lit: count,
+        along: quarterAlong[index],
+      })),
+    };
   };
 })()`;
 
@@ -1325,6 +1369,24 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
         if (ratio < FRAME_LIT_FLOOR || ratio > FRAME_LIT_CEILING) {
           violations.push(
             `A9 ${mode}/${edge}: ${String(count.lit)} of ${String(count.along)} positions along the straight run of that edge are amber (${(ratio * 100).toFixed(1)}%, expected a dotted ${String(FRAME_LIT_FLOOR * 100)}-${String(FRAME_LIT_CEILING * 100)}%); column ${boxText(column)}`,
+          );
+        }
+        const quarters = count.quarters ?? [];
+        notes.push(
+          `frame ${mode}/${edge} quarters: ${quarters
+            .map((quarter) =>
+              quarter.along === 0
+                ? "-"
+                : `${((quarter.lit / quarter.along) * 100).toFixed(0)}%`,
+            )
+            .join(" ")}`,
+        );
+        for (const [index, quarter] of quarters.entries()) {
+          if (quarter.along === 0) continue;
+          const share = quarter.lit / quarter.along;
+          if (share >= FRAME_QUARTER_LIT_FLOOR) continue;
+          violations.push(
+            `A9 ${mode}/${edge}: quarter ${String(index + 1)} of that edge's straight run is ${(share * 100).toFixed(1)}% amber (expected at least ${String(FRAME_QUARTER_LIT_FLOOR * 100)}%), so part of the edge is covered or missing; column ${boxText(column)}`,
           );
         }
       }

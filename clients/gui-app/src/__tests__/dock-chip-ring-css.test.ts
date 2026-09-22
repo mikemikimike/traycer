@@ -96,7 +96,12 @@ describe("the dock chip's attention ring", () => {
       (match) => match[1],
     );
 
-    expect(attributes).toEqual(["pulseAttribute(pulse.pulsing, failurePulse)"]);
+    // The SHAPE, not the locals' current names: one write, and it is the
+    // decision function's return value rather than an expression assembled at
+    // the call site. Renaming a local is not a behaviour change; calling
+    // anything else there is.
+    expect(attributes).toHaveLength(1);
+    expect(attributes[0]).toMatch(/^pulseAttribute\(/);
   });
 
   it("gives the failure variant a ring as well as a colour", () => {

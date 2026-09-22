@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type {
   BackgroundItem,
   ChatActiveTurn,
@@ -11,14 +11,20 @@ import { ActiveAgentsPanel } from "@/components/chat/chat-active-agents-panel";
 import { BackgroundItemsPanel } from "@/components/chat/chat-background-items-panel";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
-import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import type { AgentRow } from "@/hooks/agent/use-agent-stop-controls";
 import { QueuedMessagePanel } from "@/components/chat/queued-message-surface";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
 
-import { ChatDockCompactStrip } from "@/components/chat/chat-dock-compact-strip";
+import {
+  ChatDockCompactStrip,
+  ChatDockCompactStripProvider,
+} from "@/components/chat/chat-dock-compact-strip";
 import { ChatDockPillActionsHostProvider } from "@/components/chat/chat-dock-attached-panel";
-import { useChatDockCompactStrip } from "@/components/chat/chat-dock-compact-context";
+import {
+  useChatDockCompactStrip,
+  type ChatDockCompactStripValue,
+} from "@/components/chat/chat-dock-compact-context";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
 import { LayoutClusterContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { dockMemberMaterialised } from "@/components/chat/chat-dock-fold";
@@ -177,12 +183,43 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
   const [pillActionsHost, setPillActionsHost] = useState<HTMLDivElement | null>(
     null,
   );
-  const openSection = strip === null ? null : strip.openSection;
   const rows = props.dockOrder.map((section) =>
     planDockRow(section, props.hotspots[section], props.folded),
   );
   const anyRowVisible = rows.some((row) => row.showRow);
   const anyChipVisible = strip !== null && strip.chips.length > 0;
+  // The attached panel is built ONCE, here, and everything that claims a panel
+  // is open follows THE NODE rather than the pill that asked for it.
+  //
+  // A pill exists on a wider predicate than its panel does - Active agents
+  // keeps its pill on received A2A rows alone, while `dockPanelContent`
+  // declines to draw the panel without a self record - so "the pill is there"
+  // and "the panel has something to draw" are different questions and the pill
+  // must not answer the second. Deriving `openSection` from the node closes
+  // that for every member at once: a pressed pill pointing at an
+  // `aria-controls` id no element carries, and a separator drawn under
+  // nothing, are both impossible by construction rather than by each
+  // member remembering to keep two predicates equal.
+  const openPill = strip === null ? null : strip.openSection;
+  const attached =
+    openPill === null
+      ? null
+      : dockPanel({
+          section: openPill,
+          attached: true,
+          separated: false,
+          editing: false,
+          hotspotRef: null,
+          dock: props,
+        });
+  const openSection = attached === null ? null : openPill;
+  // The strip below reads the corrected answer, so the open pill's
+  // `aria-pressed`, its `aria-controls` and the panels' own
+  // `useChatDockSectionAttached` all agree with what was drawn.
+  const drawnStrip = useMemo<ChatDockCompactStripValue | null>(
+    () => (strip === null ? null : { ...strip, openSection }),
+    [strip, openSection],
+  );
 
   if (!anyRowVisible && !anyChipVisible) {
     return null;
@@ -191,15 +228,16 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
   const topPadding = props.topSpacing === "compact" ? "pt-2" : "pt-4";
 
   return (
-    <ChatDockPillActionsHostProvider value={pillActionsHost}>
-      <div className="pointer-events-none px-4" data-testid="chat-lower-dock">
-        <div
-          className={cn(
-            "pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-1.5 bg-canvas",
-            topPadding,
-          )}
-        >
-          {/* One stack, two clusters (A.5, L-97): the pill row loose at the
+    <ChatDockCompactStripProvider value={drawnStrip}>
+      <ChatDockPillActionsHostProvider value={pillActionsHost}>
+        <div className="pointer-events-none px-4" data-testid="chat-lower-dock">
+          <div
+            className={cn(
+              "pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-1.5 bg-canvas",
+              topPadding,
+            )}
+          >
+            {/* One stack, two clusters (A.5, L-97): the pill row loose at the
               composer's left edge, then the joined frame tucked under the
               input. The pills sit ABOVE the frame rather than between it and
               the composer, because anything between the two would have to
@@ -210,8 +248,11 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
               side effect of a move, which is not what L-68..L-71 describe - so
               `normalizeArrangement`'s cross-cluster refusal keeps meaning what
               it says. */}
-          <ChatDockCompactStrip actionsRef={setPillActionsHost} />
-          {/* The box the dock's rows are laid out in, which is what a canvas
+            <ChatDockCompactStrip
+              actionsRef={setPillActionsHost}
+              snapshotLoaded={props.snapshotLoaded}
+            />
+            {/* The box the dock's rows are laid out in, which is what a canvas
               drag reorders inside (G3-01), under ONE quick-verb menu for the
               whole stack (L-144). A right-click anywhere on a row that does
               not belong to a control with a menu of its own - its header, its
@@ -219,36 +260,28 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
               which member from the element under the pointer, exactly as the
               composer's toolbar clusters do, so five dock members cost one
               Radix root rather than five. */}
-          <LayoutClusterContextMenu>
-            <div
-              {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
-              className={DOCK_FRAME_CLASS}
-            >
-              {/* The one pill-opened panel, topmost and replaceable (L-142):
+            <LayoutClusterContextMenu>
+              <div
+                {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
+                className={DOCK_FRAME_CLASS}
+              >
+                {/* The one pill-opened panel, topmost and replaceable (L-142):
                   clicking another pill puts a different section here, clicking
                   the open pill empties it. The fixed full rows follow, in dock
                   order, so the members the user chose to keep stay next to the
                   composer where they have always been. */}
-              {openSection === null
-                ? null
-                : dockPanel({
-                    section: openSection,
-                    attached: true,
-                    separated: false,
-                    editing: false,
-                    hotspotRef: null,
-                    dock: props,
-                  })}
-              {dockRows({
-                rows,
-                separatedBefore: openSection !== null,
-                dock: props,
-              })}
-            </div>
-          </LayoutClusterContextMenu>
+                {attached}
+                {dockRows({
+                  rows,
+                  separatedBefore: attached !== null,
+                  dock: props,
+                })}
+              </div>
+            </LayoutClusterContextMenu>
+          </div>
         </div>
-      </div>
-    </ChatDockPillActionsHostProvider>
+      </ChatDockPillActionsHostProvider>
+    </ChatDockCompactStripProvider>
   );
 }
 
@@ -307,7 +340,15 @@ function dockPanel(props: {
   const panel = dockPanelContent(props.section, props.separated, dock);
   if (panel === null) return null;
   if (props.attached) {
-    return <span key={props.section}>{panel}</span>;
+    // `contents`, like the resting row's wrapper two lines down: this span
+    // carries no ref and no attribute, so it exists only to hold the key, and
+    // an inline box around a block-level panel is one flex-direction change
+    // away from splitting it inside an `overflow-hidden` frame.
+    return (
+      <span key={props.section} className="contents">
+        {panel}
+      </span>
+    );
   }
   return (
     <span

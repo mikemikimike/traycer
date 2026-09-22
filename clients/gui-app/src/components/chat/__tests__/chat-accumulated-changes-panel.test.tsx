@@ -2,10 +2,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
 import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
-import {
-  ChatDockCompactStripProvider,
-  type ChatDockSection,
-} from "@/components/chat/chat-dock-compact-strip";
+import { ChatDockCompactStripProvider } from "@/components/chat/chat-dock-compact-strip";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import {
   ChatDiffTargetContext,
   type ChatSnapshotDiffOpener,

@@ -455,10 +455,11 @@ function TabStripBody() {
 
                   The `-members` spelling dims each tab rather than the
                   scroller's own box, because one of those tabs is the
-                  session's own chrome: the amber cap under the sample
-                  workspace tab (L-87). `opacity` on this box could not be
-                  undone below it, so the one mark that says "you are
-                  customizing" was drawn at 45% of itself (L-132). */}
+                  session's own chrome: the sample workspace tab, which draws
+                  itself as the customizing mark (L-87, L-138). `opacity` on
+                  this box could not be undone below it, so the one mark that
+                  says "you are customizing" was drawn at 45% of itself
+                  (L-132). */}
               <div
                 // Two owners, one node: dnd-kit's trailing drop slot, and the
                 // reveal above, which needs the scrolling box itself.

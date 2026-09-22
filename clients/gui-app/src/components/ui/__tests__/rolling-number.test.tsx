@@ -111,12 +111,7 @@ function rolled(container: HTMLElement): Element | null {
 describe("RollingNumber in the environment the suite actually runs in", () => {
   it("renders the exact value as light-DOM text and starts no custom element", () => {
     const { container } = renderRolling(
-      <RollingNumber
-        value={47}
-        format={undefined}
-        className={undefined}
-        testId="count"
-      />,
+      <RollingNumber value={47} className={undefined} testId="count" />,
     );
 
     expect(screen.getByTestId("count").textContent).toBe("47");
@@ -124,40 +119,23 @@ describe("RollingNumber in the environment the suite actually runs in", () => {
     expect(rolled(container)).toBeNull();
   });
 
-  it("formats exactly as Intl.NumberFormat does, so the two branches cannot disagree", () => {
+  it("prints a four-digit count ungrouped, the way the plain numbers beside it are printed", () => {
     renderRolling(
-      <RollingNumber
-        value={0.42}
-        format={{ style: "percent" }}
-        className={undefined}
-        testId="percent"
-      />,
+      <RollingNumber value={1234} className={undefined} testId="count" />,
     );
 
-    expect(screen.getByTestId("percent").textContent).toBe(
-      new Intl.NumberFormat(undefined, { style: "percent" }).format(0.42),
-    );
+    expect(screen.getByTestId("count").textContent).toBe("1234");
   });
 
   it("updates in place when the value changes, without remounting", () => {
     const { rerender } = renderRolling(
-      <RollingNumber
-        value={3}
-        format={undefined}
-        className={undefined}
-        testId="count"
-      />,
+      <RollingNumber value={3} className={undefined} testId="count" />,
     );
     const first = screen.getByTestId("count");
 
     rerender(
       <InVisiblePane>
-        <RollingNumber
-          value={4}
-          format={undefined}
-          className={undefined}
-          testId="count"
-        />
+        <RollingNumber value={4} className={undefined} testId="count" />
       </InVisiblePane>,
     );
 
@@ -167,12 +145,7 @@ describe("RollingNumber in the environment the suite actually runs in", () => {
 
   it("carries the caller's class and no tone of its own, so the parent's colour inherits", () => {
     renderRolling(
-      <RollingNumber
-        value={9}
-        format={undefined}
-        className="font-mono"
-        testId="count"
-      />,
+      <RollingNumber value={9} className="font-mono" testId="count" />,
     );
     const rendered = screen.getByTestId("count");
 
@@ -185,12 +158,7 @@ describe("RollingNumber where the browser can animate", () => {
     isSupported.current = true;
 
     const { container } = renderRolling(
-      <RollingNumber
-        value={47}
-        format={undefined}
-        className={undefined}
-        testId="count"
-      />,
+      <RollingNumber value={47} className={undefined} testId="count" />,
     );
     const element = rolled(container);
 
@@ -207,12 +175,7 @@ describe("RollingNumber where the browser can animate", () => {
     useThemeLibraryStore.setState({ panelAnimations: false });
 
     const { container } = renderRolling(
-      <RollingNumber
-        value={47}
-        format={undefined}
-        className={undefined}
-        testId="count"
-      />,
+      <RollingNumber value={47} className={undefined} testId="count" />,
     );
 
     expect(rolled(container)).toBeNull();
@@ -224,12 +187,7 @@ describe("RollingNumber where the browser can animate", () => {
     reducedMotion = true;
 
     const { container } = renderRolling(
-      <RollingNumber
-        value={47}
-        format={undefined}
-        className={undefined}
-        testId="count"
-      />,
+      <RollingNumber value={47} className={undefined} testId="count" />,
     );
 
     expect(rolled(container)).toBeNull();
@@ -241,12 +199,7 @@ describe("RollingNumber where the browser can animate", () => {
 
     const { container } = render(
       <PaneVisibilityContext.Provider value={false}>
-        <RollingNumber
-          value={47}
-          format={undefined}
-          className={undefined}
-          testId="count"
-        />
+        <RollingNumber value={47} className={undefined} testId="count" />
       </PaneVisibilityContext.Provider>,
     );
 

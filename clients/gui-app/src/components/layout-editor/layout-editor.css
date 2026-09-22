@@ -357,11 +357,12 @@
    nothing else - no hover outline, no ring, no firewall. */
 /* `data-layout-passive-members` is the one marker that dims its CHILDREN
    instead of itself, and the tab strip's scroller is the one box that needs it:
-   it holds both the task tabs and the amber cap that says which tab is being
+   it holds both the task tabs and the tab that says which one is being
    customized, and `opacity` on an ancestor cannot be undone below it - so the
-   session's own tab was drawn at 45% opacity and 45% saturation, on a stroke
-   1.5px wide (L-132). The member that CONTAINS the session marker stays lit;
-   every other member dims exactly as a leaf marker would. */
+   one mark that says "you are customizing" was drawn at 45% opacity and 45%
+   saturation (L-132, redesigned as a filled tab by L-138). The member that
+   CONTAINS the session marker stays lit; every other member dims exactly as a
+   leaf marker would. */
 [data-layout-editing="1"] [data-layout-passive],
 [data-layout-lit="1"] [data-layout-passive],
 [data-layout-editing="1"]
@@ -775,8 +776,9 @@
    inspector (C-06) - so framing it draws one box around the app the editor
    is decorating and leaves the instrument panel outside it. The box is around
    every open tab, not around the sample one: which tab is being customized is
-   said by the amber cap on the sample tab, and this frame says that the app
-   under it is in edit mode.
+   said by that tab's own treatment (filled while it is active, a cap along its
+   bottom edge at rest - L-138), and this frame says that the app under it is
+   in edit mode.
 
    An OVERLAY, not the column's own `outline`. The column paints with
    `z-index: auto`, so its outline went under every positioned descendant that

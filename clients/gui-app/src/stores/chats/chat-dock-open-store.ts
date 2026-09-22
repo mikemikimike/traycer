@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 
 /**
  * Which compact-dock pill each chat has open (L-142).

@@ -30,6 +30,7 @@ import {
 } from "@/lib/layout/legacy-layout-records";
 import type {
   LayoutSnapshot,
+  LayoutValueKeysByRegion,
   LayoutValuePatches,
 } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -75,6 +76,16 @@ export interface LayoutStoreState extends LayoutSnapshot {
   readonly clearRegionValues: (
     region: RegionId,
     keys: ReadonlyArray<string>,
+  ) => void;
+  /**
+   * The same revert across several regions, in ONE write (G1-09).
+   *
+   * "Reset panel visibility" takes the answer back for all nine rail regions
+   * at once, and nine separate writes are nine renders and, inside a session,
+   * nine snapshots taken of a layout that is mid-change.
+   */
+  readonly clearRegionValuesMany: (
+    keysByRegion: LayoutValueKeysByRegion,
   ) => void;
   readonly setArrangement: (arrangement: LayoutArrangement) => void;
   readonly replaceAll: (next: LayoutSnapshot) => void;
@@ -128,19 +139,12 @@ export const useLayoutStore = create<LayoutStoreState>()(
         set(nextOverrides(get(), patches));
       },
       clearRegionValues: (region, keys) => {
-        const state = get();
-        const current = state.overrides[region];
-        if (current === undefined) return;
-        const kept: Record<string, unknown> = { ...current };
-        for (const key of keys) delete kept[key];
-        // Back through the same resolver every other write path ends in,
-        // which is also what drops the region entirely once nothing is left.
-        set({
-          overrides: resolvePersistedOverrides({
-            ...state.overrides,
-            [region]: kept,
-          }),
-        });
+        const next = clearedOverrides(get(), { [region]: keys });
+        if (next !== null) set(next);
+      },
+      clearRegionValuesMany: (keysByRegion) => {
+        const next = clearedOverrides(get(), keysByRegion);
+        if (next !== null) set(next);
       },
       setArrangement: (arrangement) => {
         set({ arrangement: normalizeArrangement(arrangement) });
@@ -200,6 +204,33 @@ export const useLayoutStore = create<LayoutStoreState>()(
  * branch for a session and then vanish on the next launch when the read-side
  * resolver drops it. Write and read are now the same parse.
  */
+/**
+ * One or more regions' keys taken back OUT of the delta, through that same
+ * resolver - which is also what drops a region entirely once nothing of it is
+ * left.
+ *
+ * `null` rather than an unchanged object when no named region holds a delta at
+ * all: the resolver mints a fresh object every call, so a `set` on that path
+ * would notify every subscriber for a revert that reverted nothing.
+ */
+function clearedOverrides(
+  state: LayoutSnapshot,
+  keysByRegion: Readonly<Record<string, ReadonlyArray<string> | undefined>>,
+): Pick<LayoutSnapshot, "overrides"> | null {
+  const merged: Record<string, unknown> = { ...state.overrides };
+  let touched = false;
+  for (const [region, keys] of Object.entries(keysByRegion)) {
+    const current = merged[region];
+    if (keys === undefined || !isRecord(current)) continue;
+    const kept: Record<string, unknown> = { ...current };
+    for (const key of keys) delete kept[key];
+    merged[region] = kept;
+    touched = true;
+  }
+  if (!touched) return null;
+  return { overrides: resolvePersistedOverrides(merged) };
+}
+
 function nextOverrides(
   state: LayoutSnapshot,
   patches: LayoutValuePatches,

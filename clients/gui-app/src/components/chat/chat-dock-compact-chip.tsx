@@ -73,7 +73,6 @@ function ChipCounts(props: { readonly text: string }): ReactNode {
     <>
       <RollingNumber
         value={Number(match[1])}
-        format={undefined}
         className={undefined}
         testId={undefined}
       />
@@ -82,7 +81,6 @@ function ChipCounts(props: { readonly text: string }): ReactNode {
           {separator}
           <RollingNumber
             value={Number(second)}
-            format={undefined}
             className={undefined}
             testId={undefined}
           />

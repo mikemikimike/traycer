@@ -10,7 +10,7 @@ import {
 } from "@/components/chat/chat-lower-dock";
 import { dockMemberFolded } from "@/components/chat/chat-dock-fold";
 import { ChatDockCompactStripProvider } from "@/components/chat/chat-dock-compact-strip";
-import type { ChatDockSection } from "@/components/chat/chat-dock-compact-context";
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
 import {
   ChatDiffTargetContext,
@@ -35,7 +35,7 @@ import {
   useRegionShown,
   useRegionValues,
 } from "@/lib/layout-overrides";
-import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
+import { chatDockSection } from "@/lib/chat/chat-dock-sections";
 import { SampleWorkspaceRail } from "./sample-workspace-rail";
 import {
   CONTEXT_USAGE_PREVIEW_SAMPLE,
@@ -103,7 +103,7 @@ export function SampleWorkspaceBody() {
     regionId: "background",
     instanceId: SAMPLE_TILE_ID,
   });
-  // Five members since L-139: the Message Queue and Todo are dock regions with
+  // Five members since L-139: the Message queue and Todo are dock regions with
   // the same Full row / Chip / Hidden semantics as the other three, so the
   // canvas has to draw them the same way.
   const queueValues = useRegionValues("queue");

@@ -1,47 +1,6 @@
 import { createContext, useContext } from "react";
 import type { DiffLineCounts } from "@/lib/file-change-diff-hunks";
-import type { DockRegionId } from "@/lib/layout/region-id";
-
-/** The dock rows Layout ▸ Composer can fold into a pill. */
-export type ChatDockSection =
-  | "filesChanged"
-  | "activeAgents"
-  | "background"
-  | "queue"
-  | "todo";
-
-/**
- * The dock's own name for one of the dock regions.
- *
- * Two vocabularies, deliberately: the registry words a region for someone
- * reading the layout form ("Running agents"), while the dock names its rows
- * after the panels they mount. This is the one place they meet, so the order
- * the arrangement holds can be read as a list of sections.
- *
- * Five members since L-139/L-142: the Message Queue and Todo are dock members
- * with the same Full row / Chip / Hidden semantics as the other three.
- */
-const SECTION_BY_REGION: Readonly<Record<DockRegionId, ChatDockSection>> = {
-  changedFiles: "filesChanged",
-  runningAgents: "activeAgents",
-  background: "background",
-  queue: "queue",
-  todo: "todo",
-};
-
-export function chatDockSection(regionId: DockRegionId): ChatDockSection {
-  return SECTION_BY_REGION[regionId];
-}
-
-/** The short name a screen reader gets for the open pill's panel. */
-export const CHAT_DOCK_SECTION_NAME: Readonly<Record<ChatDockSection, string>> =
-  {
-    filesChanged: "Files changed",
-    activeAgents: "Active agents",
-    background: "Background",
-    queue: "Message Queue",
-    todo: "Todo",
-  };
+import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 
 /**
  * What a pill draws ahead of its number - what the section IS, never what it

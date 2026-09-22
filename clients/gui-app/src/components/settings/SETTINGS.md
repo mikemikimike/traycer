@@ -1638,9 +1638,22 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     anything that carries a verb with no other home - the five dock rows own
     Stop all / Review all / Undo all / Pause, and the Access pill reports the
     permission the next send runs under. `Chip` is their floor: a row folds to
-    a chip at the RIGHT end of the composer's bottom strip - after the host and
-    workspace pickers, hard against the context-usage cluster - and one click
-    opens the row again; the pill folds to its icon with the name on hover. A
+    a pill in the row that sits above the composer, on its LEFT edge, as the
+    first child of the stack that holds the pills, the joined frame and the
+    composer (L-99; `chat/chat-dock-compact-strip.tsx`).
+    The pills are a one-at-a-time switcher (L-141).
+    Clicking one opens that section as a single panel attached above the
+    composer, with no collapsible header of its own; clicking another REPLACES
+    it, clicking the open one closes it, and the open pill reads as selected.
+    In a mixed dock the members set to `Row` stay at the bottom of the joined
+    frame with their normal headers, and the pill-opened panel is the topmost,
+    replaceable one.
+    That panel's own actions (Review all / Undo all, Stop all, Pause) sit at
+    the RIGHT end of the pill row while it is open, so the panel below is pure
+    content (L-142(1), `chat/chat-dock-attached-panel.tsx`).
+    It is user-resizable from a handle on its top edge, starts at about a third
+    of the CHAT PANE's height and is clamped to that pane (L-142(3), L-145).
+    The pill folds to its icon with the name on hover. A
     chip always draws its own icon (`FileDiff`, `Bot`, for Background the
     section's own `MessageSquareClock`, `ListOrdered` for the Message queue and
     `ListChecks` for Todo), and activity shows ON that icon rather
@@ -1656,16 +1669,20 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     drag-drop attach images, the dictation chord starts voice input (`Hidden`
     here is NOT `voiceInputEnabled` off), and the palette and `/compact`
     compact a conversation.
-  - **Expanding a chip is per tile, and is never written back.** `Chip` says
+  - **Which pill is open is per CHAT, and is never written back.** `Chip` says
     how a chat OPENS; one glance at a folded row must not redefine that for
-    every chat, so the reveal is component state in
-    `chat-tile-lower-surfaces.tsx` and dies with the tile - and with its own
-    chip, so a section that empties and later refills comes back folded. A
-    revealed row arrives OPEN, and each panel reads that off the strip's
-    context (`useChatDockSectionRevealed`) rather than taking a prop every
-    component in between would have to carry. The chip stays on screen while
-    its row is showing (`aria-pressed`) because it is the only way back, and
-    pulses once when the thing it stands for starts.
+    every chat, so what the user opened is a glance rather than a preference.
+    It lives in `stores/chats/chat-dock-open-store.ts`, keyed by chat id,
+    session-lifetime and never persisted (L-142(2)).
+    Per chat rather than per tile because a same-pane chat switch is a full
+    remount in this app, so component state would lose the open panel every
+    time the user looked at a sibling chat and came back; the store survives
+    that and a tab switch with it.
+    Nothing ever auto-opens: a chat with no entry there has no panel attached,
+    and a section that empties closes its own.
+    The pill stays on screen while its panel is showing (`aria-pressed`)
+    because it is the only way back, and a pill rings once when the thing it
+    stands for arrives, never when it drains (L-150(6)).
   - **Received A2A queue rows follow the Running agents mode**, and fold into
     the same chip with their own count. That is also why the chip exists
     whenever those rows do, even with no sub-agent running: without it, folding

@@ -8,9 +8,11 @@ import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-con
 import {
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
-  type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
-import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
+import {
+  chatDockSection,
+  type ChatDockSection,
+} from "@/lib/chat/chat-dock-sections";
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
 import { ComposerWorkspaceRow } from "@/components/home/composer/composer-workspace-mode-row";
 import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";

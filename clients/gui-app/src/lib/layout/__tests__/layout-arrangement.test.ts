@@ -545,13 +545,6 @@ describe("resolvePersistedArrangement", () => {
   });
 
   /**
-   * The unreleased-feature rule in the one place a retired region can still
-   * arrive: a blob written while `agent` existed (L-136). Tolerant parsing,
-   * not migration - the id is simply not one `TOOLBAR_REGION_IDS` names, so it
-   * never reaches an arrangement, and the members around it keep the order the
-   * user gave them.
-   */
-  /**
    * The other half of the same rule, in the direction L-142 opened: a dock
    * order written before Todo and Message queue were members has three
    * entries and this build has five. No migration exists and none is wanted
@@ -600,6 +593,13 @@ describe("resolvePersistedArrangement", () => {
     ]);
   });
 
+  /**
+   * The unreleased-feature rule in the one place a retired region can still
+   * arrive: a blob written while `agent` existed (L-136). Tolerant parsing,
+   * not migration - the id is simply not one `TOOLBAR_REGION_IDS` names, so it
+   * never reaches an arrangement, and the members around it keep the order the
+   * user gave them.
+   */
   it("drops a toolbar region this build retired and keeps the rest in stored order", () => {
     const arrangement = resolvePersistedArrangement({
       toolbarLeft: ["access", "agent", "attachImage"],

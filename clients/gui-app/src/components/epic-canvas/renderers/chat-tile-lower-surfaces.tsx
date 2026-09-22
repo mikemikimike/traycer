@@ -40,15 +40,20 @@ import {
   ChatDockCompactStripProvider,
   type ChatDockCompactChipModel,
   type ChatDockCompactStripValue,
-  type ChatDockSection,
 } from "@/components/chat/chat-dock-compact-strip";
-import { chatDockSection } from "@/components/chat/chat-dock-compact-context";
+import {
+  chatDockSection,
+  type ChatDockSection,
+} from "@/lib/chat/chat-dock-sections";
 import { CHAT_DOCK_FAILURE_PULSE_PREFIX } from "@/components/chat/chat-dock-compact-chip";
 import {
   useChatDockOpenSection,
   useChatDockOpenStore,
 } from "@/stores/chats/chat-dock-open-store";
-import { isReceivedAgentResponse } from "@/components/chat/chat-queue-utils";
+import {
+  isReceivedAgentResponse,
+  queueArrivalPulseToken,
+} from "@/components/chat/chat-queue-utils";
 import {
   type ChatLowerSurfaceTopSpacing,
   type ChatPinnedStackTopSpacing,
@@ -894,12 +899,21 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
   // back a fresh copy of an unchanged queue would churn both. An OPEN agents
   // pill puts them back: that panel lists the agents, never the responses they
   // queued, so nothing else would show them.
+  // The RAW stored section, where every other consumer reads the derived
+  // `openSection`. The two are equal here and the `&&` is why: `openSection`
+  // is `storedOpenSection` filtered by `chipPresent`, and `chipPresent`'s
+  // entry for this member IS `agentsChip`, which this expression already
+  // requires. The raw value is read because the derivation order forces it -
+  // `queueChip` needs `dockQueue`, `dockQueue` needs this, and `openSection`
+  // needs `queueChip` - so hoisting `openSection` above this line would make a
+  // real cycle rather than tidying a second source of truth.
   const agentsRowsFolded = agentsChip && storedOpenSection !== "activeAgents";
   const dockQueue = useMemo(
     () => foldedQueue(input.queue, agentsRowsFolded),
     [input.queue, agentsRowsFolded],
   );
   const queuedCount = dockQueue.items.length;
+  const queueArrivalToken = queueArrivalPulseToken(dockQueue.items);
   const queueHasContent = queuedCount > 0;
   const queueChip = dockMemberFolded({
     values: queueValues,
@@ -907,7 +921,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     hasContent: queueHasContent,
   });
 
-  // Todo and the Message Queue are dock members too (L-139): same Full row /
+  // Todo and the Message queue are dock members too (L-139): same Full row /
   // Chip / Hidden semantics, same reordering, same pill treatment.
   const todo = input.todo;
   const todoCounts = useMemo(() => {
@@ -1056,11 +1070,12 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         working: false,
         lineDeltas: null,
         text: `${queuedCount}`,
-        label: `Message Queue. ${queuedCount} ${queuedCount === 1 ? "message" : "messages"} queued.`,
-        // Keyed on the count, so a message ARRIVING in the queue flicks the
-        // pill once - the folded queue's only other channel is the number
-        // itself, which nothing draws the eye to.
-        pulseToken: queuedCount > 0 ? `${queuedCount}` : null,
+        label: `Message queue. ${queuedCount} ${queuedCount === 1 ? "message" : "messages"} queued.`,
+        // Keyed on the newest row's id, so a message ARRIVING in the queue
+        // flicks the pill once - the folded queue's only other channel is the
+        // number itself, which nothing draws the eye to - and a queue
+        // DRAINING, which is the count moving the other way, flicks nothing.
+        pulseToken: queueArrivalToken,
       });
     }
     if (todoChip && todoCounts !== null) {
@@ -1091,6 +1106,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     todoChip,
     todoCounts,
     queuedCount,
+    queueArrivalToken,
     backgroundSummary,
     changeTotals,
     changedFileCount,

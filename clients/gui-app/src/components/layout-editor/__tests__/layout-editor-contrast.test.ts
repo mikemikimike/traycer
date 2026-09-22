@@ -307,12 +307,22 @@ function sourceFiles(directory: string): ReadonlyArray<string> {
  * whole column: the old bar was `app-header.tsx` alone, which the frame cleared
  * at 21 and which would not have noticed the canvas climbing to 42.
  *
- * A file that calls `createPortal` is SKIPPED, with the reason that its overlay
- * is not in the column at all - the floating popovers under `chat/` and
- * `epic-canvas/` portal to `body` and sit at 50 there, above the frame and
+ * A file that calls `createPortal` is SKIPPED, with the reason that its
+ * overlay is not in the column at all - the floating popovers under `chat/`
+ * and `epic-canvas/` portal to `body` and sit at 50 there, above the frame and
  * correctly so, exactly as every `components/ui` overlay does. The rule is
  * derived from the source rather than kept as a list, so a new popover is
- * exempt by portalling and a new in-column layer is not exempt at all.
+ * exempt by portalling.
+ *
+ * The exemption is per FILE, and saying so is the honest half of the claim
+ * (R4B-10): a `z-50` this file adds to something it does NOT portal is skipped
+ * with the rest, so the scan is a floor on the column's ceiling rather than a
+ * proof of it. Per CALL was tried and does not work in this tree - every
+ * portalling file here hoists the portalled tree into a variable
+ * (`createPortal(menu, document.body)`, `createPortal(inputRow, headerSlot)`),
+ * so the classNames are nowhere near the call and only a real JSX parse could
+ * tell the two apart. Today the gap is empty: each exempted file's `z-` class
+ * belongs to its portalled surface, checked by reading them.
  */
 const COLUMN_LAYER = (() => {
   const layers = COLUMN_DIRS.flatMap(sourceFiles).flatMap((file) => {

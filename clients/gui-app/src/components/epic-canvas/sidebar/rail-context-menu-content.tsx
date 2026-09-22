@@ -35,8 +35,10 @@ import { type LeftPanelId } from "@/lib/left-panel-ids";
  * It lives in a module of its own because BOTH rails draw it (L-144): the real
  * sidebar, and the sample workspace's rail, which is the one the user
  * right-clicks while customizing (L-87). Every item here writes the layout
- * store - the same values a quick verb writes - so it is exactly as true on
- * the sample rail as on the real one; what the sample has none of is the app
+ * store through `rail-view.ts`, which records the write as a GESTURE exactly
+ * as a quick verb does - so inside a session a hide made here is an Undo step
+ * and a "Discard changes" takes it back (L-18, L-150(1)), and at rest the
+ * recording is a pass-through. What the sample has none of is the app
  * behaviour BESIDE the menu (switching the active panel), and that was never
  * in here.
  */

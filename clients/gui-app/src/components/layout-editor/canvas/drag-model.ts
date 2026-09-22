@@ -36,6 +36,33 @@ export interface DragSlot {
 /** How far a press travels before it is unmistakably a drag (section 6). */
 const DRAG_ACTIVATION_DISTANCE = 6;
 
+/**
+ * How far the dragged member must travel before it may claim ANY neighbour
+ * (L-150(4)).
+ *
+ * Under the leading-edge rule the travel a claim costs is `gap + size(n) / 2`,
+ * which depends only on the NEIGHBOUR. That is what makes the rule symmetric
+ * (L-143), and it also means a small neighbour is cheap: the sidebar's 8px
+ * group break costs 8px of travel where the 36px icon beside it costs 22px.
+ * With every pointerdown on a canvas region arming a drag (L-69), a click
+ * meant to select Terminals that slips a few pixels would commit a regrouping
+ * and spend a history entry on it.
+ *
+ * Measured against the OFFSET rather than against any one neighbour, so it
+ * reads the same in both directions and on both axes.
+ *
+ * Twice the distance that tells a drag from a click, rather than the round 16
+ * the ruling offered, because that is a number this module already owns: a
+ * claim asks for the gesture to be unmistakable twice over. It lifts the 8px
+ * break to 12px of member travel, which is 18px of pointer travel from the
+ * press (`drag-engine.ts` takes the grab point at the move that crosses the
+ * activation distance), and it stays UNDER every claim boundary the
+ * half-overlap rule itself draws in this model's own table - the smallest is
+ * 14px, for two 20px rows 4px apart. A floor above one of those would start
+ * deciding ordinary claims, which is the size-dependence L-143 removed.
+ */
+const MIN_CLAIM_TRAVEL = DRAG_ACTIVATION_DISTANCE * 2;
+
 /** How much of a pull past a clamp survives (section 6). */
 const RUBBER_BAND = 0.25;
 
@@ -131,6 +158,12 @@ export function targetSlotOf(
   index: number,
   offset: number,
 ): number {
+  // The floor comes first, so a neighbour that is cheap to claim is still
+  // claimed by a MOVE (see {@link MIN_CLAIM_TRAVEL}). Monotonicity survives it:
+  // every ordinary threshold is above the floor, so the function still steps
+  // one slot at a time as `offset` grows, and it still releases a claim at the
+  // same offset it took it.
+  if (Math.abs(offset) < MIN_CLAIM_TRAVEL) return index;
   const dragged = slots[index];
   const leadingStart = dragged.start + offset;
   const leadingEnd = leadingStart + dragged.size;

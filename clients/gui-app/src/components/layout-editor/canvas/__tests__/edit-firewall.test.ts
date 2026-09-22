@@ -108,10 +108,14 @@ describe("the edit firewall (4.4)", () => {
   });
 
   it("still swallows a right-click on a region with no menu to open", () => {
-    // A dock row, the minimap, the sample rail's icons: named, so the canvas
-    // resolves them, and with no quick-verb trigger anywhere above them. The
-    // event used to pass straight through to Electron's own menu over sample
-    // content, which is the class of thing the firewall exists to prevent.
+    // A named region whose menu host is not there: unmounted, not mounted
+    // yet, or a region a call site never gave one. Naming a region is not on
+    // its own a reason to let the event by - with no trigger above it the
+    // press reaches nothing in the app and goes on to Electron's own menu
+    // over sample content, which is the class of thing the firewall exists to
+    // prevent. (L-144 has since put a trigger over every region a user can
+    // point at, so this branch guards the gap rather than a standing set of
+    // surfaces.)
     const { control, heard } = mountColumn();
     control.setAttribute("data-layout-region", "changedFiles");
 

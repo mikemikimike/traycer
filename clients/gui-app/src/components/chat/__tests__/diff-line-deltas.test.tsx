@@ -45,6 +45,20 @@ describe("<DiffLineDeltas />", () => {
     expect(side("data-diff-deletions", 1).textContent).toBe("−4");
   });
 
+  // Above 999 is where the claim above stops being free: the rolling branch
+  // formats through `Intl.NumberFormat`, which GROUPS by default, while the
+  // plain branch is the number as JavaScript prints it. A lockfile rewrite
+  // reaches four figures routinely, and the header would then read `+1,420`
+  // over per-file rows reading `+1420`.
+  it("groups neither side at four figures", () => {
+    deltas({ additions: 1420, deletions: 1118 });
+
+    expect(side("data-diff-additions", 0).textContent).toBe("+1420");
+    expect(side("data-diff-additions", 1).textContent).toBe("+1420");
+    expect(side("data-diff-deletions", 0).textContent).toBe("−1118");
+    expect(side("data-diff-deletions", 1).textContent).toBe("−1118");
+  });
+
   it("wraps only the rolling numbers, and never the signs", () => {
     deltas({ additions: 12, deletions: 4 });
 

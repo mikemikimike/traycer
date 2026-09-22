@@ -40,11 +40,11 @@ export type {
   ChatDockCompactChipGlyph,
   ChatDockCompactChipModel,
   ChatDockCompactStripValue,
-  ChatDockSection,
 } from "@/components/chat/chat-dock-compact-context";
 
 export function ChatDockCompactStripProvider(props: {
-  readonly value: ChatDockCompactStripValue;
+  /** `null` is "no dock on this surface", the context's own resting value. */
+  readonly value: ChatDockCompactStripValue | null;
   readonly children: ReactNode;
 }): ReactNode {
   return (
@@ -277,6 +277,11 @@ function ChatDockCompactPill(props: {
  */
 export function ChatDockCompactStrip(props: {
   readonly actionsRef: (node: HTMLDivElement | null) => void;
+  /**
+   * Whether this chat's snapshot has landed - the dock's hydration signal,
+   * passed down rather than read here because the dock owns it already.
+   */
+  readonly snapshotLoaded: boolean;
 }): ReactNode {
   // Destructured before it reaches a `ref=`: `react-hooks/refs` reads a ref
   // callback taken off a props BAG as a ref access during render.
@@ -284,21 +289,40 @@ export function ChatDockCompactStrip(props: {
   const editing = useLayoutEditorStore((state) => state.session !== null);
   const value = useChatDockCompactStrip();
   const motionEnabled = useMotionEnabled();
-  // The strip arms itself one commit after it mounts, and suppresses the pulse
-  // of every pill in that first commit. Opening a chat is not an arrival: five
-  // pills reaching their first paint together rang five rings at once beside
-  // the input, for nothing that had happened. A pill that arrives after this
-  // has flipped still rings exactly as before, because the chip reads it once
-  // in its own state initializer.
+  const hasChips = value !== null && value.chips.length > 0;
+  // The strip arms itself one commit after it has drawn a pill over SETTLED
+  // data, and suppresses the pulse of every pill until then. Opening a chat is
+  // not an arrival: five pills reaching their first paint together rang five
+  // rings at once beside the input, for nothing that had happened. A pill that
+  // arrives after this has flipped still rings exactly as before, because the
+  // chip reads it once in its own state initializer.
+  //
+  // Both halves of the condition are load-bearing, and each answers a hole the
+  // other leaves. "This strip has COMMITTED" is not enough: the strip mounts
+  // whenever the dock renders at all, including for a chat that has rows and
+  // no pills, so an empty first commit would arm it and the next burst - every
+  // pill a turn brings at once - would ring together, which is L-148's failure
+  // through the other door. And "the snapshot has LOADED" is not enough
+  // either, because the pills are built from five independently arriving
+  // sources in `chat-tile-lower-surfaces.tsx`: the queue comes from the
+  // session store and the background rows from the host's own stream, neither
+  // of which waits for the snapshot, so a strip can hold a pill before the
+  // snapshot lands and would then be armed for the burst the snapshot brings
+  // with it (`changesPresent` and `todoHasContent` are both gated on it).
+  // Requiring both means the arming commit is the first one in which this dock
+  // has real data AND something to draw, and everything arriving in it is
+  // hydration by construction.
   //
   // "Has committed once" is the one fact a render cannot compute, which is why
   // `react-hooks/set-state-in-effect` is turned off for this file in
   // `eslint.config.mjs` rather than worked around; the reasoning is there.
   const [settled, setSettled] = useState(false);
+  const snapshotLoaded = props.snapshotLoaded;
   useEffect(() => {
+    if (!snapshotLoaded || !hasChips) return;
     setSettled(true);
-  }, []);
-  if (value === null || value.chips.length === 0) return null;
+  }, [snapshotLoaded, hasChips]);
+  if (value === null || !hasChips) return null;
   return (
     <LayoutClusterContextMenu>
       <div

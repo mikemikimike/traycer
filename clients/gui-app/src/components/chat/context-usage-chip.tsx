@@ -71,6 +71,23 @@ type ContextUsageMeterStyle = CSSProperties & {
 const RING_ARC_TRANSITION_CLASS_NAME =
   "transition-[stroke-dashoffset] duration-240 ease-spring";
 
+/**
+ * Whether this chip puts anything on screen.
+ *
+ * ONE predicate, because two callers ask it: {@link ContextUsageChipView}'s own
+ * early return, and {@link ContextUsageChip}'s guard on whether to mount a
+ * context-menu root at all. A copy of the rule in the parent is a copy that
+ * stops agreeing the day the view gains a third reason to draw nothing - and
+ * the parent would then wrap a `display: contents` trigger around an empty
+ * subtree, which answers a right-click meant for whatever is behind it.
+ */
+function contextUsageChipDraws(
+  usage: TokenUsage | null,
+  editing: boolean,
+): boolean {
+  return editing || computeEffectiveContextUsage(usage) !== null;
+}
+
 export function ContextUsageChip(props: ContextUsageChipProps) {
   const tileId = useComposerTileId();
   const { ref, editing } = useLayoutRegion({
@@ -84,13 +101,8 @@ export function ContextUsageChip(props: ContextUsageChipProps) {
   // case that gets no menu root is the one with nothing to point AT - the
   // chip hides itself outside an editing session when no turn has carried a
   // usable rollup, and a `display: contents` trigger around nothing would
-  // still answer a press landing on whatever is behind it. The predicate is
-  // `ContextUsageChipView`'s own, asked of the same two inputs.
-  const drawsNothing =
-    !editing &&
-    (props.usage === null ||
-      computeEffectiveContextUsage(props.usage) === null);
-  if (drawsNothing) return chip;
+  // still answer a press landing on whatever is behind it.
+  if (!contextUsageChipDraws(props.usage, editing)) return chip;
   return (
     <LayoutRegionContextMenu regionId="contextUsage">
       {chip}
@@ -124,7 +136,6 @@ export function ContextUsageChipView({
   }, []);
   const indicatorStyle = useRegionValue("contextUsage", "style");
   const effective = computeEffectiveContextUsage(usage);
-  const noUsage = usage === null || effective === null;
 
   useLayoutEffect(() => {
     if (pinContextUsageBreakdown && focusPinnedActionAfterPinRef.current) {
@@ -145,8 +156,12 @@ export function ContextUsageChipView({
   // public context-window surface - the chip stays hidden. Raw token
   // counts on their own would mislead without a denominator, so we don't
   // show them.
-  if (noUsage) {
-    if (!contextEditing) return null;
+  //
+  // `computeEffectiveContextUsage` already answers null for a null `usage`, so
+  // the second half of this test decides nothing at runtime: it is what tells
+  // the compiler that the rows below have a usage to read.
+  if (effective === null || usage === null) {
+    if (!contextUsageChipDraws(usage, contextEditing)) return null;
     return (
       <span
         ref={contextHotspotRef}
@@ -225,7 +240,6 @@ export function ContextUsageChipView({
           <span className="@max-[28rem]:sr-only">
             <RollingNumber
               value={percent}
-              format={undefined}
               className={undefined}
               testId="context-usage-chip-percent-value"
             />
@@ -386,7 +400,6 @@ function ContextUsageRing({ percent, style }: ContextUsageRingProps) {
         >
           <RollingNumber
             value={percent}
-            format={undefined}
             className={undefined}
             testId="context-usage-ring-percent-value"
           />
@@ -464,7 +477,6 @@ function ContextUsageBreakdown({
         >
           <RollingNumber
             value={effective.percentLeft}
-            format={undefined}
             className={undefined}
             testId="context-usage-breakdown-percent-value"
           />
@@ -538,7 +550,6 @@ function ContextUsagePinnedStrip({
             Context{" "}
             <RollingNumber
               value={effective.percentLeft}
-              format={undefined}
               className="inline-block min-w-[3ch] text-right"
               testId="context-usage-pinned-percent-value"
             />

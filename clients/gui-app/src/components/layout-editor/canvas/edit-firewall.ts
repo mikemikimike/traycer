@@ -53,13 +53,14 @@ export const FIREWALLED_EVENT_TYPES = [
  *
  * So the test is "this press has somewhere to go", which is two facts and not
  * one. A named region says the verbs would know what they are about; a mounted
- * context-menu trigger says something is listening for the event. Only three
- * hosts hang one (L-72): the composer's two clusters, the Home tab item and the
- * header's usage cluster, plus the chrome that renders the verbs INSIDE a menu
- * it already owns - the sidebar rail. Keyed on the region alone, every other
- * named region - the dock rows, the minimap, the sample rail's icons, the
- * resource monitor - passed the event to nothing, and it went on to Electron's
- * own spell-check menu over sample content.
+ * context-menu trigger says something is listening for the event. L-144 has
+ * since put a trigger over every region a user can point at - the composer's
+ * clusters, the dock's pill row and joined frame, the minimap, the Home tab
+ * item, the header's usage cluster, plus the chrome that renders the verbs
+ * INSIDE a menu it already owns, the sidebar rail. Keyed on the region alone
+ * this let a press through to nothing wherever a host was missing or not yet
+ * mounted, and it went on to Electron's own spell-check menu over sample
+ * content.
  *
  * `data-slot="context-menu-trigger"` is what `components/ui/context-menu.tsx`
  * stamps on every trigger, `asChild` included, so a host that gains or loses a
