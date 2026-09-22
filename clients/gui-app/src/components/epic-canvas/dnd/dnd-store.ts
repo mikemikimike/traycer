@@ -13,6 +13,7 @@ import type {
   MergeSide,
   StripDragState,
 } from "@/components/epic-canvas/dnd/strip-drag-model";
+import type { StripAxisId } from "@/components/epic-canvas/dnd/strip-axis";
 import {
   EPIC_CANVAS_DND_SOURCE_TYPES,
   LEFT_PANEL_RAIL_ITEM_DND_TYPE,
@@ -239,7 +240,8 @@ function isDragStateIdle(state: EpicDndState): boolean {
       state.dropPreview,
       state.headerStripDropIndex,
       state.headerStripDragState,
-      state.headerStripSourceWidth,
+      state.headerStripSourceSize,
+      state.headerStripAxis,
       state.tileSourceWidth,
       state.topLevelStripPairPreview,
       state.reparentTargetNodeId,
@@ -286,10 +288,15 @@ interface EpicDndState {
    */
   readonly headerStripDragState: StripDragState | null;
   /**
-   * Measured width of the dragged strip item, so the overlay can render the tab
+   * Measured size of the dragged strip item, so the overlay can render the tab
    * at its real size instead of a differently-shaped floating chip.
    */
-  readonly headerStripSourceWidth: number | null;
+  readonly headerStripSourceSize: {
+    readonly width: number;
+    readonly height: number;
+  } | null;
+  /** The axis the dragged header strip lays its items out along. */
+  readonly headerStripAxis: StripAxisId | null;
   /**
    * Per-item x displacement for the HEADER strip while a header drag is in
    * flight. The header renders an explicit transform from this rather than a
@@ -331,7 +338,8 @@ interface EpicDndState {
   ) => void;
   readonly headerTabDragStarted: (
     tab: HeaderTabDragData,
-    sourceWidth: number | null,
+    size: { readonly width: number; readonly height: number } | null,
+    axis: StripAxisId | null,
     ghost: HeaderTabDragGhost | null,
   ) => void;
   readonly headerTearOffPreviewChanged: (active: boolean) => void;
@@ -369,7 +377,8 @@ export const useEpicDndStore = create<EpicDndState>()((set, get) => ({
   dropPreview: null,
   headerStripDropIndex: null,
   headerStripDragState: null,
-  headerStripSourceWidth: null,
+  headerStripSourceSize: null,
+  headerStripAxis: null,
   headerStripOffsets: EMPTY_GROUP_OFFSETS,
   tileStripOffsets: EMPTY_TILE_OFFSETS,
   tileSourceWidth: null,
@@ -388,7 +397,8 @@ export const useEpicDndStore = create<EpicDndState>()((set, get) => ({
       dropPreview: null,
       headerStripDropIndex: null,
       headerStripDragState: null,
-      headerStripSourceWidth: null,
+      headerStripSourceSize: null,
+      headerStripAxis: null,
       headerStripOffsets: EMPTY_GROUP_OFFSETS,
       tileStripOffsets: EMPTY_TILE_OFFSETS,
       tileSourceWidth: null,
@@ -399,7 +409,7 @@ export const useEpicDndStore = create<EpicDndState>()((set, get) => ({
       reparentRootViewTabId: null,
     });
   },
-  headerTabDragStarted: (tab, sourceWidth, ghost) => {
+  headerTabDragStarted: (tab, size, axis, ghost) => {
     set({
       activeSource: null,
       activeOverlayTile: null,
@@ -409,7 +419,8 @@ export const useEpicDndStore = create<EpicDndState>()((set, get) => ({
       dropPreview: null,
       headerStripDropIndex: null,
       headerStripDragState: null,
-      headerStripSourceWidth: sourceWidth,
+      headerStripSourceSize: size,
+      headerStripAxis: axis,
       headerStripOffsets: EMPTY_GROUP_OFFSETS,
       tileStripOffsets: EMPTY_TILE_OFFSETS,
       tileSourceWidth: null,
@@ -503,7 +514,8 @@ export const useEpicDndStore = create<EpicDndState>()((set, get) => ({
       dropPreview: null,
       headerStripDropIndex: null,
       headerStripDragState: null,
-      headerStripSourceWidth: null,
+      headerStripSourceSize: null,
+      headerStripAxis: null,
       headerStripOffsets: EMPTY_GROUP_OFFSETS,
       tileStripOffsets: EMPTY_TILE_OFFSETS,
       tileSourceWidth: null,

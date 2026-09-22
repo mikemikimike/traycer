@@ -148,7 +148,10 @@ function rebaseArrangement(
   previous: LayoutArrangement,
   next: LayoutArrangement,
 ): LayoutArrangement {
-  return resolvePersistedArrangement({
+  // Typed as `LayoutArrangement` rather than left for `resolvePersistedArrangement`
+  // to accept as `unknown`, so a field added to the type and left out here is a
+  // compile error instead of a silent fallback to its default.
+  const rebased: LayoutArrangement = {
     dock: pick(entry.dock, previous.dock, next.dock),
     toolbarLeft: pick(
       entry.toolbarLeft,
@@ -214,7 +217,18 @@ function rebaseArrangement(
       next.mobileFooter,
     ),
     dividerSeq: Math.max(entry.dividerSeq, next.dividerSeq),
-  });
+    tabStripPlacement: pick(
+      entry.tabStripPlacement,
+      previous.tabStripPlacement,
+      next.tabStripPlacement,
+    ),
+    sidebarSide: pick(
+      entry.sidebarSide,
+      previous.sidebarSide,
+      next.sidebarSide,
+    ),
+  };
+  return resolvePersistedArrangement(rebased);
 }
 
 /**

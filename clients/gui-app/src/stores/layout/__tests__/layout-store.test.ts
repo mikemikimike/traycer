@@ -483,6 +483,43 @@ describe("useLayoutStore", () => {
       expect(getLayoutSnapshot()).toEqual(DEFAULT_LAYOUT_SNAPSHOT);
     });
 
+    /**
+     * The tab strip placement and the sidebar side are new fields on an
+     * unchanged version: `merge` resolves every field against its default
+     * through `resolvePersistedArrangement`, so a v4 record written before
+     * they existed rehydrates with both defaults rather than losing the rest
+     * of the record to a version bump.
+     */
+    it("rehydrates a v4 record without the placement fields as top and left, merged field by field", async () => {
+      // `usageHost: "header"` is a non-default field IN THE SAME RECORD: it
+      // has to survive next to the two defaulted fields, which a version bump
+      // that discarded the record (or ran a migration over it) would also
+      // pass for `tabStripPlacement`/`sidebarSide` alone, since both would
+      // read back as their defaults either way.
+      const arrangementWithoutPlacement: Record<string, unknown> = {
+        ...DEFAULT_ARRANGEMENT,
+        usageHost: "header",
+      };
+      delete arrangementWithoutPlacement.tabStripPlacement;
+      delete arrangementWithoutPlacement.sidebarSide;
+
+      writeLayoutRecordAtVersion(
+        {
+          basePreset: "default",
+          overrides: {},
+          arrangement: arrangementWithoutPlacement,
+          layoutCarryDone: true,
+        },
+        LAYOUT_VERSION,
+      );
+      await useLayoutStore.persist.rehydrate();
+
+      const arrangement = getLayoutSnapshot().arrangement;
+      expect(arrangement.tabStripPlacement).toBe("top");
+      expect(arrangement.sidebarSide).toBe("left");
+      expect(arrangement.usageHost).toBe("header");
+    });
+
     it("takes another window's write through the storage event", async () => {
       writeLayoutRecord({
         basePreset: "detailed",

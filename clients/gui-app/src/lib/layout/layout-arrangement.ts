@@ -38,6 +38,12 @@ export type BarHost = "status-bar" | "header";
 export type EdgeSide = "left" | "right";
 
 /**
+ * Where the header task tabs draw: horizontal at the top (today's layout), or
+ * a vertical strip at either edge (S-01, S-02).
+ */
+export type TabStripPlacement = "top" | EdgeSide;
+
+/**
  * The two regions that name a bar AND an end of it, each for itself (L-156).
  *
  * In this order, which is the order a cluster holding both draws them: usage
@@ -185,6 +191,21 @@ export interface LayoutArrangement {
   readonly mobileFooter: boolean;
   /** Only ever increases, so a divider id is never reused. */
   readonly dividerSeq: number;
+  /**
+   * Where the header task tabs draw, on every desktop window at once (S-11):
+   * top, or a vertical strip at the left or right edge.
+   *
+   * The EFFECTIVE placement this window draws with also depends on whether
+   * the mobile header stands in its place - `useTabStripPlacement` is the one
+   * hook that folds the two together; readers of this field alone get the
+   * STORED pick (editor rows, Settings, the depictions, the palette toggle).
+   */
+  readonly tabStripPlacement: TabStripPlacement;
+  /**
+   * Which side of the epic canvas the per-epic sidebar draws on, independent
+   * of the tab strip's own placement (S-06).
+   */
+  readonly sidebarSide: EdgeSide;
 }
 
 /** Every provider that reports account rate limits, in the strip's own order. */
@@ -293,6 +314,8 @@ export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
   pinnedContextFieldOrder: CONTEXT_USAGE_ROW_KEYS,
   mobileFooter: false,
   dividerSeq: DEFAULT_RAIL_DIVIDER_SEQ,
+  tabStripPlacement: "top",
+  sidebarSide: "left",
 };
 
 /** What a provider draws until told otherwise: its tightest limit, and only that. */
@@ -520,6 +543,33 @@ export function statusBarShown(
   return isMobileViewport
     ? arrangement.mobileFooter
     : statusBarHostsAnyRegion(arrangement);
+}
+
+// ── The tab strip's placement (S-01, S-02, S-05, S-25) ──────────────────────
+
+/**
+ * The edge a vertical strip draws at, or `null` for the horizontal `top`
+ * placement - the only placement helper (there is deliberately no separate
+ * `isSideTabStrip` boolean).
+ */
+export function sideTabStripEdge(
+  placement: TabStripPlacement,
+): EdgeSide | null {
+  return placement === "top" ? null : placement;
+}
+
+/**
+ * The palette's "Toggle vertical tabs" command (S-25): `top` becomes `left`,
+ * the default side for a vertical strip (S-05); either side becomes `top`.
+ * Touches no other field.
+ */
+export function toggleVerticalTabs(
+  arrangement: LayoutArrangement,
+): LayoutArrangement {
+  return {
+    ...arrangement,
+    tabStripPlacement: arrangement.tabStripPlacement === "top" ? "left" : "top",
+  };
 }
 
 // ── Reordering ──────────────────────────────────────────────────────────────

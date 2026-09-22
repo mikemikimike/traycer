@@ -57,6 +57,35 @@ describe("undo and redo", () => {
     expect(redoLayout(branched, first)).toBeNull();
   });
 
+  // `undoLayout`/`redoLayout` hand back a stored snapshot VERBATIM (they
+  // never reach `rebaseArrangement`), so this pins that the two new fields
+  // travel through `LayoutSnapshot` untouched, alongside every other field -
+  // not the `pick`-per-field logic `rebaseArrangement` adds, which the
+  // "rebasing the entry snapshot" cases below cover.
+  it("carries the tab strip placement and the sidebar side through a stored travel step", () => {
+    const before: LayoutSnapshot = {
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: {
+        ...DEFAULT_ARRANGEMENT,
+        tabStripPlacement: "left",
+        sidebarSide: "right",
+      },
+    };
+    const after: LayoutSnapshot = {
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: DEFAULT_ARRANGEMENT,
+    };
+    const history = recordLayoutChange(EMPTY_LAYOUT_HISTORY, before);
+
+    const undone = undoLayout(history, after);
+    expect(undone?.snapshot.arrangement.tabStripPlacement).toBe("left");
+    expect(undone?.snapshot.arrangement.sidebarSide).toBe("right");
+
+    const redone = redoLayout(undone?.history ?? EMPTY_LAYOUT_HISTORY, before);
+    expect(redone?.snapshot.arrangement.tabStripPlacement).toBe("top");
+    expect(redone?.snapshot.arrangement.sidebarSide).toBe("left");
+  });
+
   it("keeps the newest entries once the cap is reached", () => {
     let history: LayoutHistory = EMPTY_LAYOUT_HISTORY;
     for (let step = 0; step < LAYOUT_HISTORY_CAP + 5; step += 1) {
@@ -99,6 +128,44 @@ describe("rebasing the entry snapshot on an external write", () => {
       DEFAULT_ARRANGEMENT.minimapSide,
     );
     expect(rebased.overrides).toEqual({ model: { style: "bars" } });
+  });
+
+  /**
+   * The entry's own pick and the external writer's move can land on
+   * DIFFERENT arrangement fields, and each must survive on its own - a bug
+   * that collapsed both onto whichever wrote last would pass every other
+   * case here, since they all move at most one non-default field.
+   */
+  it("keeps the entry's own tab strip placement while taking the other writer's sidebar side", () => {
+    const placementEntry: LayoutSnapshot = {
+      ...entry,
+      arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
+    };
+    const next: LayoutSnapshot = {
+      ...previous,
+      arrangement: { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
+    };
+
+    const rebased = rebaseLayoutSnapshot(placementEntry, previous, next);
+
+    expect(rebased.arrangement.tabStripPlacement).toBe("left");
+    expect(rebased.arrangement.sidebarSide).toBe("right");
+  });
+
+  it("keeps the entry's own sidebar side while taking the other writer's tab strip placement", () => {
+    const sideEntry: LayoutSnapshot = {
+      ...entry,
+      arrangement: { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
+    };
+    const next: LayoutSnapshot = {
+      ...previous,
+      arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
+    };
+
+    const rebased = rebaseLayoutSnapshot(sideEntry, previous, next);
+
+    expect(rebased.arrangement.sidebarSide).toBe("right");
+    expect(rebased.arrangement.tabStripPlacement).toBe("left");
   });
 
   it("takes a region the other writer changed and leaves a region it did not", () => {

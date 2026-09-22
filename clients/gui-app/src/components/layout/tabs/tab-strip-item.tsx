@@ -11,7 +11,7 @@ import { X } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence } from "motion/react";
-import { useHeaderTabDisplacement } from "./use-header-tab-displacement";
+import { useStripItemDisplacement } from "./use-strip-item-displacement";
 import * as m from "motion/react-m";
 import {
   useDraggable,
@@ -683,9 +683,9 @@ function HeaderTabMotionFrame(props: {
 }) {
   const transition = useHeaderTabDisplacementTransition();
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const x = useHeaderTabDisplacement({
+  const x = useStripItemDisplacement({
     nodeRef: frameRef,
-    offsetX: props.offsetX,
+    offset: props.offsetX,
     transition,
   });
 

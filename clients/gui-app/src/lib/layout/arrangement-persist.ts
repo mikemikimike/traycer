@@ -16,6 +16,7 @@ import {
   type StatusBarProviderLimits,
   type StatusBarProviderLimitSelection,
   type StatusBarShownProfiles,
+  type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import { sameFieldList } from "@/lib/layout/layout-values";
 import {
@@ -123,6 +124,8 @@ const ARRANGEMENT_FIELDS: ReadonlyArray<keyof LayoutArrangement> = [
   "statusBarParked",
   "mobileFooter",
   "dividerSeq",
+  "tabStripPlacement",
+  "sidebarSide",
 ];
 
 /**
@@ -204,6 +207,14 @@ export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
       Number.isFinite(stored.dividerSeq)
         ? Math.max(0, Math.floor(stored.dividerSeq))
         : 0,
+    tabStripPlacement: persistedTabStripPlacement(
+      stored.tabStripPlacement,
+      DEFAULT_ARRANGEMENT.tabStripPlacement,
+    ),
+    sidebarSide: persistedSide(
+      stored.sidebarSide,
+      DEFAULT_ARRANGEMENT.sidebarSide,
+    ),
   });
 }
 
@@ -394,6 +405,21 @@ function persistedShownProfiles(value: unknown): StatusBarShownProfiles {
 
 function persistedSide(value: unknown, fallback: EdgeSide): EdgeSide {
   return value === "left" || value === "right" ? value : fallback;
+}
+
+/**
+ * The stored tab strip placement, kept verbatim when it names one of the
+ * three values this build knows (L-133); no legacy carry, because no record
+ * has ever written another meaning for this key - it names nothing else, on
+ * any build, before or after this one.
+ */
+function persistedTabStripPlacement(
+  value: unknown,
+  fallback: TabStripPlacement,
+): TabStripPlacement {
+  return value === "top" || value === "left" || value === "right"
+    ? value
+    : fallback;
 }
 
 /** The remembered set, holding only ids this build has a reading for (L-160). */

@@ -11,7 +11,9 @@ import {
 } from "./header-strip-commit-handoff";
 
 /**
- * Drive a header tab's displacement transform.
+ * Drive a strip item's displacement along the strip's main axis. The caller
+ * binds the returned value to `style.x` for a horizontal strip or `style.y`
+ * for a vertical one.
  *
  * The value is bound through `style`, not `animate`, because the commit frame
  * needs an INSTANTANEOUS re-base and an `animate` target cannot express one -
@@ -27,15 +29,15 @@ import {
  * that returns a ref alongside a value taints the whole returned object as
  * ref-like, and every read of it then counts as reading a ref during render.
  */
-export function useHeaderTabDisplacement(input: {
+export function useStripItemDisplacement(input: {
   readonly nodeRef: RefObject<HTMLElement | null>;
-  readonly offsetX: number;
+  readonly offset: number;
   readonly transition: Transition;
 }): MotionValue<number> {
-  const { nodeRef, offsetX, transition } = input;
-  const x = useMotionValue(offsetX);
+  const { nodeRef, offset, transition } = input;
+  const displacement = useMotionValue(offset);
 
-  useLayoutEffect(() => registerHeaderStripItem(x), [x]);
+  useLayoutEffect(() => registerHeaderStripItem(displacement), [displacement]);
 
   // No dependency array on purpose: the element and the target are re-published
   // on EVERY render because both can change. React can recreate the node, and a
@@ -43,20 +45,20 @@ export function useHeaderTabDisplacement(input: {
   // while reading as registered.
   useLayoutEffect(() => {
     syncHeaderStripItem({
-      value: x,
+      value: displacement,
       node: nodeRef.current,
-      targetX: offsetX,
+      target: offset,
       transition,
     });
   });
 
   useLayoutEffect(() => {
-    animate(x, offsetX, transition);
+    animate(displacement, offset, transition);
     // Deliberately no `stop()` on cleanup. Motion replaces the running
     // animation when a new one starts on the same value, and the container's
     // re-base starts one AFTER this effect - so a cleanup here would cancel the
     // correction rather than tidy up after it.
-  }, [offsetX, transition, x]);
+  }, [offset, transition, displacement]);
 
-  return x;
+  return displacement;
 }

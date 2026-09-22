@@ -7,6 +7,7 @@ import {
   type LayoutArrangement,
   type OrderGroupId,
   type StatusBarProviderLimitSelection,
+  type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import {
   overrideKeys,
@@ -180,6 +181,30 @@ export function mobileFooterChanged(arrangement: LayoutArrangement): boolean {
   return arrangement.mobileFooter !== DEFAULT_ARRANGEMENT.mobileFooter;
 }
 
+/**
+ * Whether the tab strip's placement differs between the two arrangements
+ * handed to it - a two-arrangement comparator rather than one fixed against
+ * `DEFAULT_ARRANGEMENT`, so a caller comparing against a session's entry
+ * snapshot and one comparing against the shipped default can both use it.
+ * `arrangementChanged` below is the one caller so far and passes
+ * `DEFAULT_ARRANGEMENT` as `b`, the same "changed from shipped" reading every
+ * Position row dot and revert uses (`region-position-rows.ts`).
+ */
+export function tabStripPlacementChanged(
+  a: LayoutArrangement,
+  b: LayoutArrangement,
+): boolean {
+  return a.tabStripPlacement !== b.tabStripPlacement;
+}
+
+/** Whether the epic sidebar's side differs between two arrangements (S-06). */
+export function sidebarSideChanged(
+  a: LayoutArrangement,
+  b: LayoutArrangement,
+): boolean {
+  return a.sidebarSide !== b.sidebarSide;
+}
+
 /** Whether ANY of where things live differs from the shipped arrangement. */
 export function arrangementChanged(arrangement: LayoutArrangement): boolean {
   return (
@@ -190,7 +215,9 @@ export function arrangementChanged(arrangement: LayoutArrangement): boolean {
     arrangement.resourceHost !== DEFAULT_ARRANGEMENT.resourceHost ||
     arrangement.resourceSide !== DEFAULT_ARRANGEMENT.resourceSide ||
     usageProvidersChanged(arrangement) ||
-    mobileFooterChanged(arrangement)
+    mobileFooterChanged(arrangement) ||
+    tabStripPlacementChanged(arrangement, DEFAULT_ARRANGEMENT) ||
+    sidebarSideChanged(arrangement, DEFAULT_ARRANGEMENT)
   );
 }
 
@@ -368,6 +395,8 @@ export interface LayoutSnapshotProperties {
   readonly layout_minimap_side: EdgeSide;
   readonly layout_resource_host: BarHost;
   readonly layout_resource_side: EdgeSide;
+  readonly layout_tab_strip_placement: TabStripPlacement;
+  readonly layout_sidebar_side: EdgeSide;
   readonly layout_dock_reordered: boolean;
   readonly layout_toolbar_left_reordered: boolean;
   readonly layout_toolbar_right_reordered: boolean;
@@ -404,6 +433,8 @@ export function layoutSnapshotProperties(
     layout_minimap_side: snapshot.arrangement.minimapSide,
     layout_resource_host: snapshot.arrangement.resourceHost,
     layout_resource_side: snapshot.arrangement.resourceSide,
+    layout_tab_strip_placement: snapshot.arrangement.tabStripPlacement,
+    layout_sidebar_side: snapshot.arrangement.sidebarSide,
     layout_dock_reordered: reordered.has("dock"),
     layout_toolbar_left_reordered: reordered.has("toolbarLeft"),
     layout_toolbar_right_reordered: reordered.has("toolbarRight"),

@@ -1013,7 +1013,8 @@ describe("<TabStrip />", () => {
             tabId: EPIC_A.id,
             index: 0,
           },
-          120,
+          { width: 120, height: 36 },
+          "x",
           null,
         );
       });
@@ -1132,7 +1133,8 @@ describe("<TabStrip />", () => {
           tabId: "e-a",
           index: 0,
         },
-        120,
+        { width: 120, height: 36 },
+        "x",
         null,
       );
       // Dragging rightward onto B: the dragged tab's centre is on B's
@@ -1176,7 +1178,8 @@ describe("<TabStrip />", () => {
           tabId: "e-a",
           index: 0,
         },
-        120,
+        { width: 120, height: 36 },
+        "x",
         null,
       );
       dndStore.headerStripDragStateChanged({
@@ -1210,7 +1213,8 @@ describe("<TabStrip />", () => {
           tabId: "e-a",
           index: 0,
         },
-        120,
+        { width: 120, height: 36 },
+        "x",
         null,
       );
       // Dragging leftward back onto B: the dragged tab's centre is on B's

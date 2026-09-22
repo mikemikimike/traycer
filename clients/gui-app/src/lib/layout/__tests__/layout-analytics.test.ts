@@ -106,12 +106,13 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     expect(properties.layout_mic_shown).toBe("hidden");
     expect(properties.changed_from_default_count).toBe(1);
     // Every other declared key is still present and still "default" - the
-    // event is dense, never sparse (L-55). The twelve beside the per-setting
+    // event is dense, never sparse (L-55). The fourteen beside the per-setting
     // keys are the built-ins the snapshot carries: the preset, the count, the
-    // four placement fields the two bar readings pick (L-156), the minimap
-    // side and the five reorder flags.
+    // four placement fields the two bar readings pick (L-156), the tab strip
+    // placement and the sidebar side (S-01, S-06), the minimap side and the
+    // five reorder flags.
     expect(Object.keys(properties)).toHaveLength(
-      LAYOUT_SETTING_PROPERTY_KEYS.length + 12,
+      LAYOUT_SETTING_PROPERTY_KEYS.length + 14,
     );
   });
 
@@ -191,10 +192,10 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     const serialized = JSON.stringify(properties);
 
     // `layoutSnapshotProperties` only ever writes the declared key set
-    // (`LAYOUT_SETTING_PROPERTY_KEYS` plus the ten named arrangement/count
-    // fields - proven by the structural-parity tests below), so these
-    // fields never reach the event even though the type's index signature
-    // would allow reading them.
+    // (`LAYOUT_SETTING_PROPERTY_KEYS` plus the built-in arrangement/count
+    // fields the structural-parity "reserved" list below names - proven by
+    // those tests), so these fields never reach the event even though the
+    // type's index signature would allow reading them.
     expect(properties.shownProfiles).toBeUndefined();
     expect(properties.providerLimits).toBeUndefined();
     expect(serialized).not.toContain("profile-a");
@@ -284,6 +285,62 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
     }
   });
 
+  it("sends a snapshot with each tab strip placement and each sidebar side, sanitized intact", () => {
+    const placements = ["top", "left", "right"] as const;
+    const sides = ["left", "right"] as const;
+    for (const tabStripPlacement of placements) {
+      for (const sidebarSide of sides) {
+        const properties = layoutSnapshotProperties({
+          ...DEFAULT_LAYOUT_SNAPSHOT,
+          arrangement: {
+            ...DEFAULT_ARRANGEMENT,
+            tabStripPlacement,
+            sidebarSide,
+          },
+        });
+        const label = `${tabStripPlacement} / ${sidebarSide}`;
+
+        expect(properties.layout_tab_strip_placement).toBe(tabStripPlacement);
+        expect(properties.layout_sidebar_side).toBe(sidebarSide);
+        // The acceptance is that the payload passes the real sanitizer
+        // INTACT - not merely that `track` returns `true`, which a sanitizer
+        // that silently dropped one property to make the event valid would
+        // still satisfy.
+        expect(
+          sanitizeAnalyticsProperties(
+            AnalyticsEvent.LayoutSnapshot,
+            properties,
+          ),
+          label,
+        ).toEqual(properties);
+        expect(
+          Analytics.getInstance().track(
+            AnalyticsEvent.LayoutSnapshot,
+            properties,
+          ),
+          label,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("drops the whole event on a tab strip placement or sidebar side this build does not know", () => {
+    const base = layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT);
+
+    expect(
+      sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, {
+        ...base,
+        layout_tab_strip_placement: "bottom",
+      }),
+    ).toBeNull();
+    expect(
+      sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, {
+        ...base,
+        layout_sidebar_side: "top",
+      }),
+    ).toBeNull();
+  });
+
   it("sends layout_editor_session, including a session with no first change", () => {
     const summary = layoutEditorSessionChangeSummary(
       DEFAULT_LAYOUT_SNAPSHOT,
@@ -350,6 +407,8 @@ describe("structural parity: LayoutValues cannot drift from the declared propert
       "layout_minimap_side",
       "layout_resource_host",
       "layout_resource_side",
+      "layout_tab_strip_placement",
+      "layout_sidebar_side",
       "layout_dock_reordered",
       "layout_toolbar_left_reordered",
       "layout_toolbar_right_reordered",

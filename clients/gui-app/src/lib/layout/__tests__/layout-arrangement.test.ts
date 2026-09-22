@@ -20,10 +20,13 @@ import {
   moveRailPanelToEnd,
   removeRailDivider,
   isStackedRailPanel,
+  sideTabStripEdge,
   stackRailPanels,
+  toggleVerticalTabs,
   unstackRail,
   TOOLBAR_REGION_IDS,
   type LayoutArrangement,
+  type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import {
   normalizeArrangement,
@@ -1391,6 +1394,129 @@ describe("what a rail SURFACE draws (L-166, L-167)", () => {
     expect(railStackId("railAgents", "railArtifacts")).toBe(
       "stack:railAgents+railArtifacts",
     );
+  });
+});
+
+/**
+ * S-01, S-02, S-05, S-06: the tab strip's placement and the sidebar's side
+ * are arrangement fields beside the bar placements, top and left by default.
+ */
+describe("the tab strip's placement and the sidebar's side (S-01, S-02, S-05, S-06)", () => {
+  it("ships top for the strip and left for the sidebar", () => {
+    expect(DEFAULT_ARRANGEMENT.tabStripPlacement).toBe("top");
+    expect(DEFAULT_ARRANGEMENT.sidebarSide).toBe("left");
+  });
+
+  describe("sideTabStripEdge", () => {
+    it("is null for top and the edge itself for a side", () => {
+      expect(sideTabStripEdge("top")).toBeNull();
+      expect(sideTabStripEdge("left")).toBe("left");
+      expect(sideTabStripEdge("right")).toBe("right");
+    });
+  });
+
+  describe("toggleVerticalTabs (S-25)", () => {
+    it("sends top to left, the default vertical side, touching no other field", () => {
+      const arrangement: LayoutArrangement = {
+        ...DEFAULT_ARRANGEMENT,
+        sidebarSide: "right",
+        usageHost: "header",
+      };
+
+      expect(toggleVerticalTabs(arrangement)).toEqual({
+        ...arrangement,
+        tabStripPlacement: "left",
+      });
+    });
+
+    it("sends either side back to top, touching no other field", () => {
+      const leftArrangement: LayoutArrangement = {
+        ...DEFAULT_ARRANGEMENT,
+        tabStripPlacement: "left",
+        sidebarSide: "right",
+        usageHost: "header",
+      };
+      const rightArrangement: LayoutArrangement = {
+        ...DEFAULT_ARRANGEMENT,
+        tabStripPlacement: "right",
+        sidebarSide: "right",
+        usageHost: "header",
+      };
+
+      expect(toggleVerticalTabs(leftArrangement)).toEqual({
+        ...leftArrangement,
+        tabStripPlacement: "top",
+      });
+      expect(toggleVerticalTabs(rightArrangement)).toEqual({
+        ...rightArrangement,
+        tabStripPlacement: "top",
+      });
+    });
+  });
+
+  describe("resolvePersistedArrangement", () => {
+    it("falls back to the default on an absent or unreadable value", () => {
+      expect(resolvePersistedArrangement({}).tabStripPlacement).toBe("top");
+      expect(resolvePersistedArrangement({}).sidebarSide).toBe("left");
+
+      // A number, a wrong-case literal, `null`, an object and a string this
+      // build has no case for - every shape a corrupt or foreign record could
+      // hold, not just one string.
+      const junkPlacements: ReadonlyArray<unknown> = [
+        1,
+        "TOP",
+        null,
+        {},
+        "sideways",
+      ];
+      for (const tabStripPlacement of junkPlacements) {
+        expect(
+          resolvePersistedArrangement({ tabStripPlacement }).tabStripPlacement,
+          JSON.stringify(tabStripPlacement),
+        ).toBe("top");
+      }
+
+      // `"top"` is valid for the strip but junk for the sidebar, which is
+      // worth pinning on its own.
+      const junkSides: ReadonlyArray<unknown> = [0, "LEFT", null, "top"];
+      for (const sidebarSide of junkSides) {
+        expect(
+          resolvePersistedArrangement({ sidebarSide }).sidebarSide,
+          JSON.stringify(sidebarSide),
+        ).toBe("left");
+      }
+    });
+
+    it("keeps each valid placement verbatim (L-133)", () => {
+      const placements: ReadonlyArray<TabStripPlacement> = [
+        "top",
+        "left",
+        "right",
+      ];
+      for (const tabStripPlacement of placements) {
+        expect(
+          resolvePersistedArrangement({ tabStripPlacement }).tabStripPlacement,
+        ).toBe(tabStripPlacement);
+      }
+      expect(
+        resolvePersistedArrangement({ sidebarSide: "right" }).sidebarSide,
+      ).toBe("right");
+    });
+
+    it("keeps a stored right placement through a full persisted round trip", () => {
+      const stored: unknown = JSON.parse(
+        JSON.stringify({
+          ...DEFAULT_ARRANGEMENT,
+          tabStripPlacement: "right",
+          sidebarSide: "right",
+        }),
+      );
+
+      const arrangement = resolvePersistedArrangement(stored);
+
+      expect(arrangement.tabStripPlacement).toBe("right");
+      expect(arrangement.sidebarSide).toBe("right");
+    });
   });
 });
 

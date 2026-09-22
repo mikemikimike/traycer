@@ -15,7 +15,7 @@ import {
   type HeaderTabSlotDropData,
 } from "@/components/layout/tabs/header-tab-dnd";
 import { useEpicDndStore } from "@/components/epic-canvas/dnd/dnd-store";
-import { useHeaderTabDisplacement } from "./use-header-tab-displacement";
+import { useStripItemDisplacement } from "./use-strip-item-displacement";
 import { cn } from "@/lib/utils";
 import { SplitTabLayout, SplitFocusIcon } from "./split-tab-chrome";
 import { SplitFillableMemberVisual } from "./header-tab-visual";
@@ -108,9 +108,9 @@ export const SplitTabItem = memo(function SplitTabItem(
   // strip exempt from every commit, in both directions, while its neighbours
   // were corrected.
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const x = useHeaderTabDisplacement({
+  const x = useStripItemDisplacement({
     nodeRef: frameRef,
-    offsetX: props.offsetX,
+    offset: props.offsetX,
     transition,
   });
   const setFrameRef = useCallback(

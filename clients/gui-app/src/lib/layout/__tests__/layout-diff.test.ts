@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   anythingChanged,
   arrangementChanged,
+  layoutSnapshotProperties,
   mobileFooterChanged,
   providerChanged,
   resetEverything,
   revertProvider,
+  sidebarSideChanged,
+  tabStripPlacementChanged,
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
 import {
@@ -123,6 +126,8 @@ describe("what the page can see as changed", () => {
       { mobileFooter: true },
       { hiddenProviders: [PROVIDER] },
       { dock: [...DEFAULT_ARRANGEMENT.dock].reverse() },
+      { tabStripPlacement: "left" },
+      { sidebarSide: "right" },
     ];
     for (const patch of eachOne) {
       expect(
@@ -130,6 +135,46 @@ describe("what the page can see as changed", () => {
         JSON.stringify(patch),
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * S-01, S-02, S-06: the tab strip's placement and the sidebar's side, as
+ * their own two-arrangement comparators and in the `layout_snapshot` payload.
+ */
+describe("the tab strip's placement and the sidebar's side", () => {
+  it("tabStripPlacementChanged and sidebarSideChanged compare the two arrangements handed to them", () => {
+    expect(
+      tabStripPlacementChanged(DEFAULT_ARRANGEMENT, DEFAULT_ARRANGEMENT),
+    ).toBe(false);
+    expect(
+      tabStripPlacementChanged(
+        { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
+        DEFAULT_ARRANGEMENT,
+      ),
+    ).toBe(true);
+    expect(sidebarSideChanged(DEFAULT_ARRANGEMENT, DEFAULT_ARRANGEMENT)).toBe(
+      false,
+    );
+    expect(
+      sidebarSideChanged(
+        { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
+        DEFAULT_ARRANGEMENT,
+      ),
+    ).toBe(true);
+  });
+
+  it("the snapshot builder emits both properties", () => {
+    const properties = layoutSnapshotProperties(
+      snapshotWith({
+        ...DEFAULT_ARRANGEMENT,
+        tabStripPlacement: "right",
+        sidebarSide: "right",
+      }),
+    );
+
+    expect(properties.layout_tab_strip_placement).toBe("right");
+    expect(properties.layout_sidebar_side).toBe("right");
   });
 });
 
@@ -148,6 +193,10 @@ describe("Reset everything (L-20)", () => {
         providerLimits: { [PROVIDER]: { limitKeys: ["5h"] } },
         dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
         usageProviders: [...DEFAULT_ARRANGEMENT.usageProviders].reverse(),
+        // S-29: "Reset everything" restores the tab strip placement and the
+        // sidebar side too.
+        tabStripPlacement: "right",
+        sidebarSide: "right",
       },
     };
 
@@ -157,6 +206,8 @@ describe("Reset everything (L-20)", () => {
     expect(after.overrides).toEqual({});
     expect(arrangementChanged(after.arrangement)).toBe(false);
     expect(anythingChanged(after)).toBe(false);
+    expect(after.arrangement.tabStripPlacement).toBe("top");
+    expect(after.arrangement.sidebarSide).toBe("left");
   });
 
   it("never hands a divider id back out, which is the one field it keeps", () => {

@@ -335,6 +335,10 @@ export const PERSIST_STORES = [
   // Where the layout inspector is docked (right, left or floating) and where
   // a floating panel was last dragged to. Per device, like the layout itself.
   { camelName: "layoutEditorDock", leaf: "layout-editor-dock", kind: "static" },
+  // The vertical tab strip's width and whether it is collapsed to a rail.
+  // Global across windows and kept outside the layout arrangement, so a drag
+  // of the handle is not a layout change.
+  { camelName: "sideTabStrip", leaf: "side-tab-strip", kind: "static" },
   // When this device last sent the `layout_snapshot` analytics event. Read and
   // written as one synchronous compare-and-set, so two windows launching
   // together cannot both count the same device (L-54).

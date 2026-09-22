@@ -407,7 +407,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-left",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         null,
       );
       renderOverlay();
@@ -428,7 +429,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-right",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         null,
       );
       renderOverlay();
@@ -458,7 +460,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-left",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         {
           appearance: { color: "#654321", icon: "🚀" },
           indicatorState: {
@@ -498,7 +501,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-left",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         null,
       );
       renderOverlay();
@@ -549,7 +553,8 @@ describe("<EpicRootDragOverlayContent />", () => {
             tabId: "epic-right",
             index: 0,
           },
-          480,
+          { width: 480, height: 36 },
+          "x",
           null,
         );
         renderOverlay();
@@ -593,7 +598,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-solo",
           index: 0,
         },
-        220,
+        { width: 220, height: 36 },
+        "x",
         null,
       );
       renderOverlay();
@@ -651,7 +657,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-right",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         null,
       );
       renderOverlay();
@@ -719,7 +726,8 @@ describe("<EpicRootDragOverlayContent />", () => {
               tabId: draggedId,
               index: 0,
             },
-            480,
+            { width: 480, height: 36 },
+            "x",
             null,
           );
           renderOverlay();
@@ -775,7 +783,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-right",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         null,
       );
       useEpicDndStore.getState().headerTearOffPreviewChanged(true);
@@ -789,7 +798,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: "epic-left",
           index: 0,
         },
-        480,
+        { width: 480, height: 36 },
+        "x",
         null,
       );
       expect(useEpicDndStore.getState().headerTearOffPreview).toBe(false);
@@ -950,7 +960,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: EPIC_ID,
           index: 0,
         },
-        400,
+        { width: 400, height: 36 },
+        "x",
         null,
       );
     }
@@ -1087,7 +1098,8 @@ describe("<EpicRootDragOverlayContent />", () => {
           tabId: EPIC_ID,
           index: 0,
         },
-        400,
+        { width: 400, height: 36 },
+        "x",
         null,
       );
       renderOverlay();

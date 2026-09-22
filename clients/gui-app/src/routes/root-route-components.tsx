@@ -246,7 +246,7 @@ function StandaloneShell(props: { readonly children: ReactNode }) {
   const menuBarActive = useDesktopMenuBarActive();
   return (
     <div data-full-bleed-surface="" className="fixed inset-0 flex flex-col">
-      {menuBarActive ? <DesktopMenuHeader /> : null}
+      {menuBarActive ? <DesktopMenuHeader variant="boot" /> : null}
       <div className="min-h-0 flex-1 overflow-y-auto">{props.children}</div>
     </div>
   );

@@ -44,7 +44,7 @@ const PROVIDER = join(
 /** State a finished gesture must not leave behind. */
 const TEARDOWN_ASSIGNMENTS = [
   "activeTileDrag = null",
-  "activeHeaderStripGeometry = null",
+  "activeHeaderStripSession = null",
   "promotedPreviewOnDrag = null",
 ] as const;
 

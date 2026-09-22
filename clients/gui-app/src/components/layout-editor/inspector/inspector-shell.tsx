@@ -76,7 +76,13 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
         here and nowhere else, so the body scrolls rather than moves. */}
       <div
         data-layout-inspector-header
-        className="flex h-11 shrink-0 items-center gap-1.5 border-b border-border pr-2.5 pl-3.5"
+        className={cn(
+          "flex h-11 shrink-0 items-center gap-1.5 border-b border-border pr-2.5 pl-3.5",
+          // Docked left, this header sits at the window's top-left corner, so
+          // it keeps the traffic-light reserve the app column gives up.
+          dockMode === "left" &&
+            "wco:pl-[max(0.875rem,var(--window-leading-inset))]",
+        )}
       >
         <span className="text-ui-sm font-medium tracking-[0.01em]">Layout</span>
         <span className="flex-1" />

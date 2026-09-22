@@ -110,7 +110,7 @@ import {
   insertionIndexForTarget,
   insertionIndexFromPointer,
   insertionOffsetsFor,
-  overlayLeftForPointer,
+  overlayStartForPointer,
   remapGeometryToSlots,
   resolveStripDragState,
   stripOffsetsFor,
@@ -121,9 +121,13 @@ import {
 import {
   HEADER_STRIP_SCROLL_TEST_ID,
   measureHeaderStripGeometry,
-  readHeaderStripContentOriginX,
+  readHeaderStripContentOrigin,
+  readHeaderStripItemSize,
+  readHeaderStripSession,
   readHeaderStripSlots,
+  type HeaderStripDeclaration,
 } from "@/components/layout/tabs/header-strip-geometry";
+import { pulledOutOfStrip } from "@/components/epic-canvas/dnd/strip-axis";
 import { pointIsOutsideViewport } from "@/components/epic-canvas/dnd/viewport-release";
 import {
   readTabDetachHandler,
@@ -147,9 +151,10 @@ import {
 } from "@/components/epic-canvas/dnd/tile-strip-geometry";
 
 /**
- * How far below the header strip a release has to land before it detaches into
- * a new window. Measured from the strip's own bottom edge - a hard-coded y is
- * only ever right for one strip height.
+ * How far past the header strip, toward the content, a release has to land
+ * before it detaches into a new window. Measured from the strip's own edge on
+ * its cross axis - a hard-coded coordinate is only ever right for one strip
+ * size.
  */
 const HEADER_TAB_TEAR_OFF_THRESHOLD_PX = 24;
 
@@ -160,20 +165,30 @@ const HEADER_TAB_TEAR_OFF_RELEASE_PX = 16;
 const EMPTY_HEADER_OFFSETS: ReadonlyMap<string, number> = new Map();
 
 /**
- * Strip geometry for the header-tab gesture in flight, or null.
+ * The header-tab gesture in flight: the strip's 1-D geometry plus the axis it
+ * runs along and the side its content lies on, read from the strip's own
+ * declaration at drag start. The model never sees the axis; only this session
+ * maps the viewport onto it.
+ */
+interface HeaderStripDragSession extends HeaderStripDeclaration {
+  readonly geometry: StripDragGeometry;
+}
+
+/**
+ * The session for the header-tab gesture in flight, or null.
  *
  * Module-scoped rather than a React ref, mirroring the collision pass's pointer
  * stash: the overlay modifier is a plain dnd-kit callback, not a React consumer,
  * and threading a ref into it is exactly the "ref read during render" shape the
  * hooks lint forbids. Cleared on drag end and cancel.
  */
-let activeHeaderStripGeometry: StripDragGeometry | null = null;
+let activeHeaderStripSession: HeaderStripDragSession | null = null;
 
 /** Hysteresis latch for the header tear-off preview/commit boundary. */
 let headerTearOffActive = false;
 
 /**
- * Latest raw pointer x, tracked independently of dnd-kit's render cycle.
+ * Latest raw pointer, tracked independently of dnd-kit's render cycle.
  *
  * The overlay mounts a frame after activation, and on that first frame dnd-kit's
  * transform is still zero - so a tab positioned from the transform paints at its
@@ -184,8 +199,7 @@ let headerTearOffActive = false;
  * Overlay presentation ONLY. The model keeps using the collision pass's pointer,
  * which is the scroll-corrected point that actually chose `over`.
  */
-let latestPointerX: number | null = null;
-let latestPointerY: number | null = null;
+let latestPointer: PointLike | null = null;
 
 /**
  * Tile-drag geometry for the gesture in flight: the SOURCE group's strip, plus
@@ -233,13 +247,12 @@ function reportStripGeometryFailure(strip: "header" | "tile"): void {
   );
 }
 
-function trackPointerX(event: PointerEvent): void {
-  latestPointerX = event.clientX;
-  latestPointerY = event.clientY;
+function trackPointer(event: PointerEvent): void {
+  latestPointer = { x: event.clientX, y: event.clientY };
 }
 
 /**
- * Viewport x of the last pointer PRESS.
+ * Viewport point of the last pointer PRESS.
  *
  * The grab offset must be measured from where the gesture was pressed, not
  * where it activated - activation happens `EPIC_CANVAS_DRAG_ACTIVATION_DISTANCE`
@@ -250,22 +263,42 @@ function trackPointerX(event: PointerEvent): void {
  * is a several-tens-of-px error rather than a few. Capturing the press
  * directly removes the guesswork for every source.
  */
-let lastPointerDownX: number | null = null;
+let lastPointerDown: PointLike | null = null;
 
-function trackPointerDownX(event: PointerEvent): void {
-  lastPointerDownX = event.clientX;
-  latestPointerX = event.clientX;
-  latestPointerY = event.clientY;
-}
-
-/** The press position for a starting gesture, most reliable source first. */
-function grabPointerX(activatorEvent: Event): number {
-  if (lastPointerDownX !== null) return lastPointerDownX;
-  if (activatorEvent instanceof MouseEvent) return activatorEvent.clientX;
-  return getLastCollisionPointerPoint()?.x ?? 0;
+function trackPointerDown(event: PointerEvent): void {
+  lastPointerDown = { x: event.clientX, y: event.clientY };
+  latestPointer = lastPointerDown;
 }
 
 /**
+ * The session for a header-tab gesture starting at `grab`, or null when the
+ * strip does not declare itself or its geometry cannot be measured. The strip
+ * declares its own axis and content side; the provider never asks the layout
+ * store which presentation is mounted.
+ */
+function beginHeaderStripSession(
+  stripItemId: string,
+  grab: PointLike,
+): HeaderStripDragSession | null {
+  const declaration = readHeaderStripSession();
+  if (declaration === null) return null;
+  const geometry = measureHeaderStripGeometry({
+    stripItemId,
+    pointer: declaration.axis.pointerMain(grab),
+    axis: declaration.axis,
+  });
+  return geometry === null ? null : { ...declaration, geometry };
+}
+
+/** The press position for a starting gesture, most reliable source first. */
+function grabPoint(activatorEvent: Event): PointLike {
+  if (lastPointerDown !== null) return lastPointerDown;
+  if (activatorEvent instanceof MouseEvent) {
+    return { x: activatorEvent.clientX, y: activatorEvent.clientY };
+  }
+  return getLastCollisionPointerPoint() ?? { x: 0, y: 0 };
+}
+
 /**
  * Tile overlay: pointer-derived, and deliberately NOT clamped to any strip.
  *
@@ -294,10 +327,10 @@ function tileOverlayTransform(
   readonly scaleX: number;
   readonly scaleY: number;
 } {
-  const pointerX = latestPointerX ?? getLastCollisionPointerPoint()?.x ?? null;
-  if (pointerX === null) return transform;
-  const left = pointerX - tile.geometry.grabOffsetX;
-  return { ...transform, x: left - tile.geometry.sourceInitialLeft };
+  const pointer = latestPointer ?? getLastCollisionPointerPoint();
+  if (pointer === null) return transform;
+  const left = pointer.x - tile.geometry.grabOffset;
+  return { ...transform, x: left - tile.geometry.sourceInitialStart };
 }
 
 /**
@@ -306,8 +339,9 @@ function tileOverlayTransform(
  * centring it would teleport it on the first frame and break the illusion that
  * the pointer is holding the object it grabbed.
  *
- * The header tab's position is derived from the POINTER rather than from the
- * drag delta, against the source's rect at drag start. Never against
+ * The header tab's position along the strip is derived from the POINTER rather
+ * than from the drag delta, against the source's rect at drag start, and the
+ * cross axis is pinned so the tab never leaves the strip's line. Never against
  * `activeNodeRect`: that rect follows the source placeholder as the provisional
  * order slides it, and mixing it with a delta measured from the original
  * position pins the overlay partway through a drag.
@@ -318,25 +352,34 @@ const rootDragOverlayModifier: Modifier = (args) => {
   if (readHeaderTabDragData(args.active?.data.current) === null) {
     return snapCenterToCursor(args);
   }
-  const geometry = activeHeaderStripGeometry;
-  const pointerX = latestPointerX ?? getLastCollisionPointerPoint()?.x ?? null;
-  // Sprint 01 is single-mode: the tab stays in the strip row for the whole
-  // gesture, so crossing the tear-off threshold introduces no discontinuity.
-  if (geometry === null || pointerX === null) {
-    return { ...args.transform, y: 0 };
+  const session = activeHeaderStripSession;
+  const pointer = latestPointer ?? getLastCollisionPointerPoint();
+  // Single-mode: the tab stays in the strip's line for the whole gesture, so
+  // crossing the tear-off threshold introduces no discontinuity. Without a
+  // model the delta still drives the main axis and the cross axis is pinned.
+  if (session === null || pointer === null) {
+    return useEpicDndStore.getState().headerStripAxis === "y"
+      ? { ...args.transform, x: 0 }
+      : { ...args.transform, y: 0 };
   }
+  const { axis, geometry } = session;
   const strip = document.querySelector(
     `[data-testid="${HEADER_STRIP_SCROLL_TEST_ID}"]`,
   );
   const stripRect = strip === null ? null : strip.getBoundingClientRect();
-  const left = overlayLeftForPointer({
-    pointerX,
-    grabOffsetX: geometry.grabOffsetX,
-    sourceWidth: geometry.sourceWidth,
-    stripLeft: stripRect?.left ?? Number.NEGATIVE_INFINITY,
-    stripRight: stripRect?.right ?? Number.POSITIVE_INFINITY,
+  const start = overlayStartForPointer({
+    pointer: axis.pointerMain(pointer),
+    grabOffset: geometry.grabOffset,
+    sourceExtent: geometry.sourceExtent,
+    stripStart:
+      stripRect === null ? Number.NEGATIVE_INFINITY : axis.mainStart(stripRect),
+    stripEnd:
+      stripRect === null ? Number.POSITIVE_INFINITY : axis.mainEnd(stripRect),
   });
-  return { ...args.transform, x: left - geometry.sourceInitialLeft, y: 0 };
+  const main = start - geometry.sourceInitialStart;
+  return axis.id === "x"
+    ? { ...args.transform, x: main, y: 0 }
+    : { ...args.transform, x: 0, y: main };
 };
 
 const ROOT_DRAG_OVERLAY_MODIFIERS = [rootDragOverlayModifier];
@@ -501,14 +544,23 @@ function updateHeaderStripTearOffPreview(
   if (headerSlot === null || !canDropOnHeaderStrip(source) || point === null) {
     return false;
   }
+  // A canvas source is never a header drag, so no drag session holds the
+  // strip's axis: read it from the strip itself.
+  const stripSession = readHeaderStripSession();
+  if (stripSession === null) {
+    reportStripGeometryFailure("header");
+    return false;
+  }
+  const { axis } = stripSession;
   const dndStore = useEpicDndStore.getState();
   refs.lastResolved.current = null;
   dndStore.dropPreviewChanged(null);
   dndStore.headerStripDropIndexChanged(
     resolveHeaderStripDropIndex({
       slot: headerSlot,
-      pointerX: point.x,
+      pointer: axis.pointerMain(point),
       slotRect: readOverRect(event),
+      axis,
       sourceIndex: null,
     }),
   );
@@ -545,16 +597,16 @@ function updateTileStripPreview(
   // header path applies to its drop index.
   let index: number | null;
   if (groupId === drag.groupId) {
-    const contentOriginX = readTileStripContentOriginX(groupId);
-    if (contentOriginX === null) return rejectTileStripFrame(refs);
+    const contentOrigin = readTileStripContentOriginX(groupId);
+    if (contentOrigin === null) return rejectTileStripFrame(refs);
     const slots = readTileStripSlots(groupId);
     const geometry = remapGeometryToSlots(drag.geometry, slots);
     if (geometry === null) return rejectTileStripFrame(refs);
     activeTileDrag = { ...drag, geometry };
     const next = resolveStripDragState({
       geometry,
-      contentOriginX,
-      pointerX: point.x,
+      contentOrigin,
+      pointer: point.x,
       previous: dndStore.headerStripDragState,
     });
     dndStore.headerStripDragStateChanged(next);
@@ -579,7 +631,7 @@ function updateTileStripPreview(
     );
     offsets.set(
       groupId,
-      insertionOffsetsFor(foreign.slots, index, sourceGeometry.sourceWidth),
+      insertionOffsetsFor(foreign.slots, index, sourceGeometry.sourceExtent),
     );
     // Keep the source strip's dimmed origin placeholder until the cross-group
     // drop commits. The destination independently opens its insertion gap.
@@ -620,7 +672,7 @@ function updateHeaderTabSourcePreview(input: {
   readonly headerTab: HeaderTabDragData;
   readonly event: DragUpdateEvent;
   readonly point: PointLike | null;
-  readonly publishStripState: (pointerX: number) => void;
+  readonly publishStripState: (point: PointLike) => void;
 }): void {
   const { headerTab, event, point } = input;
   const dndStore = useEpicDndStore.getState();
@@ -647,10 +699,7 @@ function updateHeaderTabSourcePreview(input: {
   // empty pane inviting the drop. (The invisible edge-split bands that used to
   // sit here lost that argument and were removed outright.)
   if (
-    isHeaderTearOffPoint(
-      currentReleasePointerPoint(),
-      activeHeaderStripGeometry?.stripBottom ?? null,
-    )
+    isHeaderTearOffPoint(currentReleasePointerPoint(), activeHeaderStripSession)
   ) {
     dndStore.headerTearOffPreviewChanged(
       readTabDetachHandler()?.isAvailable === true,
@@ -669,24 +718,32 @@ function updateHeaderTabSourcePreview(input: {
     dndStore.topLevelStripPairPreviewChanged(null);
     return;
   }
-  input.publishStripState(point.x);
+  input.publishStripState(point);
 }
 
-/** Resolve the model at `pointerX` and publish it. */
+/**
+ * Resolve the model at `point`, projected onto the session's axis, and publish
+ * it.
+ */
 function publishHeaderStripDragState(input: {
   readonly headerTab: HeaderTabDragData;
-  readonly geometry: StripDragGeometry | null;
-  readonly pointerX: number;
+  readonly session: HeaderStripDragSession | null;
+  readonly point: PointLike;
 }): void {
   const dndStore = useEpicDndStore.getState();
-  const contentOriginX = readHeaderStripContentOriginX();
-  const { headerTab } = input;
+  const { headerTab, session } = input;
   const geometry =
-    input.geometry === null
+    session === null
       ? null
-      : remapGeometryToSlots(input.geometry, readHeaderStripSlots());
-  activeHeaderStripGeometry = geometry;
-  if (geometry === null || contentOriginX === null) {
+      : remapGeometryToSlots(
+          session.geometry,
+          readHeaderStripSlots(session.axis),
+        );
+  activeHeaderStripSession =
+    session === null || geometry === null ? null : { ...session, geometry };
+  const contentOrigin =
+    session === null ? null : readHeaderStripContentOrigin(session.axis);
+  if (session === null || geometry === null || contentOrigin === null) {
     reportStripGeometryFailure("header");
     dndStore.headerStripDropIndexChanged(null);
     dndStore.headerStripDragStateChanged(null);
@@ -696,8 +753,8 @@ function publishHeaderStripDragState(input: {
   }
   const next = resolveStripDragState({
     geometry,
-    contentOriginX,
-    pointerX: input.pointerX,
+    contentOrigin,
+    pointer: session.axis.pointerMain(input.point),
     previous: dndStore.headerStripDragState,
   });
   dndStore.headerStripDragStateChanged(next);
@@ -955,10 +1012,11 @@ function resolveDetachRequest(detach: HeaderTab | null): DetachRequest | null {
  * The tab a release should tear off into a new window, or null to fall through
  * to the ordinary drop commit.
  *
- * A header tab tears off ONLY by being pulled clear of its strip, measured from
- * the strip's own rect. It must not tear off merely because the release landed
- * on no droppable: the geometry model gives every in-strip position a reorder
- * destination, so "no target" would turn an ordinary reorder into a new window.
+ * A header tab tears off ONLY by being pulled clear of its strip toward the
+ * content, measured from the strip's own rect, or by leaving the viewport. It
+ * must not tear off merely because the release landed on no droppable: the
+ * geometry model gives every in-strip position a reorder destination, so "no
+ * target" would turn an ordinary reorder into a new window.
  *
  * Of the top-level targets only a valid FILLABLE SLOT blocks a tear-off - the
  * same precedence the live preview applies: it is an explicit, visible empty
@@ -966,10 +1024,10 @@ function resolveDetachRequest(detach: HeaderTab | null): DetachRequest | null {
  */
 function resolveTearOff(input: {
   readonly event: DragEndEvent;
-  readonly stripBottom: number | null;
+  readonly session: HeaderStripDragSession | null;
   readonly canvasTearOffAllowed: boolean;
 }): HeaderTab | null {
-  const { event, stripBottom } = input;
+  const { event, session } = input;
   // The activator position plus the final delta keeps advancing after the
   // pointer has left every target, unlike collision coordinates. Used for
   // tear-off detection only - drop math still reads the collision point.
@@ -977,7 +1035,7 @@ function resolveTearOff(input: {
   const headerTab = readHeaderTabDragData(event.active.data.current);
   if (headerTab !== null) {
     if (hasValidFillableSlotDrop(event, headerTab)) return null;
-    if (!isHeaderTearOffPoint(point, stripBottom)) return null;
+    if (!isHeaderTearOffPoint(point, session)) return null;
     return (
       getHeaderTabs().find(
         (tab) => tab.kind === headerTab.tabKind && tab.id === headerTab.tabId,
@@ -1003,29 +1061,36 @@ function resolveTearOff(input: {
 
 /** The final pointer source shared by tear-off preview and commit. */
 function currentReleasePointerPoint(): PointLike | null {
-  return latestPointerX === null || latestPointerY === null
-    ? getLastCollisionPointerPoint()
-    : { x: latestPointerX, y: latestPointerY };
+  return latestPointer ?? getLastCollisionPointerPoint();
 }
 
-/** Whether a header tab has visibly entered the tear-off region. */
+/**
+ * Whether a header tab has visibly entered the tear-off region: pulled out of
+ * the strip toward the content, or out of the viewport. The far side of a side
+ * strip (between it and the window edge) only counts once it leaves the
+ * viewport.
+ */
 function isHeaderTearOffPoint(
   point: PointLike | null,
-  stripBottom: number | null,
+  session: HeaderStripDragSession | null,
 ): boolean {
   const outsideViewport = pointIsOutsideViewport(point, {
     width: window.innerWidth,
     height: window.innerHeight,
   });
-  const pulledBelowStrip =
-    point !== null &&
-    stripBottom !== null &&
-    point.y >
-      stripBottom +
-        (headerTearOffActive
-          ? HEADER_TAB_TEAR_OFF_RELEASE_PX
-          : HEADER_TAB_TEAR_OFF_THRESHOLD_PX);
-  headerTearOffActive = outsideViewport || pulledBelowStrip;
+  const pulledOut =
+    session !== null &&
+    pulledOutOfStrip({
+      point,
+      bandStart: session.geometry.bandStart,
+      bandEnd: session.geometry.bandEnd,
+      contentDirection: session.contentDirection,
+      axis: session.axis,
+      thresholdPx: headerTearOffActive
+        ? HEADER_TAB_TEAR_OFF_RELEASE_PX
+        : HEADER_TAB_TEAR_OFF_THRESHOLD_PX,
+    });
+  headerTearOffActive = outsideViewport || pulledOut;
   return headerTearOffActive;
 }
 
@@ -1084,7 +1149,7 @@ function commitOrdinaryDrop(input: {
     commitHeaderTabDrop({
       event: input.event,
       navigate: input.navigate,
-      geometry: activeHeaderStripGeometry,
+      geometry: activeHeaderStripSession?.geometry ?? null,
       dragState: headerDragState,
     });
     return false;
@@ -1138,11 +1203,11 @@ export function RootDndProvider(props: RootDndProviderProps) {
   const lastReparentDropRef = useRef<LastReparentDrop | null>(null);
   const springLoadRef = useRef<SpringLoadEntry | null>(null);
   const publishStripState = useCallback(
-    (headerTab: HeaderTabDragData, pointerX: number) => {
+    (headerTab: HeaderTabDragData, point: PointLike) => {
       publishHeaderStripDragState({
         headerTab,
-        geometry: activeHeaderStripGeometry,
-        pointerX,
+        session: activeHeaderStripSession,
+        point,
       });
     },
     [],
@@ -1163,20 +1228,22 @@ export function RootDndProvider(props: RootDndProviderProps) {
   // pending `setTimeout` would fire and `expand()` a stale tab/panel.
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent): void => {
-      trackPointerX(event);
+      trackPointer(event);
+      const point: PointLike = { x: event.clientX, y: event.clientY };
       const store = useEpicDndStore.getState();
       const headerTab = store.activeHeaderTab;
+      const session = activeHeaderStripSession;
       if (
         headerTab !== null &&
-        activeHeaderStripGeometry !== null &&
-        event.clientY >= activeHeaderStripGeometry.stripTop &&
-        event.clientY <= activeHeaderStripGeometry.stripBottom
+        session !== null &&
+        session.axis.pointerCross(point) >= session.geometry.bandStart &&
+        session.axis.pointerCross(point) <= session.geometry.bandEnd
       ) {
         // dnd-kit can coalesce a fast native sweep into activation + release
         // without an intermediate onDragMove. The capture stream is the raw
         // pointer source already used for release; publish the same point live
         // so neighbours move before pointer-up too.
-        publishStripState(headerTab, event.clientX);
+        publishStripState(headerTab, point);
         return;
       }
       const source = store.activeSource;
@@ -1185,18 +1252,14 @@ export function RootDndProvider(props: RootDndProviderProps) {
         source.kind === ARTIFACT_TAB_DND_TYPE &&
         activeTileDrag !== null
       ) {
-        updateTileStripPreview(
-          source,
-          { x: event.clientX, y: event.clientY },
-          reparentRefs,
-        );
+        updateTileStripPreview(source, point, reparentRefs);
       }
     };
     window.addEventListener("pointermove", handlePointerMove, {
       capture: true,
       passive: true,
     });
-    window.addEventListener("pointerdown", trackPointerDownX, {
+    window.addEventListener("pointerdown", trackPointerDown, {
       capture: true,
       passive: true,
     });
@@ -1204,12 +1267,11 @@ export function RootDndProvider(props: RootDndProviderProps) {
       window.removeEventListener("pointermove", handlePointerMove, {
         capture: true,
       });
-      window.removeEventListener("pointerdown", trackPointerDownX, {
+      window.removeEventListener("pointerdown", trackPointerDown, {
         capture: true,
       });
-      latestPointerX = null;
-      latestPointerY = null;
-      lastPointerDownX = null;
+      latestPointer = null;
+      lastPointerDown = null;
     };
   }, [publishStripState, reparentRefs]);
   const sensors = useSensors(
@@ -1251,7 +1313,7 @@ export function RootDndProvider(props: RootDndProviderProps) {
           const geometry = measureTileStripGeometry({
             groupId: source.sourceGroupId,
             tileItemId: source.tabId,
-            pointerX: grabPointerX(event.activatorEvent),
+            pointerX: grabPoint(event.activatorEvent).x,
           });
           activeTileDrag =
             geometry === null
@@ -1261,7 +1323,7 @@ export function RootDndProvider(props: RootDndProviderProps) {
                   tileId: source.tabId,
                   geometry,
                 };
-          dndStore.tileSourceWidthChanged(geometry?.sourceWidth ?? null);
+          dndStore.tileSourceWidthChanged(geometry?.sourceExtent ?? null);
           const activationPoint = currentReleasePointerPoint();
           if (geometry !== null && activationPoint !== null) {
             updateTileStripPreview(source, activationPoint, reparentRefs);
@@ -1271,11 +1333,11 @@ export function RootDndProvider(props: RootDndProviderProps) {
       }
       const headerTab = readHeaderTabDragData(event.active.data.current);
       if (headerTab !== null) {
-        const geometry = measureHeaderStripGeometry({
-          stripItemId: headerTab.stripItemId,
-          pointerX: grabPointerX(event.activatorEvent),
-        });
-        activeHeaderStripGeometry = geometry;
+        const session = beginHeaderStripSession(
+          headerTab.stripItemId,
+          grabPoint(event.activatorEvent),
+        );
+        activeHeaderStripSession = session;
         // The ghost enrichment (repo logo, notification badge) rides the
         // SAME dnd-kit payload the identity fields above were just read
         // from - the strip item that is the drag source attaches it (see
@@ -1283,7 +1345,10 @@ export function RootDndProvider(props: RootDndProviderProps) {
         // costs nothing further: no RPC, no query.
         dndStore.headerTabDragStarted(
           headerTab,
-          geometry?.slots[geometry.sourceIndex]?.width ?? null,
+          session === null
+            ? null
+            : readHeaderStripItemSize(headerTab.stripItemId),
+          session === null ? null : session.axis.id,
           readHeaderTabDragGhost(event.active.data.current),
         );
         // The move that crosses the activation distance can itself span one or
@@ -1291,8 +1356,8 @@ export function RootDndProvider(props: RootDndProviderProps) {
         // onDragMove for the same event, so seed the preview from the raw point
         // captured before activation instead of waiting for another move that
         // a quick gesture may never produce.
-        if (geometry !== null && latestPointerX !== null) {
-          publishStripState(headerTab, latestPointerX);
+        if (session !== null && latestPointer !== null) {
+          publishStripState(headerTab, latestPointer);
         }
       }
     },
@@ -1320,8 +1385,8 @@ export function RootDndProvider(props: RootDndProviderProps) {
           headerTab,
           event,
           point,
-          publishStripState: (pointerX) => {
-            publishStripState(headerTab, pointerX);
+          publishStripState: (stripPoint) => {
+            publishStripState(headerTab, stripPoint);
           },
         });
       }
@@ -1376,12 +1441,11 @@ export function RootDndProvider(props: RootDndProviderProps) {
     lastResolvedDropRef.current = null;
     lastReparentDropRef.current = null;
     clearLastCollisionPointerPoint();
-    activeHeaderStripGeometry = null;
+    activeHeaderStripSession = null;
     activeTileDrag = null;
     promotedPreviewOnDrag = null;
-    latestPointerX = null;
-    latestPointerY = null;
-    lastPointerDownX = null;
+    latestPointer = null;
+    lastPointerDown = null;
     stripGeometryFailureReported = false;
     headerTearOffActive = false;
     useEpicDndStore.getState().dragEnded();
@@ -1405,7 +1469,7 @@ export function RootDndProvider(props: RootDndProviderProps) {
       const composerDrop = acceptedComposerDrop(source, event);
       const detach = resolveTearOff({
         event,
-        stripBottom: activeHeaderStripGeometry?.stripBottom ?? null,
+        session: activeHeaderStripSession,
         canvasTearOffAllowed:
           lastReparentDropRef.current === null &&
           lastResolvedDropRef.current === null &&

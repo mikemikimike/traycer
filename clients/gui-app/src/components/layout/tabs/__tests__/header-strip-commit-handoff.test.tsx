@@ -37,7 +37,8 @@ import {
   type HeaderStripHandoffReport,
 } from "../header-strip-commit-handoff";
 import { HEADER_STRIP_SCROLL_TEST_ID } from "../header-strip-geometry";
-import { useHeaderTabDisplacement } from "../use-header-tab-displacement";
+import { useStripItemDisplacement } from "../use-strip-item-displacement";
+import { HORIZONTAL_STRIP_AXIS } from "@/components/epic-canvas/dnd/strip-axis";
 
 /**
  * Unequal widths on purpose: a fixture of equal tabs cannot tell a correct
@@ -117,9 +118,9 @@ const values = new Map<string, () => number>();
 
 function StripItem(props: { readonly item: ItemState }) {
   const frameRef = useRef<HTMLElement | null>(null);
-  const x = useHeaderTabDisplacement({
+  const x = useStripItemDisplacement({
     nodeRef: frameRef,
-    offsetX: props.item.offsetX,
+    offset: props.item.offsetX,
     transition: { duration: 0 },
   });
   values.set(props.item.id, () => x.get());
@@ -162,7 +163,7 @@ function Strip(props: {
   readonly nodeEpoch: number;
 }) {
   useLayoutEffect(() => {
-    report = runHeaderStripCommitHandoff();
+    report = runHeaderStripCommitHandoff(HORIZONTAL_STRIP_AXIS);
   });
   return (
     // The pass walks the DOM scoped to the strip container, so the harness has
@@ -449,9 +450,9 @@ describe("header strip commit handoff", () => {
     // And the correction that makes it continuous is zero, not merely small.
     expect(
       handoffTransformFor({
-        previousBaselineLeft: 613.75,
-        nextBaselineLeft: 213.3,
-        appliedTransformX: -400.45,
+        previousBaseline: 613.75,
+        nextBaseline: 213.3,
+        appliedTransform: -400.45,
       }),
     ).toBeCloseTo(0, 2);
   });
@@ -465,9 +466,9 @@ describe("header strip commit handoff", () => {
     ] as const;
     for (const c of cases) {
       const carried = handoffTransformFor({
-        previousBaselineLeft: c.previous,
-        nextBaselineLeft: c.next,
-        appliedTransformX: c.applied,
+        previousBaseline: c.previous,
+        nextBaseline: c.next,
+        appliedTransform: c.applied,
       });
       expect(c.next + carried).toBeCloseTo(c.previous + c.applied, 6);
     }

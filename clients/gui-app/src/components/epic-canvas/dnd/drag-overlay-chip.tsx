@@ -114,7 +114,9 @@ export function EpicRootDragOverlayContent() {
   const tileSourceWidth = useEpicDndStore((s) => s.tileSourceWidth);
   const activeSource = useEpicDndStore((s) => s.activeSource);
   const activeHeaderTab = useEpicDndStore((s) => s.activeHeaderTab);
-  const headerTabWidth = useEpicDndStore((s) => s.headerStripSourceWidth);
+  const headerTabWidth = useEpicDndStore(
+    (s) => s.headerStripSourceSize?.width ?? null,
+  );
   const openableSource = canvasOpenableDragSource(activeSource);
   const railSource =
     activeSource?.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE ? activeSource : null;

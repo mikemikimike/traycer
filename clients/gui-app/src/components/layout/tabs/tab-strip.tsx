@@ -15,6 +15,10 @@ import {
 } from "react";
 import { mergeRefs } from "@/lib/merge-refs";
 import { runHeaderStripCommitHandoff } from "./header-strip-commit-handoff";
+import {
+  HORIZONTAL_STRIP_AXIS,
+  revealMemberAlongAxis,
+} from "@/components/epic-canvas/dnd/strip-axis";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { LayoutGroup } from "motion/react";
 import { useDroppable } from "@dnd-kit/core";
@@ -145,7 +149,7 @@ function TabStripBody() {
   // an earlier per-item version reached only the items React happened to
   // re-render, which is one tab per commit.
   useLayoutEffect(() => {
-    runHeaderStripCommitHandoff();
+    runHeaderStripCommitHandoff(HORIZONTAL_STRIP_AXIS);
   });
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // The strip may not cut the tab that holds the selection in half.
@@ -194,14 +198,7 @@ function TabStripBody() {
       member = member.parentElement;
     }
     if (member === null) return;
-    const memberBox = member.getBoundingClientRect();
-    const viewBox = scroller.getBoundingClientRect();
-    const pastRight = memberBox.right - viewBox.right;
-    const pastLeft = viewBox.left - memberBox.left;
-    // Right first: a tab that overflows BOTH edges cannot be fully revealed,
-    // and its leading edge is the one carrying the icon and the label.
-    if (pastRight > 0) scroller.scrollLeft += pastRight;
-    else if (pastLeft > 0) scroller.scrollLeft -= pastLeft;
+    revealMemberAlongAxis(scroller, member, HORIZONTAL_STRIP_AXIS);
   }, []);
   // On the activation CHANGE, and in a layout effect so the reveal lands in
   // the same paint as the newly active tab. Deliberately NOT on every render:
@@ -490,6 +487,8 @@ function TabStripBody() {
                 ref={setScrollerNode}
                 data-layout-passive-members
                 data-testid="header-tab-strip-scroll"
+                data-strip-axis="x"
+                data-strip-edge="top"
                 onWheel={handleWheel}
                 className="no-scrollbar flex min-w-0 max-w-full flex-[0_1_auto] touch-pan-x items-end overflow-x-auto overscroll-x-contain [-webkit-app-region:no-drag]"
               >

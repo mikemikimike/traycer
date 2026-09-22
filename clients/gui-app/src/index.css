@@ -1160,6 +1160,60 @@
 }
 
 /*
+ * `task-surface-frame` for a surface beside a vertical tab strip, with no
+ * header above it, and only the corner facing the strip is rounded and traced
+ * with the 1px hairline. Under a title band the surface tucks 1px up so the
+ * corner's top border lands on the band's own hairline instead of doubling it.
+ */
+@utility task-surface-frame-beside-left {
+  border-top-left-radius: var(--radius-xl);
+
+  [data-app-title-band="band"] & {
+    margin-top: -1px;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 30;
+    width: var(--radius-xl);
+    height: var(--radius-xl);
+    pointer-events: none;
+    border-style: solid;
+    border-top-width: 1px;
+    border-left-width: 1px;
+    border-color: color-mix(in oklab, var(--color-border) 90%, transparent);
+    border-top-left-radius: inherit;
+  }
+}
+
+@utility task-surface-frame-beside-right {
+  border-top-right-radius: var(--radius-xl);
+
+  [data-app-title-band="band"] & {
+    margin-top: -1px;
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 30;
+    width: var(--radius-xl);
+    height: var(--radius-xl);
+    pointer-events: none;
+    border-style: solid;
+    border-top-width: 1px;
+    border-right-width: 1px;
+    border-color: color-mix(in oklab, var(--color-border) 90%, transparent);
+    border-top-right-radius: inherit;
+  }
+}
+
+/*
  * App chrome that is not a semantically interactive element - list rows, header
  * bars, drawer surfaces, tab strips. On iOS a long press over any of these pops
  * the copy / look-up bubble and starts a text selection, which is exactly what
