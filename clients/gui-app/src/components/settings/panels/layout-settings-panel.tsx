@@ -29,6 +29,7 @@ import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { scrollPaneToCenter } from "@/components/settings/use-settings-anchor-reveal";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
+import { TaskTabLayoutRow } from "@/components/settings/panels/layout/tabs-layout-group";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useLayoutEditorFitsWindow } from "@/lib/layout/editor-width";
@@ -153,27 +154,31 @@ export function LayoutSettingsPanel(): ReactNode {
               </Button>
             </div>
           ) : (
-            surfaces.map((group) => (
-              <SettingsGroup
-                key={group.id}
-                group={LAYOUT.definitions[group.id]}
-                showTitle
-                tone="default"
-                dataTestId={`layout-surface-${group.id}`}
-                fill={false}
-              >
-                <SurfaceSection
-                  surface={group.id}
-                  snapshot={snapshot}
-                  filter={filter}
-                  openRows={openRows}
-                  onToggleRow={toggleRow}
-                  surfaceRows={
-                    group.id === "statusBar" ? <StatusBarSurfaceRows /> : null
-                  }
-                />
-              </SettingsGroup>
-            ))
+            surfaces.map((group) => {
+              let surfaceRows: ReactNode = null;
+              if (group.id === "statusBar")
+                surfaceRows = <StatusBarSurfaceRows />;
+              if (group.id === "topBar") surfaceRows = <TaskTabLayoutRow />;
+              return (
+                <SettingsGroup
+                  key={group.id}
+                  group={LAYOUT.definitions[group.id]}
+                  showTitle
+                  tone="default"
+                  dataTestId={`layout-surface-${group.id}`}
+                  fill={false}
+                >
+                  <SurfaceSection
+                    surface={group.id}
+                    snapshot={snapshot}
+                    filter={filter}
+                    openRows={openRows}
+                    onToggleRow={toggleRow}
+                    surfaceRows={surfaceRows}
+                  />
+                </SettingsGroup>
+              );
+            })
           )}
           <ResetEverythingCard snapshot={snapshot} />
         </div>

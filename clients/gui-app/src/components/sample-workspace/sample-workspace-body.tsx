@@ -237,6 +237,7 @@ export function SampleWorkspaceBody() {
                   backgroundItems={SAMPLE_BACKGROUND_ITEMS}
                   runningManagedCommandCount={0}
                   heldManagedCommandCount={0}
+                  portForwardCount={0}
                   backgroundStopPendingTaskIds={SAMPLE_NO_PENDING_STOPS}
                   backgroundStopAllPending={false}
                   backgroundSessionStopPending={false}

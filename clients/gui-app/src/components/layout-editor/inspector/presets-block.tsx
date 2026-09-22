@@ -27,6 +27,7 @@ import {
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   useLayoutSnapshot,
   useLayoutStore,
@@ -218,13 +219,16 @@ export function ResetEverythingButton(props: {
   const { snapshot } = props;
   const irreversible = useLayoutFormHost() === "page";
   const [confirming, setConfirming] = useState(false);
-  const changed = anythingChanged(snapshot);
+  const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
+  const changed =
+    anythingChanged(snapshot) || (irreversible && taskTabLayout !== "scroll");
   // In the dock this is one control on a crowded instrument line, so an
   // inoperable one is noise and it stands down. On the page it is a card of
   // its own, and a card that vanishes takes the floor's existence with it:
   // showing the floor and saying you are standing on it is clearer (5.8).
   if (!changed && !irreversible) return null;
   function reset(): void {
+    if (irreversible) useSettingsStore.getState().setTaskTabLayout("scroll");
     useLayoutEditorStore.getState().recordGesture(() => {
       useLayoutStore.getState().replaceAll(resetEverything(snapshot));
     });

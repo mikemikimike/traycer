@@ -99,6 +99,24 @@ export const LAYOUT = defineSettingsSection("layout", {
     availableWhen: alwaysAvailable,
     keywords: ["tabs", "home", "title bar"],
   },
+  taskTabLayout: {
+    kind: "row",
+    group: "topBar",
+    search: { anchor: "layout-task-tab-layout" },
+    label: "Task tab layout",
+    description:
+      "Scroll keeps titles readable. Shrink to fit makes tabs narrower as you open more.",
+    availableWhen: alwaysAvailable,
+    keywords: [
+      "task tabs",
+      "scroll",
+      "shrink",
+      "overflow",
+      "hidden",
+      "count",
+      "chrome",
+    ],
+  },
   sidebar: {
     kind: "group",
     search: { anchor: "layout-surface-sidebar" },

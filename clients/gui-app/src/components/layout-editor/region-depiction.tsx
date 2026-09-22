@@ -836,9 +836,7 @@ const REGION_DEPICTIONS: {
     arrangement: LayoutArrangement,
   ) => ReactNode;
 } = {
-  homeTab: () => (
-    <TabStripHomeItemView isActive={false} onActivate={noop} badgeCount={0} />
-  ),
+  homeTab: () => <TabStripHomeItemView isActive={false} onActivate={noop} />,
   usageLimits: depictUsageLimits,
   resourceMonitor: depictResourceMonitor,
   minimap: (_values, arrangement) => depictMinimap(arrangement),

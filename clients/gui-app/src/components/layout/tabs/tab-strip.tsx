@@ -1,3 +1,6 @@
+import { tabRefKey } from "@/stores/tabs/layout";
+import { HiddenTabsMenu } from "./hidden-tabs-menu";
+import { useHiddenHeaderTabs } from "./use-hidden-header-tabs";
 import { TabGroupChip } from "./tab-group-chip";
 import { stripItemGroupId } from "@/stores/tabs/tab-groups";
 import {
@@ -54,7 +57,7 @@ import { SplitTabItem } from "@/components/layout/tabs/split-tab-item";
 import { TabStripNewButton } from "@/components/layout/tabs/tab-strip-new-button";
 import { TabStripHomeItem } from "@/components/layout/tabs/tab-strip-home-item";
 import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
-import { useHomeBadgeCount } from "@/components/home-focus/use-home-badge-count";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import { useRegionShown } from "@/lib/layout-overrides";
 import { useRegionGhost } from "@/components/layout-editor/use-layout-region";
 import { useHorizontalWheelScroll } from "@/hooks/use-horizontal-wheel-scroll";
@@ -106,6 +109,20 @@ function TabStripBody() {
   const { close: closeModal } = useSystemTabModalActions();
   const modalActive = useAnySystemOverlayActive();
   const handleWheel = useHorizontalWheelScroll();
+  const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
+  const { setScrollElement, hiddenTabKeys, revealTab } =
+    useHiddenHeaderTabs(taskTabLayout);
+  const hiddenTabs = useMemo(() => {
+    const hidden = new Set(hiddenTabKeys);
+    return allTabs.filter((tab) => hidden.has(tabRefKey(tab)));
+  }, [allTabs, hiddenTabKeys]);
+  const handleActivateHiddenTab = useCallback(
+    (tab: HeaderTab) => {
+      navigateToTabIntent(navigate, tabResolveIntent(tab), undefined);
+      revealTab(tabRefKey(tab));
+    },
+    [navigate, revealTab],
+  );
   const activeItemId = useTabsStore((state) => state.activeItemId);
   const homeTabEnabled = useHomeTabDrawn();
   // `activeItemId === null` over a populated strip means Home holds the
@@ -293,8 +310,8 @@ function TabStripBody() {
   // re-attaches the node on both owners every commit - which for dnd-kit means
   // the drop slot is momentarily unregistered mid-drag.
   const setScrollerNode = useMemo(
-    () => mergeRefs(trailingSlotRef, scrollerRef),
-    [trailingSlotRef],
+    () => mergeRefs(trailingSlotRef, scrollerRef, setScrollElement),
+    [trailingSlotRef, setScrollElement],
   );
 
   const handleNewTab = useCallback(() => {
@@ -437,7 +454,8 @@ function TabStripBody() {
           role="tablist"
           aria-label="Open tabs"
           data-testid="tab-strip"
-          className="relative flex min-w-0 flex-1 items-end"
+          data-tab-layout={taskTabLayout}
+          className="group/strip relative flex min-w-0 flex-1 items-end"
         >
           {/* Outside the scrollable list and before it: Home is fixed, so it
               must not scroll away with the task tabs, and it must not sit
@@ -447,6 +465,12 @@ function TabStripBody() {
             <HomeStripSlot isActive={homeIsActive} onActivate={handleHomeTab} />
           ) : null}
           <div className="relative flex min-w-0 max-w-full flex-[0_1_auto] items-end">
+            {hiddenTabs.length > 0 ? (
+              <HiddenTabsMenu
+                tabs={hiddenTabs}
+                onActivate={handleActivateHiddenTab}
+              />
+            ) : null}
             <LayoutGroup id="header-tabs">
               {/* The task tabs are non-editable chrome and dim while a layout
                   session is live (4.2). The marker is on the scroller rather
@@ -551,15 +575,10 @@ function useHomeTabDrawn(): boolean {
   return shown || ghost;
 }
 
-/**
- * Owns the badge subscription so a change to the cross-task prompt count
- * re-renders the Home control alone, not the whole strip body.
- */
 function HomeStripSlot(props: {
   readonly isActive: boolean;
   readonly onActivate: () => void;
 }): ReactNode {
-  const badgeCount = useHomeBadgeCount();
   return (
     // The strip's right-click entry (L-19), on the Home item rather than on
     // the strip: Home is the one layout region here, and the task tabs beside
@@ -568,12 +587,10 @@ function HomeStripSlot(props: {
       <TabStripHomeItem
         isActive={props.isActive}
         onActivate={props.onActivate}
-        badgeCount={badgeCount}
       />
     </LayoutRegionContextMenu>
   );
 }
-
 interface HeaderStripItemRendererProps {
   readonly itemId: string;
   readonly stripIndex: number;

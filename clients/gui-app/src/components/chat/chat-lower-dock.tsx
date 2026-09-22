@@ -121,6 +121,8 @@ export interface ChatLowerDockProps {
    * whose only background state is a hold opens the section on this alone.
    */
   readonly heldManagedCommandCount: number;
+  /** This chat's port forwards, counted by the parent for the same reason. */
+  readonly portForwardCount: number;
   readonly backgroundStopPendingTaskIds: ReadonlySet<string>;
   readonly backgroundStopAllPending: boolean;
   readonly backgroundSessionStopPending: boolean;

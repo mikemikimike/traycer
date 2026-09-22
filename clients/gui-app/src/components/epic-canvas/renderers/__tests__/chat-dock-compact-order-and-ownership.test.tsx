@@ -220,6 +220,11 @@ function surfacesProps(patch: {
       autoPermissionModeProtocolSupported: null,
       getDraftBlobBridgeSupported: () => false,
       getActiveTurnForSteer: () => null,
+      getStopConfirmationTarget: () => ({
+        turnId: null,
+        revision: 0,
+        connectionEpoch: 0,
+      }),
       stopDisabled: true,
       onStopTurn: () => null,
     },

@@ -39,7 +39,7 @@ import {
 } from "@/lib/artifacts/node-display";
 import { DEFAULT_THEME_PRESET, type ThemePreset } from "@/lib/theme-presets";
 import {
-  OFFICE_VIEW_IDS,
+  OFFICE_VIEW_CHOICES,
   type OfficeViewChoice,
 } from "@/lib/comm-graph/office/office-view-vocabulary";
 import {
@@ -126,7 +126,7 @@ export const DEFAULT_TERMINAL_CURSOR_BLINK = true;
  * Auto, so a first-ever office opens on the view that actually fits the tile
  * it is in rather than on whichever one this build happens to list first.
  */
-export const DEFAULT_AGENT_OFFICE_VIEW: OfficeViewChoice = "auto";
+export const DEFAULT_AGENT_OFFICE_VIEW: OfficeViewChoice = "floor";
 
 // Shape drawn when the terminal loses focus (xterm's `cursorInactiveStyle`,
 // which never blinks). Bar/underline mirror the chosen shape so the cursor
@@ -208,6 +208,7 @@ export interface StartPageWallpaper {
    */
   readonly curatedId: string | null;
 }
+export type TaskTabLayout = "scroll" | "shrink";
 export interface SettingsState {
   startPageWallpaper: StartPageWallpaper | null;
   showGreeting: boolean;
@@ -272,8 +273,10 @@ export interface SettingsState {
    */
   defaultEditor: DefaultOpenTarget | null;
   /**
-   * Voice input (on-device dictation). Opt-in: enabling it surfaces the mic
-   * button in the composer and prompts the host to download the STT model.
+   * Voice input (on-device dictation). Enabling it surfaces the mic button
+   * and the dictation shortcut, and lets the host download the STT model.
+   * The microphone stays closed until the user starts a dictation, and
+   * `false` refuses capture even if a caller invokes start.
    */
   voiceInputEnabled: boolean;
   /** BCP-47-ish dictation language hint, or "auto". */
@@ -343,6 +346,7 @@ export interface SettingsState {
   chatDockPanelHeight: number;
   /** App-wide audible cues selected for each notification event type. */
   notificationChimeSounds: NotificationChimeSoundsByEvent;
+  taskTabLayout: TaskTabLayout;
   setTheme: (theme: ThemeMode) => void;
   setThemePreset: (preset: ThemePreset) => void;
   /**
@@ -397,6 +401,7 @@ export interface SettingsState {
     eventType: NotificationChimeEventType,
     value: NotificationChimeSound,
   ) => void;
+  setTaskTabLayout: (value: TaskTabLayout) => void;
 }
 
 type PersistedSettingsState = Pick<
@@ -440,6 +445,7 @@ type PersistedSettingsState = Pick<
   | "workspaceFileWordWrap"
   | "chatDockPanelHeight"
   | "notificationChimeSounds"
+  | "taskTabLayout"
 >;
 
 type SetFn = (
@@ -517,6 +523,7 @@ function partializeSettingsState(state: SettingsState): PersistedSettingsState {
     workspaceFileWordWrap: state.workspaceFileWordWrap,
     chatDockPanelHeight: state.chatDockPanelHeight,
     notificationChimeSounds: state.notificationChimeSounds,
+    taskTabLayout: state.taskTabLayout,
   };
 }
 
@@ -565,6 +572,7 @@ export const useSettingsStore = create<SettingsState>()(
       workspaceFileWordWrap: null,
       chatDockPanelHeight: CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
       notificationChimeSounds: DEFAULT_NOTIFICATION_CHIME_SOUNDS,
+      taskTabLayout: "scroll",
       setTheme: makeSetter(set, "theme"),
       setThemePreset: (themePreset) => {
         if (useThemeLibraryStore.getState().clearSelection())
@@ -699,6 +707,7 @@ export const useSettingsStore = create<SettingsState>()(
               },
         );
       },
+      setTaskTabLayout: makeSetter(set, "taskTabLayout"),
     }),
     {
       ...basePersistOptions(persistKey(STORE_KEYS.settings)),
@@ -773,6 +782,8 @@ export const useSettingsStore = create<SettingsState>()(
             persisted.notificationChimeSounds,
             persisted.notificationChimeSound,
           ),
+          taskTabLayout:
+            persisted.taskTabLayout === "shrink" ? "shrink" : "scroll",
         };
       },
     },
@@ -984,18 +995,12 @@ function resolvePersistedTilePlacement(
   };
 }
 
-/**
- * A persisted office view choice this build can still honour.
- *
- * The registry is the vocabulary, exactly as it is for the tile's own choice:
- * a value naming a view a newer build shipped degrades to Auto, which measures
- * and always has an answer, rather than to a view id nothing can plan.
- */
+/** Normalize retired choices; unknown defaults use Floor. */
 function resolvePersistedAgentOfficeView(value: unknown): OfficeViewChoice {
-  if (value === "auto") return "auto";
+  if (value === "towers" || value === "city") return "building";
   if (typeof value !== "string") return DEFAULT_AGENT_OFFICE_VIEW;
   return (
-    OFFICE_VIEW_IDS.find((id) => id === value) ?? DEFAULT_AGENT_OFFICE_VIEW
+    OFFICE_VIEW_CHOICES.find((id) => id === value) ?? DEFAULT_AGENT_OFFICE_VIEW
   );
 }
 

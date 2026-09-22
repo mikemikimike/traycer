@@ -67,6 +67,9 @@ import {
 import { useAgentStop } from "@/hooks/agent/use-stop-agent-mutation";
 import { useTabHostClient } from "@/hooks/host/use-tab-host-client";
 import { StopChildrenDialog } from "@/components/chat/chat-stop-children-dialog";
+import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import type { ChatStopConfirmationTarget } from "@/stores/chats/chat-turn-lifecycle";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import { PendingInterviewCard } from "@/components/chat/segments/pending-interview/pending-interview-card";
 import { useTabHostId } from "@/components/epic-canvas/hooks/use-tab-host-id";
@@ -87,6 +90,7 @@ import {
 } from "@/lib/chat/background-item-tree";
 import type { WorkspaceComposerAvailability } from "@/lib/composer/workspace-composer-availability";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
+import { usePortForwardsForChat } from "@/stores/port-forwards/port-forwards-for-chat";
 import {
   useHeldManagedCommandsForChat,
   useManagedCommandsForChat,
@@ -195,6 +199,8 @@ export interface ChatLowerTurnState {
   readonly getDraftBlobBridgeSupported: () => boolean;
   /** Reads the live active turn at submit time for the Cmd+Enter drift check. */
   readonly getActiveTurnForSteer: () => ChatActiveTurn | null;
+  /** Reads the live turn lifecycle, including ID-less activation boundaries. */
+  readonly getStopConfirmationTarget: () => ChatStopConfirmationTarget;
   readonly stopDisabled: boolean;
   readonly onStopTurn: () => string | null;
 }
@@ -342,7 +348,16 @@ export function ChatLowerInteractionSurfaces(
   const activeAgents = stopControls.descendants;
   const tabHostClient = useTabHostClient();
   const agentStop = useAgentStop(tabHostClient);
-  const [stopChildrenOpen, setStopChildrenOpen] = useState(false);
+  const [stopConfirmation, setStopConfirmation] = useState<{
+    readonly kind: "turn" | "children";
+    readonly target: ChatStopConfirmationTarget;
+    readonly readTarget: () => ChatStopConfirmationTarget;
+  } | null>(null);
+  // The SAME signal that puts Stop beside Send (`composer-send-button`), so
+  // the confirmation exists exactly where the mis-tap does and desktop is
+  // untouched by construction rather than by a second rule agreeing with the
+  // first.
+  const phoneLayout = useIsMobileViewport();
 
   // Destructure the turn prop for stable use in callbacks
   const turnOnStopTurn = props.turn.onStopTurn;
@@ -355,17 +370,46 @@ export function ChatLowerInteractionSurfaces(
   const turnGetDraftBlobBridgeSupported =
     props.turn.getDraftBlobBridgeSupported;
   const turnGetActiveTurnForSteer = props.turn.getActiveTurnForSteer;
+  const turnGetStopConfirmationTarget = props.turn.getStopConfirmationTarget;
+
+  // Read the store at confirmation time: a queued turn can start before React
+  // renders again. Neither dialog may redirect the original Stop to that turn.
+  const isConfirmedTurnCurrent = (): boolean => {
+    if (
+      stopConfirmation === null ||
+      stopConfirmation.readTarget !== turnGetStopConfirmationTarget
+    ) {
+      return false;
+    }
+    const current = turnGetStopConfirmationTarget();
+    return (
+      current.turnId === stopConfirmation.target.turnId &&
+      current.revision === stopConfirmation.target.revision &&
+      current.connectionEpoch === stopConfirmation.target.connectionEpoch
+    );
+  };
 
   // Intercept the composer Stop button: when this chat has active
   // sub-agents, raise the cascade prompt instead of stopping only its turn.
   // The button ignores the return value, so `null` here is just "handled".
   const requestStopTurn = useCallback((): string | null => {
-    if (activeAgents.length > 0) {
-      setStopChildrenOpen(true);
+    if (activeAgents.length > 0 || phoneLayout) {
+      // The lifecycle revision distinguishes separate activations even when
+      // both have a null turn ID. Keep it through the child-agent handoff too.
+      setStopConfirmation({
+        kind: activeAgents.length > 0 ? "children" : "turn",
+        target: turnGetStopConfirmationTarget(),
+        readTarget: turnGetStopConfirmationTarget,
+      });
       return null;
     }
     return turnOnStopTurn();
-  }, [activeAgents.length, turnOnStopTurn]);
+  }, [
+    activeAgents.length,
+    phoneLayout,
+    turnGetStopConfirmationTarget,
+    turnOnStopTurn,
+  ]);
 
   const turnWithCascade = useMemo(
     () => ({
@@ -376,6 +420,7 @@ export function ChatLowerInteractionSurfaces(
         turnAutoPermissionModeProtocolSupported,
       getDraftBlobBridgeSupported: turnGetDraftBlobBridgeSupported,
       getActiveTurnForSteer: turnGetActiveTurnForSteer,
+      getStopConfirmationTarget: turnGetStopConfirmationTarget,
       stopDisabled: turnStopDisabled,
       onStopTurn: requestStopTurn,
     }),
@@ -386,6 +431,7 @@ export function ChatLowerInteractionSurfaces(
       turnAutoPermissionModeProtocolSupported,
       turnGetDraftBlobBridgeSupported,
       turnGetActiveTurnForSteer,
+      turnGetStopConfirmationTarget,
       turnStopDisabled,
       requestStopTurn,
     ],
@@ -442,10 +488,19 @@ export function ChatLowerInteractionSurfaces(
     () => failedManagedCommandPulseToken(managedCommands),
     [managedCommands],
   );
+  // A forward outlives the turn that made it, so an otherwise idle chat can
+  // still hold one; it opens the section on its own, like a hold does.
+  const portForwards = usePortForwardsForChat({
+    epicId: props.epicId,
+    chatId: props.chatId,
+    hostId: props.hostId,
+  });
+  const portForwardCount = portForwards.length;
   const backgroundVisible = chatBackgroundSectionVisible({
     backgroundItemCount: props.backgroundItems?.length ?? 0,
     runningManagedCommandCount,
     heldManagedCommandCount,
+    portForwardCount,
   });
   const activeAgentsVisible =
     stopControls.self !== null && activeAgents.length > 0;
@@ -461,6 +516,7 @@ export function ChatLowerInteractionSurfaces(
     runningManagedCommands,
     heldManagedCommands,
     backgroundFailureToken,
+    portForwardCount,
     queue: props.queue.value,
     todo: props.todo,
   });
@@ -591,6 +647,7 @@ export function ChatLowerInteractionSurfaces(
           backgroundItems={props.backgroundItems}
           runningManagedCommandCount={runningManagedCommandCount}
           heldManagedCommandCount={heldManagedCommandCount}
+          portForwardCount={portForwardCount}
           backgroundStopPendingTaskIds={props.backgroundStopPendingTaskIds}
           backgroundStopAllPending={props.backgroundStopAllPending}
           backgroundSessionStopPending={props.backgroundSessionStopPending}
@@ -616,20 +673,47 @@ export function ChatLowerInteractionSurfaces(
         />
         <ChatComposerRegion model={composerModel} layout={composerLayout} />
         <StopChildrenDialog
-          open={stopChildrenOpen}
-          onOpenChange={setStopChildrenOpen}
+          open={stopConfirmation?.kind === "children"}
+          onOpenChange={(open) => {
+            if (!open) setStopConfirmation(null);
+          }}
           agents={activeAgents}
           onStopAll={() => {
+            setStopConfirmation(null);
+            if (!isConfirmedTurnCurrent()) return;
             agentStop.mutate({
               epicId: props.epicId,
               agentId: props.chatId,
               cascade: true,
             });
-            setStopChildrenOpen(false);
           }}
           onStopOnlyThis={() => {
-            props.turn.onStopTurn();
-            setStopChildrenOpen(false);
+            setStopConfirmation(null);
+            if (!isConfirmedTurnCurrent()) return;
+            turnOnStopTurn();
+          }}
+        />
+        <ConfirmDestructiveDialog
+          open={stopConfirmation?.kind === "turn"}
+          onOpenChange={(open) => {
+            if (!open) setStopConfirmation(null);
+          }}
+          title="Stop this turn?"
+          description="The agent will stop working on its current response."
+          cascadeSummary={null}
+          actionLabel="Stop"
+          blockedReason={null}
+          isPending={false}
+          onConfirm={() => {
+            setStopConfirmation(null);
+            if (stopConfirmation === null || !isConfirmedTurnCurrent()) return;
+            // A sub-agent can start while this dialog is open. Go back through
+            // the same gate, retaining the turn this confirmation belongs to.
+            if (activeAgents.length > 0) {
+              setStopConfirmation({ ...stopConfirmation, kind: "children" });
+              return;
+            }
+            turnOnStopTurn();
           }}
         />
       </ChatDockCompactStripProvider>
@@ -667,6 +751,7 @@ interface ChatDockChromeInput {
    * section's most recent news is not a failure.
    */
   readonly backgroundFailureToken: string | null;
+  readonly portForwardCount: number;
   readonly queue: ChatSessionState["queue"];
   readonly todo: PinnedTodoSnapshot | null;
 }
@@ -860,8 +945,14 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         waitingWakeCount: dedupedBackgroundItems.filter(
           (item) => item.kind === "wakeup",
         ).length,
+        portForwardCount: input.portForwardCount,
       }),
-    [backgroundRunning, input.heldManagedCommands, dedupedBackgroundItems],
+    [
+      backgroundRunning,
+      input.heldManagedCommands,
+      dedupedBackgroundItems,
+      input.portForwardCount,
+    ],
   );
   const changeTotals = useMemo(
     () => accumulatedDiffTotals(input.restore.accumulatedFileChanges),

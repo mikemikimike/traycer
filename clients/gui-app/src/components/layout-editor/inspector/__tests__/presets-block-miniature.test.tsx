@@ -13,6 +13,7 @@ import {
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
@@ -38,6 +39,7 @@ function card(preset: string): HTMLElement {
 
 beforeEach(() => {
   window.localStorage.clear();
+  useSettingsStore.setState({ taskTabLayout: "scroll" });
   useLayoutStore.setState({
     ...DEFAULT_LAYOUT_SNAPSHOT,
     layoutCarryDone: true,
@@ -52,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  useSettingsStore.setState({ taskTabLayout: "scroll" });
   useLayoutEditorStore.getState().endSession();
 });
 
@@ -220,6 +223,7 @@ describe('"Reset everything" is confirmed only where it cannot be undone (L-20, 
 
   it("applies straight away in the docked inspector, where Undo puts it back", () => {
     changeTheLayout();
+    useSettingsStore.setState({ taskTabLayout: "shrink" });
     render(<PresetsBlock onPreviewPreset={() => {}} />);
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
@@ -231,9 +235,41 @@ describe('"Reset everything" is confirmed only where it cannot be undone (L-20, 
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useLayoutStore.getState().basePreset).toBe("default");
+    expect(useSettingsStore.getState().taskTabLayout).toBe("shrink");
 
     // The safety net the modal was standing in for: one gesture, one step.
     useLayoutEditorStore.getState().undo();
     expect(useLayoutStore.getState().basePreset).toBe("compact");
+  });
+
+  it("resets task tab layout on the page even when the layout snapshot is default", () => {
+    useSettingsStore.setState({ taskTabLayout: "shrink" });
+    render(
+      <LayoutFormHostContext value="page">
+        <ResetEverythingButton snapshot={getLayoutSnapshot()} />
+      </LayoutFormHostContext>,
+    );
+
+    fireEvent.click(resetButton());
+    const dialog = screen.getByRole("dialog");
+    expect(useSettingsStore.getState().taskTabLayout).toBe("shrink");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Reset everything" }),
+    );
+    expect(useSettingsStore.getState().taskTabLayout).toBe("scroll");
+  });
+
+  it("keeps task tab layout when applying a preset", () => {
+    useSettingsStore.setState({ taskTabLayout: "shrink" });
+    render(
+      <LayoutFormHostContext value="page">
+        <PresetsBlock onPreviewPreset={() => {}} />
+      </LayoutFormHostContext>,
+    );
+
+    fireEvent.click(card("Compact"));
+
+    expect(useLayoutStore.getState().basePreset).toBe("compact");
+    expect(useSettingsStore.getState().taskTabLayout).toBe("shrink");
   });
 });

@@ -46,6 +46,8 @@ import {
   useHeldManagedCommandsForChat,
   useRunningManagedCommandsForChat,
 } from "@/stores/managed-commands/managed-commands-for-chat";
+import { usePortForwardsForChat } from "@/stores/port-forwards/port-forwards-for-chat";
+import { PortForwardRow } from "@/components/chat/port-forward-row";
 import type {
   HeldManagedCommandUpdate,
   ManagedCommand,
@@ -271,7 +273,7 @@ function HeldManagedCommandRow(props: {
         style={{ paddingLeft: `${BASE_PAD_LEFT}px` }}
       >
         <TooltipWrapper
-          label={`${held.description} — output that arrived as you stopped this chat is held back. It reaches the agent when the chat next wakes (a message or a resume), or right now with Deliver.`}
+          label={`${held.description} — output that arrived as this chat was stopped is held back. It reaches the agent when the chat next wakes (a message or a resume), or right now with Deliver.`}
           side="top"
           sideOffset={undefined}
           align={undefined}
@@ -710,10 +712,19 @@ export function BackgroundItemsPanel(props: {
     () => managedCommands.filter((command) => !heldCommandIds.has(command.id)),
     [managedCommands, heldCommandIds],
   );
+  // Same store, same host scoping as the shells above. Forwards are NOT part
+  // of "Stop all": that button ends work the agent is doing, and a forward is
+  // plumbing a person may still be looking through - it has its own Stop.
+  const portForwards = usePortForwardsForChat({
+    epicId: props.epicId,
+    chatId: props.chatId,
+    hostId,
+  });
   const headerSummary = backgroundHeaderSummary({
     runningCount: runningGroupCount + runningOnlyManagedCommands.length,
     heldCount: heldManagedCommands.length,
     waitingWakeCount,
+    portForwardCount: portForwards.length,
   });
   const deliverHeld = useManagedCommandDeliverHeld(props.chatId);
   const deliverHeldPending = useManagedCommandDeliverHeldIsPending(
@@ -877,6 +888,13 @@ export function BackgroundItemsPanel(props: {
           viewTabId={props.viewTabId}
           stoppable={managedStoppable}
           onOpen={openManagedCommand}
+        />
+      ))}
+      {portForwards.map((forward) => (
+        <PortForwardRow
+          key={forward.forwardId}
+          forward={forward}
+          stoppable={managedStoppable}
         />
       ))}
       <BackgroundTreeRows

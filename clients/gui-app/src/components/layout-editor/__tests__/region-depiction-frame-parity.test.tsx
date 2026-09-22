@@ -244,6 +244,7 @@ function renderDock(): void {
           }}
           backgroundItems={[]}
           runningManagedCommandCount={0}
+          portForwardCount={0}
           heldManagedCommandCount={0}
           backgroundStopPendingTaskIds={new Set()}
           backgroundStopAllPending={false}

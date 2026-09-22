@@ -190,6 +190,7 @@ function DockHarness(props: { readonly chatId: string }) {
             }}
             backgroundItems={BACKGROUND_ITEMS}
             runningManagedCommandCount={0}
+            portForwardCount={0}
             heldManagedCommandCount={0}
             backgroundStopPendingTaskIds={new Set()}
             backgroundStopAllPending={false}
