@@ -232,7 +232,6 @@ const LEAF_CASES: ReadonlyArray<LeafCase> = LAYOUT_REGION_IDS.flatMap(
                 regionId,
                 parityCase.values ?? SHIPPED_DEFAULT_VALUES[regionId],
                 DEFAULT_ARRANGEMENT,
-                null,
               ),
             },
           ]

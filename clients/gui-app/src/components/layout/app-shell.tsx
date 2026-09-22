@@ -51,7 +51,7 @@ export function AppShell(props: AppShellProps) {
   // per-account eye and the header glyph gate on the same question, and a
   // strip that one of them thought was mounted while this shell did not would
   // offer a control for a surface that is not there. `statusBarShown` explains
-  // why a mobile viewport ignores `usageHost`.
+  // why a mobile viewport ignores where the two readings say they live.
   const showStatusBar = useStatusBarShown();
   // Observed, never rendered. A publication fork resolves itself now - the
   // banner and the dialog that used to read this query are gone - but the

@@ -1,19 +1,23 @@
 import type { ReactNode } from "react";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
 import {
+  BarHostControl,
   RegionSideControl,
-  UsageHostControl,
 } from "@/components/layout-editor/inspector/region-controls";
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
 import { orderGroupInstruction } from "@/components/layout-editor/regions/surface-groups";
+import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
 import {
+  positionAxisChanged,
+  revertPositionAxis,
   positionRowChanged,
   revertPositionRow,
 } from "@/components/layout-editor/regions/region-position-rows";
-import type {
-  LayoutArrangement,
-  OrderGroupId,
+import {
+  asBarRegionId,
+  type LayoutArrangement,
+  type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { LayoutValues } from "@/lib/layout/layout-values";
@@ -29,12 +33,19 @@ import type { RegionId } from "@/lib/layout/region-id";
  * surface card's list, its side sits inline on the row, and the usage cluster's
  * host belongs to the Status bar surface rather than to a region (L-95, D7).
  *
- * All three revert together through `revertPositionRow`, because a region has
- * at most one Position row and the revert button belongs to the row rather
- * than to the field behind it (L-57).
+ * A revert belongs to the ROW it sits on, and since L-156 the two bar readings
+ * have two of them - a bar and an end of it - so each puts its own axis back
+ * and leaves the other alone. The order row still reverts its whole group,
+ * which is what putting a list back means.
  */
 
-/** The one region whose surface is itself a setting: the usage cluster. */
+/**
+ * Which of the two bars a reading lives in: the usage cluster and the resource
+ * monitor, each answering for itself (L-156).
+ *
+ * Only a bar region has this row, so a region id that is not one draws no
+ * control rather than a control writing somewhere else.
+ */
 export function PositionHostRow(props: {
   readonly regionId: RegionId;
   readonly arrangement: LayoutArrangement;
@@ -42,23 +53,35 @@ export function PositionHostRow(props: {
   readonly description: string;
 }): ReactNode {
   const { regionId, arrangement, snapshot, description } = props;
+  const barRegion = asBarRegionId(regionId);
+  if (barRegion === null) return null;
   return (
     <InspectorRow
       label="Position"
       description={description}
       onRevert={
-        positionRowChanged(snapshot, regionId)
+        positionAxisChanged(snapshot, regionId, "position-host")
           ? () => {
-              writeArrangement(revertPositionRow(arrangement, regionId));
+              writeArrangement(
+                revertPositionAxis(arrangement, regionId, "position-host"),
+              );
             }
           : undefined
       }
-      control={<UsageHostControl arrangement={arrangement} />}
+      control={
+        <BarHostControl regionId={barRegion} arrangement={arrangement} />
+      }
     />
   );
 }
 
-/** Which end of its surface an edge-anchored region sits at. */
+/**
+ * Which end of its surface an edge-anchored region sits at.
+ *
+ * "Side" wherever the region also picks a bar, because two rows both labelled
+ * Position say nothing about which is which; "Position" on its own where the
+ * side IS the whole question, which is the minimap's row.
+ */
 export function PositionSideRow(props: {
   readonly regionId: RegionId;
   readonly arrangement: LayoutArrangement;
@@ -68,12 +91,14 @@ export function PositionSideRow(props: {
   const { regionId, arrangement, snapshot, description } = props;
   return (
     <InspectorRow
-      label="Position"
+      label={sideRowLabel(regionId)}
       description={description}
       onRevert={
-        positionRowChanged(snapshot, regionId)
+        positionAxisChanged(snapshot, regionId, "position-side")
           ? () => {
-              writeArrangement(revertPositionRow(arrangement, regionId));
+              writeArrangement(
+                revertPositionAxis(arrangement, regionId, "position-side"),
+              );
             }
           : undefined
       }
@@ -82,6 +107,13 @@ export function PositionSideRow(props: {
       }
     />
   );
+}
+
+/** What the side row is called beside the rows the same region draws. */
+function sideRowLabel(regionId: RegionId): string {
+  return regionFacts(regionId).rows.some((row) => row.kind === "position-host")
+    ? "Side"
+    : "Position";
 }
 
 /**

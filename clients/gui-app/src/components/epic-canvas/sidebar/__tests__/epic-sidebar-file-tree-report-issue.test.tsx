@@ -262,7 +262,7 @@ vi.mock("@/stores/epics/epic-sidebar-expansion-store", () => ({
 // now, not on the panel store (G1-09), so the sidebar's two reads are
 // stubbed where they are actually imported from.
 vi.mock("@/lib/layout/rail-view", () => ({
-  useLeftPanelGroups: () => [{ panelIds: ["file-tree"] }],
+  useLayoutRail: () => [{ kind: "panel", id: "railFileTree" }],
   usePanelVisibilityOverrides: () => ({}),
 }));
 vi.mock("@/stores/epics/left-panel-store", () => ({
@@ -280,14 +280,10 @@ vi.mock("@/stores/epics/left-panel-store", () => ({
     selector({
       clearAcknowledgedRootCreatePending: vi.fn(),
       clearLocalRootCreatePending: vi.fn(),
-      panelSectionCollapsedByPanelId: {},
       setAcknowledgedRootCreatePending: vi.fn(),
       setActivePanelId: vi.fn(),
       setLocalRootCreatePending: vi.fn(),
-      setPanelSectionWeights: vi.fn(),
-      togglePanelSectionCollapsed: vi.fn(),
     }),
-  useLeftPanelSectionCollapsed: () => false,
   useLocalRootCreatePending: () => null,
 }));
 

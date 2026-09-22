@@ -425,10 +425,15 @@ function toggleStatusBarProvider(providerId: RateLimitProviderId): void {
   useLayoutStore.getState().setArrangement({ ...arrangement, hiddenProviders });
 }
 
+/**
+ * Both readings, because the strip stays on screen for either one of them
+ * (L-156) and the eye's own gate is whether the STRIP is drawn at all.
+ */
 function setStatusBarPlacement(usageHost: "status-bar" | "header"): void {
   useLayoutStore.getState().setArrangement({
     ...useLayoutStore.getState().arrangement,
     usageHost,
+    resourceHost: usageHost,
   });
 }
 

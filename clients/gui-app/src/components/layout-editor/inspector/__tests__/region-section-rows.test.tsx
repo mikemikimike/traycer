@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
@@ -183,5 +190,88 @@ describe("one list, two hosts (L-03, L-95)", () => {
     expect(
       screen.getAllByRole("radiogroup", { name: /visibility$/ }),
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * L-156: each of the two strip readings answers for itself, on two rows - the
+ * bar and the end of it - and writing one touches neither the other axis nor
+ * the other region.
+ */
+describe("the two bar readings' Position rows (L-156)", () => {
+  function rowControl(label: string): HTMLElement {
+    return screen.getByRole("radiogroup", { name: label });
+  }
+
+  it("gives each reading a bar row and a side row", () => {
+    render(<RegionSection regionId="resourceMonitor" onOpenProvider={noop} />);
+
+    expect(screen.getByText("Position")).not.toBeNull();
+    expect(screen.getByText("Side")).not.toBeNull();
+    expect(
+      within(rowControl("Resource monitor position"))
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["Status bar", "Header"]);
+    expect(
+      within(rowControl("Resource monitor side"))
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["Left", "Right"]);
+  });
+
+  it("writes only its own region and its own axis", () => {
+    render(<RegionSection regionId="resourceMonitor" onOpenProvider={noop} />);
+
+    // The usage cluster is put somewhere it did not ship first, so a write
+    // that reached it would be visible rather than landing on the value it
+    // already had.
+    act(() => {
+      const arrangement = useLayoutStore.getState().arrangement;
+      useLayoutStore
+        .getState()
+        .setArrangement({ ...arrangement, usageSide: "right" });
+    });
+
+    fireEvent.click(
+      within(rowControl("Resource monitor position")).getByRole("radio", {
+        name: "Header",
+      }),
+    );
+    fireEvent.click(
+      within(rowControl("Resource monitor side")).getByRole("radio", {
+        name: "Left",
+      }),
+    );
+
+    const { arrangement } = useLayoutStore.getState();
+    expect(arrangement.resourceHost).toBe("header");
+    expect(arrangement.resourceSide).toBe("left");
+    expect(arrangement.usageHost).toBe("status-bar");
+    expect(arrangement.usageSide).toBe("right");
+  });
+
+  it("reverts one row at a time (L-133)", () => {
+    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
+
+    act(() => {
+      const arrangement = useLayoutStore.getState().arrangement;
+      useLayoutStore.getState().setArrangement({
+        ...arrangement,
+        usageHost: "header",
+        usageSide: "right",
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert Side" }));
+
+    const { arrangement } = useLayoutStore.getState();
+    expect(arrangement.usageSide).toBe("left");
+    // The bar row is the one that still has something to put back.
+    expect(arrangement.usageHost).toBe("header");
+    expect(
+      screen.getByRole("button", { name: "Revert Position" }),
+    ).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Revert Side" })).toBeNull();
   });
 });

@@ -41,7 +41,10 @@ import {
 } from "@/components/layout-editor/region-depiction-frame";
 import { classifyProviderRateLimitWindow } from "@traycer/protocol/host/rate-limit";
 import {
+  asBarRegionId,
+  barPlacement,
   USAGE_PROVIDER_IDS,
+  type BarRegionId,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
@@ -110,9 +113,10 @@ function hostContextFor(
   values: LayoutValues[RegionId],
   arrangement: LayoutArrangement,
 ): HostContextId {
-  // The one region whose surface the user can move (L-19). Everything else is
-  // where it lives, which the table below states once per region.
-  if (regionId === "usageLimits") return usageHostContext(arrangement);
+  // The two regions whose bar the user can move (L-19, L-156). Everything else
+  // is where it lives, which the table below states once per region.
+  const barRegion = asBarRegionId(regionId);
+  if (barRegion !== null) return barHostContext(arrangement, barRegion);
   const host = HOST_BY_REGION[regionId];
   // The second region that moves surface, and this one moves itself: a dock
   // member set to Chip is not a row in the dock's joined frame, it is a pill
@@ -123,9 +127,14 @@ function hostContextFor(
   return host;
 }
 
-/** Where the usage cluster is hosted right now (L-28). */
-function usageHostContext(arrangement: LayoutArrangement): HostContextId {
-  return arrangement.usageHost === "header" ? "top-bar" : "status-bar";
+/** Which bar one of the two readings is hosted in right now (L-28, L-156). */
+function barHostContext(
+  arrangement: LayoutArrangement,
+  region: BarRegionId,
+): HostContextId {
+  return barPlacement(arrangement, region).host === "header"
+    ? "top-bar"
+    : "status-bar";
 }
 
 function isChipSized(values: LayoutValues[RegionId]): boolean {
@@ -141,6 +150,10 @@ function isChipSized(values: LayoutValues[RegionId]): boolean {
  */
 const HOST_BY_REGION: Readonly<Record<RegionId, HostContextId>> = {
   homeTab: "top-bar",
+  // The two bar readings never reach this table - `hostContextFor` answers
+  // them from their own placement above (L-156). The rows exist because the
+  // record is total over `RegionId`, which is what makes a new region a
+  // compile error here.
   usageLimits: "status-bar",
   resourceMonitor: "status-bar",
   minimap: "chat",
@@ -168,22 +181,20 @@ const HOST_BY_REGION: Readonly<Record<RegionId, HostContextId>> = {
 /**
  * One region as a picture, in its host's own context.
  *
- * `hostContext` is `null` everywhere the region is drawn where it lives, and
- * names a host only where a caller is deliberately drawing it somewhere else -
- * a dock row shown as the chip it would become, or a usage example pinned to
- * the strip while the cluster is hosted in the top bar.
+ * The frame is never an argument: {@link hostContextFor} answers from the
+ * region, its own values and the arrangement. A chip-sized dock member is
+ * framed as a chip because its VALUES say so, and a bar reading is framed by
+ * the bar it names (L-156); a second way to say either is a second thing to
+ * keep true.
  */
 export function depictRegion<K extends RegionId>(
   regionId: K,
   values: LayoutValues[K],
   arrangement: LayoutArrangement,
-  hostContext: HostContextId | null,
 ): ReactNode {
   const depict = REGION_DEPICTIONS[regionId];
   return (
-    <HostContextFrame
-      host={hostContext ?? hostContextFor(regionId, values, arrangement)}
-    >
+    <HostContextFrame host={hostContextFor(regionId, values, arrangement)}>
       {depict(values, arrangement)}
     </HostContextFrame>
   );
@@ -205,7 +216,7 @@ export function regionDepiction<K extends RegionId>(
   values: LayoutValues,
   arrangement: LayoutArrangement,
 ): ReactNode {
-  return depictRegion(region, values[region], arrangement, null);
+  return depictRegion(region, values[region], arrangement);
 }
 
 /**
@@ -395,7 +406,7 @@ export function depictUsageProvider(
   windows: ReadonlyArray<StatusBarRateLimitWindow> | null,
 ): ReactNode {
   return (
-    <HostContextFrame host={usageHostContext(arrangement)}>
+    <HostContextFrame host={barHostContext(arrangement, "usageLimits")}>
       {depictUsageProviderSegment(providerId, values, windows)}
     </HostContextFrame>
   );
@@ -623,6 +634,7 @@ function depictRunningAgents(values: SizedValues): ReactNode {
         working={false}
         lineDeltas={null}
         label="Active agents"
+        tooltipLines={null}
         pulseToken={null}
         expanded={false}
         controls={null}
@@ -647,6 +659,7 @@ function depictChangedFiles(values: SizedValues): ReactNode {
         working={false}
         lineDeltas={null}
         label="Changed files"
+        tooltipLines={null}
         pulseToken={null}
         expanded={false}
         controls={null}
@@ -686,6 +699,7 @@ function depictBackground(values: SizedValues): ReactNode {
         working={false}
         lineDeltas={null}
         label="Background"
+        tooltipLines={null}
         pulseToken={null}
         expanded={false}
         controls={null}
@@ -731,6 +745,7 @@ function depictQueue(values: SizedValues): ReactNode {
         working={false}
         lineDeltas={null}
         label="Message queue"
+        tooltipLines={null}
         pulseToken={null}
         expanded={false}
         controls={null}
@@ -776,6 +791,7 @@ function depictTodo(values: SizedValues): ReactNode {
         working={false}
         lineDeltas={null}
         label="Todo"
+        tooltipLines={null}
         pulseToken={null}
         expanded={false}
         controls={null}

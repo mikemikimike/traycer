@@ -1,6 +1,10 @@
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import {
+  asBarRegionId,
+  barPlacement,
   DEFAULT_ARRANGEMENT,
+  withBarHost,
+  withBarSide,
   type EdgeSide,
   type LayoutArrangement,
   type OrderGroupId,
@@ -31,21 +35,27 @@ export function positionRowChanged(
   snapshot: LayoutSnapshot,
   region: RegionId,
 ): boolean {
-  const arrangement = snapshot.arrangement;
-  const reordered = reorderedGroups(arrangement);
-  return positionRows(region).some((row) => {
-    switch (row.kind) {
-      case "position-host":
-        return arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost;
-      case "position-side":
-        return (
-          edgeSideFor(region, arrangement) !==
-          edgeSideFor(region, DEFAULT_ARRANGEMENT)
-        );
-      case "position-order":
-        return reordered.includes(row.group);
-    }
-  });
+  return positionRows(region).some((row) =>
+    rowChanged(snapshot.arrangement, region, row),
+  );
+}
+
+/**
+ * The same question asked of ONE axis, which is what a row's own dot and its
+ * own revert read (L-133).
+ *
+ * The two bar readings have two Position rows each since L-156 - a bar and an
+ * end of it - and a revert belongs to the row it sits on: putting the side
+ * back must not also drag the reading to the other bar.
+ */
+export function positionAxisChanged(
+  snapshot: LayoutSnapshot,
+  region: RegionId,
+  axis: PositionRowKind,
+): boolean {
+  return positionRows(region).some(
+    (row) => row.kind === axis && rowChanged(snapshot.arrangement, region, row),
+  );
 }
 
 /**
@@ -75,12 +85,8 @@ export function regionPositionMoved(
   return positionRows(region).some((row) => {
     switch (row.kind) {
       case "position-host":
-        return arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost;
       case "position-side":
-        return (
-          edgeSideFor(region, arrangement) !==
-          edgeSideFor(region, DEFAULT_ARRANGEMENT)
-        );
+        return rowChanged(arrangement, region, row);
       case "position-order":
         return (
           groupRegionIds(arrangement, row.group).indexOf(region) !==
@@ -88,6 +94,31 @@ export function regionPositionMoved(
         );
     }
   });
+}
+
+/** One Position row measured against the shipped arrangement, by axis. */
+function rowChanged(
+  arrangement: LayoutArrangement,
+  region: RegionId,
+  row: PositionRow,
+): boolean {
+  switch (row.kind) {
+    case "position-host": {
+      const bar = asBarRegionId(region);
+      if (bar === null) return false;
+      return (
+        barPlacement(arrangement, bar).host !==
+        barPlacement(DEFAULT_ARRANGEMENT, bar).host
+      );
+    }
+    case "position-side":
+      return (
+        edgeSideFor(region, arrangement) !==
+        edgeSideFor(region, DEFAULT_ARRANGEMENT)
+      );
+    case "position-order":
+      return reorderedGroups(arrangement).includes(row.group);
+  }
 }
 
 /** One order group's members, in order, dividers excluded. */
@@ -111,24 +142,68 @@ function groupRegionIds(
   }
 }
 
-/** This region's Position row put back, leaving every other row alone. */
+/**
+ * Every Position row of this region put back, leaving every other region
+ * alone: the whole-region revert the page offers on a row (L-95).
+ */
 export function revertPositionRow(
   arrangement: LayoutArrangement,
   region: RegionId,
 ): LayoutArrangement {
-  return positionRows(region).reduce((current, row): LayoutArrangement => {
-    switch (row.kind) {
-      case "position-host":
-        return { ...current, usageHost: DEFAULT_ARRANGEMENT.usageHost };
-      case "position-side":
-        return region === "minimap"
-          ? { ...current, minimapSide: DEFAULT_ARRANGEMENT.minimapSide }
-          : { ...current, resourceSide: DEFAULT_ARRANGEMENT.resourceSide };
-      case "position-order":
-        return revertOrderGroup(current, row.group);
-    }
-  }, arrangement);
+  return positionRows(region).reduce(
+    (current, row): LayoutArrangement => revertRow(current, region, row),
+    arrangement,
+  );
 }
+
+/** ONE axis put back, which is what the row carrying it reverts (L-156). */
+export function revertPositionAxis(
+  arrangement: LayoutArrangement,
+  region: RegionId,
+  axis: PositionRowKind,
+): LayoutArrangement {
+  return positionRows(region).reduce(
+    (current, row): LayoutArrangement =>
+      row.kind === axis ? revertRow(current, region, row) : current,
+    arrangement,
+  );
+}
+
+function revertRow(
+  arrangement: LayoutArrangement,
+  region: RegionId,
+  row: PositionRow,
+): LayoutArrangement {
+  switch (row.kind) {
+    case "position-host": {
+      const bar = asBarRegionId(region);
+      if (bar === null) return arrangement;
+      return withBarHost(
+        arrangement,
+        bar,
+        barPlacement(DEFAULT_ARRANGEMENT, bar).host,
+      );
+    }
+    case "position-side": {
+      const bar = asBarRegionId(region);
+      if (bar === null) {
+        return { ...arrangement, minimapSide: DEFAULT_ARRANGEMENT.minimapSide };
+      }
+      return withBarSide(
+        arrangement,
+        bar,
+        barPlacement(DEFAULT_ARRANGEMENT, bar).side,
+      );
+    }
+    case "position-order":
+      return revertOrderGroup(arrangement, row.group);
+  }
+}
+
+export type PositionRowKind =
+  | "position-host"
+  | "position-side"
+  | "position-order";
 
 type PositionRow =
   | { readonly kind: "position-host" }
@@ -146,14 +221,15 @@ function positionRows(region: RegionId): ReadonlyArray<PositionRow> {
   });
 }
 
-/** The side the one `position-side` region in question is drawn on. */
+/** The side a `position-side` region is drawn on: a bar's end, or the minimap's. */
 function edgeSideFor(
   region: RegionId,
   arrangement: LayoutArrangement,
 ): EdgeSide {
-  return region === "minimap"
+  const bar = asBarRegionId(region);
+  return bar === null
     ? arrangement.minimapSide
-    : arrangement.resourceSide;
+    : barPlacement(arrangement, bar).side;
 }
 
 function revertOrderGroup(

@@ -538,7 +538,7 @@ export const ACTION_META: Readonly<Record<ActionId, ActionMeta>> = {
     id: "app.status-bar.toggle",
     label: "Toggle status bar",
     description:
-      "Move usage limits and the resource monitor between the header and the status bar.",
+      "Send the status bar's readings to the header, and bring the same ones back on the next press.",
     category: "app",
     kind: "chord",
     // Unbound by default: the surfaces it moves between are both always

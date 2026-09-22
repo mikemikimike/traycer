@@ -1,6 +1,8 @@
-import type {
-  EdgeSide,
-  LayoutArrangement,
+import {
+  barPlacement,
+  type BarRegionId,
+  type EdgeSide,
+  type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import type {
   ContextUsageValues,
@@ -8,7 +10,6 @@ import type {
   RailValues,
   ShownValues,
   SizedValues,
-  UsageLimitsValues,
 } from "@/lib/layout/layout-values";
 
 /**
@@ -39,12 +40,23 @@ export function railStateWord(values: RailValues): string {
   return values.shown === "shown" ? "Shown" : "Hidden";
 }
 
-export function usageLimitsStateWord(
-  values: UsageLimitsValues,
+/**
+ * Both halves of where a bar reading sits, in one phrase: "Header, right"
+ * (L-156).
+ *
+ * One word per axis would leave the index row saying "Header" while the
+ * region is drawn at the other end of it, which is half an answer to the only
+ * question the row is asked.
+ */
+export function barPlacementStateWord(
+  values: ShownValues,
   arrangement: LayoutArrangement,
+  region: BarRegionId,
 ): string {
   if (values.shown === "hidden") return "Hidden";
-  return arrangement.usageHost === "header" ? "Header" : "Status bar";
+  const placement = barPlacement(arrangement, region);
+  const bar = placement.host === "header" ? "Header" : "Status bar";
+  return `${bar}, ${placement.side}`;
 }
 
 export function contextUsageStateWord(values: ContextUsageValues): string {

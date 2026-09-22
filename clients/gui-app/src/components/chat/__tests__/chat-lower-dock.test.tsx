@@ -218,6 +218,15 @@ describe("<ChatLowerDock />", () => {
     expect(strip.compareDocumentPosition(frame as Node)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+    // L-153: a clear STEP between the pill row and the frame tucked into the
+    // composer, not the 6px that made the owner read them as stuck together.
+    // Read as a class of the stack the two clusters are children of.
+    const stack = strip.parentElement;
+    const stackClasses = (stack?.getAttribute("class") ?? "")
+      .split(/\s+/)
+      .filter(Boolean);
+    expect(stackClasses).toContain("gap-3");
+    expect(stackClasses).not.toContain("gap-1.5");
   });
 
   // A.4.4 / risk 2: a fully compact chat has no todo, no queue and no row, so
@@ -611,6 +620,7 @@ function compactChip(section: ChatDockSection): ChatDockCompactChipModel {
     text: "1",
     lineDeltas: null,
     label: `${section} chip`,
+    detail: `${section} detail`,
     pulseToken: null,
   };
 }

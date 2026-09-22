@@ -54,5 +54,5 @@ export function GhostRegionPicture(props: {
   // editor, which the override seam's own exemption list covers.
   const arrangement = useLayoutStore((state) => state.arrangement);
   if (!ghost) return null;
-  return depictRegion(regionId, values, arrangement, null);
+  return depictRegion(regionId, values, arrangement);
 }

@@ -34,6 +34,7 @@ function chip(
     text,
     lineDeltas: null,
     label: `${section} label`,
+    detail: `${section} detail`,
     pulseToken: null,
   };
 }
@@ -90,6 +91,7 @@ function stripUi(value: ChatDockCompactStripValue, snapshotLoaded: boolean) {
         <ChatDockCompactStrip
           actionsRef={() => undefined}
           snapshotLoaded={snapshotLoaded}
+          onSettled={() => undefined}
         />
       </ChatDockCompactStripProvider>
     </TooltipProvider>
@@ -133,7 +135,11 @@ describe("<ChatDockCompactStrip />", () => {
   it("renders nothing outside a provider", () => {
     const { container } = render(
       <TooltipProvider delayDuration={0}>
-        <ChatDockCompactStrip actionsRef={() => undefined} snapshotLoaded />
+        <ChatDockCompactStrip
+          actionsRef={() => undefined}
+          snapshotLoaded
+          onSettled={() => undefined}
+        />
       </TooltipProvider>,
     );
 

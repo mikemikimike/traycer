@@ -54,6 +54,19 @@ export interface ChatDockCompactChipModel {
   readonly lineDeltas: DiffLineCounts | null;
   /** The whole sentence it stands for - the pill's accessible name. */
   readonly label: string;
+  /**
+   * The pill's counts, worded for the SECOND line of its tooltip (L-153):
+   * "3 files, +47 \u22129" in shape, never a sentence and never the member's own
+   * name, which the first line already carries and which this model already
+   * knows from `section`.
+   *
+   * A field of its own rather than a slice of `label`, because the two are
+   * worded for different readers and already differ: the accessible sentence
+   * spells "47 lines added, 4 removed" because a screen reader cannot hear a
+   * `+` or a tone, while the tooltip prints the same pair of signs the pill
+   * itself prints, beside the pill that prints them.
+   */
+  readonly detail: string;
   readonly pulseToken: string | null;
 }
 

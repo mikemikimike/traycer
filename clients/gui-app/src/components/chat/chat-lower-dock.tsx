@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence } from "motion/react";
 import type {
   BackgroundItem,
   ChatActiveTurn,
@@ -20,7 +21,10 @@ import {
   ChatDockCompactStrip,
   ChatDockCompactStripProvider,
 } from "@/components/chat/chat-dock-compact-strip";
-import { ChatDockPillActionsHostProvider } from "@/components/chat/chat-dock-attached-panel";
+import {
+  ChatDockAttachedPanelSlot,
+  ChatDockPillActionsHostProvider,
+} from "@/components/chat/chat-dock-attached-panel";
 import {
   useChatDockCompactStrip,
   type ChatDockCompactStripValue,
@@ -185,6 +189,16 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
   const [pillActionsHost, setPillActionsHost] = useState<HTMLDivElement | null>(
     null,
   );
+  // "This dock has drawn once over settled data", reported by the strip
+  // because the strip is the one component that may compute it: the fact is
+  // "has committed at least once", which no render can derive, and
+  // `chat-dock-compact-strip.tsx` is where that is already reasoned about and
+  // where the lint rule for it is already answered. One latch, two consumers -
+  // the pills' arrival ring and the attached panel's grow (L-148, L-152).
+  const [stripSettled, setStripSettled] = useState(false);
+  const markStripSettled = useCallback(() => {
+    setStripSettled(true);
+  }, []);
   const rows = props.dockOrder.map((section) =>
     planDockRow(section, props.hotspots[section], props.folded),
   );
@@ -215,6 +229,24 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
           dock: props,
         });
   const openSection = attached === null ? null : openPill;
+  // ONE slot, kept mounted across a switch and keyed by nothing (L-152): the
+  // pills are a switcher over a single box, so replacing what is inside it
+  // must ease the box's height from one content's to the other's rather than
+  // collapse and regrow. `AnimatePresence` is what lets it COLLAPSE on close
+  // instead of vanishing; with the frame's `empty:hidden` that also means a
+  // chips-only chat is back to no frame at all the moment the collapse ends.
+  const attachedSlot =
+    strip === null || openSection === null || attached === null ? null : (
+      <ChatDockAttachedPanelSlot
+        key="attached"
+        section={openSection}
+        panelId={strip.panelId}
+        separated={anyRowVisible}
+        settled={stripSettled}
+      >
+        {attached}
+      </ChatDockAttachedPanelSlot>
+    );
   // The strip below reads the corrected answer, so the open pill's
   // `aria-pressed`, its `aria-controls` and the panels' own
   // `useChatDockSectionAttached` all agree with what was drawn.
@@ -235,7 +267,18 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
         <div className="pointer-events-none px-4" data-testid="chat-lower-dock">
           <div
             className={cn(
-              "pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-1.5 bg-canvas",
+              // `gap-3`, not the `gap-1.5` this stack shipped with (L-153).
+              // The pill row is a cluster of its own standing ABOVE the
+              // composer's joined frame, and at 6px it read as part of the
+              // frame's top edge - the owner saw the pills and the input
+              // "stuck together". 12px is the step the composer's own stack
+              // already keeps between its rows (`flex flex-col gap-3` in
+              // `chat-composer.tsx`), so the pill row now reads as one more
+              // band in that rhythm rather than as a lid on the frame. The
+              // gap is between two flex children, so a chat with no frame
+              // (`empty:hidden`) pays nothing for it and keeps the composer's
+              // own `pt-4` as its separation.
+              "pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-3 bg-canvas",
               topPadding,
             )}
           >
@@ -253,6 +296,7 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
             <ChatDockCompactStrip
               actionsRef={setPillActionsHost}
               snapshotLoaded={props.snapshotLoaded}
+              onSettled={markStripSettled}
             />
             {/* The box the dock's rows are laid out in, which is what a canvas
               drag reorders inside (G3-01), under ONE quick-verb menu for the
@@ -271,11 +315,24 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
                   clicking another pill puts a different section here, clicking
                   the open pill empties it. The fixed full rows follow, in dock
                   order, so the members the user chose to keep stay next to the
-                  composer where they have always been. */}
-                {attached}
+                  composer where they have always been.
+
+                  The presence root is mounted unconditionally and only the
+                  exit VALUE is gated on motion (L-152), the pattern the pill
+                  strip beside it already keeps: `useMotionEnabled` includes
+                  PANE VISIBILITY, so a conditional root here would reconcile
+                  a different element every time the user switched tabs and
+                  destroy the open panel's scroll position with it. */}
+                <AnimatePresence initial={false}>
+                  {attachedSlot}
+                </AnimatePresence>
                 {dockRows({
                   rows,
-                  separatedBefore: attached !== null,
+                  // `false`: the rule between the panel and the first row is
+                  // the PANEL's own bottom border now (L-150), so it collapses
+                  // with it instead of dropping a frame early. Rows still
+                  // separate from each other.
+                  separatedBefore: false,
                   dock: props,
                 })}
               </div>
@@ -341,17 +398,11 @@ function dockPanel(props: {
   const { dock } = props;
   const panel = dockPanelContent(props.section, props.separated, dock);
   if (panel === null) return null;
-  if (props.attached) {
-    // `contents`, like the resting row's wrapper two lines down: this span
-    // carries no ref and no attribute, so it exists only to hold the key, and
-    // an inline box around a block-level panel is one flex-direction change
-    // away from splitting it inside an `overflow-hidden` frame.
-    return (
-      <span key={props.section} className="contents">
-        {panel}
-      </span>
-    );
-  }
+  // No wrapper of its own: the attached panel goes straight into the slot,
+  // which already keys the crossfade by section and carries the region, the
+  // handle and the height. A `contents` span in between would only be one
+  // more box for a `popLayout` ghost to be measured through.
+  if (props.attached) return panel;
   return (
     <span
       key={props.section}

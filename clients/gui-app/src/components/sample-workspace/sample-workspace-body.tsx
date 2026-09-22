@@ -8,7 +8,10 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import { dockMemberFolded } from "@/components/chat/chat-dock-fold";
+import {
+  dockMemberFolded,
+  dockMemberMaterialised,
+} from "@/components/chat/chat-dock-fold";
 import { ChatDockCompactStripProvider } from "@/components/chat/chat-dock-compact-strip";
 import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
@@ -24,6 +27,7 @@ import {
 import { TextSegment } from "@/components/chat/segments/text-segment";
 import { ChatTurnMinimapView } from "@/components/chat/chat-turn-minimap";
 import { ContextUsageChip } from "@/components/chat/context-usage-chip";
+import { ComposerSlotShell } from "@/components/epic-canvas/renderers/chat-tile-lower-surfaces";
 import { ComposerShell } from "@/components/home/composer/composer-shell";
 import { ComposerWorkspaceRow } from "@/components/home/composer/composer-workspace-mode-row";
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
@@ -196,6 +200,22 @@ export function SampleWorkspaceBody() {
       ? [{ ...sample, hotspotRef: hotspots[section].hotspotRef }]
       : [];
   });
+  // The same question the real tile asks before it spaces its composer
+  // (`chat-tile-lower-surfaces.tsx`'s `lowerSurfaceTopSpacing`): is there a
+  // FULL dock row above the input, whose frame tucks into it with `-mb-px`?
+  // If there is, the two are one joined surface and the composer adds no top
+  // padding; if the dock is pills only, the composer's own `pt-4` is what
+  // holds the pill row a clear step off the input (L-153). The sample used to
+  // add nothing in either case, which is why the editor - and only the editor
+  // - showed the pills stuck to the composer's border.
+  const anyFullRow = dockOrder.some(
+    (section) =>
+      !folded.has(section) &&
+      dockMemberMaterialised({
+        shown: hotspots[section].shown,
+        ghost: hotspots[section].ghost,
+      }),
+  );
   return (
     <ComposerTileIdProvider tileId={SAMPLE_TILE_ID}>
       <div className="flex min-h-0 flex-1 bg-canvas" data-sample-workspace-body>
@@ -247,7 +267,11 @@ export function SampleWorkspaceBody() {
                   queueKeepPausedRequested={false}
                   readOnly={false}
                   editingQueueItemId={null}
-                  topSpacing="compact"
+                  // "normal" (`pt-4`), the same answer the real tile gives
+                  // whenever no approval surface is drawn above the dock
+                  // (`pinnedStackTopSpacing`). The scene had "compact"
+                  // (`pt-2`) with nothing above it to be compact for.
+                  topSpacing="normal"
                   scrollRegionMaxHeightClass="max-h-[min(24dvh,12rem)]"
                   onQueuePause={sampleNoopAction}
                   onQueueResume={sampleNoopAction}
@@ -261,69 +285,94 @@ export function SampleWorkspaceBody() {
                   onBackgroundItemsStopAll={sampleNoopAction}
                   onBackgroundSessionStop={sampleNoopAction}
                 />
-                <div className="shrink-0 px-4 pb-2">
-                  <div className="mx-auto w-full max-w-3xl">
-                    <ComposerShell
-                      pickerStore={pickerStore}
-                      onDragOver={sampleNoop}
-                      onDragEnter={sampleNoop}
-                      onDragLeave={sampleNoop}
-                      onDrop={sampleNoop}
-                      dragOverlayVariant={null}
-                      utilityRail={null}
-                      attachmentsStrip={null}
-                      editor={
-                        // No marker of its own: `ComposerShell` already marks
-                        // `data-composer-editor-frame`, which this placeholder
-                        // renders inside, and a second marker on a descendant
-                        // would dim it twice.
-                        <p className="pb-5 text-ui text-muted-foreground">
-                          Describe the next change…
-                        </p>
-                      }
-                      toolbar={
-                        <ComposerToolbar
-                          presentation
-                          store={toolbarStore}
-                          onAttachImages={sampleNoop}
-                          canSubmit={false}
-                          attachmentPending={false}
-                          onSubmit={sampleNoop}
-                          activeTurnStatus={null}
-                          stopDisabled
-                          onStopTurn={null}
-                          composerDisabledHint="Sample content"
-                          // The mic slot draws nothing without a control, so a
-                          // Microphone set to Shown had no chip to point at
-                          // (L-116). The scene's idle control is what the real
-                          // `ComposerMicButton` renders from.
-                          dictation={SAMPLE_DICTATION}
-                          dictationPreparing={null}
-                          settingsLocked
-                          createProfileHostId={null}
-                          runTargetHostId={null}
-                          terminalLoginSurface={null}
-                          chatLineCarriesAutoMode={null}
-                        />
-                      }
-                    />
-                    <ComposerWorkspaceRow
-                      workspaceControls={
-                        <>
-                          <span
-                            data-layout-passive
-                            className="min-w-0 text-ui-xs text-muted-foreground"
-                          >
-                            Sample workspace
-                          </span>
-                          <ContextUsageChip
-                            usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
-                            onCompact={sampleNoop}
+                {/* The REAL composer stack, not a copy of its classes
+                    (L-87): `ComposerSlotShell` owns the edge lanes, the
+                    `max-w-3xl` column, the canvas fill, the top and bottom
+                    spacing and the seam seal, and `relative flex flex-col
+                    gap-3` is the composer's own inner rhythm
+                    (`chat-composer.tsx`). The scene used to hand-roll both
+                    and had drifted to no vertical spacing at all, which is
+                    why the pills read as stuck to the input here and nowhere
+                    else (L-153).
+
+                    `shrink-0` is the one thing the sample adds, and it is
+                    about this scene rather than about the composer: the real
+                    lower surfaces are an absolutely positioned overlay, while
+                    here they are a flex child under a scrolling transcript.
+
+                    `connected` is the same question the real tile asks - a
+                    FULL dock row above means the frame tucks into the input
+                    with `-mb-px` and the two are one surface, so the composer
+                    adds no top padding; a pills-only dock means its `pt-4` is
+                    what holds the pill row a clear step off the input. */}
+                <div className="shrink-0">
+                  <ComposerSlotShell
+                    topSpacing={anyFullRow ? "connected" : "normal"}
+                    bottomSpacing="normal"
+                  >
+                    <div className="relative flex flex-col gap-3">
+                      <ComposerShell
+                        pickerStore={pickerStore}
+                        onDragOver={sampleNoop}
+                        onDragEnter={sampleNoop}
+                        onDragLeave={sampleNoop}
+                        onDrop={sampleNoop}
+                        dragOverlayVariant={null}
+                        utilityRail={null}
+                        attachmentsStrip={null}
+                        editor={
+                          // No marker of its own: `ComposerShell` already marks
+                          // `data-composer-editor-frame`, which this placeholder
+                          // renders inside, and a second marker on a descendant
+                          // would dim it twice.
+                          <p className="pb-5 text-ui text-muted-foreground">
+                            Describe the next change…
+                          </p>
+                        }
+                        toolbar={
+                          <ComposerToolbar
+                            presentation
+                            store={toolbarStore}
+                            onAttachImages={sampleNoop}
+                            canSubmit={false}
+                            attachmentPending={false}
+                            onSubmit={sampleNoop}
+                            activeTurnStatus={null}
+                            stopDisabled
+                            onStopTurn={null}
+                            composerDisabledHint="Sample content"
+                            // The mic slot draws nothing without a control, so a
+                            // Microphone set to Shown had no chip to point at
+                            // (L-116). The scene's idle control is what the real
+                            // `ComposerMicButton` renders from.
+                            dictation={SAMPLE_DICTATION}
+                            dictationPreparing={null}
+                            settingsLocked
+                            createProfileHostId={null}
+                            runTargetHostId={null}
+                            terminalLoginSurface={null}
+                            chatLineCarriesAutoMode={null}
                           />
-                        </>
-                      }
-                    />
-                  </div>
+                        }
+                      />
+                      <ComposerWorkspaceRow
+                        workspaceControls={
+                          <>
+                            <span
+                              data-layout-passive
+                              className="min-w-0 text-ui-xs text-muted-foreground"
+                            >
+                              Sample workspace
+                            </span>
+                            <ContextUsageChip
+                              usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
+                              onCompact={sampleNoop}
+                            />
+                          </>
+                        }
+                      />
+                    </div>
+                  </ComposerSlotShell>
                 </div>
               </ChatDockCompactStripProvider>
             </ChatDiffTargetContext.Provider>

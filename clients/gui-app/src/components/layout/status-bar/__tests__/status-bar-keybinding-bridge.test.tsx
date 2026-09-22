@@ -36,8 +36,10 @@ function resetStore(): void {
   window.localStorage.clear();
 }
 
-function placement(): string {
-  return useLayoutStore.getState().arrangement.usageHost;
+/** Both readings' bars, since the toggle is about the SURFACE (L-156). */
+function hosts(): ReadonlyArray<string> {
+  const { arrangement } = useLayoutStore.getState();
+  return [arrangement.usageHost, arrangement.resourceHost];
 }
 
 beforeEach(resetStore);
@@ -51,17 +53,17 @@ describe("<StatusBarKeybindingBridge />", () => {
   it("registers the toggle handler on mount and flips placement status-bar -> header -> status-bar", () => {
     render(<StatusBarKeybindingBridge />);
 
-    expect(placement()).toBe("status-bar");
+    expect(hosts()).toEqual(["status-bar", "status-bar"]);
 
     act(() => {
       expect(dispatchAction("app.status-bar.toggle", NOOP_ROUTER)).toBe(true);
     });
-    expect(placement()).toBe("header");
+    expect(hosts()).toEqual(["header", "header"]);
 
     act(() => {
       expect(dispatchAction("app.status-bar.toggle", NOOP_ROUTER)).toBe(true);
     });
-    expect(placement()).toBe("status-bar");
+    expect(hosts()).toEqual(["status-bar", "status-bar"]);
   });
 
   it("reads placement at invocation time, not at registration time", () => {
@@ -73,16 +75,70 @@ describe("<StatusBarKeybindingBridge />", () => {
       useLayoutStore.getState().setArrangement({
         ...useLayoutStore.getState().arrangement,
         usageHost: "header",
+        resourceHost: "header",
       });
     });
 
     act(() => {
       dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
     });
-    // Toggling from "header" (the CURRENT value) goes to "status-bar" - if the
-    // handler had captured "status-bar" at registration it would incorrectly
-    // toggle back to "header" here.
-    expect(placement()).toBe("status-bar");
+    // With nothing left in the strip the toggle brings both back - if the
+    // handler had captured the empty strip at registration it would
+    // incorrectly send them up again here.
+    expect(hosts()).toEqual(["status-bar", "status-bar"]);
+  });
+
+  it("brings back exactly what it sent up, two presses later (L-160)", () => {
+    // The arrangement L-156 exists for: the gauge up, the readout down. A
+    // toggle that flattened it would put the gauge in the strip on the way
+    // back, and the chord path writes the store directly, so there is no
+    // Undo to reach for.
+    act(() => {
+      useLayoutStore.getState().setArrangement({
+        ...useLayoutStore.getState().arrangement,
+        usageHost: "header",
+        usageSide: "right",
+      });
+    });
+
+    render(<StatusBarKeybindingBridge />);
+
+    act(() => {
+      dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
+    });
+    expect(hosts()).toEqual(["header", "header"]);
+
+    act(() => {
+      dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
+    });
+    expect(hosts()).toEqual(["header", "status-bar"]);
+    expect(useLayoutStore.getState().arrangement.usageSide).toBe("right");
+  });
+
+  it("moves what the strip still holds, and leaves the sides alone (L-156)", () => {
+    act(() => {
+      useLayoutStore.getState().setArrangement({
+        ...useLayoutStore.getState().arrangement,
+        usageHost: "header",
+        usageSide: "right",
+      });
+    });
+
+    render(<StatusBarKeybindingBridge />);
+
+    act(() => {
+      dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
+    });
+
+    // The strip was still holding the monitor, so the surface toggle empties
+    // it; the reading already up there is not dragged back down, and neither
+    // reading changes ends.
+    expect(hosts()).toEqual(["header", "header"]);
+    const { arrangement } = useLayoutStore.getState();
+    expect([arrangement.usageSide, arrangement.resourceSide]).toEqual([
+      "right",
+      "right",
+    ]);
   });
 
   it("registers nothing in the installed mobile app", () => {
@@ -98,7 +154,7 @@ describe("<StatusBarKeybindingBridge />", () => {
       fired = dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
     });
     expect(fired).toBe(false);
-    expect(placement()).toBe("status-bar");
+    expect(hosts()).toEqual(["status-bar", "status-bar"]);
   });
 
   it("no-ops the action once the bridge unmounts", () => {
@@ -110,6 +166,6 @@ describe("<StatusBarKeybindingBridge />", () => {
       fired = dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
     });
     expect(fired).toBe(false);
-    expect(placement()).toBe("status-bar");
+    expect(hosts()).toEqual(["status-bar", "status-bar"]);
   });
 });

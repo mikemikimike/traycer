@@ -4,21 +4,17 @@ import {
   commitResolvedCanvasDrop,
   isLeftPanelDropNoop,
   resolveCanvasDropPreview,
-  resolveLeftPanelGroupsForDrop,
+  resolveRailForDrop,
 } from "@/components/epic-canvas/dnd/root-dnd-commits";
 import type { EpicCanvasDragSourceData } from "@/components/epic-canvas/dnd/dnd";
-import {
-  moveLeftPanelGroup,
-  useLeftPanelStore,
-} from "@/stores/epics/left-panel-store";
+import { useLeftPanelStore } from "@/stores/epics/left-panel-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
-import {
-  applyLeftPanelGroups,
-  currentLeftPanelGroups,
-} from "@/lib/layout/rail-view";
+import { currentLayoutArrangement } from "@/lib/layout/rail-view";
+import { DEFAULT_RAIL, visibleRailPanelIds } from "@/lib/layout/rail";
+import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { useEpicSidebarExpansionStore } from "@/stores/epics/epic-sidebar-expansion-store";
 import { makeGitFileDiffTile } from "@/lib/git/git-diff-tile";
 import type { NavigateNestedFocus } from "@/lib/epic-nested-focus-navigation";
@@ -301,7 +297,6 @@ function resetStores(): void {
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
-    panelSectionCollapsedByPanelId: {},
     commentsPanelRevealedByTabId: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},
@@ -316,15 +311,7 @@ describe("root dnd commits - left panel", () => {
   beforeEach(resetStores);
   afterEach(resetStores);
 
-  it("extracts a grouped section to the rail end from the rail background", () => {
-    applyLeftPanelGroups(
-      moveLeftPanelGroup(
-        currentLeftPanelGroups(),
-        "artifacts",
-        "chats",
-        "combine",
-      ),
-    );
+  it("moves a panel to the rail end from a section-origin drop on the rail background", () => {
     const source = railSource("artifacts", "panel-section");
     const target = { kind: "left-panel-rail-list" } as const;
     const preview = resolveCanvasDropPreview({
@@ -339,54 +326,25 @@ describe("root dnd commits - left panel", () => {
     expect(isLeftPanelDropNoop(source, preview)).toBe(false);
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["artifacts"] },
+    expect(
+      visibleRailPanelIds(currentLayoutArrangement().rail, () => true),
+    ).toEqual([
+      "chats",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+      "artifacts",
     ]);
-  });
-
-  it("flags same-group middle-band section drops as no-ops", () => {
-    applyLeftPanelGroups(
-      moveLeftPanelGroup(
-        currentLeftPanelGroups(),
-        "artifacts",
-        "chats",
-        "combine",
-      ),
-    );
-    const source = railSource("artifacts", "panel-section");
-    const target = {
-      kind: "left-panel-rail-item",
-      panelId: "chats",
-      orientation: "vertical",
-    } as const;
-    const preview = resolveCanvasDropPreview({
-      source,
-      target,
-      point: { x: 18, y: 18 },
-      targetRect: { left: 0, top: 0, width: 36, height: 36 },
-      targetElement: null,
-      activeRect: null,
-    });
-
-    expect(preview).toEqual({
-      kind: "left-panel-rail",
-      panelId: "chats",
-      position: "combine",
-    });
-    expect(isLeftPanelDropNoop(source, preview)).toBe(true);
   });
 
   // A rail slot is square, so the pointer below sits in the middle band of one
   // axis and the leading band of the other. Which one is read is the whole
-  // difference between reordering the rail and nesting into it.
+  // difference between a "before" and an "after" drop (L-155: there is no
+  // third, nesting band any more).
   const RAIL_SLOT_RECT = { left: 0, top: 0, width: 36, height: 36 };
   const LEADING_X_MIDDLE_Y = { x: 4, y: 18 };
 
@@ -425,29 +383,48 @@ describe("root dnd commits - left panel", () => {
     expect(isLeftPanelDropNoop(source, preview)).toBe(false);
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+    expect(
+      visibleRailPanelIds(currentLayoutArrangement().rail, () => true),
+    ).toEqual([
+      "chats",
+      "artifacts",
+      "file-tree",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "sharing",
+      "comments",
     ]);
   });
 
-  it("still nests a vertical rail drop at that same point", () => {
+  it("reorders a vertical rail drop from the pointer's y, whatever its width", () => {
     const source = railSource("file-tree", "rail");
     const target = {
       kind: "left-panel-rail-item",
       panelId: "terminals",
       orientation: "vertical",
     } as const;
+    for (const x of [2, 18, 34]) {
+      expect(
+        resolveCanvasDropPreview({
+          source,
+          target,
+          point: { x, y: 4 },
+          targetRect: RAIL_SLOT_RECT,
+          targetElement: null,
+          activeRect: null,
+        }),
+      ).toEqual({
+        kind: "left-panel-rail",
+        panelId: "terminals",
+        position: "before",
+      });
+    }
     const preview = resolveCanvasDropPreview({
       source,
       target,
-      point: LEADING_X_MIDDLE_Y,
+      point: { x: 4, y: 34 },
       targetRect: RAIL_SLOT_RECT,
       targetElement: null,
       activeRect: null,
@@ -456,41 +433,35 @@ describe("root dnd commits - left panel", () => {
     expect(preview).toEqual({
       kind: "left-panel-rail",
       panelId: "terminals",
-      position: "combine",
+      position: "after",
     });
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["terminals", "file-tree"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+    expect(
+      visibleRailPanelIds(currentLayoutArrangement().rail, () => true),
+    ).toEqual([
+      "chats",
+      "artifacts",
+      "terminals",
+      "file-tree",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "sharing",
+      "comments",
     ]);
   });
 
-  it("inserts a rail group into a single-panel group via section bounds", () => {
-    applyLeftPanelGroups([
-      { panelIds: ["chats"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-    ]);
+  it("inserts a panel at a section boundary via the body's section bounds", () => {
     const groupElement = document.createElement("div");
     groupElement.append(
       makeRectElement("chats", { x: 0, y: 0, width: 320, height: 900 }),
     );
     const source = railSource("file-tree", "rail");
+    // The body always draws exactly one panel now (L-155).
     const target = {
-      kind: "left-panel-group",
-      panelIds: ["chats"],
+      kind: "left-panel-body",
+      panelId: "chats",
     } as const;
     const preview = resolveCanvasDropPreview({
       source,
@@ -503,56 +474,18 @@ describe("root dnd commits - left panel", () => {
 
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "file-tree"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-    ]);
-  });
-
-  it("inserts a rail group at the nearest grouped-section boundary", () => {
-    applyLeftPanelGroups(
-      moveLeftPanelGroup(
-        currentLeftPanelGroups(),
-        "artifacts",
-        "chats",
-        "combine",
-      ),
-    );
-    const groupElement = document.createElement("div");
-    groupElement.append(
-      makeRectElement("chats", { x: 0, y: 0, width: 320, height: 300 }),
-      makeRectElement("artifacts", { x: 0, y: 300, width: 320, height: 300 }),
-    );
-    const source = railSource("git-diff", "rail");
-    const target = {
-      kind: "left-panel-group",
-      panelIds: ["chats", "artifacts"],
-    } as const;
-    const preview = resolveCanvasDropPreview({
-      source,
-      target,
-      point: { x: 20, y: 310 },
-      targetRect: null,
-      targetElement: groupElement,
-      activeRect: null,
-    });
-
-    commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
-
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "git-diff", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+    expect(
+      visibleRailPanelIds(currentLayoutArrangement().rail, () => true),
+    ).toEqual([
+      "chats",
+      "file-tree",
+      "artifacts",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "sharing",
+      "comments",
     ]);
   });
 });
@@ -599,147 +532,130 @@ describe("root dnd commits - left panel drop resolver", () => {
   beforeEach(resetStores);
   afterEach(resetStores);
 
-  const SPLIT_GROUPS = [
-    { panelIds: ["chats"] },
-    { panelIds: ["artifacts"] },
-    { panelIds: ["terminals"] },
-    { panelIds: ["git-diff"] },
-    { panelIds: ["pull-requests"] },
-    { panelIds: ["file-tree"] },
-    { panelIds: ["sharing"] },
-    { panelIds: ["comments"] },
-  ] as const;
-
-  it("moves a whole rail group before another group", () => {
+  it("moves a panel before another panel", () => {
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "rail"),
         { kind: "left-panel-rail", panelId: "chats", position: "before" },
-        SPLIT_GROUPS,
+        DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { panelIds: ["artifacts"] },
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
     ]);
   });
 
-  it("combines an extracted section into another rail group", () => {
+  it("moves a section-origin drop beside another panel", () => {
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "panel-section"),
-        { kind: "left-panel-rail", panelId: "git-diff", position: "combine" },
-        SPLIT_GROUPS,
+        { kind: "left-panel-rail", panelId: "git-diff", position: "after" },
+        DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["git-diff", "artifacts"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
     ]);
   });
 
-  it("returns structurally equal groups when a section combines into its own group", () => {
-    const groups = [
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-    ] as const;
+  it("returns an equal rail for a drop that lands a panel where it already is", () => {
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "panel-section"),
-        { kind: "left-panel-rail", panelId: "chats", position: "combine" },
-        groups,
+        { kind: "left-panel-rail", panelId: "chats", position: "after" },
+        DEFAULT_ARRANGEMENT,
       ),
-    ).toEqual([...groups, { panelIds: ["browsers"] }]);
+    ).toEqual(DEFAULT_RAIL);
   });
 
-  it("moves a rail group and a section to the rail end", () => {
+  it("moves a panel and a section to the rail end", () => {
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "rail"),
         { kind: "left-panel-rail-list" },
-        SPLIT_GROUPS,
+        DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["artifacts"] },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+      { kind: "panel", id: "railArtifacts" },
     ]);
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "panel-section"),
         { kind: "left-panel-rail-list" },
-        [{ panelIds: ["chats", "artifacts"] }, ...SPLIT_GROUPS.slice(2)],
+        DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["artifacts"] },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+      { kind: "panel", id: "railArtifacts" },
     ]);
   });
 
-  it("inserts at a section boundary inside another group", () => {
+  it("inserts at a section boundary", () => {
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("git-diff", "rail"),
         {
           kind: "left-panel-section",
           panelId: "artifacts",
           position: "before",
         },
-        [{ panelIds: ["chats", "artifacts"] }, ...SPLIT_GROUPS.slice(2)],
+        DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { panelIds: ["chats", "git-diff", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["browsers"] },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
     ]);
   });
 
   it("returns null for non-left-panel previews", () => {
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "rail"),
         { kind: "empty-shell" },
-        SPLIT_GROUPS,
+        DEFAULT_ARRANGEMENT,
       ),
     ).toBeNull();
     expect(
-      resolveLeftPanelGroupsForDrop(
+      resolveRailForDrop(
         railSource("artifacts", "rail"),
         { kind: "artifact-tab-strip", groupId: "group-a", index: 0 },
-        SPLIT_GROUPS,
+        DEFAULT_ARRANGEMENT,
       ),
     ).toBeNull();
   });
@@ -747,10 +663,12 @@ describe("root dnd commits - left panel drop resolver", () => {
   it("never dispatches a store write for a noop drop commit", () => {
     const before = useLayoutStore.getState().arrangement.rail;
     const source = railSource("artifacts", "panel-section");
+    // Artifacts already sits immediately after Chats in the default rail, so
+    // landing it "after chats" again is a no-op.
     const preview = {
       kind: "left-panel-rail",
       panelId: "chats",
-      position: "combine",
+      position: "after",
     } as const;
 
     expect(isLeftPanelDropNoop(source, preview)).toBe(true);

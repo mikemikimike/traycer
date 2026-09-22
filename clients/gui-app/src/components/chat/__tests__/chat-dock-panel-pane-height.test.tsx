@@ -6,7 +6,10 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { ChatDockAttachedPanelBody } from "@/components/chat/chat-dock-attached-panel";
+import {
+  ChatDockAttachedPanelBody,
+  ChatDockAttachedPanelSlot,
+} from "@/components/chat/chat-dock-attached-panel";
 import {
   CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
   CHAT_DOCK_PANEL_HEIGHT_PROPERTY,
@@ -19,11 +22,16 @@ import {
 import { useSettingsStore } from "@/stores/settings/settings-store";
 
 /**
- * L-145: the opened pill panel is a share of the CHAT PANE, not of the window.
+ * L-145: the opened pill panel's cap is a share of the CHAT PANE, not of the
+ * window. L-151: it is a CAP, not a height - the panel is as tall as its
+ * content and scrolls past that share.
  *
- * The case that made this a defect is a chat TILE on a canvas with several of
- * them: the pane here is 400px inside jsdom's 768px window, so every number
- * below separates the two readings rather than merely agreeing with one.
+ * The case that made the first a defect is a chat TILE on a canvas with
+ * several of them: the pane here is 400px inside jsdom's 768px window, so
+ * every number below separates the two readings rather than merely agreeing
+ * with one. The second is not measurable in jsdom at all - it lays nothing
+ * out - so what is pinned here is the STYLE the browser is handed, which is
+ * where the defect lived: a `height` where a `max-height` was meant.
  */
 const PANE_HEIGHT = 400;
 
@@ -42,12 +50,34 @@ function stubPaneHeight(pane: HTMLElement, height: number): void {
   });
 }
 
+/**
+ * A body showing less than it holds, which is the only state in which the cap
+ * is doing anything and so the only one that offers the handle (L-164).
+ *
+ * jsdom answers 0 to every layout question, so a panel here never scrolls
+ * until it is told it does - and one test below is about exactly that.
+ */
+function stubPanelScrolling(): void {
+  vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(
+    function (this: Element) {
+      return this.hasAttribute("data-dock-panel-body") ? 500 : 0;
+    },
+  );
+}
+
 function renderPanelInPane(paneHeight: number): HTMLElement {
   render(
     <div data-chat-pane="" data-testid="chat-pane">
-      <ChatDockAttachedPanelBody section="filesChanged" testId="panel-rows">
-        <div>a row</div>
-      </ChatDockAttachedPanelBody>
+      <ChatDockAttachedPanelSlot
+        section="filesChanged"
+        panelId="dock-panel-1"
+        separated={false}
+        settled
+      >
+        <ChatDockAttachedPanelBody section="filesChanged" testId="panel-rows">
+          <div>a row</div>
+        </ChatDockAttachedPanelBody>
+      </ChatDockAttachedPanelSlot>
     </div>,
   );
   const pane = screen.getByTestId("chat-pane");
@@ -55,8 +85,18 @@ function renderPanelInPane(paneHeight: number): HTMLElement {
   return pane;
 }
 
+/** The same panel, with a body that is actually scrolling. */
+function renderScrollingPanelInPane(paneHeight: number): HTMLElement {
+  stubPanelScrolling();
+  return renderPanelInPane(paneHeight);
+}
+
 function handle(): HTMLElement {
   return screen.getByTestId("chat-dock-attached-panel-resize");
+}
+
+function slot(): HTMLElement {
+  return screen.getByTestId("chat-dock-attached-panel-slot");
 }
 
 function dragHandleBy(deltaY: number): void {
@@ -86,32 +126,50 @@ afterEach(() => {
   });
 });
 
-describe("the pill panel's height is a share of the chat pane", () => {
-  it("draws a pane-relative height, never a window-relative one", () => {
+describe("the pill panel hugs its content, up to a share of the chat pane", () => {
+  it("caps the body rather than sizing it", () => {
     renderPanelInPane(PANE_HEIGHT);
 
-    const body = screen.getByTestId("panel-rows");
-    const height = body.style.getPropertyValue(CHAT_DOCK_PANEL_HEIGHT_PROPERTY);
-    expect(height).toContain("cqh");
-    expect(height).not.toContain("dvh");
-    expect(height).not.toContain("vh)");
+    // Read as CLASSES, not as a substring: `max-h-[...]` contains `h-[...]`,
+    // so a `toContain` here would pass against the very utility this test
+    // exists to refuse.
+    const classes = (
+      screen.getByTestId("panel-rows").getAttribute("class") ?? ""
+    )
+      .split(/\s+/)
+      .filter(Boolean);
+    // The whole of L-151 in two lines: the share is the point the body STOPS
+    // growing, and nothing anywhere tells it how tall to be. Five todo rows
+    // draw five todo rows; a long file list stops here and scrolls.
+    expect(classes).toContain(
+      `max-h-[var(${CHAT_DOCK_PANEL_HEIGHT_PROPERTY})]`,
+    );
+    expect(classes).not.toContain(
+      `h-[var(${CHAT_DOCK_PANEL_HEIGHT_PROPERTY})]`,
+    );
+    expect(classes).toContain("overflow-y-auto");
+  });
+
+  it("draws a pane-relative cap, never a window-relative one", () => {
+    renderPanelInPane(PANE_HEIGHT);
+
+    // The property is on the SLOT, which is where the handle that moves it
+    // lives; it inherits down to whichever panel is open inside.
+    const cap = slot().style.getPropertyValue(CHAT_DOCK_PANEL_HEIGHT_PROPERTY);
+    expect(cap).toContain("cqh");
+    expect(cap).not.toContain("dvh");
+    expect(cap).not.toContain("vh)");
     // The pane is the nearest SIZE container, so the share resolves against
-    // it and against nothing else on the way up - and the drawn height is
-    // that property and nothing else.
-    expect(height).toBe(
+    // it and against nothing else on the way up.
+    expect(cap).toBe(
       chatDockPanelHeightCss(
         Math.round(CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO * 100),
       ),
     );
-    expect(body.className).toContain(
-      `h-[var(${CHAT_DOCK_PANEL_HEIGHT_PROPERTY})]`,
-    );
-    // A pane too short for the floor shrinks the panel rather than being
-    // buried by it, and the body scrolls at every size.
-    expect(height).toContain(
+    // A pane too short for the floor lowers the cap rather than being buried.
+    expect(cap).toContain(
       `min(${Math.round(CHAT_DOCK_PANEL_MAX_HEIGHT_RATIO * 100)}cqh,`,
     );
-    expect(body.className).toContain("overflow-y-auto");
   });
 
   it("clamps to half the pane and to a usable minimum", () => {
@@ -130,7 +188,7 @@ describe("the pill panel's height is a share of the chat pane", () => {
   });
 
   it("measures the chat pane it is inside, and the window only without one", () => {
-    const pane = renderPanelInPane(PANE_HEIGHT);
+    const pane = renderScrollingPanelInPane(PANE_HEIGHT);
     const grip = handle();
 
     expect(chatDockPanelPaneHeight(grip)).toBe(PANE_HEIGHT);
@@ -143,10 +201,10 @@ describe("the pill panel's height is a share of the chat pane", () => {
   });
 
   it("drags 1:1 against the pane, not against the window", () => {
-    renderPanelInPane(PANE_HEIGHT);
+    renderScrollingPanelInPane(PANE_HEIGHT);
 
     // 60px up on a 400px pane is +15 points. On jsdom's 768px window the same
-    // gesture would be +8, which is the reading this ticket removes.
+    // gesture would be +8, which is the reading L-145 removed.
     dragHandleBy(60);
 
     expect(useSettingsStore.getState().chatDockPanelHeight).toBeCloseTo(0.48);
@@ -154,7 +212,7 @@ describe("the pill panel's height is a share of the chat pane", () => {
   });
 
   it("keeps the handle's ARIA truthful about what the share is of", () => {
-    renderPanelInPane(PANE_HEIGHT);
+    renderScrollingPanelInPane(PANE_HEIGHT);
     const grip = handle();
 
     expect(grip.getAttribute("aria-valuemin")).toBe("12");
@@ -172,5 +230,42 @@ describe("the pill panel's height is a share of the chat pane", () => {
     expect(handle().getAttribute("aria-valuetext")).toBe(
       "33% of the chat pane",
     );
+  });
+
+  it("names the open section on the region the pill controls", () => {
+    renderScrollingPanelInPane(PANE_HEIGHT);
+
+    expect(slot().getAttribute("id")).toBe("dock-panel-1");
+    expect(slot().getAttribute("role")).toBe("region");
+    expect(slot().getAttribute("aria-label")).toBe("Files changed");
+    expect(handle().getAttribute("aria-label")).toBe(
+      "Resize the Files changed panel",
+    );
+  });
+
+  // L-164: the handle sets the cap, and the cap is only doing something while
+  // the body is showing less than it holds. A handle offered over five todo
+  // rows wrote `aria-valuenow`, the store and `localStorage` and moved not one
+  // pixel, and dragging it down did nothing until the cap crossed the content
+  // height, at which point the panel started shrinking mid-gesture.
+  it("offers the handle only while the body is scrolling, and stores the same cap either way", () => {
+    renderPanelInPane(PANE_HEIGHT);
+
+    expect(screen.queryByTestId("chat-dock-attached-panel-resize")).toBeNull();
+    // The stored cap is untouched by the handle going: it is a preference,
+    // not a function of what happens to be in the panel right now.
+    expect(useSettingsStore.getState().chatDockPanelHeight).toBe(
+      CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
+    );
+    expect(slot().style.getPropertyValue(CHAT_DOCK_PANEL_HEIGHT_PROPERTY)).toBe(
+      chatDockPanelHeightCss(
+        Math.round(CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO * 100),
+      ),
+    );
+
+    cleanup();
+    renderScrollingPanelInPane(PANE_HEIGHT);
+
+    expect(handle().getAttribute("aria-valuenow")).toBe("33");
   });
 });

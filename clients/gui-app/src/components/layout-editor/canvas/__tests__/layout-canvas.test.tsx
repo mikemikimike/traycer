@@ -73,6 +73,7 @@ function RailCanvas(): ReactElement {
         <LeftPanelRailDivider
           dividerId={railDividerId(1)}
           orientation="vertical"
+          editing
         />
         <Region
           regionId="railTerminals"

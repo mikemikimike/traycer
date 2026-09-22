@@ -43,9 +43,9 @@ const DRAG_ACTIVATION_DISTANCE = 6;
  * Under the leading-edge rule the travel a claim costs is `gap + size(n) / 2`,
  * which depends only on the NEIGHBOUR. That is what makes the rule symmetric
  * (L-143), and it also means a small neighbour is cheap: the sidebar's 8px
- * group break costs 8px of travel where the 36px icon beside it costs 22px.
+ * divider costs 8px of travel where the 36px icon beside it costs 22px.
  * With every pointerdown on a canvas region arming a drag (L-69), a click
- * meant to select Terminals that slips a few pixels would commit a regrouping
+ * meant to select Terminals that slips a few pixels would commit a reorder
  * and spend a history entry on it.
  *
  * Measured against the OFFSET rather than against any one neighbour, so it
@@ -54,7 +54,7 @@ const DRAG_ACTIVATION_DISTANCE = 6;
  * Twice the distance that tells a drag from a click, rather than the round 16
  * the ruling offered, because that is a number this module already owns: a
  * claim asks for the gesture to be unmistakable twice over. It lifts the 8px
- * break to 12px of member travel, which is 18px of pointer travel from the
+ * divider to 12px of member travel, which is 18px of pointer travel from the
  * press (`drag-engine.ts` takes the grab point at the move that crosses the
  * activation distance), and it stays UNDER every claim boundary the
  * half-overlap rule itself draws in this model's own table - the smallest is

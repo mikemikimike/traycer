@@ -15,11 +15,12 @@ import { NotificationsBell } from "@/components/notifications/notifications-bell
 import { cn } from "@/lib/utils";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { admitsLocalPlane, useAuthStore } from "@/stores/auth/auth-store";
-import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import { useBarPlacements, useRegionShown } from "@/lib/layout-overrides";
 import {
-  GhostRegion,
-  GhostRegionPicture,
-} from "@/components/layout-editor/ghost-region";
+  barClusterRegionsAt,
+  type EdgeSide,
+} from "@/lib/layout/layout-arrangement";
+import { GhostRegionPicture } from "@/components/layout-editor/ghost-region";
 import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
@@ -113,6 +114,21 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
     >
       <DesktopMenuBar />
       {showTabStrip ? <HistoryNavButtons /> : null}
+      {/* The header's LEFT cluster (L-156): its own box, because the header
+          row has no gap of its own and the right-hand cluster's box is the
+          one this mirrors. It sits left of the tab strip and right of the
+          window's own controls, so a reading moved here lands beside the
+          navigation rather than inside the tabs. Empty for the shipped
+          arrangement, where both readings are in the strip, and an empty
+          `shrink-0` box takes no room. */}
+      {navDisabled ? null : (
+        <div
+          className="relative z-10 flex shrink-0 items-center gap-2"
+          style={framelessDesktop ? NO_DRAG_STYLE : undefined}
+        >
+          <HeaderBarCluster side="left" />
+        </div>
+      )}
       {/* Left drag handle: breathing room beside the traffic lights +
           back/forward arrows so the window can be grabbed from the left end
           too. Desktop-only (the browser app has neither traffic lights nor
@@ -155,7 +171,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
         style={framelessDesktop ? NO_DRAG_STYLE : undefined}
       >
         {!navDisabled ? <AppUpdateHeaderButton /> : null}
-        {!navDisabled ? <HeaderUsageControls /> : null}
+        {!navDisabled ? <HeaderBarCluster side="right" /> : null}
         {!navDisabled ? <HistoryButton /> : null}
         {showBell ? <HeaderNotificationsBell /> : null}
         <HeaderIdentity showAppSettings={!navDisabled} />
@@ -165,65 +181,104 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
 }
 
 /**
- * The header's half of "exactly one surface owns the usage gauge and the
- * resource monitor". Under the `status-bar` placement both move to the strip
- * and this renders nothing.
+ * One end of the header's own row: the readings that named THIS bar and this
+ * side (L-156).
+ *
+ * The header's half of "each reading picks its bar and its side". Under the
+ * shipped arrangement both are in the strip and both clusters are empty; a
+ * reading moved up draws here, and the other one stays exactly where it was,
+ * which is the whole point of the four fields.
  *
  * The DESKTOP header's half only: `MobileAppHeader` keeps both controls
  * unconditionally, because a mobile viewport does not answer this question
- * with `usageHost` at all - the footer there is its own opt-in switch, and a
+ * with a host at all - the footer there is its own opt-in switch (L-51), and a
  * header that respected `status-bar` would leave a phone with neither control
  * until someone found that switch.
- *
- * The resource monitor's own `shown` gates its button on top of this: the two
- * answer different questions ("do I want a resource monitor at all" vs "where
- * do the usage controls live"), and one switch owns the first everywhere the
- * monitor is drawn (L-48).
  */
-function HeaderUsageControls(): ReactNode {
-  const showGlobalResourceMonitor = useRegionShown("resourceMonitor");
-  const inHeader = useArrangementValue("usageHost") === "header";
-  const usageEnabled = useRegionShown("usageLimits");
+function HeaderBarCluster(props: { readonly side: EdgeSide }): ReactNode {
+  const placements = useBarPlacements();
+  return barClusterRegionsAt(placements, "header", props.side).map((region) =>
+    region === "usageLimits" ? (
+      <HeaderUsageRegion key={region} />
+    ) : (
+      <HeaderResourceRegion key={region} />
+    ),
+  );
+}
+
+/**
+ * The usage gauge in the header.
+ *
+ * `display: contents` generates no box, so `getBoundingClientRect()` answers
+ * 0,0,0,0 and the travelling ring collapsed to a 6px dot at the top-left of
+ * the window while the hover outline had nothing to paint on (C-06). A session
+ * needs a real box here and the header needs none of its own, so this is the
+ * mic slot's pattern: the region's children keep laying out in the header's
+ * own cluster at rest, and become a box of their own exactly while the editor
+ * is open.
+ *
+ * The span is this region's canvas node in BOTH bars, named by region id, so
+ * the ring, the chip and the quick verbs follow it up here unchanged - the
+ * button it wraps registers nothing of its own, which is why the picture below
+ * is the un-registering one (two elements on one key displace each other).
+ */
+function HeaderUsageRegion(): ReactNode {
+  const shown = useRegionShown("usageLimits");
   const { ref, editing } = useLayoutRegion({
     regionId: "usageLimits",
     instanceId: null,
   });
-  if (!inHeader) return null;
   return (
-    // The header cluster's own right-click (L-19). The cluster has no menu of
-    // its own, so this is the whole menu; it names `usageLimits` because that
-    // is the region this element registers.
+    // The cluster has no menu of its own, so this is the whole menu (L-19); it
+    // names `usageLimits` because that is the region this element registers.
     <LayoutRegionContextMenu regionId="usageLimits">
-      {/*
-        `display: contents` generates no box, so `getBoundingClientRect()`
-        answers 0,0,0,0 and the travelling ring collapsed to a 6px dot at the
-        top-left of the window while the hover outline had nothing to paint on
-        (C-06). A session needs a real box here and the header needs none of
-        its own, so this is the mic slot's pattern: the cluster's children keep
-        laying out in the header's own row at rest, and become a row of their
-        own - with the header's gap - exactly while the editor is open.
-      */}
       <span
         ref={ref}
         className={cn(editing ? "inline-flex items-center gap-2" : "contents")}
       >
-        {usageEnabled ? <RateLimitIconButton /> : null}
+        {shown ? <RateLimitIconButton /> : null}
         {/* Hidden and pointed at: the passive depiction in place, never the
-          live control - both of these fetch or stream (L-14, L-62). */}
-        {usageEnabled ? null : <GhostRegionPicture regionId="usageLimits" />}
-        {showGlobalResourceMonitor ? null : (
-          <GhostRegion regionId="resourceMonitor" />
-        )}
-        {showGlobalResourceMonitor ? (
-          // Unconditionally the owner of `app.resources.open`: this whole
-          // component is behind `inHeader`, so the strip's own popover is not
-          // mounted while this one is.
+          live control - it fetches (L-14, L-62). */}
+        {shown ? null : <GhostRegionPicture regionId="usageLimits" />}
+      </span>
+    </LayoutRegionContextMenu>
+  );
+}
+
+/**
+ * The resource monitor in the header, which since L-156 is its own decision
+ * rather than a passenger on the usage cluster's.
+ *
+ * Its own `shown` still gates the button on top of the placement: the two
+ * answer different questions ("do I want a resource monitor at all" vs "where
+ * do I want it"), and one switch owns the first everywhere the monitor is
+ * drawn (L-48).
+ *
+ * Unconditionally the owner of `app.resources.open`: the strip draws the
+ * monitor only while `resourceHost` names the strip, so the two can never both
+ * be mounted on a desktop viewport.
+ */
+function HeaderResourceRegion(): ReactNode {
+  const shown = useRegionShown("resourceMonitor");
+  const { ref, editing } = useLayoutRegion({
+    regionId: "resourceMonitor",
+    instanceId: null,
+  });
+  return (
+    <LayoutRegionContextMenu regionId="resourceMonitor">
+      <span
+        ref={ref}
+        className={cn(editing ? "inline-flex items-center gap-2" : "contents")}
+      >
+        {shown ? (
           <ResourceMonitorPopover
             trigger="header-button"
             className={undefined}
             claimsOpenAction
           />
         ) : null}
+        {/* The passive depiction, never the live segment - it streams (L-62). */}
+        {shown ? null : <GhostRegionPicture regionId="resourceMonitor" />}
       </span>
     </LayoutRegionContextMenu>
   );

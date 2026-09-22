@@ -14,9 +14,9 @@ import type { HeaderTab } from "@/stores/tabs/types";
  * that overwrote it would leave the kind's field silently dead.
  *
  * The colour this returns is the WHOLE of that tab's paint, not a tint beside
- * it: `header-tab-visual.tsx` outlines the active tab's silhouette in it and
- * fills that silhouette with `--layout-session-tab-fill`, derived from the
- * same token (L-138). So the ordering above is load-bearing for the editor and
+ * it: while the tab is active `header-tab-visual.tsx` fills its silhouette
+ * with this colour and leaves its edge to the ordinary border (L-138, L-163).
+ * So the ordering above is load-bearing for the editor and
  * not only for user colours: a tier that displaced the kind's colour would not
  * merely retint this tab, it would replace the signal that says the window is
  * in an editing mode.

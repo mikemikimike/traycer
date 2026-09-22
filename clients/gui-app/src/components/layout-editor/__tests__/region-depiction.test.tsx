@@ -39,14 +39,12 @@ function drawnHostOf(
   arrangement: LayoutArrangement,
 ): string | null {
   const values: LayoutValues[RegionId] = SHIPPED_DEFAULT_VALUES[regionId];
-  const { container } = render(
-    depictRegion(regionId, values, arrangement, null),
-  );
+  const { container } = render(depictRegion(regionId, values, arrangement));
   return hostOf(regionId, container);
 }
 
 describe("the host context a depiction is drawn in", () => {
-  it("follows the arrangement for the one region that moves surface", () => {
+  it("follows the arrangement for each region that moves bar (L-156)", () => {
     expect(drawnHostOf("usageLimits", DEFAULT_ARRANGEMENT)).toBe("status-bar");
     expect(
       drawnHostOf("usageLimits", {
@@ -54,6 +52,20 @@ describe("the host context a depiction is drawn in", () => {
         usageHost: "header",
       }),
     ).toBe("top-bar");
+    // The monitor's own pick, which is the branch L-156 added: its picture is
+    // framed as the top bar without the usage cluster having moved anywhere.
+    expect(
+      drawnHostOf("resourceMonitor", {
+        ...DEFAULT_ARRANGEMENT,
+        resourceHost: "header",
+      }),
+    ).toBe("top-bar");
+    expect(
+      drawnHostOf("usageLimits", {
+        ...DEFAULT_ARRANGEMENT,
+        resourceHost: "header",
+      }),
+    ).toBe("status-bar");
   });
 
   it("puts every other region in its own surface", () => {
@@ -85,7 +97,6 @@ describe("the host context a depiction is drawn in", () => {
         "changedFiles",
         { shown: "shown", size: "full" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(hostOf("changedFiles", full.container)).toBe("dock");
@@ -95,22 +106,9 @@ describe("the host context a depiction is drawn in", () => {
         "changedFiles",
         { shown: "shown", size: "chip" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(hostOf("changedFiles", chip.container)).toBe("chip-strip");
-  });
-
-  it("honours a host the caller named over the one the region lives in", () => {
-    const { container } = render(
-      depictRegion(
-        "runningAgents",
-        SHIPPED_DEFAULT_VALUES.runningAgents,
-        DEFAULT_ARRANGEMENT,
-        "chip-strip",
-      ),
-    );
-    expect(hostOf("runningAgents", container)).toBe("chip-strip");
   });
 });
 
@@ -121,7 +119,6 @@ describe("what a depiction draws", () => {
         "queue",
         { shown: "shown", size: "full" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
 
@@ -157,7 +154,6 @@ describe("what a depiction draws", () => {
           ramShare: false,
         },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     const text = frameOf("resourceMonitor", container).textContent;
@@ -174,7 +170,6 @@ describe("what a depiction draws", () => {
         "contextUsage",
         { ...base, style: "text" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(text.container.textContent).toContain("% context left");
@@ -185,7 +180,6 @@ describe("what a depiction draws", () => {
         "contextUsage",
         { ...base, style: "ring" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(ring.container.querySelector("svg")).not.toBeNull();
@@ -197,7 +191,6 @@ describe("what a depiction draws", () => {
         "contextUsage",
         { ...base, style: "ring-only" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(ringOnly.container.querySelector("svg")).not.toBeNull();
@@ -211,7 +204,6 @@ describe("what a depiction draws", () => {
         "access",
         { shown: "shown", size: "full" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(full.container.textContent).toContain("Full access");
@@ -221,7 +213,6 @@ describe("what a depiction draws", () => {
         "access",
         { shown: "shown", size: "chip" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     // The label is still in the tree for the accessible name, but the chip
@@ -236,7 +227,6 @@ describe("what a depiction draws", () => {
         "access",
         { shown: "hidden", size: "full" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(container.textContent).toContain("Full access");
@@ -248,7 +238,6 @@ describe("what a depiction draws", () => {
         "railGitDiff",
         SHIPPED_DEFAULT_VALUES.railGitDiff,
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(container.querySelectorAll("svg")).toHaveLength(1);
@@ -262,7 +251,6 @@ describe("what a depiction draws", () => {
         "usageLimits",
         { ...base, word: true, amount: "remaining" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(withWord.container.textContent).toContain("remaining");
@@ -272,7 +260,6 @@ describe("what a depiction draws", () => {
         "usageLimits",
         { ...base, word: false, amount: "remaining" },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(withoutWord.container.textContent).not.toContain("remaining");
@@ -281,22 +268,18 @@ describe("what a depiction draws", () => {
   it("draws every provider the arrangement still shows", () => {
     const visible = DEFAULT_ARRANGEMENT.usageProviders;
     const hiddenAll = render(
-      depictRegion(
-        "usageLimits",
-        SHIPPED_DEFAULT_VALUES.usageLimits,
-        { ...DEFAULT_ARRANGEMENT, hiddenProviders: visible },
-        null,
-      ),
+      depictRegion("usageLimits", SHIPPED_DEFAULT_VALUES.usageLimits, {
+        ...DEFAULT_ARRANGEMENT,
+        hiddenProviders: visible,
+      }),
     );
     expect(hiddenAll.container.querySelectorAll("svg")).toHaveLength(0);
 
     const oneHidden = render(
-      depictRegion(
-        "usageLimits",
-        SHIPPED_DEFAULT_VALUES.usageLimits,
-        { ...DEFAULT_ARRANGEMENT, hiddenProviders: visible.slice(1) },
-        null,
-      ),
+      depictRegion("usageLimits", SHIPPED_DEFAULT_VALUES.usageLimits, {
+        ...DEFAULT_ARRANGEMENT,
+        hiddenProviders: visible.slice(1),
+      }),
     );
     expect(
       oneHidden.container.querySelectorAll("[data-provider-id]"),
@@ -311,7 +294,6 @@ describe("what a depiction draws", () => {
         "usageLimits",
         SHIPPED_DEFAULT_VALUES.usageLimits,
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(visible.length).toBeGreaterThan(3);
@@ -320,12 +302,10 @@ describe("what a depiction draws", () => {
     ).toHaveLength(visible.length);
 
     const fifthHidden = render(
-      depictRegion(
-        "usageLimits",
-        SHIPPED_DEFAULT_VALUES.usageLimits,
-        { ...DEFAULT_ARRANGEMENT, hiddenProviders: [visible[4]] },
-        null,
-      ),
+      depictRegion("usageLimits", SHIPPED_DEFAULT_VALUES.usageLimits, {
+        ...DEFAULT_ARRANGEMENT,
+        hiddenProviders: [visible[4]],
+      }),
     );
     const drawn = [
       ...fifthHidden.container.querySelectorAll("[data-provider-id]"),
@@ -343,7 +323,6 @@ describe("what a depiction draws", () => {
         "usageLimits",
         { ...SHIPPED_DEFAULT_VALUES.usageLimits, percent: true, reset: true },
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
 
@@ -374,7 +353,6 @@ describe("the clip", () => {
         "attachImage",
         SHIPPED_DEFAULT_VALUES.attachImage,
         DEFAULT_ARRANGEMENT,
-        null,
       ),
     );
     expect(frameOf("attachImage", container).dataset.clipped).toBe("false");

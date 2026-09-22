@@ -309,7 +309,11 @@ function surfacesProps(
       onSideChat: () => false,
       onSettingsChange: null,
       workspaceControls: (
-        <ChatDockCompactStrip actionsRef={() => undefined} snapshotLoaded />
+        <ChatDockCompactStrip
+          actionsRef={() => undefined}
+          snapshotLoaded
+          onSettled={() => undefined}
+        />
       ),
       workspaceAvailability: WORKSPACE_COMPOSER_READY,
     },

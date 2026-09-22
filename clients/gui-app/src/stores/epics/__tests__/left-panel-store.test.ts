@@ -3,17 +3,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CHAT_ARCHIVE_VISIBILITY,
   CHAT_OWNERSHIP,
-  DEFAULT_LEFT_PANEL_GROUPS,
   DEFAULT_LEFT_PANEL_ID,
   DEFAULT_SIDEBAR_WIDTH_PX,
   MAX_SIDEBAR_WIDTH_PX,
   MIN_SIDEBAR_WIDTH_PX,
-  moveLeftPanelGroup,
-  moveLeftPanelGroupToPanelPosition,
-  moveLeftPanelToEnd,
-  moveLeftPanelToGroup,
-  moveLeftPanelToGroupPosition,
-  moveLeftPanelToPanelPosition,
   matchesChatOwnershipFilter,
   useLeftPanelStore,
   useChatArchiveVisibility,
@@ -21,18 +14,26 @@ import {
   type ChatFilter,
 } from "../left-panel-store";
 import type {
-  LeftPanelGroup,
   LeftPanelId,
   PanelVisibilityOverrideById,
 } from "@/lib/left-panel-ids";
 import {
-  applyLeftPanelGroups,
-  currentLeftPanelGroups,
+  applyRail,
   clearRailVisibilityOverrides,
+  currentLayoutArrangement,
   setRailVisibilityOverride,
-  useLeftPanelGroups,
+  useLayoutRail,
 } from "@/lib/layout/rail-view";
-import { panelVisibilityOverridesFromValues } from "@/lib/layout/rail";
+import {
+  DEFAULT_RAIL,
+  panelVisibilityOverridesFromValues,
+  visibleRailPanelIds,
+  type RailEntry,
+} from "@/lib/layout/rail";
+import {
+  moveRailPanelBeside,
+  moveRailPanelToEnd,
+} from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -74,23 +75,35 @@ function resetLayoutStore(): void {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 }
 
+/** Every panel the rail holds, hiding nothing. */
+function railPanelIds(
+  rail: ReadonlyArray<RailEntry>,
+): ReadonlyArray<LeftPanelId> {
+  return visibleRailPanelIds(rail, () => true);
+}
+
+/** The rail as the store holds it right now. */
+function currentRail(): ReadonlyArray<RailEntry> {
+  return currentLayoutArrangement().rail;
+}
+
 /**
- * Apply a group move through the public pipeline (the DnD commit path):
- * resolve the next groups with the pure `moveLeftPanelGroup` helper, then
- * commit them atomically via `applyLeftPanelGroups`.
+ * Move one panel beside another through the public pipeline (the DnD commit
+ * path): resolve the next rail with the arrangement's own mover, then commit
+ * it atomically via `applyRail`.
  */
-function applyPanelGroupMove(
+function movePanelBeside(
   sourcePanelId: LeftPanelId,
   targetPanelId: LeftPanelId,
-  position: "before" | "after" | "combine",
+  placeAfter: boolean,
 ): void {
-  applyLeftPanelGroups(
-    moveLeftPanelGroup(
-      currentLeftPanelGroups(),
+  applyRail(
+    moveRailPanelBeside(
+      currentLayoutArrangement(),
       sourcePanelId,
       targetPanelId,
-      position,
-    ),
+      placeAfter,
+    ).rail,
   );
 }
 
@@ -99,8 +112,6 @@ interface PersistedLeftPanelState {
     readonly activePanelIdByTabId: Readonly<Record<string, string>>;
     readonly mainCollapsedByTabId: Readonly<Record<string, boolean>>;
     readonly sidebarWidthPx: number;
-    readonly panelSectionCollapsedByPanelId: Readonly<Record<string, boolean>>;
-    readonly panelSectionWeightsByPanelId: Readonly<Record<string, number>>;
     readonly chatFilterByEpicId: Readonly<Record<string, ChatFilter>>;
     readonly chatArchiveVisibilityByEpicId: Readonly<Record<string, string>>;
     readonly artifactFilterByEpicId: Readonly<Record<string, ArtifactFilter>>;
@@ -120,8 +131,6 @@ function resetStore(): void {
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
     sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
-    panelSectionCollapsedByPanelId: {},
-    panelSectionWeightsByPanelId: {},
     commentsPanelRevealedByTabId: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},
@@ -129,23 +138,6 @@ function resetStore(): void {
     chatArchiveVisibilityByEpicId: {},
     artifactFilterByEpicId: {},
   });
-}
-
-/** The shipped grouping with Agents and Artifacts pulled apart, and nothing else. */
-const SPLIT_PANEL_GROUPS: ReadonlyArray<LeftPanelGroup> = [
-  { panelIds: ["chats"] },
-  { panelIds: ["artifacts"] },
-  { panelIds: ["terminals"] },
-  { panelIds: ["browsers"] },
-  { panelIds: ["git-diff"] },
-  { panelIds: ["pull-requests"] },
-  { panelIds: ["file-tree"] },
-  { panelIds: ["sharing"] },
-  { panelIds: ["comments"] },
-];
-
-function splitChatsAndArtifacts(): void {
-  applyLeftPanelGroups(SPLIT_PANEL_GROUPS);
 }
 
 describe("useLeftPanelStore", () => {
@@ -205,40 +197,19 @@ describe("useLeftPanelStore", () => {
     );
   });
 
-  it("defaults panel groups with chats and artifacts combined", () => {
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+  it("defaults the rail to nine ungrouped panels with no dividers (L-155)", () => {
+    expect(currentRail()).toEqual(DEFAULT_RAIL);
+    expect(railPanelIds(currentRail())).toEqual([
+      "chats",
+      "artifacts",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
     ]);
-  });
-
-  it("hydrates valid global section collapse state", async () => {
-    window.localStorage.setItem(
-      PERSIST_KEY,
-      JSON.stringify({
-        state: {
-          panelSectionCollapsedByPanelId: {
-            artifacts: true,
-          },
-        },
-        version: 1,
-      }),
-    );
-
-    await useLeftPanelStore.persist.rehydrate();
-
-    expect(
-      useLeftPanelStore.getState().isPanelSectionCollapsed("artifacts"),
-    ).toBe(true);
-    expect(useLeftPanelStore.getState().isPanelSectionCollapsed("chats")).toBe(
-      false,
-    );
   });
 
   it("does not persist comments as the active panel", () => {
@@ -249,8 +220,6 @@ describe("useLeftPanelStore", () => {
         activePanelIdByTabId: {},
         mainCollapsedByTabId: {},
         sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
-        panelSectionCollapsedByPanelId: {},
-        panelSectionWeightsByPanelId: {},
         chatFilterByEpicId: {},
         chatArchiveVisibilityByEpicId: {},
         artifactFilterByEpicId: {},
@@ -516,65 +485,49 @@ describe("useLeftPanelStore", () => {
     });
   });
 
-  it("reorders panel groups before or after another group", () => {
-    splitChatsAndArtifacts();
-    applyPanelGroupMove("artifacts", "chats", "before");
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["artifacts"] },
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+  it("reorders panels before or after another panel", () => {
+    movePanelBeside("artifacts", "chats", false);
+    expect(railPanelIds(currentRail())).toEqual([
+      "artifacts",
+      "chats",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
     ]);
 
-    applyPanelGroupMove("comments", "chats", "after");
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["artifacts"] },
-      { panelIds: ["chats"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
-  it("combines two panel groups into one group", () => {
-    splitChatsAndArtifacts();
-    applyPanelGroupMove("artifacts", "chats", "combine");
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+    movePanelBeside("comments", "chats", true);
+    expect(railPanelIds(currentRail())).toEqual([
+      "artifacts",
+      "chats",
+      "comments",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
     ]);
   });
 
-  it("keeps panel groups global instead of scoping layout by tab", () => {
-    splitChatsAndArtifacts();
-    applyPanelGroupMove("artifacts", "chats", "combine");
+  it("keeps rail order global instead of scoping layout by tab", () => {
+    movePanelBeside("artifacts", "chats", false);
     useLeftPanelStore.getState().setActivePanelId("tab-a", "artifacts");
     useLeftPanelStore.getState().setActivePanelId("tab-b", "file-tree");
 
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["comments"] },
+    expect(railPanelIds(currentRail())).toEqual([
+      "artifacts",
+      "chats",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
     ]);
     expect(useLeftPanelStore.getState().getActivePanelId("tab-a")).toBe(
       "artifacts",
@@ -584,250 +537,68 @@ describe("useLeftPanelStore", () => {
     );
   });
 
-  it("inserts a rail group at a panel section position inside another group", () => {
-    expect(
-      moveLeftPanelGroupToPanelPosition(
-        [
-          { panelIds: ["chats", "artifacts"] },
-          { panelIds: ["git-diff"] },
-          { panelIds: ["pull-requests"] },
-          { panelIds: ["file-tree"] },
-          { panelIds: ["comments"] },
-        ],
-        "file-tree",
-        "artifacts",
-        "before",
-      ),
-    ).toEqual([
-      { panelIds: ["chats", "file-tree", "artifacts"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
-  it("inserts one panel at a panel section position inside another group", () => {
-    expect(
-      moveLeftPanelToPanelPosition(
-        [
-          { panelIds: ["chats", "artifacts"] },
-          { panelIds: ["git-diff"] },
-          { panelIds: ["pull-requests"] },
-          { panelIds: ["file-tree"] },
-          { panelIds: ["comments"] },
-        ],
-        "git-diff",
-        "artifacts",
-        "after",
-      ),
-    ).toEqual([
-      { panelIds: ["chats", "artifacts", "git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
-  it("reorders one panel within a combined group using section positions", () => {
-    expect(
-      moveLeftPanelToPanelPosition(
-        [{ panelIds: ["chats", "artifacts"] }, { panelIds: ["comments"] }],
-        "artifacts",
-        "chats",
-        "before",
-      ),
-    ).toEqual([
-      { panelIds: ["artifacts", "chats"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
-  it("extracts one panel from a combined group before or after another group", () => {
-    applyPanelGroupMove("artifacts", "chats", "combine");
-    applyLeftPanelGroups(
-      moveLeftPanelToGroupPosition(
-        currentLeftPanelGroups(),
-        "artifacts",
-        "comments",
-        "before",
-      ),
-    );
-    expect(currentLeftPanelGroups()).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["comments"] },
-    ]);
-  });
-
-  it("applyLeftPanelGroups writes nothing for structurally equal groups", () => {
-    // Identity is asserted on the RAIL, which is what the groups are derived
-    // from: `currentLeftPanelGroups()` builds its view on every call, while the
-    // below memoizes on exactly this array.
+  it("applyRail writes nothing for a structurally equal rail", () => {
+    // Identity is asserted on the RAIL itself: `useLayoutRail()` builds its
+    // view straight off `arrangement.rail`, while the below memoizes on
+    // exactly this array reference.
     const before = useLayoutStore.getState().arrangement.rail;
 
-    applyLeftPanelGroups(
-      DEFAULT_LEFT_PANEL_GROUPS.map((group) => ({
-        panelIds: [...group.panelIds],
-      })),
-    );
+    applyRail(DEFAULT_RAIL.map((entry) => ({ ...entry })));
 
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
   });
 
-  it("applyLeftPanelGroups normalizes duplicate and missing panel ids", () => {
-    applyLeftPanelGroups([
-      { panelIds: ["chats", "chats"] },
-      { panelIds: ["comments"] },
+  it("normalizes duplicate and missing panel ids written through the rail", () => {
+    applyRail([
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railComments" },
     ]);
 
-    // One normalizer owns this now - the rail's (`normalizeRail`), which the
-    // arrangement runs on every write. A panel the caller left out comes back
-    // beside its canonical neighbours rather than appended as its own group
-    // at the end, so the seven missing here join the group Agents is in.
-    // Nothing in the app can send an incomplete list: every caller derives its
-    // groups from the rail, which always names all nine.
-    expect(currentLeftPanelGroups()).toEqual([
-      {
-        panelIds: [
-          "chats",
-          "artifacts",
-          "terminals",
-          "browsers",
-          "git-diff",
-          "pull-requests",
-          "file-tree",
-          "sharing",
-        ],
-      },
-      { panelIds: ["comments"] },
+    // `setArrangement` runs every write through `normalizeRail`: a duplicate
+    // is dropped, and a panel this list left out comes back beside its
+    // canonical neighbour rather than appended at the end. Nothing in the app
+    // can send an incomplete list - every writer derives its rail from the
+    // one already in the store - but a persisted blob from an older build can.
+    expect(railPanelIds(currentRail())).toEqual([
+      "chats",
+      "artifacts",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
     ]);
   });
 
-  it("reorders panels within a combined group", () => {
-    expect(
-      moveLeftPanelToPanelPosition(
-        [{ panelIds: ["artifacts", "chats"] }, { panelIds: ["comments"] }],
-        "chats",
-        "artifacts",
-        "before",
-      ),
-    ).toEqual([
-      { panelIds: ["chats", "artifacts"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
+  it("moves a panel to the rail end", () => {
+    applyRail(moveRailPanelToEnd(currentLayoutArrangement(), "chats").rail);
+
+    expect(railPanelIds(currentRail())).toEqual([
+      "artifacts",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+      "chats",
     ]);
   });
 
-  it("extracts one panel from a combined group to the rail end", () => {
-    expect(
-      moveLeftPanelToEnd(
-        [{ panelIds: ["chats", "artifacts"] }, { panelIds: ["comments"] }],
-        "chats",
-      ),
-    ).toEqual([
-      { panelIds: ["artifacts"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-      { panelIds: ["chats"] },
-    ]);
-  });
-
-  it("extracts one panel from a combined group around that group's rail icon", () => {
-    expect(
-      moveLeftPanelToGroupPosition(
-        [{ panelIds: ["artifacts", "chats"] }, { panelIds: ["comments"] }],
-        "artifacts",
-        "artifacts",
-        "after",
-      ),
-    ).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-    ]);
-    expect(
-      moveLeftPanelToGroupPosition(
-        [{ panelIds: ["artifacts", "chats"] }, { panelIds: ["comments"] }],
-        "chats",
-        "artifacts",
-        "before",
-      ),
-    ).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["comments"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
-  it("combines one panel from a grouped source with another target group", () => {
-    expect(
-      moveLeftPanelToGroup(
-        [{ panelIds: ["chats", "artifacts"] }, { panelIds: ["comments"] }],
-        "artifacts",
-        "comments",
-      ),
-    ).toEqual([
-      { panelIds: ["chats"] },
-      { panelIds: ["comments", "artifacts"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
-  it("writes nothing on a no-op panel group move", () => {
-    applyPanelGroupMove("artifacts", "chats", "combine");
+  it("writes nothing on a no-op rail move", () => {
+    movePanelBeside("artifacts", "chats", false);
     const before = useLayoutStore.getState().arrangement.rail;
-    applyPanelGroupMove("artifacts", "chats", "combine");
+    movePanelBeside("artifacts", "chats", false);
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
   });
 
-  it("keeps the panel groups hook snapshot stable across unrelated writes", () => {
-    applyPanelGroupMove("artifacts", "chats", "combine");
-    const hook = renderHook(() => useLeftPanelGroups());
+  it("keeps the rail hook snapshot stable across unrelated writes", () => {
+    movePanelBeside("artifacts", "chats", false);
+    const hook = renderHook(() => useLayoutRail());
     const before = hook.result.current;
 
     act(() => {
@@ -837,69 +608,12 @@ describe("useLeftPanelStore", () => {
     expect(hook.result.current).toBe(before);
   });
 
-  it("normalizes duplicate or missing panel ids in stored groups", () => {
-    expect(
-      moveLeftPanelGroup(
-        [{ panelIds: ["chats", "chats"] }, { panelIds: ["comments"] }],
-        "comments",
-        "chats",
-        "before",
-      ),
-    ).toEqual([
-      { panelIds: ["comments"] },
-      { panelIds: ["chats"] },
-      { panelIds: ["terminals"] },
-      { panelIds: ["browsers"] },
-      { panelIds: ["artifacts"] },
-      { panelIds: ["git-diff"] },
-      { panelIds: ["pull-requests"] },
-      { panelIds: ["file-tree"] },
-      { panelIds: ["sharing"] },
-    ]);
-  });
-
   it("setActivePanelIdAndExpand expands a collapsed main panel", () => {
     useLeftPanelStore.getState().setMainCollapsed("tab-a", true);
     useLeftPanelStore.getState().setActivePanelIdAndExpand("tab-a", "comments");
     expect(useLeftPanelStore.getState().isMainCollapsed("tab-a")).toBe(false);
     expect(useLeftPanelStore.getState().getActivePanelId("tab-a")).toBe(
       "comments",
-    );
-  });
-
-  it("setActivePanelIdAndExpand expands a collapsed grouped panel section", () => {
-    useLeftPanelStore.getState().setPanelSectionCollapsed("comments", true);
-
-    useLeftPanelStore.getState().setActivePanelIdAndExpand("tab-a", "comments");
-
-    expect(
-      useLeftPanelStore.getState().isPanelSectionCollapsed("comments"),
-    ).toBe(false);
-  });
-
-  it("tracks grouped panel section collapse state globally by panel", () => {
-    expect(
-      useLeftPanelStore.getState().isPanelSectionCollapsed("artifacts"),
-    ).toBe(false);
-
-    useLeftPanelStore.getState().setPanelSectionCollapsed("artifacts", true);
-
-    expect(
-      useLeftPanelStore.getState().isPanelSectionCollapsed("artifacts"),
-    ).toBe(true);
-    expect(useLeftPanelStore.getState().isPanelSectionCollapsed("chats")).toBe(
-      false,
-    );
-  });
-
-  it("keeps slice identity on no-op grouped panel section collapse writes", () => {
-    useLeftPanelStore.getState().setPanelSectionCollapsed("artifacts", true);
-    const before = useLeftPanelStore.getState().panelSectionCollapsedByPanelId;
-
-    useLeftPanelStore.getState().setPanelSectionCollapsed("artifacts", true);
-
-    expect(useLeftPanelStore.getState().panelSectionCollapsedByPanelId).toBe(
-      before,
     );
   });
 

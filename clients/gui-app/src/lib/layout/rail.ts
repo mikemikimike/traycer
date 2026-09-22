@@ -1,11 +1,10 @@
-import type { LeftPanelGroup, LeftPanelId } from "@/lib/left-panel-ids";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import type { LayoutValues, RailVisibility } from "@/lib/layout/layout-values";
 import type { RailRegionId } from "@/lib/layout/region-id";
 
 /**
  * The sidebar rail's own shape: its entries, the bijection onto the sidebar's
- * panel ids, and the two conversions between the flat list and the grouped view
- * the sidebar draws.
+ * panel ids, and the two gestures that move a panel within it.
  *
  * A leaf of the layout model, deliberately: nothing here names
  * `LayoutArrangement`, so `layout-arrangement.ts` can hold the rail among its
@@ -14,14 +13,12 @@ import type { RailRegionId } from "@/lib/layout/region-id";
  */
 
 /**
- * The rail as one flat list of items (L-25): a panel, or a divider that ends
- * the group before it. Group objects are gone, and with them drop-onto-to-
- * merge - dragging a divider IS the grouping gesture, in the rail and in the
- * inspector list alike.
+ * The rail as one flat list of items (L-155): a panel, or a divider.
  *
- * Everywhere the user reads it, a divider is called a "Group break" (L-140);
- * `divider` stays the code's and the persisted record's word for the same
- * entry, because renaming a stored shape buys nothing.
+ * A divider is a SPACER and nothing more - the user adds one, drags it and
+ * removes it, and the rail draws it as a gap at rest (L-140). It groups
+ * nothing: there is no notion of a run of panels belonging together, in the
+ * rail or in the sidebar body, and the shipped rail ships with none.
  */
 export type RailEntry =
   | { readonly kind: "panel"; readonly id: RailRegionId }
@@ -130,138 +127,80 @@ export function highestDividerSeq(rail: ReadonlyArray<RailEntry>): number {
   }, 0);
 }
 
-/**
- * Today's rail: Agents and Artifacts together, then every other panel on its
- * own - the shipped sidebar grouping, expressed as dividers.
- */
-export const DEFAULT_RAIL: ReadonlyArray<RailEntry> = [
-  { kind: "panel", id: "railAgents" },
-  { kind: "panel", id: "railArtifacts" },
-  { kind: "divider", id: railDividerId(1) },
-  { kind: "panel", id: "railTerminals" },
-  { kind: "divider", id: railDividerId(2) },
-  { kind: "panel", id: "railBrowsers" },
-  { kind: "divider", id: railDividerId(3) },
-  { kind: "panel", id: "railGitDiff" },
-  { kind: "divider", id: railDividerId(4) },
-  { kind: "panel", id: "railPullRequests" },
-  { kind: "divider", id: railDividerId(5) },
-  { kind: "panel", id: "railFileTree" },
-  { kind: "divider", id: railDividerId(6) },
-  { kind: "panel", id: "railSharing" },
-  { kind: "divider", id: railDividerId(7) },
-  { kind: "panel", id: "railComments" },
-];
+/** The shipped rail: the nine panels in order and no dividers (L-155). */
+export const DEFAULT_RAIL: ReadonlyArray<RailEntry> = RAIL_REGION_IDS.map(
+  (id): RailEntry => ({ kind: "panel", id }),
+);
 
-/** The `dividerSeq` the shipped rail has already used up. */
-export const DEFAULT_RAIL_DIVIDER_SEQ = 7;
+/** The `dividerSeq` the shipped rail has used up, so the first one is `divider:1`. */
+export const DEFAULT_RAIL_DIVIDER_SEQ = 0;
 
 /**
- * A run of panels the rail draws together, and the boundary that ends it.
+ * The panels the rail draws, in its own order, with the hidden ones dropped.
  *
- * The group view with the divider's own id kept, which is what a rail that
- * DRAWS its boundaries needs (L-115): the element between two groups has to
- * carry the id the drop places by, and `LeftPanelGroup` deliberately does not
- * know about dividers at all.
+ * THE visibility filter for the sidebar (R5R-05): the rail's icon column, the
+ * body's choice of panel and the PR retention all ask it, so a new rule about
+ * which panels are drawn is applied in one place rather than in three copies
+ * of "walk the rail, drop the dividers, drop the hidden".
  */
-interface LeftPanelRun {
-  readonly panelIds: ReadonlyArray<LeftPanelId>;
-  /** The divider that ends this run, or `null` at the rail's end. */
-  readonly dividerId: string | null;
-}
-
-/**
- * The rail read as runs of the panels a caller can see, each with the boundary
- * after it.
- *
- * Lossy in this direction, deliberately: an empty run - two dividers in a row,
- * a divider at either end, or a group whose every panel is hidden - produces
- * nothing, so a divider a user parked at the edge is inert rather than an
- * invisible empty column, and the rail never draws a boundary with nothing on
- * one side of it.
- */
-export function leftPanelRunsFromRail(
+export function visibleRailPanelIds(
   rail: ReadonlyArray<RailEntry>,
   isVisible: (panelId: LeftPanelId) => boolean,
-): ReadonlyArray<LeftPanelRun> {
-  const runs: LeftPanelRun[] = [];
-  let current: LeftPanelId[] = [];
-  for (const entry of rail) {
-    if (entry.kind === "divider") {
-      if (current.length > 0)
-        runs.push({ panelIds: current, dividerId: entry.id });
-      current = [];
-      continue;
-    }
+): ReadonlyArray<LeftPanelId> {
+  return rail.flatMap((entry): LeftPanelId[] => {
+    if (entry.kind === "divider") return [];
     const panelId = PANEL_BY_RAIL_REGION[entry.id];
-    if (isVisible(panelId)) current.push(panelId);
-  }
-  if (current.length > 0) runs.push({ panelIds: current, dividerId: null });
-  else {
-    // Every divider after the last drawn panel is one the rail has nothing to
-    // put on the far side of.
-    const last = runs.pop();
-    if (last !== undefined)
-      runs.push({ panelIds: last.panelIds, dividerId: null });
-  }
-  return runs;
-}
-
-/** Every panel there is, as the plain group view the sidebar's readers hold. */
-export function leftPanelGroupsFromRail(
-  rail: ReadonlyArray<RailEntry>,
-): ReadonlyArray<LeftPanelGroup> {
-  return leftPanelRunsFromRail(rail, everyPanel).map((run) => ({
-    panelIds: run.panelIds,
-  }));
-}
-
-function everyPanel(): boolean {
-  return true;
+    return isVisible(panelId) ? [panelId] : [];
+  });
 }
 
 /**
- * The group view read back as a rail, with one divider BETWEEN groups and
- * none at either end - the other half of the round trip, and the reason the
- * edge dividers above are never re-created.
+ * Where "Add divider" puts a new one (L-159): immediately before the last
+ * panel, never after it.
+ *
+ * Appending was right while an edge divider was inert and the gesture that
+ * mattered was dragging it into place. Under L-155 a divider is a spacer the
+ * user adds to SEE, and one past the last icon in a `justify-start` column
+ * spaces nothing, so the press reads as a no-op and the user presses again.
  */
-export function railFromLeftPanelGroups(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  seq: number,
-): ReadonlyArray<RailEntry> {
-  return railFromPanelIdGroups(
-    groups.map((group) => group.panelIds),
-    seq,
+export function railDividerInsertIndex(rail: ReadonlyArray<RailEntry>): number {
+  const lastPanelIndex = rail.reduce(
+    (found, entry, index) => (entry.kind === "panel" ? index : found),
+    -1,
+  );
+  return lastPanelIndex < 0 ? rail.length : lastPanelIndex;
+}
+
+/** Two rails holding the same entries in the same order. */
+export function areRailsEqual(
+  left: ReadonlyArray<RailEntry>,
+  right: ReadonlyArray<RailEntry>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((entry, index) => {
+      const other = right[index];
+      return entry.kind === other.kind && entry.id === other.id;
+    })
   );
 }
 
 /**
- * The same conversion from groups that are only known to be lists of strings -
- * the shape a persisted record from another store has (the L-49 carry). A
- * panel id this build does not know is dropped, and a group left empty by that
- * produces no divider.
+ * A stored panel ORDER read back as a rail, with no dividers.
+ *
+ * The shape a persisted record from another store has is a list of ids this
+ * build may not know (the L-49 carry), so an unknown id is dropped and
+ * `normalizeRail` puts back whatever the record never named.
  */
-export function railFromPanelIdGroups(
-  groups: ReadonlyArray<ReadonlyArray<string>>,
-  seq: number,
+export function railFromPanelIdOrder(
+  panelIds: ReadonlyArray<string>,
 ): ReadonlyArray<RailEntry> {
-  const rail: RailEntry[] = [];
-  let nextSeq = seq;
-  for (const panelIds of groups) {
-    const regionIds = panelIds.flatMap((panelId): RailRegionId[] => {
+  return normalizeRail(
+    panelIds.flatMap((panelId): RailEntry[] => {
       const regionId = railRegionForPanelId(panelId);
-      return regionId === null ? [] : [regionId];
-    });
-    if (regionIds.length === 0) continue;
-    if (rail.length > 0) {
-      nextSeq += 1;
-      rail.push({ kind: "divider", id: railDividerId(nextSeq) });
-    }
-    for (const regionId of regionIds) {
-      rail.push({ kind: "panel", id: regionId });
-    }
-  }
-  return normalizeRail(rail);
+      return regionId === null ? [] : [{ kind: "panel", id: regionId }];
+    }),
+  );
 }
 
 function railRegionForPanelId(panelId: string): RailRegionId | null {

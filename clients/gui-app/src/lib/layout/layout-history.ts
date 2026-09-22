@@ -182,6 +182,12 @@ function rebaseArrangement(
       next.shownProfiles,
     ),
     usageHost: pick(entry.usageHost, previous.usageHost, next.usageHost),
+    usageSide: pick(entry.usageSide, previous.usageSide, next.usageSide),
+    resourceHost: pick(
+      entry.resourceHost,
+      previous.resourceHost,
+      next.resourceHost,
+    ),
     resourceSide: pick(
       entry.resourceSide,
       previous.resourceSide,
@@ -191,6 +197,11 @@ function rebaseArrangement(
       entry.minimapSide,
       previous.minimapSide,
       next.minimapSide,
+    ),
+    statusBarParked: pick(
+      entry.statusBarParked,
+      previous.statusBarParked,
+      next.statusBarParked,
     ),
     pinnedContextFieldOrder: pick(
       entry.pinnedContextFieldOrder,

@@ -49,10 +49,7 @@ import {
   type PrRepoGroup,
 } from "@/lib/pr/pr-list-projection";
 import { cn } from "@/lib/utils";
-import {
-  useLeftPanelSectionCollapsed,
-  useMainPanelCollapsed,
-} from "@/stores/epics/left-panel-store";
+import { useMainPanelCollapsed } from "@/stores/epics/left-panel-store";
 import { tileIntent } from "@/lib/canvas/tile-open/intent";
 import {
   clearSidebarNodeRevealRequest,
@@ -88,14 +85,11 @@ function PrPanelBodyLive(
 ): ReactNode {
   const hostId = props.pin.resolvedHostId;
   const mainCollapsed = useMainPanelCollapsed(props.tabId);
-  const sectionCollapsed = useLeftPanelSectionCollapsed("pull-requests");
   const methodSupport = useStreamMethodSupport("pr.subscribeListForEpic");
   const methodSupported = methodSupport !== "unsupported";
   const isMobileViewport = useIsMobileViewport();
 
-  const surfaceHidden = isMobileViewport
-    ? false
-    : mainCollapsed || sectionCollapsed;
+  const surfaceHidden = isMobileViewport ? false : mainCollapsed;
   const enabled = !surfaceHidden && methodSupported;
 
   const subscription = usePrListSubscription({

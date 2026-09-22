@@ -47,6 +47,17 @@ export function ChatDockChipArrival(props: {
 }
 
 /**
+ * The two lines above a pill's click affordance: what the member is called,
+ * and what it counts (L-153).
+ */
+export interface ChatDockChipTooltipLines {
+  /** The member's own name, from `CHAT_DOCK_SECTION_NAME`. */
+  readonly name: string;
+  /** Its counts: "3 files, +47 −9", "2 of 5 done", "2 running · 1 held". */
+  readonly detail: string;
+}
+
+/**
  * The short forms whose numbers roll: one count (`3`), or two with a fixed
  * separator between them (`2 · 1`, `2/5`).
  *
@@ -90,6 +101,40 @@ function ChipCounts(props: { readonly text: string }): ReactNode {
   );
 }
 
+/**
+ * A pill's tooltip: what it is, what it counts, and what a click will do
+ * (L-153).
+ *
+ * Three lines in one small block, in falling weight, because they answer three
+ * different questions and only the first is always needed. The name is the
+ * member's own, so someone who cannot tell the file-diff glyph from the
+ * background one gets the word. The counts are the pill's own two
+ * measurements, spelled the way the pill spells them. The affordance is last
+ * and quietest - it is the least new information on screen once you have
+ * hovered a pill twice - and it follows `aria-pressed` rather than restating
+ * it, so the open pill offers to close and never the other way round.
+ *
+ * One flex column inside the tooltip rather than three children of it:
+ * `TooltipContent` is a row (`inline-flex items-center`), so three siblings
+ * would become three columns and each would wrap into a ribbon - the same
+ * trap `git-watcher-status-notice.tsx` records. Toned against `background`
+ * rather than `muted-foreground`, because this surface is INVERSE.
+ */
+function ChatDockChipTooltip(props: {
+  readonly lines: ChatDockChipTooltipLines;
+  readonly expanded: boolean;
+}): ReactNode {
+  return (
+    <span className="flex w-full flex-col gap-0.5 text-left">
+      <span className="font-medium">{props.lines.name}</span>
+      <span className="text-background/70">{props.lines.detail}</span>
+      <span className="text-background/55">
+        {props.expanded ? "Click to close" : "Click to open"}
+      </span>
+    </span>
+  );
+}
+
 interface ChatDockCompactChipProps {
   /** Icon only - the sentence a screen reader gets is `label`. */
   readonly icon: ReactNode;
@@ -123,6 +168,17 @@ interface ChatDockCompactChipProps {
    * thing; let the button role and the pressed state carry the action.
    */
   readonly label: string;
+  /**
+   * The two lines above the click affordance in this chip's tooltip, or
+   * `null` for a chip that has none.
+   *
+   * `null` is what the layout editor's form passes: it draws these chips as
+   * PICTURES (`region-depiction.tsx`), with no strip behind them, no counts
+   * and an `onClick` that does nothing, so a tooltip reading "Click to open"
+   * under one would be a lie. Those chips keep the one-line accessible
+   * sentence this component has always shown.
+   */
+  readonly tooltipLines: ChatDockChipTooltipLines | null;
   /**
    * What the chip is standing in for, right now, as one comparable token. The
    * chip pulses once whenever it ARRIVES at a non-null value - including the
@@ -198,6 +254,7 @@ function pulseAttribute(
  */
 export function ChatDockCompactChip(props: ChatDockCompactChipProps) {
   const arrivalSuppressed = useContext(ChipArrivalSuppressedContext);
+  const tooltipLines = props.tooltipLines;
   const [pulse, setPulse] = useState<PulseState>(() => ({
     token: props.pulseToken,
     pulsing: !arrivalSuppressed && props.pulseToken !== null,
@@ -214,7 +271,13 @@ export function ChatDockCompactChip(props: ChatDockCompactChipProps) {
 
   return (
     <TooltipWrapper
-      label={props.label}
+      label={
+        tooltipLines === null ? (
+          props.label
+        ) : (
+          <ChatDockChipTooltip lines={tooltipLines} expanded={props.expanded} />
+        )
+      }
       side="top"
       sideOffset={undefined}
       align={undefined}

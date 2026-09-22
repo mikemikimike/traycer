@@ -11,7 +11,8 @@ import {
 import { DEFAULT_DOCK_ORDER } from "@/lib/layout/layout-arrangement";
 import {
   DEFAULT_RAIL,
-  leftPanelGroupsFromRail,
+  leftPanelIdForRailRegion,
+  railDividerId,
   type RailEntry,
 } from "@/lib/layout/rail";
 import type { RegionId, ToolbarRegionId } from "@/lib/layout/region-id";
@@ -228,10 +229,21 @@ function mountRail(
   return nodes;
 }
 
-function railGroups(): ReadonlyArray<string> {
-  return leftPanelGroupsFromRail(
-    useLayoutStore.getState().arrangement.rail,
-  ).map((group) => group.panelIds.join(","));
+/** The stored rail, flattened to one id per entry (L-155: no groups). */
+function railOrder(): ReadonlyArray<string> {
+  return useLayoutStore
+    .getState()
+    .arrangement.rail.map((entry) =>
+      entry.kind === "panel" ? leftPanelIdForRailRegion(entry.id) : entry.id,
+    );
+}
+
+/** Seeds the stored rail directly, the same way `setToolbarLeft` does for the
+ * toolbar - so a test can mount a rail (with a divider the shipped default no
+ * longer carries) that matches what the drop is actually placed against. */
+function setRail(rail: ReadonlyArray<RailEntry>): void {
+  const arrangement = useLayoutStore.getState().arrangement;
+  useLayoutStore.setState({ arrangement: { ...arrangement, rail } });
 }
 
 /** One surface's own laid-out box, marked the way the real surfaces mark it. */
@@ -424,25 +436,27 @@ describe("dragging a region on the canvas", () => {
 });
 
 /**
- * The sidebar rail, which L-115 restored to the canvas: nine icons and every
- * divider in one cluster, and a drop placed by the entry's id.
+ * The sidebar rail, which L-115 restored to the canvas: every panel and
+ * divider in one flat cluster (L-155 - no groups, so a drop places one entry
+ * beside another and nothing more), and a drop placed by the entry's id.
  */
 describe("dragging in the sidebar rail", () => {
-  it("moves a panel across a boundary, which changes the group it is in", () => {
-    // Artifacts sits at 40..76, the boundary that ends its group at 80..88 and
-    // Terminals at 92..128. A slot is claimed when the leading edge passes the
-    // neighbour's centre (L-143), so 24px down carries Artifacts' bottom edge
-    // to 100 - past the boundary's centre at 84, short of Terminals' at 110.
-    // The engine's grab point is the move that crossed the 6px activation
-    // distance, which this helper sends at 8, so the member travels 16: above
-    // the 12px claim floor as well (L-150(4)).
+  it("moves a panel past its neighbour, placed by id", () => {
+    // Artifacts sits at 40..76 and Terminals at 80..116 (centre 98). A slot is
+    // claimed when the leading edge passes the neighbour's centre (L-143).
+    // The engine's grab point is the move that crosses the 6px activation
+    // distance, which this helper sends at clientY:8, so a final clientY:40
+    // travels 32 past that grab point - carrying Artifacts' bottom edge to
+    // 40 + 32 + 36 = 108, past Terminals' centre at 98 and short of Browsers'
+    // at 138.
     const nodes = mountRail(DEFAULT_RAIL);
 
-    dragBy(nodes[1], { clientY: 24 });
+    dragBy(nodes[1], { clientY: 40 });
 
-    expect(railGroups()).toEqual([
+    expect(railOrder()).toEqual([
       "chats",
-      "artifacts,terminals",
+      "terminals",
+      "artifacts",
       "browsers",
       "git-diff",
       "pull-requests",
@@ -453,16 +467,28 @@ describe("dragging in the sidebar rail", () => {
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
 
-  it("moves a DIVIDER, which is the gesture that merges two groups", () => {
-    // The boundary after Terminals dragged up past Terminals itself: a
-    // divider is an entry like any other, so the same drop places it.
-    const nodes = mountRail(DEFAULT_RAIL);
+  it("moves a DIVIDER, placed the same way a panel is", () => {
+    // A divider the user added between Chats and Artifacts (which the drop
+    // pushes to 52..88, centre 70). The same clientY:40 (32px past the
+    // clientY:8 grab point) carries the divider's leading edge to 80, past
+    // Artifacts' centre and short of Terminals' at 110, so it settles right
+    // after Artifacts instead of before it.
+    const entries: ReadonlyArray<RailEntry> = [
+      ...DEFAULT_RAIL.slice(0, 1),
+      { kind: "divider", id: railDividerId(1) },
+      ...DEFAULT_RAIL.slice(1),
+    ];
+    setRail(entries);
+    const nodes = mountRail(entries);
 
-    dragBy(nodes[4], { clientY: -32 });
+    dragBy(nodes[1], { clientY: 40 });
 
-    expect(railGroups()).toEqual([
-      "chats,artifacts",
-      "terminals,browsers",
+    expect(railOrder()).toEqual([
+      "chats",
+      "artifacts",
+      railDividerId(1),
+      "terminals",
+      "browsers",
       "git-diff",
       "pull-requests",
       "file-tree",
@@ -474,17 +500,18 @@ describe("dragging in the sidebar rail", () => {
 
   it("keeps a hidden panel beside the neighbours it had", () => {
     // Browsers is hidden, so the rail draws every entry but that one; the
-    // boundaries around it are still drawn, and the stored rail keeps it.
+    // stored rail still keeps its place relative to its own neighbours.
     const drawn = DEFAULT_RAIL.filter(
       (entry) => !(entry.kind === "panel" && entry.id === "railBrowsers"),
     );
     const nodes = mountRail(drawn);
 
-    dragBy(nodes[1], { clientY: 24 });
+    dragBy(nodes[1], { clientY: 40 });
 
-    expect(railGroups()).toEqual([
+    expect(railOrder()).toEqual([
       "chats",
-      "artifacts,terminals",
+      "terminals",
+      "artifacts",
       "browsers",
       "git-diff",
       "pull-requests",

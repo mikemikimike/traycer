@@ -2,13 +2,12 @@ import {
   DEFAULT_ARRANGEMENT,
   isAutomaticLimitSelection,
   ORDER_GROUP_IDS,
+  type BarHost,
   type EdgeSide,
   type LayoutArrangement,
   type OrderGroupId,
   type StatusBarProviderLimitSelection,
-  type UsageHost,
 } from "@/lib/layout/layout-arrangement";
-import { leftPanelGroupsFromRail } from "@/lib/layout/rail";
 import {
   overrideKeys,
   sameFieldList,
@@ -113,8 +112,8 @@ export function resetToBase(snapshot: LayoutSnapshot): LayoutSnapshot {
 // ── The floor (L-20's "Reset everything", P-6) ──────────────────────────────
 //
 // `changeCount` and `resetToBase` are deliberately values-only, and
-// `positionRowChanged` covers the usage host, the two sides and the five order
-// groups. That leaves three arrangement fields nothing measured and nothing
+// `positionRowChanged` covers the two bar placements, the minimap side and
+// the five order groups. That leaves three fields nothing measured and nothing
 // put back - `hiddenProviders`, `providerLimits` and `mobileFooter` - so a
 // page reading "Default" with no changes could have three providers hidden and
 // the mobile footer off. The predicates below are what a changed dot and a
@@ -186,7 +185,9 @@ export function arrangementChanged(arrangement: LayoutArrangement): boolean {
   return (
     reorderedGroups(arrangement).length > 0 ||
     arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost ||
+    arrangement.usageSide !== DEFAULT_ARRANGEMENT.usageSide ||
     arrangement.minimapSide !== DEFAULT_ARRANGEMENT.minimapSide ||
+    arrangement.resourceHost !== DEFAULT_ARRANGEMENT.resourceHost ||
     arrangement.resourceSide !== DEFAULT_ARRANGEMENT.resourceSide ||
     usageProvidersChanged(arrangement) ||
     mobileFooterChanged(arrangement)
@@ -228,9 +229,9 @@ export function anythingChanged(snapshot: LayoutSnapshot): boolean {
 /**
  * One order group's ids.
  *
- * The rail is read as its GROUPING rather than as its entries: divider ids are
+ * A rail divider stands in as a mark rather than as its own id: divider ids are
  * issued from a counter that only ever increases, so a divider removed and
- * added back would leave the rail permanently "reordered" against a default it
+ * added back would leave the rail permanently "reordered" against a rail it
  * draws identically to.
  */
 function orderIds(
@@ -245,11 +246,8 @@ function orderIds(
     case "toolbarRight":
       return arrangement.toolbarRight;
     case "rail":
-      return leftPanelGroupsFromRail(arrangement.rail).flatMap(
-        (railGroup, index): string[] =>
-          index === 0
-            ? [...railGroup.panelIds]
-            : [GROUP_BOUNDARY, ...railGroup.panelIds],
+      return arrangement.rail.map((entry) =>
+        entry.kind === "divider" ? DIVIDER_MARK : entry.id,
       );
     case "usageProviders":
       return arrangement.usageProviders;
@@ -257,7 +255,7 @@ function orderIds(
 }
 
 /** Stands for a divider in the rail's comparable order. Not a panel id. */
-const GROUP_BOUNDARY = "|";
+const DIVIDER_MARK = "|";
 
 function defaultOrderIds(group: OrderGroupId): ReadonlyArray<string> {
   return orderIds(DEFAULT_ARRANGEMENT, group);
@@ -365,8 +363,10 @@ export interface LayoutSnapshotProperties {
   readonly [key: string]: string | number | boolean;
   readonly base_preset: LayoutPresetId;
   readonly changed_from_default_count: number;
-  readonly layout_usage_host: UsageHost;
+  readonly layout_usage_host: BarHost;
+  readonly layout_usage_side: EdgeSide;
   readonly layout_minimap_side: EdgeSide;
+  readonly layout_resource_host: BarHost;
   readonly layout_resource_side: EdgeSide;
   readonly layout_dock_reordered: boolean;
   readonly layout_toolbar_left_reordered: boolean;
@@ -400,7 +400,9 @@ export function layoutSnapshotProperties(
     base_preset: snapshot.basePreset,
     changed_from_default_count: changedFromDefaultCount,
     layout_usage_host: snapshot.arrangement.usageHost,
+    layout_usage_side: snapshot.arrangement.usageSide,
     layout_minimap_side: snapshot.arrangement.minimapSide,
+    layout_resource_host: snapshot.arrangement.resourceHost,
     layout_resource_side: snapshot.arrangement.resourceSide,
     layout_dock_reordered: reordered.has("dock"),
     layout_toolbar_left_reordered: reordered.has("toolbarLeft"),

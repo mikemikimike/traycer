@@ -21,6 +21,7 @@ import {
   ChatDockChipArrival,
   ChatDockCompactChip,
 } from "@/components/chat/chat-dock-compact-chip";
+import { CHAT_DOCK_SECTION_NAME } from "@/lib/chat/chat-dock-sections";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
 import { LayoutClusterContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
@@ -237,6 +238,16 @@ function ChatDockCompactPill(props: {
         working={props.chip.working}
         lineDeltas={props.chip.lineDeltas}
         label={props.chip.label}
+        // The tooltip's first line is the member's own name, read off the
+        // dock's one name table rather than carried per chip (L-153): the
+        // pill, the panel header and the layout form must all call a member
+        // the same thing, and a model field would be a fourth place to say
+        // so. The counts beside it are the model's, because only the tile
+        // that built the chip knows them.
+        tooltipLines={{
+          name: CHAT_DOCK_SECTION_NAME[props.chip.section],
+          detail: props.chip.detail,
+        }}
         pulseToken={props.chip.pulseToken}
         expanded={props.expanded}
         controls={props.controls}
@@ -282,6 +293,16 @@ export function ChatDockCompactStrip(props: {
    * passed down rather than read here because the dock owns it already.
    */
   readonly snapshotLoaded: boolean;
+  /**
+   * Called once the latch below flips, so the dock can gate the attached
+   * panel's grow on the same fact the pills gate their ring on (L-152).
+   *
+   * Reported rather than read: "this component has committed at least once"
+   * is the one thing a render cannot compute, and this file is where that is
+   * already reasoned about and where the lint rule for it is already
+   * answered. Must be stable - it is an effect dependency.
+   */
+  readonly onSettled: () => void;
 }): ReactNode {
   // Destructured before it reaches a `ref=`: `react-hooks/refs` reads a ref
   // callback taken off a props BAG as a ref access during render.
@@ -318,10 +339,12 @@ export function ChatDockCompactStrip(props: {
   // `eslint.config.mjs` rather than worked around; the reasoning is there.
   const [settled, setSettled] = useState(false);
   const snapshotLoaded = props.snapshotLoaded;
+  const onSettled = props.onSettled;
   useEffect(() => {
     if (!snapshotLoaded || !hasChips) return;
     setSettled(true);
-  }, [snapshotLoaded, hasChips]);
+    onSettled();
+  }, [snapshotLoaded, hasChips, onSettled]);
   if (value === null || !hasChips) return null;
   return (
     <LayoutClusterContextMenu>

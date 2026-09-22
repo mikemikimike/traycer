@@ -33,8 +33,13 @@ const FLASH_ATTRIBUTE = "data-settings-anchor-flash";
  * On the scrolling pane each settings surface wraps its panel in — the page a
  * `null`-anchor request means. Owned by the surfaces, not by the panels, so
  * every section has one however bespoke its panel is.
+ *
+ * Exported because a panel may legitimately need to find its own scrollport -
+ * `layout-settings-panel.tsx` roots its sticky filter's observer on it. One
+ * name for the attribute means renaming it stays a rename, rather than leaving
+ * a second copy that compiles and silently finds nothing.
  */
-const PANEL_PANE_SELECTOR = "[data-settings-panel-pane]";
+export const PANEL_PANE_SELECTOR = "[data-settings-panel-pane]";
 
 /**
  * Scrolls to, and briefly marks, the element a search result asked for.

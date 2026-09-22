@@ -31,14 +31,12 @@ const tab: Extract<HeaderTab, { kind: "sample-workspace" }> = {
   // the app column, which is the other half of "you are editing this screen"
   // and uses this same token.
   //
-  // ONE treatment across both halves (L-138): the frame is the hollow amber
-  // outline around the screen and this tab is the one SOLID amber object
-  // inside it - `header-tab-visual.tsx` fills the tab's real silhouette with
-  // `--layout-session-tab-fill`, derived from this same token, and outlines it
-  // in the token itself. At rest - the user clicked another tab mid-session -
-  // `SessionTabMark` wears it as a cap instead, at a thickness that reads next
-  // to the frame and outside the passive dim that calms every other tab
-  // (L-132).
+  // ONE treatment across both halves (L-138, L-163): the frame is the hollow
+  // amber outline around the screen, and while this tab is ACTIVE it is the
+  // one solid amber object inside it - `header-tab-visual.tsx` fills the tab's
+  // real silhouette with this colour and leaves its edge to the ordinary
+  // border. At rest the tab wears it as a cap along its bottom edge instead,
+  // outside the passive dim that calms every other tab (L-132).
   //
   // The pair's FOREGROUND rather than its tint: `--warning` measures 2.56:1 to
   // 2.95:1 against the surfaces this lands on in every light palette, under

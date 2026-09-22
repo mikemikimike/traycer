@@ -25,11 +25,10 @@ import {
   WORKSPACE_FILE_DND_TYPE,
   getArtifactTabDropIndexFromPoint,
   getEpicCanvasDropPreview,
-  getLeftPanelGroupDropPreview,
+  getLeftPanelBodyDropPreview,
   type EpicCanvasDragSourceData,
   type EpicCanvasDropPreview,
   type EpicCanvasDropTargetData,
-  type LeftPanelSectionRect,
   type PointLike,
   type RectLike,
 } from "@/components/epic-canvas/dnd/dnd";
@@ -50,25 +49,15 @@ import {
   type GitDiffTileRef,
   type ManagedCommandOutputTileRef,
 } from "@/stores/epics/canvas/types";
+import { type RootCreatePanelId } from "@/stores/epics/left-panel-store";
+import { type LeftPanelId } from "@/lib/left-panel-ids";
+import { areRailsEqual, type RailEntry } from "@/lib/layout/rail";
 import {
-  moveLeftPanelGroup,
-  moveLeftPanelGroupToEnd,
-  moveLeftPanelGroupToPanelPosition,
-  moveLeftPanelToEnd,
-  moveLeftPanelToGroup,
-  moveLeftPanelToGroupPosition,
-  moveLeftPanelToPanelPosition,
-  type RootCreatePanelId,
-} from "@/stores/epics/left-panel-store";
-import {
-  areLeftPanelGroupsEqual,
-  type LeftPanelGroup,
-  type LeftPanelId,
-} from "@/lib/left-panel-ids";
-import {
-  applyLeftPanelGroups,
-  currentLeftPanelGroups,
-} from "@/lib/layout/rail-view";
+  moveRailPanelBeside,
+  moveRailPanelToEnd,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
+import { applyRail, currentLayoutArrangement } from "@/lib/layout/rail-view";
 import type { QueryClient } from "@tanstack/react-query";
 import type { HostRpcRegistry } from "@traycer/protocol/host/index";
 import type { HostRuntimeBinding } from "@/providers/host-runtime-provider";
@@ -113,7 +102,7 @@ export function isCanvasDropCompatible(
     return (
       (target.kind === "left-panel-rail-item" ||
         target.kind === "left-panel-rail-list" ||
-        target.kind === "left-panel-group") &&
+        target.kind === "left-panel-body") &&
       target.viewTabId === source.viewTabId
     );
   }
@@ -232,18 +221,15 @@ function getElementRect(element: Element): RectLike {
   };
 }
 
+/** The one section the sidebar body draws, measured where the drop aims. */
 function getLeftPanelSectionRect(
-  groupElement: Element,
+  bodyElement: Element,
   panelId: LeftPanelId,
-): LeftPanelSectionRect | null {
-  const sectionElement = groupElement.querySelector(
+): RectLike | null {
+  const sectionElement = bodyElement.querySelector(
     `[data-left-panel-section-id="${panelId}"]`,
   );
-  if (sectionElement === null) return null;
-  return {
-    panelId,
-    rect: getElementRect(sectionElement),
-  };
+  return sectionElement === null ? null : getElementRect(sectionElement);
 }
 
 export interface ResolveCanvasDropPreviewInput {
@@ -252,9 +238,9 @@ export interface ResolveCanvasDropPreviewInput {
   readonly point: PointLike;
   readonly targetRect: RectLike | null;
   /**
-   * The droppable's DOM element - only required for `left-panel-group`
-   * targets (section-rect scanning); every other target resolves from
-   * `targetRect` alone.
+   * The droppable's DOM element - only required for `left-panel-body`
+   * targets, whose preview splits the drawn section rather than the
+   * droppable; every other target resolves from `targetRect` alone.
    */
   readonly targetElement: Element | null;
   /** Translated rect of the dragged chip (tab-over-tab center math). */
@@ -266,18 +252,18 @@ export function resolveCanvasDropPreview(
 ): EpicCanvasDropPreview {
   const { source, target, point, targetRect, targetElement, activeRect } =
     input;
-  if (target.kind === "left-panel-group") {
+  if (target.kind === "left-panel-body") {
     if (source.kind !== LEFT_PANEL_RAIL_ITEM_DND_TYPE) return null;
     if (targetElement === null) return null;
-    const sectionRects: ReadonlyArray<LeftPanelSectionRect> =
-      target.panelIds.flatMap((panelId) => {
-        if (source.origin === "panel-section" && source.panelId === panelId) {
-          return [];
-        }
-        const sectionRect = getLeftPanelSectionRect(targetElement, panelId);
-        return sectionRect === null ? [] : [sectionRect];
-      });
-    return getLeftPanelGroupDropPreview(target, sectionRects, point);
+    // A section dragged onto its own body is the one drop with nothing to
+    // say, since the only panel there to place it beside is itself.
+    if (source.origin === "panel-section" && source.panelId === target.panelId)
+      return null;
+    return getLeftPanelBodyDropPreview(
+      target,
+      getLeftPanelSectionRect(targetElement, target.panelId),
+      point,
+    );
   }
   if (
     target.kind === "artifact-tab" &&
@@ -324,56 +310,39 @@ type LeftPanelRailDragSource = Extract<
 >;
 
 /**
- * Single source of truth for "left-panel drop → next rail groups". Both the
+ * Single source of truth for "left-panel drop → next rail". Both the
  * preview-time noop check and the drag-end commit resolve through this pure
  * function, so they can never disagree on what a drop does. Returns the next
- * groups (structurally equal to `groups` for a no-op position, e.g. combining
- * a section into its own group) or null when the preview is not a left-panel
- * preview.
+ * rail (equal to `rail` for a no-op position) or null when the preview is not
+ * a left-panel preview.
+ *
+ * The rail is one flat list of panels and dividers (L-155), so a drop can only
+ * say "this panel goes on this side of that one" - and it says the same thing
+ * whether the icon came off the rail or off the panel body's own section
+ * header, which is why `source.origin` no longer parts the branches.
+ *
+ * It resolves through the arrangement's own movers rather than a second copy
+ * of them (R5R-06), so the app's rail drag and the editor's canvas drop place
+ * a member by exactly the same rule.
  */
-export function resolveLeftPanelGroupsForDrop(
+export function resolveRailForDrop(
   source: LeftPanelRailDragSource,
   preview: NonNullable<EpicCanvasDropPreview>,
-  groups: ReadonlyArray<LeftPanelGroup>,
-): ReadonlyArray<LeftPanelGroup> | null {
-  if (preview.kind === "left-panel-rail") {
-    if (source.origin === "rail") {
-      return moveLeftPanelGroup(
-        groups,
-        source.panelId,
-        preview.panelId,
-        preview.position,
-      );
-    }
-    if (preview.position === "combine") {
-      return moveLeftPanelToGroup(groups, source.panelId, preview.panelId);
-    }
-    return moveLeftPanelToGroupPosition(
-      groups,
+  arrangement: LayoutArrangement,
+): ReadonlyArray<RailEntry> | null {
+  if (
+    preview.kind === "left-panel-rail" ||
+    preview.kind === "left-panel-section"
+  ) {
+    return moveRailPanelBeside(
+      arrangement,
       source.panelId,
       preview.panelId,
-      preview.position,
-    );
-  }
-  if (preview.kind === "left-panel-section") {
-    return source.origin === "rail"
-      ? moveLeftPanelGroupToPanelPosition(
-          groups,
-          source.panelId,
-          preview.panelId,
-          preview.position,
-        )
-      : moveLeftPanelToPanelPosition(
-          groups,
-          source.panelId,
-          preview.panelId,
-          preview.position,
-        );
+      preview.position === "after",
+    ).rail;
   }
   if (preview.kind === "left-panel-rail-list") {
-    return source.origin === "rail"
-      ? moveLeftPanelGroupToEnd(groups, source.panelId)
-      : moveLeftPanelToEnd(groups, source.panelId);
+    return moveRailPanelToEnd(arrangement, source.panelId).rail;
   }
   return null;
 }
@@ -384,15 +353,9 @@ export function isLeftPanelDropNoop(
 ): boolean {
   if (source.kind !== LEFT_PANEL_RAIL_ITEM_DND_TYPE) return false;
   if (preview === null) return false;
-  const currentGroups = currentLeftPanelGroups();
-  const nextGroups = resolveLeftPanelGroupsForDrop(
-    source,
-    preview,
-    currentGroups,
-  );
-  return (
-    nextGroups !== null && areLeftPanelGroupsEqual(currentGroups, nextGroups)
-  );
+  const arrangement = currentLayoutArrangement();
+  const nextRail = resolveRailForDrop(source, preview, arrangement);
+  return nextRail !== null && areRailsEqual(arrangement.rail, nextRail);
 }
 
 // ── Commits ─────────────────────────────────────────────────────────────────
@@ -542,7 +505,7 @@ function placeResolvedCanvasTile(
   if (
     target.kind === "left-panel-rail-item" ||
     target.kind === "left-panel-rail-list" ||
-    target.kind === "left-panel-group"
+    target.kind === "left-panel-body"
   ) {
     return false;
   }
@@ -582,13 +545,13 @@ export function commitResolvedCanvasDrop(
     );
   }
   if (drop.source.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE) {
-    const nextGroups = resolveLeftPanelGroupsForDrop(
+    const nextRail = resolveRailForDrop(
       drop.source,
       drop.preview,
-      currentLeftPanelGroups(),
+      currentLayoutArrangement(),
     );
-    if (nextGroups !== null) {
-      applyLeftPanelGroups(nextGroups);
+    if (nextRail !== null) {
+      applyRail(nextRail);
       return true;
     }
     return false;

@@ -37,7 +37,7 @@ export interface SortableListItem<Id extends string> {
    * band.
    */
   readonly glyph: ReactNode;
-  /** A group boundary (L-25) rather than a member: a rule, with no state. */
+  /** A divider (L-155) rather than a region: a rule, with no state. */
   readonly divider: boolean;
   /** Drawn muted: the member is hidden. */
   readonly dimmed: boolean;

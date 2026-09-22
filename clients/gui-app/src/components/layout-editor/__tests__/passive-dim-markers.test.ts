@@ -47,7 +47,7 @@ interface PlanLeafSet {
  */
 const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
   {
-    item: "app-header.tsx: history nav, update, history, bell, identity - but NOT HeaderUsageControls",
+    item: "app-header.tsx: history nav, update, history, bell, identity - but NOT HeaderBarCluster",
     files: {
       "components/layout/header/history-nav-buttons.tsx": 1,
       "components/layout/header/app-update-button.tsx": 3,
@@ -114,7 +114,7 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
     item: "epic-sidebar-rail.tsx: the non-panel chrome",
     files: {},
     deviation:
-      "The rail has no non-panel chrome. Every child is a RailGroupButton, " +
+      "The rail has no non-panel chrome. Every child is a RailPanelButton, " +
       "which IS a region, plus the transient drop previews that exist only " +
       "during a drag; the rail container itself is an ancestor of all nine " +
       "regions. Marking anything here would dim the regions.",

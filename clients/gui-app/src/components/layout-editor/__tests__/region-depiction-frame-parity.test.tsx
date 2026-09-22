@@ -184,6 +184,7 @@ const CHIP: ChatDockCompactChipModel = {
   lineDeltas: null,
   text: "1",
   label: "Changed files. 1 file changed.",
+  detail: "1 file",
   pulseToken: null,
 };
 

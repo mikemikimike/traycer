@@ -153,33 +153,22 @@ export const LAYOUT = defineSettingsSection("layout", {
     availableWhen: alwaysAvailable,
     keywords: ["footer", "strip", "usage", "resources"],
   },
-  /**
-   * The other surface-tier row on the Status bar card (D7, L-126): `usageHost`
-   * moves Usage limits AND Resource monitor into the top bar and removes the
-   * strip, so it belongs to no region either.
-   *
-   * It has an entry of its own because it was the one setting on this page
-   * that Settings search could not find: it used to be an `InspectorRow` -
-   * the last instance of the dock's scale sitting at surface level on the page
-   * (P-4) - and an `InspectorRow` carries no anchor because a grammar row is
-   * fixed structure rather than a searchable setting. As a `SettingsRow` with
-   * this definition it is both.
+  /*
+   * There is no surface-tier row for where the strip's readings live any more
+   * (L-156). "Show these in" moved both at once and said so in its own copy;
+   * each reading now names its own bar and its own end of it, on its own
+   * region row, which is where the page draws them - the same Position and
+   * Side rows the inspector draws (L-03). A region's search entries are
+   * generated from the registry
+   * (`components/layout-editor/layout-search.definitions.ts`), so the two
+   * picks are findable without an entry here.
    */
-  usageHost: {
-    kind: "row",
-    group: "statusBar",
-    search: { anchor: "layout-usage-host" },
-    label: "Show these in",
-    description:
-      "Usage limits and Resource monitor move together. In the top bar there is no status bar left to draw.",
-    availableWhen: alwaysAvailable,
-    keywords: ["usage", "resources", "top bar", "status bar", "move", "header"],
-  },
   /**
    * The grammar's surface tier (L-51): it belongs to no region, and it decides
    * whether the strip exists at all on a narrow viewport. Only the installed
    * mobile app withholds the footer by default, so only that build has the
-   * switch; every other build draws the strip whenever `usageHost` says so.
+   * switch; every other build draws the strip whenever a reading still names
+   * it.
    */
   mobileFooter: {
     kind: "row",

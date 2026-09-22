@@ -110,10 +110,10 @@ export function regionRowItem<Id extends RegionId>(
 }
 
 /**
- * A group boundary as a first-class row: draggable, and removable (L-25).
+ * A divider as a first-class row: draggable, and removable (L-155).
  *
- * "Group break" is the only name the user ever sees for it (L-140), and the
- * row's Remove button takes its accessible name from this label.
+ * "Divider" is the only name the user ever sees for it, and the row's Remove
+ * button takes its accessible name from this label.
  */
 export function dividerOrderItem(
   entryId: string,
@@ -122,7 +122,7 @@ export function dividerOrderItem(
   return {
     ...BARE_ROW,
     id: entryId,
-    label: "Group break",
+    label: "Divider",
     icon: null,
     divider: true,
     dimmed: false,

@@ -12,7 +12,7 @@ import {
 
 /**
  * The sidebar group's lines in document order, each named by what it is: a
- * region row by its region id, a break by the divider's own id.
+ * region row by its region id, a divider by its own id.
  *
  * Read off the DOM rather than off a test-only hook, because the order on
  * screen is the whole subject (LV2-09) - the index used to draw the nine
@@ -72,8 +72,8 @@ afterEach(() => {
   useLayoutEditorStore.getState().endSession();
 });
 
-describe("the sidebar index follows the rail (LV2-09)", () => {
-  it("lists the panels in the rail's order and its breaks between them", () => {
+describe("the sidebar index follows the rail (LV2-09, LV4-05)", () => {
+  it("lists the panels in the rail's order", () => {
     render(<InspectorIndex onPreviewPreset={() => {}} />);
 
     // The shipped rail is not the registry's order - Artifacts is declared
@@ -81,6 +81,33 @@ describe("the sidebar index follows the rail (LV2-09)", () => {
     // anything having to be moved first.
     expect(railPanelIds(DEFAULT_RAIL)).not.toEqual(registrySidebarIds());
     expect(sidebarLineIds()).toEqual(railLineIds(DEFAULT_RAIL));
+  });
+
+  it("shows no divider by default, because the rail has none (L-155)", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+
+    expect(sidebarLineIds().filter((id) => id.startsWith("divider:"))).toEqual(
+      [],
+    );
+  });
+
+  it("shows EVERY divider the rail holds, wherever it sits", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+
+    // One at the head, two in a row, one at the tail: the index is the rail's
+    // membership, so all four are lines here and all four are rows in the
+    // Position list beside it (LV4-05).
+    setRail([
+      { kind: "divider", id: railDividerId(20) },
+      { kind: "panel", id: "railAgents" },
+      { kind: "divider", id: railDividerId(21) },
+      { kind: "divider", id: railDividerId(22) },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "divider", id: railDividerId(23) },
+    ]);
+
+    const rail = useLayoutStore.getState().arrangement.rail;
+    expect(sidebarLineIds()).toEqual(railLineIds(rail));
   });
 
   it("follows a reorder", () => {
@@ -94,43 +121,19 @@ describe("the sidebar index follows the rail (LV2-09)", () => {
     });
 
     const rail = useLayoutStore.getState().arrangement.rail;
-    const lines = sidebarLineIds();
-    expect(lines.at(0)).toBe("railComments");
-    expect(lines.filter((id) => !id.startsWith("divider:"))).toEqual(
-      railPanelIds(rail),
-    );
-    // Comments was the rail's last panel, so the break above it is now the
-    // rail's last entry and separates nothing - the same rule that hides a
-    // divider parked at either end.
-    expect(rail.at(-1)?.id).toBe(railDividerId(7));
-    expect(lines).not.toContain(railDividerId(7));
+    expect(sidebarLineIds().at(0)).toBe("railComments");
+    expect(sidebarLineIds()).toEqual(railLineIds(rail));
   });
 
-  it("draws no break with nothing on one side of it", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
-
-    const second = railDividerId(21);
+  it("drops every divider while a filter is on", () => {
+    // A filtered index is a search result, not the rail's picture: a rule
+    // between two rows that are no longer adjacent would say something
+    // untrue, so the one exception to the membership rule is stated here.
     setRail([
-      { kind: "divider", id: railDividerId(20) },
       { kind: "panel", id: "railAgents" },
-      { kind: "divider", id: railDividerId(22) },
-      { kind: "divider", id: second },
-      { kind: "panel", id: "railArtifacts" },
-      { kind: "divider", id: railDividerId(23) },
+      { kind: "divider", id: railDividerId(30) },
+      { kind: "panel", id: "railTerminals" },
     ]);
-
-    // The store re-inserts the panels this rail did not name, so the assertions
-    // below name what the case is about rather than the whole sequence: a
-    // divider at either end separates nothing - the rail itself draws no group
-    // for it - and two in a row are one boundary, not two.
-    const lines = sidebarLineIds();
-    expect(lines.at(0)).toBe("railAgents");
-    expect(lines.at(-1)).toBe("railComments");
-    expect(lines.filter((id) => id.startsWith("divider:"))).toEqual([second]);
-    expect(lines.indexOf(second)).toBe(1);
-  });
-
-  it("drops a break the filter has left with one neighbour", () => {
     render(<InspectorIndex onPreviewPreset={() => {}} />);
 
     act(() => {
@@ -140,11 +143,14 @@ describe("the sidebar index follows the rail (LV2-09)", () => {
     expect(sidebarLineIds()).toEqual(["railTerminals"]);
   });
 
-  it("steps an arrow over a break", () => {
+  it("steps an arrow over a divider", () => {
+    setRail([
+      ...DEFAULT_RAIL.slice(0, 2),
+      { kind: "divider", id: railDividerId(40) },
+      ...DEFAULT_RAIL.slice(2),
+    ]);
     render(<InspectorIndex onPreviewPreset={() => {}} />);
 
-    // Artifacts and Terminals are two groups apart in the shipped rail, so
-    // the walk crosses a drawn boundary here.
     const row = document.querySelector<HTMLElement>(
       '[data-region-id="railArtifacts"]',
     );

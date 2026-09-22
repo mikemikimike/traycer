@@ -15,6 +15,7 @@ import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-region
 import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import {
   regionFacts,
+  regionWhere,
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
@@ -59,10 +60,10 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
   const region = LAYOUT_REGIONS[regionId];
   const facts = regionFacts(regionId);
   const shown = values[regionId].shown !== "hidden";
-  const where =
-    facts.whereByHost !== null
-      ? facts.whereByHost[arrangement.usageHost]
-      : facts.where;
+  // Composed rather than indexed by one region's host: the two bar readings
+  // each answer for themselves now (L-156), so the line under a name is the
+  // registry's sentence for the bar THIS region is in, plus its own side.
+  const where = regionWhere(regionId, arrangement);
 
   return (
     <div className="flex flex-col">

@@ -674,7 +674,7 @@ export function ChatTreePanelBody(props: ChatTreePanelBodyProps) {
   const tree = useEpicTreeIndex();
   const revealRequest = useSidebarNodeRevealRequest(tabId);
   const ancestorIdsOfReveal = useAncestorIds(revealRequest?.nodeId ?? null);
-  // Bulk selection owns the header outright (`PanelGroupSectionHeader` returns
+  // Bulk selection owns the header outright (`LeftPanelSectionHeader` returns
   // the selection actions before it ever considers the search row), so while
   // selection mode is on there is no search input to type into, to read a query
   // back from, or to press Escape in. Treating search as INACTIVE for that whole

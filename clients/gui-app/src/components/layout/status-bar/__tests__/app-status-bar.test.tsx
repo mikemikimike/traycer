@@ -19,6 +19,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   dispatchAction,
@@ -1120,9 +1121,16 @@ describe("<AppStatusBar /> resource action ownership", () => {
 // elements now, so there is no overlay, proxy or per-ghost popover left to
 // assert about, and what replaced them is covered against the real canvas in
 // `components/layout-editor/`. This ordering assertion is the one survivor:
-// it never touched the ghost machinery, only `resourceSide` and plain DOM
-// position.
-describe("<AppStatusBar /> resource segment placement", () => {
+// it never touched the ghost machinery, only where the two readings sit and
+// plain DOM position.
+describe("<AppStatusBar /> reading placement (L-156)", () => {
+  function setViewportWidth(width: number): void {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: width,
+    });
+  }
+
   beforeEach(() => {
     scope = hostScopeFixture({});
     useWatchHostStore.setState({ scopedHostId: null });
@@ -1133,46 +1141,171 @@ describe("<AppStatusBar /> resource segment placement", () => {
 
   afterEach(() => {
     cleanup();
+    // Restored HERE rather than at the end of the one case that narrows it:
+    // a failing assertion would otherwise leave every case after it on a
+    // phone, and the failure that follows names the wrong mechanism.
+    setViewportWidth(1280);
     useWatchHostStore.setState({ scopedHostId: null });
     useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     resetRateLimitMocks();
     resourceProjection.value = null;
   });
 
-  it("renders the resource segment before the usage slot when resourceSide is left, and after it when right", () => {
+  function place(patch: Partial<LayoutArrangement>): void {
     useLayoutStore.getState().setArrangement({
       ...useLayoutStore.getState().arrangement,
-      resourceSide: "left",
+      ...patch,
     });
-    const { unmount } = render(<AppStatusBar />);
-    const resourceSegmentLeft = screen.getByTestId(
-      "status-bar-resource-segment",
-    );
-    const slotLeft = screen.getByTestId("status-bar-rate-limit-slot");
-    // Resource segment comes first in the tree: `slotLeft` FOLLOWS it.
-    expect(
-      Boolean(
-        resourceSegmentLeft.compareDocumentPosition(slotLeft) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    ).toBe(true);
-    unmount();
+  }
 
-    useLayoutStore.getState().setArrangement({
-      ...useLayoutStore.getState().arrangement,
-      resourceSide: "right",
+  /** The strip's own children, as the two readings and the row's grower. */
+  function stripOrder(): ReadonlyArray<string> {
+    const row = screen.getByTestId("app-status-bar").firstElementChild;
+    return [...(row?.children ?? [])].map((child) => {
+      if (child.getAttribute("data-testid") === "status-bar-rate-limit-slot") {
+        return "usage";
+      }
+      return child.querySelector('[data-testid="status-bar-resource-segment"]')
+        ? "resource"
+        : "grower";
     });
+  }
+
+  it("draws each reading at the end of the strip it names", () => {
     render(<AppStatusBar />);
-    const resourceSegmentRight = screen.getByTestId(
-      "status-bar-resource-segment",
-    );
-    const slotRight = screen.getByTestId("status-bar-rate-limit-slot");
-    // Now the slot comes first: `resourceSegmentRight` FOLLOWS it.
-    expect(
-      Boolean(
-        slotRight.compareDocumentPosition(resourceSegmentRight) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    ).toBe(true);
+    expect(stripOrder()).toEqual(["usage", "grower", "resource"]);
+    cleanup();
+
+    place({ resourceSide: "left", usageSide: "right" });
+    render(<AppStatusBar />);
+    expect(stripOrder()).toEqual(["resource", "grower", "usage"]);
+  });
+
+  it("puts usage limits first where the two share one end", () => {
+    place({ resourceSide: "left" });
+    render(<AppStatusBar />);
+    // Both are in the LEFT cluster, and the order is the model's: usage
+    // limits lead. Before L-156 the monitor led here, because `resourceSide`
+    // was read as "before or after the usage slot".
+    expect(stripOrder()).toEqual(["usage", "resource", "grower"]);
+    cleanup();
+
+    place({ resourceSide: "right", usageSide: "right" });
+    render(<AppStatusBar />);
+    expect(stripOrder()).toEqual(["grower", "usage", "resource"]);
+  });
+
+  it("leaves the reading that moved to the header out, and keeps the other", () => {
+    place({ usageHost: "header" });
+    render(<AppStatusBar />);
+    expect(screen.queryByTestId("status-bar-rate-limit-slot")).toBeNull();
+    expect(screen.getByTestId("status-bar-resource-segment")).not.toBeNull();
+    cleanup();
+
+    place({ usageHost: "status-bar", resourceHost: "header" });
+    render(<AppStatusBar />);
+    expect(screen.getByTestId("status-bar-rate-limit-slot")).not.toBeNull();
+    expect(screen.queryByTestId("status-bar-resource-segment")).toBeNull();
+  });
+
+  it("draws neither reading once both have named the header", () => {
+    // The shell does not mount a strip in this state (`statusBarShown`), but
+    // the strip must not draw half of one if something does: an empty row is
+    // a bordered 24px band holding a spacer.
+    place({ usageHost: "header", resourceHost: "header" });
+    render(<AppStatusBar />);
+
+    expect(stripOrder()).toEqual(["grower"]);
+    expect(screen.queryByTestId("status-bar-rate-limit-slot")).toBeNull();
+    expect(screen.queryByTestId("status-bar-resource-segment")).toBeNull();
+  });
+
+  it("draws both readings on a narrow viewport whatever bar they name", () => {
+    // L-162: a phone has one bar. The footer is opt-in (`mobileFooter`) and
+    // once it is on it draws both readings, because a footer that honoured a
+    // header pick would drop a readout the mobile header does not replace.
+    // The picks themselves survive for the next desktop window.
+    setViewportWidth(390);
+    place({ usageHost: "header", resourceHost: "header", mobileFooter: true });
+    render(<AppStatusBar />);
+
+    expect(stripOrder()).toEqual(["usage", "grower", "resource"]);
+    expect(useLayoutStore.getState().arrangement.usageHost).toBe("header");
+  });
+
+  it("opens the usage panel at the end the cluster is on", () => {
+    function openPanelAlign(): string | undefined {
+      render(<AppStatusBar />);
+      act(() => {
+        dispatchAction("app.rate-limits.open", DYNAMIC_ACTION_ROUTER);
+      });
+      return (
+        screen
+          .getByTestId("rate-limit-popover-stub")
+          .getAttribute("data-align") ?? undefined
+      );
+    }
+
+    expect(openPanelAlign()).toBe("start");
+    cleanup();
+
+    place({ usageSide: "right" });
+    expect(openPanelAlign()).toBe("end");
+  });
+
+  it("forgets an open usage panel when the cluster leaves the bar", () => {
+    const view = render(<AppStatusBar />);
+    act(() => {
+      dispatchAction("app.rate-limits.open", DYNAMIC_ACTION_ROUTER);
+    });
+    expect(screen.getByTestId("rate-limit-popover-stub")).not.toBeNull();
+
+    act(() => {
+      place({ usageHost: "header" });
+    });
+    view.rerender(<AppStatusBar />);
+    expect(screen.queryByTestId("rate-limit-popover-stub")).toBeNull();
+
+    // And the request does not come back with the reading: the anchor and the
+    // content unmount together, so Radix never reports the close, and a
+    // remembered `true` would reopen a panel nobody asked for.
+    act(() => {
+      place({ usageHost: "status-bar" });
+    });
+    view.rerender(<AppStatusBar />);
+    expect(screen.queryByTestId("rate-limit-popover-stub")).toBeNull();
+  });
+
+  it("owns each chord exactly while it draws the reading behind it", () => {
+    // One handler slot per chord and two possible owners, exclusive by
+    // placement on a desktop viewport: whatever this strip is not drawing,
+    // the header is, and a handler registered here would take the chord away
+    // from the button that owns the panel.
+    const cases: ReadonlyArray<{
+      readonly patch: Partial<LayoutArrangement>;
+      readonly usage: boolean;
+      readonly resources: boolean;
+    }> = [
+      { patch: {}, usage: true, resources: true },
+      { patch: { usageHost: "header" }, usage: false, resources: true },
+      { patch: { resourceHost: "header" }, usage: true, resources: false },
+    ];
+    for (const one of cases) {
+      place(one.patch);
+      render(<AppStatusBar />);
+
+      expect(
+        dispatchAction("app.rate-limits.open", DYNAMIC_ACTION_ROUTER),
+        JSON.stringify(one.patch),
+      ).toBe(one.usage);
+      // The resource panel's owner is the popover the strip mounts, so its
+      // presence IS the claim; the flag it carries is asserted beside it.
+      expect(
+        screen.queryByTestId("status-bar-resource-segment") !== null,
+        JSON.stringify(one.patch),
+      ).toBe(one.resources);
+      cleanup();
+      useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+    }
   });
 });

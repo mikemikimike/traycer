@@ -64,10 +64,6 @@ import { NavigatorResourceHotspotChip } from "@/components/resources/resource-us
 import { cn } from "@/lib/utils";
 import { useIsActiveTile } from "@/stores/epics/canvas/store";
 import {
-  useEpicLeftPanelStore,
-  useLeftPanelSectionCollapsed,
-} from "@/stores/epics/left-panel-store";
-import {
   SidebarContextMenuItems,
   SidebarDropdownMenuItems,
 } from "@/components/epic-canvas/sidebar/sidebar-row-menu-items";
@@ -167,24 +163,15 @@ function TerminalsPanelBodyLive(props: {
 /**
  * Header "+" action for the "terminals" left panel - opens the host +
  * folder picker; selecting a folder opens a fresh raw terminal tab in
- * that directory. Subscribes only to the open-action (no terminal-list
- * subscription) so a collapsed Terminals section doesn't re-render on
- * every host list update.
+ * that directory. Subscribes to nothing but the open-action, so it does not
+ * re-render on every host list update.
  */
 export function TerminalsPanelActions(props: LeftPanelSlotProps) {
-  const collapsed = useLeftPanelSectionCollapsed("terminals");
-  const setPanelSectionCollapsed = useEpicLeftPanelStore(
-    (state) => state.setPanelSectionCollapsed,
-  );
-  const expandBeforeOpen = useCallback(() => {
-    if (collapsed) setPanelSectionCollapsed("terminals", false);
-  }, [collapsed, setPanelSectionCollapsed]);
   return (
     <NewTerminalPicker
       epicId={props.epicId}
       tabId={props.tabId}
       onLaunched={null}
-      onBeforeOpen={expandBeforeOpen}
     />
   );
 }

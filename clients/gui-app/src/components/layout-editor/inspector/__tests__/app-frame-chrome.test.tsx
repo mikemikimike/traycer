@@ -3,8 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AppFrameComposerStack,
   AppFrameStatusBarRow,
+  AppFrameTopBar,
 } from "@/components/layout-editor/inspector/app-frame-chrome";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_ARRANGEMENT,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 
@@ -73,43 +77,74 @@ describe("the composer stack (L-97, L-99)", () => {
 });
 
 /**
- * R2-02: the strip's assembly - which region leads, where the spacer goes,
- * that `resourceSide` decides it - was written twice, so a change to what
- * `resourceSide` means had to be made in two files or the preset card and the
- * Settings band disagreed about the app.
+ * R2-02: the strip's assembly - which reading leads and where the spacer goes
+ * - was written twice, so a change to what the placement fields mean had to be
+ * made in two files or the preset card and the Settings band disagreed about
+ * the app. L-156 made that placement four fields, two per reading, and both
+ * bars now draw their clusters through the same one copy.
  */
-describe("the status bar row (R2-02)", () => {
+describe("the two bars' clusters (R2-02, L-156)", () => {
   /**
-   * The row's own shape: which slots hold a picture and where the spacer that
-   * separates the two ends of the strip sits. Read off the DOM rather than off
-   * a class, and it is the one thing this component decides.
+   * The row's own shape: which slots hold which picture, and where the spacer
+   * that separates the two ends sits. The resource readout is the one that
+   * prints `cpu`; read off the DOM rather than off a class, and it is the one
+   * thing this component decides.
    */
   function shapeOf(): ReadonlyArray<string> {
-    return [...screen.getByTestId("bar").children].map((child) =>
-      child.hasAttribute("data-layout-depiction") ? "region" : "spacer",
+    return [...screen.getByTestId("bar").children].map((child) => {
+      if (!child.hasAttribute("data-layout-depiction")) return "spacer";
+      return child.textContent.includes("cpu") ? "resource" : "usage";
+    });
+  }
+
+  function renderRow(arrangement: LayoutArrangement): void {
+    render(
+      <div data-testid="bar">
+        <AppFrameStatusBarRow
+          values={PRESET_VALUES.default}
+          arrangement={arrangement}
+        />
+      </div>,
     );
   }
 
-  it("puts the resource readout on the side the arrangement names", () => {
-    const { rerender } = render(
-      <div data-testid="bar">
-        <AppFrameStatusBarRow
-          values={PRESET_VALUES.default}
-          arrangement={{ ...DEFAULT_ARRANGEMENT, resourceSide: "right" }}
-        />
-      </div>,
-    );
-    expect(shapeOf()).toEqual(["region", "spacer", "region"]);
+  it("puts each reading at the end of the strip it names", () => {
+    renderRow(DEFAULT_ARRANGEMENT);
+    expect(shapeOf()).toEqual(["usage", "spacer", "resource"]);
+    cleanup();
 
-    rerender(
+    renderRow({
+      ...DEFAULT_ARRANGEMENT,
+      usageSide: "right",
+      resourceSide: "left",
+    });
+    expect(shapeOf()).toEqual(["resource", "spacer", "usage"]);
+  });
+
+  it("leads with the usage limits where the two share one end", () => {
+    renderRow({ ...DEFAULT_ARRANGEMENT, resourceSide: "left" });
+    expect(shapeOf()).toEqual(["usage", "resource", "spacer"]);
+  });
+
+  it("draws the reading that named the top bar up there instead", () => {
+    const arrangement: LayoutArrangement = {
+      ...DEFAULT_ARRANGEMENT,
+      resourceHost: "header",
+    };
+    renderRow(arrangement);
+    // The strip keeps the usage cluster, which did not move.
+    expect(shapeOf()).toEqual(["usage", "spacer"]);
+    cleanup();
+
+    render(
       <div data-testid="bar">
-        <AppFrameStatusBarRow
+        <AppFrameTopBar
           values={PRESET_VALUES.default}
-          arrangement={{ ...DEFAULT_ARRANGEMENT, resourceSide: "left" }}
+          arrangement={arrangement}
         />
       </div>,
     );
-    expect(shapeOf()).toEqual(["region", "region", "spacer"]);
+    expect(shapeOf().filter((slot) => slot !== "spacer")).toContain("resource");
   });
 
   it("draws nothing for a region the surface does not show", () => {
@@ -128,6 +163,6 @@ describe("the status bar row (R2-02)", () => {
       </div>,
     );
 
-    expect(shapeOf()).toEqual(["region", "spacer"]);
+    expect(shapeOf()).toEqual(["usage", "spacer"]);
   });
 });

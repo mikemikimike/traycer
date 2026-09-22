@@ -1,19 +1,17 @@
 import { useMemo } from "react";
 import {
-  leftPanelGroupsFromRail,
+  areRailsEqual,
   panelVisibilityOverridesFromValues,
   RAIL_REGION_BY_PANEL,
-  railFromLeftPanelGroups,
   railRegionForLeftPanelId,
   railVisibilityFor,
   type RailEntry,
 } from "@/lib/layout/rail";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
-import {
-  areLeftPanelGroupsEqual,
-  type LeftPanelGroup,
-  type LeftPanelId,
-  type PanelVisibilityOverrideById,
+import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import type {
+  LeftPanelId,
+  PanelVisibilityOverrideById,
 } from "@/lib/left-panel-ids";
 import type { LayoutValueKeysByRegion } from "@/lib/layout/layout-snapshot";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -23,8 +21,8 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
  * The sidebar rail's shape, read and written where it actually lives.
  *
  * `arrangement.rail` and the nine rail regions' `shown` are the layout store's
- * (L-25, L-47), and the sidebar's grouped view is derived from them. This
- * module is that derivation and its writers, beside the bijection itself.
+ * (L-25, L-47), and every sidebar surface reads them from here. This module is
+ * that read and its writers, beside the bijection itself.
  *
  * It used to hang off `LeftPanelStore` as five members that each reached into
  * the layout store from inside a zustand action. That API lied about
@@ -49,30 +47,21 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
  * same hole.
  */
 
-/** The rail as the sidebar's group view, subscribed to the rail alone. */
-export function useLeftPanelGroups(): ReadonlyArray<LeftPanelGroup> {
-  const rail = useLayoutStore((state) => state.arrangement.rail);
-  return useMemo(() => leftPanelGroupsFromRail(rail), [rail]);
-}
-
 /**
- * The rail's own entries, for the two surfaces that DRAW it rather than
- * consume its group view: the epic sidebar's icon column and the sample
- * workspace's copy of it.
+ * The rail's entries, for every surface that draws it: the epic sidebar's icon
+ * column, the sample workspace's copy of it and the inspector's own picture.
  *
- * A boundary is an entry with an id of its own and the group view drops it
- * (L-25, L-115), so a rail that draws its dividers has to see the entries. It
- * is served here, beside the derivation, because this module is the rail's own
- * ancestor seam - what it answers is which panels EXIST and in what order, and
- * D11 keeps a specimen's preview out of a read that decides a mount.
+ * Served here because this module is the rail's own ancestor seam - what it
+ * answers is which panels EXIST and in what order, and D11 keeps a specimen's
+ * preview out of a read that decides a mount.
  */
 export function useLayoutRail(): ReadonlyArray<RailEntry> {
   return useLayoutStore((state) => state.arrangement.rail);
 }
 
-/** The same, for the non-React commit layer (canvas DnD). */
-export function currentLeftPanelGroups(): ReadonlyArray<LeftPanelGroup> {
-  return leftPanelGroupsFromRail(useLayoutStore.getState().arrangement.rail);
+/** The whole arrangement, for the non-React commit layer (canvas DnD). */
+export function currentLayoutArrangement(): LayoutArrangement {
+  return useLayoutStore.getState().arrangement;
 }
 
 /**
@@ -92,22 +81,15 @@ export function usePanelVisibilityOverrides(): PanelVisibilityOverrideById {
 }
 
 /**
- * The grouped view written back as a rail, in one write.
+ * A new rail order written back, in one write.
  *
- * Guarded on the GROUPS rather than on the resulting rail, because
- * `railFromLeftPanelGroups` mints a fresh divider id per call: a no-op drop
- * would otherwise advance `dividerSeq` and rewrite the rail with ids nothing
- * asked to change.
+ * Guarded, so a drop that lands a panel back where it already was writes
+ * nothing and spends no undo step on it.
  */
-export function applyLeftPanelGroups(
-  nextGroups: ReadonlyArray<LeftPanelGroup>,
-): void {
-  if (areLeftPanelGroupsEqual(currentLeftPanelGroups(), nextGroups)) return;
+export function applyRail(nextRail: ReadonlyArray<RailEntry>): void {
   const arrangement = useLayoutStore.getState().arrangement;
-  useLayoutStore.getState().setArrangement({
-    ...arrangement,
-    rail: railFromLeftPanelGroups(nextGroups, arrangement.dividerSeq),
-  });
+  if (areRailsEqual(arrangement.rail, nextRail)) return;
+  useLayoutStore.getState().setArrangement({ ...arrangement, rail: nextRail });
 }
 
 /**

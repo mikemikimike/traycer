@@ -416,7 +416,7 @@ function updateCanvasSourcePreview(
     point: resolvedPoint,
     targetRect: readOverRect(event),
     targetElement:
-      target.kind === "left-panel-group" && over !== null
+      target.kind === "left-panel-body" && over !== null
         ? findDroppableElement(over.id)
         : null,
     activeRect: event.active.rect.current.translated ?? null,

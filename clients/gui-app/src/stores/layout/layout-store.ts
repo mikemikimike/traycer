@@ -13,7 +13,7 @@ import {
 } from "@/lib/layout/arrangement-persist";
 import {
   RAIL_REGION_BY_PANEL,
-  railFromPanelIdGroups,
+  railFromPanelIdOrder,
   railVisibilityFor,
   type RailEntry,
 } from "@/lib/layout/rail";
@@ -100,11 +100,15 @@ export const DEFAULT_LAYOUT_SNAPSHOT: LayoutSnapshot = {
 const LAYOUT_PERSIST_KEY = persistKey(STORE_KEYS.layout);
 
 /**
- * Bumped for the new shape, with no `migrate`: the layout store is unreleased
- * (L-22), so a blob written by a development build is discarded rather than
- * translated. The five values that DID ship are carried separately, below.
+ * Version 2 was bumped for the new shape with no `migrate`, because the layout
+ * store is unreleased (L-22) and a blob written by a development build is
+ * discarded rather than translated. Version 3 is the exception (L-158): the
+ * shipped rail put a divider between every panel, and a record written before
+ * L-155 holds all seven whatever else it holds, so it needs translating rather
+ * than discarding - discarding it would take the user's panel ORDER with it.
+ * The five values that DID ship are carried separately, below.
  */
-const LAYOUT_PERSIST_VERSION = 2;
+const LAYOUT_PERSIST_VERSION = 3;
 
 const SHIPPED_CARRY = carryShippedLayoutValues();
 
@@ -164,6 +168,7 @@ export const useLayoutStore = create<LayoutStoreState>()(
     {
       ...basePersistOptions(LAYOUT_PERSIST_KEY),
       version: LAYOUT_PERSIST_VERSION,
+      migrate: migrateLayoutPersistedState,
       storage: createJSONStorage(() => localStorage),
       // Field by field against the defaults, like every resolver in this app:
       // a corrupt arrangement cannot reach the values, and a value union this
@@ -429,20 +434,58 @@ function carriedRailVisibility(value: unknown): Record<string, unknown> {
   return overrides;
 }
 
-/** The sidebar's persisted groups, as the rail's dividers (L-25). */
+/**
+ * The sidebar's persisted grouping, as the rail's panel ORDER (L-155).
+ *
+ * The order is the user's; the boundaries are not. The shipped sidebar put one
+ * between every panel, so an upgrading user's record carries seven dividers
+ * nobody placed - structure this build no longer has rather than a preference
+ * to keep. The panels come across in the order they were in and the rail
+ * starts with no dividers, exactly as a fresh install does.
+ */
 function carriedRail(value: unknown): ReadonlyArray<RailEntry> {
   if (!Array.isArray(value)) return DEFAULT_ARRANGEMENT.rail;
-  const groups = value.flatMap((group): ReadonlyArray<string>[] => {
+  const panelIds = value.flatMap((group): string[] => {
     if (!isRecord(group) || !Array.isArray(group.panelIds)) return [];
-    return [
-      group.panelIds.filter(
-        (panelId): panelId is string => typeof panelId === "string",
-      ),
-    ];
+    return group.panelIds.filter(
+      (panelId): panelId is string => typeof panelId === "string",
+    );
   });
-  return groups.length === 0
+  return panelIds.length === 0
     ? DEFAULT_ARRANGEMENT.rail
-    : railFromPanelIdGroups(groups, 0);
+    : railFromPanelIdOrder(panelIds);
+}
+
+/**
+ * Every divider dropped from a rail written before L-155 (L-158).
+ *
+ * The rail a version-2 record holds was written when the shipped default put
+ * one divider between every panel, so those seven are structure this build no
+ * longer has rather than spacers anyone placed - the same judgement the
+ * one-shot carry makes about the shipped `panelGroups`. The user's panel ORDER
+ * is theirs and stays.
+ *
+ * `dividerSeq` is left where it is on purpose: it is the counter that keeps a
+ * new divider's id unique, and winding it back would reissue an id a removed
+ * divider already used.
+ */
+function migrateLayoutPersistedState(
+  persistedState: unknown,
+  version: number,
+): unknown {
+  if (version >= 3) return persistedState;
+  if (!isRecord(persistedState)) return persistedState;
+  const arrangement = persistedState.arrangement;
+  if (!isRecord(arrangement) || !Array.isArray(arrangement.rail)) {
+    return persistedState;
+  }
+  const rail = arrangement.rail.filter(
+    (entry) => !(isRecord(entry) && entry.kind === "divider"),
+  );
+  return {
+    ...persistedState,
+    arrangement: { ...arrangement, rail },
+  };
 }
 
 /** This store's own persisted record, or `null` if it is not readable. */

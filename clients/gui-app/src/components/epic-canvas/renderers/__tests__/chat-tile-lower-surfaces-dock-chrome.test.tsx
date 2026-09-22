@@ -1041,3 +1041,138 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
   });
 });
+
+/**
+ * L-153: a pill's tooltip is a compact hierarchy - the member's name, then its
+ * counts, then a quiet click affordance - and not the run-on accessible
+ * sentence it used to repeat.
+ *
+ * Read through the real tile so the DETAIL LINES are the ones the dock
+ * actually builds. The chip component's own test covers how the three lines
+ * are drawn; what is pinned here is that every kind has one and that each says
+ * something true about that section.
+ */
+describe("each pill's tooltip", () => {
+  /** Radix opens on focus, with no timer to advance. */
+  async function tooltipFor(section: string): Promise<HTMLElement> {
+    fireEvent.focus(screen.getByTestId(`chat-dock-chip-${section}`));
+    return screen.findByRole("tooltip");
+  }
+
+  function allPills(): void {
+    for (const region of [
+      "changedFiles",
+      "runningAgents",
+      "background",
+      "queue",
+      "todo",
+    ] as const) {
+      useLayoutStore.getState().setRegionValues(region, { size: "chip" });
+    }
+  }
+
+  it("names the member, counts it, and offers the click - per kind", async () => {
+    allPills();
+    const props = surfacesProps({
+      restoreContext: {
+        ...EMPTY_RESTORE,
+        accumulatedFileChanges: [
+          fileChangeRow("/repo/src/a.ts", 47, 0),
+          fileChangeRow("/repo/src/b.ts", 0, 9),
+          fileChangeRow("/repo/src/c.ts", 1, 0),
+        ],
+      },
+      queueItems: [queuedItem("queued-1", "Do the thing")],
+      backgroundItems: [
+        backgroundCommandItem("task-1", "bun test"),
+        backgroundWakeupItem("wake-1", "Review status"),
+      ],
+    });
+    renderSurfaces({
+      ...props,
+      todo: {
+        id: "todo-1",
+        items: [
+          {
+            id: "t1",
+            status: "completed",
+            text: "One",
+            priority: null,
+            activeForm: null,
+          },
+          {
+            id: "t2",
+            status: "pending",
+            text: "Two",
+            priority: null,
+            activeForm: null,
+          },
+        ],
+      },
+    });
+
+    // The pill's own two measurements, with the pill's own signs - not the
+    // screen reader's "47 lines added, 9 removed", which stays on the button.
+    expect((await tooltipFor("filesChanged")).textContent).toBe(
+      `Files changed3 files, +48 ${MINUS}9Click to open`,
+    );
+    expect((await tooltipFor("queue")).textContent).toBe(
+      "Message queue1 message queuedClick to open",
+    );
+    expect((await tooltipFor("todo")).textContent).toBe(
+      "Todo1 of 2 doneClick to open",
+    );
+    // The header's own summary: the running count on the pill cannot say that
+    // something is merely waiting, and the tooltip is where that is said.
+    expect((await tooltipFor("background")).textContent).toBe(
+      "Background1 running · 1 waitingClick to open",
+    );
+  });
+
+  // Its own render: the agents pill needs an agent, and the received-A2A row
+  // is the cheapest one that makes the pill exist.
+  it("counts the agents rather than listing them", async () => {
+    allPills();
+    renderSurfaces(
+      surfacesProps({
+        restoreContext: EMPTY_RESTORE,
+        queueItems: [receivedAgentQueueItem("received-1", "Received prompt")],
+        backgroundItems: [],
+      }),
+    );
+
+    expect((await tooltipFor("activeAgents")).textContent).toBe(
+      "Active agents0 running, 1 queued from other agentsClick to open",
+    );
+    // The ROSTER - who is running, by name - stays on the accessible
+    // sentence. A tooltip that named three agents and "and 2 more" under a
+    // heading would stop being the small block L-153 asks for, and the panel
+    // one click away is the list.
+    expect(
+      screen
+        .getByTestId("chat-dock-chip-activeAgents")
+        .getAttribute("aria-label"),
+    ).toBe(
+      "Active agents. 0 running, 1 received from other agents and queued.",
+    );
+  });
+
+  it("offers to CLOSE the pill that is open", async () => {
+    allPills();
+    renderSurfaces(
+      surfacesProps({
+        restoreContext: EMPTY_RESTORE,
+        queueItems: [queuedItem("queued-1", "Do the thing")],
+        backgroundItems: [],
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId("chat-dock-chip-queue"));
+
+    // The last line follows `aria-pressed` rather than restating it, so the
+    // open pill never offers to do what it has already done.
+    expect((await tooltipFor("queue")).textContent).toBe(
+      "Message queue1 message queuedClick to close",
+    );
+  });
+});

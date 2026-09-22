@@ -366,14 +366,25 @@ const SAMPLE_TAB_COLOR = (() => {
 })();
 
 /**
- * The FILL of that same tab (L-138), read as declared.
+ * The colour the active session tab's LABEL is set in, read off the component
+ * that sets it (L-163).
  *
- * The redesign made the editor's tab a solid object rather than an outline
- * with a rectangle floating inside it, so the fill is now part of the signal
- * and is measured beside the outline - as a dilution of the same token, never
- * as a colour of its own.
+ * The tab's fill is `SAMPLE_TAB_COLOR` at full strength, so the label is text
+ * on a coloured surface and owes 4.5:1 on it - the stricter bar, and one no
+ * dilution of that token could meet on every palette, which is why there is no
+ * share left to tune. Read rather than restated: a label colour changed in the
+ * component without a thought for the fill fails here.
  */
-const SESSION_TAB_FILL = rootValue("--layout-session-tab-fill");
+const SESSION_TAB_LABEL = (() => {
+  const source = read("components/layout/tabs/header-tab-visual.tsx");
+  const value = /SESSION_TAB_LABEL_CLASS\s*=\s*"text-([a-z-]+)"/.exec(
+    source,
+  )?.[1];
+  if (value === undefined) {
+    throw new Error("header-tab-visual.tsx: no session tab label class");
+  }
+  return `--${value}`;
+})();
 
 // --- measuring --------------------------------------------------------------
 
@@ -523,22 +534,20 @@ describe("layout-editor.css is read, not assumed", () => {
    * inside it, and a reader who sees an amber tab and a differently-coloured
    * screen outline learns nothing from either.
    *
-   * Both the tab's OUTLINE and its FILL are measured against the frame,
-   * because the redesign added the second one. The fill is a dilution of the
-   * same token over `--background` rather than a colour of its own - and it is
-   * opaque, because the tab chrome uses it to cover the strip's baseline under
-   * the active tab, where a translucent fill would let the seam show through.
+   * The tab's fill is the colour it is HANDED rather than a value of its own,
+   * so the two cannot drift: `TabChrome` passes `props.color` through when the
+   * tab is the session's, which is the same field this file reads for
+   * `SAMPLE_TAB_COLOR`. That also keeps the fill opaque, which the strip needs
+   * - the chrome covers the baseline under the active tab with it, and a
+   * translucent fill would let the seam show through.
    */
   it("paints the editor's tab and the editing frame from the same token", () => {
     expect(SAMPLE_TAB_COLOR).toBe(EDITING_FRAME_COLOR);
-    expect(SESSION_TAB_FILL).toContain(EDITING_FRAME_COLOR);
-    expect(SESSION_TAB_FILL).toContain("--background");
-    expect(SESSION_TAB_FILL).not.toContain("transparent");
-    // The tab reads the token by name, so the two cannot drift apart in a
-    // rename that touches only one of them.
-    expect(read("components/layout/tabs/header-tab-visual.tsx")).toContain(
-      "--layout-session-tab-fill",
-    );
+    expect(
+      /fill=\{\s*props\.session\s*\?\s*\(props\.color/.test(
+        read("components/layout/tabs/header-tab-visual.tsx"),
+      ),
+    ).toBe(true);
   });
 
   /**
@@ -614,30 +623,56 @@ describe("the canvas decoration across every built-in palette", () => {
   });
 
   /**
-   * The editing mode's own colour, measured as what it IS: a 2px dotted frame
-   * around the app column and, on the editor's own tab, a 1.5px outline around
-   * the whole silhouette in use and a 3px cap at rest - all non-text
-   * indicators owing 3:1 (1.4.11). The tab's FILL is not measured here and
-   * owes nothing: it is a dilution of this same token toward `--background`,
-   * so it is a surface rather than an indicator, and the outline drawn on top
-   * of it is what carries the signal. `--warning` is the tint of the status pair
-   * and is a mid amber in the light palettes, which is why the pair's
-   * FOREGROUND is what ships here - the same reason L-78 took `--foreground`
-   * over `--ring` for the selection outline.
+   * The editing colour where it is a non-text INDICATOR owing 3:1 (1.4.11):
+   * the 2px dotted frame around the app column, and the 3px cap the editor's
+   * tab wears along its bottom edge at rest. One measurement covers both,
+   * because the sibling test above asserts they are the same token.
    *
-   * Both halves land on the same surfaces: the tab strip sits on the app's
-   * header and the frame runs around a column that can show any of them.
+   * `--warning` is the tint of the status pair and is a mid amber in the light
+   * palettes, which is why the pair's FOREGROUND is what ships here - the same
+   * reason L-78 took `--foreground` over `--ring` for the selection outline.
+   * Both land on the same surfaces: the tab strip sits on the app's header and
+   * the frame runs around a column that can show any of them.
+   *
+   * The ACTIVE tab is not measured here, because there the colour is a
+   * SURFACE. What it owes is the text on it, at 4.5, and that is the next
+   * test.
    */
-  it("holds 3:1 for the editing frame and the editor tab's own stroke", () => {
+  it("holds 3:1 for the editing colour on every surface", () => {
     expect(
       violations((palette, need) => {
-        onSurfaces(palette, need, "editing frame", () =>
+        onSurfaces(palette, need, "editing colour", () =>
           themeToken(palette.tokens, EDITING_FRAME_COLOR),
         );
-        onSurfaces(palette, need, "editor tab stroke", () =>
-          themeToken(palette.tokens, SAMPLE_TAB_COLOR),
-        );
       }),
+    ).toEqual([]);
+  });
+
+  /**
+   * The active session tab's own label, on the active session tab's own fill
+   * (L-163, 1.4.3).
+   *
+   * This is the gate that says there is no share left to tune. The fill used
+   * to be a dilution of the editing colour toward `--background`, and every
+   * share is a trade between the tab reading as coloured and its label staying
+   * legible on it: at 14% the tab read as black on Amoled, and at 32% the
+   * label fell under 4.5:1 on six palette/mode pairs, with the largest share
+   * that cleared every one of them at 4.5%. So the fill is the token
+   * at full strength and the label is that token's own counterpart. Contrast
+   * is symmetric, so this measures exactly what the palette already promises
+   * for warning text on the background, and a palette that fails here is a
+   * token defect rather than a number to tune.
+   */
+  it("holds 4.5:1 for the session tab's label on its own fill", () => {
+    expect(
+      violations((palette, need) =>
+        need(
+          "session tab label",
+          themeToken(palette.tokens, SESSION_TAB_LABEL),
+          themeToken(palette.tokens, SAMPLE_TAB_COLOR),
+          TEXT,
+        ),
+      ),
     ).toEqual([]);
   });
 

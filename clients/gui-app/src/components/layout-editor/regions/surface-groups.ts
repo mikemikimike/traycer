@@ -31,7 +31,7 @@ export interface OrderGroupFacts {
   readonly description: string;
   /** A rule about the whole group, said by the group rather than by a member. */
   readonly note: string | null;
-  /** Whether this group's boundaries are items of its own (L-25): the rail. */
+  /** Whether this group's dividers are items of its own (L-155): the rail. */
   readonly dividers: boolean;
 }
 
@@ -62,7 +62,7 @@ export const ORDER_GROUPS: Readonly<Record<OrderGroupId, OrderGroupFacts>> = {
     // The rail's icons are canvas-draggable too now (L-115), so its line says
     // what the other three canvas groups' lines say.
     description:
-      "Drag to reorder, here or on the canvas. Group breaks are items too.",
+      "Drag to reorder, here or on the canvas. Add a divider to space icons apart.",
     note: null,
     dividers: true,
   },
@@ -166,8 +166,9 @@ export function surfaceMatchesFilter(
  *   pills-vs-joined-frame split and the two toolbar clusters are not derivable
  *   from three lists of names. It runs horizontally, so a band above it is the
  *   right axis.
- * - **Status bar.** `usageHost` and `resourceSide` are facts about the strip,
- *   and the strip is the only thing that can show them.
+ * - **Status bar.** Which bar each reading is in and which end of it (L-156)
+ *   are facts about the strip, and the strip is the only thing that can show
+ *   them.
  *
  * The other three draw none. The **Sidebar**'s assembled shape IS its list
  * order, and each row already carries the real rail button as its glyph

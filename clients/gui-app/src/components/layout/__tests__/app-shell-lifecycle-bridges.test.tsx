@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
 import { useAuthStore } from "@/stores/auth/auth-store";
-import type { UsageHost } from "@/lib/layout/layout-arrangement";
+import type { BarHost } from "@/lib/layout/layout-arrangement";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
@@ -263,13 +263,17 @@ describe("<AppShell />", () => {
     useTabsStore.setState(useTabsStore.getInitialState(), true);
   });
 
-  // The footer is the default, so the strip-drawing cases need no setup at
-  // all; the HEADER is the placement a test has to ask for now.
+  // The strip is the default for both readings, so the strip-drawing cases
+  // need no setup at all; the HEADER is what a test has to ask for. Both
+  // readings, because the strip stays on screen for either one of them
+  // (L-156) and this helper is for the cases about the header.
   function selectHeaderPlacement(): void {
     const { arrangement } = useLayoutStore.getState();
-    useLayoutStore
-      .getState()
-      .setArrangement({ ...arrangement, usageHost: "header" });
+    useLayoutStore.getState().setArrangement({
+      ...arrangement,
+      usageHost: "header",
+      resourceHost: "header",
+    });
   }
 
   // Its counterpart, for a case that has to NAME the footer placement rather
@@ -277,9 +281,11 @@ describe("<AppShell />", () => {
   // the strip must not go quiet the day the default moves again.
   function selectFooterPlacement(): void {
     const { arrangement } = useLayoutStore.getState();
-    useLayoutStore
-      .getState()
-      .setArrangement({ ...arrangement, usageHost: "status-bar" });
+    useLayoutStore.getState().setArrangement({
+      ...arrangement,
+      usageHost: "status-bar",
+      resourceHost: "status-bar",
+    });
   }
 
   it("renders the signed-in app shell around routed children", async () => {
@@ -467,12 +473,15 @@ describe("<AppShell />", () => {
      * fixture resting on whichever placement happens to be the default cannot
      * show that - it also silently changes meaning the day the default moves.
      */
-    function selectMobileFooter(placement: UsageHost): void {
+    function selectMobileFooter(placement: BarHost): void {
       const { arrangement } = useLayoutStore.getState();
+      // Both readings, because either one still in the strip is enough to
+      // draw it on a desktop viewport (L-156).
       useLayoutStore.getState().setArrangement({
         ...arrangement,
         mobileFooter: true,
         usageHost: placement,
+        resourceHost: placement,
       });
     }
 
@@ -570,6 +579,7 @@ describe("<AppShell />", () => {
           ...arrangement,
           mobileFooter: true,
           usageHost: "status-bar",
+          resourceHost: "status-bar",
         });
       });
 

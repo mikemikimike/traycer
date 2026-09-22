@@ -16,12 +16,9 @@ import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 // this module's body, which an import is and a bootstrap call is not.
 import "@/lib/layout/legacy-layout-records";
 import { useLayoutStore } from "@/stores/layout/layout-store";
-import {
-  isLeftPanelId,
-  LEFT_PANEL_IDS,
-  type LeftPanelGroup,
-  type LeftPanelId,
-  type PanelVisibilityOverrideById,
+import type {
+  LeftPanelId,
+  PanelVisibilityOverrideById,
 } from "@/lib/left-panel-ids";
 import {
   DEFAULT_SORT_MODE,
@@ -189,7 +186,7 @@ export const DEFAULT_LEFT_PANEL_ID: LeftPanelId = "chats";
 // ─── Sidebar width (global) ────────────────────────────────────────────────
 // One persisted px width shared by every epic tab: the sidebar is a single
 // hoisted app-level surface (see `epic-sidebar-column.tsx`), so its width is a
-// user layout preference like the rail grouping, not per-tab view chrome.
+// user layout preference like the rail's own order, not per-tab view chrome.
 // Bounds ported from paseo's panel store; the resize handle additionally caps
 // the live drag at half the layout row so the canvas always keeps space.
 export const DEFAULT_SIDEBAR_WIDTH_PX = 320;
@@ -204,17 +201,6 @@ export function clampSidebarWidthPx(widthPx: number): number {
   );
 }
 
-export const DEFAULT_LEFT_PANEL_GROUPS: ReadonlyArray<LeftPanelGroup> = [
-  { panelIds: ["chats", "artifacts"] },
-  { panelIds: ["terminals"] },
-  { panelIds: ["browsers"] },
-  { panelIds: ["git-diff"] },
-  { panelIds: ["pull-requests"] },
-  { panelIds: ["file-tree"] },
-  { panelIds: ["sharing"] },
-  { panelIds: ["comments"] },
-];
-
 export interface LeftPanelRootCreatePending {
   readonly name: string;
 }
@@ -227,19 +213,11 @@ export interface LeftPanelAcknowledgedRootCreatePending {
 type RootCreatePendingByPanel<T> = Readonly<
   Partial<Record<string, Readonly<Partial<Record<RootCreatePanelId, T>>>>>
 >;
-type PanelSectionCollapsedByPanelId = Readonly<
-  Partial<Record<LeftPanelId, boolean>>
->;
-type PanelSectionWeightsByPanelId = Readonly<
-  Partial<Record<LeftPanelId, number>>
->;
 
 interface LeftPanelStore {
   readonly activePanelIdByTabId: Readonly<Record<string, LeftPanelId>>;
   readonly mainCollapsedByTabId: Readonly<Record<string, boolean>>;
   readonly sidebarWidthPx: number;
-  readonly panelSectionCollapsedByPanelId: PanelSectionCollapsedByPanelId;
-  readonly panelSectionWeightsByPanelId: PanelSectionWeightsByPanelId;
   readonly commentsPanelRevealedByTabId: Readonly<Record<string, boolean>>;
   readonly localRootCreatePendingByEpicPanel: RootCreatePendingByPanel<LeftPanelRootCreatePending>;
   readonly acknowledgedRootCreatePendingByEpicPanel: RootCreatePendingByPanel<LeftPanelAcknowledgedRootCreatePending>;
@@ -269,15 +247,6 @@ interface LeftPanelStore {
   readonly setMainCollapsed: (tabId: string, collapsed: boolean) => void;
   readonly toggleMainCollapsed: (tabId: string) => void;
   readonly setSidebarWidthPx: (widthPx: number) => void;
-  readonly isPanelSectionCollapsed: (panelId: LeftPanelId) => boolean;
-  readonly setPanelSectionCollapsed: (
-    panelId: LeftPanelId,
-    collapsed: boolean,
-  ) => void;
-  readonly togglePanelSectionCollapsed: (panelId: LeftPanelId) => void;
-  readonly setPanelSectionWeights: (
-    weights: ReadonlyArray<{ panelId: LeftPanelId; weight: number }>,
-  ) => void;
 
   readonly isCommentsPanelRevealed: (tabId: string) => boolean;
   readonly revealCommentsPanel: (tabId: string) => void;
@@ -406,19 +375,6 @@ export function migrateLeftPanelPersistedState(persisted: unknown): unknown {
   return migrated;
 }
 
-function getPersistedPanelSectionCollapsedByPanelId(
-  panelSectionCollapsedByPanelId: PanelSectionCollapsedByPanelId,
-): PanelSectionCollapsedByPanelId {
-  return Object.entries(panelSectionCollapsedByPanelId).reduce<
-    Partial<Record<LeftPanelId, boolean>>
-  >((nextPanelState, [panelId, collapsed]) => {
-    if (isLeftPanelId(panelId) && collapsed) {
-      nextPanelState[panelId] = true;
-    }
-    return nextPanelState;
-  }, {});
-}
-
 function getPersistedActivePanelIds(
   activePanelIdByTabId: Readonly<Record<string, LeftPanelId>>,
 ): Readonly<Record<string, LeftPanelId>> {
@@ -497,24 +453,6 @@ function filterActiveByEpic<T>(
   );
 }
 
-function findPanelGroupIndex(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  panelId: LeftPanelId,
-): number {
-  return groups.findIndex((group) => group.panelIds.includes(panelId));
-}
-
-function findPanelLocation(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  panelId: LeftPanelId,
-): { readonly groupIndex: number; readonly panelIndex: number } | null {
-  const groupIndex = findPanelGroupIndex(groups, panelId);
-  if (groupIndex < 0) return null;
-  const panelIndex = groups[groupIndex].panelIds.indexOf(panelId);
-  if (panelIndex < 0) return null;
-  return { groupIndex, panelIndex };
-}
-
 /**
  * The nine rail regions' show/hide, for this store's OWN activation guard.
  *
@@ -528,257 +466,6 @@ function currentPanelVisibilityOverrides(): PanelVisibilityOverrideById {
   return panelVisibilityOverridesFromValues(
     effectiveLayoutValues(state.basePreset, state.overrides),
   );
-}
-
-function normalizeLeftPanelGroups(
-  groups: ReadonlyArray<LeftPanelGroup>,
-): ReadonlyArray<LeftPanelGroup> {
-  const seen = new Set<LeftPanelId>();
-  const nextGroups = groups.flatMap((group) => {
-    const panelIds = group.panelIds.filter((panelId) => {
-      if (!isLeftPanelId(panelId)) return false;
-      if (seen.has(panelId)) return false;
-      seen.add(panelId);
-      return true;
-    });
-    return panelIds.length === 0 ? [] : [{ panelIds }];
-  });
-  const missingGroups = LEFT_PANEL_IDS.flatMap((panelId) =>
-    seen.has(panelId) ? [] : [{ panelIds: [panelId] }],
-  );
-  const normalizedGroups = [...nextGroups, ...missingGroups];
-  const alreadyNormalized =
-    missingGroups.length === 0 &&
-    normalizedGroups.length === groups.length &&
-    normalizedGroups.every((group, groupIndex) => {
-      const originalGroup = groups[groupIndex];
-      return (
-        group.panelIds.length === originalGroup.panelIds.length &&
-        group.panelIds.every(
-          (panelId, panelIndex) =>
-            originalGroup.panelIds[panelIndex] === panelId,
-        )
-      );
-    });
-  return alreadyNormalized ? groups : normalizedGroups;
-}
-
-export function moveLeftPanelGroup(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-  targetPanelId: LeftPanelId,
-  position: "before" | "after" | "combine",
-): ReadonlyArray<LeftPanelGroup> {
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  const targetIndex = findPanelGroupIndex(normalizedGroups, targetPanelId);
-  if (sourceIndex < 0 || targetIndex < 0) return normalizedGroups;
-  if (sourceIndex === targetIndex) return normalizedGroups;
-
-  const sourceGroup = normalizedGroups[sourceIndex];
-  const targetGroup = normalizedGroups[targetIndex];
-  const groupsWithoutSource = normalizedGroups.filter(
-    (_group, index) => index !== sourceIndex,
-  );
-  const adjustedTargetIndex =
-    sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-
-  if (position === "combine") {
-    return groupsWithoutSource.map((group, index) =>
-      index === adjustedTargetIndex
-        ? {
-            panelIds: [...targetGroup.panelIds, ...sourceGroup.panelIds],
-          }
-        : group,
-    );
-  }
-
-  const insertIndex =
-    position === "before" ? adjustedTargetIndex : adjustedTargetIndex + 1;
-  return [
-    ...groupsWithoutSource.slice(0, insertIndex),
-    sourceGroup,
-    ...groupsWithoutSource.slice(insertIndex),
-  ];
-}
-
-export function moveLeftPanelGroupToEnd(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-): ReadonlyArray<LeftPanelGroup> {
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  if (sourceIndex < 0 || sourceIndex === normalizedGroups.length - 1) {
-    return normalizedGroups;
-  }
-  const sourceGroup = normalizedGroups[sourceIndex];
-  return [
-    ...normalizedGroups.filter((_group, index) => index !== sourceIndex),
-    sourceGroup,
-  ];
-}
-
-function removePanelFromGroups(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-): ReadonlyArray<LeftPanelGroup> {
-  return groups.flatMap((group) => {
-    const panelIds = group.panelIds.filter(
-      (panelId) => panelId !== sourcePanelId,
-    );
-    return panelIds.length === 0 ? [] : [{ panelIds }];
-  });
-}
-
-function insertPanelIdsAtPanelPosition(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  panelIds: ReadonlyArray<LeftPanelId>,
-  targetPanelId: LeftPanelId,
-  position: "before" | "after",
-): ReadonlyArray<LeftPanelGroup> | null {
-  const targetLocation = findPanelLocation(groups, targetPanelId);
-  if (targetLocation === null) return null;
-  const targetGroup = groups[targetLocation.groupIndex];
-  const insertIndex =
-    position === "before"
-      ? targetLocation.panelIndex
-      : targetLocation.panelIndex + 1;
-  const nextPanelIds = [
-    ...targetGroup.panelIds.slice(0, insertIndex),
-    ...panelIds,
-    ...targetGroup.panelIds.slice(insertIndex),
-  ];
-  return groups.map((group, index) =>
-    index === targetLocation.groupIndex ? { panelIds: nextPanelIds } : group,
-  );
-}
-
-export function moveLeftPanelToGroup(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-  targetPanelId: LeftPanelId,
-): ReadonlyArray<LeftPanelGroup> {
-  if (sourcePanelId === targetPanelId) return normalizeLeftPanelGroups(groups);
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  const targetIndex = findPanelGroupIndex(normalizedGroups, targetPanelId);
-  if (sourceIndex < 0 || targetIndex < 0) return normalizedGroups;
-  if (sourceIndex === targetIndex) return normalizedGroups;
-  const groupsWithoutSource = removePanelFromGroups(
-    normalizedGroups,
-    sourcePanelId,
-  );
-  const targetIndexAfterRemoval = findPanelGroupIndex(
-    groupsWithoutSource,
-    targetPanelId,
-  );
-  if (targetIndexAfterRemoval < 0) return normalizedGroups;
-
-  return groupsWithoutSource.map((group, index) =>
-    index === targetIndexAfterRemoval
-      ? { panelIds: [...group.panelIds, sourcePanelId] }
-      : group,
-  );
-}
-
-export function moveLeftPanelGroupToPanelPosition(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-  targetPanelId: LeftPanelId,
-  position: "before" | "after",
-): ReadonlyArray<LeftPanelGroup> {
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  const targetIndex = findPanelGroupIndex(normalizedGroups, targetPanelId);
-  if (sourceIndex < 0 || targetIndex < 0) return normalizedGroups;
-  if (sourceIndex === targetIndex) return normalizedGroups;
-  const sourceGroup = normalizedGroups[sourceIndex];
-  return (
-    insertPanelIdsAtPanelPosition(
-      normalizedGroups.filter((_group, index) => index !== sourceIndex),
-      sourceGroup.panelIds,
-      targetPanelId,
-      position,
-    ) ?? normalizedGroups
-  );
-}
-
-export function moveLeftPanelToPanelPosition(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-  targetPanelId: LeftPanelId,
-  position: "before" | "after",
-): ReadonlyArray<LeftPanelGroup> {
-  if (sourcePanelId === targetPanelId) return normalizeLeftPanelGroups(groups);
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  const targetIndex = findPanelGroupIndex(normalizedGroups, targetPanelId);
-  if (sourceIndex < 0 || targetIndex < 0) return normalizedGroups;
-  return (
-    insertPanelIdsAtPanelPosition(
-      removePanelFromGroups(normalizedGroups, sourcePanelId),
-      [sourcePanelId],
-      targetPanelId,
-      position,
-    ) ?? normalizedGroups
-  );
-}
-
-export function moveLeftPanelToGroupPosition(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-  targetPanelId: LeftPanelId,
-  position: "before" | "after",
-): ReadonlyArray<LeftPanelGroup> {
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  const targetIndex = findPanelGroupIndex(normalizedGroups, targetPanelId);
-  if (sourceIndex < 0 || targetIndex < 0) return normalizedGroups;
-  const sourceGroup = normalizedGroups[sourceIndex];
-  if (sourcePanelId === targetPanelId && sourceGroup.panelIds.length === 1) {
-    return normalizedGroups;
-  }
-  const groupsWithoutSource = removePanelFromGroups(
-    normalizedGroups,
-    sourcePanelId,
-  );
-  const targetIndexAfterRemoval =
-    sourcePanelId === targetPanelId
-      ? sourceIndex
-      : findPanelGroupIndex(groupsWithoutSource, targetPanelId);
-  if (targetIndexAfterRemoval < 0) return normalizedGroups;
-  if (targetIndexAfterRemoval >= groupsWithoutSource.length) {
-    return [...groupsWithoutSource, { panelIds: [sourcePanelId] }];
-  }
-  const insertIndex =
-    position === "before"
-      ? targetIndexAfterRemoval
-      : targetIndexAfterRemoval + 1;
-  return [
-    ...groupsWithoutSource.slice(0, insertIndex),
-    { panelIds: [sourcePanelId] },
-    ...groupsWithoutSource.slice(insertIndex),
-  ];
-}
-
-export function moveLeftPanelToEnd(
-  groups: ReadonlyArray<LeftPanelGroup>,
-  sourcePanelId: LeftPanelId,
-): ReadonlyArray<LeftPanelGroup> {
-  const normalizedGroups = normalizeLeftPanelGroups(groups);
-  const sourceIndex = findPanelGroupIndex(normalizedGroups, sourcePanelId);
-  if (sourceIndex < 0) return normalizedGroups;
-  const sourceGroup = normalizedGroups[sourceIndex];
-  if (
-    sourceIndex === normalizedGroups.length - 1 &&
-    sourceGroup.panelIds.length === 1
-  ) {
-    return normalizedGroups;
-  }
-  return [
-    ...removePanelFromGroups(normalizedGroups, sourcePanelId),
-    { panelIds: [sourcePanelId] },
-  ];
 }
 
 function setPanelRootPending<T>(
@@ -830,8 +517,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
       activePanelIdByTabId: {},
       mainCollapsedByTabId: {},
       sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
-      panelSectionCollapsedByPanelId: {},
-      panelSectionWeightsByPanelId: {},
       commentsPanelRevealedByTabId: {},
       localRootCreatePendingByEpicPanel: {},
       acknowledgedRootCreatePendingByEpicPanel: {},
@@ -874,27 +559,15 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           const currentPanelId =
             state.activePanelIdByTabId[tabId] ?? DEFAULT_LEFT_PANEL_ID;
           const currentCollapsed = state.mainCollapsedByTabId[tabId] ?? false;
-          const currentSectionCollapsed =
-            state.panelSectionCollapsedByPanelId[panelId] ?? false;
           const panelChanged = currentPanelId !== panelId;
-          const collapseChanged = currentCollapsed;
-          const sectionCollapseChanged = currentSectionCollapsed;
-          if (!panelChanged && !collapseChanged && !sectionCollapseChanged) {
-            return state;
-          }
+          if (!panelChanged && !currentCollapsed) return state;
           return {
             activePanelIdByTabId: panelChanged
               ? { ...state.activePanelIdByTabId, [tabId]: panelId }
               : state.activePanelIdByTabId,
-            mainCollapsedByTabId: collapseChanged
+            mainCollapsedByTabId: currentCollapsed
               ? { ...state.mainCollapsedByTabId, [tabId]: false }
               : state.mainCollapsedByTabId,
-            panelSectionCollapsedByPanelId: sectionCollapseChanged
-              ? {
-                  ...state.panelSectionCollapsedByPanelId,
-                  [panelId]: false,
-                }
-              : state.panelSectionCollapsedByPanelId,
           };
         });
       },
@@ -979,51 +652,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           const next = clampSidebarWidthPx(widthPx);
           if (next === state.sidebarWidthPx) return state;
           return { sidebarWidthPx: next };
-        });
-      },
-
-      isPanelSectionCollapsed: (panelId) =>
-        get().panelSectionCollapsedByPanelId[panelId] ?? false,
-
-      setPanelSectionCollapsed: (panelId, collapsed) => {
-        set((state) => {
-          const current =
-            state.panelSectionCollapsedByPanelId[panelId] ?? false;
-          if (current === collapsed) return state;
-          return {
-            panelSectionCollapsedByPanelId: {
-              ...state.panelSectionCollapsedByPanelId,
-              [panelId]: collapsed,
-            },
-          };
-        });
-      },
-
-      togglePanelSectionCollapsed: (panelId) => {
-        set((state) => {
-          const current =
-            state.panelSectionCollapsedByPanelId[panelId] ?? false;
-          return {
-            panelSectionCollapsedByPanelId: {
-              ...state.panelSectionCollapsedByPanelId,
-              [panelId]: !current,
-            },
-          };
-        });
-      },
-
-      setPanelSectionWeights: (weights) => {
-        set((state) => {
-          const next = weights.reduce<PanelSectionWeightsByPanelId>(
-            (acc, { panelId, weight }) => {
-              const rounded = Math.round(weight * 100) / 100;
-              if (acc[panelId] === rounded) return acc;
-              return { ...acc, [panelId]: rounded };
-            },
-            state.panelSectionWeightsByPanelId,
-          );
-          if (next === state.panelSectionWeightsByPanelId) return state;
-          return { panelSectionWeightsByPanelId: next };
         });
       },
 
@@ -1378,11 +1006,6 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
           state.mainCollapsedByTabId,
         ),
         sidebarWidthPx: state.sidebarWidthPx,
-        panelSectionCollapsedByPanelId:
-          getPersistedPanelSectionCollapsedByPanelId(
-            state.panelSectionCollapsedByPanelId,
-          ),
-        panelSectionWeightsByPanelId: state.panelSectionWeightsByPanelId,
         chatFilterByEpicId: filterActiveByEpic(
           state.chatFilterByEpicId,
           isChatFilterActive,
@@ -1468,12 +1091,6 @@ export function useMainPanelCollapsed(tabId: string): boolean {
 
 export function useSidebarWidthPx(): number {
   return useLeftPanelStore((s) => s.sidebarWidthPx);
-}
-
-export function useLeftPanelSectionCollapsed(panelId: LeftPanelId): boolean {
-  return useLeftPanelStore(
-    (s) => s.panelSectionCollapsedByPanelId[panelId] ?? false,
-  );
 }
 
 export function useCommentsPanelRevealed(tabId: string): boolean {

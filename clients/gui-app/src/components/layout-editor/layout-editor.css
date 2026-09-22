@@ -64,20 +64,6 @@
      as an accident wherever the two met. */
   --layout-editor-frame-inset: 4px;
   --layout-editor-frame-radius: 12px;
-  /* The other half of the one editing signal (L-138). The sample tab is the
-     one SOLID amber object in the window and the frame is the hollow one, both
-     struck from `--warning-foreground`, so a reader who sees them sees one
-     system rather than two decorations.
-
-     Mixed against `--background` rather than `transparent`: the tab chrome
-     paints this over the strip AND uses it to cover the strip's baseline under
-     the active tab, so a translucent fill would let the seam show through and
-     would read differently on every surface the strip happens to sit on. */
-  --layout-session-tab-fill: color-mix(
-    in srgb,
-    var(--warning-foreground) 14%,
-    var(--background)
-  );
 }
 
 /* Both spellings the app's own dark variant is defined over (`index.css`): a
@@ -378,37 +364,27 @@
     filter var(--layout-editor-dim-duration) var(--layout-editor-ease);
 }
 
-/* The session tab's own mark (L-87, L-132, L-138), the other half of the rule
-   above: the member that CONTAINS it stays lit, and this is what it contains.
+/* The session tab's own mark (L-87, L-132, L-138, L-163), the other half of
+   the rule above: the member that CONTAINS it stays lit, and this is what it
+   contains. ONE element with one job, and the paint follows the state the tab
+   is in - which is the whole of what the two rules below say.
 
-   ONE element with one job - be the marker the dim exemption reads - and the
-   paint follows the state the tab is in, because the tab has two and only one
-   of them leaves the element anything to draw.
+   The two states carry the colour differently because they are given
+   different geometry to carry it in, not because they disagree about it. An
+   ACTIVE tab has a silhouette, so the colour is its area and its edge is the
+   ordinary border. A RESTING tab has no fill at all - the inactive chrome
+   paints no background - so the only thing it can say "this one" with is a
+   mark along an edge, and that mark has to read beside a dotted frame and
+   outside the dim that calms every other tab. Area beats line, so the active
+   tab is still the louder of the two. */
 
-   The previous version drew a second, unrelated decoration in the active
-   state: an inner `rounded-md` rectangle washed with 16% of the colour, inset
-   8px from a tab whose real silhouette is an S-curved trapezoid. It did not
-   follow the tab's shape, it did not touch the amber outline the same tab was
-   already wearing, and against a black palette it read as a stray brown box
-   behind the label - a rendering bug rather than a signal (the owner's third
-   live pass). It is gone. */
-
-/* At rest - the user clicked another tab while the session is live - the tab
-   wears the colour as a cap along its bottom edge, at a thickness that reads
-   beside a dotted frame around the whole screen (L-132). Painted here rather
-   than on the element because the tab's colour is the only runtime value in
-   it: `header-tab-visual.tsx` hands it over as `--layout-session-tab-color`
-   and names the state, and the geometry stays in the element's own classes. */
 [data-layout-session-tab="rest"] {
   height: 3px;
   background: var(--layout-session-tab-color);
 }
 
-/* Active, the tab's OWN silhouette is the mark: `TabChrome` fills it with
-   `--layout-session-tab-fill` and outlines it in the same token, so the whole
-   tab is the solid amber object inside the hollow amber frame. There is
-   nothing left for a separate element to draw, and it draws nothing - it stays
-   in the tree because `:has()` matches a `display: none` element, so the dim
+/* Active, `TabChrome` is the mark and this element draws nothing. It stays in
+   the tree because `:has()` matches a `display: none` element, so the dim
    exemption above keeps working in both states off one marker. */
 [data-layout-session-tab="filled"] {
   display: none;
@@ -465,7 +441,7 @@
 
 /* Keyed on the DRAGGABLE marker alone, not on the region name beside it: the
    rail's dividers are members of `arrangement.rail` without being regions
-   (L-25, L-115), so `left-panel-rail-divider.tsx` stamps the marker and no
+   (L-115, L-155), so `left-panel-rail-divider.tsx` stamps the marker and no
    name, and the region-scoped spelling could not match the one element on the
    canvas whose whole job is to be grabbed. The marker is written only while a
    session is live - by `use-layout-region.ts` for a region and by the divider

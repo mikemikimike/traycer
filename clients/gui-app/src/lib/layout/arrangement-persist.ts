@@ -2,12 +2,15 @@ import { rateLimitCapableProviderIdSchema } from "@traycer/protocol/host/rate-li
 import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import {
   AUTOMATIC_LIMIT_SELECTION,
+  BAR_REGION_IDS,
   DEFAULT_ARRANGEMENT,
   DEFAULT_DOCK_ORDER,
   DEFAULT_TOOLBAR_LEFT,
   DEFAULT_TOOLBAR_RIGHT,
   TOOLBAR_REGION_IDS,
   USAGE_PROVIDER_IDS,
+  type BarHost,
+  type BarRegionId,
   type EdgeSide,
   type LayoutArrangement,
   type StatusBarProviderLimits,
@@ -101,6 +104,27 @@ function keptEntries(
   return same ? stored : normalized;
 }
 
+/** Every field {@link sameArrangement} compares, which is all of them. */
+const ARRANGEMENT_FIELDS: ReadonlyArray<keyof LayoutArrangement> = [
+  "dock",
+  "toolbarLeft",
+  "toolbarRight",
+  "rail",
+  "usageProviders",
+  "pinnedContextFieldOrder",
+  "hiddenProviders",
+  "providerLimits",
+  "shownProfiles",
+  "usageHost",
+  "usageSide",
+  "resourceHost",
+  "resourceSide",
+  "minimapSide",
+  "statusBarParked",
+  "mobileFooter",
+  "dividerSeq",
+];
+
 /**
  * Whether normalising left every field exactly as it found it. Reference
  * equality throughout, because each field above already reuses the input's
@@ -110,32 +134,22 @@ function sameArrangement(
   left: LayoutArrangement,
   right: LayoutArrangement,
 ): boolean {
-  return (
-    left.dock === right.dock &&
-    left.toolbarLeft === right.toolbarLeft &&
-    left.toolbarRight === right.toolbarRight &&
-    left.rail === right.rail &&
-    left.usageProviders === right.usageProviders &&
-    left.pinnedContextFieldOrder === right.pinnedContextFieldOrder &&
-    left.hiddenProviders === right.hiddenProviders &&
-    left.providerLimits === right.providerLimits &&
-    left.shownProfiles === right.shownProfiles &&
-    left.usageHost === right.usageHost &&
-    left.resourceSide === right.resourceSide &&
-    left.minimapSide === right.minimapSide &&
-    left.mobileFooter === right.mobileFooter &&
-    left.dividerSeq === right.dividerSeq
-  );
+  return ARRANGEMENT_FIELDS.every((field) => left[field] === right[field]);
 }
 
 /**
  * The arrangement as some build of the app wrote it, field by field against
- * the defaults - a hand-edited `usageHost` would otherwise mount neither
- * surface, and a stale panel id would ask the rail for an icon it has no case
- * for.
+ * the defaults - a hand-edited bar host would otherwise mount neither surface,
+ * and a stale panel id would ask the rail for an icon it has no case for.
  */
 export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
   const stored: Record<string, unknown> = isRecord(value) ? value : {};
+  const usageHost = persistedBarHost(
+    stored.usageHost,
+    DEFAULT_ARRANGEMENT.usageHost,
+  );
+  const legacyHeaderPair =
+    usageHost === "header" && stored.resourceHost === undefined;
   return normalizeArrangement({
     dock: persistedIds(stored.dock, DEFAULT_DOCK_ORDER),
     // Each cluster is read against EVERY toolbar region, so a region the user
@@ -148,10 +162,26 @@ export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
     hiddenProviders: persistedProviderIds(stored.hiddenProviders),
     providerLimits: persistedProviderLimits(stored.providerLimits),
     shownProfiles: persistedShownProfiles(stored.shownProfiles),
-    usageHost:
-      stored.usageHost === "header" || stored.usageHost === "status-bar"
-        ? stored.usageHost
-        : DEFAULT_ARRANGEMENT.usageHost,
+    usageHost,
+    // The two fields a pre-L-156 record cannot have written, read against what
+    // that record MEANT rather than against today's defaults (L-161).
+    //
+    // That build had one `usageHost` for both readings and drew the header
+    // pair at the right end ("Top bar - right, before the icons"), so
+    // `usageHost: "header"` said: both readings up, no strip, gauge on the
+    // right. Resolving the absent fields to the shipped defaults would give
+    // that user a status bar back with the readout in it and move their gauge
+    // across the window. This is the only place that can tell a record
+    // predates the split - an absent field - so the carry lives here and
+    // nothing downstream has to know about it.
+    usageSide: persistedSide(
+      stored.usageSide,
+      legacyHeaderPair ? "right" : DEFAULT_ARRANGEMENT.usageSide,
+    ),
+    resourceHost: persistedBarHost(
+      stored.resourceHost,
+      legacyHeaderPair ? "header" : DEFAULT_ARRANGEMENT.resourceHost,
+    ),
     resourceSide: persistedSide(
       stored.resourceSide,
       DEFAULT_ARRANGEMENT.resourceSide,
@@ -160,6 +190,7 @@ export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
       stored.minimapSide,
       DEFAULT_ARRANGEMENT.minimapSide,
     ),
+    statusBarParked: persistedBarRegionIds(stored.statusBarParked),
     pinnedContextFieldOrder: persistedIds(
       stored.pinnedContextFieldOrder,
       CONTEXT_USAGE_ROW_KEYS,
@@ -363,6 +394,20 @@ function persistedShownProfiles(value: unknown): StatusBarShownProfiles {
 
 function persistedSide(value: unknown, fallback: EdgeSide): EdgeSide {
   return value === "left" || value === "right" ? value : fallback;
+}
+
+/** The remembered set, holding only ids this build has a reading for (L-160). */
+function persistedBarRegionIds(value: unknown): ReadonlyArray<BarRegionId> {
+  if (!Array.isArray(value)) return DEFAULT_ARRANGEMENT.statusBarParked;
+  const parked = BAR_REGION_IDS.filter((region) =>
+    value.some((entry) => entry === region),
+  );
+  return parked.length === 0 ? DEFAULT_ARRANGEMENT.statusBarParked : parked;
+}
+
+/** Which bar a stored reading names, or the one it ships in (L-156). */
+function persistedBarHost(value: unknown, fallback: BarHost): BarHost {
+  return value === "status-bar" || value === "header" ? value : fallback;
 }
 
 /**

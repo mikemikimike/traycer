@@ -6,7 +6,7 @@ import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-co
 import { leftPanelIdForRailRegion, RAIL_REGION_IDS } from "@/lib/layout/rail";
 import type { LeftPanelId } from "@/lib/left-panel-ids";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
-import { useRailBreaksEditing } from "@/components/epic-canvas/sidebar/use-rail-breaks-editing";
+import { useRailDividersEditing } from "@/components/epic-canvas/sidebar/use-rail-dividers-editing";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import {
@@ -24,14 +24,13 @@ import { cn } from "@/lib/utils";
 /**
  * The sample scene's icon rail: `arrangement.rail` drawn entry by entry.
  *
- * Flat rather than grouped, because the rail IS flat (L-25) - a panel, or a
- * group break that ends the group before it - and this is the surface a session
- * drags on (L-115). The `<aside>` is the cluster the drop resolves against,
- * so a rail member can be pulled past its neighbours and no further.
+ * Flat, because the rail IS flat (L-155) - a panel, or a divider the user put
+ * between two of them - and this is the surface a session drags on (L-115).
+ * The `<aside>` is the cluster the drop resolves against, so a rail member can
+ * be pulled past its neighbours and no further.
  *
- * The breaks are drawn only while this rail is being customized, which is the
- * same rule the real sidebar follows (L-140): a break at rest is the spacing
- * between two groups and nothing else.
+ * A divider is drawn at rest as the space it is and in a session as the handle
+ * it becomes, which is the same rule the real sidebar follows (L-140).
  *
  * It answers a right-click with the REAL rail's menu (L-144), rendered from the
  * one module both rails share: the editor always opens here (L-87), so this is
@@ -43,7 +42,7 @@ import { cn } from "@/lib/utils";
  */
 export function SampleWorkspaceRail() {
   const rail = useLayoutRail();
-  const breaksEditing = useRailBreaksEditing();
+  const dividersEditing = useRailDividersEditing();
   const visibilityOverrideById = usePanelVisibilityOverrides();
   // The icon the pointer was over, or null for the rail's own empty space -
   // which is still a menu, because it is the only way back to a panel with no
@@ -69,12 +68,12 @@ export function SampleWorkspaceRail() {
           {rail.map((entry) => {
             if (entry.kind !== "divider")
               return <SampleRailTile key={entry.id} regionId={entry.id} />;
-            if (!breaksEditing) return null;
             return (
               <LeftPanelRailDivider
                 key={entry.id}
                 dividerId={entry.id}
                 orientation="vertical"
+                editing={dividersEditing}
               />
             );
           })}

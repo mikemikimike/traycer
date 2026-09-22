@@ -12,12 +12,19 @@ import {
 } from "@/components/layout-editor/layout-gestures";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import {
+  BAR_HOST_OPTIONS,
   EDGE_SIDE_OPTIONS,
   SIZE_OPTIONS,
-  USAGE_HOST_OPTIONS,
 } from "@/components/layout-editor/regions/region-grammar";
 import { Switch } from "@/components/ui/switch";
-import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import {
+  asBarRegionId,
+  barPlacement,
+  withBarHost,
+  withBarSide,
+  type BarRegionId,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -225,47 +232,61 @@ export function RegionSizeControl(props: {
   );
 }
 
-/** Which end of its surface an edge-anchored region sits at. */
+/**
+ * Which end of its surface an edge-anchored region sits at.
+ *
+ * Three regions have a side and they are not all the same kind of thing: the
+ * minimap's is an edge of the transcript, and the two bar readings' is an end
+ * of whichever bar each of them is in (L-156). The write is the model's, so
+ * neither answer is spelled as a field name here.
+ */
 export function RegionSideControl(props: {
   readonly regionId: RegionId;
   readonly arrangement: LayoutArrangement;
 }): ReactNode {
   const { regionId, arrangement } = props;
-  const sideKey = regionId === "minimap" ? "minimapSide" : "resourceSide";
+  const bar = asBarRegionId(regionId);
+  const value =
+    bar === null
+      ? arrangement.minimapSide
+      : barPlacement(arrangement, bar).side;
   return (
     <SegmentedControl
       ariaLabel={`${regionFacts(regionId).name} side`}
       options={EDGE_SIDE_OPTIONS}
-      value={arrangement[sideKey]}
+      value={value}
       onChange={(next) => {
         if (next !== "left" && next !== "right") return;
-        writeArrangement({ ...arrangement, [sideKey]: next });
+        writeArrangement(
+          bar === null
+            ? { ...arrangement, minimapSide: next }
+            : withBarSide(arrangement, bar, next),
+        );
       }}
     />
   );
 }
 
 /**
- * Which surface hosts the usage cluster.
+ * Which of the two bars one reading lives in (L-156).
  *
- * A SURFACE control wearing a region's clothes until now (D7): `usageHost`
- * moves Usage limits AND Resource monitor into the top bar and removes the
- * status strip entirely, which is what the preset miniature has always drawn.
- * The page hoists it onto the Status bar card for that reason; the dock still
- * reaches it from the Usage limits section, where a selection is what there is.
+ * Its own region's answer and nothing else's: usage limits and the resource
+ * monitor each carry this control, and writing one leaves the other exactly
+ * where it is.
  */
-export function UsageHostControl(props: {
+export function BarHostControl(props: {
+  readonly regionId: BarRegionId;
   readonly arrangement: LayoutArrangement;
 }): ReactNode {
-  const { arrangement } = props;
+  const { regionId, arrangement } = props;
   return (
     <SegmentedControl
-      ariaLabel="Position"
-      options={USAGE_HOST_OPTIONS}
-      value={arrangement.usageHost}
+      ariaLabel={`${regionFacts(regionId).name} position`}
+      options={BAR_HOST_OPTIONS}
+      value={barPlacement(arrangement, regionId).host}
       onChange={(next) => {
         if (next !== "status-bar" && next !== "header") return;
-        writeArrangement({ ...arrangement, usageHost: next });
+        writeArrangement(withBarHost(arrangement, regionId, next));
       }}
     />
   );

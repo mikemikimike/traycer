@@ -5,10 +5,12 @@ import {
   type QuickVerbId,
   type SurfaceGroupId,
 } from "@/components/layout-editor/regions/region-grammar";
-import type {
-  LayoutArrangement,
-  OrderGroupId,
-  UsageHost,
+import {
+  asBarRegionId,
+  barPlacement,
+  type BarHost,
+  type LayoutArrangement,
+  type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -60,7 +62,7 @@ export interface RegionFacts {
   readonly surface: SurfaceGroupId;
   readonly icon: LayoutRegionIcon;
   readonly where: string;
-  readonly whereByHost: Readonly<Record<UsageHost, string>> | null;
+  readonly whereByHost: Readonly<Record<BarHost, string>> | null;
   readonly hint: string | null;
   readonly keywords: ReadonlyArray<string>;
   readonly rows: ReadonlyArray<RegionRowFacts>;
@@ -71,6 +73,27 @@ const REGION_FACTS: Readonly<Record<RegionId, RegionFacts>> = LAYOUT_REGIONS;
 
 export function regionFacts(region: RegionId): RegionFacts {
   return REGION_FACTS[region];
+}
+
+/**
+ * The line under a region's name: where it sits right now.
+ *
+ * Static for every region but the two readings that pick a bar and an end of
+ * it (L-156); for those it is composed from the placement, so one sentence
+ * per bar in the registry covers all four answers and the side is never
+ * written down twice.
+ */
+export function regionWhere(
+  region: RegionId,
+  arrangement: LayoutArrangement,
+): string {
+  const facts = regionFacts(region);
+  const barRegion = asBarRegionId(region);
+  if (facts.whereByHost === null || barRegion === null) {
+    return facts.where;
+  }
+  const placement = barPlacement(arrangement, barRegion);
+  return `${facts.whereByHost[placement.host]} - ${placement.side} side`;
 }
 
 /**

@@ -141,7 +141,7 @@ describe("Settings - Layout", () => {
       // whole rail - one list, not nine copies of it.
       expect(panelRows).toHaveLength(DEFAULT_ARRANGEMENT.rail.length);
       expect(
-        within(sidebar).getAllByRole("button", { name: "Add group break" }),
+        within(sidebar).getAllByRole("button", { name: "Add divider" }),
       ).toHaveLength(1);
     });
 
@@ -211,7 +211,7 @@ describe("Settings - Layout", () => {
 
       expect(
         screen.getAllByText(
-          "Drag to reorder, here or on the canvas. Group breaks are items too.",
+          "Drag to reorder, here or on the canvas. Add a divider to space icons apart.",
         ),
       ).toHaveLength(1);
       expect(
@@ -227,19 +227,34 @@ describe("Settings - Layout", () => {
       expect(surface("composer").contains(pinned[0])).toBe(true);
     });
 
-    it("hoists the usage host onto the Status bar card, off both its regions", () => {
+    it("gives each strip reading its own bar and side, and shares neither (L-156)", async () => {
+      const user = userEvent.setup();
       renderPanel();
 
-      const hosts = screen.getAllByRole("radiogroup", { name: "Position" });
+      // The row that moved both at once is gone: where a reading lives is the
+      // region's own pick now, behind its own disclosure.
+      expect(within(surface("statusBar")).queryByText("Show these in")).toBe(
+        null,
+      );
 
-      // One on the whole page, and it belongs to the Status bar card rather
-      // than to either of the regions it moves (D7).
-      expect(hosts).toHaveLength(1);
-      expect(
-        within(surface("statusBar")).getByText("Show these in"),
-      ).toBeTruthy();
-      expect(row("usageLimits").contains(hosts[0])).toBe(false);
-      expect(row("resourceMonitor").contains(hosts[0])).toBe(false);
+      const names = {
+        usageLimits: "Usage limits",
+        resourceMonitor: "Resource monitor",
+      } as const;
+      for (const regionId of ["usageLimits", "resourceMonitor"] as const) {
+        await user.click(row(regionId));
+        const name = names[regionId];
+        expect(
+          within(row(regionId)).getAllByRole("radiogroup", {
+            name: `${name} position`,
+          }),
+        ).toHaveLength(1);
+        expect(
+          within(row(regionId)).getAllByRole("radiogroup", {
+            name: `${name} side`,
+          }),
+        ).toHaveLength(1);
+      }
     });
   });
 
@@ -573,6 +588,139 @@ describe("Settings - Layout", () => {
     // `keyboardNav` is a fact about an editor SESSION, and this host has none
     // (R2-04). The page must never write it.
     expect(useLayoutEditorStore.getState().keyboardNav).toBe(false);
+  });
+
+  describe("the sticky filter band (L-154)", () => {
+    /**
+     * The band's observer, driven by hand.
+     *
+     * `observe()` delivers the target's current state straight away, which is
+     * what the real API does a frame after it is called - that first delivery
+     * IS the mount-time answer, and it is the path a panel takes when it
+     * mounts into an already-scrolled pane.
+     */
+    interface ObservedEntry {
+      readonly isIntersecting: boolean;
+    }
+    type ObserverCallback = (entries: ReadonlyArray<ObservedEntry>) => void;
+    interface BandObserver {
+      readonly callback: ObserverCallback;
+      readonly root: Element | Document | null;
+      readonly targets: Array<Element>;
+    }
+    let bandObservers: Array<BandObserver> = [];
+    /** Whether the hairline above the band is inside the pane when observed. */
+    let sentinelStartsInPane = true;
+
+    class ControllableIntersectionObserver {
+      private readonly record: BandObserver;
+      constructor(
+        callback: ObserverCallback,
+        options: IntersectionObserverInit,
+      ) {
+        this.record = {
+          callback,
+          root: options.root ?? null,
+          targets: [],
+        };
+        bandObservers.push(this.record);
+      }
+      observe(target: Element): void {
+        this.record.targets.push(target);
+        this.record.callback([{ isIntersecting: sentinelStartsInPane }]);
+      }
+      unobserve(): void {}
+      disconnect(): void {
+        bandObservers = bandObservers.filter((entry) => entry !== this.record);
+      }
+      takeRecords(): ReadonlyArray<ObservedEntry> {
+        return [];
+      }
+    }
+
+    beforeEach(() => {
+      bandObservers = [];
+      sentinelStartsInPane = true;
+      vi.stubGlobal("IntersectionObserver", ControllableIntersectionObserver);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    /**
+     * The panel inside a real scrollport, because the band's whole contract is
+     * about what the pane behind it is doing.
+     */
+    function renderInPane(): HTMLElement {
+      const pane = document.createElement("div");
+      pane.setAttribute("data-settings-panel-pane", "");
+      document.body.append(pane);
+      render(<LayoutSettingsPanel />, { container: pane });
+      return pane;
+    }
+
+    /** The band's hairline crossing the pane's top edge, either way. */
+    function sentinelInPane(inside: boolean): void {
+      act(() => {
+        for (const observer of bandObservers) {
+          observer.callback([{ isIntersecting: inside }]);
+        }
+      });
+    }
+
+    function band(): HTMLElement {
+      return screen.getByTestId("layout-page-filter");
+    }
+
+    it("stays within the content width, with no box drawn around it", () => {
+      renderInPane();
+
+      // The ruling itself: no bleed past the cards, and no border or shadow
+      // standing in for the fade.
+      expect(band().className).not.toMatch(/-mx-|border|shadow/);
+    });
+
+    it("watches the band's own top edge, inside the settings pane", () => {
+      const pane = renderInPane();
+
+      // Rooted on the scrollport `sticky top-0` pins to - not the document,
+      // and not the panel's own column, either of which would answer a
+      // different question entirely.
+      expect(bandObservers).toHaveLength(1);
+      expect(bandObservers[0].root).toBe(pane);
+      // And it watches a node welded to the band, not the band itself: the
+      // band never leaves the pane, so observing it would answer nothing.
+      const watched = bandObservers[0].targets[0];
+      expect(watched.parentElement).toBe(band());
+    });
+
+    it("arrives lit when the panel mounts into a pane already scrolled past it", () => {
+      // A search landing or a promotion from the modal into a tab mounts this
+      // panel with the pane already scrolled, so the band is pinned before
+      // anyone touches a wheel.
+      sentinelStartsInPane = false;
+
+      renderInPane();
+
+      expect(band().hasAttribute("data-stuck")).toBe(true);
+    });
+
+    it("lights its scroll edge only while rows are running under it", () => {
+      renderInPane();
+
+      // At rest the band sits below the pane's top edge: nothing is under it,
+      // so nothing separates it from the page.
+      expect(band().hasAttribute("data-stuck")).toBe(false);
+
+      sentinelInPane(false);
+      expect(band().hasAttribute("data-stuck")).toBe(true);
+
+      // And it goes out again on the way back up - an edge that latches is a
+      // box with extra steps.
+      sentinelInPane(true);
+      expect(band().hasAttribute("data-stuck")).toBe(false);
+    });
   });
 
   describe("the small-screen status bar row (L-51)", () => {

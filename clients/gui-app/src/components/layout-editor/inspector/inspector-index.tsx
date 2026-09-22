@@ -82,55 +82,45 @@ function rememberIndexFocus(): void {
 }
 
 /**
- * One line of the index: a region to open, or a group boundary to read.
+ * One line of the index: a region to open, or a divider to read.
  *
- * Only the sidebar has the second kind, because only the rail has boundaries
- * of its own (L-25).
+ * Only the sidebar has the second kind, because only the rail has dividers of
+ * its own (L-155).
  */
 type IndexEntry =
   | { readonly kind: "region"; readonly region: RegionFacts }
   | { readonly kind: "divider"; readonly id: string };
 
 /**
- * The sidebar group's lines: the rail's own order, with its group breaks
- * (LV2-09).
+ * The sidebar group's lines: the rail's own order, with its dividers (LV2-09).
  *
- * The index used to list the nine panels in registry order while the canvas
- * beside it drew them in `arrangement.rail`'s, so row 2 of the list was icon 5
- * on the screen, and the dividers a user had added were invisible until they
- * opened the section. The list IS the rail's picture in this host, so it is
- * read off the rail.
+ * ONE membership rule for the two sidebar lists this panel shows (LV4-05).
+ * Both the index and the Position list are `arrangement.rail` read in order,
+ * every entry, panels and dividers alike; they differ only in what a line can
+ * DO, which is the difference between reading the rail and operating it - the
+ * index draws a divider as the rule it is, and the sortable list draws it as a
+ * row with a drag handle and a Remove. They used to disagree on membership,
+ * with seven dividers in one list and none in the other, which read as a bug
+ * in whichever one the user looked at second.
  *
- * A group break is drawn as the break it is rather than as a row of its own:
- * the rail draws a boundary as a gap between two icons, not as the words "Group
- * break", and a row per break would be seven extra lines in the shipped rail
- * alone. The words, the remove button and the drag belong to the sortable list,
- * which is where a break is OPERATED.
+ * A filter is the one exception, and it applies to the index alone because the
+ * Position list has no filter: a filtered index is a search result rather than
+ * the rail's picture, and a rule drawn between two rows that are no longer
+ * adjacent in the rail would say something untrue.
  */
 function railIndexEntries(
   rail: ReadonlyArray<RailEntry>,
   filter: string,
 ): ReadonlyArray<IndexEntry> {
-  const entries: IndexEntry[] = [];
-  let pending: string | null = null;
-  for (const entry of rail) {
+  const filtering = filter.trim().length > 0;
+  return rail.flatMap((entry): IndexEntry[] => {
     if (entry.kind === "divider") {
-      // Held, not drawn: a break needs a line on each side of it. One at
-      // either end of the rail - or the second of two in a row - separates
-      // nothing, which is exactly how inert it is in the rail itself
-      // (`leftPanelGroupsFromRail`), and under a filter the same rule drops
-      // the breaks whose neighbours have gone.
-      if (entries.length > 0) pending = entry.id;
-      continue;
+      return filtering ? [] : [{ kind: "divider", id: entry.id }];
     }
-    if (!regionMatchesFilter(entry.id, filter)) continue;
-    if (pending !== null) {
-      entries.push({ kind: "divider", id: pending });
-      pending = null;
-    }
-    entries.push({ kind: "region", region: regionFacts(entry.id) });
-  }
-  return entries;
+    return regionMatchesFilter(entry.id, filter)
+      ? [{ kind: "region", region: regionFacts(entry.id) }]
+      : [];
+  });
 }
 
 /** Every other surface: the registry's declaration order, filtered. */
@@ -155,8 +145,8 @@ interface InspectorIndexProps {
  *
  * Within a surface the registry's declaration order stands, except on the
  * sidebar: the rail is the one surface whose order the user rearranges and the
- * canvas draws, so that group is read off `arrangement.rail`, breaks included
- * (LV2-09).
+ * canvas draws, so that group is read off `arrangement.rail`, dividers
+ * included (LV2-09).
  *
  * The primary keyboard surface (L-31): arrows walk the rows with the ring
  * following (the ring itself is ticket 06's wiring; this component raises
@@ -181,7 +171,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
         : surfaceIndexEntries(group.id, filter),
   })).filter((entry) => entry.entries.length > 0);
 
-  // The walk is over the rows that open something: a break is read, not
+  // The walk is over the rows that open something: a divider is read, not
   // operated, so an arrow steps straight over it.
   const orderedIds = groups.flatMap((entry) =>
     entry.entries.flatMap((item) =>
@@ -282,9 +272,9 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                     role="separator"
                     // Named, because a bare separator is announced as nothing
                     // at all and this one is a thing the user can add, move and
-                    // remove. "Group break" is the only name it has anywhere
-                    // (L-140), the same words the sortable list's own row uses.
-                    aria-label="Group break"
+                    // remove. "Divider" is the only name it has anywhere
+                    // (L-155), the same word the sortable list's own row uses.
+                    aria-label="Divider"
                     data-rail-divider={item.id}
                     className="mx-3.5 my-1 h-px bg-border"
                   />

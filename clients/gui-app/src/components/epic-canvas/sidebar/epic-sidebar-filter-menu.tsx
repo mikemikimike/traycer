@@ -87,7 +87,6 @@ interface ViewMenuState<TDetail extends string> {
 function useViewMenuState<TDetail extends string>(
   tabId: string,
   panelId: LeftPanelId,
-  collapsed: boolean,
 ): ViewMenuState<TDetail> {
   const open = usePanelHeaderMenuOpen(tabId, panelId, "filter");
   const setMenuOpen = usePanelHeaderMenuStore((state) => state.setMenuOpen);
@@ -95,14 +94,9 @@ function useViewMenuState<TDetail extends string>(
   const [detail, setDetail] = useState<TDetail | null>(null);
   const [triggerElement, setTriggerElement] =
     useState<HTMLButtonElement | null>(null);
-  const setPanelSectionCollapsed = useLeftPanelStore(
-    (state) => state.setPanelSectionCollapsed,
-  );
-
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (nextOpen) {
-        if (collapsed) setPanelSectionCollapsed(panelId, false);
         const triggerRight = triggerElement?.getBoundingClientRect().right ?? 0;
         setDrillIn(
           window.innerWidth - triggerRight < TWO_COLUMN_MENU_MIN_AVAILABLE_PX,
@@ -112,14 +106,7 @@ function useViewMenuState<TDetail extends string>(
       }
       setMenuOpen(tabId, panelId, "filter", nextOpen);
     },
-    [
-      collapsed,
-      panelId,
-      setMenuOpen,
-      setPanelSectionCollapsed,
-      tabId,
-      triggerElement,
-    ],
+    [panelId, setMenuOpen, tabId, triggerElement],
   );
 
   const openDetail = useCallback((nextDetail: TDetail) => {
@@ -242,7 +229,6 @@ function DrillInHeader(props: {
 export function ChatFilterMenu(props: {
   readonly epicId: string;
   readonly tabId: string;
-  readonly collapsed: boolean;
   readonly canArchive: boolean;
 }) {
   const { epicId } = props;
@@ -265,11 +251,7 @@ export function ChatFilterMenu(props: {
     archiveVisibility !== DEFAULT_CHAT_ARCHIVE_VISIBILITY;
   const active =
     filterActive || archiveVisibilityChanged || isSortModeActive(sort);
-  const menu = useViewMenuState<ChatViewDetail>(
-    props.tabId,
-    "chats",
-    props.collapsed,
-  );
+  const menu = useViewMenuState<ChatViewDetail>(props.tabId, "chats");
 
   const detailProps = {
     filterOrigin: filter.origin,
@@ -392,7 +374,6 @@ export function ChatFilterMenu(props: {
 export function ArtifactFilterMenu(props: {
   readonly epicId: string;
   readonly tabId: string;
-  readonly collapsed: boolean;
   readonly onMarkAllRead: () => void;
   readonly markAllReadDisabled: boolean;
 }) {
@@ -418,11 +399,7 @@ export function ArtifactFilterMenu(props: {
   const filterActive = isArtifactFilterActive(filter);
   const filterCount = artifactFilterCount(filter);
   const active = filterActive || isSortModeActive(sort);
-  const menu = useViewMenuState<ArtifactViewDetail>(
-    props.tabId,
-    "artifacts",
-    props.collapsed,
-  );
+  const menu = useViewMenuState<ArtifactViewDetail>(props.tabId, "artifacts");
 
   const detailProps = {
     filterStatuses: filter.statuses,

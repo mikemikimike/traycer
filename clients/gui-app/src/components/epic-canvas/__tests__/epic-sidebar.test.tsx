@@ -18,20 +18,16 @@ import type {
   EpicCanvasDropPreview,
   EpicCanvasLeftPanelRailDragData,
 } from "@/components/epic-canvas/dnd/dnd";
-import {
-  DEFAULT_LEFT_PANEL_GROUPS,
-  DEFAULT_LEFT_PANEL_ID,
-  moveLeftPanelGroup,
-  useLeftPanelStore,
-} from "@/stores/epics/left-panel-store";
+import { useLeftPanelStore } from "@/stores/epics/left-panel-store";
 import { type PanelVisibilityOverrideById } from "@/lib/left-panel-ids";
 import {
-  applyLeftPanelGroups,
-  currentLeftPanelGroups,
+  applyRail,
   clearRailVisibilityOverrides,
+  currentLayoutArrangement,
   setRailVisibilityOverride,
 } from "@/lib/layout/rail-view";
 import { panelVisibilityOverridesFromValues } from "@/lib/layout/rail";
+import { moveRailPanelBeside } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -48,6 +44,7 @@ import {
   useSurfaceHostSelectionStore,
 } from "@/stores/host/surface-host-selection-store";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { persistKey, STORE_KEYS } from "@/lib/persist";
 
 interface CapturedDroppableInput {
   readonly id: string;
@@ -199,7 +196,6 @@ function resetLeftPanelStore(): void {
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
-    panelSectionCollapsedByPanelId: {},
     commentsPanelRevealedByTabId: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},
@@ -217,7 +213,7 @@ function visibilityOverrides(): PanelVisibilityOverrideById {
 /**
  * The Pull Requests panel is presence-gated, so the rail only carries its icon
  * once this epic has observed a PR. Rail-geometry tests want the full default
- * complement of groups, so they seed presence; the gate itself is covered
+ * complement of panels, so they seed presence; the gate itself is covered
  * separately below.
  */
 function setPullRequestPresenceForHost(
@@ -299,21 +295,18 @@ describe("<EpicLeftPanelRail />", () => {
       />,
     );
 
-    // Chats and Artifacts share one rail icon (combined-by-default group);
-    // the primary panel id (chats) drives the rail test id.
+    // Every default panel draws its own rail icon (L-155): there is no group
+    // concept left to combine Agents and Artifacts under one button.
     expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
-    expect(screen.queryByTestId("epic-rail-artifacts")).toBeNull();
+    expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
     expect(screen.getByTestId("epic-rail-terminals")).not.toBeNull();
+    expect(screen.getByTestId("epic-rail-browsers")).not.toBeNull();
     expect(screen.getByTestId("epic-rail-git-diff")).not.toBeNull();
+    expect(screen.getByTestId("epic-rail-pull-requests")).not.toBeNull();
     expect(screen.getByTestId("epic-rail-file-tree")).not.toBeNull();
     expect(screen.getByTestId("epic-rail-sharing")).not.toBeNull();
     expect(screen.queryByTestId("epic-rail-comments")).toBeNull();
 
-    expect(
-      testState.droppableInputs.find((input) =>
-        input.id.startsWith("left-panel-rail-extraction-target:"),
-      ),
-    ).toBeUndefined();
     expect(
       testState.droppableInputs.find(
         (input) =>
@@ -325,6 +318,52 @@ describe("<EpicLeftPanelRail />", () => {
         (input) => input.id === `left-panel-rail-target:chats:pane:${TAB_ID}`,
       ),
     ).not.toBeUndefined();
+  });
+
+  it("draws the shipped rail as nine evenly spaced icons with no dividers", () => {
+    // "Every panel available": comments needs its own reveal + a commentable
+    // artifact, same as `revealCommentsPanel` below.
+    testState.activeArtifactId = "artifact-1";
+    testState.activeArtifact = { kind: "spec" };
+    useLeftPanelStore.getState().revealCommentsPanel(TAB_ID);
+
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    const rail = screen.getByTestId("epic-sidebar-rail");
+    expect(
+      Array.from(rail.children).map((child) =>
+        child.getAttribute("data-testid"),
+      ),
+    ).toEqual([
+      "epic-rail-chats",
+      "epic-rail-artifacts",
+      "epic-rail-terminals",
+      "epic-rail-browsers",
+      "epic-rail-git-diff",
+      "epic-rail-pull-requests",
+      "epic-rail-file-tree",
+      "epic-rail-sharing",
+      "epic-rail-comments",
+    ]);
+    // The shipped rail (`DEFAULT_RAIL`) carries no divider entries - the
+    // rail's own `gap-1` is the only spacing between icons, and no button
+    // adds a margin of its own on top of it.
+    expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
+    expect(rail.className).toContain("gap-1");
+    for (const child of Array.from(rail.children)) {
+      expect(child.className).not.toMatch(/\bm[xytrbl]?-\d/);
+    }
+    // A button's accessible name is now its own panel's title - never a
+    // "X + Y" label for a group that no longer exists.
+    expect(
+      screen.getByTestId("epic-rail-chats").getAttribute("aria-label"),
+    ).toBe("Agents");
   });
 
   it("namespaces duplicate Epic rail registrations by view tab", () => {
@@ -352,7 +391,7 @@ describe("<EpicLeftPanelRail />", () => {
     expect(ids.some((id) => id.endsWith(":pane:pane-b"))).toBe(true);
   });
 
-  it("switches inactive rail icons and toggles collapse on the active group", () => {
+  it("switches inactive rail icons and toggles collapse on the active panel", () => {
     useLeftPanelStore.getState().setMainCollapsed(TAB_ID, true);
     render(
       <EpicLeftPanelRail
@@ -370,6 +409,34 @@ describe("<EpicLeftPanelRail />", () => {
     expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(false);
 
     fireEvent.click(screen.getByTestId("epic-rail-terminals"));
+
+    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(true);
+  });
+
+  it("collapses on a click of the LIT icon, even when the active panel is hidden (R5R-09)", () => {
+    // The rail lights whatever the body fell back to, so the click handler has
+    // to compare against THAT and not against `activePanelId`. It used to take
+    // the "switch panels" branch here, so the first click did nothing visible
+    // and only the second collapsed the column.
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "chats");
+    act(() => {
+      setRailVisibilityOverride("chats", false);
+    });
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    // Agents is hidden, so the body and the rail both fall back to Artifacts.
+    expect(screen.queryByTestId("epic-rail-chats")).toBeNull();
+    expect(
+      screen.getByTestId("epic-rail-artifacts").getAttribute("aria-current"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByTestId("epic-rail-artifacts"));
 
     expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(true);
   });
@@ -406,15 +473,7 @@ describe("<EpicLeftPanelRail />", () => {
     expect(screen.getByTestId("epic-rail-comments")).not.toBeNull();
   });
 
-  it("shows the rail extraction slot for section-origin drops on rail background", () => {
-    applyLeftPanelGroups(
-      moveLeftPanelGroup(
-        currentLeftPanelGroups(),
-        "artifacts",
-        DEFAULT_LEFT_PANEL_ID,
-        "combine",
-      ),
-    );
+  it("shows the rail drop slot for a section-origin drop on rail background", () => {
     setRailDragState(
       {
         kind: "left-panel-rail-item",
@@ -472,9 +531,8 @@ describe("<EpicLeftPanelRail />", () => {
         (element) => element.getAttribute("data-testid"),
       ),
     ).toEqual([
-      // A group boundary is a gap at rest and nothing else (L-140): the only
-      // extra child here is the drop line the live drag is drawing.
       "epic-rail-chats",
+      "epic-rail-artifacts",
       "epic-rail-terminals",
       "epic-rail-panel-drop-line",
       "epic-rail-browsers",
@@ -486,11 +544,12 @@ describe("<EpicLeftPanelRail />", () => {
   });
 
   /**
-   * The boundary between two groups is drawn as the gap the rail already has
-   * (L-140), and it becomes a handle only for the rail the user is actually
-   * customizing (L-109, R3-06).
+   * A divider is a spacer the user adds to the rail (L-155): at rest it draws
+   * as the rail's own gap and nothing more, and it becomes a handle only for
+   * the rail the user is actually customizing (L-109, R3-06). The shipped
+   * rail carries none, so most of these seed one first.
    */
-  describe("group breaks", () => {
+  describe("dividers", () => {
     function renderRail(paneVisible: boolean) {
       return render(
         <PaneVisibilityContext value={paneVisible}>
@@ -503,22 +562,42 @@ describe("<EpicLeftPanelRail />", () => {
       );
     }
 
+    function seedRailWithDivider(): void {
+      const rail = currentLayoutArrangement().rail;
+      applyRail([
+        ...rail.slice(0, 3),
+        { kind: "divider", id: "divider:1" },
+        ...rail.slice(3),
+      ]);
+    }
+
     afterEach(() => {
       useLayoutEditorStore.getState().endSession();
     });
 
-    it("draws nothing between the groups at rest, so the rail is its buttons", () => {
+    it("draws nothing between panels at rest, so the shipped rail is its buttons", () => {
       renderRail(true);
 
       const rail = screen.getByTestId("epic-sidebar-rail");
-      // Every child is a panel button: no boundary element, and therefore
-      // none of the box-plus-gap a boundary element would cost in a column
-      // that scrolls.
+      // Every child is a panel button: no divider entry exists on the
+      // shipped rail, so there is nothing else to draw.
       for (const child of rail.children) expect(child.tagName).toBe("BUTTON");
       expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
     });
 
+    it("draws an added divider as a plain resting spacer outside a session", () => {
+      seedRailWithDivider();
+
+      renderRail(true);
+
+      const dividers = screen.getAllByTestId("epic-rail-divider");
+      expect(dividers).toHaveLength(1);
+      expect(dividers[0].hasAttribute("data-rail-divider-resting")).toBe(true);
+      expect(dividers[0].getAttribute("data-layout-draggable")).toBeNull();
+    });
+
     it("becomes a draggable rail member while this pane is being customized", () => {
+      seedRailWithDivider();
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
         source: "direct_ui",
@@ -527,16 +606,18 @@ describe("<EpicLeftPanelRail />", () => {
 
       renderRail(true);
 
-      const breaks = screen.getAllByTestId("epic-rail-divider");
-      expect(breaks.length).toBeGreaterThan(0);
-      for (const element of breaks) {
+      const dividers = screen.getAllByTestId("epic-rail-divider");
+      expect(dividers.length).toBeGreaterThan(0);
+      for (const element of dividers) {
         expect(element.getAttribute("data-layout-draggable")).toBe("1");
         expect(element.getAttribute("data-layout-group")).toBe("rail");
         expect(element.getAttribute("data-layout-member")).toMatch(/^divider:/);
+        expect(element.hasAttribute("data-rail-divider-resting")).toBe(false);
       }
     });
 
     it("marks nothing draggable in a hidden pane's rail during a session", () => {
+      seedRailWithDivider();
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
         source: "direct_ui",
@@ -545,12 +626,16 @@ describe("<EpicLeftPanelRail />", () => {
 
       renderRail(false);
 
-      expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
       expect(
         screen
           .getByTestId("epic-sidebar-rail")
           .querySelectorAll("[data-layout-draggable]"),
       ).toHaveLength(0);
+      // The divider is still drawn - just as the same resting spacer it is
+      // outside a session, never omitted.
+      for (const divider of screen.getAllByTestId("epic-rail-divider")) {
+        expect(divider.hasAttribute("data-rail-divider-resting")).toBe(true);
+      }
     });
   });
 
@@ -779,52 +864,6 @@ describe("<EpicLeftPanelRail />", () => {
 
       rendered.unmount();
     });
-
-    it("retains a grouped PR section when its active sibling stays selected", () => {
-      applyLeftPanelGroups(
-        moveLeftPanelGroup(
-          DEFAULT_LEFT_PANEL_GROUPS,
-          "pull-requests",
-          "git-diff",
-          "combine",
-        ),
-      );
-      setPullRequestPresenceForHost(HOST_ID, true);
-      useLeftPanelStore.getState().setActivePanelId(TAB_ID, "git-diff");
-      const rendered = render(
-        <>
-          <EpicLeftPanelRail
-            epicId={EPIC_ID}
-            tabId={TAB_ID}
-            orientation="vertical"
-          />
-          <SidebarProvider>
-            <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
-          </SidebarProvider>
-        </>,
-      );
-
-      expect(screen.getByTestId("epic-rail-git-diff")).not.toBeNull();
-      expect(
-        screen
-          .getByTestId("epic-sidebar")
-          .getAttribute("data-left-panel-group-size"),
-      ).toBe("2");
-
-      act(() => {
-        pinPullRequestsTo(PINNED_HOST_ID);
-        usePrPresenceStore.setState({ hasItemsByScopeKey: {} });
-      });
-
-      expect(screen.getByTestId("epic-rail-git-diff")).not.toBeNull();
-      expect(
-        screen
-          .getByTestId("epic-sidebar")
-          .getAttribute("data-left-panel-group-size"),
-      ).toBe("2");
-
-      rendered.unmount();
-    });
   });
 
   describe("rail context menu", () => {
@@ -1007,6 +1046,77 @@ describe("<EpicLeftPanelRail />", () => {
   });
 });
 
+/**
+ * The sidebar body draws the one panel the rail says is active, and it draws
+ * it WHOLE (L-157, R5R-01).
+ *
+ * Per-panel section collapse is deleted, and the case that forced it is an
+ * upgrade rather than a gesture: a user who collapsed Artifacts while it was
+ * stacked under Chats had `{artifacts: true}` written to localStorage, which
+ * was harmless while a sibling took the space. With one panel in the body a
+ * honoured flag is a title row over an empty column, and the rail cannot clear
+ * it - clicking the lit icon collapses the whole main panel instead.
+ */
+describe("the displayed panel is never collapsed (L-157)", () => {
+  beforeEach(() => {
+    resetLeftPanelStore();
+    resetDndStore();
+    resetTestState();
+    setPullRequestPresence(false);
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetLeftPanelStore();
+    resetDndStore();
+    resetTestState();
+  });
+
+  function renderHost(): void {
+    render(
+      <QueryClientProvider client={testQueryClient}>
+        <SidebarProvider>
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+        </SidebarProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("draws the body for a panel a persisted collapse flag names", async () => {
+    // The shape the shipped build wrote: the flag is a key this store no
+    // longer has, so it must be inert rather than obeyed.
+    window.localStorage.setItem(
+      persistKey(STORE_KEYS.leftPanel),
+      JSON.stringify({
+        state: {
+          activePanelIdByTabId: { [TAB_ID]: "terminals" },
+          panelSectionCollapsedByPanelId: { terminals: true },
+        },
+        version: 3,
+      }),
+    );
+    await useLeftPanelStore.persist.rehydrate();
+    renderHost();
+
+    // The body itself, not just its title row: a collapsed section rendered
+    // the header alone, with nothing under it.
+    expect(screen.getByTestId("epic-test-terminals-body")).toBeTruthy();
+    expect(
+      screen.getByTestId("epic-left-panel-section-terminals").children.length,
+    ).toBeGreaterThan(1);
+  });
+
+  it("offers no collapse control on the section header", () => {
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+    renderHost();
+
+    // The chevron and the title-as-button are both gone: the sidebar's one
+    // collapse lives on the rail, as `mainCollapsedByTabId`.
+    expect(screen.queryByRole("button", { name: /^Collapse /u })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Expand /u })).toBeNull();
+  });
+});
+
 describe("Browsers panel registration", () => {
   beforeEach(() => {
     resetLeftPanelStore();
@@ -1056,6 +1166,7 @@ describe("Browsers panel registration", () => {
     );
     expect(railIds).toEqual([
       "epic-rail-chats",
+      "epic-rail-artifacts",
       "epic-rail-terminals",
       "epic-rail-browsers",
       "epic-rail-git-diff",
@@ -1077,48 +1188,16 @@ describe("Browsers panel registration", () => {
     ).toBe("browsers");
     expect(screen.getByTestId("epic-browsers-panel-empty")).toBeTruthy();
 
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Collapse Browsers" })[0],
-    );
-    expect(
-      useLeftPanelStore.getState().panelSectionCollapsedByPanelId.browsers,
-    ).toBe(true);
-    expect(screen.queryByTestId("epic-browsers-panel-empty")).toBeNull();
-
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Expand Browsers" })[0],
-    );
-    expect(screen.getByTestId("epic-browsers-panel-empty")).toBeTruthy();
-
+    // Dragging Browsers before Terminals reorders the flat rail directly -
+    // there is no group to merge into any more (L-155).
     act(() => {
-      applyLeftPanelGroups(
-        moveLeftPanelGroup(
-          DEFAULT_LEFT_PANEL_GROUPS,
-          "terminals",
-          "browsers",
-          "combine",
-        ),
-      );
-    });
-    expect(
-      screen
-        .getByTestId("epic-sidebar")
-        .getAttribute("data-left-panel-group-size"),
-    ).toBe("2");
-    expect(
-      screen
-        .getByTestId("split-resize-handle")
-        .getAttribute("data-resize-group-id"),
-    ).toBe("epic-left-panel-sections");
-
-    act(() => {
-      applyLeftPanelGroups(
-        moveLeftPanelGroup(
-          DEFAULT_LEFT_PANEL_GROUPS,
+      applyRail(
+        moveRailPanelBeside(
+          currentLayoutArrangement(),
           "browsers",
           "terminals",
-          "before",
-        ),
+          false,
+        ).rail,
       );
     });
     const reorderedRailIds = Array.from(

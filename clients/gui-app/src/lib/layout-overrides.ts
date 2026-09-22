@@ -1,5 +1,9 @@
 import { createContext, use, useMemo } from "react";
-import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import type {
+  BarPlacement,
+  BarRegionId,
+  LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import {
   type LayoutOverrides,
   type LayoutValues,
@@ -201,6 +205,33 @@ export function useArrangementValue<Key extends keyof LayoutArrangement>(
   const stored = useLayoutStore((state) => state.arrangement[key]);
   const override = use(LayoutOverrideContext).arrangement?.[key];
   return override === undefined ? stored : override;
+}
+
+/**
+ * Where both bar readings say they are (L-156), for the two surfaces that
+ * draw a cluster.
+ *
+ * Four fields read one at a time, which is what the seam serves, assembled
+ * once: the strip and the header need the same pair to ask
+ * `barClusterRegionsAt` what they are holding, and a second copy of the read
+ * is the one thing that could still make the two bars disagree about one
+ * arrangement. `barClusterRegions` stays the arrangement-holding variant, for
+ * the depictions that have the whole thing in hand.
+ */
+export function useBarPlacements(): Readonly<
+  Record<BarRegionId, BarPlacement>
+> {
+  const usageHost = useArrangementValue("usageHost");
+  const usageSide = useArrangementValue("usageSide");
+  const resourceHost = useArrangementValue("resourceHost");
+  const resourceSide = useArrangementValue("resourceSide");
+  return useMemo(
+    () => ({
+      usageLimits: { host: usageHost, side: usageSide },
+      resourceMonitor: { host: resourceHost, side: resourceSide },
+    }),
+    [usageHost, usageSide, resourceHost, resourceSide],
+  );
 }
 
 /**

@@ -107,7 +107,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
-import type { UsageHost } from "@/lib/layout/layout-arrangement";
+import type { BarHost } from "@/lib/layout/layout-arrangement";
 
 const PROFILE_SELECTION: RateLimitProfileSelection = {
   shownProfiles: {},
@@ -120,10 +120,15 @@ function renderHeaderRateLimitBars(
   return renderHook(() => useHeaderRateLimitBars(profileSelection));
 }
 
-function selectPlacement(placement: UsageHost): void {
+/**
+ * Both readings, because the strip is on screen for either one of them
+ * (L-156) and what these cases are about is whether the STRIP is there.
+ */
+function selectPlacement(placement: BarHost): void {
   useLayoutStore.getState().setArrangement({
     ...useLayoutStore.getState().arrangement,
     usageHost: placement,
+    resourceHost: placement,
   });
 }
 

@@ -1090,6 +1090,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         text: `${changedFileCount}`,
         lineDeltas: changeTotals,
         label: filesChangedLabel(changedFileCount, changeTotals),
+        detail: filesChangedDetail(changedFileCount, changeTotals),
         // Constant, so this fires on the chip's arrival and never again -
         // which is the first change of the chat, since the chip exists only
         // once there is one. Keying it on the line counts instead reads well
@@ -1116,6 +1117,11 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // chip is the only door to that list while the row is away, so its
         // tooltip has to say WHO is running, not just how many.
         label: `Active agents. ${agentsRunningCount} running${receivedAgentCount > 0 ? `, ${receivedAgentCount} received from other agents and queued` : ""}.${agentsRoster === null ? "" : ` ${agentsRoster}.`}`,
+        // Counts, not the roster: the sentence above names who is running for
+        // a screen reader, and a tooltip that listed three agents and "and 2
+        // more" under a heading would stop being the small block L-153 asks
+        // for. The panel one click away is where the roster belongs.
+        detail: activeAgentsDetail(agentsRunningCount, receivedAgentCount),
         // Only the first agent starting is worth an eye-flick - which is the
         // moment this chip appears; a count moving between two non-zero values
         // is the same fact, updated.
@@ -1141,6 +1147,10 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // all - so the sentence is the header's own summary, which names every
         // part rather than letting a bare `0` stand for "nothing here".
         label: `Background. ${backgroundSummary}.`,
+        // The header's own summary again: it already names every part the
+        // section can be on screen for, including the held shell and the
+        // pending wake the pill's running count cannot show.
+        detail: backgroundSummary,
         // A failure outranks the plain arrival: it is the one thing this
         // section can report that is not simply news, and the ring is the
         // only channel it has while the row is folded into a pill.
@@ -1162,6 +1172,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         lineDeltas: null,
         text: `${queuedCount}`,
         label: `Message queue. ${queuedCount} ${queuedCount === 1 ? "message" : "messages"} queued.`,
+        detail: `${queuedCount} ${queuedCount === 1 ? "message" : "messages"} queued`,
         // Keyed on the newest row's id, so a message ARRIVING in the queue
         // flicks the pill once - the folded queue's only other channel is the
         // number itself, which nothing draws the eye to - and a queue
@@ -1180,6 +1191,7 @@ function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // edge, in the same order.
         text: `${todoCounts.done}/${todoCounts.total}`,
         label: `Todo. ${todoCounts.done} of ${todoCounts.total} done.`,
+        detail: `${todoCounts.done} of ${todoCounts.total} done`,
         // Constant: the list arriving is the news, and a pill that flicked on
         // every completed item would ring through a whole plan.
         pulseToken: "todo",
@@ -1341,6 +1353,38 @@ function filesChangedLabel(fileCount: number, totals: DiffLineCounts): string {
     );
   }
   return `Files changed. ${parts.join(", ")}.`;
+}
+
+/**
+ * The Files changed pill's tooltip detail: the same two measurements the pill
+ * itself draws, in the same order and with the same signs - "3 files, +47 −9".
+ *
+ * The signs rather than the words, deliberately: this line is read beside the
+ * pill that prints them, so a reader is matching it against what is on screen.
+ * `filesChangedLabel` above is the same fact for a screen reader, which is why
+ * it spells "lines added" instead. A zero side is dropped in both.
+ *
+ * The `−` is U+2212 MINUS SIGN, matching `diff-line-deltas.tsx` - a hyphen
+ * here would read as a different glyph two centimetres from the real one.
+ */
+function filesChangedDetail(fileCount: number, totals: DiffLineCounts): string {
+  const deltas: string[] = [];
+  if (totals.additions > 0) deltas.push(`+${totals.additions}`);
+  if (totals.deletions > 0) deltas.push(`−${totals.deletions}`);
+  const files = fileCountPhrase(fileCount);
+  return deltas.length === 0 ? files : `${files}, ${deltas.join(" ")}`;
+}
+
+/**
+ * The Active agents pill's tooltip detail. Received rows are named rather than
+ * counted into the running total, exactly as the pill's `N · M` splits them.
+ */
+function activeAgentsDetail(running: number, received: number): string {
+  const parts = [`${running} running`];
+  if (received > 0) {
+    parts.push(`${received} queued from other agents`);
+  }
+  return parts.join(", ");
 }
 
 function lineWord(count: number): string {
@@ -1562,7 +1606,18 @@ function PendingApprovalQueues(props: {
   );
 }
 
-function ComposerSlotShell(props: {
+/**
+ * The box every centered lower surface is painted in: the edge-lane outer, the
+ * `max-w-3xl` column, the canvas fill, the top and bottom spacing, and the
+ * pseudo-element that seals the seam over the transcript's scrollbar.
+ *
+ * Exported for ONE other caller, the layout editor's sample workspace (L-87,
+ * L-98). The sample used to hand-roll this stack and drifted: it paid no top
+ * padding at all, so the pill row sat flush on the composer's border in the
+ * editor while the real chat held it a clear step above (L-153). The scene is
+ * a picture of the real thing, so it uses the real thing.
+ */
+export function ComposerSlotShell(props: {
   readonly children: ReactNode;
   readonly topSpacing: ChatLowerSurfaceTopSpacing;
   readonly bottomSpacing: ComposerSlotBottomSpacing;

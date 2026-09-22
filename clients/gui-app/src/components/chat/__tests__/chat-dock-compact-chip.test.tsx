@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 import {
   ChatDockChipArrival,
   ChatDockCompactChip,
+  type ChatDockChipTooltipLines,
 } from "@/components/chat/chat-dock-compact-chip";
 import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -15,6 +16,7 @@ interface ChipProps {
   readonly working: boolean;
   readonly lineDeltas: DiffLineCounts | null;
   readonly label: string;
+  readonly tooltipLines: ChatDockChipTooltipLines | null;
   readonly pulseToken: string | null;
   readonly expanded: boolean;
   readonly controls: string | null;
@@ -29,6 +31,9 @@ function baseProps(): ChipProps {
     working: false,
     lineDeltas: null,
     label: "3 agents running. Show the active agents.",
+    // `null` by default, which is the layout editor's picture: the tooltip
+    // tests below pass lines where they mean to.
+    tooltipLines: null,
     pulseToken: null,
     expanded: false,
     controls: null,
@@ -473,5 +478,75 @@ describe("<ChatDockCompactChip />", () => {
         cleanup();
       }
     });
+  });
+});
+
+/**
+ * L-153: a pill's tooltip is a compact hierarchy rather than the run-on
+ * accessible sentence it used to repeat. The dock's own suite pins WHAT each
+ * kind says; this pins how the three lines are drawn, and what a chip with no
+ * lines at all falls back to.
+ */
+describe("the pill's tooltip", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  async function openTooltip(): Promise<HTMLElement> {
+    fireEvent.focus(screen.getByTestId("chip"));
+    return screen.findByRole("tooltip");
+  }
+
+  it("stacks the name, the counts and the affordance, in that order", async () => {
+    renderChip({
+      ...baseProps(),
+      tooltipLines: { name: "Files changed", detail: "3 files, +47 −9" },
+    });
+
+    const tooltip = await openTooltip();
+    expect(tooltip.textContent).toBe(
+      "Files changed3 files, +47 −9Click to open",
+    );
+    // One block, not three siblings of the tooltip's own row: `TooltipContent`
+    // is `inline-flex items-center`, so three children become three columns
+    // and each wraps into a ribbon.
+    const block = tooltip.firstElementChild;
+    const blockClasses = classesOf(block as Element);
+    expect(blockClasses).toContain("flex-col");
+    // Falling weight down the block: the name leads, the counts are quieter,
+    // the affordance is quietest.
+    const lines = [...(block?.children ?? [])];
+    expect(lines.map((line) => line.textContent)).toEqual([
+      "Files changed",
+      "3 files, +47 −9",
+      "Click to open",
+    ]);
+    expect(classesOf(lines[0])).toContain("font-medium");
+    expect(classesOf(lines[1])).toContain("text-background/70");
+    expect(classesOf(lines[2])).toContain("text-background/55");
+  });
+
+  it("leaves the accessible name a sentence, not the block", async () => {
+    renderChip({
+      ...baseProps(),
+      label: "Files changed. 3 files, 47 lines added, 9 removed.",
+      tooltipLines: { name: "Files changed", detail: "3 files" },
+    });
+
+    await openTooltip();
+    // The two are worded for different readers and must not collapse into
+    // one: a screen reader cannot hear a `+`, a tone or a click affordance.
+    expect(screen.getByTestId("chip").getAttribute("aria-label")).toBe(
+      "Files changed. 3 files, 47 lines added, 9 removed.",
+    );
+  });
+
+  it("falls back to that sentence when it is handed no lines", async () => {
+    // The layout editor draws these chips as PICTURES in its form, with no
+    // counts and an `onClick` that does nothing - so "Click to open" under
+    // one would be a lie. `tooltipLines={null}` is what those five sites pass.
+    renderChip({ ...baseProps(), label: "Active agents", tooltipLines: null });
+
+    expect((await openTooltip()).textContent).toBe("Active agents");
   });
 });

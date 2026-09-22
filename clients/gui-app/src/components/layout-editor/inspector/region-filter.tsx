@@ -67,6 +67,22 @@ const FILTER_COPY: Readonly<Record<LayoutFormHost, FilterCopy>> = {
 };
 
 /**
+ * The gutter the field sits in, which is a fact about the HOST as much as the
+ * copy above is (L-154).
+ *
+ * The inspector's field is the only thing at its level, so it carries its own
+ * horizontal inset. The page's column already has one, and its CARDS draw the
+ * content edge: a field indented inside that edge reads as a narrower thing
+ * than the settings it filters, and the band behind it then has to bleed back
+ * out to reach the cards - which is exactly the full-bleed stripe L-154 is
+ * about. The page keeps the vertical padding, which is the band's own height.
+ */
+const FIELD_GUTTER: Readonly<Record<LayoutFormHost, string>> = {
+  inspector: "px-3 py-2",
+  page: "py-2",
+};
+
+/**
  * The index's filter field (L-07): `.filterwrap` / `input.filter` in the
  * prototype. Matches labels and keywords through `regionMatchesFilter` and
  * auto-expands Fine-tune on a fine-tune match - both read by
@@ -112,7 +128,7 @@ export function RegionFilter(props: RegionFilterProps): ReactNode {
   }
 
   return (
-    <div className="px-3 py-2">
+    <div className={FIELD_GUTTER[host]}>
       <InputGroup variant="search">
         <InputGroupAddon align="inline-start">
           <Search aria-hidden className="size-3.5" />

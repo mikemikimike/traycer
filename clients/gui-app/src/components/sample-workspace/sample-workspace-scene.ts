@@ -331,6 +331,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     text: `${SAMPLE_CHANGED_FILES.length}`,
     lineDeltas: SAMPLE_CHANGE_TOTALS,
     label: "Sample: three changed files, 47 additions and 9 deletions",
+    detail: "3 files, +47 −9",
     pulseToken: null,
   },
   {
@@ -340,6 +341,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     text: `${1 + SAMPLE_AGENT_DESCENDANTS.length}`,
     lineDeltas: null,
     label: "Sample: two active agents",
+    detail: "2 running",
     pulseToken: null,
   },
   {
@@ -349,6 +351,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     text: `${SAMPLE_BACKGROUND_ITEMS.length}`,
     lineDeltas: null,
     label: "Sample: two background shells",
+    detail: "2 running",
     pulseToken: null,
   },
   {
@@ -358,6 +361,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     text: `${SAMPLE_QUEUE.items.length}`,
     lineDeltas: null,
     label: "Sample: one queued message",
+    detail: "1 message queued",
     pulseToken: null,
   },
   {
@@ -367,6 +371,7 @@ export const SAMPLE_DOCK: ReadonlyArray<
     text: `${SAMPLE_TODO.items.filter((item) => item.status === "completed").length}/${SAMPLE_TODO.items.length}`,
     lineDeltas: null,
     label: "Sample: one of three tasks done",
+    detail: "1 of 3 done",
     pulseToken: null,
   },
 ];

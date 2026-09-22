@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getLeftPanelDefinition } from "@/components/epic-canvas/sidebar/left-panel-registry";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
 import { SampleWorkspaceRail } from "@/components/sample-workspace/sample-workspace-rail";
+import { insertRailDivider } from "@/lib/layout/layout-arrangement";
 import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -14,8 +15,9 @@ import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
  * The surface a session's rail drag happens on (L-115).
  *
  * The editor's canvas is always the sample workspace, so this rail is where
- * the nine icons and the seven boundaries are picked up - and what it has to
- * be is `arrangement.rail` itself, entry for entry, inside one cluster.
+ * the nine icons and whatever dividers the user has added are picked up - and
+ * what it has to be is `arrangement.rail` itself, entry for entry, inside one
+ * cluster.
  */
 
 function railEntries(): ReadonlyArray<HTMLElement> {
@@ -39,23 +41,62 @@ afterEach(() => {
   useLayoutEditorStore.getState().endSession();
 });
 
+/** One divider in the rail, which is the only way there is one (L-155). */
+function addDivider(index: number): void {
+  const { arrangement } = useLayoutStore.getState();
+  useLayoutStore
+    .getState()
+    .setArrangement(insertRailDivider(arrangement, index));
+}
+
 describe("the sample workspace's icon rail", () => {
-  it("draws its boundaries as gaps at rest, and its panels in order", () => {
+  it("is nine icons and nothing else by default (L-155)", () => {
+    render(<SampleWorkspaceRail />);
+
+    const nodes = railEntries();
+    expect(nodes).toHaveLength(9);
+    expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
+    // The rail's own `gap-1` is the whole of the spacing: no icon carries a
+    // margin of its own, so the rhythm is uniform down the column.
+    expect(screen.getByLabelText("Sample sidebar").className).toContain(
+      "gap-1",
+    );
+    for (const node of nodes)
+      expect(node.className).not.toMatch(/(?:^|\s)-?m[xytblre]?-/);
+  });
+
+  it("draws a divider the user added as a gap at rest, and its panels in order", () => {
+    addDivider(2);
     render(<SampleWorkspaceRail />);
 
     const rail = useLayoutStore.getState().arrangement.rail;
-    // A group break is not an element until the user is customizing (L-140),
-    // so at rest the rail is exactly its panels.
+    expect(rail.filter((entry) => entry.kind === "divider")).toHaveLength(1);
+    // The panels are the rail's, in order, with the divider between them
+    // drawing space rather than a name (L-140).
     expect(
       railEntries().map((node) => node.getAttribute("aria-label")),
     ).toEqual(
-      rail.flatMap((entry) =>
+      rail.map((entry) =>
         entry.kind === "divider"
-          ? []
-          : [getLeftPanelDefinition(leftPanelIdForRailRegion(entry.id)).title],
+          ? null
+          : getLeftPanelDefinition(leftPanelIdForRailRegion(entry.id)).title,
       ),
     );
-    expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
+    const dividers = screen.getAllByTestId("epic-rail-divider");
+    expect(dividers).toHaveLength(1);
+    // At rest it is space and nothing else: no rule inside it, no member to
+    // grab, and no name to announce.
+    expect(dividers[0].childElementCount).toBe(0);
+    expect(dividers[0].hasAttribute("data-rail-divider-resting")).toBe(true);
+    expect(dividers[0].getAttribute("data-layout-member")).toBeNull();
+    // The gap it draws, asserted as the CLASS rather than as a measurement:
+    // jsdom lays nothing out, so `getBoundingClientRect` here is all zeroes
+    // and only the class can carry the design intent. `h-1` is 4px, the same
+    // as the column's own `gap-1`, so two icons a divider separates sit three
+    // gaps apart instead of one (R5R-13). A real measurement of this lives in
+    // the Chrome driver's rail plans.
+    expect(dividers[0].className).toContain("h-1");
+    expect(dividers[0].className).toContain("w-full");
   });
 
   it("lays the entries out in one cluster, which is the drop's own scope", () => {
@@ -168,6 +209,7 @@ describe("the sample workspace's icon rail", () => {
   });
 
   it("makes every entry a draggable member of the rail in a session", () => {
+    addDivider(2);
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
       source: "direct_ui",
@@ -183,12 +225,13 @@ describe("the sample workspace's icon rail", () => {
       const node = nodes[index];
       expect(node.getAttribute("data-layout-group")).toBe("rail");
       expect(node.getAttribute("data-layout-draggable")).toBe("1");
-      // A panel is a region and a boundary is not, so they name themselves
+      // A panel is a region and a divider is not, so they name themselves
       // through different attributes - and the drop reads both.
       expect(
         node.getAttribute("data-layout-member") ??
           node.getAttribute("data-layout-region"),
       ).toBe(entry.id);
+      expect(node.hasAttribute("data-rail-divider-resting")).toBe(false);
     }
   });
 });

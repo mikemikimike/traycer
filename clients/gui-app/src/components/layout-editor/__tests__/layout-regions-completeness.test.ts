@@ -16,7 +16,9 @@ import {
 } from "@/components/layout-editor/regions/region-filter-match";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import {
+  positionAxisChanged,
   positionRowChanged,
+  revertPositionAxis,
   revertPositionRow,
 } from "@/components/layout-editor/regions/region-position-rows";
 import {
@@ -48,8 +50,11 @@ const STATE_WORDS: ReadonlyArray<string> = [
   "Full row",
   "Left",
   "Right",
-  "Status bar",
-  "Header",
+  // The two bar readings say both halves of where they are (L-156).
+  "Status bar, left",
+  "Status bar, right",
+  "Header, left",
+  "Header, right",
   "Text",
   "Ring",
   "Ring only",
@@ -100,6 +105,8 @@ const REACHABLE_VALUES: ReadonlyArray<LayoutValues> = [
 const MOVED_ARRANGEMENT = {
   ...DEFAULT_ARRANGEMENT,
   usageHost: "header" as const,
+  usageSide: "right" as const,
+  resourceHost: "header" as const,
   resourceSide: "left" as const,
   minimapSide: "left" as const,
 };
@@ -255,18 +262,23 @@ describe("state words", () => {
 
   it("reads the position out of the arrangement, not out of the values", () => {
     const values = PRESET_VALUES.default;
+    // Both halves, because both are the answer to "where is it" (L-156): a
+    // row that said only "Header" left the end it is on unsaid.
     expect(regionStateWord("usageLimits", values, DEFAULT_ARRANGEMENT)).toBe(
-      "Status bar",
+      "Status bar, left",
     );
     expect(regionStateWord("usageLimits", values, MOVED_ARRANGEMENT)).toBe(
-      "Header",
+      "Header, right",
     );
     expect(regionStateWord("minimap", values, DEFAULT_ARRANGEMENT)).toBe(
       "Right",
     );
     expect(regionStateWord("minimap", values, MOVED_ARRANGEMENT)).toBe("Left");
+    expect(
+      regionStateWord("resourceMonitor", values, DEFAULT_ARRANGEMENT),
+    ).toBe("Status bar, right");
     expect(regionStateWord("resourceMonitor", values, MOVED_ARRANGEMENT)).toBe(
-      "Left",
+      "Header, left",
     );
   });
 
@@ -364,7 +376,7 @@ describe("the Position row against the default arrangement (L-57)", () => {
     expect(positionRowChanged(reordered, "attachImage")).toBe(false);
   });
 
-  it("puts one Position row back and leaves the others alone", () => {
+  it("puts one region's Position rows back and leaves the others alone", () => {
     const moved = {
       ...MOVED_ARRANGEMENT,
       dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
@@ -378,5 +390,49 @@ describe("the Position row against the default arrangement (L-57)", () => {
     const dockBack = revertPositionRow(moved, "background");
     expect(dockBack.dock).toEqual(DEFAULT_ARRANGEMENT.dock);
     expect(dockBack.minimapSide).toBe("left");
+
+    // A bar reading has two Position rows now, and the whole-region revert
+    // puts both of its own back without touching the other reading (L-156).
+    const usageBack = revertPositionRow(moved, "usageLimits");
+    expect(usageBack.usageHost).toBe(DEFAULT_ARRANGEMENT.usageHost);
+    expect(usageBack.usageSide).toBe(DEFAULT_ARRANGEMENT.usageSide);
+    expect(usageBack.resourceHost).toBe("header");
+    expect(usageBack.resourceSide).toBe("left");
+  });
+
+  /**
+   * L-133 on the two readings' rows: a revert belongs to the ROW it sits on,
+   * so putting the side back must not also bring the reading down a bar.
+   */
+  it("measures and reverts one axis at a time", () => {
+    const moved = {
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: MOVED_ARRANGEMENT,
+    };
+
+    expect(positionAxisChanged(moved, "resourceMonitor", "position-host")).toBe(
+      true,
+    );
+    expect(positionAxisChanged(moved, "resourceMonitor", "position-side")).toBe(
+      true,
+    );
+    // The usage cluster moved bar but not, in this fixture, off the shipped
+    // left - so its side row has nothing to put back.
+    expect(
+      positionAxisChanged(
+        { ...moved, arrangement: { ...MOVED_ARRANGEMENT, usageSide: "left" } },
+        "usageLimits",
+        "position-side",
+      ),
+    ).toBe(false);
+
+    const sideBack = revertPositionAxis(
+      MOVED_ARRANGEMENT,
+      "resourceMonitor",
+      "position-side",
+    );
+    expect(sideBack.resourceSide).toBe(DEFAULT_ARRANGEMENT.resourceSide);
+    expect(sideBack.resourceHost).toBe("header");
+    expect(sideBack.usageSide).toBe("right");
   });
 });

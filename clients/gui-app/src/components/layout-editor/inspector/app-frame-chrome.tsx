@@ -3,9 +3,14 @@ import { Bell, History } from "lucide-react";
 import {
   depictDockRows,
   depictRegion,
-  type HostContextId,
 } from "@/components/layout-editor/region-depiction";
-import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import {
+  barClusterRegions,
+  type BarHost,
+  type BarRegionId,
+  type EdgeSide,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RailEntry } from "@/lib/layout/rail";
 import type {
@@ -48,25 +53,29 @@ const APP_FRAME_TABS: ReadonlyArray<{
 ];
 
 /**
- * The top bar's row, minus the row itself: the home tab, the tab strip, the
- * usage cluster where the arrangement hosts it, and the header's own glyphs.
+ * The top bar's row, minus the row itself: its two clusters, the home tab, the
+ * tab strip and the header's own glyphs.
  *
- * Under the `header` placement this is where BOTH status-bar regions live -
- * exactly as `HeaderUsageControls` renders them (L-51's `statusBarShown`) - so
- * both are framed as the top bar rather than as the strip they came from.
+ * A reading that named the header draws in the end it named (L-156), as
+ * `HeaderBarCluster` renders it: left of the tabs or right of them, framed as
+ * the top bar.
  *
  * Drawn with their real labels, because two blank rectangles are not a picture
  * of a top bar (I-03).
  */
 export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
-  const inHeader = arrangement.usageHost === "header";
   return (
     <>
+      <AppFrameBarCluster
+        host="header"
+        side="left"
+        values={values}
+        arrangement={arrangement}
+      />
       <AppFrameRegion
         regionId="homeTab"
         values={values}
         arrangement={arrangement}
-        hostContext={null}
       />
       {APP_FRAME_TABS.map((tab) => (
         <span
@@ -81,22 +90,12 @@ export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
         </span>
       ))}
       <span className="flex-1" />
-      {inHeader ? (
-        <>
-          <AppFrameRegion
-            regionId="usageLimits"
-            values={values}
-            arrangement={arrangement}
-            hostContext="top-bar"
-          />
-          <AppFrameRegion
-            regionId="resourceMonitor"
-            values={values}
-            arrangement={arrangement}
-            hostContext="top-bar"
-          />
-        </>
-      ) : null}
+      <AppFrameBarCluster
+        host="header"
+        side="right"
+        values={values}
+        arrangement={arrangement}
+      />
       <History aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       <Bell aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
@@ -158,12 +157,9 @@ function AppFrameDock({ values, arrangement }: AppFrame): ReactNode {
         >
           {chips.map((regionId) => (
             <span key={regionId}>
-              {depictRegion(
-                regionId,
-                values[regionId],
-                arrangement,
-                "chip-strip",
-              )}
+              {/* Framed as a chip because its VALUES say so, which is what
+                `hostContextFor` reads; this list is the chip-sized members. */}
+              {depictRegion(regionId, values[regionId], arrangement)}
             </span>
           ))}
         </div>
@@ -225,7 +221,6 @@ function AppFrameToolbarCluster(props: {
           regionId={regionId}
           values={values}
           arrangement={arrangement}
-          hostContext={null}
         />
       ))}
     </div>
@@ -235,45 +230,68 @@ function AppFrameToolbarCluster(props: {
 /**
  * The status strip's ordered children, and nothing else.
  *
- * The one part of the app frame R1-04 left behind in two copies: which of the
- * two regions leads, where the spacer goes, and that `resourceSide` decides it
- * is ASSEMBLY rather than placement, so a third status-bar region or a change
- * to what `resourceSide` means had to be made in two files or the preset card
- * and the Settings band disagreed about the strip (R2-02).
+ * Which of the two readings leads and where the spacer goes is ASSEMBLY
+ * rather than placement, and it lives here once: the preset card and the
+ * Settings band draw the strip through this, so they cannot disagree about it
+ * (R1-04, R2-02).
  *
  * The bar's own BOX stays with each caller, and so does each one's answer for
- * the `header` placement, because those two genuinely differ: the miniature
- * draws no strip at all, the page's band draws a sentence saying where it went.
+ * a strip with nothing left in it, because those two genuinely differ: the
+ * miniature draws no strip at all, the page's band draws a sentence saying
+ * where its readings went.
  */
 export function AppFrameStatusBarRow({
   values,
   arrangement,
 }: AppFrame): ReactNode {
-  const monitor = (
-    <AppFrameRegion
-      regionId="resourceMonitor"
-      values={values}
-      arrangement={arrangement}
-      hostContext={null}
-    />
-  );
   return (
     <>
-      {arrangement.resourceSide === "left" ? monitor : null}
-      <AppFrameRegion
-        regionId="usageLimits"
+      <AppFrameBarCluster
+        host="status-bar"
+        side="left"
         values={values}
         arrangement={arrangement}
-        hostContext={null}
       />
       <span className="flex-1" />
-      {arrangement.resourceSide === "right" ? monitor : null}
+      <AppFrameBarCluster
+        host="status-bar"
+        side="right"
+        values={values}
+        arrangement={arrangement}
+      />
     </>
   );
 }
 
 /**
- * The real rail: the arrangement's own entries, dividers included (L-25), in
+ * One end of one bar: the readings that named it, in the model's own order
+ * (L-156).
+ *
+ * Both bars draw their clusters through this, so the picture cannot put the
+ * monitor ahead of the usage limits in one place and behind it in another -
+ * and neither bar has to know which regions can move.
+ */
+function AppFrameBarCluster(props: {
+  readonly host: BarHost;
+  readonly side: EdgeSide;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+}): ReactNode {
+  const { host, side, values, arrangement } = props;
+  return barClusterRegions(arrangement, host, side).map(
+    (regionId: BarRegionId) => (
+      <AppFrameRegion
+        key={regionId}
+        regionId={regionId}
+        values={values}
+        arrangement={arrangement}
+      />
+    ),
+  );
+}
+
+/**
+ * The real rail: the arrangement's own entries, dividers included (L-155), in
  * the order the list beside them is in. Each panel brings its own rail frame,
  * so this adds no spacing of its own.
  *
@@ -301,15 +319,15 @@ function AppFrameRailEntry(props: {
 }): ReactNode {
   const { entry, values, arrangement } = props;
   if (entry.kind === "divider") {
-    // Nothing, which is the parity answer (L-11): a preset card is a picture of
-    // the app AT REST, and at rest a group break IS the rail's own `gap-1` and
-    // no element (L-140). The hairline drawn here was a picture of something
-    // the sidebar no longer draws.
-    return null;
+    // The space a divider is at rest, and nothing else (L-11, L-140): a preset
+    // card is a picture of the app AT REST, and there a divider draws the
+    // column's own gap again rather than a line. The hairline this used to
+    // draw was a picture of something the sidebar never shows.
+    return <span className="h-1 w-full shrink-0" />;
   }
   const railValues = values[entry.id];
   if (railValues.shown === "hidden") return null;
-  return <span>{depictRegion(entry.id, railValues, arrangement, null)}</span>;
+  return <span>{depictRegion(entry.id, railValues, arrangement)}</span>;
 }
 
 /**
@@ -332,10 +350,9 @@ export function AppFrameRegion<
   readonly regionId: K;
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
-  readonly hostContext: HostContextId | null;
 }): ReactNode {
-  const { regionId, values, arrangement, hostContext } = props;
+  const { regionId, values, arrangement } = props;
   const regionValues = values[regionId];
   if (regionValues.shown !== "shown") return null;
-  return depictRegion(regionId, regionValues, arrangement, hostContext);
+  return depictRegion(regionId, regionValues, arrangement);
 }

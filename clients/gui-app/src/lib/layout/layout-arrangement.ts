@@ -6,8 +6,10 @@ import {
   DEFAULT_RAIL_DIVIDER_SEQ,
   RAIL_REGION_IDS,
   railDividerId,
+  railRegionForLeftPanelId,
   type RailEntry,
 } from "@/lib/layout/rail";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import type { DockRegionId, ToolbarRegionId } from "@/lib/layout/region-id";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
@@ -24,11 +26,32 @@ import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
  * `arrangement-persist.ts`; the rail's own shape is `rail.ts`.
  */
 
-/** Which surface hosts the usage reading. */
-export type UsageHost = "status-bar" | "header";
+/** Which of the two bars hosts a reading that can live in either (L-156). */
+export type BarHost = "status-bar" | "header";
 
 /** Which end of its surface an edge-anchored region sits at. */
 export type EdgeSide = "left" | "right";
+
+/**
+ * The two regions that name a bar AND an end of it, each for itself (L-156).
+ *
+ * In this order, which is the order a cluster holding both draws them: usage
+ * limits lead, the resource monitor follows. One list rather than a rule
+ * repeated per surface, so the strip, the header, the depictions and the
+ * miniature cannot disagree about which comes first.
+ */
+export type BarRegionId = "usageLimits" | "resourceMonitor";
+
+export const BAR_REGION_IDS: ReadonlyArray<BarRegionId> = [
+  "usageLimits",
+  "resourceMonitor",
+];
+
+/** Where one of the two readings draws: a bar, and an end of it. */
+export interface BarPlacement {
+  readonly host: BarHost;
+  readonly side: EdgeSide;
+}
 
 /** Every list a drag can reorder. */
 export type OrderGroupId =
@@ -125,13 +148,33 @@ export interface LayoutArrangement {
   readonly hiddenProviders: ReadonlyArray<RateLimitProviderId>;
   readonly providerLimits: StatusBarProviderLimits;
   readonly shownProfiles: StatusBarShownProfiles;
-  readonly usageHost: UsageHost;
+  /**
+   * The two readings' four picks, two per region: which bar, and which end of
+   * it (L-156). They are four independent fields rather than one shared
+   * placement because moving one reading must never move the other - which is
+   * what a single `usageHost` did, taking the resource monitor with it and
+   * removing the strip underneath both.
+   */
+  readonly usageHost: BarHost;
+  readonly usageSide: EdgeSide;
+  readonly resourceHost: BarHost;
   readonly resourceSide: EdgeSide;
   readonly minimapSide: EdgeSide;
+  /**
+   * Which readings the "Toggle status bar" command last sent up, so the next
+   * press can put exactly those back (L-160).
+   *
+   * Empty whenever the strip is the one holding them, which is also the
+   * shipped value: it is written by that one command and cleared by it, and
+   * every other writer of a host leaves it alone - a stale set is harmless,
+   * because a press only ever brings DOWN what is in it and the strip is
+   * where a reading not in it already is.
+   */
+  readonly statusBarParked: ReadonlyArray<BarRegionId>;
   readonly pinnedContextFieldOrder: ReadonlyArray<ContextBreakdownField>;
   /**
    * Whether the status bar is drawn on a mobile VIEWPORT, where the shell
-   * otherwise withholds it whatever `usageHost` says (L-51). Here rather than
+   * otherwise withholds it whatever the two hosts say (L-51). Here rather than
    * in a region's value bag because it decides whether a SURFACE exists.
    */
   readonly mobileFooter: boolean;
@@ -237,8 +280,11 @@ export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
   providerLimits: {},
   shownProfiles: {},
   usageHost: "status-bar",
+  usageSide: "left",
+  resourceHost: "status-bar",
   resourceSide: "right",
   minimapSide: "right",
+  statusBarParked: [],
   pinnedContextFieldOrder: CONTEXT_USAGE_ROW_KEYS,
   mobileFooter: false,
   dividerSeq: DEFAULT_RAIL_DIVIDER_SEQ,
@@ -292,16 +338,175 @@ export function statusBarShownProfileIds(
   return shownProfiles[hostId]?.[providerId] ?? NO_SHOWN_PROFILE_IDS;
 }
 
+// ── The two bar readings (L-156) ────────────────────────────────────────────
+
+/**
+ * The same id read back as one of the two, for a caller holding a `RegionId`
+ * (or a string off the DOM). `null` for every other region, which is what
+ * keeps "has a bar and a side" a fact about the model rather than a list
+ * repeated in the inspector, the registry and the depictions.
+ */
+export function asBarRegionId(region: string): BarRegionId | null {
+  return BAR_REGION_IDS.find((id) => id === region) ?? null;
+}
+
+/** Where one reading draws right now, as the one pair both axes make. */
+export function barPlacement(
+  arrangement: LayoutArrangement,
+  region: BarRegionId,
+): BarPlacement {
+  return region === "usageLimits"
+    ? { host: arrangement.usageHost, side: arrangement.usageSide }
+    : { host: arrangement.resourceHost, side: arrangement.resourceSide };
+}
+
+/** One reading moved to the other bar, leaving the other reading alone. */
+export function withBarHost(
+  arrangement: LayoutArrangement,
+  region: BarRegionId,
+  host: BarHost,
+): LayoutArrangement {
+  return region === "usageLimits"
+    ? { ...arrangement, usageHost: host }
+    : { ...arrangement, resourceHost: host };
+}
+
+/** One reading moved to the other end of its bar, on its own. */
+export function withBarSide(
+  arrangement: LayoutArrangement,
+  region: BarRegionId,
+  side: EdgeSide,
+): LayoutArrangement {
+  return region === "usageLimits"
+    ? { ...arrangement, usageSide: side }
+    : { ...arrangement, resourceSide: side };
+}
+
+/**
+ * What ONE cluster holds, in drawing order.
+ *
+ * Every surface that draws a cluster - the strip, the header, the settings
+ * band, the preset miniature - asks this rather than testing the two fields
+ * itself, so "usage limits precede the resource monitor when they share a
+ * bar and a side" (L-156) is written once.
+ */
+export function barClusterRegions(
+  arrangement: LayoutArrangement,
+  host: BarHost,
+  side: EdgeSide,
+): ReadonlyArray<BarRegionId> {
+  return barClusterRegionsAt(
+    {
+      usageLimits: barPlacement(arrangement, "usageLimits"),
+      resourceMonitor: barPlacement(arrangement, "resourceMonitor"),
+    },
+    host,
+    side,
+  );
+}
+
+/**
+ * {@link barClusterRegions} for the two LIVE surfaces, which hold the four
+ * fields rather than the arrangement.
+ *
+ * The strip and the header subscribe field by field through the override seam
+ * (there is deliberately no whole-arrangement hook, G1-14), so they arrive
+ * with placements in hand; the order and the membership rule are still this
+ * module's.
+ */
+export function barClusterRegionsAt(
+  placements: Readonly<Record<BarRegionId, BarPlacement>>,
+  host: BarHost,
+  side: EdgeSide,
+): ReadonlyArray<BarRegionId> {
+  return BAR_REGION_IDS.filter(
+    (region) =>
+      placements[region].host === host && placements[region].side === side,
+  );
+}
+
+/** The readings one bar is holding, in the model's own order. */
+export function barRegionsIn(
+  arrangement: LayoutArrangement,
+  host: BarHost,
+): ReadonlyArray<BarRegionId> {
+  return BAR_REGION_IDS.filter(
+    (region) => barPlacement(arrangement, region).host === host,
+  );
+}
+
+/**
+ * The status bar surface toggled, and its own inverse (L-160).
+ *
+ * A press sends whatever the strip is holding to the header and REMEMBERS
+ * that set; the next press brings exactly that set back down and forgets it.
+ * So a mixed arrangement - the gauge up, the readout down, which is the
+ * arrangement L-156 exists to let a person build - survives the round trip
+ * instead of being flattened into "both down" by the second press.
+ *
+ * With nothing remembered and an empty strip the answer is both, which is the
+ * only sensible reading of "show the status bar" for a user who emptied it
+ * some other way. Sides are never touched: this command is about the surface.
+ */
+export function toggleStatusBarSurface(
+  arrangement: LayoutArrangement,
+): LayoutArrangement {
+  const inStrip = barRegionsIn(arrangement, "status-bar");
+  if (inStrip.length > 0) {
+    return {
+      ...movedToBar(arrangement, inStrip, "header"),
+      statusBarParked: inStrip,
+    };
+  }
+  const returning =
+    arrangement.statusBarParked.length > 0
+      ? arrangement.statusBarParked
+      : BAR_REGION_IDS;
+  return {
+    ...movedToBar(arrangement, returning, "status-bar"),
+    statusBarParked: [],
+  };
+}
+
+function movedToBar(
+  arrangement: LayoutArrangement,
+  regions: ReadonlyArray<BarRegionId>,
+  host: BarHost,
+): LayoutArrangement {
+  return regions.reduce(
+    (current, region) => withBarHost(current, region, host),
+    arrangement,
+  );
+}
+
+/**
+ * Whether the strip has anything to hold, which is whether it exists at all on
+ * a desktop viewport.
+ *
+ * Either reading keeps it: since L-156 the two pick their bar separately, so
+ * usage moved up no longer takes the strip - and the monitor - with it.
+ */
+export function statusBarHostsAnyRegion(
+  arrangement: LayoutArrangement,
+): boolean {
+  return (
+    arrangement.usageHost === "status-bar" ||
+    arrangement.resourceHost === "status-bar"
+  );
+}
+
 /**
  * Whether the status bar strip is on screen: the ONE answer to that question,
  * read by the shell that mounts it and by every control that only makes sense
  * while it is mounted.
  *
  * A mobile VIEWPORT, not a mobile build: a narrow desktop window behaves the
- * same way. Mobile ignores `usageHost` entirely and answers with `mobileFooter`
- * (L-51), which is off by default - `usageHost` names which of two surfaces
- * hosts the usage reading, and on a phone that question has no second answer,
- * since the mobile header keeps both controls whatever the strip does.
+ * same way. Mobile ignores both hosts entirely and answers with `mobileFooter`
+ * (L-51), which is off by default - and it ignores them for the CONTENTS too
+ * (L-162): a footer switched on draws both readings whichever bar each of
+ * them names, because the phone has one bar and a footer that honoured a
+ * header pick would silently drop a readout. The picks are kept, not
+ * overridden, so the desktop window they were made in still honours them.
  */
 export function statusBarShown(
   arrangement: LayoutArrangement,
@@ -309,7 +514,7 @@ export function statusBarShown(
 ): boolean {
   return isMobileViewport
     ? arrangement.mobileFooter
-    : arrangement.usageHost === "status-bar";
+    : statusBarHostsAnyRegion(arrangement);
 }
 
 // ── Reordering ──────────────────────────────────────────────────────────────
@@ -344,8 +549,8 @@ export function movedWithin<T>(
  * member - drawn or not - keeps its place relative to its neighbours.
  *
  * In the rail the member may be a DIVIDER rather than a panel, which is how a
- * group boundary is moved, split and merged on the canvas (L-25, L-115): the
- * id is the entry's, and both kinds place the same way.
+ * divider is re-placed on the canvas (L-115, L-155): the id is the entry's,
+ * and both kinds place the same way.
  */
 export function moveCanvasOrderMember(input: {
   readonly arrangement: LayoutArrangement;
@@ -429,9 +634,8 @@ function placedBeside<T>(
 // rail back beside the rest of one, and they live here for that reason.
 
 /**
- * One entry dragged to a new index, panels and dividers alike: moving a
- * divider is what splits and merges groups, and moving a panel past one is
- * what changes which group it is in.
+ * One entry dragged to a new index, panels and dividers alike, since the rail
+ * is one flat list (L-155).
  */
 export function moveRailEntry(
   arrangement: LayoutArrangement,
@@ -446,7 +650,7 @@ export function moveRailEntry(
   };
 }
 
-/** A new group boundary at `index`, on an id no divider has held before. */
+/** A new divider at `index`, on an id no divider has held before. */
 export function insertRailDivider(
   arrangement: LayoutArrangement,
   index: number,
@@ -461,7 +665,7 @@ export function insertRailDivider(
   return { ...arrangement, rail, dividerSeq };
 }
 
-/** Two groups merged: the boundary between them goes, the panels stay put. */
+/** One divider taken out of the flat rail; the panels stay put (L-155). */
 export function removeRailDivider(
   arrangement: LayoutArrangement,
   entryId: string,
@@ -471,4 +675,45 @@ export function removeRailDivider(
   );
   if (rail.length === arrangement.rail.length) return arrangement;
   return { ...arrangement, rail };
+}
+
+/**
+ * One rail PANEL placed beside another, for the app's own sidebar drag.
+ *
+ * The same mover the editor's canvas drop uses, reached the same way
+ * (R5R-06): the drag at rest and the drag in a session differ in what the
+ * user grabs, not in what a drop means, and two copies of "take it out and
+ * put it back beside that one" would drift the first time either is fixed.
+ * The sidebar speaks panel ids, so the only thing added here is the
+ * bijection onto the rail's region ids.
+ */
+export function moveRailPanelBeside(
+  arrangement: LayoutArrangement,
+  sourcePanelId: LeftPanelId,
+  targetPanelId: LeftPanelId,
+  placeAfter: boolean,
+): LayoutArrangement {
+  return moveCanvasOrderMember({
+    arrangement,
+    group: "rail",
+    fromId: railRegionForLeftPanelId(sourcePanelId),
+    toId: railRegionForLeftPanelId(targetPanelId),
+    placeAfter,
+  });
+}
+
+/** The same panel onto the rail's end, which is the rail's own empty space. */
+export function moveRailPanelToEnd(
+  arrangement: LayoutArrangement,
+  sourcePanelId: LeftPanelId,
+): LayoutArrangement {
+  const regionId = railRegionForLeftPanelId(sourcePanelId);
+  const fromIndex = arrangement.rail.findIndex(
+    (entry) => entry.kind === "panel" && entry.id === regionId,
+  );
+  if (fromIndex < 0) return arrangement;
+  return {
+    ...arrangement,
+    rail: movedWithin(arrangement.rail, fromIndex, arrangement.rail.length),
+  };
 }

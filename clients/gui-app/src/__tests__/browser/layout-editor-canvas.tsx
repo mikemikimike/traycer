@@ -16,6 +16,7 @@ import {
   LAYOUT_REGION_IDS,
   regionFacts,
 } from "@/components/layout-editor/regions/region-facts";
+import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
 import { SampleSceneProvider } from "@/components/sample-workspace/sample-scene-provider";
 import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-workspace-body";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -25,6 +26,7 @@ import {
   type HostRpcRegistry,
   type MessengerFactory,
 } from "@/lib/host";
+import { insertRailDivider } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
@@ -37,6 +39,8 @@ import {
   getLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { sampleWorkspaceTabModule } from "@/stores/tabs/kinds/sample-workspace";
+import { tabAppearance } from "@/stores/tabs/types";
 import "@/lib/theme-applier";
 import "@/index.css";
 import "@/components/layout-editor/layout-editor.css";
@@ -60,7 +64,8 @@ import "@/components/layout-editor/layout-editor.css";
  *   opaque `relative z-20` header strip. That header is not decoration: it is
  *   the element that painted over the editing outline when the outline was the
  *   column's own `outline` (LV2-04), so the frame's pixels are measured under
- *   the same condition that broke it.
+ *   the same condition that broke it. It also carries the editor's own TAB, in
+ *   the real `TabChrome`, bottom-aligned exactly as the strip aligns it.
  * - `SampleWorkspaceBody`, which is the sample rail, the sample transcript and
  *   minimap, the REAL chat lower dock with its real panels, and the REAL
  *   composer toolbar fed the scene's sample dictation control (L-98, L-116).
@@ -75,6 +80,41 @@ import "@/components/layout-editor/layout-editor.css";
  *
  * `window.__layoutCanvasProbe.ready` gates all of it.
  */
+
+/**
+ * The editor tab's colour, taken from the tab the app really opens.
+ *
+ * Restating `var(--warning-foreground)` here would make the fixture agree with
+ * itself rather than with the product, and the thing being measured on this
+ * tab is precisely what the chrome does with the colour it is handed.
+ */
+const SESSION_TAB_COLOR: string | null =
+  tabAppearance(sampleWorkspaceTabModule.build(null))?.color ?? null;
+
+/**
+ * The editor's own tab, on the geometry that puts it under the frame (L-163).
+ *
+ * `app-shell.tsx` gives the header `h-10` and the strip bottom-aligns an `h-9`
+ * tab inside it, so the tab's top edge and the editing frame's dotted stroke,
+ * held 4px inside the column, are the same line to within a rounding error.
+ * The real `TabChrome` in its `session` state is what paints the tab, and it
+ * reads only props, so A9 can ask this specimen what the product does. The
+ * width is fixed because a tab's width is a SIMULATED fact here, the same
+ * exception the preset miniature takes.
+ */
+function SessionTabSpecimen(): ReactNode {
+  return (
+    <span data-fixture-session-tab className="relative h-9 w-48 shrink-0">
+      <TabChrome isActive color={SESSION_TAB_COLOR} session />
+      {/* The label colour the real tab gives itself on this fill, restated
+          rather than imported: `header-tab-visual.tsx` exports components
+          only, and a string export would cost that file its fast refresh. */}
+      <span className="relative z-20 flex h-full items-center justify-center text-background">
+        Customizing
+      </span>
+    </span>
+  );
+}
 
 /**
  * Why a region has no node on this canvas, one line each.
@@ -109,6 +149,15 @@ interface LayoutCanvasProbe {
   readonly setMicShown: (shown: boolean) => void;
   /** Hidden AND Chip, the shape whose only picture used to be the row it never takes. */
   readonly hideChangedFilesAsChip: () => void;
+  /**
+   * One divider in the rail, between Artifacts and Terminals.
+   *
+   * The shipped rail has none (L-155), and the two rail drag plans need a
+   * divider to aim at. Written through the arrangement's own `insertRail
+   * Divider`, so the entry the driver grabs is the one the product mints -
+   * including its id, which is `divider:1` on a rail that has used no seq.
+   */
+  readonly addRailDivider: () => void;
   readonly clearSelection: () => void;
   readonly snapshot: () => LayoutSnapshot;
   readonly historyDepth: () => number;
@@ -119,6 +168,9 @@ declare global {
     __layoutCanvasProbe?: LayoutCanvasProbe;
   }
 }
+
+/** Between Artifacts and Terminals, which is where the rail plans aim. */
+const RAIL_DIVIDER_INDEX = 2;
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -224,6 +276,12 @@ function buildProbe(): LayoutCanvasProbe {
         .getState()
         .setRegionValues("changedFiles", { shown: "hidden", size: "chip" });
     },
+    addRailDivider: () => {
+      const { arrangement } = useLayoutStore.getState();
+      useLayoutStore
+        .getState()
+        .setArrangement(insertRailDivider(arrangement, RAIL_DIVIDER_INDEX));
+    },
     clearSelection: () => {
       useLayoutEditorStore.getState().select(null);
     },
@@ -261,9 +319,10 @@ export function CanvasFixture(): ReactNode {
             painted underneath this; the shipped `::after` frame is not. */}
         <header
           data-fixture-header
-          className="relative z-20 flex h-10 shrink-0 items-center border-b bg-canvas px-3 text-ui-sm"
+          className="relative z-20 flex h-10 shrink-0 items-end gap-3 border-b bg-canvas px-3 text-ui-sm"
         >
-          Sample window
+          <span className="self-center">Sample window</span>
+          <SessionTabSpecimen />
         </header>
         <main className="relative flex min-h-0 flex-1 flex-col">
           <div className="relative flex min-h-0 flex-1 overflow-clip">

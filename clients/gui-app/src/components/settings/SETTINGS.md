@@ -1440,17 +1440,19 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     two rows there, writing the same two stored values.
     `regions/surface-groups.ts` is the tier above the registry: which order
     groups a surface owns, and the facts that belong to a LIST rather than to a
-    member (its heading, its reorder instruction, "Add group break", the
+    member (its heading, its reorder instruction, "Add divider", the
     pinned-right note). Those were the repeats L-92 was about - nine identical
     rail Position lists, five dock copies, three toolbar-left copies.
   - **Exactly one control per thing.** A region's visibility has one control on
     either host, and the eye button the sortable rows used to carry is gone: it
     wrote through `regionShownOnValue`, so two presses anywhere turned a pinned
-    `shown` back into `auto` without saying so. `usageHost` is a SURFACE
-    control - it moves Usage limits AND Resource monitor and removes the strip
-    - so the page draws it once on the Status bar card, as a `SettingsRow`
-      ("Show these in") with its own search anchor `layout-usage-host` (L-126),
-      not on a region and not at the dock's scale.
+    `shown` back into `auto` without saying so. Where the two strip
+    readings live is a pair of picks EACH (L-156): Usage limits and Resource
+    monitor carry their own `Position` (Status bar / Header) and `Side` (Left /
+    Right) on both hosts, and moving one never moves the other. The shared
+    "Show these in" row that moved both at once is gone with the behaviour it
+    described, and the Status bar card's one surface-tier row is
+    `mobileFooter`.
   - **Usage providers are a headed list in the Status bar card** (L-123), a
     sibling of the two region rows, rendered only while Usage limits is shown.
     Each provider is an ordinary row with a `Shown | Hidden` control writing
@@ -1504,7 +1506,7 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     L-51) is the one row here that belongs to a SURFACE rather than to a
     region: it decides whether the strip exists at all on a narrow viewport,
     and it is drawn only in the installed mobile app, since every other build
-    draws the footer whenever `usageHost` says so.
+    draws the footer whenever a reading still names the status bar.
 
   The rules below describe the CHROME these controls configure. They live here
   because the chrome has no other doc, not because this page owns them.
@@ -1584,8 +1586,9 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     provider hidden or shown, account checked or unchecked) or the WATCHED HOST
     changes (`statusBarUsageScrollKey`) and never when a reading inside one
     moves, so a countdown tick does not throw away where the user scrolled to.
-    The refresh `↻` sits after the scroller, outside it; the resource segment
-    stays `shrink-0`, pinned right. The percentage is severity-coloured always,
+    The refresh `↻` sits after the scroller, outside it; each cluster is
+    `shrink-0` and the row's single grower is the spacer between them, so a
+    reading stays pinned to the end it named (L-156). The percentage is severity-coloured always,
     bar or no bar.
   - **Which ACCOUNTS a provider's segments describe is chosen in the usage
     panel, not in the layout form** (`layout/header/rate-limit-popover.tsx`).
@@ -1601,9 +1604,10 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     not.
     - **The eye exists only while the strip is on screen**, which is ONE
       predicate, `statusBarShown` / `useStatusBarShown`
-      (`stores/layout/layout-store.ts`): `usageHost === "status-bar"` on a
-      desktop viewport, `mobileFooter` on a mobile one - the same read
-      `AppShell` mounts the strip on. A hidden provider hides the eye only.
+      (`stores/layout/layout-store.ts`): on a desktop viewport, EITHER reading
+      still naming the status bar (L-156), `mobileFooter` on a mobile one - the
+      same read `AppShell` mounts the strip on. A hidden provider hides the eye
+      only.
     - **Nothing checked draws ONE account**, resolved by
       `resolveStatusBarProfileIds`
       (`hooks/rate-limits/use-rate-limit-profile-selection.ts`): the profile
@@ -1728,15 +1732,24 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     collapses - it is the one `desktopOnly: true` entry in `ACTION_META`, and
     both the palette filter and `StatusBarKeybindingBridge` READ that flag
     rather than testing the build, so the pair follows from the field.
-  - **The rail is one flat list** (L-25): `arrangement.rail` is panels and
-    dividers in order, a divider ends the group before it - the user reads it
-    as a "Group break" and the sidebar draws it as a gap at rest (L-140) - and
-    `leftPanelGroupsFromRail` / `railFromLeftPanelGroups`
-    (`lib/layout/rail.ts`) are the bijection every surface that
-    still speaks in groups reads through (`left-panel-store`, the rail itself,
-    the canvas drop previews). A rail region's three-state `shown` maps onto
-    the sparse show/hide map the sidebar already reads: `auto` leaves the panel
-    absent from it and therefore on its own presence rule.
+  - **The rail is one flat list** (L-155): `arrangement.rail` is panels and
+    dividers in order, and a divider is a SPACER - the user reads it as a
+    "Divider", adds it, drags it and removes it, and the sidebar draws it as a
+    gap at rest (L-140).
+    There is no grouping concept: the shipped rail carries no dividers at all,
+    each panel gets its own rail icon, and the sidebar body draws the one panel
+    the rail says is active.
+    `visibleRailPanelIds` (`lib/layout/rail.ts`) is the one visibility filter
+    every sidebar surface reads the rail through - the icon column, the body's
+    choice of panel and the PR retention.
+    Writes go through `applyRail` (`lib/layout/rail-view.ts`) for the app's own
+    drag and through `moveRailEntry` / `insertRailDivider` / `removeRailDivider`
+    (`lib/layout/layout-arrangement.ts`) for the editor's list, with
+    `moveRailPanelBeside` / `moveRailPanelToEnd` the one mover both drags place
+    a panel by.
+    A rail region's three-state `shown` maps onto the sparse show/hide map the
+    sidebar already reads: `auto` leaves the panel absent from it and therefore
+    on its own presence rule.
   - **Home tab behaviour** - NOT a group on this page, and Home now owns no
     Settings row on it at all (`Home tab` above is the switch that draws the
     tab, not a preference about what is on it). Recorded here because this is

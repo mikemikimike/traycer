@@ -32,6 +32,7 @@ import type {
   RegionId,
   ToolbarRegionId,
 } from "@/lib/layout/region-id";
+import { railDividerInsertIndex } from "@/lib/layout/rail";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
@@ -63,23 +64,26 @@ export function OrderGroupList(props: {
       <OrderGroupRows {...props} />
       {ORDER_GROUPS[group].dividers ? (
         // In the rows' own gutter: it is the last line of the same list, not a
-        // button parked under a card (L-25).
+        // button parked under a card (L-25, L-155).
         <div className={gutter.row}>
           <Button
             type="button"
             variant="muted-outline"
             size="xs"
             onClick={() => {
-              // Appended, so a new boundary never lands in the middle of a
-              // grouping the user has already made; dragging it up is the
-              // gesture that places it (L-25).
+              // Before the LAST panel, never after it (L-159): a divider past
+              // the last icon spaces nothing, so an appended one made the
+              // press read as a no-op and the user pressed again.
               writeArrangement(
-                insertRailDivider(arrangement, arrangement.rail.length),
+                insertRailDivider(
+                  arrangement,
+                  railDividerInsertIndex(arrangement.rail),
+                ),
               );
             }}
           >
             <Plus />
-            Add group break
+            Add divider
           </Button>
         </div>
       ) : null}
@@ -222,9 +226,8 @@ function OrderGroupRows(props: {
               ? dividerOrderItem(entry.id, arrangement)
               : regionRowItem(entry.id, values, decorate),
           )}
-          // Panels and dividers alike, which is the whole of L-25: dragging a
-          // divider is what splits and merges groups, and dragging a panel
-          // past one is what changes which group it is in.
+          // Panels and dividers alike (L-155): the rail is one flat list and
+          // a divider is a member of it like any other.
           onMove={(id, toIndex) => {
             writeArrangement(moveRailEntry(arrangement, id, toIndex));
           }}

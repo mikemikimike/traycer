@@ -9,7 +9,10 @@ import {
   resetEverything,
   resetToBase,
 } from "@/lib/layout/layout-diff";
-import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
+import {
+  statusBarHostsAnyRegion,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import {
   LAYOUT_PRESET_IDS,
@@ -399,7 +402,7 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
  * Everything the arrangement decides is honoured, because the card's whole
  * claim is that it is a picture of the user's own frame under that density:
  * a chip-sized dock row draws as a chip in the compact strip rather than as a
- * full row, the usage cluster sits in whichever surface `usageHost` names, the
+ * full row, each bar reading sits in whichever bar it names (L-156), the
  * resource readout and the minimap take the sides they are on, and the rail is
  * the real rail with its real dividers. The three cards then differ by density
  * and by nothing else, which is what makes them comparable.
@@ -487,7 +490,6 @@ function MiniatureChatArea({ values, arrangement }: AppFrame): ReactNode {
       regionId="minimap"
       values={values}
       arrangement={arrangement}
-      hostContext={null}
     />
   );
   return (
@@ -541,21 +543,20 @@ function MiniatureComposerFoot({ values, arrangement }: AppFrame): ReactNode {
         regionId="contextUsage"
         values={values}
         arrangement={arrangement}
-        hostContext={null}
       />
     </div>
   );
 }
 
 /**
- * The status strip, or nothing at all: under the `header` placement the strip
- * is not drawn and both of its regions have moved up (L-51).
+ * The status strip, or nothing at all: the strip is drawn for as long as
+ * either reading is still in it (L-51, L-156).
  *
  * The bar's BOX is this card's; what is in it and in what order is the frame
  * chrome's one copy (R2-02).
  */
 function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
-  if (arrangement.usageHost === "header") return null;
+  if (!statusBarHostsAnyRegion(arrangement)) return null;
   return (
     <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3">
       <AppFrameStatusBarRow values={values} arrangement={arrangement} />
@@ -563,7 +564,7 @@ function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
   );
 }
 
-/** The app's own rail column, holding the frame chrome's entries (L-25). */
+/** The app's own rail column, holding the frame chrome's entries (L-155). */
 function MiniatureRail({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-3">

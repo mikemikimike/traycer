@@ -248,7 +248,7 @@ const SLOT_CASES: ReadonlyArray<SlotCase> = [
 
   // The sidebar rail on its real numbers, which is the shape the floor exists
   // for and the one size relation the rest of this table does not carry: an
-  // 8px group break between two 36px icons is claimed at 8px of travel by the
+  // 8px divider between two 36px icons is claimed at 8px of travel by the
   // half-overlap rule alone, so a click that slips would regroup a panel
   // (L-150(4)). The floor puts it at 12, and the panel BEYOND the break is
   // still where the rule puts it, at 34.

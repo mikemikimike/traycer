@@ -243,7 +243,11 @@ function LiveDockChips(): ReactNode {
       }}
     >
       <HostContextFrame host="chip-strip">
-        <ChatDockCompactStrip actionsRef={() => undefined} snapshotLoaded />
+        <ChatDockCompactStrip
+          actionsRef={() => undefined}
+          snapshotLoaded
+          onSettled={() => undefined}
+        />
       </HostContextFrame>
     </ChatDockCompactStripProvider>
   );
@@ -272,16 +276,11 @@ function ClipFadeCase(): ReactNode {
   return (
     <div data-clip-case="usage-limits" style={{ width: 292 }}>
       <SpecimenStage off={false}>
-        {depictRegion(
-          "usageLimits",
-          values.usageLimits,
-          {
-            ...arrangement,
-            usageProviders: USAGE_PROVIDER_IDS,
-            hiddenProviders: [],
-          },
-          null,
-        )}
+        {depictRegion("usageLimits", values.usageLimits, {
+          ...arrangement,
+          usageProviders: USAGE_PROVIDER_IDS,
+          hiddenProviders: [],
+        })}
       </SpecimenStage>
     </div>
   );

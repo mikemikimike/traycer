@@ -163,9 +163,35 @@ function runQuickVerb(input: {
   });
 }
 
-/** The region's own verbs, then the way into the editor on that region. */
+/**
+ * The region's own verbs, then the way into the editor on that region.
+ *
+ * The two halves are separate components because a menu over a CONTAINER of
+ * regions offers one set of verbs per region it holds and exactly one way in
+ * (the strip's, L-159): "Customize layout..." names a screen, and a menu that
+ * listed it twice would be offering the same door under two labels.
+ */
 export function LayoutRegionMenuItems(props: {
   readonly regionId: RegionId;
+}): ReactNode {
+  return (
+    <>
+      <LayoutRegionVerbItems regionId={props.regionId} separator />
+      <CustomizeLayoutMenuItem target={props.regionId} />
+    </>
+  );
+}
+
+/**
+ * One region's verbs, with no door of its own (L-159).
+ *
+ * `separator` is the rule between the verbs and whatever the caller puts
+ * after them, and it is the CALLER's because a container drawing several of
+ * these wants one rule at the end rather than one per region.
+ */
+export function LayoutRegionVerbItems(props: {
+  readonly regionId: RegionId;
+  readonly separator: boolean;
 }): ReactNode {
   const { regionId } = props;
   const facts = regionFacts(regionId);
@@ -178,6 +204,8 @@ export function LayoutRegionMenuItems(props: {
   const sizeable = facts.quickVerbs.includes("chip");
   const chip = sizeable && readControlValue(values, "size") === "chip";
   const verbs = offeredQuickVerbs(facts.quickVerbs, { hidden, chip });
+
+  const separated = props.separator && verbs.length > 0;
 
   const run = (verb: QuickVerbId): void => {
     runQuickVerb({
@@ -206,8 +234,7 @@ export function LayoutRegionMenuItems(props: {
           </ContextMenuItem>
         );
       })}
-      {verbs.length > 0 ? <ContextMenuSeparator /> : null}
-      <CustomizeLayoutMenuItem target={regionId} />
+      {separated ? <ContextMenuSeparator /> : null}
     </>
   );
 }

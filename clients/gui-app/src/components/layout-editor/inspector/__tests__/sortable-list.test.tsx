@@ -21,6 +21,7 @@ import {
   orderGroupInstruction,
 } from "@/components/layout-editor/regions/surface-groups";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
+import { DEFAULT_RAIL, railDividerId } from "@/lib/layout/rail";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -135,6 +136,27 @@ function dockOrder(): ReadonlyArray<string> {
 
 function historyDepth(): number {
   return useLayoutEditorStore.getState().history.past.length;
+}
+
+/**
+ * The shipped rail carries no dividers of its own any more (L-155): it is a
+ * flat list of panels, and a divider exists only once a user adds one. Tests
+ * that are about an EXISTING divider's own row seed one directly rather than
+ * relying on a default the rail no longer ships.
+ */
+function seedRailDivider(): void {
+  const arrangement = useLayoutStore.getState().arrangement;
+  useLayoutStore.setState({
+    arrangement: {
+      ...arrangement,
+      rail: [
+        ...DEFAULT_RAIL.slice(0, 1),
+        { kind: "divider", id: railDividerId(1) },
+        ...DEFAULT_RAIL.slice(1),
+      ],
+      dividerSeq: 1,
+    },
+  });
 }
 
 beforeEach(() => {
@@ -254,7 +276,9 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
 describe("what a row claims as its own (R1-02)", () => {
   it("keeps the dock's own row controls out of the grab", () => {
     // The rail is the inspector's decorated list: every divider carries a real
-    // Remove button, which used to sit INSIDE the `role="button"` line.
+    // Remove button, which used to sit INSIDE the `role="button"` line. The
+    // shipped rail carries none of its own (L-155), so this seeds one.
+    seedRailDivider();
     render(section("railAgents", vi.fn()));
 
     const decorated = rows().filter(
@@ -555,26 +579,34 @@ describe("the rail's dividers as items (L-25)", () => {
     return useLayoutStore.getState().arrangement.rail.map((entry) => entry.id);
   }
 
-  it("adds a boundary at the end, as one entry", () => {
+  it("adds a boundary before the last panel, as one entry (L-159)", () => {
     render(section("railAgents", vi.fn()));
     const before = railIds();
 
-    fireEvent.click(screen.getByRole("button", { name: "Add group break" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add divider" }));
 
     const after = railIds();
     expect(after).toHaveLength(before.length + 1);
+    const newDividerId = after.find((id) => !before.includes(id)) ?? "";
     // Never an id a divider has held before, so the rail's own ids stay unique.
-    expect(before).not.toContain(after.at(-1));
+    expect(newDividerId).not.toBe("");
+    // Sits between the second-to-last and last rail rows rather than
+    // appended past the last icon: a divider past the last icon in a
+    // justify-start column spaces nothing, so the press would read as a
+    // no-op.
+    expect(after.at(-2)).toBe(newDividerId);
+    expect(after.at(-1)).toBe(before.at(-1));
     expect(historyDepth()).toBe(1);
   });
 
-  it("removes one from its own row, merging the groups either side", () => {
+  it("removes one from its own row", () => {
+    seedRailDivider();
     render(section("railAgents", vi.fn()));
     const before = railIds();
     const dividerId = before.find((id) => id.startsWith("divider:")) ?? "";
 
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Remove group break" })[0],
+      screen.getAllByRole("button", { name: "Remove divider" })[0],
     );
 
     expect(railIds()).not.toContain(dividerId);
@@ -583,6 +615,7 @@ describe("the rail's dividers as items (L-25)", () => {
   });
 
   it("draws a rule on a divider row, which is the whole of what it is", () => {
+    seedRailDivider();
     render(section("railAgents", vi.fn()));
     const dividerId = railIds().find((id) => id.startsWith("divider:")) ?? "";
     const dividerRow = row(dividerId);
@@ -598,7 +631,8 @@ describe("the rail's dividers as items (L-25)", () => {
     ).not.toBeNull();
   });
 
-  it("moves a divider like any other item, which is what regroups the rail", () => {
+  it("moves a divider like any other item", () => {
+    seedRailDivider();
     render(section("railAgents", vi.fn()));
     const before = railIds();
     const dividerId = before.find((id) => id.startsWith("divider:")) ?? "";

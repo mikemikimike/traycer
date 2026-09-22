@@ -11,14 +11,12 @@ import {
   focusFirstSortableRow,
   focusSortableRowGrab,
 } from "@/components/layout-editor/inspector/first-row-focus";
-import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import {
   PresetsBlock,
   ResetEverythingButton,
 } from "@/components/layout-editor/inspector/presets-block";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
-import { UsageHostControl } from "@/components/layout-editor/inspector/region-controls";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { layoutRegionRowSelector } from "@/components/layout-editor/layout-search.definitions";
 import { writeArrangement } from "@/components/layout-editor/layout-gestures";
@@ -27,7 +25,10 @@ import { surfaceMatchesFilter } from "@/components/layout-editor/regions/surface
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
 import { SettingsRow } from "@/components/settings/settings-row";
-import { scrollPaneToCenter } from "@/components/settings/use-settings-anchor-reveal";
+import {
+  PANEL_PANE_SELECTOR,
+  scrollPaneToCenter,
+} from "@/components/settings/use-settings-anchor-reveal";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { TaskTabLayoutRow } from "@/components/settings/panels/layout/tabs-layout-group";
 import { Button } from "@/components/ui/button";
@@ -193,8 +194,25 @@ export function LayoutSettingsPanel(): ReactNode {
  * arrives at knowing the word for what they want.
  *
  * **Sticky to the top of the settings pane**, so it is reachable from anywhere
- * on a page five cards long. No border and no shadow: the cards scroll under
- * it and the pane's own fill is the separation.
+ * on a page five cards long.
+ *
+ * It is the pane's OWN fill, at the content width, and nothing else (L-154).
+ * The page is a column of `bg-card/40` cards on `bg-background`, and in every
+ * dark palette the card is the lighter of the two and carries a border - so a
+ * band of raw `bg-background` any wider than the cards is the darkest and only
+ * unbordered thing in the column, and reads as a stripe cutting the page
+ * rather than a field sitting in it. Matching the page's own colour and its
+ * width is what makes it disappear at rest.
+ *
+ * That is also the only honest way a sticky child can sit on this pane: the
+ * providers tab retired ITS sticky header because that pane is a translucent
+ * `bg-card/40` a pinned child cannot reproduce, and this page's panel body is
+ * `bg-transparent`, so the opaque `bg-background` directly behind it is a
+ * colour the band can simply repeat.
+ *
+ * The separation is a SCROLL EDGE instead of a box: a short fade below the
+ * band, lit only while the band is pinned and rows are running under it
+ * (`data-stuck`, written by `useStickyScrollEdge`).
  *
  * It stays BETWEEN the presets and the surface cards rather than moving to the
  * page top, because the finder belongs immediately above the thing it filters
@@ -205,8 +223,27 @@ function PageFilter(props: {
   readonly paneRef: { current: HTMLDivElement | null };
 }): ReactNode {
   const ref = useRef<HTMLInputElement | null>(null);
+  const bandRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useStickyScrollEdge(sentinelRef, bandRef);
   return (
-    <div className="sticky top-0 z-20 -mx-3 bg-background">
+    <div
+      ref={bandRef}
+      data-testid="layout-page-filter"
+      className="sticky top-0 z-20 bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-background after:to-background/0 after:opacity-0 after:transition-opacity after:duration-150 after:ease-out data-stuck:after:opacity-100"
+    >
+      {/* The pin detector, and the reason it is a CHILD of the band rather
+        than the sibling above it: a sibling takes a slot in the page's flex
+        column and a `gap` with it, which moves the field to make room for a
+        thing that is not supposed to exist. Absolutely positioned against the
+        band - `sticky` is a containing block - it has no layout at all, and
+        `bottom-full` keeps it welded to the band's top edge, which is the
+        edge the question is about. */}
+      <div
+        ref={sentinelRef}
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-full h-px"
+      />
       {/* ArrowDown lands on the first row on the page, which is the walk L-31
         asks for and the thing this key was being taken and dropped for
         (R2-04). `setKeyboardNav` is deliberately NOT written: that flag is a
@@ -224,6 +261,67 @@ function PageFilter(props: {
       />
     </div>
   );
+}
+
+/**
+ * Lights the filter band's scroll edge only while page content is actually
+ * running underneath it (L-154).
+ *
+ * A band painted in the page's own colour is invisible at rest, which is what
+ * makes it stop reading as a stripe - and also why it has to say something the
+ * moment it starts covering rows. A border or a shadow would say it always;
+ * the fade says it exactly when it is true.
+ *
+ * Pinning is observed, not calculated. The band is pinned exactly when the
+ * hairline welded to its top edge has left the pane, so one
+ * `IntersectionObserver` rooted on the pane answers it - and answers it on
+ * REFLOW as well as on scroll, which a scroll listener cannot. That case is
+ * real here: the settings modal is sized off the window, so resizing the app
+ * resizes the pane and rewraps the column above the band without moving
+ * `scrollTop` at all. A listener would leave a lit fade hanging under an
+ * unpinned field, or a pinned field bare, until the next wheel tick.
+ *
+ * It also reads no boxes, which is the second thing that used to be fragile
+ * here: a hand-rolled comparison had to pick between the pane's border box and
+ * the padding box that `sticky` actually pins to, and picking wrong meant an
+ * edge that never lit at all with nothing red to say so. A pane inset can now
+ * only move the crossover by that inset; it cannot invert the answer.
+ *
+ * The answer is written straight onto the node rather than through state,
+ * because re-rendering a five-card page to set one attribute is a price an
+ * edge treatment does not get to charge.
+ */
+function useStickyScrollEdge(
+  sentinel: { current: HTMLDivElement | null },
+  band: { current: HTMLDivElement | null },
+): void {
+  useEffect(() => {
+    const mark = sentinel.current;
+    const node = band.current;
+    if (mark === null || node === null) return;
+    const pane = node.closest(PANEL_PANE_SELECTOR);
+    if (pane === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // The newest record wins: a batch can carry several frames of a fast
+        // scroll, and only the last one describes where the band is now.
+        const latest = entries.at(-1);
+        if (latest === undefined) return;
+        node.toggleAttribute("data-stuck", !latest.isIntersecting);
+      },
+      { root: pane },
+    );
+    // The first delivery is the mount-time answer, so a panel that mounts into
+    // an already-scrolled pane - a search landing, or a promotion from the
+    // modal into a tab - arrives with its edge lit. The browser delivers it a
+    // frame after `observe`, so an already-pinned band paints one bare frame
+    // and then fades the edge in over 150ms, which reads as the transition
+    // doing its job rather than as a miss.
+    observer.observe(mark);
+    return () => {
+      observer.disconnect();
+    };
+  }, [sentinel, band]);
 }
 
 /**
@@ -304,55 +402,16 @@ function CustomizeLayoutRow(): ReactNode {
 }
 
 /**
- * The rows that belong to a SURFACE rather than to any region on it.
+ * The named slot for the Status bar's SURFACE tier, holding the one row that
+ * belongs to the surface rather than to a region on it.
  *
- * Both of the Status bar's are exactly that. `mobileFooter` decides whether the
- * strip exists at all on a narrow viewport (L-51), and `usageHost` moves BOTH
- * status-bar regions into the top bar and removes the strip - which is what the
- * preset miniature has always drawn, and what made it a surface control wearing
- * a region's clothes on the Usage limits section (D7).
+ * `mobileFooter` decides whether the strip exists at all on a narrow viewport
+ * (L-51). Where the two readings live is a per-REGION pick (L-156), so it is
+ * drawn on their own rows and not here; the slot stays because the tier does,
+ * and the next surface-level row on this card belongs in it.
  */
 function StatusBarSurfaceRows(): ReactNode {
-  return (
-    <>
-      <UsageHostRow />
-      <MobileFooterRow />
-    </>
-  );
-}
-
-/**
- * A `SettingsRow`, not an `InspectorRow` (L-126).
- *
- * It was the last place on this page where the dock's scale sat at surface
- * level beside a `SettingsRow` at the form's (P-4), and it carried no
- * settings-search anchor, so "where does usage show" was unfindable. Its own
- * definition fixes both.
- */
-function UsageHostRow(): ReactNode {
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  const moved = arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost;
-  return (
-    <SettingsRow
-      row={LAYOUT.definitions.usageHost}
-      control={
-        <div className="flex items-center gap-1.5">
-          <UsageHostControl arrangement={arrangement} />
-          {moved ? (
-            <RevertButton
-              label="Revert where these live"
-              onRevert={() => {
-                writeArrangement({
-                  ...arrangement,
-                  usageHost: DEFAULT_ARRANGEMENT.usageHost,
-                });
-              }}
-            />
-          ) : null}
-        </div>
-      }
-    />
-  );
+  return <MobileFooterRow />;
 }
 
 /**

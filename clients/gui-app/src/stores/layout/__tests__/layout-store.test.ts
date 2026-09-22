@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
-import { leftPanelGroupsFromRail } from "@/lib/layout/rail";
+import { visibleRailPanelIds, type RailEntry } from "@/lib/layout/rail";
 import {
   changeCount,
   regionChanged,
@@ -22,7 +22,14 @@ import {
 } from "@/stores/layout/layout-store";
 
 const LAYOUT_KEY = persistKey(STORE_KEYS.layout);
-const LAYOUT_VERSION = 2;
+const LAYOUT_VERSION = 3;
+
+/** Every panel the rail holds, hiding nothing. */
+function everyRailPanelId(
+  rail: ReadonlyArray<RailEntry>,
+): ReadonlyArray<string> {
+  return visibleRailPanelIds(rail, () => true);
+}
 
 function reset(): void {
   useLayoutStore.setState({
@@ -33,14 +40,24 @@ function reset(): void {
 }
 
 function writeLayoutRecord(state: unknown): void {
-  window.localStorage.setItem(
-    LAYOUT_KEY,
-    JSON.stringify({ state, version: LAYOUT_VERSION }),
-  );
+  writeLayoutRecordAtVersion(state, LAYOUT_VERSION);
+}
+
+function writeLayoutRecordAtVersion(state: unknown, version: number): void {
+  window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ state, version }));
 }
 
 async function rehydrateFrom(state: unknown): Promise<void> {
   writeLayoutRecord(state);
+  await useLayoutStore.persist.rehydrate();
+}
+
+/** The same, from a record written before the version this build writes. */
+async function rehydrateFromVersion(
+  state: unknown,
+  version: number,
+): Promise<void> {
+  writeLayoutRecordAtVersion(state, version);
   await useLayoutStore.persist.rehydrate();
 }
 
@@ -87,16 +104,18 @@ function seedLegacyRecords(): void {
     persistKey(STORE_KEYS.leftPanel),
     JSON.stringify({
       // The whole grouping, which is the shape the sidebar store holds: a
-      // panel it has no group for is its own group there.
+      // panel it has no group for is its own group there. Deliberately NOT
+      // the canonical order, so the carry's one job - keeping the order the
+      // user put the panels in - is observable.
       state: {
         panelGroups: [
-          { panelIds: ["chats", "artifacts", "terminals"] },
+          { panelIds: ["comments", "chats"] },
+          { panelIds: ["artifacts", "terminals"] },
           { panelIds: ["browsers"] },
           { panelIds: ["git-diff"] },
           { panelIds: ["pull-requests"] },
           { panelIds: ["file-tree"] },
           { panelIds: ["sharing"] },
-          { panelIds: ["comments"] },
         ],
         // The fifth shipped key (L-61). `true` and `false` are both real
         // preferences; a panel absent from this map is on its own presence
@@ -131,15 +150,23 @@ function expectCarried(snapshot: LayoutSnapshot, label: string): void {
     "cacheRead",
     "cacheWrite",
   ]);
-  expect(leftPanelGroupsFromRail(snapshot.arrangement.rail), label).toEqual([
-    { panelIds: ["chats", "artifacts", "terminals"] },
-    { panelIds: ["browsers"] },
-    { panelIds: ["git-diff"] },
-    { panelIds: ["pull-requests"] },
-    { panelIds: ["file-tree"] },
-    { panelIds: ["sharing"] },
-    { panelIds: ["comments"] },
+  // The ORDER carries and the boundaries do not (L-155): the shipped sidebar
+  // put one between every panel, which was structure rather than a preference.
+  expect(everyRailPanelId(snapshot.arrangement.rail), label).toEqual([
+    "comments",
+    "chats",
+    "artifacts",
+    "terminals",
+    "browsers",
+    "git-diff",
+    "pull-requests",
+    "file-tree",
+    "sharing",
   ]);
+  expect(
+    snapshot.arrangement.rail.filter((entry) => entry.kind === "divider"),
+    label,
+  ).toEqual([]);
 }
 
 describe("useLayoutStore", () => {
@@ -597,5 +624,120 @@ describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
 
     expect(relaunched.state()).toEqual(DEFAULT_LAYOUT_SNAPSHOT);
     expect(relaunched.carried()).toBe(true);
+  });
+});
+
+/**
+ * The record a dogfooder already has (L-158).
+ *
+ * The one-shot carry above only runs for a machine that has NO layout record,
+ * so it cannot reach anyone who opened this branch before L-155: their rail
+ * holds the seven dividers the shipped default put between every panel, which
+ * is structure this build no longer has rather than spacers they placed.
+ */
+describe("the version-3 migration off the shipped dividers (L-158)", () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  /** The pre-L-155 default, panel by panel with a divider between each. */
+  function shippedRailWithDividers(): ReadonlyArray<RailEntry> {
+    const panels: ReadonlyArray<RailEntry> = [
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+    ];
+    return panels.flatMap((entry, index): RailEntry[] =>
+      index === 0
+        ? [entry]
+        : [{ kind: "divider", id: `divider:${String(index)}` }, entry],
+    );
+  }
+
+  it("drops every divider and keeps the user's panel order", async () => {
+    // Deliberately NOT the canonical order: what the migration must keep is
+    // the order this user put the panels in.
+    const stored = shippedRailWithDividers().filter(
+      (entry) => !(entry.kind === "panel" && entry.id === "railComments"),
+    );
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: {},
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          rail: [{ kind: "panel", id: "railComments" }, ...stored],
+          dividerSeq: 8,
+        },
+        layoutCarryDone: true,
+      },
+      2,
+    );
+
+    const rail = useLayoutStore.getState().arrangement.rail;
+    expect(rail.filter((entry) => entry.kind === "divider")).toEqual([]);
+    expect(everyRailPanelId(rail)).toEqual([
+      "comments",
+      "chats",
+      "artifacts",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+    ]);
+  });
+
+  it("leaves `dividerSeq` alone, so no removed id is ever reissued", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: {},
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          rail: shippedRailWithDividers(),
+          dividerSeq: 8,
+        },
+        layoutCarryDone: true,
+      },
+      2,
+    );
+
+    expect(useLayoutStore.getState().arrangement.dividerSeq).toBe(8);
+  });
+
+  it("keeps a divider in a record this build already wrote", async () => {
+    // Version 3 is this build's own shape: a divider in it is one the user
+    // placed, and the migration must not reach it.
+    writeLayoutRecordAtVersion(
+      {
+        basePreset: "default",
+        overrides: {},
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          rail: [
+            { kind: "panel", id: "railAgents" },
+            { kind: "divider", id: "divider:1" },
+            ...DEFAULT_ARRANGEMENT.rail.slice(1),
+          ],
+          dividerSeq: 1,
+        },
+        layoutCarryDone: true,
+      },
+      3,
+    );
+    await useLayoutStore.persist.rehydrate();
+
+    expect(
+      useLayoutStore
+        .getState()
+        .arrangement.rail.filter((entry) => entry.kind === "divider"),
+    ).toEqual([{ kind: "divider", id: "divider:1" }]);
   });
 });

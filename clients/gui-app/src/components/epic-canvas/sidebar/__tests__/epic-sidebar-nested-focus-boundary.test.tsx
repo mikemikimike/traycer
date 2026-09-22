@@ -99,7 +99,6 @@ interface TestState {
   createdArtifactId: string;
   activeArtifactId: string | null;
   artifactFilterKinds: ReadonlyArray<string>;
-  collapsedPanelIds: ReadonlySet<string>;
   expandedIds: ReadonlySet<string>;
   unreadArtifactIds: ReadonlySet<string>;
   tree: {
@@ -147,7 +146,6 @@ const testState = vi.hoisted<TestState>(() => ({
   createdArtifactId: "new-spec-1",
   activeArtifactId: null,
   artifactFilterKinds: [],
-  collapsedPanelIds: new Set<string>(),
   expandedIds: new Set<string>(),
   unreadArtifactIds: new Set<string>(),
   tree: {
@@ -541,7 +539,7 @@ vi.mock("@/stores/epics/epic-sidebar-expansion-store", () => ({
 // now, not on the panel store (G1-09), so the sidebar's two reads are
 // stubbed where they are actually imported from.
 vi.mock("@/lib/layout/rail-view", () => ({
-  useLeftPanelGroups: () => [{ panelIds: ["artifacts"] }],
+  useLayoutRail: () => [{ kind: "panel", id: "railArtifacts" }],
   usePanelVisibilityOverrides: () => ({}),
 }));
 vi.mock("@/stores/epics/left-panel-store", () => ({
@@ -563,15 +561,10 @@ vi.mock("@/stores/epics/left-panel-store", () => ({
     selector({
       clearAcknowledgedRootCreatePending: vi.fn(),
       clearLocalRootCreatePending: vi.fn(),
-      panelSectionCollapsedByPanelId: {},
       setAcknowledgedRootCreatePending: vi.fn(),
       setActivePanelId: vi.fn(),
       setLocalRootCreatePending: vi.fn(),
-      setPanelSectionWeights: vi.fn(),
-      togglePanelSectionCollapsed: vi.fn(),
     }),
-  useLeftPanelSectionCollapsed: (panelId: string) =>
-    testState.collapsedPanelIds.has(panelId),
   useLocalRootCreatePending: () => null,
 }));
 
@@ -761,7 +754,6 @@ describe("sidebar navigation boundary (back/forward regression fixes)", () => {
     vi.clearAllMocks();
     testState.activeArtifactId = null;
     testState.artifactFilterKinds = [];
-    testState.collapsedPanelIds = new Set<string>();
     testState.expandedIds = new Set<string>();
     testState.unreadArtifactIds = new Set<string>();
     testState.tree = { rootIds: [], childrenByParent: {}, nodeById: {} };

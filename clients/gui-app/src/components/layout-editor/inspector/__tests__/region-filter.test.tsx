@@ -130,3 +130,27 @@ describe("clearing the filter (L-125)", () => {
     expect(useLayoutEditorStore.getState().filter).toBe("");
   });
 });
+
+describe("the gutter the field sits in is the host's (L-154)", () => {
+  /** The box the field is drawn in, which is what carries the host's inset. */
+  function gutter(name: string): HTMLElement {
+    const box = field(name).closest("div.py-2");
+    if (!(box instanceof HTMLElement)) throw new Error("no field box");
+    return box;
+  }
+
+  it("indents the field inside the dock, which has no column of its own", () => {
+    renderFilter({ host: "inspector", onArrowDown: null, onEnter: null });
+
+    expect(gutter("Filter regions").className).toContain("px-3");
+  });
+
+  it("leaves the page's field flush with the cards it filters", () => {
+    renderFilter({ host: "page", onArrowDown: null, onEnter: null });
+
+    // A field indented inside the card edge reads as narrower than the
+    // settings it filters, and the band behind it then has to bleed back out
+    // to reach them - which is the full-bleed stripe L-154 is about.
+    expect(gutter("Filter these settings").className).not.toContain("px-");
+  });
+});

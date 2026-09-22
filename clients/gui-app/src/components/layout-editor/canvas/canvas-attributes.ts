@@ -25,8 +25,8 @@ export const LAYOUT_CLUSTER_ATTRIBUTE = "data-layout-cluster";
  * A member's own id, where it is not a region's.
  *
  * Every member of a canvas order group but one IS a region, and carries its id
- * in `data-layout-region`. The exception is the rail's group breaks (L-25,
- * L-115): they are entries in `arrangement.rail` that the rail draws and a drop
+ * in `data-layout-region`. The exception is the rail's dividers (L-115,
+ * L-155): they are entries in `arrangement.rail` that the rail draws and a drop
  * places by, and nothing else about them is a region - no name, no value bag,
  * no row in the index - so they carry their entry id here instead of a region
  * id `LAYOUT_REGION_IDS` would have to invent.

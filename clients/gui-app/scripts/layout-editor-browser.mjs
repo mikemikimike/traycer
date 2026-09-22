@@ -71,7 +71,11 @@
 //   A9. The editing frame is counted in PIXELS off a screenshot, within 3 CSS
 //       px of each of the column's four edges, in all three dock modes -
 //       including the top edge under the opaque positioned header, which is
-//       the exact place the pre-L-130 outline was painted under (LV2-04).
+//       the exact place the pre-L-130 outline was painted under (LV2-04). Its
+//       inset and radius are asserted against L-137's numbers rather than
+//       merely read, each of the four corners is checked for the square join
+//       an arc cannot draw, and the editor's own TAB under the top run is
+//       READ - fill against stroke - rather than sampled (L-163).
 //  A10. The selection ring's painted box is the region's box plus its padding,
 //       stays inside the window on the bottom row, and follows a dock switch.
 // ---------------------------------------------------------------------------
@@ -263,6 +267,37 @@ const FRAME_BAND_BEFORE_INSET = 2;
 const FRAME_BAND_AFTER_INSET = 6;
 
 /**
+ * L-137's two numbers, stated here so that reading them is not the same as
+ * accepting them.
+ *
+ * A9 counts each edge AT the inset the column reports, which is what lets one
+ * count describe all three dock modes without restating the stylesheet. The
+ * cost is that the count moves with the value: a frame that regressed to
+ * `inset: 0` with square corners - which is exactly what the owner's fourth
+ * live pass believed it was looking at - would be counted at zero and pass
+ * every edge, because a stroke flush with the window edge is still a stroke.
+ * So the value is asserted as well as read. The pixels below then answer the
+ * other half, which no computed style can: whether the CORNERS are drawn on
+ * the radius the stylesheet declares.
+ */
+const DESIGNED_FRAME_INSET = 4;
+const DESIGNED_FRAME_RADIUS = 12;
+
+/**
+ * The square of pixels a SQUARE corner would light and a rounded one cannot.
+ *
+ * Centred on the frame's own rectangle corner, `(inset, inset)` in the
+ * column's coordinates. With `border-radius: r`, the stroke's outer edge near
+ * that corner is the arc centred at `(inset + r, inset + r)` with radius `r`,
+ * and every point of this box is further from that centre than `r` - the
+ * nearest, `(inset + 2, inset + 2)`, by 14.1 against 12 - so the designed
+ * frame provably leaves it dark no matter where the dot phase falls. A square
+ * corner puts its mitre join exactly there. The assertion is therefore in the
+ * safe direction: it can only fire on ink the design cannot produce.
+ */
+const FRAME_CORNER_PROBE = 4;
+
+/**
  * The share of an edge's straight run that a DOTTED stroke lights, as this
  * count can see it.
  *
@@ -313,19 +348,21 @@ const FRAME_QUARTER_LIT_FLOOR = 0.1;
  * travel passes the neighbour's centre, not once its own centre does. A plan
  * whose anchor is smaller than the member it drags therefore sets
  * `leadingEdge`, and the pointer is placed so that EDGE lands the overshoot
- * past the anchor - otherwise a 36px rail icon aimed 18px past an 8px group
- * break carries its top edge 44px, which is past the panel above the break as
+ * past the anchor - otherwise a 36px rail icon aimed 18px past an 8px divider
+ * carries its top edge 44px, which is past the panel above the divider as
  * well, and one gesture claims two slots.
  *
  * `drag-model.ts` also floors the travel a claim needs at 12px (L-150(4)), so
  * every plan below has to clear that as well as the claim boundary itself.
  * The two rail plans are the tight ones and both do, on the rail's measured
- * geometry (36px icons, 4px gaps, an 8px break at 80..88, Terminals 92..128).
+ * geometry (36px icons, 4px gaps, an 8px divider at 80..88, Terminals
+ * 92..128 - the rail those two plans build with `addRailDivider`, whose first
+ * four entries are the four the old shipped default had in the same places).
  * "Rail icon across a divider" aims Terminals' top edge at 84 - 18 = 66 and
  * places the pointer half a member behind it, at 84, so the pointer travels
  * 110 - 84 = 26 and the member travels 26 - 6 = 20. "Rail divider itself"
- * aims the 8px break's centre at 110 + 18 = 128, so the pointer travels 44 and
- * the member 38. Every other plan passes an ordinary neighbour, whose own
+ * aims the 8px divider's centre at 110 + 18 = 128, so the pointer travels 44
+ * and the member 38. Every other plan passes an ordinary neighbour, whose own
  * boundary is already above the floor.
  */
 const DROP_OVERSHOOT = 18;
@@ -485,23 +522,24 @@ const APP_ACTED_PROBE = `(() => {
   };
 })()`;
 
-/** `railTerminals` joined the first group, however the gesture got it there. */
-const TERMINALS_JOINED_FIRST_GROUP = [
+/**
+ * `railTerminals` ended up above the divider, however the gesture got it there.
+ *
+ * The shipped rail carries no dividers (L-155), so both rail plans put one in
+ * first through the product's own add-divider action - between Artifacts and
+ * Terminals, which is where `divider:1` sat in the rail this wave replaced, so
+ * the measured geometry the overshoot is tuned on is unchanged.
+ */
+const TERMINALS_ABOVE_THE_DIVIDER = [
   "railAgents",
   "railArtifacts",
   "railTerminals",
   "divider:1",
-  "divider:2",
   "railBrowsers",
-  "divider:3",
   "railGitDiff",
-  "divider:4",
   "railPullRequests",
-  "divider:5",
   "railFileTree",
-  "divider:6",
   "railSharing",
-  "divider:7",
   "railComments",
 ];
 
@@ -1326,24 +1364,40 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
   } else {
     notes.push(`--warning-foreground paints as rgb(${target.join(", ")})`);
     // Where the stylesheet put the stroke, read off the column rather than
-    // restated here (see `countEdge`).
-    const frame = await evaluate(
+    // restated here (see `countEdge`). Read as the TOKENS were authored, and
+    // parsed here: a custom property comes back verbatim, so `0.25rem` or
+    // `calc(4px)` would silently become 0.25 and NaN, and a driver that
+    // swallowed either would report a frame regression that did not happen.
+    const tokens = await evaluate(
       client,
       `(() => {
         const column = document.querySelector("[data-layout-column]");
-        const read = (name) => {
-          if (column === null) return 0;
-          const parsed = Number.parseFloat(
-            getComputedStyle(column).getPropertyValue(name),
-          );
-          return Number.isFinite(parsed) ? parsed : 0;
-        };
+        if (column === null) return { inset: null, radius: null };
+        const style = getComputedStyle(column);
         return {
-          inset: read("--layout-editor-frame-inset"),
-          radius: read("--layout-editor-frame-radius"),
+          inset: style.getPropertyValue("--layout-editor-frame-inset").trim(),
+          radius: style.getPropertyValue("--layout-editor-frame-radius").trim(),
         };
       })()`,
     );
+    const frame = {
+      inset: pxValue(tokens.inset),
+      radius: pxValue(tokens.radius),
+    };
+    if (frame.inset === null || frame.radius === null) {
+      violations.push(
+        `A9: the frame's geometry is not a plain px value (inset ${String(tokens.inset)}, radius ${String(tokens.radius)}), so nothing below measured where the stroke actually is; the counts fall back to L-137's ${String(DESIGNED_FRAME_INSET)}px and ${String(DESIGNED_FRAME_RADIUS)}px`,
+      );
+      frame.inset = frame.inset ?? DESIGNED_FRAME_INSET;
+      frame.radius = frame.radius ?? DESIGNED_FRAME_RADIUS;
+    } else if (
+      frame.inset !== DESIGNED_FRAME_INSET ||
+      frame.radius !== DESIGNED_FRAME_RADIUS
+    ) {
+      violations.push(
+        `A9: the frame is inset ${String(frame.inset)}px with a ${String(frame.radius)}px radius, expected ${String(DESIGNED_FRAME_INSET)}px and ${String(DESIGNED_FRAME_RADIUS)}px (L-137)`,
+      );
+    }
     notes.push(
       `editing frame is inset ${String(frame.inset)}px with a ${String(frame.radius)}px radius; each edge's straight run is counted at that inset`,
     );
@@ -1390,10 +1444,120 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
           );
         }
       }
+      // The four corners, which the edge counts above cut out by construction
+      // (`countEdge` starts each run at `inset + radius`). Nothing in those
+      // counts can tell a 12px arc from a square join, so this asks the one
+      // question that can be asked of a pixel: is the corner of the frame's
+      // own RECTANGLE dark, as only a rounded corner leaves it.
+      for (const corner of [
+        "top-left",
+        "top-right",
+        "bottom-left",
+        "bottom-right",
+      ]) {
+        const cornerX = corner.endsWith("left")
+          ? column.x + frame.inset
+          : column.x + column.width - frame.inset;
+        const cornerY = corner.startsWith("top")
+          ? column.y + frame.inset
+          : column.y + column.height - frame.inset;
+        const ink = await countBox(
+          client,
+          {
+            x: cornerX - FRAME_CORNER_PROBE / 2,
+            y: cornerY - FRAME_CORNER_PROBE / 2,
+            width: FRAME_CORNER_PROBE,
+            height: FRAME_CORNER_PROBE,
+          },
+          target,
+        );
+        notes.push(
+          `frame ${mode}/${corner} square-corner probe: ${String(ink.lit)}/${String(ink.along)} amber`,
+        );
+        if (ink.lit > 0) {
+          violations.push(
+            `A9 ${mode}/${corner}: amber ink at the frame's own rectangle corner (${String(ink.lit)} of ${String(ink.along)} columns), which a ${String(frame.radius)}px radius cannot produce (L-137); the box is 4px square at the corner and anything painted there will report, so read the pixels before reading the border-radius; column ${boxText(column)}`,
+          );
+        }
+      }
     }
     await evaluate(client, 'window.__layoutCanvasProbe.setDockMode("right")');
     await flush(client);
     await delay(400);
+
+    // The editor's own TAB, under that same stroke (L-138, L-163). Its top
+    // edge and the frame's top run share a line - the header is `h-10` and the
+    // tab `h-9`, so the tab starts 4px down and the frame's stroke sits at 4px
+    // - and while the tab wore the colour on its SILHOUETTE the two met at its
+    // shoulders and read as one broken line. What must hold is that the colour
+    // is the tab's AREA and the ordinary border is its edge.
+    //
+    // Read, not counted. The fill IS the target colour now, so a pixel probe
+    // would have to exclude the filled silhouette - an S-curve - to see a
+    // stroke at all, and even the cap bands either side of the label carry
+    // that fill inside the curve. A computed-style read asks the declarations
+    // themselves, so nothing it reports depends on antialiasing, on the dot
+    // phase, or on where the label happens to fall. Both sides of every
+    // comparison are normalised through one element's `color`, so a theme that
+    // spells a token with `light-dark()` compares as the colour it resolves to
+    // rather than as the text it was written in.
+    const chrome = await evaluate(
+      client,
+      `(() => {
+        const tab = document.querySelector("[data-fixture-session-tab]");
+        if (tab === null) return { error: "no session tab in the fixture header" };
+        const probe = document.createElement("span");
+        probe.style.display = "none";
+        tab.append(probe);
+        const resolve = (value) => {
+          probe.style.color = "";
+          probe.style.color = value;
+          return getComputedStyle(probe).color;
+        };
+        const amber = resolve("var(--warning-foreground)");
+        const edges = [...tab.querySelectorAll('[data-testid^="tab-cap-outline-"]')]
+          .map((path) => ({
+            name: path.getAttribute("data-testid"),
+            paint: getComputedStyle(path).stroke,
+          }));
+        const centre = tab.querySelector('[data-testid="tab-chrome-center"]');
+        if (centre !== null) {
+          edges.push({
+            name: "tab-chrome-center border-top",
+            paint: getComputedStyle(centre).borderTopColor,
+          });
+        }
+        const result = {
+          error: null,
+          amber,
+          fill: centre === null ? null : resolve(getComputedStyle(centre).backgroundColor),
+          edges: edges.map((edge) => ({
+            name: edge.name,
+            paint: edge.paint === "none" ? "none" : resolve(edge.paint),
+          })),
+        };
+        probe.remove();
+        return result;
+      })()`,
+    );
+    if (chrome.error !== null) {
+      violations.push(`A9 tab: ${chrome.error}`);
+    } else {
+      notes.push(
+        `session tab fill ${String(chrome.fill)} against the editing colour ${String(chrome.amber)}; edges ${chrome.edges.map((edge) => `${String(edge.name)}=${String(edge.paint)}`).join(", ")}`,
+      );
+      if (chrome.fill !== chrome.amber) {
+        violations.push(
+          `A9 tab: the editor's own tab is filled ${String(chrome.fill)} rather than the editing colour ${String(chrome.amber)}, so the tab is not the solid object the frame is the outline of (L-163)`,
+        );
+      }
+      for (const edge of chrome.edges) {
+        if (edge.paint !== chrome.amber) continue;
+        violations.push(
+          `A9 tab: ${String(edge.name)} is painted in the editing colour ${String(chrome.amber)}, so the tab wears a ring of it - which traces the skirt below the header baseline and lands on the frame's own line at the tab's shoulders (L-163)`,
+        );
+      }
+    }
   }
 
   // --- A10. The selection ring's painted box --------------------------------
@@ -1832,7 +1996,10 @@ function buildDragPlans(toolbarLeft, dock) {
     ...toolbarPlan,
     {
       id: "rail icon across a divider",
-      setup: ["window.__layoutCanvasProbe.reset()"],
+      setup: [
+        "window.__layoutCanvasProbe.reset()",
+        "window.__layoutCanvasProbe.addRailDivider()",
+      ],
       memberId: "railTerminals",
       memberSelector: regionSelector("railTerminals"),
       siblingSelector: '[data-layout-member="divider:1"]',
@@ -1841,16 +2008,19 @@ function buildDragPlans(toolbarLeft, dock) {
         selector: '[data-layout-member="divider:1"]',
         dx: 0,
         dy: -DROP_OVERSHOOT,
-        // A 36px icon against an 8px break: the overshoot has to be measured
-        // on the edge that claims the slot, or the icon passes the PANEL above
-        // the break too (L-143).
+        // A 36px icon against an 8px divider: the overshoot has to be
+        // measured on the edge that claims the slot, or the icon passes the
+        // PANEL above the divider too (L-143).
         leadingEdge: true,
       },
-      expect: { kind: "rail", ids: TERMINALS_JOINED_FIRST_GROUP },
+      expect: { kind: "rail", ids: TERMINALS_ABOVE_THE_DIVIDER },
     },
     {
       id: "rail divider itself",
-      setup: ["window.__layoutCanvasProbe.reset()"],
+      setup: [
+        "window.__layoutCanvasProbe.reset()",
+        "window.__layoutCanvasProbe.addRailDivider()",
+      ],
       memberId: "divider:1",
       memberSelector: '[data-layout-member="divider:1"]',
       siblingSelector: regionSelector("railTerminals"),
@@ -1860,7 +2030,7 @@ function buildDragPlans(toolbarLeft, dock) {
         dx: 0,
         dy: DROP_OVERSHOOT,
       },
-      expect: { kind: "rail", ids: TERMINALS_JOINED_FIRST_GROUP },
+      expect: { kind: "rail", ids: TERMINALS_ABOVE_THE_DIVIDER },
     },
     {
       id: "the clamp: a rail icon pulled far outside the column",
@@ -2262,6 +2432,49 @@ async function countEdge(client, column, edge, target, frame) {
   return await evaluate(
     client,
     `window.__countShot(${JSON.stringify(shot.data)}, ${String(horizontal)}, ${JSON.stringify(target)}, 90)`,
+  );
+}
+
+/**
+ * A CSS length that is written in plain pixels, or `null`.
+ *
+ * `getPropertyValue` on a custom property returns the token as authored, so
+ * `Number.parseFloat` is only meaningful once the unit has been checked: it
+ * reads `0.25rem` as 0.25 and `calc(4px)` as NaN, and a caller that took
+ * either would be measuring a number the stylesheet never expressed.
+ */
+function pxValue(token) {
+  if (typeof token !== "string") return null;
+  const match = /^(-?\d+(?:\.\d+)?)px$/.exec(token.trim());
+  return match === null ? null : Number(match[1]);
+}
+
+/**
+ * One arbitrary box, counted by COLUMN: how many of its `width` columns hold a
+ * pixel within tolerance of the target colour.
+ *
+ * `countEdge` asks the same question of a band it computes from the column and
+ * an edge; this one takes the box, because the frame's rectangle corner is a
+ * box the caller knows and the edge geometry does not. It reads `lit === 0`
+ * when the design is right, which is the direction a pixel count can be
+ * trusted in: a dotted stroke's phase can hide ink, it cannot invent it.
+ */
+async function countBox(client, box, target) {
+  await ensurePixelTools(client);
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    clip: {
+      x: Math.max(0, box.x),
+      y: Math.max(0, box.y),
+      width: Math.max(1, box.width),
+      height: Math.max(1, box.height),
+      scale: 1,
+    },
+    captureBeyondViewport: false,
+  });
+  return await evaluate(
+    client,
+    `window.__countShot(${JSON.stringify(shot.data)}, true, ${JSON.stringify(target)}, 90)`,
   );
 }
 

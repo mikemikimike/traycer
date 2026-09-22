@@ -4,10 +4,7 @@ import {
   type LayoutRegion,
   type StyleExample,
 } from "@/components/layout-editor/regions/region-grammar";
-import {
-  sideStateWord,
-  usageLimitsStateWord,
-} from "@/components/layout-editor/regions/region-state-words";
+import { barPlacementStateWord } from "@/components/layout-editor/regions/region-state-words";
 
 /**
  * The five readings worth picking between, each a complete answer rather than
@@ -72,17 +69,17 @@ const USAGE_LIMITS_EXAMPLES: ReadonlyArray<StyleExample<"usageLimits">> = [
   },
 ];
 
-/** The one region whose home is itself a setting, plus its per-provider level. */
+/**
+ * One of the two regions whose home is itself a setting - a bar and an end of
+ * it, picked for this region alone (L-156) - plus its per-provider level.
+ */
 export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
   id: "usageLimits",
   name: "Usage limits",
   surface: "statusBar",
   icon: Gauge,
   where: "Status bar - left side",
-  whereByHost: {
-    "status-bar": "Status bar - left side",
-    header: "Top bar - right, before the icons",
-  },
+  whereByHost: { "status-bar": "Status bar", header: "Top bar" },
   hint: null,
   keywords: [
     "usage",
@@ -96,11 +93,22 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
     "reset",
     "providers",
     "bar",
+    // Where it can LIVE, not only what it says: the page's own "Show these
+    // in" row carried these words and is gone with L-156, and a search entry
+    // is generated from this list (L-126).
+    "header",
+    "top bar",
+    "status bar",
+    "move",
   ],
   rows: [
     {
       kind: "position-host",
-      description: "Where the cluster lives.",
+      description: "Which bar the cluster lives in.",
+    },
+    {
+      kind: "position-side",
+      description: "Which end of that bar.",
     },
     {
       kind: "style",
@@ -158,7 +166,8 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
     { kind: "children", level: "usage-providers" },
   ],
   quickVerbs: SHOW_HIDE_VERBS,
-  stateWord: usageLimitsStateWord,
+  stateWord: (values, arrangement) =>
+    barPlacementStateWord(values, arrangement, "usageLimits"),
 };
 
 export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
@@ -167,7 +176,7 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
   surface: "statusBar",
   icon: Cpu,
   where: "Status bar - right side",
-  whereByHost: null,
+  whereByHost: { "status-bar": "Status bar", header: "Top bar" },
   hint: null,
   keywords: [
     "cpu",
@@ -177,9 +186,19 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
     "ram",
     "resource",
     "monitor",
+    // The same four as the usage cluster's: since L-156 this reading picks
+    // its own bar, so "header" and "move" have to find it too.
+    "header",
+    "top bar",
+    "status bar",
+    "move",
   ],
   rows: [
-    { kind: "position-side", description: "Which end of the status bar." },
+    {
+      kind: "position-host",
+      description: "Which bar the monitor lives in.",
+    },
+    { kind: "position-side", description: "Which end of that bar." },
     {
       kind: "fine-tune",
       rows: [
@@ -204,5 +223,5 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
   ],
   quickVerbs: SHOW_HIDE_VERBS,
   stateWord: (values, arrangement) =>
-    sideStateWord(values, arrangement.resourceSide),
+    barPlacementStateWord(values, arrangement, "resourceMonitor"),
 };

@@ -25,8 +25,6 @@ function resetLeftPanelStore(): void {
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
-    panelSectionCollapsedByPanelId: {},
-    panelSectionWeightsByPanelId: {},
     commentsPanelRevealedByTabId: {},
     localRootCreatePendingByEpicPanel: {},
     acknowledgedRootCreatePendingByEpicPanel: {},

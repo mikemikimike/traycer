@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import type {
   LayoutArrangement,
   OrderGroupId,
-  UsageHost,
+  BarHost,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -140,8 +140,13 @@ export interface LayoutRegion<K extends RegionId> {
   readonly surface: SurfaceGroupId;
   readonly icon: LayoutRegionIcon;
   readonly where: string;
-  /** Set only where the region's home is itself a setting: the usage cluster. */
-  readonly whereByHost: Readonly<Record<UsageHost, string>> | null;
+  /**
+   * The BAR each of the two movable readings names, one sentence per bar
+   * (L-156). The side is the other half of their position and comes from the
+   * arrangement, so it is composed in `regionWhere` rather than written into
+   * four sentences here. `null` for a region that lives where it lives.
+   */
+  readonly whereByHost: Readonly<Record<BarHost, string>> | null;
   /**
    * The presence rule a region follows when nobody has chosen for it (L-47),
    * spelled out in its row. `null` means the region has no rule, which is also
@@ -164,7 +169,7 @@ export const SIZE_OPTIONS: ReadonlyArray<SegmentOption> = [
   { value: "chip", label: "Chip" },
 ];
 
-export const USAGE_HOST_OPTIONS: ReadonlyArray<SegmentOption> = [
+export const BAR_HOST_OPTIONS: ReadonlyArray<SegmentOption> = [
   { value: "status-bar", label: "Status bar" },
   { value: "header", label: "Header" },
 ];

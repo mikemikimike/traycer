@@ -84,7 +84,9 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     expect(properties.changed_from_default_count).toBe(0);
     expect(properties.base_preset).toBe("default");
     expect(properties.layout_usage_host).toBe("status-bar");
+    expect(properties.layout_usage_side).toBe("left");
     expect(properties.layout_minimap_side).toBe("right");
+    expect(properties.layout_resource_host).toBe("status-bar");
     expect(properties.layout_resource_side).toBe("right");
     expect(properties.layout_dock_reordered).toBe(false);
     expect(properties.layout_toolbar_left_reordered).toBe(false);
@@ -104,9 +106,12 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     expect(properties.layout_mic_shown).toBe("hidden");
     expect(properties.changed_from_default_count).toBe(1);
     // Every other declared key is still present and still "default" - the
-    // event is dense, never sparse (L-55).
+    // event is dense, never sparse (L-55). The twelve beside the per-setting
+    // keys are the built-ins the snapshot carries: the preset, the count, the
+    // four placement fields the two bar readings pick (L-156), the minimap
+    // side and the five reorder flags.
     expect(Object.keys(properties)).toHaveLength(
-      LAYOUT_SETTING_PROPERTY_KEYS.length + 10,
+      LAYOUT_SETTING_PROPERTY_KEYS.length + 12,
     );
   });
 
@@ -240,7 +245,9 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
       arrangement: {
         ...DEFAULT_ARRANGEMENT,
         usageHost: "header",
+        usageSide: "right",
         minimapSide: "left",
+        resourceHost: "header",
         resourceSide: "left",
       },
     };
@@ -339,7 +346,9 @@ describe("structural parity: LayoutValues cannot drift from the declared propert
       "base_preset",
       "changed_from_default_count",
       "layout_usage_host",
+      "layout_usage_side",
       "layout_minimap_side",
+      "layout_resource_host",
       "layout_resource_side",
       "layout_dock_reordered",
       "layout_toolbar_left_reordered",

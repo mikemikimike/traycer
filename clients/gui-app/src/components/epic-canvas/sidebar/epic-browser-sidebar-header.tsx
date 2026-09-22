@@ -40,10 +40,6 @@ import {
 } from "@/hooks/host/use-surface-host-pin";
 import { useHostDirectoryEntryForHostId } from "@/hooks/host/use-host-client-for-host-id";
 import {
-  useEpicLeftPanelStore,
-  useLeftPanelSectionCollapsed,
-} from "@/stores/epics/left-panel-store";
-import {
   usePanelHeaderSearchOpen,
   usePanelHeaderSearchQuery,
   usePanelHeaderSearchSlot,
@@ -70,11 +66,7 @@ export function BrowsersPanelActions(props: LeftPanelSlotProps) {
 }
 
 function BrowsersPanelActionsLive(props: LeftPanelSlotProps) {
-  const collapsed = useLeftPanelSectionCollapsed("browsers");
   const searchOpen = usePanelHeaderSearchOpen(props.tabId, BROWSERS_PANEL_ID);
-  const setPanelSectionCollapsed = useEpicLeftPanelStore(
-    (state) => state.setPanelSectionCollapsed,
-  );
   const openSearch = usePanelHeaderSearchStore((state) => state.openSearch);
   const surfaceKey = useTabSurfaceKey("browsers", props.tabId);
   const hostPin = useSurfaceHostPin(surfaceKey);
@@ -88,20 +80,17 @@ function BrowsersPanelActionsLive(props: LeftPanelSlotProps) {
   const resolvedHost = useHostDirectoryEntryForHostId(hostPin.resolvedHostId);
   const { add: addBrowser, isAdding } = useAddBrowserAction(props.tabId, null);
   const handleAdd = useCallback(() => {
-    if (collapsed) setPanelSectionCollapsed("browsers", false);
     addBrowser();
-  }, [addBrowser, collapsed, setPanelSectionCollapsed]);
+  }, [addBrowser]);
   const handleSearch = useCallback(() => {
-    if (collapsed) setPanelSectionCollapsed("browsers", false);
     openSearch(props.tabId, BROWSERS_PANEL_ID, "");
-  }, [collapsed, openSearch, props.tabId, setPanelSectionCollapsed]);
+  }, [openSearch, props.tabId]);
   const handleFilterOpenChange = useCallback(
     (open: boolean) => {
-      if (open && collapsed) setPanelSectionCollapsed("browsers", false);
       if (!open) setHostMenuOpen(false);
       setMenuOpen(props.tabId, BROWSERS_PANEL_ID, "filter", open);
     },
-    [collapsed, props.tabId, setMenuOpen, setPanelSectionCollapsed],
+    [props.tabId, setMenuOpen],
   );
   const filterLabel = hostPin.isPinned
     ? "Filter browsers by host, 1 filter active"

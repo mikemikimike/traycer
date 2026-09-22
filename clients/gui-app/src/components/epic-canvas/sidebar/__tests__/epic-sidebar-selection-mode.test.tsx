@@ -40,6 +40,7 @@ import {
   requestSidebarNodeReveal,
   useSidebarNodeRevealStore,
 } from "@/stores/epics/sidebar-node-reveal-store";
+import { RAIL_REGION_BY_PANEL } from "@/lib/layout/rail";
 
 const writeText = vi.hoisted(() =>
   vi.fn((_value: string) => Promise.resolve()),
@@ -124,7 +125,6 @@ interface TestState {
   artifactFilterKinds: ReadonlyArray<string>;
   chatFilterOrigin: "all" | "gui" | "tui";
   chatFilterOwnership: "all" | "mine" | "others";
-  collapsedPanelIds: ReadonlySet<string>;
   expandedIds: ReadonlySet<string>;
   unreadArtifactIds: ReadonlySet<string>;
   tree: {
@@ -240,7 +240,6 @@ const testState = vi.hoisted<TestState>(() => ({
   artifactFilterKinds: [],
   chatFilterOrigin: "all",
   chatFilterOwnership: "all",
-  collapsedPanelIds: new Set<string>(),
   expandedIds: new Set<string>(),
   unreadArtifactIds: new Set<string>(),
   tree: {
@@ -824,7 +823,9 @@ vi.mock("@/stores/epics/epic-sidebar-expansion-store", () => ({
 // now, not on the panel store (G1-09), so the sidebar's two reads are
 // stubbed where they are actually imported from.
 vi.mock("@/lib/layout/rail-view", () => ({
-  useLeftPanelGroups: () => [{ panelIds: [testState.activePanelId] }],
+  useLayoutRail: () => [
+    { kind: "panel", id: RAIL_REGION_BY_PANEL[testState.activePanelId] },
+  ],
   usePanelVisibilityOverrides: () => ({}),
 }));
 vi.mock("@/stores/epics/left-panel-store", () => ({
@@ -873,15 +874,10 @@ vi.mock("@/stores/epics/left-panel-store", () => ({
     selector({
       clearAcknowledgedRootCreatePending: vi.fn(),
       clearLocalRootCreatePending: vi.fn(),
-      panelSectionCollapsedByPanelId: {},
       setAcknowledgedRootCreatePending: vi.fn(),
       setActivePanelId: vi.fn(),
       setLocalRootCreatePending: vi.fn(),
-      setPanelSectionWeights: vi.fn(),
-      togglePanelSectionCollapsed: vi.fn(),
     }),
-  useLeftPanelSectionCollapsed: (panelId: string) =>
-    testState.collapsedPanelIds.has(panelId),
   useLocalRootCreatePending: () => null,
 }));
 
@@ -1290,7 +1286,6 @@ describe("epic sidebar selection mode", () => {
     testState.artifactFilterKinds = [];
     testState.chatFilterOrigin = "all";
     testState.chatFilterOwnership = "all";
-    testState.collapsedPanelIds = new Set<string>();
     testState.expandedIds = new Set<string>();
     testState.unreadArtifactIds = new Set<string>();
     testState.tree = {
@@ -2199,80 +2194,6 @@ describe("epic sidebar selection mode", () => {
         .getByTestId("epic-sidebar-delete-selected-chats")
         .matches(":disabled"),
     ).toBe(false);
-  });
-
-  it("clears chat selection when the section collapses", async () => {
-    seedChatTree();
-
-    const { rerender } = render(
-      <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />,
-    );
-
-    fireEvent.click(screen.getByRole("menuitem", { name: "Select agents" }));
-    fireEvent.click(screen.getByTestId("epic-sidebar-select-chat-root"));
-    expect(
-      screen
-        .getByTestId("epic-sidebar-delete-selected-chats")
-        .matches(":disabled"),
-    ).toBe(false);
-
-    testState.collapsedPanelIds = new Set(["chats"]);
-    rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
-
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("epic-sidebar-delete-selected-chats"),
-      ).toBeNull();
-    });
-    expect(
-      screen
-        .getByRole("menuitem", { name: "Select agents" })
-        .matches(":disabled"),
-    ).toBe(true);
-  });
-
-  it("keeps collapsed chat header entry points available", () => {
-    seedChatTree();
-    testState.collapsedPanelIds = new Set(["chats"]);
-
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
-
-    expect(
-      screen.getByRole("button", { name: "Chat filter" }).matches(":disabled"),
-    ).toBe(false);
-    expect(
-      screen
-        .getByRole("button", { name: "More agent actions" })
-        .matches(":disabled"),
-    ).toBe(false);
-    expect(
-      screen.getByRole("button", { name: "Add agent" }).matches(":disabled"),
-    ).toBe(false);
-    expect(screen.getByRole("menuitem", { name: "Collapse all" })).toBeTruthy();
-  });
-
-  it("keeps collapsed artifact header entry points available", () => {
-    seedArtifactTree();
-    testState.activePanelId = "artifacts";
-    testState.collapsedPanelIds = new Set(["artifacts"]);
-    testState.unreadArtifactIds = new Set(["ticket-child"]);
-
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
-
-    expect(
-      screen
-        .getByRole("button", { name: "Artifact filter" })
-        .matches(":disabled"),
-    ).toBe(false);
-    expect(
-      screen
-        .getByRole("button", { name: "More artifact actions" })
-        .matches(":disabled"),
-    ).toBe(false);
-    expect(
-      screen.getByRole("button", { name: "Add artifact" }).matches(":disabled"),
-    ).toBe(false);
-    expect(screen.getByRole("menuitem", { name: "Collapse all" })).toBeTruthy();
   });
 
   it("keeps the Agents overflow actions available during search", () => {
@@ -4232,7 +4153,6 @@ describe("chat row archive", () => {
     testState.activePanelId = "chats";
     testState.artifactFilterKinds = [];
     testState.chatFilterOrigin = "all";
-    testState.collapsedPanelIds = new Set<string>();
     testState.expandedIds = new Set<string>();
     testState.unreadArtifactIds = new Set<string>();
     testState.tree = { rootIds: [], childrenByParent: {}, nodeById: {} };

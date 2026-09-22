@@ -77,17 +77,6 @@ export interface PointLike {
   readonly y: number;
 }
 
-export interface LeftPanelSectionRect {
-  readonly panelId: LeftPanelId;
-  readonly rect: RectLike;
-}
-
-interface LeftPanelGroupBoundary {
-  readonly panelId: LeftPanelId;
-  readonly position: Exclude<LeftPanelRailDropPosition, "combine">;
-  readonly y: number;
-}
-
 /**
  * Every canvas-openable source carries the epic + view-tab it is dragged
  * FROM. The root DndContext lives at the app shell (outside any epic
@@ -239,7 +228,7 @@ export interface ComposerAttachmentDropTargetData {
   readonly attach: (source: EpicCanvasDragSourceData) => void;
 }
 
-export type LeftPanelRailDropPosition = "before" | "after" | "combine";
+export type LeftPanelRailDropPosition = "before" | "after";
 
 /**
  * Which way a rail lays its slots out. The drop bands run along that axis, so
@@ -290,9 +279,9 @@ export type EpicCanvasDropTargetData =
       readonly viewTabId?: string;
     }
   | {
-      readonly kind: "left-panel-group";
+      readonly kind: "left-panel-body";
       readonly viewTabId?: string;
-      readonly panelIds: ReadonlyArray<LeftPanelId>;
+      readonly panelId: LeftPanelId;
     }
   | {
       /**
@@ -327,9 +316,9 @@ type EpicCanvasLeftPanelDropTargetData =
       readonly viewTabId?: string;
     }
   | {
-      readonly kind: "left-panel-group";
+      readonly kind: "left-panel-body";
       readonly viewTabId?: string;
-      readonly panelIds: ReadonlyArray<LeftPanelId>;
+      readonly panelId: LeftPanelId;
     };
 
 export type EpicCanvasDropPreview =
@@ -361,7 +350,7 @@ export type EpicCanvasDropPreview =
       readonly kind: "left-panel-section";
       readonly viewTabId?: string;
       readonly panelId: LeftPanelId;
-      readonly position: Exclude<LeftPanelRailDropPosition, "combine">;
+      readonly position: LeftPanelRailDropPosition;
     }
   | null;
 
@@ -453,11 +442,11 @@ export function getLeftPanelRailListDropId(epicId: string): string {
   return `left-panel-rail-list-target:${epicId}`;
 }
 
-export function getLeftPanelGroupDropId(
+export function getLeftPanelBodyDropId(
   epicId: string,
   panelId: string,
 ): string {
-  return `left-panel-group-target:${epicId}:${panelId}`;
+  return `left-panel-body-target:${epicId}:${panelId}`;
 }
 
 export function getEmptyShellDropId(epicId: string, tabId: string): string {
@@ -484,14 +473,6 @@ function isLeftPanelId(value: unknown): value is LeftPanelId {
 
 function isRootCreatePanelId(value: unknown): value is RootCreatePanelId {
   return ROOT_CREATE_PANEL_IDS.some((panelId) => panelId === value);
-}
-
-function readLeftPanelIds(value: unknown): ReadonlyArray<LeftPanelId> | null {
-  if (!Array.isArray(value)) return null;
-  if (value.length === 0) return null;
-  if (!value.every(isLeftPanelId)) return null;
-  if (new Set(value).size !== value.length) return null;
-  return value;
 }
 
 function isLeftPanelRailDragOrigin(
@@ -886,14 +867,13 @@ function readLeftPanelDropTargetData(
       viewTabId: value.viewTabId,
     };
   }
-  if (value.kind === "left-panel-group") {
+  if (value.kind === "left-panel-body") {
     if (!isNonEmptyString(value.viewTabId)) return null;
-    const panelIds = readLeftPanelIds(value.panelIds);
-    if (panelIds === null) return null;
+    if (!isLeftPanelId(value.panelId)) return null;
     return {
-      kind: "left-panel-group",
+      kind: "left-panel-body",
       viewTabId: value.viewTabId,
-      panelIds,
+      panelId: value.panelId,
     };
   }
   return null;
@@ -950,7 +930,7 @@ export function getArtifactTabDropIndexFromPoint(
   if (target.kind === "artifact-tab-group-body") return null;
   if (target.kind === "left-panel-rail-item") return null;
   if (target.kind === "left-panel-rail-list") return null;
-  if (target.kind === "left-panel-group") return null;
+  if (target.kind === "left-panel-body") return null;
   if (target.kind === "sidebar-reparent-row") return null;
   if (target.kind === "sidebar-reparent-panel") return null;
   if (target.kind === "artifact-tab-strip-end") return target.index;
@@ -960,87 +940,49 @@ export function getArtifactTabDropIndexFromPoint(
 }
 
 /**
- * The rail's own drop bands, along whichever axis the slots are laid out on:
- * the outer 30% at each end reorders, the middle 40% nests. Every surface that
- * lays those slots out resolves through here - the rail down a column (`"y"`)
- * or across a row (`"x"`), and the strip on Layout ▸ Sidebar - so the same
- * gesture reads the same way wherever it is made.
+ * Which side of a rail slot a drop landed on, along whichever axis the slots
+ * are laid out on: the slot's own midpoint, and nothing in between.
+ *
+ * There is no third band any more (L-155). The middle used to mean "nest these
+ * two panels into one rail group", and with the group concept gone a drop on a
+ * rail icon can only mean "put the dragged panel on this side of it". Every
+ * surface that lays those slots out resolves through here - the rail down a
+ * column (`"y"`) or across a row (`"x"`) - so the same gesture reads the same
+ * way wherever it is made.
  */
 export function getLeftPanelRailDropPositionOnAxis(
   point: PointLike,
-  rect: RectLike | null,
+  rect: RectLike,
   axis: "x" | "y",
 ): LeftPanelRailDropPosition {
-  if (rect === null) return "combine";
   const offset = axis === "x" ? point.x - rect.left : point.y - rect.top;
   const extent = axis === "x" ? rect.width : rect.height;
-  if (offset < extent * 0.3) return "before";
-  if (offset > extent * 0.7) return "after";
-  return "combine";
+  return offset < extent * 0.5 ? "before" : "after";
 }
 
-function getRectBottom(rect: RectLike): number {
-  return rect.top + rect.height;
-}
-
-function makeLeftPanelGroupBoundary(
-  panelId: LeftPanelId,
-  position: Exclude<LeftPanelRailDropPosition, "combine">,
-  y: number,
-): LeftPanelGroupBoundary {
-  return {
-    panelId,
-    position,
-    y,
-  };
-}
-
-export function getLeftPanelGroupDropPreview(
+/**
+ * A drop of a rail icon onto the sidebar BODY, which draws exactly one panel
+ * (L-155): the top half means "before that panel", the bottom half "after".
+ *
+ * The same midpoint rule the rail icons use, on a bigger target. It used to
+ * pick the nearest of N+1 boundaries between stacked sections, which is a
+ * shape the body no longer has (R5R-04).
+ */
+export function getLeftPanelBodyDropPreview(
   target: Extract<
     EpicCanvasDropTargetData,
-    { readonly kind: "left-panel-group" }
+    { readonly kind: "left-panel-body" }
   >,
-  sectionRects: ReadonlyArray<LeftPanelSectionRect>,
+  sectionRect: RectLike | null,
   point: PointLike,
 ): EpicCanvasDropPreview {
-  const orderedSections = target.panelIds.flatMap((panelId) => {
-    const section = sectionRects.find((item) => item.panelId === panelId);
-    return section === undefined ? [] : [section];
-  });
-  const firstSection = orderedSections.at(0);
-  const lastSection = orderedSections.at(-1);
-  if (firstSection === undefined || lastSection === undefined) return null;
-
-  const boundaries: ReadonlyArray<LeftPanelGroupBoundary> = [
-    makeLeftPanelGroupBoundary(
-      firstSection.panelId,
-      "before",
-      firstSection.rect.top,
-    ),
-    ...orderedSections.slice(1).map((section, sectionIndex) => {
-      const previousSection = orderedSections[sectionIndex];
-      return makeLeftPanelGroupBoundary(
-        section.panelId,
-        "before",
-        (getRectBottom(previousSection.rect) + section.rect.top) / 2,
-      );
-    }),
-    makeLeftPanelGroupBoundary(
-      lastSection.panelId,
-      "after",
-      getRectBottom(lastSection.rect),
-    ),
-  ];
-  const nearestBoundary = boundaries.reduce((nearest, boundary) =>
-    Math.abs(boundary.y - point.y) < Math.abs(nearest.y - point.y)
-      ? boundary
-      : nearest,
-  );
+  if (sectionRect === null) return null;
   return {
     kind: "left-panel-section",
     viewTabId: target.viewTabId,
-    panelId: nearestBoundary.panelId,
-    position: nearestBoundary.position,
+    panelId: target.panelId,
+    position:
+      point.y < sectionRect.top + sectionRect.height / 2 ? "before" : "after",
   };
 }
 
@@ -1091,6 +1033,11 @@ export function getEpicCanvasDropPreview(
     };
   }
   if (target.kind === "left-panel-rail-item") {
+    // A slot nothing has measured yet answers NO preview rather than a side
+    // (R5R-08): committing "before" from a position the function could not
+    // read is a reorder the user did not aim, and `resolveRailForDrop`
+    // already treats a null preview as "commit nothing".
+    if (rect === null) return null;
     return {
       kind: "left-panel-rail",
       viewTabId: target.viewTabId,
@@ -1108,7 +1055,7 @@ export function getEpicCanvasDropPreview(
       viewTabId: target.viewTabId,
     };
   }
-  if (target.kind === "left-panel-group") return null;
+  if (target.kind === "left-panel-body") return null;
   // Sidebar reparent targets render their own row/panel highlight (via the
   // dnd-store reparent selectors), never a canvas drop preview.
   if (target.kind === "sidebar-reparent-row") return null;

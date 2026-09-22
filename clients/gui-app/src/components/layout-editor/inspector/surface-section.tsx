@@ -57,6 +57,7 @@ import {
 } from "@/lib/layout/layout-diff";
 import {
   DEFAULT_ARRANGEMENT,
+  statusBarHostsAnyRegion,
   type LayoutArrangement,
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
@@ -135,7 +136,7 @@ export function SurfaceSection(props: {
       // depictions are either too wide to be a glyph or already in the
       // surface's band - and the list wraps it `inert` and dims it.
       glyph: isRailRegionId(regionId)
-        ? depictRegion(regionId, values[regionId], arrangement, null)
+        ? depictRegion(regionId, values[regionId], arrangement)
         : null,
       control: <RegionDisplayControl regionId={regionId} values={values} />,
       revert: changed ? (
@@ -243,12 +244,12 @@ function surfaceBand(
 }
 
 /**
- * The status strip, or the line that says where it went: under the `header`
- * placement the strip is not drawn at all and both of its regions have moved
- * up (L-51, D7).
+ * The status strip, or the line that says where it went: the strip is not
+ * drawn at all once BOTH of its readings have moved up, which each of them
+ * decides for itself (L-51, L-156).
  */
 function StatusBarBand({ values, arrangement }: AppFrame): ReactNode {
-  if (arrangement.usageHost === "header") {
+  if (!statusBarHostsAnyRegion(arrangement)) {
     return (
       <p className="text-ui-sm text-muted-foreground">
         Both of these are in the top bar, so there is no status bar to draw.
@@ -520,11 +521,15 @@ function RegionRowDetail(props: {
  *
  * Everything else is drawn by the row itself or by the card: `size` and
  * `shown` are the row's one display control (L-121), `position-order` IS the
- * list the row sits in, `position-host` belongs to the Status bar surface
- * rather than to a region (D7), and `children` is the Providers list the card
- * draws as a sibling (L-123).
+ * list the row sits in, and `children` is the Providers list the card draws as
+ * a sibling (L-123).
+ *
+ * `position-host` is a detail row because the bar is a per-REGION pick
+ * (L-156): each reading names its own, so there is no surface-tier row above
+ * the list that could answer for both.
  */
 const DETAIL_ROW_KINDS: ReadonlyArray<string> = [
+  "position-host",
   "position-side",
   "style",
   "fine-tune",

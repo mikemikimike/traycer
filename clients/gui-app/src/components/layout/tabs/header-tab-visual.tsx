@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useEpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import { useRegisteredEpicTitleGenerating } from "@/lib/epic-selectors";
+import { cn } from "@/lib/utils";
 import { SplitMemberChrome } from "./split-tab-chrome";
 import { TabChromeBackground } from "./tab-chrome-background";
 import { useHeaderTabTitle } from "./header-tab-presentation";
@@ -19,6 +20,24 @@ import {
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 import type { HeaderTabDragGhost } from "@/components/epic-canvas/dnd/dnd-store";
 import { TabLeadingIcon } from "./tab-leading-icon";
+
+/**
+ * The active session tab's label and icon (L-163).
+ *
+ * `headerTabClassName` gives every active tab `text-foreground`, which is the
+ * one colour that cannot sit on this tab: its fill is `--warning-foreground`
+ * at full strength. The pair here is that fill's own counterpart, and contrast
+ * is symmetric, so the label has exactly the ratio the palette already
+ * guarantees for warning text on the background - measured per palette in
+ * `layout-editor/__tests__/layout-editor-contrast.test.ts`, which reads this
+ * constant rather than restating it.
+ *
+ * On the content wrapper rather than in `headerTabClassName`, because that
+ * helper takes no session input and four call sites pass its two, while this
+ * element is inside the visual that already knows - so the drag overlay and
+ * the split preview, which render the same visual, are right for free.
+ */
+const SESSION_TAB_LABEL_CLASS = "text-background";
 
 interface HeaderTabVisualProps {
   readonly tab: HeaderTab;
@@ -53,7 +72,12 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
       {sessionColor === null ? null : (
         <SessionTabMark color={sessionColor} isActive={props.isActive} />
       )}
-      <span className="relative z-20 flex min-w-0 flex-1 items-center justify-center gap-1.5 outline-none group-data-[tab-layout=shrink]/strip:overflow-hidden">
+      <span
+        className={cn(
+          "relative z-20 flex min-w-0 flex-1 items-center justify-center gap-1.5 outline-none group-data-[tab-layout=shrink]/strip:overflow-hidden",
+          sessionColor !== null && props.isActive && SESSION_TAB_LABEL_CLASS,
+        )}
+      >
         <TabLeadingIcon
           icon={props.tab.icon}
           identity={props.appearance}
@@ -103,12 +127,9 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
  * matches a `display: none` element, so one marker covers both states.
  *
  * What it PAINTS depends on the state, because only one of the two leaves it
- * anything to draw (L-138). At rest - the user clicked another tab mid-session
- * - the tab wears the colour as a cap along its bottom edge, and this is that
- * cap. Active, the tab's own silhouette is the mark: `TabChrome` fills the
- * real S-curved shape with `--layout-session-tab-fill` and outlines it in the
- * same token, so there is no second decoration to add and this element paints
- * nothing.
+ * anything to draw (L-138). At rest the tab wears the colour as a cap along
+ * its bottom edge, and this is that cap. Active, `TabChrome` fills the tab's
+ * own silhouette with the same colour, so there is nothing left here to draw.
  */
 function SessionTabMark(props: {
   readonly color: string;
@@ -171,13 +192,7 @@ export function SplitFillableMemberVisual(props: {
 export function TabChrome(props: {
   readonly isActive: boolean;
   readonly color: string | null;
-  /**
-   * The layout editor's own tab (L-87). It is the one tab whose colour is a
-   * MODE rather than an identity, so it is the one tab that fills its
-   * silhouette instead of merely outlining it - and the one whose bottom edge
-   * is drawn by `SessionTabMark` rather than here, so the two do not stack two
-   * bars of the same colour on one edge.
-   */
+  /** The layout editor's own tab (L-87, L-163). See `borderColor` below. */
   readonly session: boolean;
 }) {
   if (!props.isActive) {
@@ -199,20 +214,28 @@ export function TabChrome(props: {
   }
   return (
     <TabChromeBackground
-      // The editor's tab is FILLED, which is the whole of the redesigned
-      // signal (L-138): the frame around the screen is a hollow amber outline
-      // and this is the one solid amber object inside it, both struck from
-      // `--warning-foreground`. The fill lands on the tab's real silhouette -
-      // S-curved caps, top border and baseline cover together - instead of an
-      // inner rectangle floating inside it, which is what read as a rendering
-      // bug. The fallback keeps a plain tab if `layout-editor.css` has not
-      // loaded yet, rather than an invalid colour.
+      // ACTIVE, the editor's tab is the colour and wears none of it on its
+      // edge (L-163): the fill is the token at full strength and the stroke is
+      // the ordinary tab border, so the frame around the screen owns the only
+      // amber LINE while a session is live and this tab is the only amber
+      // OBJECT. A dilution cannot do that job: every share of the token over
+      // `--background` trades the tab reading as coloured against its own
+      // label staying legible on it, and the largest that clears 4.5:1 on all
+      // the built-in palettes is 4.5% - a tab indistinguishable from the strip
+      // it sits in. Nor can a stroke in the colour, because the frame's dotted
+      // run and the tab's top edge share a line to within a quarter of a pixel
+      // and read as one broken stroke where they meet.
+      // `layout-editor-contrast.test.ts` measures the label on this fill.
       fill={
         props.session
-          ? "var(--layout-session-tab-fill, var(--color-background))"
+          ? (props.color ?? "var(--color-background)")
           : "var(--color-background)"
       }
-      borderColor={props.color ?? "var(--color-border)"}
+      borderColor={
+        props.session
+          ? "var(--color-border)"
+          : (props.color ?? "var(--color-border)")
+      }
       coversBaseline
       className="transition-opacity duration-300 ease-spring"
     />

@@ -825,30 +825,38 @@ describe("<TabStrip />", () => {
   });
 
   /**
-   * The redesigned editing signal (L-87, L-138): the editor's own tab is the
-   * one SOLID amber object in the window and the frame around the screen is
-   * the hollow one, both struck from the same token. The fill lands on the
-   * tab's REAL silhouette - the same `--swatch` the caps, the top border and
-   * the baseline cover all read - which is what the deleted inner wash
-   * rectangle could never do.
+   * The editing signal on the tab (L-87, L-138, L-163): ACTIVE, the editor's
+   * own tab IS the colour and wears none of it on its edge. The fill is the
+   * colour the tab is handed, at full strength, and the stroke is the ordinary
+   * border every other active tab gets - so the frame around the screen owns
+   * the only amber line while a session is live.
+   *
+   * Both halves are pinned, because each one alone passed while the tab was a
+   * ring: a colour on the silhouette's stroke traces the skirt that hangs
+   * below the header baseline and lands on the frame's own line.
    */
   it("fills the editor's own tab instead of outlining it like every other", () => {
     render(<TabChrome isActive color="var(--warning-foreground)" session />);
 
     const center = screen.getByTestId("tab-chrome-center");
     expect(center.style.getPropertyValue("--swatch")).toBe(
-      "var(--layout-session-tab-fill, var(--color-background))",
-    );
-    expect(center.style.getPropertyValue("--swatch-border")).toBe(
       "var(--warning-foreground)",
     );
+    expect(center.style.getPropertyValue("--swatch-border")).toBe(
+      "var(--color-border)",
+    );
+    for (const side of ["left", "right"]) {
+      expect(
+        screen.getByTestId(`tab-cap-outline-${side}`).getAttribute("stroke"),
+      ).toBe("var(--color-border)");
+    }
     // The baseline cover takes the same fill, so the seam into the content
-    // below the tab is closed in the tint rather than in the app background.
+    // below the tab is closed in the colour rather than in the app background.
     expect(
       screen
         .getByTestId("tab-baseline-cover")
         .style.getPropertyValue("--swatch"),
-    ).toBe("var(--layout-session-tab-fill, var(--color-background))");
+    ).toBe("var(--warning-foreground)");
   });
 
   /**
@@ -904,6 +912,48 @@ describe("<TabStrip />", () => {
     } finally {
       geometry.restore();
     }
+  });
+
+  /**
+   * The other half of the solid fill (L-163): with the tab painted in
+   * `--warning-foreground`, the strip's own `text-foreground` is the one
+   * colour its label cannot be in, so the session tab hands its content
+   * wrapper the fill's counterpart instead. `layout-editor-contrast.test.ts`
+   * measures that pair per palette; what is asserted here is that the class
+   * reaches the element the label and the icon are inside, and reaches only
+   * that tab.
+   */
+  it("gives the active editor tab's label the fill's counterpart colour", async () => {
+    const sampleRef: TabRef = {
+      kind: "sample-workspace",
+      id: "sample-workspace",
+    };
+    openEpicFixture(EPIC_A);
+    const epicRef: TabRef = { kind: "epic", id: EPIC_A.id };
+    useTabsStore.setState({
+      version: 2,
+      items: [
+        { kind: "tab", id: tabItemId(epicRef), ref: epicRef },
+        { kind: "tab", id: tabItemId(sampleRef), ref: sampleRef },
+      ],
+      activeItemId: tabItemId(sampleRef),
+      stripOrder: [epicRef, sampleRef],
+      systemTabs: { history: null, settings: null },
+    });
+    const router = buildRouter("/sample-workspace");
+    render(<RouterProvider router={router} />);
+
+    const sampleTab = await screen.findByTestId(
+      "tab-sample-workspace-sample-workspace",
+    );
+    const title = within(sampleTab).getByTestId(
+      "tab-title-sample-workspace-sample-workspace",
+    );
+    expect(title.closest(".text-background")).not.toBeNull();
+    // The ordinary tab beside it keeps the strip's own colours, so the class
+    // is the session tab's and not the strip's.
+    const epicTab = screen.getByTestId(`tab-epic-${EPIC_A.id}`);
+    expect(epicTab.querySelector(".text-background")).toBeNull();
   });
 
   /**

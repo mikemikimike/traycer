@@ -33,6 +33,7 @@ function renderRow() {
               text: "2",
               lineDeltas: null,
               label: "Active agents. 2 running.",
+              detail: "2 running",
               pulseToken: null,
             },
           ],
