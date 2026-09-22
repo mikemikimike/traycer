@@ -1,10 +1,22 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { LazyMotion, domAnimation } from "motion/react";
+import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
+import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
+import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-changes-panel";
+import { ActiveAgentsPanel } from "@/components/chat/chat-active-agents-panel";
+import { BackgroundItemsPanel } from "@/components/chat/chat-background-items-panel";
+import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
+import { QueuedMessagePanel } from "@/components/chat/queued-message-surface";
+import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
 import {
   ChatDockCompactStrip,
   ChatDockCompactStripProvider,
 } from "@/components/chat/chat-dock-compact-strip";
+import { CHAT_DOCK_PANEL_ROW } from "@/components/chat/chat-dock-panel-row";
 import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
+import type { ChatQueueState } from "@traycer/protocol/host/agent/gui/subscribe";
 import { createHoverChip } from "@/components/layout-editor/canvas/hover-chip";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
@@ -12,6 +24,7 @@ import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-sta
 import {
   depictRegion,
   regionDepiction,
+  SPECIMEN_SCROLL_REGION_CLASS,
 } from "@/components/layout-editor/region-depiction";
 import { HostContextFrame } from "@/components/layout-editor/region-depiction-frame";
 import { LAYOUT_REGION_IDS } from "@/components/layout-editor/regions/region-facts";
@@ -19,14 +32,34 @@ import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile
 import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
 import { SampleWorkspaceRail } from "@/components/sample-workspace/sample-workspace-rail";
 import {
+  SAMPLE_AGENT_DESCENDANTS,
+  SAMPLE_BACKGROUND_ITEMS,
+  SAMPLE_CHAT_ID,
   SAMPLE_DOCK,
+  SAMPLE_EPIC_ID,
+  SAMPLE_HOST_ID,
+  SAMPLE_NO_PENDING_STOPS,
+  SAMPLE_QUEUE,
+  SAMPLE_RESTORE,
+  SAMPLE_SELF_AGENT,
   SAMPLE_TILE_ID,
+  SAMPLE_TODO,
+  SAMPLE_VIEW_TAB_ID,
+  sampleNoop,
+  sampleNoopAction,
 } from "@/components/sample-workspace/sample-workspace-scene";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  HostRuntimeProvider,
+  hostRpcRegistry,
+  type HostRpcRegistry,
+  type MessengerFactory,
+} from "@/lib/host";
 import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
+import { RunnerHostProvider } from "@/providers/runner-host-provider";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 import "@/lib/theme-applier";
@@ -93,6 +126,13 @@ declare global {
       ready: boolean;
       noLiveLeaf: Readonly<Partial<Record<RegionId, string>>>;
       regionIds: ReadonlyArray<RegionId>;
+      /**
+       * The shared row recipe's tokens, handed to the driver rather than
+       * restated by it: a row is found by the recipe because the six panels
+       * agree on neither a tag nor a test id, and the driver cannot import a
+       * module the page compiles.
+       */
+      dockRowRecipe: ReadonlyArray<string>;
       showChip: () => void;
     };
   }
@@ -286,6 +326,254 @@ function ClipFadeCase(): ReactNode {
   );
 }
 
+/**
+ * THE ONE ROW METRIC, in real Chrome (L-171).
+ *
+ * The compact pills are a switcher: clicking another one replaces the panel
+ * attached above the composer. So a panel showing ONE one-line row has to
+ * measure the same whichever of the five members it belongs to, or every
+ * switch between two one-line panels moves the composer's whole upper edge -
+ * which is what the owner saw going from one changed file to one background
+ * shell. `chat-dock-panel-row.ts` states that height instead of letting the
+ * tallest thing inside a row decide it.
+ *
+ * jsdom can check that the five rows carry the same class recipe and nothing
+ * more; only a browser resolves `min-h-8`, `py-0.5`, a `size-6` control and a
+ * floated toolbar into a number. So the five panels are mounted here for
+ * REAL, each fed exactly one one-line row of the sample scene's own data, and
+ * the driver compares their five `getBoundingClientRect().height` values to
+ * the pixel.
+ *
+ * Their own runtime island rather than the fixture's root: two of the five
+ * (Active agents, Background) resolve a host client and a mutation, so they
+ * need the app-wide runtime the parity sections above deliberately do without
+ * - the whole fixture inside a `LazyMotion` would also hand `contextUsage` a
+ * live leaf it is excused from having.
+ */
+const dockMetricQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+});
+
+const dockMetricRunnerHost = new MockRunnerHost({
+  signInUrl: "http://127.0.0.1:9/sign-in",
+  authnBaseUrl: "http://127.0.0.1:9",
+  localHost: null,
+  hosts: [],
+  workspaceFolderPickerPaths: undefined,
+  hasLocalHost: undefined,
+  traycerCli: undefined,
+});
+
+let dockMetricRequestCounter = 0;
+
+/**
+ * The startup calls the runtime makes, and nothing else - the same three the
+ * canvas fixture answers. The sample ids address a host that is in no
+ * directory, so every panel below resolves a null client and asks nothing.
+ */
+const dockMetricMessengerFactory: MessengerFactory<HostRpcRegistry> = ({
+  registry,
+}) =>
+  new MockHostMessenger<HostRpcRegistry>({
+    registry,
+    requestId: () => `layout-dock-metric-${String(++dockMetricRequestCounter)}`,
+    handlers: {
+      "host.status": () => ({
+        ready: true,
+        hostVersion: "1.2.3",
+        protocolVersion: { major: 1, minor: 2 },
+        busy: false,
+        busySessionCount: 0,
+        updateProgress: null,
+        busyBreakdown: null,
+        updateOperation: null,
+        updateTransaction: null,
+        storeFormats: null,
+        install: null,
+      }),
+      "host.notifications.indicatorState": () => ({ epics: {}, chats: {} }),
+      "epic.getTaskContexts": () => ({ tasks: {} }),
+    },
+  });
+
+/** One one-line row each, taken from the sample scene rather than invented. */
+const ONE_CHANGED_FILE = SAMPLE_RESTORE.accumulatedFileChanges.slice(0, 1);
+const ONE_BACKGROUND_ITEM = SAMPLE_BACKGROUND_ITEMS.slice(0, 1);
+const ONE_TODO = { ...SAMPLE_TODO, items: SAMPLE_TODO.items.slice(0, 1) };
+/** The Active agents panel's one row is the chat itself, with no children. */
+const NO_AGENT_DESCENDANTS = SAMPLE_AGENT_DESCENDANTS.slice(0, 0);
+
+/**
+ * The queue's one row again, sent by an AGENT rather than by the user, which
+ * is the row that carries a provenance badge (L-172).
+ *
+ * A sixth case rather than a swap, because the claim is that the badge costs
+ * nothing: the same panel with and without one has to measure the same as the
+ * other five. Built here rather than in `sample-workspace-scene.ts`, which
+ * the sample canvas reads and which no fixture should reshape.
+ */
+const PROVENANCE_QUEUE: ChatQueueState = {
+  ...SAMPLE_QUEUE,
+  items: SAMPLE_QUEUE.items.map((item) =>
+    item.kind === "prompt"
+      ? {
+          ...item,
+          sender: {
+            type: "agent",
+            harnessId: "claude",
+            agentId: "sample-sender-agent",
+            displayName: "Sample reviewer",
+            reply: { expectsReply: false },
+            inReplyTo: null,
+          },
+        }
+      : item,
+  ),
+};
+
+/**
+ * A panel drawn as the attached one, which is what `openSection` decides: the
+ * members read it themselves, so this is the only thing that has to be said to
+ * get the header-less compact body rather than the collapsible full row.
+ */
+function OneRowPanel(props: {
+  readonly section: ChatDockSection;
+  /** What the driver prints for this case; defaults to the section's name. */
+  readonly name: string | null;
+  readonly children: ReactNode;
+}): ReactNode {
+  const panelId = useId();
+  return (
+    <div
+      data-dock-row-metric={props.name ?? props.section}
+      style={{ width: 420 }}
+    >
+      <ChatDockCompactStripProvider
+        value={{
+          chips: [],
+          openSection: props.section,
+          panelId,
+          onToggle: () => undefined,
+        }}
+      >
+        {props.children}
+      </ChatDockCompactStripProvider>
+    </div>
+  );
+}
+
+function DockRowMetrics(): ReactNode {
+  return (
+    <QueryClientProvider client={dockMetricQueryClient}>
+      <RunnerHostProvider runnerHost={dockMetricRunnerHost}>
+        <HostRuntimeProvider
+          registry={hostRpcRegistry}
+          messengerFactory={dockMetricMessengerFactory}
+          invalidator={null}
+          requestId={null}
+          remoteFetcher={() => Promise.resolve({ kind: "hosts", entries: [] })}
+          fallback={<div data-dock-row-metric-fallback />}
+        >
+          <LazyMotion features={domAnimation}>
+            <TabHostContext.Provider value={SAMPLE_HOST_ID}>
+              <OneRowPanel section="filesChanged" name={null}>
+                <ChatAccumulatedChangesPanel
+                  restore={{
+                    ...SAMPLE_RESTORE,
+                    accumulatedFileChanges: ONE_CHANGED_FILE,
+                  }}
+                  separated={false}
+                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+                />
+              </OneRowPanel>
+              <OneRowPanel section="activeAgents" name={null}>
+                <ActiveAgentsPanel
+                  epicId={SAMPLE_EPIC_ID}
+                  viewTabId={SAMPLE_VIEW_TAB_ID}
+                  self={SAMPLE_SELF_AGENT}
+                  descendants={NO_AGENT_DESCENDANTS}
+                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+                  separated={false}
+                />
+              </OneRowPanel>
+              <OneRowPanel section="background" name={null}>
+                <BackgroundItemsPanel
+                  items={ONE_BACKGROUND_ITEM}
+                  epicId={SAMPLE_EPIC_ID}
+                  chatId={SAMPLE_CHAT_ID}
+                  viewTabId={SAMPLE_VIEW_TAB_ID}
+                  canAct
+                  readOnly={false}
+                  pendingStopTaskIds={SAMPLE_NO_PENDING_STOPS}
+                  stopAllPending={false}
+                  sessionStopPending={false}
+                  turnActive={false}
+                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+                  separated={false}
+                  onItemClick={sampleNoop}
+                  onStopItem={sampleNoopAction}
+                  onStopAll={sampleNoopAction}
+                  onStopSession={sampleNoopAction}
+                />
+              </OneRowPanel>
+              <OneRowPanel section="queue" name={null}>
+                <QueuedMessagePanel
+                  queue={SAMPLE_QUEUE}
+                  activeTurnStatus={null}
+                  canAct
+                  resumeRequested={false}
+                  keepPausedRequested={false}
+                  readOnly={false}
+                  editingQueueItemId={null}
+                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+                  separated={false}
+                  onPause={sampleNoopAction}
+                  onResume={sampleNoopAction}
+                  onEdit={sampleNoop}
+                  onCancel={sampleNoop}
+                  onAbortSteer={sampleNoop}
+                  onReorder={sampleNoop}
+                  onSteerNow={sampleNoop}
+                />
+              </OneRowPanel>
+              {/* The queue again, with a provenance chip on its one row: the
+                  badge is a float the message wraps around since L-172, so
+                  this has to measure what the five above measure. */}
+              <OneRowPanel section="queue" name="queue-provenance">
+                <QueuedMessagePanel
+                  queue={PROVENANCE_QUEUE}
+                  activeTurnStatus={null}
+                  canAct
+                  resumeRequested={false}
+                  keepPausedRequested={false}
+                  readOnly={false}
+                  editingQueueItemId={null}
+                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+                  separated={false}
+                  onPause={sampleNoopAction}
+                  onResume={sampleNoopAction}
+                  onEdit={sampleNoop}
+                  onCancel={sampleNoop}
+                  onAbortSteer={sampleNoop}
+                  onReorder={sampleNoop}
+                  onSteerNow={sampleNoop}
+                />
+              </OneRowPanel>
+              <OneRowPanel section="todo" name={null}>
+                <PinnedTodoPanel
+                  todo={ONE_TODO}
+                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
+                  separated={false}
+                />
+              </OneRowPanel>
+            </TabHostContext.Provider>
+          </LazyMotion>
+        </HostRuntimeProvider>
+      </RunnerHostProvider>
+    </QueryClientProvider>
+  );
+}
+
 export function Fixture(): ReactNode {
   useEffect(() => {
     const chip = createHoverChip();
@@ -293,6 +581,7 @@ export function Fixture(): ReactNode {
       ready: true,
       noLiveLeaf: NO_LIVE_LEAF,
       regionIds: LAYOUT_REGION_IDS,
+      dockRowRecipe: CHAT_DOCK_PANEL_ROW.split(" "),
       showChip: () => {
         const node = document.querySelector("[data-chip-anchor]");
         if (!(node instanceof HTMLElement)) return;
@@ -324,6 +613,10 @@ export function Fixture(): ReactNode {
           {LAYOUT_REGION_IDS.map((regionId) => (
             <PictureRow key={regionId} regionId={regionId} />
           ))}
+        </section>
+
+        <section id="dock-row-metrics">
+          <DockRowMetrics />
         </section>
 
         <section id="clip-fade">

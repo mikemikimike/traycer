@@ -245,6 +245,56 @@ const STYLESHEET_PROBE = `(() => {
   };
 })()`;
 
+/**
+ * THE ONE ROW METRIC (L-171).
+ *
+ * Five attached panels, one one-line row each, measured as the browser laid
+ * them out. `min-h-8` on a shared row class, a `py-0.5`, a `size-6` control
+ * and a floated toolbar are four things jsdom resolves to nothing, and the
+ * defect they fix is a NUMBER: switching pills between two one-line panels
+ * moved the composer's upper edge by 3.75px.
+ *
+ * The panel body is what the slot sizes itself to, so that is what is
+ * measured - the list's own top and bottom inset included, since the ruling
+ * binds the inset as much as the row.
+ */
+const DOCK_ROW_METRIC_PROBE = `(() => {
+  // The recipe the page itself states, so a row is counted by the box it
+  // claims rather than by a tag or a test id - the six panels agree on
+  // neither. A child count cannot stand in for it: the body's own first child
+  // is the scroll box, and the queue's list sits under dnd-kit's nodes inside
+  // it, so counting children reports the wrapper rather than the rows.
+  const recipe = window.__layoutEditorProbe.dockRowRecipe;
+  const sections = [...document.querySelectorAll("[data-dock-row-metric]")];
+  const rows = sections.map((section) => {
+    const body = section.querySelector(
+      "[data-testid='chat-dock-attached-panel']",
+    );
+    const drawn =
+      body === null
+        ? null
+        : [...body.querySelectorAll("*")].filter((node) =>
+            recipe.every((token) => node.classList.contains(token)),
+          ).length;
+    return {
+      section: section.getAttribute("data-dock-row-metric"),
+      height: body === null ? null : body.getBoundingClientRect().height,
+      rows: drawn,
+    };
+  });
+  return { rows };
+})()`;
+
+/**
+ * The list's own `py-1.5` inset, which is what an EMPTY panel measures.
+ *
+ * A bare equality check passes on five identical numbers, and five 11.25s -
+ * every panel drawing its inset and no rows at all - are five identical
+ * numbers (R6H-04). So the shared height has to clear the inset as well as
+ * be shared, and each panel has to have drawn exactly the one row it was fed.
+ */
+const DOCK_ROW_METRIC_LIST_INSET = 11.25;
+
 // --- phase 2: canvas-interaction constants ---------------------------------
 
 /** `selection-ring.ts`'s own two numbers, restated so a drift is a failure. */
@@ -742,6 +792,43 @@ try {
     }
   }
 
+  // The attached dock panels, one one-line row each, are the same height to
+  // the pixel (L-171, L-172): the five members, plus the queue again with a
+  // provenance chip on its row. Waited for rather than read straight off: two
+  // of them boot a host runtime before they draw a row, so an unwaited read
+  // would measure the runtime's fallback and call the nulls equal. The count
+  // is read off the page rather than written down here, because a member is
+  // exactly the thing this file should not be the register of.
+  await waitFor(
+    client,
+    "the five attached dock panels to draw their one row each",
+    `document.querySelectorAll("[data-dock-row-metric] [data-testid='chat-dock-attached-panel']").length === document.querySelectorAll("[data-dock-row-metric]").length && document.querySelectorAll("[data-dock-row-metric]").length > 0`,
+  );
+  const dockRows = await evaluate(client, DOCK_ROW_METRIC_PROBE);
+  const dockRowReport = dockRows.rows
+    .map((row) => `${row.section} ${String(row.height)}px/${String(row.rows)}`)
+    .join(", ");
+  const dockRowHeights = new Set(dockRows.rows.map((row) => row.height));
+  if (dockRowHeights.size !== 1) {
+    violations.push(
+      `the attached dock panels do not share one row metric: ${dockRowReport}`,
+    );
+  }
+  // Not vacuously: every panel drew the one row it was fed, and the shared
+  // height is more than an empty list's inset.
+  for (const row of dockRows.rows) {
+    if (row.rows === 1) continue;
+    violations.push(
+      `${String(row.section)} drew ${String(row.rows)} rows, expected exactly 1: ${dockRowReport}`,
+    );
+  }
+  for (const height of dockRowHeights) {
+    if (height !== null && height > DOCK_ROW_METRIC_LIST_INSET) continue;
+    violations.push(
+      `the attached dock panels measured ${String(height)}px, which is no more than an empty list's ${String(DOCK_ROW_METRIC_LIST_INSET)}px inset: ${dockRowReport}`,
+    );
+  }
+
   const miniature = await evaluate(client, MINIATURE_PROBE);
   if (miniature.error !== null) {
     violations.push(`preset miniature: ${miniature.error}`);
@@ -803,7 +890,7 @@ try {
     violations,
     [],
     `Layout editor parity regression failed:\n${JSON.stringify(
-      { violations, stylesheet, miniature, chip },
+      { violations, stylesheet, dockRows, miniature, chip },
       null,
       2,
     )}`,

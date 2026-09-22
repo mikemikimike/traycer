@@ -17,6 +17,14 @@ import { fallbackProviderLabelFor } from "@/components/chat/fallback/fallback-id
 import { formatWaitTime, useSampledNow } from "@/lib/relative-time";
 import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
 import {
+  CHAT_DOCK_PANEL_LIST,
+  CHAT_DOCK_PANEL_ROW,
+  CHAT_DOCK_PANEL_ROW_BUTTON,
+  CHAT_DOCK_PANEL_ROW_CONTENT,
+  CHAT_DOCK_PANEL_ROW_TEXT,
+  chatDockPanelRowTreeInset,
+} from "@/components/chat/chat-dock-panel-row";
+import {
   ChatDockAttachedPanelBody,
   ChatDockPillActions,
 } from "@/components/chat/chat-dock-attached-panel";
@@ -53,10 +61,6 @@ import type {
   ManagedCommand,
 } from "@traycer/protocol/host/managed-command/unary-schemas";
 import { cn } from "@/lib/utils";
-import {
-  BASE_PAD_LEFT,
-  INDENT_PX,
-} from "@/components/epic-canvas/sidebar/epic-sidebar-tree-shared";
 import { TreeGroupGuide } from "@/components/epic-canvas/sidebar/epic-sidebar-tree-guide";
 import {
   backgroundHeaderSummary,
@@ -269,8 +273,8 @@ function HeldManagedCommandRow(props: {
   return (
     <li className="m-0">
       <div
-        className="group flex min-w-0 items-center gap-2 rounded-md pr-2 hover:bg-foreground/8"
-        style={{ paddingLeft: `${BASE_PAD_LEFT}px` }}
+        className={cn("group", CHAT_DOCK_PANEL_ROW, "hover:bg-foreground/8")}
+        style={{ paddingLeft: chatDockPanelRowTreeInset(0) }}
       >
         <TooltipWrapper
           label={`${held.description} — output that arrived as this chat was stopped is held back. It reaches the agent when the chat next wakes (a message or a resume), or right now with Deliver.`}
@@ -285,7 +289,7 @@ function HeldManagedCommandRow(props: {
             onClick={() => {
               onOpen?.(held.commandId);
             }}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className={CHAT_DOCK_PANEL_ROW_BUTTON}
           >
             {command !== null && command.status.state === "running" ? (
               <ManagedCommandMonitorIcon
@@ -299,10 +303,20 @@ function HeldManagedCommandRow(props: {
                 className="size-3.5 shrink-0 text-foreground/40"
               />
             )}
-            <span className="block min-w-0 flex-1 truncate text-ui-xs text-foreground/85">
+            <span
+              className={cn(
+                "block min-w-0 flex-1 truncate text-foreground/85",
+                CHAT_DOCK_PANEL_ROW_TEXT,
+              )}
+            >
               {held.description}
             </span>
-            <span className="shrink-0 text-ui-xs text-muted-foreground">
+            <span
+              className={cn(
+                "shrink-0 text-muted-foreground",
+                CHAT_DOCK_PANEL_ROW_TEXT,
+              )}
+            >
               Held
             </span>
           </button>
@@ -391,10 +405,12 @@ function ManagedCommandRow(props: {
     <li className="m-0">
       <div
         className={cn(
-          "group flex min-w-0 items-center gap-2 rounded-md pr-2 hover:bg-foreground/8",
+          "group",
+          CHAT_DOCK_PANEL_ROW,
+          "hover:bg-foreground/8",
           isDragging ? "opacity-50" : null,
         )}
-        style={{ paddingLeft: `${BASE_PAD_LEFT}px` }}
+        style={{ paddingLeft: chatDockPanelRowTreeInset(0) }}
       >
         <TooltipWrapper
           label={title}
@@ -412,7 +428,7 @@ function ManagedCommandRow(props: {
               onOpen?.(command.id);
             }}
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              CHAT_DOCK_PANEL_ROW_BUTTON,
               // No grab affordance where the gesture is gone.
               dragDisabled ? null : grabCursor,
             )}
@@ -422,7 +438,12 @@ function ManagedCommandRow(props: {
               decorative
               className="size-3.5 text-primary/80"
             />
-            <span className="block min-w-0 flex-1 truncate text-ui-xs text-foreground/85">
+            <span
+              className={cn(
+                "block min-w-0 flex-1 truncate text-foreground/85",
+                CHAT_DOCK_PANEL_ROW_TEXT,
+              )}
+            >
               {title}
             </span>
             {command.status.state === "running" ? (
@@ -504,12 +525,12 @@ function BackgroundTreeRow(props: {
     <li className="m-0">
       <div
         className={cn(
-          "group flex min-w-0 items-center gap-2 rounded-md pr-2 hover:bg-foreground/8",
+          "group",
+          CHAT_DOCK_PANEL_ROW,
+          "hover:bg-foreground/8",
           item === null ? "text-muted-foreground" : null,
         )}
-        style={{
-          paddingLeft: `${props.depth * INDENT_PX + BASE_PAD_LEFT}px`,
-        }}
+        style={{ paddingLeft: chatDockPanelRowTreeInset(props.depth) }}
       >
         {item === null ? (
           <TooltipWrapper
@@ -518,12 +539,22 @@ function BackgroundTreeRow(props: {
             sideOffset={undefined}
             align={undefined}
           >
-            <div className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left">
+            <div className={CHAT_DOCK_PANEL_ROW_CONTENT}>
               <BackgroundKindIcon kind={node.kind} />
-              <span className="block min-w-0 flex-1 truncate text-ui-xs text-muted-foreground">
+              <span
+                className={cn(
+                  "block min-w-0 flex-1 truncate text-muted-foreground",
+                  CHAT_DOCK_PANEL_ROW_TEXT,
+                )}
+              >
                 {displayTitle}
               </span>
-              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-ui-xs uppercase text-muted-foreground">
+              <span
+                className={cn(
+                  "shrink-0 rounded bg-muted px-1.5 py-0.5 uppercase text-muted-foreground",
+                  CHAT_DOCK_PANEL_ROW_TEXT,
+                )}
+              >
                 {backgroundKindLabel(node.kind)}
               </span>
             </div>
@@ -538,17 +569,27 @@ function BackgroundTreeRow(props: {
             >
               <button
                 type="button"
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className={cn(CHAT_DOCK_PANEL_ROW_BUTTON, "cursor-pointer")}
                 onClick={() => props.onItemClick(item)}
               >
                 <BackgroundKindIcon kind={item.kind} />
-                <span className="block min-w-0 flex-1 truncate text-ui-xs text-foreground/85">
+                <span
+                  className={cn(
+                    "block min-w-0 flex-1 truncate text-foreground/85",
+                    CHAT_DOCK_PANEL_ROW_TEXT,
+                  )}
+                >
                   {titleNode}
                 </span>
                 {item.kind === "mcp" && item.startedAt !== null ? (
                   <LiveElapsed startedAt={item.startedAt} />
                 ) : null}
-                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-ui-xs uppercase text-muted-foreground">
+                <span
+                  className={cn(
+                    "shrink-0 rounded bg-muted px-1.5 py-0.5 uppercase text-muted-foreground",
+                    CHAT_DOCK_PANEL_ROW_TEXT,
+                  )}
+                >
                   {backgroundKindLabel(item.kind)}
                 </span>
               </button>
@@ -867,7 +908,7 @@ export function BackgroundItemsPanel(props: {
   );
 
   const list = (
-    <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
+    <ul className={cn("m-0 list-none", CHAT_DOCK_PANEL_LIST)}>
       {heldManagedCommands.map((held) => (
         <HeldManagedCommandRow
           key={`held-${held.commandId}`}

@@ -379,7 +379,7 @@ function noAction(): string | null {
  * nothing is ever measured against it; it is here because the real panel asks
  * for one and a picture must not invent a different geometry to hand it.
  */
-const SPECIMEN_SCROLL_REGION_CLASS = "max-h-[min(24dvh,12rem)]";
+export const SPECIMEN_SCROLL_REGION_CLASS = "max-h-[min(24dvh,12rem)]";
 
 /** Every handler the changed-files header asks for, going nowhere. */
 const INERT_DIFF_OPENER: ChatSnapshotDiffOpener = {

@@ -12,6 +12,12 @@ import { BackgroundActivityGlyph } from "@/components/notifications/background-a
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { AgentStopButton } from "@/components/chat/agent-stop-button";
 import {
+  CHAT_DOCK_PANEL_LIST,
+  CHAT_DOCK_PANEL_ROW,
+  CHAT_DOCK_PANEL_ROW_BUTTON,
+  CHAT_DOCK_PANEL_ROW_TEXT,
+} from "@/components/chat/chat-dock-panel-row";
+import {
   ACTIVE_AGENT_DND_TYPE,
   getActiveAgentDragId,
   type EpicCanvasActiveAgentDragData,
@@ -149,8 +155,9 @@ function AgentStopRow(props: {
   return (
     <li
       className={cn(
-        "group flex min-w-0 items-center gap-2 rounded-md",
-        self ? "bg-foreground/8 px-2" : "pl-5 pr-2 hover:bg-foreground/5",
+        "group",
+        CHAT_DOCK_PANEL_ROW,
+        self ? "bg-foreground/8" : "pl-5 hover:bg-foreground/5",
         isDragging && "opacity-60",
       )}
     >
@@ -167,21 +174,24 @@ function AgentStopRow(props: {
           type="button"
           aria-label={`Open ${agent.title}`}
           onClick={openAgent}
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1 text-left focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none",
-            cursorClass,
-          )}
+          className={cn(CHAT_DOCK_PANEL_ROW_BUTTON, cursorClass)}
         >
           <ActivityDot activity={agent.activity} agentId={agent.id} />
           <span
             className={cn(
-              "block min-w-0 flex-1 truncate text-ui-xs text-foreground/85",
+              "block min-w-0 flex-1 truncate text-foreground/85",
+              CHAT_DOCK_PANEL_ROW_TEXT,
               self && "font-medium",
             )}
           >
             {agent.title}
           </span>
-          <span className="shrink-0 rounded bg-foreground/8 px-1.5 py-0.5 text-ui-xs uppercase text-muted-foreground">
+          <span
+            className={cn(
+              "shrink-0 rounded bg-foreground/8 px-1.5 py-0.5 uppercase text-muted-foreground",
+              CHAT_DOCK_PANEL_ROW_TEXT,
+            )}
+          >
             {agent.surface}
           </span>
         </button>
@@ -258,7 +268,7 @@ export function AgentStopList(props: {
     [props.viewTabId, openTile],
   );
   return (
-    <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
+    <ul className={cn("m-0 list-none", CHAT_DOCK_PANEL_LIST)}>
       <AgentStopRow
         epicId={props.epicId}
         viewTabId={props.viewTabId}

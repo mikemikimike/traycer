@@ -21,6 +21,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
 import { ChatDockAttachedPanelBody } from "@/components/chat/chat-dock-attached-panel";
+import {
+  CHAT_DOCK_PANEL_LIST,
+  CHAT_DOCK_PANEL_ROW,
+  CHAT_DOCK_PANEL_ROW_TEXT,
+} from "@/components/chat/chat-dock-panel-row";
 import type { SegmentTodoItem } from "@/stores/composer/chat-store";
 
 export type ChatLowerSurfaceTopSpacing = "normal" | "connected";
@@ -54,7 +59,7 @@ export function PinnedTodoPanel(props: {
       : (activeItem.activeForm ?? activeItem.text);
 
   const list = (
-    <ul className="m-0 flex list-none flex-col gap-0.5 px-2 py-1.5">
+    <ul className={cn("m-0 list-none", CHAT_DOCK_PANEL_LIST)}>
       {todo.items.map((item) => (
         <PinnedTodoRow key={item.id} item={item} />
       ))}
@@ -143,11 +148,12 @@ function PinnedTodoRow(props: { readonly item: SegmentTodoItem }) {
   const { item } = props;
 
   return (
-    <li className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/40">
+    <li className={cn(CHAT_DOCK_PANEL_ROW, "hover:bg-muted/40")}>
       <TodoStatusIcon status={item.status} />
       <span
         className={cn(
           "block min-w-0 flex-1 truncate",
+          CHAT_DOCK_PANEL_ROW_TEXT,
           STATUS_TEXT_TONE[item.status],
         )}
       >

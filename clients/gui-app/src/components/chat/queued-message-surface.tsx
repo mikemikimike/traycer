@@ -76,6 +76,11 @@ import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
 import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
 import {
+  CHAT_DOCK_PANEL_LIST,
+  CHAT_DOCK_PANEL_ROW,
+  CHAT_DOCK_PANEL_ROW_TEXT,
+} from "@/components/chat/chat-dock-panel-row";
+import {
   ChatDockAttachedPanelBody,
   ChatDockPillActions,
 } from "@/components/chat/chat-dock-attached-panel";
@@ -227,7 +232,7 @@ export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
         items={[...reorderDnd.sortableItemIds]}
         strategy={verticalListSortingStrategy}
       >
-        <div className="flex flex-col divide-y divide-border/40">
+        <div className={CHAT_DOCK_PANEL_LIST}>
           {items.map((item, index) => {
             return (
               <QueuedMessageRow
@@ -729,7 +734,20 @@ const QueuedMessageRow = memo(function QueuedMessageRow(props: {
       ref={rowRef}
       style={rowSortable.style}
       className={cn(
-        "group relative flex min-w-0 items-start gap-2 px-3 py-1.5",
+        "group relative",
+        CHAT_DOCK_PANEL_ROW,
+        // The four sibling panels all reveal the row under the pointer; this
+        // one is the only list of PROSE, so it needs the fill most and had
+        // none (R6H-01).
+        // muted-fill-ok: row inside the canvas-surface panel above; --canvas never equals --muted
+        "hover:bg-muted/40",
+        // The hairline `divide-y` used to draw, moved OUT of flow into the
+        // list's `gap-0.5` so it costs no height: a 1px rule per boundary is
+        // what broke "N one-line rows measure the same in all five" at every
+        // N above one. Two wrapped messages would otherwise be separated by
+        // 1.875px while their own lines are 15px apart, and read as one
+        // paragraph.
+        "before:pointer-events-none before:absolute before:inset-x-2 before:-top-px before:h-px before:bg-border/40 first:before:hidden",
         editing ? "bg-primary/5" : null,
         actionState.isTransient ? "opacity-80" : null,
         rowSortable.isDragSource ? "opacity-50" : null,
@@ -785,7 +803,6 @@ function QueuedMessageRowContent(props: {
   readonly handleSteerNow: () => void;
 }) {
   const item = props.item;
-  const receivedAgentItem = isReceivedAgentResponse(item) ? item : null;
   const framed =
     props.showOwnerActions ||
     props.showManagedCommandCancel ||
@@ -794,30 +811,15 @@ function QueuedMessageRowContent(props: {
 
   return (
     <div className="min-w-0 flex-1">
-      {receivedAgentItem !== null ? (
-        <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1">
-          <ReceivedAgentBadge sender={receivedAgentItem.sender} />
-        </div>
-      ) : null}
-      {item.kind === "managed-command" ? (
-        <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1">
-          <ManagedCommandBadge
-            commandId={item.commandId}
-            monitoring={item.monitoring}
-            hostId={item.hostId}
-          />
-        </div>
-      ) : null}
-      {item.kind === "port-forward" ? (
-        <div className="mb-1 flex min-w-0 flex-wrap items-center gap-1">
-          <PortForwardBadge />
-        </div>
-      ) : null}
       <div
-        className="max-h-[3lh] overflow-y-auto pr-1 text-ui-sm leading-5 wrap-break-word"
+        className={cn(
+          "max-h-[3lh] overflow-y-auto pr-1 wrap-break-word",
+          CHAT_DOCK_PANEL_ROW_TEXT,
+        )}
         data-testid="queued-message-content-scroll"
         data-native-scrollbar="true"
       >
+        <QueuedMessageProvenanceChip item={item} />
         {showFloatingChrome ? (
           <QueuedMessageFloatingChrome framed={framed}>
             {props.statusLabel !== null ? (
@@ -865,6 +867,58 @@ function QueuedMessageRowContent(props: {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The row's provenance marker, as a chip the message wraps around (L-172).
+ *
+ * It used to be a line of its own above the message. That made a queue with
+ * one received agent response 54.5px against every other one-row panel's
+ * 41.25px, so switching the pill from Background to Queue moved the
+ * composer's upper edge by 13.25px - three times the jump this ticket was
+ * opened for. L-171 exempted the two-line case by fiat; L-172 narrows the
+ * exemption, because the exemption did not make the jump go away.
+ *
+ * A float rather than an inline span, and the mirror of the toolbar floating
+ * into the same scroll box from the other side: the message is a block
+ * (`ComposerContentPreview` renders paragraphs), so an in-flow inline chip
+ * before it would still start the text on a second line. Floated, the text
+ * wraps around it and a one-line message stays one line.
+ *
+ * `max-h-[3lh]` is untouched. A queued message is the user's own text and the
+ * one thing in the dock they may need to READ before deciding to edit or
+ * cancel it, so the answer to "one line or two" is neither: metadata gives up
+ * its line, content keeps its three.
+ */
+/** The one badge a queued row's provenance calls for, or `null` for none. */
+function queuedMessageProvenanceBadge(item: ChatQueuedItem): ReactNode {
+  if (isReceivedAgentResponse(item))
+    return <ReceivedAgentBadge sender={item.sender} />;
+  if (item.kind === "managed-command")
+    return (
+      <ManagedCommandBadge
+        commandId={item.commandId}
+        monitoring={item.monitoring}
+        hostId={item.hostId}
+      />
+    );
+  if (item.kind === "port-forward") return <PortForwardBadge />;
+  return null;
+}
+
+function QueuedMessageProvenanceChip(props: {
+  readonly item: ChatQueuedItem;
+}): ReactNode {
+  const badge = queuedMessageProvenanceBadge(props.item);
+  if (badge === null) return null;
+  return (
+    <span
+      className="float-left mr-1 inline-flex"
+      data-testid="queued-message-provenance-chip"
+    >
+      {badge}
+    </span>
   );
 }
 
@@ -965,9 +1019,9 @@ function ManagedCommandCancelButton(props: {
         <span className="inline-flex shrink-0">
           <Button
             type="button"
-            size="icon"
+            size="icon-xs"
             variant="muted"
-            className="size-7 shrink-0"
+            className="shrink-0"
             aria-label={
               props.kind === "shell"
                 ? "Cancel queued command output"
@@ -995,9 +1049,19 @@ function QueuedMessageFloatingChrome(props: {
   return (
     <div
       className={cn(
-        "sticky top-0 z-10 float-right ml-2 mb-1 flex shrink-0 items-center",
+        "sticky top-0 z-10 float-right ml-2 flex shrink-0 items-center",
+        // `gap-1` rather than `gap-0.5`: the buttons are `size-6`, which is
+        // 22.5px at this root, so 3.75px between them puts their centres
+        // 26.25px apart and the undersized-target spacing exception is not
+        // decided by a third of a pixel (R6H-05).
+        //
+        // `-my-0.5` pays for `p-0.5` out of the row's own padding: the frame's
+        // border box is 28.25px and its MARGIN box is what the float
+        // contributes to the message column, so cancelling 1.875px a side
+        // brings it to 24.5px, inside the row's 26.25px budget. The frame
+        // keeps its padding, which is what holds the buttons off its border.
         props.framed
-          ? "gap-1 rounded-md border border-border/60 bg-background/70 p-0.5 shadow-lg supports-backdrop-filter:bg-background/60"
+          ? "-my-0.5 gap-1 rounded-md border border-border/60 bg-background/70 p-0.5 shadow-lg supports-backdrop-filter:bg-background/60"
           : null,
       )}
       data-testid="queued-message-row-toolbar"
@@ -1199,7 +1263,7 @@ function QueuedMessageDragHandle({
         aria-hidden
         data-testid="queued-message-drag-handle"
         data-disabled="true"
-        className="inline-flex size-7 shrink-0 cursor-not-allowed items-center justify-center rounded-sm text-muted-foreground/40"
+        className="inline-flex size-6 shrink-0 self-start cursor-not-allowed items-center justify-center rounded-sm text-muted-foreground/40"
       >
         <GripVertical className="size-3.5" />
       </span>
@@ -1237,7 +1301,7 @@ function QueuedMessageDragHandle({
           {...listeners}
           aria-hidden
           className={cn(
-            "inline-flex size-7 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors",
+            "inline-flex size-6 shrink-0 self-start cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors",
             "hover:bg-muted hover:text-foreground active:cursor-grabbing",
           )}
           data-testid="queued-message-drag-handle"
@@ -1259,7 +1323,7 @@ function QueuedMessageDropIndicator(props: {
     <span
       aria-hidden
       className={cn(
-        "pointer-events-none absolute right-3 left-3 z-20",
+        "pointer-events-none absolute right-2 left-2 z-20",
         props.edge === "top" ? "top-0" : "bottom-0",
       )}
     >
@@ -1288,9 +1352,9 @@ function QueuedMessageAbortSteerButton(props: {
         <span className="inline-flex shrink-0">
           <Button
             type="button"
-            size="icon"
+            size="icon-xs"
             variant="muted"
-            className="size-7 shrink-0"
+            className="shrink-0"
             aria-label="Cancel steer"
             onClick={props.onAbortSteer}
           >
@@ -1325,9 +1389,9 @@ function QueuedMessageRowActions(props: {
         >
           <Button
             type="button"
-            size="icon"
+            size="icon-xs"
             variant="muted"
-            className="size-7 shrink-0"
+            className="shrink-0"
             disabled={props.actionsDisabled}
             aria-label={props.editLabel}
             onClick={props.onEdit}
@@ -1343,9 +1407,9 @@ function QueuedMessageRowActions(props: {
         >
           <Button
             type="button"
-            size="icon"
+            size="icon-xs"
             variant="muted"
-            className="size-7 shrink-0"
+            className="shrink-0"
             disabled={props.actionsDisabled}
             aria-label="Delete queued message"
             onClick={props.onCancel}
@@ -1359,9 +1423,9 @@ function QueuedMessageRowActions(props: {
           <span className="inline-flex shrink-0">
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="muted"
-              className="size-7 shrink-0"
+              className="shrink-0"
               disabled={props.steerNowDisabled}
               aria-label="Steer queued message now"
               onClick={props.onSteerNow}

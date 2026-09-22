@@ -34,6 +34,11 @@ import {
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
 import {
+  CHAT_DOCK_PANEL_LIST,
+  CHAT_DOCK_PANEL_ROW,
+  CHAT_DOCK_PANEL_ROW_TEXT,
+} from "@/components/chat/chat-dock-panel-row";
+import {
   ChatDockAttachedPanelBody,
   ChatDockPillActions,
 } from "@/components/chat/chat-dock-attached-panel";
@@ -219,7 +224,7 @@ export function ChatAccumulatedChangesPanel(
   );
 
   const rows = (
-    <div className="flex flex-col gap-0.5 px-2 py-1.5">
+    <div className={CHAT_DOCK_PANEL_LIST}>
       {changes.map((change) => (
         <AccumulatedChangeRow
           key={change.filePath}
@@ -430,7 +435,7 @@ function AccumulatedChangeRow(props: AccumulatedChangeRowProps) {
   const undoEnabled = gate.enabled && change.undoable && !pending;
   return (
     // muted-fill-ok: row inside the canvas-surface panel above; --canvas never equals --muted
-    <div className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/40">
+    <div className={cn("group", CHAT_DOCK_PANEL_ROW, "hover:bg-muted/40")}>
       {change.artifact ? (
         <ArtifactAccumulatedHeader
           artifact={change.artifact}
@@ -499,7 +504,17 @@ function ArtifactAccumulatedHeader(props: {
         type={display.displayKind}
         className="size-4 shrink-0 text-muted-foreground/80"
       />
-      <span className="shrink-0 text-ui-sm font-medium text-foreground/85">
+      {/* The same two tokens the FILE branch beside this one draws (L-171):
+          the verb on the dock's row text, the title on the code ramp, because
+          it occupies the row slot a path occupies. This branch was `text-ui-sm`
+          throughout - a 1.875px step inside one typeface at one weight, which
+          is exactly the size step the ruling is about (R6H-03). */}
+      <span
+        className={cn(
+          "shrink-0 font-medium text-foreground/85",
+          CHAT_DOCK_PANEL_ROW_TEXT,
+        )}
+      >
         {artifactOperationVerb(operation)}
       </span>
       <span aria-hidden className="shrink-0 text-muted-foreground/40">
@@ -520,7 +535,7 @@ function ArtifactAccumulatedHeader(props: {
             display.openArtifact();
           }}
           className={cn(
-            "min-w-0 flex-1 text-ui-sm text-foreground/85",
+            "min-w-0 flex-1 text-code-sm text-foreground/85",
             "hover:text-foreground hover:underline underline-offset-2",
             "focus-visible:underline focus-visible:outline-none",
             "cursor-pointer",
@@ -531,7 +546,7 @@ function ArtifactAccumulatedHeader(props: {
       ) : (
         <StartTruncatedText
           className={cn(
-            "min-w-0 flex-1 text-ui-sm text-foreground/85",
+            "min-w-0 flex-1 text-code-sm text-foreground/85",
             display.isDeleted && "text-muted-foreground line-through",
           )}
         >
