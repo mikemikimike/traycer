@@ -1,16 +1,28 @@
 import {
   alwaysAvailable,
   isMobileFooterRowAvailable,
+  type SettingsAvailabilityContext,
 } from "@/lib/settings/settings-availability";
 import { defineSettingsSection } from "@/lib/settings-search/settings-definitions";
+
+/**
+ * The tab strip's placement and the sidebar's side have no effect in the
+ * installed mobile app, which always draws its own header and no sidebar, so
+ * their rows are withheld there.
+ */
+function isSurfacePlacementRowAvailable(
+  context: SettingsAvailabilityContext,
+): boolean {
+  return !context.mobileApp;
+}
 
 /**
  * Where the app's own chrome sits and how much of it shows.
  *
  * The page is the full-width host for the SAME section tree the inspector
  * docks (L-03), so this collection describes only what search has to land on:
- * the page, the presets block, one anchor per surface group, and the one row
- * that belongs to a surface rather than to a region (L-51).
+ * the page, the presets block, one anchor per surface group, and the rows
+ * that belong to a surface rather than to a region.
  *
  * The regions themselves are not listed here. They come from
  * `components/layout-editor/layout-search.definitions.ts`, generated from the region
@@ -93,11 +105,31 @@ export const LAYOUT = defineSettingsSection("layout", {
   topBar: {
     kind: "group",
     search: { anchor: "layout-surface-top-bar" },
-    label: "Top bar",
+    label: "Tabs",
     description: null,
     breadcrumb: null,
     availableWhen: alwaysAvailable,
-    keywords: ["tabs", "home", "title bar"],
+    keywords: ["tabs", "home", "top bar", "title bar"],
+  },
+  /**
+   * Where the task tabs sit: a surface-level row, because the tab strip is not
+   * a region. Drawn by `TabStripPositionRow` on both hosts.
+   */
+  tabStripPlacement: {
+    kind: "row",
+    group: "topBar",
+    search: { anchor: "layout-tab-strip-placement" },
+    label: "Position",
+    description: "Across the top, or as a vertical strip at either edge.",
+    availableWhen: isSurfacePlacementRowAvailable,
+    keywords: [
+      "vertical tabs",
+      "side tabs",
+      "left",
+      "right",
+      "top",
+      "position",
+    ],
   },
   taskTabLayout: {
     kind: "row",
@@ -125,6 +157,19 @@ export const LAYOUT = defineSettingsSection("layout", {
     breadcrumb: null,
     availableWhen: alwaysAvailable,
     keywords: ["rail", "panels", "icons", "order", "group"],
+  },
+  /**
+   * Which side of the task canvas the sidebar takes: a surface-level row,
+   * drawn by `SidebarSideRow` on both hosts.
+   */
+  sidebarSide: {
+    kind: "row",
+    group: "sidebar",
+    search: { anchor: "layout-sidebar-side" },
+    label: "Side",
+    description: "Which side of the task canvas the sidebar sits on.",
+    availableWhen: isSurfacePlacementRowAvailable,
+    keywords: ["sidebar", "left", "right", "side"],
   },
   chat: {
     kind: "group",

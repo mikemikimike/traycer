@@ -12,7 +12,7 @@ import {
   stackOrderItem,
   type SortableRowDecorator,
 } from "@/components/layout-editor/inspector/rows/order-row-items";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   ORDER_GROUPS,
   orderGroupInstruction,

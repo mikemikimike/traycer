@@ -235,6 +235,63 @@ describe("the sample workspace's icon rail", () => {
     expect(useLayoutStore.getState().overrides).toEqual({});
   });
 
+  /**
+   * S-32: the epic sidebar's own side is a "Move sidebar to..." item in the
+   * same shared menu, named for the direction it MOVES TO rather than the
+   * side it is currently on.
+   */
+  it("offers 'Move sidebar to right' for the default (left) side, and writes sidebarSide on click", () => {
+    render(<SampleWorkspaceRail />);
+
+    fireEvent.contextMenu(screen.getByLabelText("Sample sidebar"));
+    expect(screen.getByTestId("epic-rail-move-sidebar").textContent).toBe(
+      "Move sidebar to right",
+    );
+
+    fireEvent.click(screen.getByTestId("epic-rail-move-sidebar"));
+
+    expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+    // At rest, `recordGesture` is a pass-through: nothing lands on the undo
+    // stack for a write made outside a customizing session.
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(0);
+  });
+
+  it("offers 'Move sidebar to left' once the side is right, and writes it back on click", () => {
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      sidebarSide: "right",
+    });
+    render(<SampleWorkspaceRail />);
+
+    fireEvent.contextMenu(screen.getByLabelText("Sample sidebar"));
+    expect(screen.getByTestId("epic-rail-move-sidebar").textContent).toBe(
+      "Move sidebar to left",
+    );
+
+    fireEvent.click(screen.getByTestId("epic-rail-move-sidebar"));
+
+    expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("left");
+  });
+
+  it("records a sidebar-side move as a gesture while a session is open, so Undo takes it back", () => {
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+    });
+    render(<SampleWorkspaceRail />);
+
+    fireEvent.contextMenu(screen.getByLabelText("Sample sidebar"));
+    fireEvent.click(screen.getByTestId("epic-rail-move-sidebar"));
+
+    expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
+
+    useLayoutEditorStore.getState().undo();
+
+    expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("left");
+  });
+
   it("makes every entry a draggable member of the rail in a session", () => {
     addDivider(2);
     useLayoutEditorStore.getState().beginSession({

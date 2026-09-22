@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AppFrameComposerStack,
+  AppFrameSideStrip,
   AppFrameStatusBarRow,
   AppFrameTopBar,
 } from "@/components/layout-editor/inspector/app-frame-chrome";
@@ -164,5 +165,156 @@ describe("the two bars' clusters (R2-02, L-156)", () => {
     );
 
     expect(shapeOf()).toEqual(["usage", "spacer"]);
+  });
+});
+
+/**
+ * S-01, S-03, S-06: `top` keeps drawing today's horizontal row untouched; a
+ * side strip draws the real strip's shape (ticket 11) - a top block, Home as
+ * its own row, the fake tabs as a column, and a foot with the header-hosted
+ * readings and the header's own glyphs.
+ */
+describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
+  const INACTIVE_TAB_CLASS =
+    "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm text-muted-foreground";
+  // `cn()` merges the conflicting text-color utility: `text-foreground`
+  // (same group as `text-muted-foreground`) wins because it is later.
+  const ACTIVE_TAB_CLASS =
+    "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm border border-border bg-foreground/5 text-foreground";
+  const IDENTITY_DOT_CLASS =
+    "size-5 shrink-0 rounded-full border border-border bg-foreground/10";
+
+  it("renders the top bar's row exactly as before, glyph for glyph", () => {
+    render(
+      <div data-testid="row">
+        <AppFrameTopBar
+          values={PRESET_VALUES.default}
+          arrangement={DEFAULT_ARRANGEMENT}
+        />
+      </div>,
+    );
+
+    expect(screen.queryByTestId("app-frame-side-strip")).toBeNull();
+    const row = screen.getByTestId("row");
+    // Nothing hosts at the header by default, so the row is exactly: the two
+    // fake tabs, the spacer, History, Bell, the identity dot.
+    const children = [...row.children];
+    expect(children).toHaveLength(6);
+    const [startPage, sampleChat, spacer, history, bell, identity] = children;
+    expect(startPage.tagName).toBe("SPAN");
+    expect(startPage.className).toBe(INACTIVE_TAB_CLASS);
+    expect(startPage.textContent).toBe("Start page");
+    expect(sampleChat.className).toBe(ACTIVE_TAB_CLASS);
+    expect(sampleChat.textContent).toBe("Sample chat");
+    expect(spacer.className).toBe("flex-1");
+    expect(history.classList.contains("lucide-history")).toBe(true);
+    expect(bell.classList.contains("lucide-bell")).toBe(true);
+    expect(identity.className).toBe(IDENTITY_DOT_CLASS);
+  });
+
+  it("draws the top block as one row: history left, New task and collapse right", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+
+    const strip = screen.getByTestId("app-frame-side-strip");
+    const topBlock = strip.firstElementChild;
+    if (topBlock === null) throw new Error("expected a top block");
+    const glyphs = [...topBlock.children].map((child) =>
+      [...child.classList].find((cls) => cls.startsWith("lucide-")),
+    );
+    // Back, forward, a spacer (no glyph class), New task, the collapse toggle.
+    expect(glyphs).toEqual([
+      "lucide-arrow-left",
+      "lucide-arrow-right",
+      undefined,
+      "lucide-plus",
+      "lucide-panel-left",
+    ]);
+  });
+
+  it("draws Home as its own row, above the fake tabs, gated on the region", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+
+    // Hidden by default (PRESET_VALUES.default.homeTab.shown === "hidden").
+    expect(screen.queryByText("Home")).toBeNull();
+
+    cleanup();
+    render(
+      <AppFrameSideStrip
+        values={{
+          ...PRESET_VALUES.default,
+          homeTab: { shown: "shown" },
+        }}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+
+    const strip = screen.getByTestId("app-frame-side-strip");
+    const home = within(strip).getByText("Home");
+    const tabList =
+      within(strip).getByText("Sample chat").parentElement?.parentElement;
+    if (tabList === null || tabList === undefined) {
+      throw new Error("expected the fake tabs' column");
+    }
+    // Home precedes the fake-tab column as a sibling, not a member of it.
+    expect(home.parentElement?.nextElementSibling).toBe(tabList);
+    expect(within(tabList).queryByText("Home")).toBeNull();
+  });
+
+  it("sizes the fake tab rows from the tokens: a leading slot, then the title", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+
+    const strip = screen.getByTestId("app-frame-side-strip");
+    const sampleChat = within(strip).getByText("Sample chat");
+    const row = sampleChat.parentElement;
+    if (row === null) throw new Error("expected the row");
+    expect(row.children).toHaveLength(2);
+    const leading = row.children[0];
+    expect(leading.className).toContain("size-4");
+    expect(sampleChat.className).toContain("text-[0.8125rem]");
+  });
+
+  it("lays the foot out as a wrapping row with History, Bell and the identity dot", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+
+    const foot = screen.getByTestId("app-frame-side-strip-foot");
+    expect(foot.className).toContain("flex-wrap");
+    expect(foot.querySelector("svg.lucide-history")).not.toBeNull();
+    expect(foot.querySelector("svg.lucide-bell")).not.toBeNull();
+    expect(foot.lastElementChild?.className).toBe(IDENTITY_DOT_CLASS);
+  });
+
+  it("puts a header-hosted reading in the foot, and nowhere else", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={{ ...DEFAULT_ARRANGEMENT, resourceHost: "header" }}
+      />,
+    );
+
+    const foot = screen.getByTestId("app-frame-side-strip-foot");
+    expect(foot.textContent).toContain("cpu");
+    const strip = screen.getByTestId("app-frame-side-strip");
+    const topBlock = strip.firstElementChild;
+    expect(topBlock?.textContent.includes("cpu")).toBe(false);
   });
 });

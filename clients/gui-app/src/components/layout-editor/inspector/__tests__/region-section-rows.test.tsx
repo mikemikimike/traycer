@@ -212,7 +212,7 @@ describe("the two bar readings' Position rows (L-156)", () => {
       within(rowControl("Resource monitor position"))
         .getAllByRole("radio")
         .map((radio) => radio.textContent),
-    ).toEqual(["Status bar", "Header"]);
+    ).toEqual(["Status bar", "Tab strip"]);
     expect(
       within(rowControl("Resource monitor side"))
         .getAllByRole("radio")
@@ -235,7 +235,7 @@ describe("the two bar readings' Position rows (L-156)", () => {
 
     fireEvent.click(
       within(rowControl("Resource monitor position")).getByRole("radio", {
-        name: "Header",
+        name: "Tab strip",
       }),
     );
     fireEvent.click(

@@ -1,20 +1,15 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
-import { ChevronRight, Plus, Ungroup, X } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { ChevronRight } from "lucide-react";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useTabsStore } from "@/stores/tabs/store";
 import type { TabGroup } from "@/stores/tabs/tab-groups";
-import { TabColorPicker } from "./tab-appearance-menu";
-import { navigateToTabIntent } from "@/lib/tab-navigation";
-import { openNewEpicIntent } from "@/lib/commands/actions/new-epic";
+import { TabGroupEditor } from "./tab-group-editor";
 import { cn } from "@/lib/utils";
 
 export function TabGroupChip(props: {
@@ -23,7 +18,6 @@ export function TabGroupChip(props: {
   readonly onClose: (groupId: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const navigate = useNavigate();
   const { group, groupId } = props;
   const actions = useTabsStore.getState();
   return (
@@ -79,62 +73,12 @@ export function TabGroupChip(props: {
         </TooltipWrapper>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-fit max-w-xs">
-        <Input
-          aria-label="Group name"
-          placeholder="Name this group"
-          maxLength={80}
-          value={group.name}
-          onChange={(event) =>
-            actions.updateGroup(groupId, { name: event.target.value })
-          }
-          onKeyDown={(event) => {
-            if (event.key === "Enter") setEditing(false);
-          }}
+        <TabGroupEditor
+          groupId={groupId}
+          group={group}
+          onClose={props.onClose}
+          onDone={() => setEditing(false)}
         />
-        <TabColorPicker
-          menu={false}
-          color={group.color}
-          onChange={(color) => actions.updateGroup(groupId, { color })}
-        />
-        <div className="flex flex-col border-t pt-2">
-          <Button
-            variant="ghost"
-            className="justify-start"
-            onClick={() => {
-              setEditing(false);
-              navigateToTabIntent(
-                navigate,
-                { ...openNewEpicIntent(), groupId },
-                undefined,
-              );
-            }}
-          >
-            <Plus />
-            New tab in group
-          </Button>
-          <Button
-            variant="ghost"
-            className="justify-start"
-            onClick={() => {
-              setEditing(false);
-              props.onClose(groupId);
-            }}
-          >
-            <X />
-            Close group
-          </Button>
-          <Button
-            variant="ghost"
-            className="justify-start"
-            onClick={() => {
-              setEditing(false);
-              actions.ungroup(groupId);
-            }}
-          >
-            <Ungroup />
-            Ungroup
-          </Button>
-        </div>
       </PopoverContent>
     </Popover>
   );

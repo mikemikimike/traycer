@@ -14,9 +14,11 @@ import {
 import {
   clearRailVisibilityOverrides,
   setRailVisibilityOverride,
+  setSidebarSide,
 } from "@/lib/layout/rail-view";
 import { railRegionForLeftPanelId } from "@/lib/layout/rail";
 import { type LeftPanelId } from "@/lib/left-panel-ids";
+import { useArrangementValue } from "@/lib/layout-overrides";
 
 /**
  * Rail context menu: every panel we have, each with a checkmark for whether it
@@ -48,6 +50,7 @@ export function RailContextMenuContent(props: {
   readonly contextPanelId: LeftPanelId | null;
 }): ReactNode {
   const { context, contextPanelId } = props;
+  const sidebarSide = useArrangementValue("sidebarSide");
   const visibility = LEFT_PANEL_DEFINITIONS.map((definition) => ({
     definition,
     visible: isLeftPanelVisible(definition, context),
@@ -118,10 +121,26 @@ export function RailContextMenuContent(props: {
         </>
       ) : null}
       <ContextMenuSeparator />
+      {/* S-32: the sidebar's own side, beside its visibility verbs. Writes
+          through the same recordGesture-wrapped path as every item above it,
+          so a move made while customizing is an Undo step. */}
+      <ContextMenuItem
+        onSelect={() =>
+          setSidebarSide(sidebarSide === "left" ? "right" : "left")
+        }
+        data-testid="epic-rail-move-sidebar"
+      >
+        {sidebarSide === "left"
+          ? "Move sidebar to right"
+          : "Move sidebar to left"}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
       {/* The way in (L-19), on the panel the pointer was over so the editor
-          opens on that region's own section. No quick verbs beside it: this
-          menu's hide item and its checkbox list ALREADY are this rail's
-          show/hide verbs, and they write the same values a quick verb would. */}
+          opens on that region's own section. This menu already carries its
+          own placement verbs - the hide item and checkbox list for show/hide,
+          and the item above for the sidebar's side (S-32, which supersedes
+          L-19 / L-72 for this surface) - so there is nothing left for a quick
+          verb to add. */}
       <CustomizeLayoutMenuItem
         target={
           pointedEntry === null

@@ -8,6 +8,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 
 interface SidebarRowMenuTestIds {
   readonly dropdown: string;
@@ -62,11 +63,12 @@ function SidebarRowMenuItemTooltip(props: {
   readonly tooltip: string | null;
   readonly children: ReactNode;
 }) {
+  const popoverSide = useSidebarPopoverSide();
   if (props.tooltip === null) return props.children;
   return (
     <TooltipWrapper
       label={props.tooltip}
-      side="right"
+      side={popoverSide}
       sideOffset={undefined}
       align={undefined}
     >

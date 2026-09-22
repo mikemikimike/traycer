@@ -8,15 +8,16 @@ import {
   isRailRegionId,
   regionShownOnValue,
   setRegionShown,
-  writeArrangement,
 } from "@/components/layout-editor/layout-gestures";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import {
   BAR_HOST_OPTIONS,
   EDGE_SIDE_OPTIONS,
+  edgeSideOptions,
   SIZE_OPTIONS,
 } from "@/components/layout-editor/regions/region-grammar";
 import { Switch } from "@/components/ui/switch";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   asBarRegionId,
   barPlacement,
@@ -246,15 +247,16 @@ export function RegionSideControl(props: {
 }): ReactNode {
   const { regionId, arrangement } = props;
   const bar = asBarRegionId(regionId);
-  const value =
-    bar === null
-      ? arrangement.minimapSide
-      : barPlacement(arrangement, bar).side;
+  const placement = bar === null ? null : barPlacement(arrangement, bar);
   return (
     <SegmentedControl
       ariaLabel={`${regionFacts(regionId).name} side`}
-      options={EDGE_SIDE_OPTIONS}
-      value={value}
+      options={
+        placement === null
+          ? EDGE_SIDE_OPTIONS
+          : edgeSideOptions(placement.host, arrangement.tabStripPlacement)
+      }
+      value={placement === null ? arrangement.minimapSide : placement.side}
       onChange={(next) => {
         if (next !== "left" && next !== "right") return;
         writeArrangement(

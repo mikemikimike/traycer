@@ -918,7 +918,7 @@ describe("<EpicLeftPanelRail />", () => {
     function renderLiveHost(): void {
       render(
         <SidebarProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </SidebarProvider>,
       );
     }
@@ -926,11 +926,7 @@ describe("<EpicLeftPanelRail />", () => {
     function renderLoadingHost(): void {
       render(
         <SidebarProvider>
-          <EpicLeftPanelLoadingHost
-            epicId={EPIC_ID}
-            tabId={TAB_ID}
-            side="left"
-          />
+          <EpicLeftPanelLoadingHost epicId={EPIC_ID} tabId={TAB_ID} />
         </SidebarProvider>,
       );
     }
@@ -1227,7 +1223,7 @@ describe("the displayed panel is never collapsed (L-157)", () => {
     render(
       <QueryClientProvider client={testQueryClient}>
         <SidebarProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </SidebarProvider>
       </QueryClientProvider>,
     );
@@ -1303,7 +1299,7 @@ describe("a stacked pair vs a lone panel in the body (L-166)", () => {
     render(
       <QueryClientProvider client={testQueryClient}>
         <SidebarProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </SidebarProvider>
       </QueryClientProvider>,
     );
@@ -1449,7 +1445,7 @@ describe("Browsers panel registration", () => {
           orientation="vertical"
         />
         <SidebarProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </SidebarProvider>
       </QueryClientProvider>,
     );

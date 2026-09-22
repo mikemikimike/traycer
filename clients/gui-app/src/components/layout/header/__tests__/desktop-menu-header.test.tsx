@@ -141,6 +141,7 @@ describe("title-band variant", () => {
       expect(band.classList.contains("flex")).toBe(true);
       expect(band.classList.contains("hidden")).toBe(false);
       expect(band.classList.contains("wco:flex")).toBe(false);
+      expect(band.dataset.titleBandMenus).toBe("active");
       expect(
         screen.getAllByRole("navigation", { name: "Application menu" }),
       ).toHaveLength(1);
@@ -163,6 +164,7 @@ describe("title-band variant", () => {
     expect(band.classList.contains(WINDOW_LEADING_INSET_CLASS)).toBe(false);
     expect(band.classList.contains("[-webkit-app-region:drag]")).toBe(true);
     expect(band.getAttribute("aria-hidden")).toBe("true");
+    expect(band.hasAttribute("data-title-band-menus")).toBe(false);
     expect(band.childElementCount).toBe(0);
     expect(
       screen.queryByRole("navigation", { name: "Application menu" }),

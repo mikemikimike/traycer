@@ -24,7 +24,6 @@ import { useSortableRowPadding } from "@/components/layout-editor/inspector/sort
 import {
   isRailRegionId,
   toggleHiddenProvider,
-  writeArrangement,
 } from "@/components/layout-editor/layout-gestures";
 import { depictRegion } from "@/components/layout-editor/region-depiction";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
@@ -48,6 +47,7 @@ import {
   surfaceHasBand,
   SURFACE_ORDER_GROUPS,
 } from "@/components/layout-editor/regions/surface-groups";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   providerChanged,
   regionChanged,

@@ -10,7 +10,9 @@ import {
   resetToBase,
 } from "@/lib/layout/layout-diff";
 import {
+  sideTabStripEdge,
   statusBarHostsAnyRegion,
+  type EdgeSide,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
@@ -24,9 +26,11 @@ import {
   AppFrameComposerStack,
   AppFrameRailEntries,
   AppFrameRegion,
+  AppFrameSideStrip,
   AppFrameStatusBarRow,
   AppFrameTopBar,
 } from "@/components/layout-editor/inspector/app-frame-chrome";
+import { SIDE_STRIP_DEFAULT_WIDTH_PX } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -390,14 +394,20 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
  * stage and the canvas use, under the CURRENT arrangement (2.2) - never a
  * reflowed or hand-drawn lookalike.
  *
- * The frame it is drawn into is the app's own: a top bar with real tab labels,
- * a transcript with a few turns in it, the dock the preset produces, a
+ * The frame it is drawn into is the app's own: a top bar, or a side strip
+ * where the stored placement puts the tabs (S-03), with real tab labels, a
+ * transcript with a few turns in it, the dock the preset produces, a
  * composer box and the status strip. That part is inert static markup, and it
  * is there because a card that was 60% empty `bg-card` read as a near-black
  * rectangle in every dark preset, where `--card` and `--background` are the
  * same colour (I-03). Everything in it that is not this card's own placement
  * comes from `app-frame-chrome.tsx`, which the page's specimens draw from
  * too, so the two pictures cannot disagree about the app (R1-04).
+ *
+ * Platform-neutral: the real frame draws a slim title band above a vertical
+ * strip on Windows, on Linux, and on macOS with the strip at the right
+ * (S-04); the miniature draws none, on any platform, which is not drift for
+ * ticket 12's live-vs-picture pass to report.
  *
  * Everything the arrangement decides is honoured, because the card's whole
  * claim is that it is a picture of the user's own frame under that density:
@@ -437,6 +447,18 @@ function PresetMiniature(props: {
   }, []);
 
   const frame = { values, arrangement };
+  const edge = sideTabStripEdge(arrangement.tabStripPlacement);
+
+  const rail = <MiniatureRail {...frame} />;
+  const canvas = (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <MiniatureChatArea {...frame} />
+      <div className="px-6 py-2">
+        <AppFrameComposerStack {...frame} />
+      </div>
+      <MiniatureComposerFoot {...frame} />
+    </div>
+  );
 
   return (
     <div
@@ -456,16 +478,25 @@ function PresetMiniature(props: {
           transform: `scale(${scale})`,
         }}
       >
-        <MiniatureTopBar {...frame} />
+        {edge === null ? <MiniatureTopBar {...frame} /> : null}
         <div className="flex min-h-0 flex-1">
-          <MiniatureRail {...frame} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <MiniatureChatArea {...frame} />
-            <div className="px-6 py-2">
-              <AppFrameComposerStack {...frame} />
-            </div>
-            <MiniatureComposerFoot {...frame} />
-          </div>
+          {edge === "left" ? (
+            <MiniatureSideStrip {...frame} edge={edge} />
+          ) : null}
+          {arrangement.sidebarSide === "left" ? (
+            <>
+              {rail}
+              {canvas}
+            </>
+          ) : (
+            <>
+              {canvas}
+              {rail}
+            </>
+          )}
+          {edge === "right" ? (
+            <MiniatureSideStrip {...frame} edge={edge} />
+          ) : null}
         </div>
         <MiniatureStatusBar {...frame} />
       </div>
@@ -478,6 +509,32 @@ function MiniatureTopBar({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
       <AppFrameTopBar values={values} arrangement={arrangement} />
+    </div>
+  );
+}
+
+/**
+ * The vertical strip, at its real width, scaled with everything else here.
+ *
+ * The border that meets the canvas is drawn here, not by `AppFrameSideStrip`:
+ * in the real frame that hairline belongs to `task-surface-frame-beside-edge`
+ * (tech plan 6.6), the canvas's own box, so the caller that places the strip
+ * beside the canvas is the caller that owns it.
+ */
+function MiniatureSideStrip({
+  values,
+  arrangement,
+  edge,
+}: AppFrame & { readonly edge: EdgeSide }): ReactNode {
+  return (
+    <div
+      className={cn(
+        "flex h-full shrink-0 flex-col border-border",
+        edge === "left" ? "border-r" : "border-l",
+      )}
+      style={{ width: SIDE_STRIP_DEFAULT_WIDTH_PX }}
+    >
+      <AppFrameSideStrip values={values} arrangement={arrangement} />
     </div>
   );
 }
@@ -564,10 +621,19 @@ function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
   );
 }
 
-/** The app's own rail column, holding the frame chrome's entries (L-155). */
+/**
+ * The app's own rail column, holding the frame chrome's entries (L-155), with
+ * its border on the edge that faces the canvas.
+ */
 function MiniatureRail({ values, arrangement }: AppFrame): ReactNode {
   return (
-    <div className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-3">
+    <div
+      data-testid="preset-miniature-rail"
+      className={cn(
+        "flex w-12 shrink-0 flex-col items-center gap-1 border-border py-3",
+        arrangement.sidebarSide === "left" ? "border-r" : "border-l",
+      )}
+    >
       <AppFrameRailEntries values={values} arrangement={arrangement} />
     </div>
   );

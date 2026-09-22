@@ -23,6 +23,7 @@ import {
   usePanelVisibilityOverrides,
 } from "@/lib/layout/rail-view";
 import type { RailRegionId } from "@/lib/layout/region-id";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import { SAMPLE_RAIL_PRESENCE } from "./sample-workspace-scene";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +50,7 @@ import { cn } from "@/lib/utils";
  */
 export function SampleWorkspaceRail() {
   const rail = useLayoutRail();
+  const sidebarSide = useArrangementValue("sidebarSide");
   const dividersEditing = useRailDividersEditing();
   const visibilityOverrideById = usePanelVisibilityOverrides();
   // The icon the pointer was over, or null for the rail's own empty space -
@@ -70,7 +72,10 @@ export function SampleWorkspaceRail() {
         <aside
           aria-label="Sample sidebar"
           {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
-          className="hidden shrink-0 flex-col items-center gap-1 border-r p-2 md:flex"
+          className={cn(
+            "hidden shrink-0 flex-col items-center gap-1 p-2 md:flex",
+            sidebarSide === "left" ? "border-r" : "border-l",
+          )}
         >
           {railDisplayEntries(rail, () => true).map((entry) => {
             if (entry.kind === "panel")

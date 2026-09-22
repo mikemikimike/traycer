@@ -1164,11 +1164,19 @@
  * header above it, and only the corner facing the strip is rounded and traced
  * with the 1px hairline. Under a title band the surface tucks 1px up so the
  * corner's top border lands on the band's own hairline instead of doubling it.
+ * Only while the band is displayed: under a window-controls overlay, or while
+ * it carries the desktop menus (`data-title-band-menus="active"`). A hidden
+ * band (macOS fullscreen) leaves the surface at the window's top edge, where a
+ * tuck would clip the corner.
  */
 @utility task-surface-frame-beside-left {
   border-top-left-radius: var(--radius-xl);
 
-  [data-app-title-band="band"] & {
+  :is(
+      .wco [data-app-title-band="band"],
+      [data-app-title-band="band"]:has(> [data-title-band-menus="active"])
+    )
+    & {
     margin-top: -1px;
   }
 
@@ -1192,7 +1200,11 @@
 @utility task-surface-frame-beside-right {
   border-top-right-radius: var(--radius-xl);
 
-  [data-app-title-band="band"] & {
+  :is(
+      .wco [data-app-title-band="band"],
+      [data-app-title-band="band"]:has(> [data-title-band-menus="active"])
+    )
+    & {
     margin-top: -1px;
   }
 

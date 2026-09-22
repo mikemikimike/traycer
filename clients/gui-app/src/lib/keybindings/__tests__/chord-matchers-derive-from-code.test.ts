@@ -147,7 +147,7 @@ const KEYBOARD_KEY_READS: Readonly<Record<string, number>> = {
   "gui-app/src/components/layout-editor/layout-editor.tsx": 2,
   "gui-app/src/components/layout/find-in-page-bar.tsx": 2,
   "gui-app/src/components/layout/header/desktop-menu-buttons.tsx": 3,
-  "gui-app/src/components/layout/tabs/tab-group-chip.tsx": 4,
+  "gui-app/src/components/layout/tabs/tab-group-chip.tsx": 3,
   // The guided tour's card answers arrows, Enter and Escape by name; none is
   // a registered chord.
   // Arrows, Home and End walking the minimap's own list - named keys inside an

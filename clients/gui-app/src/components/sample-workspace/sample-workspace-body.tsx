@@ -216,10 +216,13 @@ export function SampleWorkspaceBody() {
         ghost: hotspots[section].ghost,
       }),
   );
+  const sidebarSide = useArrangementValue("sidebarSide");
   return (
     <ComposerTileIdProvider tileId={SAMPLE_TILE_ID}>
       <div className="flex min-h-0 flex-1 bg-canvas" data-sample-workspace-body>
-        <SampleWorkspaceRail />
+        {/* DOM order follows `sidebarSide` (S-06), never CSS `order`, so the
+            layout editor's sample scene shows the real side. */}
+        {sidebarSide === "right" ? null : <SampleWorkspaceRail />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <SampleTranscript />
           {/* The two contexts the real dock panels resolve before they draw:
@@ -378,6 +381,7 @@ export function SampleWorkspaceBody() {
             </ChatDiffTargetContext.Provider>
           </TabHostContext.Provider>
         </div>
+        {sidebarSide === "right" ? <SampleWorkspaceRail /> : null}
       </div>
     </ComposerTileIdProvider>
   );

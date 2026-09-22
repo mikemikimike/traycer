@@ -522,9 +522,9 @@ to join.
   one gate hides both. The panel gates nothing (the `BrowserSettingsSection`
   shape); a second gate there would stay on the build identity the day this one
   narrows to the capability it is really about, and the empty card would return.
-- **Layout's "Show the status bar on small screens" ROW** - the one
-  surface-level row in the whole layout form (L-51), and the only thing on the
-  Layout page any shell withholds.
+- **Layout's "Show the status bar on small screens" ROW** - a
+  surface-level row of the layout form (L-51), and the only Layout row the
+  installed mobile app ADDS.
   The installed mobile app draws no footer strip until it is switched on; every
   other build draws the strip whenever the usage host says so, so the switch
   would pick between two identical outcomes and is withheld
@@ -532,7 +532,9 @@ to join.
   It is available in BOTH of that build's states, on and off: it is the control
   that flips the gate, so a predicate that went away with the surface it
   governs would leave no way back.
-  Nothing else on the page is gated.
+  The other gate on the page runs the other way: the installed mobile app
+  withholds the Tabs card's `Position` and the Sidebar card's `Side`, which
+  place things that build never draws.
   Every REGION section renders in every shell, because a region the strip does
   not host is hosted by the header instead - `MobileAppHeader` draws the usage
   gauge and the resource monitor whatever the strip does - so there is no
@@ -1409,7 +1411,7 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     SELECTION: one `RegionSection` for the selected region, with its order
     group's list drawn `selectedId={regionId}`. This page cannot filter,
     because nothing is selected, so it groups: one `SettingsGroup` per SURFACE
-    (Top bar · Sidebar · Chat · Composer · Status bar) whose body is a
+    (Tabs · Sidebar · Chat · Composer · Status bar) whose body is a
     `SurfaceSection` - at most one picture BAND, the surface's own rows, and
     one `OrderGroupList` per order group it owns, drawn `selectedId={null}`.
     **A surface gets a picture only where the picture carries something the
@@ -1448,7 +1450,7 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     wrote through `regionShownOnValue`, so two presses anywhere turned a pinned
     `shown` back into `auto` without saying so. Where the two strip
     readings live is a pair of picks EACH (L-156): Usage limits and Resource
-    monitor carry their own `Position` (Status bar / Header) and `Side` (Left /
+    monitor carry their own `Position` (Status bar / Tab strip) and `Side` (Left /
     Right) on both hosts, and moving one never moves the other. The shared
     "Show these in" row that moved both at once is gone with the behaviour it
     described, and the Status bar card's one surface-tier row is
@@ -1498,15 +1500,26 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     carried into it once on first launch (L-49).
     `components/settings/panels/layout-settings.definitions.ts` carries only
     what search has to land on - the page, the presets block, one anchor per
-    surface group, and the one row that belongs to a surface rather than to a
+    surface group, and the rows that belong to a surface rather than to a
     region. The per-region search results are generated from the region
     registry (`components/layout-editor/layout-search.definitions.ts`), so a region added
     without a hand-written entry is still findable.
-  - **`Show the status bar on small screens`** (`arrangement.mobileFooter`,
-    L-51) is the one row here that belongs to a SURFACE rather than to a
-    region: it decides whether the strip exists at all on a narrow viewport,
-    and it is drawn only in the installed mobile app, since every other build
-    draws the footer whenever a reading still names the status bar.
+  - **Surface rows.**
+    Four rows belong to a SURFACE rather than to a region, because what they place is not a region.
+    The Tabs card opens with **`Position`** (`arrangement.tabStripPlacement`: Top, Left or Right; keywords "vertical tabs" and "side tabs"), then `Task tab layout`.
+    `Task tab layout` is disabled while the tabs sit at a side, with the reason "Applies when tabs are at the top." in place of its description, and its stored value is kept.
+    The Sidebar card opens with **`Side`** (`arrangement.sidebarSide`: Left or Right).
+    `Position` and `Side` are `TabStripPositionRow` and `SidebarSideRow` in `components/layout-editor/inspector/rows/surface-placement-rows.tsx`.
+    The docked inspector draws the same two rows under its Tabs and Sidebar headings.
+    Each host frames them its own way: an `InspectorRow` in the dock, and on this page a `SettingsRow` that carries its search anchor.
+    Both write one recorded gesture and revert against the shipped arrangement.
+    The page's filter and the dock's filter both match these rows by their own label and keywords, so "vertical tabs" finds `Position` there as it does in Settings search.
+    The installed mobile app withholds `Position` and `Side`, because it always draws its own header and no sidebar, and there `Task tab layout` is never disabled.
+    The Tabs card was called "Top bar"; its id is still `topBar`, and search still finds it by "top bar" and "title bar".
+    Wherever a label names the place, it is the tab strip: "Tab strip - left of the tabs", a reading's `Position` of Status bar or Tab strip, and "Tab strip, left" in the index.
+  - **`Show the status bar on small screens`** (`arrangement.mobileFooter`, L-51) is the fourth surface row.
+    It decides whether the strip exists at all on a narrow viewport.
+    It is drawn only in the installed mobile app, since every other build draws the footer whenever a reading still names the status bar.
 
   The rules below describe the CHROME these controls configure. They live here
   because the chrome has no other doc, not because this page owns them.

@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 import type { LeftPanelSlotProps } from "@/components/epic-canvas/sidebar/left-panel-registry";
 import { PanelSearchField } from "@/components/epic-canvas/sidebar/epic-sidebar-search-field";
 import { useAddBrowserAction } from "@/components/epic-canvas/sidebar/use-browser-add-action";
@@ -79,6 +80,7 @@ function BrowsersPanelActionsLive(props: LeftPanelSlotProps) {
   const [hostMenuOpen, setHostMenuOpen] = useState(false);
   const resolvedHost = useHostDirectoryEntryForHostId(hostPin.resolvedHostId);
   const { add: addBrowser, isAdding } = useAddBrowserAction(props.tabId, null);
+  const popoverSide = useSidebarPopoverSide();
   const handleAdd = useCallback(() => {
     addBrowser();
   }, [addBrowser]);
@@ -151,7 +153,7 @@ function BrowsersPanelActionsLive(props: LeftPanelSlotProps) {
           </DropdownMenuTrigger>
         </TooltipWrapper>
         <DropdownMenuContent
-          side="right"
+          side={popoverSide}
           align="start"
           sideOffset={8}
           avoidCollisions={false}
@@ -173,7 +175,7 @@ function BrowsersPanelActionsLive(props: LeftPanelSlotProps) {
             <DropdownMenuSubContent
               sideOffset={8}
               alignOffset={-4}
-              avoidCollisions={false}
+              avoidCollisions={popoverSide === "left"}
               className="w-[min(90vw,20rem)]"
               data-testid="epic-browsers-panel-host-menu"
             >

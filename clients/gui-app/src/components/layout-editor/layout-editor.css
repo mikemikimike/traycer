@@ -383,6 +383,14 @@
   background: var(--layout-session-tab-color);
 }
 
+/* The same resting cap on a vertical tab row (L-163): the row is a line in a
+   column, so the cap runs down its inline-start edge instead of along its
+   bottom, and the row's own absolute inset gives it its height. */
+[data-layout-session-tab="rest"][data-orientation="vertical"] {
+  height: auto;
+  width: 3px;
+}
+
 /* Active, `TabChrome` is the mark and this element draws nothing. It stays in
    the tree because `:has()` matches a `display: none` element, so the dim
    exemption above keeps working in both states off one marker. */

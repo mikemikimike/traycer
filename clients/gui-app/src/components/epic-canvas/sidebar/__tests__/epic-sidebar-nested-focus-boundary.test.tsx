@@ -766,7 +766,7 @@ describe("sidebar navigation boundary (back/forward regression fixes)", () => {
   });
 
   it("routes root-create-then-open through navigateNested + prepareOpenTileInTabFocusTargetFromSource", () => {
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
+    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
 
     fireEvent.click(screen.getByTestId("epic-sidebar-add-artifact-root-spec"));
 
@@ -809,7 +809,7 @@ describe("sidebar navigation boundary (back/forward regression fixes)", () => {
       instanceId: "instance-1",
     });
 
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
+    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
 
     fireEvent.click(screen.getByTestId("epic-sidebar-more-spec-root"));
     fireEvent.click(screen.getByTestId("epic-sidebar-delete-spec-root"));
@@ -856,7 +856,7 @@ describe("sidebar navigation boundary (back/forward regression fixes)", () => {
       return { paneId: "pane-1", tileInstanceId: "instance-1" };
     });
 
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
+    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     fireEvent.click(screen.getByTestId("epic-sidebar-more-spec-root"));
     fireEvent.click(screen.getByTestId("epic-sidebar-delete-spec-root"));
     fireEvent.click(screen.getByTestId("confirm-action"));
@@ -883,7 +883,7 @@ describe("sidebar navigation boundary (back/forward regression fixes)", () => {
       "tab-a",
     );
 
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
+    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select artifacts" }));
     fireEvent.click(screen.getByRole("button", { name: "Select all" }));
@@ -935,7 +935,7 @@ describe("sidebar navigation boundary (back/forward regression fixes)", () => {
       "tab-d",
     );
 
-    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />);
+    render(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select artifacts" }));
     fireEvent.click(screen.getByRole("button", { name: "Select all" }));

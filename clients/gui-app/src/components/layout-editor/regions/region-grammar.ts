@@ -3,6 +3,7 @@ import type {
   LayoutArrangement,
   OrderGroupId,
   BarHost,
+  TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -33,7 +34,7 @@ export const SURFACE_GROUPS: ReadonlyArray<{
   readonly id: SurfaceGroupId;
   readonly label: string;
 }> = [
-  { id: "topBar", label: "Top bar" },
+  { id: "topBar", label: "Tabs" },
   { id: "sidebar", label: "Sidebar" },
   { id: "chat", label: "Chat" },
   { id: "composer", label: "Composer" },
@@ -169,15 +170,49 @@ export const SIZE_OPTIONS: ReadonlyArray<SegmentOption> = [
   { value: "chip", label: "Chip" },
 ];
 
-export const BAR_HOST_OPTIONS: ReadonlyArray<SegmentOption> = [
-  { value: "status-bar", label: "Status bar" },
-  { value: "header", label: "Header" },
+/** Where the task tabs sit; the Tabs surface's Position row and tab menus. */
+export const TAB_STRIP_PLACEMENT_OPTIONS: ReadonlyArray<{
+  readonly value: TabStripPlacement;
+  readonly label: string;
+}> = [
+  { value: "top", label: "Top" },
+  { value: "left", label: "Left" },
+  { value: "right", label: "Right" },
 ];
 
 export const EDGE_SIDE_OPTIONS: ReadonlyArray<SegmentOption> = [
   { value: "left", label: "Left" },
   { value: "right", label: "Right" },
 ];
+
+/**
+ * The two bars a reading can live in. The `header` value is the tab strip's
+ * bar in every placement - across the top beside the tabs, or the vertical
+ * strip's foot - so it is named for the tab strip; the stored value stays
+ * `"header"` (L-133).
+ */
+export const BAR_HOST_OPTIONS: ReadonlyArray<SegmentOption> = [
+  { value: "status-bar", label: "Status bar" },
+  { value: "header", label: "Tab strip" },
+];
+
+/**
+ * The two ends of a bar reading's bar. In the vertical strip's foot the
+ * readings stack, so `left` and `right` read as "First" and "Last" there;
+ * every other bar is horizontal and keeps "Left" and "Right".
+ */
+export function edgeSideOptions(
+  host: BarHost,
+  placement: TabStripPlacement,
+): ReadonlyArray<SegmentOption> {
+  if (host === "header" && placement !== "top") {
+    return [
+      { value: "left", label: "First" },
+      { value: "right", label: "Last" },
+    ];
+  }
+  return EDGE_SIDE_OPTIONS;
+}
 
 /** Shown under the examples when the values match none of them. */
 export const NO_EXAMPLE_MATCH_COPY =

@@ -1,5 +1,6 @@
 import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import { useSidebarCopyIdMenuEntry } from "@/components/epic-canvas/sidebar/use-sidebar-copy-id-menu-entry";
+import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 /**
  * Chat/terminal-agent tree body for the sidebar. Renders the tree of chat nodes
  * with expansion, rename, delete, and drag-drop behaviors.
@@ -3249,6 +3250,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
   } = props;
   const resourceOwnerKind = resourceOwnerKindForNode(artifactType);
   const roleClaims = useEpicAgentRoleClaims(nodeId);
+  const popoverSide = useSidebarPopoverSide();
   // Read HERE as well as inside the badge, because the row button's explicit
   // `aria-label` replaces its subtree - a state only the badge knows would be
   // visible and unspoken. The same store read, so the two cannot disagree.
@@ -3428,7 +3430,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
         ownerKind={null}
         roleClaims={roleClaims}
         extraContent={null}
-        side="right"
+        side={popoverSide}
       />
     );
   }
@@ -3495,7 +3497,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
           {offlineLock !== null ? (
             <TooltipWrapper
               label={offlineRowLockTooltip(offlineLock)}
-              side="right"
+              side={popoverSide}
               sideOffset={undefined}
               align={undefined}
             >
@@ -3563,7 +3565,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
       ownerKind={ownerKind}
       roleClaims={roleClaims}
       extraContent={null}
-      side="right"
+      side={popoverSide}
     />
   );
 }

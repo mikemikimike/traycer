@@ -19,6 +19,7 @@ import {
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { searchSettings } from "@/lib/settings-search/settings-search";
 
 // The provider list is read through the watched host's scope; this page needs
 // it mounted, never connected.
@@ -335,8 +336,8 @@ describe("Settings - Layout", () => {
       // The word the deleted plinth printed. Its absence is the complaint
       // L-118 was filed about, and it is not a class-name assertion.
       expect(within(sidebar).queryByText("Specimen")).toBeNull();
-      // The first thing that can be operated in the card is the first panel's
-      // own grab, so the list that changes the rail is the top of the card.
+      // Below the surface's own Side row, the first button in the card is the
+      // first panel's own grab, so the list that changes the rail comes next.
       const focusable = sidebar.querySelector('[role="button"]');
       const firstRow = sidebar.querySelector("[data-sortable-id]");
       expect(firstRow?.contains(focusable ?? null)).toBe(true);
@@ -747,5 +748,147 @@ describe("Settings - Layout", () => {
 
       expect(useLayoutStore.getState().arrangement.mobileFooter).toBe(true);
     });
+  });
+
+  describe("the surface placement rows", () => {
+    it("labels the tabs card Tabs, and opens it with Position then Task tab layout", () => {
+      renderPanel();
+
+      const tabs = surface("topBar");
+      expect(tabs.querySelector("h2")?.textContent).toBe("Tabs");
+      const position = tabs.querySelector(
+        "[data-settings-anchor='layout-tab-strip-placement']",
+      );
+      const taskTabLayout = tabs.querySelector(
+        "[data-settings-anchor='layout-task-tab-layout']",
+      );
+      if (position === null || taskTabLayout === null) {
+        throw new Error("missing a Tabs surface row");
+      }
+      expect(position.textContent).toContain("Position");
+      expect(
+        position.compareDocumentPosition(taskTabLayout) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        within(tabs).getByRole("radiogroup", { name: "Tabs position" }),
+      ).toBeTruthy();
+    });
+
+    it("disables Task tab layout with its reason while the tabs are vertical, keeping its value", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      const taskTabLayout = within(surface("topBar")).getByRole("group", {
+        name: "Task tab layout",
+      });
+      const disabledStates = (): ReadonlyArray<boolean> =>
+        within(taskTabLayout)
+          .getAllByRole<HTMLButtonElement>("button")
+          .map((button) => button.disabled);
+      expect(disabledStates()).toEqual([false, false]);
+
+      await user.click(
+        within(
+          screen.getByRole("radiogroup", { name: "Tabs position" }),
+        ).getByRole("radio", { name: "Left" }),
+      );
+
+      expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
+        "left",
+      );
+      expect(disabledStates()).toEqual([true, true]);
+      expect(surface("topBar").textContent).toContain(
+        "Applies when tabs are at the top.",
+      );
+      expect(
+        within(taskTabLayout)
+          .getByRole("button", { name: "Scroll" })
+          .getAttribute("aria-pressed"),
+      ).toBe("true");
+    });
+
+    it("opens the Sidebar card with Side, which writes the sidebar's side", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      const sidebar = surface("sidebar");
+      const side = sidebar.querySelector(
+        "[data-settings-anchor='layout-sidebar-side']",
+      );
+      expect(side?.textContent).toContain("Side");
+      await user.click(
+        within(
+          within(sidebar).getByRole("radiogroup", { name: "Sidebar side" }),
+        ).getByRole("radio", { name: "Right" }),
+      );
+
+      expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+    });
+
+    it("finds Position and Side with the page's own filter", () => {
+      act(() => {
+        useLayoutEditorStore.getState().setFilter("vertical tabs");
+      });
+      renderPanel();
+
+      expect(
+        within(surface("topBar")).getByRole("radiogroup", {
+          name: "Tabs position",
+        }),
+      ).toBeTruthy();
+      expect(screen.queryByTestId("layout-surface-statusBar")).toBeNull();
+
+      act(() => {
+        useLayoutEditorStore.getState().setFilter("sidebar");
+      });
+      expect(
+        within(surface("sidebar")).getByRole("radiogroup", {
+          name: "Sidebar side",
+        }),
+      ).toBeTruthy();
+    });
+
+    it("withholds Position and Side in the installed mobile app, and never disables Task tab layout there", () => {
+      setMobileApp(true);
+      useLayoutStore.setState({
+        ...DEFAULT_LAYOUT_SNAPSHOT,
+        arrangement: {
+          ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
+          tabStripPlacement: "left",
+        },
+      });
+      renderPanel();
+
+      expect(
+        screen.queryByRole("radiogroup", { name: "Tabs position" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("radiogroup", { name: "Sidebar side" }),
+      ).toBeNull();
+      const taskTabLayout = within(surface("topBar")).getByRole("group", {
+        name: "Task tab layout",
+      });
+      expect(
+        within(taskTabLayout)
+          .getAllByRole<HTMLButtonElement>("button")
+          .map((button) => button.disabled),
+      ).toEqual([false, false]);
+      expect(surface("topBar").textContent).not.toContain(
+        "Applies when tabs are at the top.",
+      );
+    });
+
+    it.each(["vertical tabs", "side tabs"])(
+      "finds Position when searching %s",
+      (query) => {
+        const anchors = searchSettings(query, {
+          runnerHost: null,
+          featureSettings: null,
+          mobileApp: false,
+        }).map((result) => result.entry.anchor);
+
+        expect(anchors).toContain("layout-tab-strip-placement");
+      },
+    );
   });
 });

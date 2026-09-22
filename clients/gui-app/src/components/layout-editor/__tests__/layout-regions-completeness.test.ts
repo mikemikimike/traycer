@@ -53,8 +53,10 @@ const STATE_WORDS: ReadonlyArray<string> = [
   // The two bar readings say both halves of where they are (L-156).
   "Status bar, left",
   "Status bar, right",
-  "Header, left",
-  "Header, right",
+  "Tab strip, left",
+  "Tab strip, right",
+  "Tab strip, first",
+  "Tab strip, last",
   "Text",
   "Ring",
   "Ring only",
@@ -263,12 +265,12 @@ describe("state words", () => {
   it("reads the position out of the arrangement, not out of the values", () => {
     const values = PRESET_VALUES.default;
     // Both halves, because both are the answer to "where is it" (L-156): a
-    // row that said only "Header" left the end it is on unsaid.
+    // row that said only "Tab strip" left the end it is on unsaid.
     expect(regionStateWord("usageLimits", values, DEFAULT_ARRANGEMENT)).toBe(
       "Status bar, left",
     );
     expect(regionStateWord("usageLimits", values, MOVED_ARRANGEMENT)).toBe(
-      "Header, right",
+      "Tab strip, right",
     );
     expect(regionStateWord("minimap", values, DEFAULT_ARRANGEMENT)).toBe(
       "Right",
@@ -278,7 +280,7 @@ describe("state words", () => {
       regionStateWord("resourceMonitor", values, DEFAULT_ARRANGEMENT),
     ).toBe("Status bar, right");
     expect(regionStateWord("resourceMonitor", values, MOVED_ARRANGEMENT)).toBe(
-      "Header, left",
+      "Tab strip, left",
     );
   });
 

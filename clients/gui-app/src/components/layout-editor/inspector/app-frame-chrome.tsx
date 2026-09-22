@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
-import { Bell, History } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bell,
+  History,
+  House,
+  PanelLeft,
+  Plus,
+} from "lucide-react";
 import {
   depictDockRows,
   depictRegion,
@@ -14,6 +22,13 @@ import {
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import { railDisplayEntries } from "@/lib/layout/rail";
 import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
+import {
+  SIDE_STRIP_LIST_CLASS,
+  SIDE_TAB_ACTIVE_CLASS,
+  SIDE_TAB_LEADING_CLASS,
+  SIDE_TAB_ROW_CLASS,
+  SIDE_TAB_TITLE_CLASS,
+} from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import type {
   RailRegionId,
   RegionId,
@@ -37,7 +52,9 @@ import { cn } from "@/lib/utils";
  *
  * What stays with each caller is PLACEMENT - the miniature draws these inside
  * a 1000x620 frame with the app's own bars and paddings, the specimen draws
- * one of them on a stage - so nothing here takes a size, a padding or a flag.
+ * one of them on a stage - so nothing here takes a size or a padding. The one
+ * flag is `AppFrameTabEntries`' `layout`: the tab entries are chrome whose
+ * orientation IS the placement, not a size choice a caller makes.
  */
 export interface AppFrame {
   readonly values: LayoutValues;
@@ -73,6 +90,69 @@ export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
         values={values}
         arrangement={arrangement}
       />
+      <AppFrameTabEntries
+        values={values}
+        arrangement={arrangement}
+        layout="row"
+      />
+      <span className="flex-1" />
+      <AppFrameBarCluster
+        host="header"
+        side="right"
+        values={values}
+        arrangement={arrangement}
+      />
+      <History aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      <Bell aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
+    </>
+  );
+}
+
+/**
+ * The fake tabs, as a horizontal row (the top bar, alongside Home) or a
+ * vertical column of rows (a side strip, where Home draws separately as its
+ * own full row - `AppFrameSideHomeRow`).
+ *
+ * The row layout is the top bar's original markup, untouched, so `top` keeps
+ * drawing exactly what it drew before this split. The column layout sizes its
+ * rows from `side-strip-tokens.ts`, the strip's own proportions: a leading
+ * slot, then the title at the row's own text size, nothing invented.
+ */
+export function AppFrameTabEntries({
+  values,
+  arrangement,
+  layout,
+}: AppFrame & { readonly layout: "row" | "column" }): ReactNode {
+  if (layout === "column") {
+    return (
+      <div className={SIDE_STRIP_LIST_CLASS}>
+        {APP_FRAME_TABS.map((tab) => (
+          <span
+            key={tab.label}
+            className={cn(
+              "flex items-center text-muted-foreground",
+              SIDE_TAB_ROW_CLASS,
+              tab.active && cn("text-foreground", SIDE_TAB_ACTIVE_CLASS),
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                SIDE_TAB_LEADING_CLASS,
+                "shrink-0 rounded-full bg-foreground/10",
+              )}
+            />
+            <span className={cn(SIDE_TAB_TITLE_CLASS, "truncate")}>
+              {tab.label}
+            </span>
+          </span>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <>
       <AppFrameRegion
         regionId="homeTab"
         values={values}
@@ -90,17 +170,99 @@ export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
           {tab.label}
         </span>
       ))}
-      <span className="flex-1" />
-      <AppFrameBarCluster
-        host="header"
-        side="right"
+    </>
+  );
+}
+
+/**
+ * Home in the side strip: a full row with a house glyph and its label, the
+ * shape `SideHomeRow` draws (ticket 11), rather than the top strip's
+ * icon-only item stretched by the column.
+ *
+ * Gated on the same `homeTab` region value the top bar reads, so hiding Home
+ * removes this row exactly as it removes the top bar's.
+ */
+function AppFrameSideHomeRow(props: {
+  readonly values: LayoutValues;
+}): ReactNode {
+  if (props.values.homeTab.shown !== "shown") return null;
+  return (
+    <span
+      className={cn(
+        "flex items-center text-muted-foreground",
+        SIDE_TAB_ROW_CLASS,
+      )}
+    >
+      <House aria-hidden className={cn(SIDE_TAB_LEADING_CLASS, "shrink-0")} />
+      <span className={cn(SIDE_TAB_TITLE_CLASS, "truncate")}>Home</span>
+    </span>
+  );
+}
+
+/**
+ * The vertical strip's own frame: a top block (history, New task, the
+ * collapse toggle, Home), the tab entries as a column, and a foot holding the
+ * header-hosted readings and the header's own glyphs - the trailing half of
+ * today's top bar, moved down here because the header itself does not draw
+ * while the strip is vertical (S-03, ticket 11).
+ *
+ * Takes no size, padding or edge: the border that meets the canvas, the
+ * strip's width and its placement in the frame all stay with the caller,
+ * exactly as the rest of this file's exports take no size of their own.
+ */
+export function AppFrameSideStrip({
+  values,
+  arrangement,
+}: AppFrame): ReactNode {
+  return (
+    <div data-testid="app-frame-side-strip" className="flex flex-1 flex-col">
+      <div className="flex items-center gap-1 p-2">
+        <ArrowLeft
+          aria-hidden
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+        <ArrowRight
+          aria-hidden
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+        <span className="flex-1" />
+        <Plus aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <PanelLeft
+          aria-hidden
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+      </div>
+      <AppFrameSideHomeRow values={values} />
+      <AppFrameTabEntries
         values={values}
         arrangement={arrangement}
+        layout="column"
       />
-      <History aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-      <Bell aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-      <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
-    </>
+      <span className="flex-1" />
+      <div
+        data-testid="app-frame-side-strip-foot"
+        className="flex flex-wrap items-center gap-1 p-2"
+      >
+        <AppFrameBarCluster
+          host="header"
+          side="left"
+          values={values}
+          arrangement={arrangement}
+        />
+        <AppFrameBarCluster
+          host="header"
+          side="right"
+          values={values}
+          arrangement={arrangement}
+        />
+        <History
+          aria-hidden
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+        <Bell aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
+      </div>
+    </div>
   );
 }
 

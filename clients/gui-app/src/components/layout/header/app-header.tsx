@@ -4,7 +4,7 @@ import { TabStrip } from "@/components/layout/tabs/tab-strip";
 import { AppUpdateHeaderButton } from "@/components/layout/header/app-update-button";
 import { HistoryButton } from "@/components/layout/header/history-button";
 import { HistoryNavButtons } from "@/components/layout/header/history-nav-buttons";
-import { useDesktopMenuBarActive } from "@/components/layout/header/use-desktop-menu-bar-active";
+import { useMobileHeaderActive } from "@/components/layout/header/use-mobile-header-active";
 import { DesktopMenuBar } from "@/components/layout/header/desktop-menu-bar";
 import { APP_HEADER_HEIGHT_CLASS } from "@/components/layout/header/app-header-height";
 import {
@@ -20,7 +20,6 @@ import {
   WINDOW_TRAILING_INSET_CLASS,
 } from "@/components/layout/header/title-bar-drag";
 import { cn } from "@/lib/utils";
-import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
 
 export type AppHeaderVariant = "app" | "host-loading";
@@ -35,10 +34,10 @@ export interface AppHeaderProps {
  * and tab row at every zoom level.
  */
 export function AppHeader(props: AppHeaderProps): ReactNode {
-  const isMobile = useIsMobileViewport();
-  const desktopMenus = useDesktopMenuBarActive();
-  // A zoomed desktop window still needs its menu row and native control insets.
-  if (props.variant === "app" && isMobile && !desktopMenus) {
+  // A zoomed desktop window still needs its menu row and native control insets;
+  // the same predicate forces the effective tab strip placement to the top.
+  const mobileHeaderActive = useMobileHeaderActive();
+  if (props.variant === "app" && mobileHeaderActive) {
     return <MobileAppHeader />;
   }
   return <DesktopAppHeader variant={props.variant} />;

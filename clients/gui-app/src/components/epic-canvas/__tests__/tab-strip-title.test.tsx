@@ -556,4 +556,18 @@ describe("TabStrip title", () => {
 
     expect(screen.queryByText("Edit Title")).toBeNull();
   });
+
+  it("keeps the Edit Title input mounted and focused after the menu closes", async () => {
+    renderTabStrip(TAB, true);
+    await flushEpicSnapshot();
+    fireEvent.contextMenu(screen.getByTestId(`tab-item-${TAB.instanceId}`));
+    fireEvent.click(await screen.findByText("Edit Title"));
+
+    // Guards the NON-MODAL tab menu: a modal menu's focus trap pulls focus
+    // back as it closes, the input blur-commits and unmounts, and this fails.
+    const input = await screen.findByTestId(
+      `tab-title-input-${TAB.instanceId}`,
+    );
+    await waitFor(() => expect(document.activeElement).toBe(input));
+  });
 });

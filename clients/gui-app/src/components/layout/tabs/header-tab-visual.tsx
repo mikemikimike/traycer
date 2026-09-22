@@ -37,7 +37,7 @@ import { TabLeadingIcon } from "./tab-leading-icon";
  * element is inside the visual that already knows - so the drag overlay and
  * the split preview, which render the same visual, are right for free.
  */
-const SESSION_TAB_LABEL_CLASS = "text-background";
+export const SESSION_TAB_LABEL_CLASS = "text-background";
 
 interface HeaderTabVisualProps {
   readonly tab: HeaderTab;

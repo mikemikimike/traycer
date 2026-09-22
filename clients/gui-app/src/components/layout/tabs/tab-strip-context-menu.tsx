@@ -1,5 +1,10 @@
 import { TabAppearanceMenu } from "./tab-appearance-menu";
-import { useCallback, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useId,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useTabRecovery } from "@/lib/tab-recovery/use-tab-recovery";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { useBindingForAction } from "@/stores/settings/keybinding-store";
@@ -26,8 +31,16 @@ import {
 import {
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import { LayoutRegionContextMenuWithItems } from "@/components/layout-editor/region-quick-verbs";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
+import { TAB_STRIP_PLACEMENT_OPTIONS } from "@/components/layout-editor/regions/region-grammar";
+import { useArrangementValue } from "@/lib/layout-overrides";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -356,6 +369,8 @@ export function TabContextMenuContent(
       {showOpenInNewWindow ? <ContextMenuSeparator /> : null}
       <TabSplitMenuItems tab={tab} onSplitCommand={onSplitCommand} />
       <ContextMenuSeparator />
+      <TabStripPlacementMenuItems />
+      <ContextMenuSeparator />
       <ContextMenuItem
         disabled={!canCloseOtherTabs}
         onSelect={() => onCloseOtherTabs(tab)}
@@ -382,6 +397,67 @@ export function TabContextMenuContent(
         )}
       </ContextMenuItem>
     </ContextMenuContent>
+  );
+}
+
+/**
+ * Where the task tabs sit - Top, Left or Right - as one radio group headed
+ * "Tabs", shared by a task tab's menu and Home's.
+ *
+ * It reads the STORED placement, not the effective one, because it describes
+ * the layout rather than this window. The write is a recorded gesture: a plain
+ * layout write at rest, and one Undo step that Discard takes back while the
+ * layout editor is open. In a session only Home's menu can open, because the
+ * edit firewall swallows a right-click on a task tab, which is not a region.
+ * The caller draws the separators around it.
+ */
+function TabStripPlacementMenuItems(): ReactNode {
+  const placement = useArrangementValue("tabStripPlacement");
+  const labelId = useId();
+  return (
+    <>
+      <ContextMenuLabel id={labelId}>Tabs</ContextMenuLabel>
+      <ContextMenuRadioGroup value={placement} aria-labelledby={labelId}>
+        {TAB_STRIP_PLACEMENT_OPTIONS.map((option) => (
+          <ContextMenuRadioItem
+            key={option.value}
+            value={option.value}
+            data-testid={`tab-strip-placement-${option.value}`}
+            onSelect={() => {
+              writeArrangement({
+                ...useLayoutStore.getState().arrangement,
+                tabStripPlacement: option.value,
+              });
+            }}
+          >
+            {option.label}
+          </ContextMenuRadioItem>
+        ))}
+      </ContextMenuRadioGroup>
+    </>
+  );
+}
+
+/**
+ * Home's right-click menu: Home's own layout verbs, the tabs' placement, then
+ * the way into the layout editor on Home - the region menu every other piece
+ * of chrome has, with the placement group added.
+ */
+export function HomeTabContextMenu(props: {
+  readonly children: ReactNode;
+}): ReactNode {
+  return (
+    <LayoutRegionContextMenuWithItems
+      regionId="homeTab"
+      extraItems={
+        <>
+          <TabStripPlacementMenuItems />
+          <ContextMenuSeparator />
+        </>
+      }
+    >
+      {props.children}
+    </LayoutRegionContextMenuWithItems>
   );
 }
 

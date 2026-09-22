@@ -47,6 +47,10 @@ export function DesktopMenuHeader(props: DesktopMenuHeaderProps): ReactNode {
     return (
       <div
         data-testid="app-title-band"
+        // Read by the beside-strip surface frames (index.css): while the band
+        // carries the menus it is displayed on every shell, not only under a
+        // window-controls overlay.
+        data-title-band-menus={active ? "active" : undefined}
         aria-hidden={active ? undefined : true}
         className={cn(
           "h-[var(--app-title-band-height)]",

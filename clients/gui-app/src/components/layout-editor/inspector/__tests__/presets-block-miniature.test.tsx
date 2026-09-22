@@ -11,7 +11,10 @@ import {
   ResetEverythingButton,
 } from "@/components/layout-editor/inspector/presets-block";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_ARRANGEMENT,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
@@ -271,5 +274,100 @@ describe('"Reset everything" is confirmed only where it cannot be undone (L-20, 
 
     expect(useLayoutStore.getState().basePreset).toBe("compact");
     expect(useSettingsStore.getState().taskTabLayout).toBe("shrink");
+  });
+});
+
+/** Whether an element is the miniature's canvas column, by its own class. */
+function isCanvasColumn(el: Element | null): boolean {
+  return el !== null && el.className.includes("min-w-0");
+}
+
+/**
+ * S-01, S-06, S-29: the miniature is a picture of the STORED arrangement, not
+ * a fixed layout - it follows the tab strip placement and the sidebar side,
+ * and a preset click (which is values-only, L-20) never moves either.
+ */
+describe("the miniature follows the stored placement and sidebar side", () => {
+  function setArrangement(overrides: Partial<LayoutArrangement>): void {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, ...overrides },
+      layoutCarryDone: true,
+    });
+  }
+
+  it.each(["left", "right"] as const)(
+    "draws the side strip at the stored %s edge, positioned there, with no top bar left behind",
+    (edge) => {
+      setArrangement({ tabStripPlacement: edge });
+      render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+      for (const miniature of miniatures()) {
+        const strip = within(miniature).getByTestId("app-frame-side-strip");
+        const wrapper = strip.parentElement;
+        const row = wrapper?.parentElement ?? null;
+        if (wrapper === null || row === null) {
+          throw new Error("expected the strip's width wrapper and its row");
+        }
+        // Position in the row is an output independent of the wrapper's own
+        // border class - a strip on the wrong side with the right class
+        // would still fail this.
+        expect(
+          edge === "left" ? row.firstElementChild : row.lastElementChild,
+        ).toBe(wrapper);
+        // No top bar left mounted alongside the strip.
+        expect(frameOf(miniature).querySelector(".h-10.border-b")).toBeNull();
+      }
+    },
+  );
+
+  it("keeps the top bar, and draws no side strip, for the stored `top` placement", () => {
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      expect(
+        within(miniature).queryByTestId("app-frame-side-strip"),
+      ).toBeNull();
+      expect(frameOf(miniature).querySelector(".h-10.border-b")).not.toBeNull();
+    }
+  });
+
+  it.each(["left", "right"] as const)(
+    "orders the rail relative to the canvas for a %s sidebar, whatever the strip's placement",
+    (side) => {
+      setArrangement({ sidebarSide: side, tabStripPlacement: "right" });
+      render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+      for (const miniature of miniatures()) {
+        const rail = within(miniature).getByTestId("preset-miniature-rail");
+        expect(rail.className).toContain(
+          side === "left" ? "border-r" : "border-l",
+        );
+        const canvasSibling =
+          side === "left"
+            ? rail.nextElementSibling
+            : rail.previousElementSibling;
+        expect(isCanvasColumn(canvasSibling)).toBe(true);
+      }
+    },
+  );
+
+  it("never moves the placement or the sidebar side when a preset is clicked, and each click still lands (L-20, S-29)", () => {
+    setArrangement({ tabStripPlacement: "left", sidebarSide: "right" });
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const presetId of ["Compact", "Detailed", "Default"]) {
+      fireEvent.click(card(presetId));
+      expect(useLayoutStore.getState().basePreset).toBe(presetId.toLowerCase());
+      expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
+        "left",
+      );
+      expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+      for (const miniature of miniatures()) {
+        expect(
+          within(miniature).queryByTestId("app-frame-side-strip"),
+        ).not.toBeNull();
+      }
+    }
   });
 });

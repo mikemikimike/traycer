@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
 import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
+import { SurfacePlacementRow } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
+import { surfacePlacementRowMatchesFilter } from "@/components/layout-editor/inspector/rows/surface-placement-filter";
 import {
   LAYOUT_REGION_LIST,
   regionFacts,
@@ -168,14 +170,19 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   const rowRefs = useRef<Map<RegionId, HTMLButtonElement>>(new Map());
 
   // A group with no region left has no divider left either, so one emptiness
-  // test covers both kinds of line.
+  // test covers both kinds of line. A group whose own placement row matches
+  // stays for that row, with whatever regions still match under it.
   const groups = SURFACE_GROUPS.map((group) => ({
     group,
     entries:
       group.id === "sidebar"
         ? railIndexEntries(snapshot.arrangement.rail, filter)
         : surfaceIndexEntries(group.id, filter),
-  })).filter((entry) => entry.entries.length > 0);
+  })).filter(
+    (entry) =>
+      entry.entries.length > 0 ||
+      surfacePlacementRowMatchesFilter(entry.group.id, filter),
+  );
 
   // The walk is over the rows that open something: a divider and a stack link
   // are read, not operated, so an arrow steps straight over them.
@@ -260,7 +267,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
           useLayoutEditorStore.getState().select(first);
         }}
       />
-      {orderedIds.length === 0 ? (
+      {groups.length === 0 ? (
         <p className="px-3.5 py-4 text-ui-sm text-muted-foreground">
           No region matches "{filter}".
         </p>
@@ -270,6 +277,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
             <div className="px-3.5 pt-3 pb-1 text-overline text-muted-foreground uppercase">
               {entry.group.label}
             </div>
+            <SurfacePlacementRow surface={entry.group.id} />
             {entry.entries.map((item) => {
               if (item.kind === "divider") {
                 return (

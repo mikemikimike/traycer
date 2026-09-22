@@ -509,7 +509,7 @@ describe("epic sidebar file-tree load failure report action", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <TooltipProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </TooltipProvider>
       </QueryClientProvider>,
     );
@@ -522,7 +522,7 @@ describe("epic sidebar file-tree load failure report action", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <TooltipProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </TooltipProvider>
       </QueryClientProvider>,
     );
@@ -570,7 +570,7 @@ describe("epic sidebar file-tree workspace picker persistence", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <TooltipProvider>
-          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} side="left" />
+          <EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />
         </TooltipProvider>
       </QueryClientProvider>,
     );

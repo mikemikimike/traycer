@@ -7,7 +7,7 @@ import {
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
 import { orderGroupInstruction } from "@/components/layout-editor/regions/surface-groups";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   positionAxisChanged,
   revertPositionAxis,

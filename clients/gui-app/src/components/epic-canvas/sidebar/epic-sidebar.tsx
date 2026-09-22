@@ -257,6 +257,7 @@ import {
   BrowsersPanelActions,
   BrowsersPanelBody,
 } from "@/components/epic-canvas/sidebar/epic-browser-sidebar";
+import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 import { tileIntent } from "@/lib/canvas/tile-open/intent";
 const CHATS_PANEL_SKELETON = <ChatsPanelSkeleton />;
 const ARTIFACTS_PANEL_SKELETON = <ArtifactsPanelSkeleton />;
@@ -477,7 +478,6 @@ function useFileTreeRevealRouting(args: {
 export interface EpicLeftPanelHostProps {
   epicId: string;
   tabId: string;
-  side: "left" | "right" | undefined;
 }
 
 export type LeftPanelBodyProps = LeftPanelSlotProps;
@@ -668,7 +668,7 @@ function getDisplayedPanels(
 }
 
 export function EpicLeftPanelHost(props: EpicLeftPanelHostProps) {
-  const { epicId, tabId, side } = props;
+  const { epicId, tabId } = props;
   const activePanelId = useActiveLeftPanelId(tabId);
   const rail = useLayoutRail();
   const commentsPanelRevealed = useCommentsPanelRevealed(tabId);
@@ -716,7 +716,6 @@ export function EpicLeftPanelHost(props: EpicLeftPanelHostProps) {
 
   return (
     <Sidebar
-      side={side ?? "left"}
       collapsible="none"
       className="w-full"
       // The panel body is non-editable chrome and dims while a layout session
@@ -744,7 +743,7 @@ export function EpicLeftPanelHost(props: EpicLeftPanelHostProps) {
 }
 
 export function EpicLeftPanelLoadingHost(props: EpicLeftPanelHostProps) {
-  const { epicId, tabId, side } = props;
+  const { epicId, tabId } = props;
   const activePanelId = useActiveLeftPanelId(tabId);
   const rail = useLayoutRail();
   const commentsPanelRevealed = useCommentsPanelRevealed(tabId);
@@ -788,7 +787,6 @@ export function EpicLeftPanelLoadingHost(props: EpicLeftPanelHostProps) {
 
   return (
     <Sidebar
-      side={side ?? "left"}
       collapsible="none"
       className="w-full"
       data-layout-passive
@@ -2253,6 +2251,7 @@ function ChatHeaderMoreMenu(props: {
   const menu = useHeaderMenu(props.tabId, "chats");
   const searchSelectedRef = useRef(false);
   const selectionEnabled = selection.canSelect && connectionStatus !== "closed";
+  const popoverSide = useSidebarPopoverSide();
 
   return (
     <DropdownMenu open={menu.open} onOpenChange={menu.handleOpenChange}>
@@ -2261,7 +2260,7 @@ function ChatHeaderMoreMenu(props: {
         testId="epic-sidebar-more-chats"
       />
       <DropdownMenuContent
-        side="right"
+        side={popoverSide}
         align="start"
         sideOffset={8}
         avoidCollisions={false}
@@ -2316,6 +2315,7 @@ function ArtifactHeaderMoreMenu(props: {
   const searchAvailable = useArtifactSearchAvailable();
   const searchSelectedRef = useRef(false);
   const menu = useHeaderMenu(props.tabId, "artifacts");
+  const popoverSide = useSidebarPopoverSide();
 
   return (
     <DropdownMenu open={menu.open} onOpenChange={menu.handleOpenChange}>
@@ -2324,7 +2324,7 @@ function ArtifactHeaderMoreMenu(props: {
         testId="epic-sidebar-more-artifacts"
       />
       <DropdownMenuContent
-        side="right"
+        side={popoverSide}
         align="start"
         sideOffset={8}
         avoidCollisions={false}

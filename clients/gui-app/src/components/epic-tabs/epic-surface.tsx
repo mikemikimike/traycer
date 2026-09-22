@@ -4,6 +4,7 @@ import { EpicRouteSessionBody } from "@/components/epic-canvas/epic-route-sessio
 import { MobileEpicHeaderActionsBinder } from "@/components/epic-canvas/mobile/epic-mobile-header-actions";
 import { EpicSidebarColumn } from "@/components/epic-canvas/sidebar/epic-sidebar-column";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import {
   PaneSurfaceActivityContext,
   PaneVisibilityContext,
@@ -46,6 +47,7 @@ export function EpicSurface(props: EpicSurfaceProps) {
     structuralSharing: true,
   });
   const isMobile = useIsMobileViewport();
+  const sidebarSide = useArrangementValue("sidebarSide");
   const route = activeRoute ?? null;
   const activeSearch =
     route !== null &&
@@ -54,6 +56,17 @@ export function EpicSurface(props: EpicSurfaceProps) {
       ? route.search
       : null;
   const routeMatches = activeSearch !== null;
+  // Phones present one full-screen surface at a time: the epic sidebar
+  // (artifact/chat/terminal tree + resize rail) is dropped below md so the
+  // pane container spans the full width. Its navigation re-homes into the
+  // mobile tile switcher. Desktop (>=768px) is unaffected.
+  const sidebarColumn = isMobile ? null : (
+    <EpicSidebarColumn
+      epicId={props.epicId}
+      tabId={props.tabId}
+      side={sidebarSide}
+    />
+  );
   return (
     <PaneSurfaceActivityContext.Provider value={activity}>
       <PaneVisibilityContext.Provider value={activity.visible}>
@@ -75,17 +88,11 @@ export function EpicSurface(props: EpicSurfaceProps) {
                 className="flex min-h-0 min-w-0 flex-1 flex-row"
                 data-epic-surface={props.tabId}
               >
-                {/* Phones present one full-screen surface at a time: the epic
-                    sidebar (artifact/chat/terminal tree + resize rail) is dropped
-                    below md so the pane container spans the full width. Its
-                    navigation re-homes into the mobile tile switcher. Desktop
-                    (>=768px) is unaffected. */}
-                {isMobile ? null : (
-                  <EpicSidebarColumn
-                    epicId={props.epicId}
-                    tabId={props.tabId}
-                  />
-                )}
+                {/* DOM order follows `sidebarSide` (S-06), never CSS
+                    `order`, so focus and reading order track what is on
+                    screen. Split panes each render an `EpicSurface`, so both
+                    follow the one global side. */}
+                {sidebarSide === "right" ? null : sidebarColumn}
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   <EpicRouteSessionBody
                     epicId={props.epicId}
@@ -98,6 +105,7 @@ export function EpicSurface(props: EpicSurfaceProps) {
                     focusTileInstanceId={activeSearch?.focusTileInstanceId}
                   />
                 </div>
+                {sidebarSide === "right" ? sidebarColumn : null}
               </div>
               <AgentBrowserPip
                 epicId={props.epicId}

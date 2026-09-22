@@ -7,9 +7,12 @@ import { TileSelectAllBridge } from "@/components/epic-canvas/tile-select-all-br
 import { ReservedBrowserChordsBridge } from "@/components/layout/bridges/reserved-browser-chords-bridge";
 import { QuitInterceptBridge } from "@/components/layout/bridges/quit-intercept-bridge";
 import { MigrationBlockingModalHost } from "@/components/layout/dialogs/migration-blocking-modal-host";
+import { AppColumnFrame } from "@/components/layout/app-column-frame";
 import { AppHeader } from "@/components/layout/header/app-header";
+import { appColumnChrome } from "@/components/layout/header/app-title-band-kind";
+import { isFramelessDesktop } from "@/components/layout/header/title-bar-drag";
+import { useTabStripPlacement } from "@/components/layout/tabs/use-tab-strip-placement";
 import { MobileNavDrawer } from "@/components/layout/shell/mobile-nav-drawer";
-import { SWIPE_NAV_SCREEN_ATTRIBUTE } from "@/components/layout/shell/screen-snapshot";
 import { useDragToDismissKeyboard } from "@/components/layout/shell/use-drag-to-dismiss-keyboard";
 import { SessionConnectivityStrip } from "@/components/layout/session-connectivity-strip";
 import { useHostSessionConnectivity } from "@/lib/host/session-connectivity";
@@ -30,6 +33,8 @@ import { useChatForkEventQuery } from "@/hooks/chats/use-chat-fork-queries";
 import { useAddressableHostId } from "@/hooks/host/use-addressable-host-id";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { PrimaryFocusCoordinatorProvider } from "@/lib/focus/primary-focus-coordinator-provider";
+import { resolveDesktopPlatform } from "@/lib/windows/desktop-capabilities";
+import { useRunnerHostOrNull } from "@/providers/use-runner-host";
 import { useStatusBarShown } from "@/stores/layout/layout-store";
 
 interface AppShellProps {
@@ -85,6 +90,15 @@ export function AppShell(props: AppShellProps) {
   // the edit firewall on, and docks BESIDE (4.5). State rather than a ref
   // because the editor has to re-run its effects when the node arrives.
   const [appColumn, setAppColumn] = useState<HTMLDivElement | null>(null);
+  // The effective placement: `"top"` wherever the mobile header stands in for
+  // the desktop chrome, so the header and the strip never both render.
+  const placement = useTabStripPlacement();
+  const runnerHost = useRunnerHostOrNull();
+  const chrome = appColumnChrome({
+    placement,
+    platform: runnerHost === null ? null : resolveDesktopPlatform(runnerHost),
+    frameless: isFramelessDesktop(),
+  });
 
   return (
     <PrimaryFocusCoordinatorProvider>
@@ -96,41 +110,24 @@ export function AppShell(props: AppShellProps) {
           below, which must never be an ancestor of the inspector (C-06). */}
         <div className="flex min-h-safe-dvh bg-canvas text-canvas-foreground">
           <RootDndProvider>
-            {/* The screen, as a history swipe understands one: the header and
-              the content viewport travel together, because a transition that
-              moved only the content would leave the title of the screen you
-              are leaving sitting above the screen you are arriving at. */}
-            <div
-              ref={setAppColumn}
-              // Named for the stylesheet, which is the half of the entry and
-              // exit transition that has to exist before a session does (5.2):
-              // the editor's own `data-layout-editing` is written when a
-              // session opens, and the OLD snapshot of the column is captured
-              // before that.
-              data-layout-column
-              className="relative flex h-safe-dvh min-w-0 flex-1 flex-col"
-              {...{ [SWIPE_NAV_SCREEN_ATTRIBUTE]: "" }}
-            >
-              <AppHeader variant="app" />
-              {/* Above the session strip: a wrong clock is the CAUSE of the
-                interruption the strip reports, so if both are showing the
-                actionable one has to be read first. */}
-              <ClockSkewBanner />
-              <SessionConnectivityStrip connectivity={sessionConnectivity} />
-              <main className="relative flex min-h-0 flex-1 flex-col">
-                {/* The app's edge-to-edge content viewport. Individual surfaces
-                  own their internal overflow, including the landing terminal.
-
-                  `overflow-clip`, NOT `overflow-hidden`: a hidden-overflow box
-                  is still a scroll container, so a `focus()` without
-                  `preventScroll` or a `scrollIntoView` on any descendant can
-                  scroll it programmatically - and nothing ever scrolls it
-                  back. Seen live when the window moved onto an external
-                  display: the transient relayout left this viewport scrolled
-                  by one toolbar row, so the epic status row and sidebar rail
-                  sat under the app header until a tab switch remounted the
-                  surface. A clipped box has no scroll offset to drift. */}
-                <div className="relative flex min-h-0 flex-1 overflow-clip md:task-surface-frame">
+            <AppColumnFrame
+              columnRef={setAppColumn}
+              {...chrome}
+              header={<AppHeader variant="app" />}
+              strip={null}
+              banners={
+                <>
+                  {/* Above the session strip: a wrong clock is the CAUSE of
+                    the interruption the strip reports, so if both are showing
+                    the actionable one has to be read first. */}
+                  <ClockSkewBanner />
+                  <SessionConnectivityStrip
+                    connectivity={sessionConnectivity}
+                  />
+                </>
+              }
+              surface={
+                <>
                   <TopLevelSurfaceActivationProvider>
                     <TopLevelTabHost />
                   </TopLevelSurfaceActivationProvider>
@@ -148,54 +145,68 @@ export function AppShell(props: AppShellProps) {
                   <HostScopeReady scope="default-host">
                     <LandingTerminalHost />
                   </HostScopeReady>
-                </div>
-                <ReservedBrowserChordsBridge />
-                <TileFindOwnerBridge />
-                <TileSelectAllBridge />
-              </main>
-              {/* After `</main>` so the strip spans the full window under the
-                sidebar and the canvas alike (both live inside
-                `TopLevelTabHost`), and stays visible on Settings so a change
-                there previews live. NOT the last child: the swipe transition
-                below must stay last, or the frozen screen it renders would
-                slide under a strip it was copied with.
+                </>
+              }
+              mainTail={
+                <>
+                  <ReservedBrowserChordsBridge />
+                  <TileFindOwnerBridge />
+                  <TileSelectAllBridge />
+                </>
+              }
+              tail={
+                <>
+                  {/* After `</main>` so the strip spans the full window under
+                    the sidebar and the canvas alike (both live inside
+                    `TopLevelTabHost`), and stays visible on Settings so a
+                    change there previews live. NOT the last child: the swipe
+                    transition below must stay last, or the frozen screen it
+                    renders would slide under a strip it was copied with.
 
-                A React gate, never CSS hiding. The mobile header keeps its own
-                gauge and resource controls, and the dynamic action registry is
-                single-handler - a hidden second mount would take
-                `app.rate-limits.open` from the header that is still on screen.
+                    A React gate, never CSS hiding. The mobile header keeps its
+                    own gauge and resource controls, and the dynamic action
+                    registry is single-handler - a hidden second mount would
+                    take `app.rate-limits.open` from the header that is still
+                    on screen.
 
-                Mobile goes through `MobileAppStatusBar`, which owns the two
-                further gates that only exist there (the software keyboard and
-                the nav drawer) so their subscriptions stay out of this root. */}
-              {showStatusBar && isMobile ? <MobileAppStatusBar /> : null}
-              {showStatusBar && !isMobile ? <AppStatusBar /> : null}
-              <OpenFolderDialog />
-              <RemoteFolderPickerDialog />
-              <QuitInterceptBridge />
-              {/* Mounted unconditionally: the bridge itself reads the action's
-                `desktopOnly` flag and registers nothing in the installed
-                mobile app, the same fact the palette reads to drop its row. */}
-              <StatusBarKeybindingBridge />
-              <MigrationRunController />
-              <MigrationBlockingModalHost />
-              {isMobile ? <MobileNavDrawer /> : null}
-              {/* Test-only probe: binds the active hostId to a hidden DOM
-                attribute so the mobile-cardinality integration tests can
-                assert the runner-host auto-bind machinery without depending
-                on the now-removed host-status footer. Hidden from a11y
-                and visual layout. */}
-              <span
-                aria-hidden
-                data-testid="active-host-probe"
-                data-bound-host-id={activeHostId === null ? "" : activeHostId}
-                className="sr-only"
-              />
-              {/* Last child, so the frozen screens cover everything they were
-                copied from. Inside this box rather than portalled, because they
-                are this screen leaving rather than a layer over the app. */}
-              {historySwipeTransition}
-            </div>
+                    Mobile goes through `MobileAppStatusBar`, which owns the
+                    two further gates that only exist there (the software
+                    keyboard and the nav drawer) so their subscriptions stay
+                    out of this root. */}
+                  {showStatusBar && isMobile ? <MobileAppStatusBar /> : null}
+                  {showStatusBar && !isMobile ? <AppStatusBar /> : null}
+                  <OpenFolderDialog />
+                  <RemoteFolderPickerDialog />
+                  <QuitInterceptBridge />
+                  {/* Mounted unconditionally: the bridge itself reads the
+                    action's `desktopOnly` flag and registers nothing in the
+                    installed mobile app, the same fact the palette reads to
+                    drop its row. */}
+                  <StatusBarKeybindingBridge />
+                  <MigrationRunController />
+                  <MigrationBlockingModalHost />
+                  {isMobile ? <MobileNavDrawer /> : null}
+                  {/* Test-only probe: binds the active hostId to a hidden DOM
+                    attribute so the mobile-cardinality integration tests can
+                    assert the runner-host auto-bind machinery without
+                    depending on the now-removed host-status footer. Hidden
+                    from a11y and visual layout. */}
+                  <span
+                    aria-hidden
+                    data-testid="active-host-probe"
+                    data-bound-host-id={
+                      activeHostId === null ? "" : activeHostId
+                    }
+                    className="sr-only"
+                  />
+                  {/* Last child, so the frozen screens cover everything they
+                    were copied from. Inside the column rather than portalled,
+                    because they are this screen leaving rather than a layer
+                    over the app. */}
+                  {historySwipeTransition}
+                </>
+              }
+            />
           </RootDndProvider>
           {/* The app column's SIBLING, so nothing the firewall does to the
             column reaches the inspector. Mounted unconditionally: it renders

@@ -1,5 +1,6 @@
 import {
   barPlacement,
+  sideTabStripEdge,
   type BarRegionId,
   type EdgeSide,
   type LayoutArrangement,
@@ -41,12 +42,16 @@ export function railStateWord(values: RailValues): string {
 }
 
 /**
- * Both halves of where a bar reading sits, in one phrase: "Header, right"
+ * Both halves of where a bar reading sits, in one phrase: "Tab strip, right"
  * (L-156).
  *
- * One word per axis would leave the index row saying "Header" while the
+ * One word per axis would leave the index row saying "Tab strip" while the
  * region is drawn at the other end of it, which is half an answer to the only
  * question the row is asked.
+ *
+ * The header host is named for the tab strip in every placement; while the
+ * stored placement is vertical the readings stack in the strip's foot, where
+ * the stored `left` / `right` read as "first" / "last".
  */
 export function barPlacementStateWord(
   values: ShownValues,
@@ -55,8 +60,11 @@ export function barPlacementStateWord(
 ): string {
   if (values.shown === "hidden") return "Hidden";
   const placement = barPlacement(arrangement, region);
-  const bar = placement.host === "header" ? "Header" : "Status bar";
-  return `${bar}, ${placement.side}`;
+  if (placement.host === "status-bar") return `Status bar, ${placement.side}`;
+  if (sideTabStripEdge(arrangement.tabStripPlacement) === null) {
+    return `Tab strip, ${placement.side}`;
+  }
+  return `Tab strip, ${placement.side === "left" ? "first" : "last"}`;
 }
 
 export function contextUsageStateWord(values: ContextUsageValues): string {

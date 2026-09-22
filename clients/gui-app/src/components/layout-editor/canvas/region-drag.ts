@@ -6,7 +6,7 @@ import {
   armLayoutDrag,
   type LayoutDragTarget,
 } from "@/components/layout-editor/canvas/drag-engine";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   canvasOrderGroupOf,
   moveCanvasOrderMember,

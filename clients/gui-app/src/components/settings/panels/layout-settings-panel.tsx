@@ -17,10 +17,18 @@ import {
   ResetEverythingButton,
 } from "@/components/layout-editor/inspector/presets-block";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
+import {
+  SidebarSideRow,
+  TabStripPositionRow,
+} from "@/components/layout-editor/inspector/rows/surface-placement-rows";
+import { settingsRowMatchesFilter } from "@/components/layout-editor/inspector/rows/surface-placement-filter";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { layoutRegionRowSelector } from "@/components/layout-editor/layout-search.definitions";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
-import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
+import {
+  SURFACE_GROUPS,
+  type SurfaceGroupId,
+} from "@/components/layout-editor/regions/region-grammar";
 import { surfaceMatchesFilter } from "@/components/layout-editor/regions/surface-groups";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
@@ -39,6 +47,7 @@ import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-av
 import { mobileFooterChanged } from "@/lib/layout/layout-diff";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import type { SettingsAvailabilityContext } from "@/lib/settings/settings-availability";
 import {
   readPendingLayoutRegion,
   subscribePendingLayoutRegion,
@@ -102,8 +111,11 @@ export function LayoutSettingsPanel(): ReactNode {
 
   useLayoutRegionLanding({ paneRef, filter, openRows, setOpenRows });
 
-  const surfaces = SURFACE_GROUPS.filter((group) =>
-    surfaceMatchesFilter(group.id, filter),
+  const availability = useSettingsAvailabilityContext();
+  const surfaces = SURFACE_GROUPS.filter(
+    (group) =>
+      surfaceMatchesFilter(group.id, filter) ||
+      surfaceRowsMatchFilter(group.id, filter, availability),
   );
 
   return (
@@ -159,7 +171,8 @@ export function LayoutSettingsPanel(): ReactNode {
               let surfaceRows: ReactNode = null;
               if (group.id === "statusBar")
                 surfaceRows = <StatusBarSurfaceRows />;
-              if (group.id === "topBar") surfaceRows = <TaskTabLayoutRow />;
+              if (group.id === "topBar") surfaceRows = <TabsSurfaceRows />;
+              if (group.id === "sidebar") surfaceRows = <SidebarSurfaceRows />;
               return (
                 <SettingsGroup
                   key={group.id}
@@ -398,6 +411,52 @@ function CustomizeLayoutRow(): ReactNode {
         )
       }
     />
+  );
+}
+
+/**
+ * The Tabs card's surface tier: where the strip sits, then how its tabs fit.
+ * Both close with a `SettingsRow` rule, which the Home row under them needs.
+ */
+function TabsSurfaceRows(): ReactNode {
+  return (
+    <>
+      <TabStripPositionRow />
+      <TaskTabLayoutRow />
+    </>
+  );
+}
+
+/**
+ * The Sidebar card's surface tier: which side of the task canvas it takes.
+ *
+ * Wrapped so the row is its container's last child and drops its own rule:
+ * the panel list under it already draws one on its top edge.
+ */
+function SidebarSurfaceRows(): ReactNode {
+  return (
+    <div>
+      <SidebarSideRow />
+    </div>
+  );
+}
+
+/**
+ * Whether a surface card has a surface-level row of its own that this build
+ * draws and whose label or keywords match the filter, so the filter finds
+ * "vertical tabs" as readily as Settings search does.
+ */
+function surfaceRowsMatchFilter(
+  surface: SurfaceGroupId,
+  filter: string,
+  availability: SettingsAvailabilityContext,
+): boolean {
+  return Object.values(LAYOUT.definitions).some(
+    (definition) =>
+      definition.kind === "row" &&
+      definition.group === surface &&
+      definition.availableWhen(availability) &&
+      settingsRowMatchesFilter(definition, filter),
   );
 }
 

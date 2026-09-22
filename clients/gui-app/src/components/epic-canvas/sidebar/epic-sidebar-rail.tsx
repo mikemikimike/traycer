@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, use, useCallback, useMemo, useState } from "react";
 import {
   useDraggable,
   useDroppable,
@@ -15,7 +15,10 @@ import {
   railRegionForLeftPanelId,
   type RailEntry,
 } from "@/lib/layout/rail";
-import { isStackedRailPanel } from "@/lib/layout/layout-arrangement";
+import {
+  isStackedRailPanel,
+  type EdgeSide,
+} from "@/lib/layout/layout-arrangement";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
 import { DropLine } from "@/components/ui/drop-line";
@@ -64,6 +67,7 @@ import {
   LEFT_PANEL_RAIL_TILE_CLASS,
 } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import { useEpicArtifact } from "@/lib/epic-selectors";
+import { SidebarSideContext } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 import { useSurfaceHostPinWithDefault } from "@/hooks/host/use-surface-host-pin";
 import { tabSurfaceKey } from "@/stores/host/surface-host-selection-store";
 import { useCanvasHostId } from "@/components/epic-canvas/hooks/use-canvas-host-id";
@@ -608,6 +612,12 @@ interface RailButtonProps {
   readonly onContextMenu: () => void;
 }
 
+/** The vertical rail's active bar, on the edge that faces the window's side. */
+const RAIL_ACTIVE_INDICATOR_CLASS: Readonly<Record<EdgeSide, string>> = {
+  left: "absolute inset-y-1 left-0 rounded-l-none rounded-r",
+  right: "absolute inset-y-1 right-0 rounded-r-none rounded-l",
+};
+
 function RailButton(props: RailButtonProps) {
   const {
     buttonRef,
@@ -622,18 +632,23 @@ function RailButton(props: RailButtonProps) {
     onClick,
     onContextMenu,
   } = props;
+  // One context read: the tooltip's popover side is this same value mirrored,
+  // so it is derived here rather than through a second `useSidebarPopoverSide()`
+  // call, which would read `SidebarSideContext` again.
+  const sidebarSide = use(SidebarSideContext);
+  const popoverSide = sidebarSide === "left" ? "right" : "left";
   const activeClass =
     orientation === "vertical"
       ? "bg-accent text-accent-foreground hover:bg-accent"
       : "text-foreground hover:bg-transparent";
   const activeIndicatorClass =
     orientation === "vertical"
-      ? "absolute inset-y-1 left-0 rounded-l-none rounded-r"
+      ? RAIL_ACTIVE_INDICATOR_CLASS[sidebarSide]
       : LEFT_PANEL_RAIL_TAB_UNDERLINE_CLASS;
   return (
     <TooltipWrapper
       label={label}
-      side={orientation === "vertical" ? "right" : "bottom"}
+      side={orientation === "vertical" ? popoverSide : "bottom"}
       sideOffset={undefined}
       align={undefined}
     >

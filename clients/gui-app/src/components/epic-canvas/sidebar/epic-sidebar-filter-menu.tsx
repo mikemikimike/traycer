@@ -12,6 +12,7 @@ import type { EpicArtifactKind } from "@traycer/protocol/common/registry";
 import { EPIC_NODE_LABELS } from "@/lib/artifacts/node-display";
 import { Button } from "@/components/ui/button";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -164,6 +165,7 @@ function ViewDetailEntry<TDetail extends string>(props: {
   readonly children: ReactNode;
 }) {
   const [subOpen, setSubOpen] = useState(false);
+  const popoverSide = useSidebarPopoverSide();
   if (props.drillIn) {
     return (
       <DropdownMenuItem
@@ -196,7 +198,7 @@ function ViewDetailEntry<TDetail extends string>(props: {
       <DropdownMenuSubContent
         sideOffset={8}
         alignOffset={-4}
-        avoidCollisions={false}
+        avoidCollisions={popoverSide === "left"}
         className="min-w-52"
       >
         {props.children}
@@ -252,6 +254,7 @@ export function ChatFilterMenu(props: {
   const active =
     filterActive || archiveVisibilityChanged || isSortModeActive(sort);
   const menu = useViewMenuState<ChatViewDetail>(props.tabId, "chats");
+  const popoverSide = useSidebarPopoverSide();
 
   const detailProps = {
     filterOrigin: filter.origin,
@@ -293,7 +296,7 @@ export function ChatFilterMenu(props: {
         setTriggerElement={menu.setTriggerElement}
       />
       <DropdownMenuContent
-        side="right"
+        side={popoverSide}
         align="start"
         sideOffset={8}
         avoidCollisions={false}
@@ -400,6 +403,7 @@ export function ArtifactFilterMenu(props: {
   const filterCount = artifactFilterCount(filter);
   const active = filterActive || isSortModeActive(sort);
   const menu = useViewMenuState<ArtifactViewDetail>(props.tabId, "artifacts");
+  const popoverSide = useSidebarPopoverSide();
 
   const detailProps = {
     filterStatuses: filter.statuses,
@@ -438,7 +442,7 @@ export function ArtifactFilterMenu(props: {
         setTriggerElement={menu.setTriggerElement}
       />
       <DropdownMenuContent
-        side="right"
+        side={popoverSide}
         align="start"
         sideOffset={8}
         avoidCollisions={false}

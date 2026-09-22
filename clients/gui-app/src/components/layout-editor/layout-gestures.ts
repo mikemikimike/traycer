@@ -1,6 +1,7 @@
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { RailVisibility } from "@/lib/layout/layout-values";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -14,7 +15,8 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
  * skipped `recordGesture` would be a change the undo stack never saw -
  * invisible until someone pressed undo and the wrong thing moved. It is also
  * what makes a whole drag one step: the reflow is paint, and the drop calls
- * {@link writeArrangement} exactly once.
+ * `writeArrangement` (`lib/layout/arrangement-gestures.ts`) exactly once -
+ * import it from there directly rather than through this module.
  */
 
 export function isRailRegionId(id: RegionId): id is RailRegionId {
@@ -39,13 +41,6 @@ export function setRegionShown(regionId: RegionId, next: boolean): void {
   const shown = next ? regionShownOnValue(regionId) : "hidden";
   useLayoutEditorStore.getState().recordGesture(() => {
     useLayoutStore.getState().setRegionValues(regionId, { shown });
-  });
-}
-
-/** Every arrangement write from a section, as one recorded gesture. */
-export function writeArrangement(arrangement: LayoutArrangement): void {
-  useLayoutEditorStore.getState().recordGesture(() => {
-    useLayoutStore.getState().setArrangement(arrangement);
   });
 }
 

@@ -1,6 +1,7 @@
 import { type ReactNode, type Ref } from "react";
 import { House } from "lucide-react";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { HomeTabContextMenu } from "./tab-strip-context-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
 import { headerTabClassName } from "@/components/layout/tabs/tab-chrome-tokens";
@@ -11,6 +12,23 @@ const HOME_TAB_LABEL = "Home";
 interface TabStripHomeItemProps {
   readonly isActive: boolean;
   readonly onActivate: () => void;
+}
+
+/**
+ * Home inside its own menu: the strip's right-click entry (L-19), on the Home
+ * item rather than on the strip. Home is the one layout region there, and the
+ * task tabs beside it own a menu of their own that a strip-wide trigger would
+ * fight.
+ */
+export function HomeStripSlot(props: TabStripHomeItemProps): ReactNode {
+  return (
+    <HomeTabContextMenu>
+      <TabStripHomeItem
+        isActive={props.isActive}
+        onActivate={props.onActivate}
+      />
+    </HomeTabContextMenu>
+  );
 }
 
 /**

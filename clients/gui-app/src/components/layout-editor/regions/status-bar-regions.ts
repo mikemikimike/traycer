@@ -79,7 +79,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
   surface: "statusBar",
   icon: Gauge,
   where: "Status bar - left side",
-  whereByHost: { "status-bar": "Status bar", header: "Top bar" },
+  whereByHost: { "status-bar": "Status bar", header: "Tab strip" },
   hint: null,
   keywords: [
     "usage",
@@ -176,7 +176,7 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
   surface: "statusBar",
   icon: Cpu,
   where: "Status bar - right side",
-  whereByHost: { "status-bar": "Status bar", header: "Top bar" },
+  whereByHost: { "status-bar": "Status bar", header: "Tab strip" },
   hint: null,
   keywords: [
     "cpu",

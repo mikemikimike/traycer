@@ -27,6 +27,7 @@ import {
   EpicLeftPanelStaticRail,
 } from "@/components/epic-canvas/sidebar/epic-sidebar-rail";
 import { SidebarKeybindingBridge } from "@/components/epic-canvas/sidebar/sidebar-keybinding-bridge";
+import { SidebarSideContext } from "@/components/epic-canvas/sidebar/sidebar-side-context";
 import { SnapshotLoadingProvider } from "@/components/epic-canvas/snapshots/snapshot-loading-context";
 import {
   useEpicSnapshotFetchError,
@@ -36,6 +37,7 @@ import {
   pointerDragHandleAxisClassName,
   usePointerDragCommit,
 } from "@/components/epic-canvas/canvas/use-pointer-drag-commit";
+import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { useMaybeOpenEpicHandle } from "@/providers/use-open-epic-handle";
 import {
   DEFAULT_SIDEBAR_WIDTH_PX,
@@ -55,9 +57,21 @@ import { cn } from "@/lib/utils";
 const MAX_SIDEBAR_DRAG_FRACTION = 0.5;
 const KEYBOARD_RESIZE_STEP_PX = 24;
 
+/**
+ * The three `before:` tokens that differ by side; everything else about the
+ * handle's hover edge is shared (see `SidebarWidthResizeHandle`'s
+ * className). Keyed on the whole two-member `EdgeSide` so a third value
+ * would be a compile error here rather than a silent fallthrough.
+ */
+const HANDLE_EDGE_CLASS: Record<EdgeSide, string> = {
+  left: "before:left-0 before:rounded-tl-lg before:border-l",
+  right: "before:right-0 before:rounded-tr-lg before:border-r",
+};
+
 export interface EpicSidebarColumnProps {
   readonly epicId: string;
   readonly tabId: string;
+  readonly side: EdgeSide;
 }
 
 // Top-level activation rerenders every retained EpicSurface with new activity
@@ -66,71 +80,95 @@ export interface EpicSidebarColumnProps {
 export const EpicSidebarColumn = memo(function EpicSidebarColumn(
   props: EpicSidebarColumnProps,
 ): ReactNode {
-  return <EpicSidebarColumnBody epicId={props.epicId} tabId={props.tabId} />;
+  return (
+    <EpicSidebarColumnBody
+      epicId={props.epicId}
+      tabId={props.tabId}
+      side={props.side}
+    />
+  );
 });
 
 function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
-  const { epicId, tabId } = props;
+  const { epicId, tabId, side } = props;
   const mainCollapsed = useMainPanelCollapsed(tabId);
   const sessionReady = useMaybeOpenEpicHandle() !== null;
   const sidebarWidthPx = useSidebarWidthPx();
 
-  return (
-    <>
-      {mainCollapsed ? (
-        <ColumnRail
-          epicId={epicId}
-          tabId={tabId}
-          orientation="vertical"
-          sessionReady={sessionReady}
-        />
-      ) : null}
-      <div
-        data-epic-sidebar-panel
-        data-testid="epic-sidebar-column"
-        data-epic-id={epicId}
-        data-collapsed={mainCollapsed ? "true" : "false"}
-        data-session-ready={sessionReady ? "true" : "false"}
-        className={cn(
-          "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
-          mainCollapsed && "hidden",
+  const collapsedRail = mainCollapsed ? (
+    <ColumnRail
+      epicId={epicId}
+      tabId={tabId}
+      orientation="vertical"
+      sessionReady={sessionReady}
+    />
+  ) : null;
+
+  const panel = (
+    <div
+      data-epic-sidebar-panel
+      data-testid="epic-sidebar-column"
+      data-epic-id={epicId}
+      data-collapsed={mainCollapsed ? "true" : "false"}
+      data-session-ready={sessionReady ? "true" : "false"}
+      className={cn(
+        "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
+        mainCollapsed && "hidden",
+      )}
+      style={{ width: sidebarWidthPx }}
+    >
+      <SidebarArtwork />
+      <SidebarProvider defaultOpen className="h-full min-h-0 w-full flex-col">
+        {mainCollapsed ? null : (
+          <ColumnRail
+            epicId={epicId}
+            tabId={tabId}
+            orientation="horizontal"
+            sessionReady={sessionReady}
+          />
         )}
-        style={{ width: sidebarWidthPx }}
-      >
-        <SidebarArtwork />
-        <SidebarProvider defaultOpen className="h-full min-h-0 w-full flex-col">
-          {mainCollapsed ? null : (
-            <ColumnRail
+        <SidebarKeybindingBridge tabId={tabId} />
+        <div className="min-h-0 flex-1">
+          {sessionReady ? (
+            <SidebarSnapshotScope>
+              <EpicLeftPanelHost key={epicId} epicId={epicId} tabId={tabId} />
+            </SidebarSnapshotScope>
+          ) : (
+            <EpicLeftPanelLoadingHost
+              key={epicId}
               epicId={epicId}
               tabId={tabId}
-              orientation="horizontal"
-              sessionReady={sessionReady}
             />
           )}
-          <SidebarKeybindingBridge tabId={tabId} />
-          <div className="min-h-0 flex-1">
-            {sessionReady ? (
-              <SidebarSnapshotScope>
-                <EpicLeftPanelHost
-                  key={epicId}
-                  epicId={epicId}
-                  tabId={tabId}
-                  side={undefined}
-                />
-              </SidebarSnapshotScope>
-            ) : (
-              <EpicLeftPanelLoadingHost
-                key={epicId}
-                epicId={epicId}
-                tabId={tabId}
-                side={undefined}
-              />
-            )}
-          </div>
-        </SidebarProvider>
-      </div>
-      <SidebarWidthResizeHandle hidden={mainCollapsed} />
-    </>
+        </div>
+      </SidebarProvider>
+    </div>
+  );
+
+  const handle = (
+    <SidebarWidthResizeHandle side={side} hidden={mainCollapsed} />
+  );
+
+  return (
+    <SidebarSideContext.Provider value={side}>
+      {/* Fragment order is DOM order, never CSS `order`: the collapsed
+          vertical rail has to sit at the PANE's outer edge, and the handle
+          has to be adjacent to the panel on the side matching `side` so
+          `SidebarWidthResizeHandle` can find it through a sibling lookup. */}
+      {side === "right" ? (
+        <>
+          {handle}
+          {panel}
+          {collapsedRail}
+        </>
+      ) : (
+        <>
+          {collapsedRail}
+          {panel}
+          {handle}
+        </>
+      )}
+    </SidebarSideContext.Provider>
   );
 }
 
@@ -209,17 +247,31 @@ function isSidebarPanelElement(
  * nudge by a fixed step (committed immediately). Cancel restores the
  * inline width string captured at drag start (the canvas handle instead
  * recomputes from its committed fractions).
+ *
+ * `side` decides which sibling is the panel (previous for a left sidebar,
+ * next for a right one, matching the fragment order `EpicSidebarColumnBody`
+ * renders) and negates the drag delta and the arrow nudge for a right
+ * sidebar, so both read as "toward the canvas grows the panel" regardless
+ * of which edge the canvas is on.
  */
-function SidebarWidthResizeHandle(props: { readonly hidden: boolean }) {
+function SidebarWidthResizeHandle(props: {
+  readonly side: EdgeSide;
+  readonly hidden: boolean;
+}) {
+  const { side, hidden } = props;
   const sidebarWidthPx = useSidebarWidthPx();
   const setSidebarWidthPx = useLeftPanelStore((s) => s.setSidebarWidthPx);
   const dragRef = useRef<SidebarDragState | null>(null);
+  const sign = side === "right" ? -1 : 1;
 
   const sliderProps = usePointerDragCommit({
     axis: "horizontal",
     onDragStart: (event) => {
       const handle = event.currentTarget;
-      const panelElement = handle.previousElementSibling;
+      const panelElement =
+        side === "right"
+          ? handle.nextElementSibling
+          : handle.previousElementSibling;
       const container = handle.parentElement;
       if (!isSidebarPanelElement(panelElement) || container === null) {
         return false;
@@ -244,7 +296,7 @@ function SidebarWidthResizeHandle(props: { readonly hidden: boolean }) {
       if (drag === null) return;
       const nextWidth = Math.min(
         drag.maxWidth,
-        Math.max(MIN_SIDEBAR_WIDTH_PX, drag.startWidth + deltaPx),
+        Math.max(MIN_SIDEBAR_WIDTH_PX, drag.startWidth + deltaPx * sign),
       );
       drag.latestWidth = nextWidth;
       // Direct DOM mutation - zero React renders while the pointer moves.
@@ -267,7 +319,7 @@ function SidebarWidthResizeHandle(props: { readonly hidden: boolean }) {
     },
     onKeyNudge: (nudgeDirection) => {
       setSidebarWidthPx(
-        sidebarWidthPx + nudgeDirection * KEYBOARD_RESIZE_STEP_PX,
+        sidebarWidthPx + nudgeDirection * sign * KEYBOARD_RESIZE_STEP_PX,
       );
     },
   });
@@ -282,9 +334,10 @@ function SidebarWidthResizeHandle(props: { readonly hidden: boolean }) {
       data-testid="epic-sidebar-resize-handle"
       className={cn(
         "relative z-10 shrink-0 bg-background ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
-        "before:pointer-events-none before:absolute before:left-0 before:top-10 before:bottom-0 before:w-2 before:rounded-tl-lg before:border-l before:border-transparent before:transition-colors before:content-[''] hover:before:border-border focus-visible:before:border-border",
+        "before:pointer-events-none before:absolute before:top-10 before:bottom-0 before:w-2 before:border-transparent before:transition-colors before:content-[''] hover:before:border-border focus-visible:before:border-border",
+        HANDLE_EDGE_CLASS[side],
         pointerDragHandleAxisClassName("horizontal"),
-        props.hidden && "hidden",
+        hidden && "hidden",
       )}
     />
   );

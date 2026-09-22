@@ -1834,10 +1834,13 @@ describe("<TabStrip />", () => {
 
     expect(await screen.findByTestId(`tab-epic-${EPIC_A.id}`)).toBeDefined();
     expect(screen.queryByTestId(`header-tab-activity-${EPIC_A.id}`)).toBeNull();
-    expect(screen.queryByTestId(`header-tab-prompt-${EPIC_A.id}`)).toBeNull();
+    expect(
+      screen.queryByTestId(`header-tab-interview-${EPIC_A.id}`),
+    ).toBeNull();
+    expect(screen.queryByTestId(`header-tab-approval-${EPIC_A.id}`)).toBeNull();
   });
 
-  it("does not derive a prompt indicator from a chat session's pending interview", () => {
+  it("shows the interview glyph for a live chat's pending interview with no notification lit", async () => {
     openEpicFixture(EPIC_A);
     registerLiveEpicHeader(EPIC_A, "owner", ["chat-waiting"]);
     registerChatSession(EPIC_A.id, "chat-waiting");
@@ -1853,10 +1856,13 @@ describe("<TabStrip />", () => {
     const router = buildRouter("/epics/e-a/e-a");
     render(<RouterProvider router={router} />);
 
-    expect(screen.queryByTestId(`header-tab-prompt-${EPIC_A.id}`)).toBeNull();
+    expect(
+      await screen.findByTestId(`header-tab-interview-${EPIC_A.id}`),
+    ).toBeDefined();
+    expect(screen.queryByTestId(`header-tab-approval-${EPIC_A.id}`)).toBeNull();
   });
 
-  it("does not derive a prompt indicator from a chat session's pending approval", () => {
+  it("shows the approval glyph for a live chat's pending approval with no notification lit", async () => {
     openEpicFixture(EPIC_A);
     registerLiveEpicHeader(EPIC_A, "owner", ["chat-permission"]);
     registerChatSession(EPIC_A.id, "chat-permission");
@@ -1885,7 +1891,12 @@ describe("<TabStrip />", () => {
     const router = buildRouter("/epics/e-a/e-a");
     render(<RouterProvider router={router} />);
 
-    expect(screen.queryByTestId(`header-tab-prompt-${EPIC_A.id}`)).toBeNull();
+    expect(
+      await screen.findByTestId(`header-tab-approval-${EPIC_A.id}`),
+    ).toBeDefined();
+    expect(
+      screen.queryByTestId(`header-tab-interview-${EPIC_A.id}`),
+    ).toBeNull();
   });
 
   it("hides the header epic edit-title menu item for viewer role", async () => {

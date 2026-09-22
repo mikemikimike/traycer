@@ -173,10 +173,13 @@ function runQuickVerb(input: {
  */
 export function LayoutRegionMenuItems(props: {
   readonly regionId: RegionId;
+  /** Items of the chrome's own, before the way in; they draw their own rule. */
+  readonly extraItems: ReactNode | null;
 }): ReactNode {
   return (
     <>
       <LayoutRegionVerbItems regionId={props.regionId} separator />
+      {props.extraItems}
       <CustomizeLayoutMenuItem target={props.regionId} />
     </>
   );
@@ -245,6 +248,30 @@ export function LayoutRegionContextMenu(props: {
   readonly children: ReactNode;
 }): ReactNode {
   return (
+    <LayoutRegionContextMenuWithItems
+      regionId={props.regionId}
+      extraItems={null}
+    >
+      {props.children}
+    </LayoutRegionContextMenuWithItems>
+  );
+}
+
+/**
+ * A region's menu with items of the chrome's own between the region's verbs
+ * and the way into the editor - Home's "Tabs" placement group. `extraItems`
+ * draws its own trailing separator; the verbs already draw theirs.
+ *
+ * The same root and the same stand-down trigger as every other region menu,
+ * so the operating system keeps its own menu over a selection, a link or an
+ * editable field here too.
+ */
+export function LayoutRegionContextMenuWithItems(props: {
+  readonly regionId: RegionId;
+  readonly extraItems: ReactNode | null;
+  readonly children: ReactNode;
+}): ReactNode {
+  return (
     <ContextMenu>
       {/* `display: contents` generates no box, so the chrome this wraps keeps
           its own place in its parent's flex or grid row; the span is only
@@ -257,7 +284,10 @@ export function LayoutRegionContextMenu(props: {
         <span className="contents">{props.children}</span>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <LayoutRegionMenuItems regionId={props.regionId} />
+        <LayoutRegionMenuItems
+          regionId={props.regionId}
+          extraItems={props.extraItems}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -319,7 +349,7 @@ export function LayoutClusterContextMenu(props: {
       </ContextMenuTrigger>
       {regionId === null ? null : (
         <ContextMenuContent>
-          <LayoutRegionMenuItems regionId={regionId} />
+          <LayoutRegionMenuItems regionId={regionId} extraItems={null} />
         </ContextMenuContent>
       )}
     </ContextMenu>

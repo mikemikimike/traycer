@@ -48,6 +48,7 @@ export const ACTION_IDS = [
   "tile.find.replace",
   "app.sidebar.toggle",
   "app.status-bar.toggle",
+  "app.tabs.vertical.toggle",
   "nav.back",
   "nav.forward",
   "app.resources.open",
@@ -552,6 +553,23 @@ export const ACTION_META: Readonly<Record<ActionId, ActionMeta>> = {
     // the usage gauge and the resource monitor - so the placement this flips
     // has only one reachable value there. See the Layout page's own mobile
     // collapse (`layout-settings-panel.tsx`), which states the same fact.
+    desktopOnly: true,
+  },
+  "app.tabs.vertical.toggle": {
+    id: "app.tabs.vertical.toggle",
+    label: "Toggle vertical tabs",
+    description:
+      "Move the task tabs from the top to a vertical strip at the left, or from either side back to the top.",
+    category: "app",
+    kind: "chord",
+    // Unbound by default: a layout change made now and then earns a palette
+    // row, not one of the few chords left that a terminal does not want.
+    defaultChord: null,
+    secondaryChord: undefined,
+    terminalPolicy: "shell",
+    secondaryTerminalPolicy: undefined,
+    // The installed mobile app always draws its own header, so the placement
+    // this flips has no effect there.
     desktopOnly: true,
   },
   "nav.back": {

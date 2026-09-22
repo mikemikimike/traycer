@@ -10,11 +10,12 @@ import { describe, expect, it } from "vitest";
  *
  * Everything here compares two INDEPENDENT artefacts: the stylesheet against
  * the rule L-30 states (exactly two named groups, a third of which would put
- * the streaming transcript in a snapshot of its own), against `app-shell.tsx`'s
- * own marker, and against the attribute value `editor-motion.ts` writes. A rule
- * written out again as an exact source string is not one of those - it fails a
- * correct stylesheet on a formatter reflow and passes a wrong one that kept the
- * spelling, which is how G2-01 lived in this file with this suite green on it.
+ * the streaming transcript in a snapshot of its own), against the app column's
+ * own marker (`app-column-frame.tsx`), and against the attribute value
+ * `editor-motion.ts` writes. A rule written out again as an exact source
+ * string is not one of those - it fails a correct stylesheet on a formatter
+ * reflow and passes a wrong one that kept the spelling, which is how G2-01
+ * lived in this file with this suite green on it.
  * What those pins were reaching for is the owner's live pass, which plan 5.2
  * already books.
  */
@@ -109,7 +110,7 @@ describe("the named groups (5.2, C-14)", () => {
 
   it("names the column the shell markup actually carries", () => {
     expect(noPreferenceBlock()).toContain("[data-layout-column]");
-    expect(read("components/layout/app-shell.tsx")).toContain(
+    expect(read("components/layout/app-column-frame.tsx")).toContain(
       "data-layout-column",
     );
   });

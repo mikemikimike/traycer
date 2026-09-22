@@ -128,7 +128,7 @@ function renderColumn() {
   return render(
     <TooltipProvider>
       <div className="flex">
-        <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} />
+        <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} side="left" />
       </div>
     </TooltipProvider>,
   );
@@ -139,7 +139,7 @@ function renderColumnWithSession(handle: OpenedStoreForTest) {
     <TooltipProvider>
       <EpicSessionContext.Provider value={handle}>
         <div className="flex">
-          <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} />
+          <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} side="left" />
         </div>
       </EpicSessionContext.Provider>
     </TooltipProvider>,
@@ -197,7 +197,7 @@ describe("<EpicSidebarColumn />", () => {
     view.rerender(
       <TooltipProvider>
         <div className="flex">
-          <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} />
+          <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} side="left" />
         </div>
       </TooltipProvider>,
     );
@@ -223,7 +223,7 @@ describe("<EpicSidebarColumn />", () => {
       <TooltipProvider>
         <EpicSessionContext.Provider value={null}>
           <div className="flex">
-            <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} />
+            <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} side="left" />
           </div>
         </EpicSessionContext.Provider>
       </TooltipProvider>,
@@ -237,7 +237,7 @@ describe("<EpicSidebarColumn />", () => {
       <TooltipProvider>
         <EpicSessionContext.Provider value={handle}>
           <div className="flex">
-            <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} />
+            <EpicSidebarColumn epicId={EPIC_ID} tabId={TAB_ID} side="left" />
           </div>
         </EpicSessionContext.Provider>
       </TooltipProvider>,

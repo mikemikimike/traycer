@@ -8,6 +8,7 @@ import {
 import {
   asBarRegionId,
   barPlacement,
+  sideTabStripEdge,
   type BarHost,
   type LayoutArrangement,
   type OrderGroupId,
@@ -82,17 +83,26 @@ export function regionFacts(region: RegionId): RegionFacts {
  * it (L-156); for those it is composed from the placement, so one sentence
  * per bar in the registry covers all four answers and the side is never
  * written down twice.
+ *
+ * While the tabs are a vertical strip there is no header: Home sits above the
+ * tabs, and a header-hosted reading sits in the strip's foot, where the stored
+ * `left` / `right` read as first and last in the stack.
  */
 export function regionWhere(
   region: RegionId,
   arrangement: LayoutArrangement,
 ): string {
   const facts = regionFacts(region);
+  const vertical = sideTabStripEdge(arrangement.tabStripPlacement) !== null;
+  if (region === "homeTab" && vertical) return "Tab strip - above the tabs";
   const barRegion = asBarRegionId(region);
   if (facts.whereByHost === null || barRegion === null) {
     return facts.where;
   }
   const placement = barPlacement(arrangement, barRegion);
+  if (vertical && placement.host === "header") {
+    return `Tab strip foot - ${placement.side === "left" ? "first" : "last"}`;
+  }
   return `${facts.whereByHost[placement.host]} - ${placement.side} side`;
 }
 

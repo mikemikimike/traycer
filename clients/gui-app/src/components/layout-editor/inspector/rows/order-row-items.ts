@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Gauge, Rows2 } from "lucide-react";
 import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
 import type { SortableListItem } from "@/components/layout-editor/inspector/sortable-list";
-import { writeArrangement } from "@/components/layout-editor/layout-gestures";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import {
   isStackedRailPanel,
