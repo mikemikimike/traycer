@@ -14,11 +14,6 @@ export function TabLeadingIcon(props: {
   readonly activityStatus: EpicActivityStatus;
   readonly indicatorState: NotificationIndicatorState;
   readonly tabId: string;
-  /**
-   * How the status is drawn: the horizontal strip's message icons, or the
-   * shared glyph set the side strip and the Agents tree use (D12).
-   */
-  readonly statusPresentation: "message" | "glyph";
 }) {
   const identity = props.identity;
   const iconCharacters = firstGraphemes(identity?.icon ?? "", 2);
@@ -58,8 +53,6 @@ export function TabLeadingIcon(props: {
           style={undefined}
           runningTitle="Task activity in progress"
           defaultIcon={defaultIcon}
-          statusPresentation={props.statusPresentation}
-          agentSurface="gui"
         />
       </span>
       {iconCharacters.length > 0 ? (

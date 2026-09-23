@@ -146,12 +146,16 @@ export function attentionTone(
   return null;
 }
 
+/**
+ * The latest terminal outcome, when it is an unread failure. Every agent
+ * surface draws it as the one failed glyph (F3), so it takes no surface; the
+ * notification feed keeps the TUI icon through `notificationFeedTone`.
+ */
 export function terminalFailureTone(
   state: NotificationIndicatorState,
-  surface: AgentNotificationSurface,
 ): IndicatorTone | null {
   if (!state.unreadFailure || state.unreadTerminalFailure !== true) return null;
-  return surface === "tui" ? TERMINAL_FAILURE_TONE : FAILURE_TONE;
+  return FAILURE_TONE;
 }
 
 export type AgentNotificationSurface = "gui" | "tui";

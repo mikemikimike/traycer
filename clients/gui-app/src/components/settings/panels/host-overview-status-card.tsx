@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { ACTIVATE_HOST_HINT } from "@/components/settings/host-scope/host-option-model";
 import {
   describeOverviewDegrade,
   type OverviewDegradeReason,
@@ -411,10 +412,7 @@ export function HostOverviewHeaderActions(props: {
           // one the user is blocked on.
           label={
             props.connectable
-              ? // Not "tabs stay on the host they started on" - the active-host
-                // switch still reloads open tabs today (F2/F3/F7), so that
-                // promise would be false. This only says what IS true.
-                "Switching changes where new work starts."
+              ? ACTIVATE_HOST_HINT
               : `${hostName} has no dialable route from this window, so it can't become this window's host.`
           }
           side="top"

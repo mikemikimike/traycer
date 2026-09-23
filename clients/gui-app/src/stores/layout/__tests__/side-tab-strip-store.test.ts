@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import {
   SIDE_STRIP_DEFAULT_WIDTH_PX,
   SIDE_STRIP_MAX_WIDTH_PX,
@@ -7,6 +8,7 @@ import {
 import { persistKey, STORE_KEYS } from "@/lib/persist";
 import {
   clampSideStripWidth,
+  useSideStripCollapsed,
   useSideTabStripStore,
 } from "@/stores/layout/side-tab-strip-store";
 
@@ -26,11 +28,17 @@ beforeEach(() => {
   useSideTabStripStore.setState({
     widthPx: SIDE_STRIP_DEFAULT_WIDTH_PX,
     collapsed: false,
+    dragCollapsed: null,
   });
 });
 
 afterEach(() => {
   window.localStorage.clear();
+  useSideTabStripStore.setState({
+    widthPx: SIDE_STRIP_DEFAULT_WIDTH_PX,
+    collapsed: false,
+    dragCollapsed: null,
+  });
 });
 
 describe("clampSideStripWidth", () => {
@@ -76,6 +84,43 @@ describe("writes", () => {
     expect(useSideTabStripStore.getState().widthPx).toBe(
       SIDE_STRIP_DEFAULT_WIDTH_PX,
     );
+  });
+});
+
+describe("dragCollapsed (F9)", () => {
+  it("excludes dragCollapsed from what is persisted", () => {
+    useSideTabStripStore.getState().setDragCollapsed(true);
+
+    const stored: unknown = JSON.parse(window.localStorage.getItem(KEY) ?? "");
+    expect(stored).toMatchObject({
+      state: { widthPx: SIDE_STRIP_DEFAULT_WIDTH_PX, collapsed: false },
+    });
+    const storedState = (stored as { state: Record<string, unknown> }).state;
+    expect("dragCollapsed" in storedState).toBe(false);
+  });
+
+  it("useSideStripCollapsed prefers dragCollapsed while set, and falls back to collapsed", () => {
+    const { result } = renderHook(() => useSideStripCollapsed());
+    expect(result.current).toBe(false);
+
+    act(() => {
+      useSideTabStripStore.getState().setDragCollapsed(true);
+    });
+    expect(result.current).toBe(true);
+
+    act(() => {
+      // A stored `collapsed` write underneath a live drag has no visible
+      // effect until the drag clears - dragCollapsed still wins.
+      useSideTabStripStore.getState().setCollapsed(true);
+      useSideTabStripStore.getState().setDragCollapsed(false);
+    });
+    expect(result.current).toBe(false);
+
+    act(() => {
+      useSideTabStripStore.getState().setDragCollapsed(null);
+    });
+    // Falls back to the stored `collapsed`, written above.
+    expect(result.current).toBe(true);
   });
 });
 

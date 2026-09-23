@@ -238,3 +238,22 @@ function unavailableReason(input: {
   }
   return "Waiting for resource data.";
 }
+
+/**
+ * The button's whole accessible name: what it is, then each metric the strip is
+ * showing and what it currently reads.
+ *
+ * `label: value` per metric, in the order they are drawn, so the name matches
+ * the readout left to right. An unavailable metric says so rather than being
+ * dropped — a name that silently omitted it would leave a reader who turned
+ * the metric on with no way to tell it from one this build never draws.
+ */
+export function statusBarResourceSegmentLabel(
+  views: ReadonlyArray<StatusBarResourceMetricView>,
+): string {
+  if (views.length === 0) return "Resources, no metrics selected";
+  const readings = views
+    .map((view) => `${view.label} ${view.value ?? "unavailable"}`)
+    .join(", ");
+  return `Resources: ${readings}`;
+}

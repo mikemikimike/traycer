@@ -12,7 +12,10 @@ import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
 import { useWindowsBridgeHydrated } from "@/providers/windows-bridge-context";
-import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import {
+  useSideStripCollapsed,
+  useSideTabStripStore,
+} from "@/stores/layout/side-tab-strip-store";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
 import { useTabsStore } from "@/stores/tabs/store";
 import { useTabStripController } from "../tab-strip-controller";
@@ -53,7 +56,7 @@ export function SideTabStrip(props: {
   const controller = useTabStripController();
   const hydrated = useWindowsBridgeHydrated();
   const persistedStripCount = useTabsStore((state) => state.stripOrder.length);
-  const collapsed = useSideTabStripStore((state) => state.collapsed);
+  const collapsed = useSideStripCollapsed();
   const widthPx = useSideTabStripStore((state) => state.widthPx);
   const variant: SideTabRowVariant = collapsed ? "collapsed" : "expanded";
   const widthEasing = useCollapseWidthEasing();

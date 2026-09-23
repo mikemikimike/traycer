@@ -140,19 +140,47 @@ describe("SideStripResizeHandle", () => {
     expect(useSideTabStripStore.getState().widthPx).toBe(240);
   });
 
-  it("collapses on a release at 110px and keeps the stored width", () => {
+  it("collapses on a release below the snap point, drawing the rail flat, and keeps the stored width", () => {
     const { handle, strip } = renderHandle("left", 240, 0);
 
+    // 240 - 130 = 110px, under the 126px snap point: the rail's own width is
+    // drawn flat, not the tracked pointer position.
     drag(handle, 500, 370);
-    expect(strip.style.width).toBe("110px");
+    expect(strip.style.width).toBe(`${SIDE_STRIP_RAIL_WIDTH_PX}px`);
     release(handle, 370);
 
     expect(useSideTabStripStore.getState()).toMatchObject({
       widthPx: 240,
       collapsed: true,
     });
-    // The per-frame width is handed back to what React renders.
-    expect(strip.style.width).toBe("");
+    // Settled explicitly to the rail width (F9): a crossing's live layout
+    // means React may not rewrite an inline value it already rendered, so the
+    // release itself writes the width rather than clearing it back to React.
+    expect(strip.style.width).toBe(`${SIDE_STRIP_RAIL_WIDTH_PX}px`);
+  });
+
+  it("holds the rail flat below the snap point, then tracks the pointer once back above it", () => {
+    const { handle, strip } = renderHandle("left", 240, 0);
+
+    drag(handle, 500, 370); // 110px, under the snap point.
+    expect(strip.style.width).toBe(`${SIDE_STRIP_RAIL_WIDTH_PX}px`);
+
+    fireEvent(
+      handle,
+      pointerEvent("pointermove", {
+        pointerId: POINTER_ID,
+        clientX: 560, // 240 + 60 = 300px, back over the snap point.
+        clientY: 10,
+        button: 0,
+      }),
+    );
+    expect(strip.style.width).toBe("300px");
+
+    release(handle, 560);
+    expect(useSideTabStripStore.getState()).toMatchObject({
+      widthPx: 300,
+      collapsed: false,
+    });
   });
 
   it("expands from the rail once a drag passes the snap point", () => {
@@ -207,10 +235,11 @@ describe("SideStripResizeHandle", () => {
       String(SIDE_STRIP_MAX_WIDTH_PX),
     );
 
-    // The strip measures 240px, so this lands at 150px: above the snap point
-    // but below the minimum.
-    drag(handle, 500, 410);
-    release(handle, 410);
+    // Settling now WRITES the released width (F9), so the strip measures
+    // 400px here, not the original 240px: this lands at 150px, above the
+    // snap point but below the minimum.
+    drag(handle, 500, 250);
+    release(handle, 250);
     expect(useSideTabStripStore.getState()).toMatchObject({
       widthPx: SIDE_STRIP_MIN_WIDTH_PX,
       collapsed: false,

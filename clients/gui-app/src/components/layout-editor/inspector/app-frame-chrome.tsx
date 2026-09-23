@@ -40,6 +40,7 @@ import {
   SideTabMeter,
   type SideTabLiveAgents,
 } from "@/components/layout/tabs/side-strip/agent-meter";
+import { NO_LIVE_AGENTS } from "@/components/layout/tabs/side-strip/side-tab-live-agents";
 import { MonogramChip } from "@/components/layout/tabs/monogram-chip";
 import { tabAutoTint } from "@/components/layout/tabs/tab-identity";
 import {
@@ -49,6 +50,8 @@ import {
   SIDE_STRIP_INSET_CLASS,
   SIDE_STRIP_LIST_CLASS,
   SIDE_STRIP_NAV_TILE_CLASS,
+  SIDE_STRIP_RAIL_DIVIDER_CLASS,
+  SIDE_STRIP_RAIL_NAV_CLASS,
   SIDE_STRIP_SECTION_LABEL_CLASS,
   SIDE_TAB_ACTIVE_CLASS,
   SIDE_TAB_LEADING_CLASS,
@@ -105,7 +108,7 @@ const APP_FRAME_ACTIVE_TASK: AppFrameTask = {
   label: "Sample chat",
   monogram: "SC",
   active: true,
-  agents: { turn: 1, background: 2 },
+  agents: { turn: 1, background: 2, coverage: "covered" },
 };
 
 /** The tasks in every picture of the frame: the top bar's tabs, the strip's rows and tiles. */
@@ -115,7 +118,7 @@ const APP_FRAME_TABS: ReadonlyArray<AppFrameTask> = [
     label: "Onboarding flow",
     monogram: "OF",
     active: false,
-    agents: { turn: 1, background: 0 },
+    agents: { turn: 1, background: 0, coverage: "covered" },
   },
   APP_FRAME_ACTIVE_TASK,
   {
@@ -123,7 +126,7 @@ const APP_FRAME_TABS: ReadonlyArray<AppFrameTask> = [
     label: "Release notes",
     monogram: "RN",
     active: false,
-    agents: { turn: 0, background: 0 },
+    agents: { turn: 0, background: 0, coverage: "covered" },
   },
 ];
 
@@ -220,9 +223,8 @@ export function AppFrameTabEntries({
         <span
           key={tab.id}
           className={cn(
-            "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm text-muted-foreground",
-            tab.active &&
-              "border border-border bg-foreground/5 text-foreground",
+            "flex h-8 shrink-0 items-center rounded-xl border border-transparent px-3 text-ui-sm text-muted-foreground",
+            tab.active && "border-canvas-border bg-background text-foreground",
           )}
         >
           {tab.label}
@@ -244,12 +246,13 @@ function AppFrameTaskChip(props: { readonly task: AppFrameTask }): ReactNode {
 }
 
 /**
- * The vertical strip as the shell draws it on the ground (D3-D6): the top
- * block (history arrows, New task, the collapse toggle), the Inbox and All
- * tasks rows, Home, "Tasks" and its count, the task rows, and the foot with
- * the header-hosted readings over the account row. Collapsed, the 60px rail:
- * 32px icon tiles, then a 40x44 tile per task (its monogram chip over its
- * meter), then the avatar.
+ * The vertical strip as the shell draws it on the ground (D3-D6, F1, F7): the
+ * top row (history arrows, the collapse toggle), the Inbox and All tasks
+ * rows, Home, the primary New Task row, "Tasks" and its count, the task rows,
+ * and the foot with the header-hosted readings over the account row.
+ * Collapsed, the 60px rail as one centred column: the expand, Inbox, All
+ * tasks and New Task tiles, a divider, Home and a 40x44 tile per task (its
+ * monogram chip over its meter), then the avatar.
  *
  * The frame beside it is always a task's, so the active task joins its panel
  * sheet exactly when the live strip's does (`sideTabJoinsPanel`), through the
@@ -288,12 +291,21 @@ export function AppFrameSideStrip({
       className="relative flex flex-1 flex-col text-canvas-foreground"
     >
       {collapsed ? (
-        <div className="flex flex-col items-center gap-1 pt-2">
-          {home ? <AppFrameNavTile icon={House} /> : null}
-          <AppFrameNavTile icon={Plus} />
-          <AppFrameNavTile icon={CollapseIcon} />
-          <AppFrameNavTile icon={Inbox} />
-          <AppFrameNavTile icon={History} />
+        <div className="flex flex-col items-center">
+          <div className={cn(SIDE_STRIP_RAIL_NAV_CLASS, "pt-2")}>
+            <AppFrameNavTile icon={CollapseIcon} primary={false} />
+            <AppFrameNavTile icon={Inbox} primary={false} />
+            <AppFrameNavTile icon={History} primary={false} />
+            <AppFrameNavTile icon={Plus} primary />
+          </div>
+          <span
+            className={cn(
+              SIDE_STRIP_RAIL_DIVIDER_CLASS,
+              "shrink-0",
+              !home && "mb-0",
+            )}
+          />
+          {home ? <AppFrameHomeTile /> : null}
         </div>
       ) : (
         <div className={cn("flex flex-col gap-1 pt-2", SIDE_STRIP_INSET_CLASS)}>
@@ -301,12 +313,25 @@ export function AppFrameSideStrip({
             <ArrowLeft aria-hidden className="size-4 shrink-0" />
             <ArrowRight aria-hidden className="size-4 shrink-0" />
             <span className="flex-1" />
-            <Plus aria-hidden className="size-4 shrink-0" />
-            <CollapseIcon aria-hidden className="ml-2 size-4 shrink-0" />
+            <CollapseIcon aria-hidden className="size-4 shrink-0" />
           </div>
           <AppFrameNavRow icon={Inbox} label="Inbox" />
           <AppFrameNavRow icon={History} label="All tasks" />
           {home ? <AppFrameNavRow icon={House} label="Home" /> : null}
+          <span
+            className={cn(
+              "flex items-center bg-primary font-medium text-primary-foreground",
+              SIDE_TAB_ROW_CLASS,
+            )}
+          >
+            <Plus
+              aria-hidden
+              className={cn(SIDE_TAB_LEADING_CLASS, "shrink-0")}
+            />
+            <span className={cn(SIDE_TAB_TITLE_CLASS, "truncate")}>
+              New Task
+            </span>
+          </span>
           <div
             className={cn(
               SIDE_STRIP_SECTION_LABEL_CLASS,
@@ -318,7 +343,12 @@ export function AppFrameSideStrip({
           </div>
         </div>
       )}
-      <div className={cn(SIDE_STRIP_LIST_CLASS, collapsed && "items-center")}>
+      <div
+        className={cn(
+          SIDE_STRIP_LIST_CLASS[collapsed ? "collapsed" : "expanded"],
+          collapsed && "items-center",
+        )}
+      >
         {APP_FRAME_TABS.map((task) => (
           <Fragment key={task.id}>
             {collapsed ? (
@@ -339,10 +369,14 @@ export function AppFrameSideStrip({
           collapsed ? "items-center" : "items-stretch",
         )}
       >
+        {/* The live foot's readings row (F6): one equal share each, so two
+            split the row and one takes all of it; collapsed, stacked tiles. */}
         <div
           className={cn(
-            "flex items-center gap-2 empty:hidden",
-            collapsed ? "flex-col" : "flex-wrap px-1",
+            "gap-2 empty:hidden",
+            collapsed
+              ? "flex w-10 flex-col"
+              : "grid auto-cols-fr grid-flow-col",
           )}
         >
           <AppFrameBarCluster
@@ -393,17 +427,42 @@ function AppFrameNavRow(props: {
   );
 }
 
-/** A collapsed nav control: the rail's 32px icon tile. */
-function AppFrameNavTile(props: { readonly icon: LucideIcon }): ReactNode {
+/** A collapsed nav control: the rail's 32px icon tile; New Task's is primary. */
+function AppFrameNavTile(props: {
+  readonly icon: LucideIcon;
+  readonly primary: boolean;
+}): ReactNode {
   const Icon = props.icon;
   return (
     <span
       className={cn(
         SIDE_STRIP_NAV_TILE_CLASS,
-        "flex shrink-0 items-center justify-center text-muted-foreground",
+        "flex shrink-0 items-center justify-center",
+        props.primary
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground",
       )}
     >
       <Icon aria-hidden className="size-4" />
+    </span>
+  );
+}
+
+/** Home on the rail: a 40x44 tile with its icon where a task's chip sits. */
+function AppFrameHomeTile(): ReactNode {
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center text-muted-foreground",
+        SIDE_TAB_TILE_CLASS,
+      )}
+    >
+      <MonogramChip
+        tile={{ kind: "icon", icon: <House aria-hidden className="size-4" /> }}
+        tint={null}
+        tinted={false}
+      />
+      <SideTabMeter agents={NO_LIVE_AGENTS} attention={null} size="tile" />
     </span>
   );
 }
@@ -521,7 +580,7 @@ function AppFrameAccount(props: { readonly collapsed: boolean }): ReactNode {
           Ada Lovelace
         </span>
         <span className="truncate text-ui-xs text-muted-foreground">
-          This Mac · 2 agents running
+          This Mac · 2 running
         </span>
       </span>
       <ChevronsUpDown

@@ -4,17 +4,23 @@ import {
   NestedChatStatusGlyph,
 } from "@/components/epic-canvas/sidebar/epic-sidebar-chat-tree";
 import { INDENT_PX } from "@/components/epic-canvas/sidebar/epic-sidebar-tree-shared";
-import type { ChatDescendantStatusKind } from "@/components/epic-canvas/sidebar/use-chat-archive-hidden-ids";
+import type { OwnChatStatusKind } from "@/components/epic-canvas/sidebar/use-chat-archive-hidden-ids";
 import {
   SIDE_TAB_HOVER_CLASS,
   SIDE_TAB_TITLE_CLASS,
 } from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import { UNKNOWN_ACTIVITY_TITLE } from "@/components/notifications/notification-indicator-icon";
+import { UnknownActivityGlyph } from "@/components/notifications/unknown-activity-glyph";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-/** A live agent's state: the ladder without "done", which is not live. */
+/**
+ * A live agent's state: the ladder without "done", which is not live, and
+ * with "unknown" for an agent on a host this device is not served activity
+ * for - it may well be live, so it is listed rather than dropped.
+ */
 export type LiveAgentKind = Exclude<
-  ChatDescendantStatusKind,
+  OwnChatStatusKind,
   "done" | "terminal-failure"
 >;
 
@@ -25,6 +31,7 @@ const LIVE_KIND_LABEL: Readonly<Record<LiveAgentKind, string>> = {
   approval: "Needs approval",
   running: "Running",
   background: "Background work",
+  unknown: UNKNOWN_ACTIVITY_TITLE,
 };
 
 const WAITING_CHIP: Readonly<Partial<Record<LiveAgentKind, string>>> = {
@@ -74,7 +81,11 @@ export function LiveAgentRowView(props: {
       }}
     >
       <span className="inline-flex size-4 shrink-0 items-center justify-center">
-        <NestedChatStatusGlyph kind={props.kind} />
+        {props.kind === "unknown" ? (
+          <UnknownActivityGlyph testId={undefined} />
+        ) : (
+          <NestedChatStatusGlyph kind={props.kind} />
+        )}
       </span>
       <span className={cn(SIDE_TAB_TITLE_CLASS, "min-w-0 flex-1 truncate")}>
         {shownTitle}

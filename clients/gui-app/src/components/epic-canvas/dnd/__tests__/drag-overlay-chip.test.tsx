@@ -419,7 +419,7 @@ describe("<EpicRootDragOverlayContent />", () => {
       expect(overlay.style.width).toBe("480px");
     });
 
-    it("shows the focus icon and underline for the side the store says is focused", () => {
+    it("shows the focus icon and box for the side the store says is focused", () => {
       seedSplitGroup("right", { kind: "tab" });
       useEpicDndStore.getState().headerTabDragStarted(
         {
@@ -440,14 +440,19 @@ describe("<EpicRootDragOverlayContent />", () => {
         "split-focus-indicator-split-1",
       );
       expect(indicator.dataset.focusedSide).toBe("right");
-      const underline = within(overlay).getByTestId(
-        "split-tab-group-underline-right-split-1",
+      // F4 round 2 dropped the group underline; the focused member's own box
+      // is now what says which side is focused.
+      const leftMember = overlay.querySelector<HTMLElement>(
+        '[data-split-member="left"]',
       );
-      expect(underline.className).not.toContain("bg-current");
-      const leftUnderline = within(overlay).getByTestId(
-        "split-tab-group-underline-left-split-1",
+      const rightMember = overlay.querySelector<HTMLElement>(
+        '[data-split-member="right"]',
       );
-      expect(leftUnderline.className).toContain("bg-current");
+      if (leftMember === null || rightMember === null) {
+        throw new Error("expected both split members");
+      }
+      expect(within(leftMember).queryByTestId("tab-chrome-box")).toBeNull();
+      expect(within(rightMember).getByTestId("tab-chrome-box")).toBeTruthy();
     });
 
     it("carries the captured manual appearance and notification snapshot into the split preview", () => {
@@ -483,7 +488,7 @@ describe("<EpicRootDragOverlayContent />", () => {
       // `tab-strip-drag-overlay.test.tsx`.
       expect(
         within(overlay)
-          .getByTestId("tab-chrome-center")
+          .getByTestId("tab-chrome-box")
           .style.getPropertyValue("--swatch-border"),
       ).toBe("#654321");
       expect(
@@ -669,15 +674,7 @@ describe("<EpicRootDragOverlayContent />", () => {
       expect(
         within(overlay).getByTestId("split-tab-divider-split-1"),
       ).toBeTruthy();
-      const leftUnderline = within(overlay).getByTestId(
-        "split-tab-group-underline-left-split-1",
-      );
-      const rightUnderline = within(overlay).getByTestId(
-        "split-tab-group-underline-right-split-1",
-      );
-      expect(leftUnderline.className).toContain("bg-current");
-      expect(rightUnderline.className).toContain("bg-current");
-      expect(within(overlay).queryByTestId("tab-chrome-center")).toBeNull();
+      expect(within(overlay).queryByTestId("tab-chrome-box")).toBeNull();
 
       act(() => {
         useTabsStore.setState({ activeItemId: "split-1" });
@@ -686,9 +683,7 @@ describe("<EpicRootDragOverlayContent />", () => {
       expect(
         within(overlay).queryByTestId("split-tab-divider-split-1"),
       ).toBeNull();
-      expect(leftUnderline.className).toContain("bg-current");
-      expect(rightUnderline.className).not.toContain("bg-current");
-      expect(within(overlay).getByTestId("tab-chrome-center")).toBeTruthy();
+      expect(within(overlay).getByTestId("tab-chrome-box")).toBeTruthy();
     });
 
     (

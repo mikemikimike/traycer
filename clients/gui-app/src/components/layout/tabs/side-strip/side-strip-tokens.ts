@@ -31,10 +31,19 @@ export const SIDE_STRIP_RAIL_WIDTH_PX = 60;
 export const SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX =
   (SIDE_STRIP_MIN_WIDTH_PX + SIDE_STRIP_RAIL_WIDTH_PX) / 2;
 
-/** The row list: 2px between rows and an 8px inset all round, so nothing a
- * row draws past its box is clipped by the scroller at the list's edges: the
- * badge, the focus ring, and the waiting pulse's 8px ring. */
-export const SIDE_STRIP_LIST_CLASS = "flex flex-col gap-0.5 p-2";
+/**
+ * The row list: an 8px inset all round, so nothing a row draws past its box is
+ * clipped by the scroller at the list's edges: the badge, the focus ring, and
+ * the waiting pulse's 8px ring. Expanded rows sit 2px apart; the rail's tiles
+ * 8px apart, the rhythm of the rail below its divider (Home, then the tiles,
+ * each 8px on from the last).
+ */
+export const SIDE_STRIP_LIST_CLASS: Readonly<
+  Record<SideTabRowVariant, string>
+> = {
+  expanded: "flex flex-col gap-0.5 p-2",
+  collapsed: "flex flex-col gap-2 p-2",
+};
 /** One expanded row: 32px tall, 8px radius, 8px padding and gap. */
 export const SIDE_TAB_ROW_CLASS = "h-8 rounded-lg px-2 gap-2";
 /**
@@ -43,9 +52,22 @@ export const SIDE_TAB_ROW_CLASS = "h-8 rounded-lg px-2 gap-2";
  * never moves a title.
  */
 export const SIDE_TAB_LEADING_CLASS = "size-4 me-2";
-/** A custom icon or monogram tile in the 16px leading slot. */
+/**
+ * The leading slot when it holds a tile, by tile kind. An icon keeps the 16px
+ * slot, so Home's glyph stands where Inbox's and All tasks' do. A monogram
+ * takes 20px of the same 24px, the rail chip's shape (26x22) at row size, so
+ * two letters stand clear of its edges; its badge then sits flush beside it,
+ * its ring ending where the title starts.
+ */
+export const SIDE_TAB_LEADING_TILE_SLOT_CLASS: Readonly<
+  Record<"icon" | "monogram", string>
+> = {
+  icon: "size-4 me-2",
+  monogram: "h-4 w-5 me-1",
+};
+/** A custom icon or monogram tile in that slot, the slot's own size. */
 export const SIDE_TAB_LEADING_TILE_CLASS =
-  "size-4 rounded-sm text-micro font-semibold leading-none";
+  "size-full rounded-sm text-[0.5625rem] font-semibold leading-none tracking-[0.02em]";
 export const SIDE_TAB_TITLE_CLASS = "text-[0.8125rem] leading-4";
 export const SIDE_TAB_TRAILING_CLASS = "min-w-5 h-5";
 export const SIDE_TAB_ACTIVE_CLASS = "bg-foreground/8";
@@ -58,12 +80,13 @@ export const SIDE_TAB_SESSION_ACTIVE_CLASS = "bg-warning-foreground";
 export const SIDE_TAB_GROUP_LINE_CLASS = "w-0.5";
 /**
  * Where each member's segment of the group line sits, so a group's segments
- * join into one line at one x. A lone row's segment reaches across the 2px
- * row gap below it. A split pair's members sit inside the pair's 2px padding:
- * the top member's segment also covers the pair's top padding and the 4px
- * seam, the bottom member's its bottom padding and the row gap. Expanded, the
- * members are also 2px further in than a lone row, so their segments step 2px
- * further out; collapsed, the pair is centred like a lone tile and they do not.
+ * join into one line at one x. A lone row's segment reaches across the row
+ * gap below it (2px expanded, 8px collapsed). A split pair's members sit
+ * inside the pair's 2px padding: the top member's segment also covers the
+ * pair's top padding and the 4px seam, the bottom member's its bottom padding
+ * and the row gap. Expanded, the members are also 2px further in than a lone
+ * row, so their segments step 2px further out; collapsed, the pair is centred
+ * like a lone tile and they do not.
  */
 export const SIDE_TAB_GROUP_LINE_SEAT_CLASS: Readonly<
   Record<SideTabRowVariant, Readonly<Record<SideGroupLineSeat, string>>>
@@ -74,10 +97,20 @@ export const SIDE_TAB_GROUP_LINE_SEAT_CLASS: Readonly<
     "pair-bottom": "-start-2 top-0 -bottom-1",
   },
   collapsed: {
-    row: "-start-1.5 top-0 -bottom-0.5",
+    row: "-start-1.5 top-0 -bottom-2",
     "pair-top": "-start-1.5 -top-0.5 -bottom-1",
-    "pair-bottom": "-start-1.5 top-0 -bottom-1",
+    "pair-bottom": "-start-1.5 top-0 -bottom-2.5",
   },
+};
+/**
+ * Where a drop's 2px line sits: centred in the row gap before or after the
+ * row it is on (2px expanded, 8px on the rail).
+ */
+export const SIDE_TAB_DROP_LINE_SEAT_CLASS: Readonly<
+  Record<SideTabRowVariant, Readonly<Record<"before" | "after", string>>>
+> = {
+  expanded: { before: "-top-0.5", after: "-bottom-0.5" },
+  collapsed: { before: "-top-1.25", after: "-bottom-1.25" },
 };
 export const SIDE_TAB_GROUP_HEADER_CLASS = "h-7";
 /**
@@ -103,10 +136,10 @@ export const SIDE_TAB_BADGE_POSITION_CLASS =
   "absolute top-0 right-0 translate-x-1/4 -translate-y-1/4";
 /**
  * Where a leading tile's badge sits: in the space reserved beside the tile,
- * level with its top and clear of its monogram, 1px past its edge.
+ * level with its top and flush against its edge, clear of its monogram.
  */
 export const SIDE_TAB_LEADING_BADGE_POSITION_CLASS =
-  "absolute -top-0.5 left-full ml-px";
+  "absolute -top-0.5 left-full";
 /**
  * The rail tile's badge (D5): a 14px disc of the strip's ground holding a 12px
  * status glyph, at the tile's top-right, 1px above and 1px in.
@@ -157,19 +190,49 @@ export const SIDE_STRIP_FOOT_CLASS = "gap-2 p-2";
 export const SIDE_TAB_GROUP_COUNT_CLASS = "text-ui-xs tabular-nums";
 /** The dragged row or pair: an opaque, raised copy of the source. */
 export const SIDE_TAB_DRAG_OVERLAY_CLASS = "rounded-lg bg-canvas shadow-lg";
-/** A nav row's (Inbox, All tasks) collapsed form: a 32px icon tile (D6). */
+/**
+ * A nav control's collapsed form - the expand toggle, Inbox, All tasks, New
+ * Task and the avatar: a 32px icon tile (D6), on the rail's axis. The rail's
+ * nav tiles stand 4px apart.
+ */
 export const SIDE_STRIP_NAV_TILE_CLASS = "size-8 rounded-lg";
-/** The collapsed Inbox tile's needs-you count, on its top-right corner, cut out of the strip's ground. */
+/** The rail's nav tiles as a column: centred, 4px apart. */
+export const SIDE_STRIP_RAIL_NAV_CLASS = "flex flex-col items-center gap-1";
+/**
+ * The rail's divider between New Task and Home (F1): a 24px hairline, 8px from
+ * each, so the rail keeps its 8px rhythm from there down. A foreground alpha,
+ * not `bg-border`: on the light ground `--border` is the ground's own grey.
+ */
+export const SIDE_STRIP_RAIL_DIVIDER_CLASS = "my-2 h-px w-6 bg-foreground/15";
+/**
+ * The collapsed Inbox tile's marks, both cut out of the strip's ground and
+ * seated on the 16px glyph's top-right corner as a task tile's badge sits on
+ * its chip's: centred 1px out from that corner, at (25, 7) in the 32px tile.
+ * The needs-you count is a 16px pill, the status-unavailable dot 8px.
+ */
 export const SIDE_STRIP_NAV_TILE_COUNT_CLASS =
-  "absolute -top-1 -right-1 h-4 min-w-4 rounded-md px-1 text-overline leading-4 ring-2 ring-canvas md:ring-shell-ground";
-/** The collapsed Inbox tile's status-unavailable dot, on its top-right corner, cut out of the strip's ground. */
+  "absolute -top-px -right-px h-4 min-w-4 rounded-md px-1 text-overline leading-4 ring-2 ring-canvas md:ring-shell-ground";
 export const SIDE_STRIP_NAV_TILE_UNKNOWN_DOT_CLASS =
-  "absolute -top-0.5 -right-0.5 bg-canvas md:bg-shell-ground ring-2 ring-canvas md:ring-shell-ground";
+  "absolute top-0.75 right-0.75 bg-canvas md:bg-shell-ground ring-2 ring-canvas md:ring-shell-ground";
 /** The "Tasks · N" label above the rows. */
 export const SIDE_STRIP_SECTION_LABEL_CLASS =
   "px-2 pt-2 text-overline font-medium uppercase tracking-wide";
 /** The foot's account row: avatar, name and host line. */
 export const SIDE_STRIP_ACCOUNT_ROW_CLASS = "h-11 rounded-lg px-2 gap-2";
+/**
+ * How a reading's button draws (F6): `glyph` is the header's compact icon,
+ * `tile` the collapsed rail's rail-wide box around that same glyph, and
+ * `readout` the readings row's half or whole, which has room for the readings
+ * themselves.
+ */
+export type ReadingButtonForm = "glyph" | "tile" | "readout";
+/**
+ * A reading tile's content line (F6): one row tall, readings wrapped onto a
+ * clipped second row when they do not fit, so the tile shows only whole
+ * readings - the first one at half width, more as the row widens.
+ */
+export const STRIP_READOUT_LINE_CLASS =
+  "flex h-4 min-w-0 flex-1 flex-wrap items-center justify-center gap-x-2 overflow-hidden text-ui-xs";
 /** The host-health dot on the avatar's bottom-right, cut out of the strip's ground. */
 export const SIDE_STRIP_HOST_DOT_CLASS =
   "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-canvas md:ring-shell-ground";

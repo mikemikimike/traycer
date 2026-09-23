@@ -11,6 +11,24 @@ import { cn } from "@/lib/utils";
 export const TAB_CLASS_BASE =
   "group/tab relative flex h-9 w-full min-w-0 items-center gap-1.5 px-[var(--header-tab-padding,1.5rem)] text-ui-sm transition-[color,transform] duration-300 ease-spring";
 
+/**
+ * Where a header tab's box sits in its 36px frame: 2px in from every side, so
+ * the box is 32px tall and centred in the 40px header, and neighbouring boxes
+ * keep 4px of ground between them. The corners are the sheets' own
+ * `radius-xl`: the active tab, a hover and a split's focused member are all
+ * this one box (staging round 1, F4).
+ */
+export const TAB_BOX_CLASS =
+  "pointer-events-none absolute inset-0.5 rounded-xl";
+
+/**
+ * A tab's colour on a tab with no box of its own to wear it: a short line
+ * centred inside the box's bottom edge, the same for a lone tab and a split
+ * member. Never a rule across the tab - the header has no baseline (F4).
+ */
+export const TAB_COLOR_MARK_CLASS =
+  "pointer-events-none absolute bottom-1.25 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-(--swatch)";
+
 export const SPLIT_MEMBER_CLASS =
   "gap-1 px-[var(--header-tab-padding,1.25rem)]";
 export const SPLIT_TAB_CONTROL_CLASS =

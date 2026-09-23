@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { useTabStripPlacement } from "@/components/layout/tabs/use-tab-strip-placement";
 import { useArrangementValue } from "@/lib/layout-overrides";
 import { liveAgentsInStrip } from "@/lib/layout/layout-arrangement";
-import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import { useSideStripCollapsed } from "@/stores/layout/side-tab-strip-store";
 
 /**
  * Where the strip wants the active task's live agents drawn (D9): the element
@@ -46,7 +46,7 @@ export function useLiveAgentsSlot(tabId: string): HTMLElement | null {
 /** Whether this window's strip lists live agents at all (D9). */
 export function useLiveAgentsInStrip(): boolean {
   const placement = useTabStripPlacement();
-  const collapsed = useSideTabStripStore((state) => state.collapsed);
+  const collapsed = useSideStripCollapsed();
   const view = useArrangementValue("sideStripView");
   return liveAgentsInStrip(placement, collapsed, view);
 }

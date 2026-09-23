@@ -31,6 +31,8 @@ export function StatusGlyph(props: {
       ? { "aria-hidden": true }
       : { role: "img", "aria-label": props.label };
   if (props.kind === "running") {
+    // The app's one running language: the same spinner, in its default
+    // variant, as a running agent everywhere else.
     return (
       <span
         {...a11y}
@@ -43,7 +45,7 @@ export function StatusGlyph(props: {
         <AgentSpinningDots
           className="size-full"
           testId={undefined}
-          variant="dots2"
+          variant={undefined}
           tone="muted"
         />
       </span>

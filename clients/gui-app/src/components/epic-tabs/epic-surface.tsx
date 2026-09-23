@@ -1,11 +1,13 @@
 import { useMatch } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, type ReactNode } from "react";
 import { EpicRouteSessionBody } from "@/components/epic-canvas/epic-route-session-body";
 import { MobileEpicHeaderActionsBinder } from "@/components/epic-canvas/mobile/epic-mobile-header-actions";
 import { EpicSidebarColumn } from "@/components/epic-canvas/sidebar/epic-sidebar-column";
+import { remeasureTileSurfaceGeometry } from "@/components/epic-canvas/surface-host/tile-surface-geometry-coordinator";
 import { StripLiveAgentsPortal } from "@/components/epic-canvas/sidebar/strip-live-agents";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useArrangementValue } from "@/lib/layout-overrides";
+import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import {
   PaneSurfaceActivityContext,
   PaneVisibilityContext,
@@ -93,35 +95,22 @@ export function EpicSurface(props: EpicSurfaceProps) {
                 epicId={props.epicId}
                 tabId={props.tabId}
               />
-              <div
-                className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
-                data-epic-surface={props.tabId}
+              <EpicSurfaceSheets
+                tabId={props.tabId}
+                sidebarSide={sidebarSide}
+                sidebar={sidebarColumn}
               >
-                {/* DOM order follows `sidebarSide` (S-06), never CSS
-                    `order`, so focus and reading order track what is on
-                    screen. Split panes each render an `EpicSurface`, so both
-                    follow the one global side. */}
-                {sidebarSide === "right" ? null : sidebarColumn}
-                <div
-                  data-shell-sheet="content"
-                  style={{
-                    anchorName: browserGuestCssSheetAnchorName(props.tabId),
-                  }}
-                  className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas"
-                >
-                  <EpicRouteSessionBody
-                    epicId={props.epicId}
-                    tabId={props.tabId}
-                    active={Boolean(activity.focused && routeMatches)}
-                    focusedAt={activeSearch?.focusedAt}
-                    focusArtifactId={activeSearch?.focusArtifactId}
-                    focusThreadId={activeSearch?.focusThreadId}
-                    focusPaneId={activeSearch?.focusPaneId}
-                    focusTileInstanceId={activeSearch?.focusTileInstanceId}
-                  />
-                </div>
-                {sidebarSide === "right" ? sidebarColumn : null}
-              </div>
+                <EpicRouteSessionBody
+                  epicId={props.epicId}
+                  tabId={props.tabId}
+                  active={Boolean(activity.focused && routeMatches)}
+                  focusedAt={activeSearch?.focusedAt}
+                  focusArtifactId={activeSearch?.focusArtifactId}
+                  focusThreadId={activeSearch?.focusThreadId}
+                  focusPaneId={activeSearch?.focusPaneId}
+                  focusTileInstanceId={activeSearch?.focusTileInstanceId}
+                />
+              </EpicSurfaceSheets>
               <AgentBrowserPip
                 epicId={props.epicId}
                 viewTabId={props.tabId}
@@ -132,5 +121,47 @@ export function EpicSurface(props: EpicSurfaceProps) {
         </EpicSessionProvider>
       </PaneVisibilityContext.Provider>
     </PaneSurfaceActivityContext.Provider>
+  );
+}
+
+/**
+ * The epic surface's two sheets: the sidebar column (the panel sheet) on
+ * `sidebarSide` and the content sheet beside it, with the ground between.
+ */
+export function EpicSurfaceSheets(props: {
+  readonly tabId: string;
+  readonly sidebarSide: EdgeSide;
+  readonly sidebar: ReactNode;
+  readonly children: ReactNode;
+}): ReactNode {
+  const { tabId, sidebarSide, sidebar } = props;
+  // Hosted chat bodies (`StableTileSurfaceHost`) paint at rects the geometry
+  // coordinator reads inside a ResizeObserver callback, and a ResizeObserver
+  // reports SIZE changes only. Moving the sidebar to the other side moves the
+  // content sheet by the panel's width without resizing it, so without this
+  // the chat body stays at its old x, drawn over the panel (Staging F2) - the
+  // same position-only move `TopLevelTabHost` handles for "Reverse views".
+  // Layout effect: the re-read has to see this commit's order before paint.
+  useLayoutEffect(() => {
+    remeasureTileSurfaceGeometry();
+  }, [sidebarSide]);
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
+      data-epic-surface={tabId}
+    >
+      {/* DOM order follows `sidebarSide` (S-06), never CSS `order`, so
+          focus and reading order track what is on screen. Split panes each
+          render an `EpicSurface`, so both follow the one global side. */}
+      {sidebarSide === "right" ? null : sidebar}
+      <div
+        data-shell-sheet="content"
+        style={{ anchorName: browserGuestCssSheetAnchorName(tabId) }}
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas"
+      >
+        {props.children}
+      </div>
+      {sidebarSide === "right" ? sidebar : null}
+    </div>
   );
 }

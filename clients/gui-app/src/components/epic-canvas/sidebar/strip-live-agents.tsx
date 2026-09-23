@@ -33,6 +33,10 @@ import { isOpenableEpicNodeKind } from "@/stores/epics/canvas/types";
 import type { OpenEpicState } from "@/stores/epics/open-epic/store";
 import type { TreeSlice } from "@/stores/epics/open-epic/types";
 import { useAppLocalNotificationsStore } from "@/stores/notifications/app-local-notifications-store";
+import {
+  selectAgentActivityCoverage,
+  useAgentActivityStore,
+} from "@/stores/agent-activity-store";
 import { selectNotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 
 interface LiveAgentRow {
@@ -112,6 +116,15 @@ function LiveAgentRows(props: {
   const tiers = useEpicAgentActivityTiers();
   const indicators = useContext(NotificationIndicatorsContext);
   const localRows = useAppLocalNotificationsStore((state) => state.byId);
+  // Each agent's activity coverage, asked of its own host: an agent on a host
+  // the plane does not reach lists as unknown instead of vanishing.
+  const coverages = useAgentActivityStore(
+    useShallow((state) =>
+      hostIds.map((hostId) =>
+        selectAgentActivityCoverage(state.byHost, hostId),
+      ),
+    ),
+  );
   const rows = useMemo(() => {
     const kinds = new Map<string, LiveAgentKind>();
     for (const [index, chatId] of chatIds.entries()) {
@@ -123,13 +136,14 @@ function LiveAgentRows(props: {
           indicators,
         ),
         tiers.get(chatId),
+        coverages[index] ?? "indeterminate",
       );
       if (kind !== null && kind !== "done" && kind !== "terminal-failure") {
         kinds.set(chatId, kind);
       }
     }
     return liveRowsOf(tree, kinds);
-  }, [chatIds, epicId, hostIds, indicators, localRows, tiers, tree]);
+  }, [chatIds, coverages, epicId, hostIds, indicators, localRows, tiers, tree]);
   if (rows.length === 0) return null;
   return (
     <ul

@@ -37,7 +37,7 @@ import {
   SIDE_STRIP_RAIL_WIDTH_PX,
 } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import { DEFAULT_SIDEBAR_WIDTH_PX } from "@/stores/epics/left-panel-store";
-import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import { useSideStripCollapsed } from "@/stores/layout/side-tab-strip-store";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -458,7 +458,7 @@ function PresetMiniature(props: {
     return () => observer.disconnect();
   }, []);
 
-  const collapsed = useSideTabStripStore((state) => state.collapsed);
+  const collapsed = useSideStripCollapsed();
   const frame = { values, arrangement };
   const edge = sideTabStripEdge(arrangement.tabStripPlacement);
 

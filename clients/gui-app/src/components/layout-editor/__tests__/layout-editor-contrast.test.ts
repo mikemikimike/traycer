@@ -3,7 +3,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   compositeOverBackground,
   contrastRatio,
@@ -12,6 +14,15 @@ import {
   themeToken,
   type ResolvedThemeMode,
 } from "@/../__tests__/contrast";
+import {
+  HeaderTabVisual,
+  TabChrome,
+} from "@/components/layout/tabs/header-tab-visual";
+import { sampleWorkspaceTabModule } from "@/stores/tabs/kinds/sample-workspace";
+import { tabAppearance } from "@/stores/tabs/types";
+import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
+
+afterEach(cleanup);
 
 /**
  * The layout editor's decoration, measured against every built-in palette in
@@ -365,6 +376,31 @@ const SAMPLE_TAB_COLOR = (() => {
   return tokenName(value);
 })();
 
+const CLEAN_INDICATOR_STATE: NotificationIndicatorState = {
+  unreadFailure: false,
+  pendingFork: false,
+  pendingApproval: false,
+  pendingInterview: false,
+  unreadDone: false,
+};
+
+const SESSION_TAB = sampleWorkspaceTabModule.build(null);
+
+/** `HeaderTabVisual` props for the editor's own tab, active or at rest. */
+function sessionTabVisualProps(isActive: boolean) {
+  return {
+    tab: SESSION_TAB,
+    appearance: tabAppearance(SESSION_TAB),
+    indicatorState: CLEAN_INDICATOR_STATE,
+    displayName: SESSION_TAB.name,
+    chrome: "own" as const,
+    isActive,
+    titleControl: null,
+    trailingControl: null,
+    leaderVisible: false,
+  };
+}
+
 /**
  * The colour the active session tab's LABEL is set in, read off the component
  * that sets it (L-163).
@@ -543,11 +579,13 @@ describe("layout-editor.css is read, not assumed", () => {
    */
   it("paints the editor's tab and the editing frame from the same token", () => {
     expect(SAMPLE_TAB_COLOR).toBe(EDITING_FRAME_COLOR);
-    expect(
-      /fill=\{\s*props\.session\s*\?\s*\(props\.color/.test(
-        read("components/layout/tabs/header-tab-visual.tsx"),
-      ),
-    ).toBe(true);
+    const color = `var(${SAMPLE_TAB_COLOR})`;
+    render(createElement(TabChrome, { isActive: true, color, session: true }));
+    const box = screen.getByTestId("tab-chrome-box");
+    expect(box.style.getPropertyValue("--swatch")).toBe(color);
+    expect(box.style.getPropertyValue("--swatch-border")).toBe(
+      "var(--canvas-border)",
+    );
   });
 
   /**
@@ -561,7 +599,6 @@ describe("layout-editor.css is read, not assumed", () => {
    * should paint a second decoration on top of it.
    */
   it("leaves the active editor tab one treatment rather than two", () => {
-    const visual = read("components/layout/tabs/header-tab-visual.tsx");
     expect(
       RULES.some((rule) =>
         rule.selector.includes('data-layout-session-tab="wash"'),
@@ -569,13 +606,27 @@ describe("layout-editor.css is read, not assumed", () => {
     ).toBe(false);
     // One geometry on the marker, unconditionally: the two-shape className was
     // the wash, and a conditional one is how a second decoration comes back.
-    expect(visual).toContain(
-      'className="pointer-events-none absolute inset-x-0 bottom-0"',
+    const { rerender } = render(
+      createElement(HeaderTabVisual, sessionTabVisualProps(true)),
     );
+    expect(
+      document.querySelectorAll('[data-layout-session-tab="filled"]'),
+    ).toHaveLength(1);
+    expect(screen.getAllByTestId("tab-chrome-box")).toHaveLength(1);
+    expect(screen.queryByTestId("tab-color-mark")).toBeNull();
+
     // The marker survives in both states, because the dim exemption reads it
     // and a tab the user clicked away from still has to stay lit.
-    expect(visual).toContain('"filled"');
-    expect(visual).toContain('"rest"');
+    rerender(createElement(HeaderTabVisual, sessionTabVisualProps(false)));
+    const mark = document.querySelector('[data-layout-session-tab="rest"]');
+    if (mark === null) {
+      throw new Error("expected the rest-state session tab marker");
+    }
+    expect(mark.className).toContain("left-1/2");
+    expect(mark.className).toContain("w-6");
+    expect(mark.className).toContain("-translate-x-1/2");
+    expect(mark.className).not.toContain("inset-x-0");
+    expect(screen.queryByTestId("tab-chrome-box")).toBeNull();
   });
 
   /**
@@ -594,9 +645,8 @@ describe("layout-editor.css is read, not assumed", () => {
     expect(read("components/layout/tabs/tab-strip.tsx")).toContain(
       "data-layout-passive-members",
     );
-    expect(read("components/layout/tabs/header-tab-visual.tsx")).toContain(
-      "data-layout-session-tab",
-    );
+    render(createElement(HeaderTabVisual, sessionTabVisualProps(true)));
+    expect(document.querySelector("[data-layout-session-tab]")).not.toBeNull();
   });
 
   /**

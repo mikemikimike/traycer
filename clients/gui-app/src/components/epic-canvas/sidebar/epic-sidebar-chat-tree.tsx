@@ -2647,7 +2647,6 @@ function ChatRowOwnLeadingIcon(props: {
         mutedClassName="text-muted-foreground/70"
         testId="chat-sidebar-spinner"
         defaultIcon={undefined}
-        statusPresentation="glyph"
       />
     );
   }
@@ -2698,7 +2697,6 @@ function SidebarTerminalAgentProgressIcon(props: {
       style={icon.style}
       testIdPrefix="terminal-agent-sidebar"
       idleIcon={idleIcon}
-      statusPresentation="glyph"
     />
   );
 }
@@ -3590,7 +3588,7 @@ function chatSelfStatusRank(
   if (selfTier === "turn") return CHAT_STATUS_RANKS.running;
   if (selfTier === "background") return CHAT_STATUS_RANKS.background;
   if (state.unreadDone) return CHAT_STATUS_RANKS.done;
-  if (terminalFailureTone(state, "gui") !== null) {
+  if (terminalFailureTone(state) !== null) {
     return CHAT_STATUS_RANKS["terminal-failure"];
   }
   return 0;
@@ -3719,7 +3717,7 @@ function chatOwnStatusKind(
   if (running === "turn") return "working";
   if (running === "background") return "background";
   if (state.unreadDone) return "done";
-  if (terminalFailureTone(state, "gui") !== null) return "terminal-failure";
+  if (terminalFailureTone(state) !== null) return "terminal-failure";
   if (isReadOnly) return "read-only";
   return "idle";
 }

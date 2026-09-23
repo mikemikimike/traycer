@@ -25,6 +25,14 @@ export interface SideTabStripState {
   readonly setCollapsed: (collapsed: boolean) => void;
   /** Back to the default width. */
   readonly resetWidth: () => void;
+  /**
+   * A handle drag's live layout (F9): the collapsed state the strip draws
+   * while a drag holds it on the other side of the snap point from
+   * `collapsed`, else `null`. Transient: never persisted, so the release is
+   * still the one write that stores the drag.
+   */
+  readonly dragCollapsed: boolean | null;
+  readonly setDragCollapsed: (dragCollapsed: boolean | null) => void;
 }
 
 const SIDE_TAB_STRIP_PERSIST_KEY = persistKey(STORE_KEYS.sideTabStrip);
@@ -59,6 +67,10 @@ export const useSideTabStripStore = create<SideTabStripState>()(
       resetWidth: () => {
         set({ widthPx: SIDE_STRIP_DEFAULT_WIDTH_PX });
       },
+      dragCollapsed: null,
+      setDragCollapsed: (dragCollapsed) => {
+        set({ dragCollapsed });
+      },
     }),
     {
       ...basePersistOptions(SIDE_TAB_STRIP_PERSIST_KEY),
@@ -87,3 +99,14 @@ export const useSideTabStripStore = create<SideTabStripState>()(
 
 /** Another window's resize or collapse reaches this one live. */
 installCrossWindowRehydrate(useSideTabStripStore, SIDE_TAB_STRIP_PERSIST_KEY);
+
+/**
+ * Whether the strip is drawn collapsed: a live handle drag's layout, else the
+ * stored flag. Everything that draws the strip reads this, so its parts switch
+ * together at the crossing.
+ */
+export function useSideStripCollapsed(): boolean {
+  return useSideTabStripStore(
+    (state) => state.dragCollapsed ?? state.collapsed,
+  );
+}

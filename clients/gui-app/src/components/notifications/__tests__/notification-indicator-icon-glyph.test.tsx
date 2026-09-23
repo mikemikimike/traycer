@@ -17,9 +17,9 @@ import {
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 
 /**
- * `statusPresentation="glyph"` (D12): the sidebar chat tree's presentation,
- * which draws every mapped state through the shared `StatusGlyph` vocabulary
- * instead of a surface-specific lucide tone icon.
+ * The shared `StatusGlyph` vocabulary (D12): `NotificationIndicatorIcon`
+ * draws every mapped state through it on every surface; only a tone the set
+ * has no shape for keeps a surface-specific lucide icon.
  */
 
 const CLEAN_STATE: NotificationIndicatorState = {
@@ -59,7 +59,6 @@ describe("statusGlyphKindOfTone", () => {
 function renderIcon(input: {
   readonly state: NotificationIndicatorState;
   readonly running: IndicatorRunningKind;
-  readonly agentSurface?: "gui" | "tui";
 }) {
   return render(
     <NotificationIndicatorIcon
@@ -72,8 +71,6 @@ function renderIcon(input: {
       style={undefined}
       runningTitle="Task activity in progress"
       defaultIcon={<span data-testid="default-icon" />}
-      statusPresentation="glyph"
-      agentSurface={input.agentSurface ?? "gui"}
     />,
   );
 }
@@ -87,7 +84,7 @@ function glyphKind(testId: string): string | null {
   );
 }
 
-describe("<NotificationIndicatorIcon /> statusPresentation=glyph", () => {
+describe("<NotificationIndicatorIcon /> status glyphs (D12)", () => {
   it("draws a pending approval as the approval glyph", () => {
     renderIcon({
       state: { ...CLEAN_STATE, pendingApproval: true },
@@ -112,7 +109,7 @@ describe("<NotificationIndicatorIcon /> statusPresentation=glyph", () => {
     expect(glyphKind("indicator-failure-subject-1")).toBe("failed");
   });
 
-  it("draws a terminal failure as the failed glyph too, on a TUI surface", () => {
+  it("draws a terminal failure as the failed glyph too", () => {
     renderIcon({
       state: {
         ...CLEAN_STATE,
@@ -120,11 +117,11 @@ describe("<NotificationIndicatorIcon /> statusPresentation=glyph", () => {
         unreadTerminalFailure: true,
       },
       running: false,
-      agentSurface: "tui",
     });
-    // Same glyph kind as a non-terminal failure - the glyph set draws it as
-    // one shape, unlike the message-mode lucide icon which swaps to a
-    // terminal-specific glyph on TUI.
+    // Same glyph kind as a non-terminal failure - `terminalFailureTone` no
+    // longer takes a surface (RH-04); every agent surface draws the one
+    // failed glyph. The TUI-specific icon survives only in the durable
+    // notification feed (`notificationFeedTone`), a different renderer.
     expect(glyphKind("indicator-failure-subject-1")).toBe("failed");
   });
 
@@ -141,11 +138,41 @@ describe("<NotificationIndicatorIcon /> statusPresentation=glyph", () => {
     expect(glyphKind("indicator-activity-subject-1")).toBe("running");
   });
 
+  it("draws the running glyph as the shared spinner, not an svg arc", () => {
+    renderIcon({ state: CLEAN_STATE, running: "turn" });
+    const wrapper = screen.getByTestId("indicator-activity-subject-1");
+    const running = wrapper.querySelector('span[data-status-glyph="running"]');
+    if (running === null) throw new Error("expected the running glyph span");
+    // Not an svg any more - the running arc was reverted.
+    expect(
+      wrapper.querySelector('svg[data-status-glyph="running"]'),
+    ).toBeNull();
+    // The default `AgentSpinningDots` variant: same spinner, same frames, as
+    // a running agent everywhere else in the app.
+    const dots = running.querySelector("span.font-mono");
+    if (dots === null) throw new Error("expected the spinning-dots frame");
+    expect(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]).toContain(
+      dots.textContent,
+    );
+    expect(running.querySelector("[data-status-glyph-arc]")).toBeNull();
+  });
+
   it("draws background-only activity as the background glyph", () => {
     renderIcon({ state: CLEAN_STATE, running: "background" });
     expect(glyphKind("indicator-background-activity-subject-1")).toBe(
       "background",
     );
+  });
+
+  it("draws the background glyph as an svg dashed ring, distinct from the running spinner", () => {
+    renderIcon({ state: CLEAN_STATE, running: "background" });
+    const background = screen
+      .getByTestId("indicator-background-activity-subject-1")
+      .querySelector('svg[data-status-glyph="background"]');
+    if (background === null) {
+      throw new Error("expected the background glyph svg");
+    }
+    expect(background.querySelector("[data-status-glyph-arc]")).toBeNull();
   });
 
   it("keeps the fork tone's own lucide icon - the glyph set has no shape for it", () => {
@@ -158,7 +185,7 @@ describe("<NotificationIndicatorIcon /> statusPresentation=glyph", () => {
     expect(fork.getAttribute("class")).toContain("lucide-git-fork");
   });
 
-  it("falls back to defaultIcon when idle, unchanged by glyph mode", () => {
+  it("falls back to defaultIcon when idle", () => {
     renderIcon({ state: CLEAN_STATE, running: false });
     expect(screen.getByTestId("default-icon")).toBeDefined();
     expect(document.querySelector("[data-status-glyph]")).toBeNull();

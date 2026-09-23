@@ -12,6 +12,7 @@
  * renders; what it must not decide for itself is which of those survive.
  */
 import { useMemo } from "react";
+import type { AgentActivityCoverage } from "@/lib/agent-activity";
 import {
   useEpicAgentActivityTiers,
   useEpicTreeIndex,
@@ -78,28 +79,35 @@ export function chatDescendantKind(
   // newer live turn/Done is a stronger statement of current state. Once this
   // chat is rolled into a collapsed parent it is a distinct failed child and
   // must remain attention-priority over a sibling's activity or completion.
-  if (terminalFailureTone(indicatorState, "gui") !== null) return "failure";
+  if (terminalFailureTone(indicatorState) !== null) return "failure";
   if (tier !== undefined) return activityTierKind(tier);
   if (indicatorState.unreadDone) return "done";
   return null;
 }
 
+/** A chat's own state: the ladder, plus "unknown" for an unserved host. */
+export type OwnChatStatusKind = ChatDescendantStatusKind | "unknown";
+
 /**
  * A chat's OWN state, in the order its own glyph (`NotificationIndicatorIcon`)
  * says it: attention first, then a live turn or background work, then done,
- * then a terminal failure. A newer live turn outranks an older unread terminal
- * failure here, which is what separates it from {@link chatDescendantKind}'s
- * collapsed-parent order.
+ * then a terminal failure, and only then `unknown` when the plane does not
+ * reach the chat's host - silence from an unserved host is not idleness. A
+ * newer live turn outranks an older unread terminal failure here, which is
+ * what separates it from {@link chatDescendantKind}'s collapsed-parent order.
  */
 export function ownChatStatusKind(
   indicatorState: NotificationIndicatorState,
   tier: AgentActivityTier | undefined,
-): ChatDescendantStatusKind | null {
+  coverage: AgentActivityCoverage,
+): OwnChatStatusKind | null {
   if (attentionTone(indicatorState) === null) {
     if (tier !== undefined) return activityTierKind(tier);
     if (indicatorState.unreadDone) return "done";
   }
-  return chatDescendantKind(indicatorState, tier);
+  const kind = chatDescendantKind(indicatorState, tier);
+  if (kind === null && coverage === "unserved") return "unknown";
+  return kind;
 }
 
 /**

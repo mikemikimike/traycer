@@ -58,7 +58,6 @@ export function SideStripTabRow(props: {
       activityStatus={activityStatus}
       indicatorState={item.indicatorState}
       tabId={tab.id}
-      statusPresentation="glyph"
     />
   );
   return (

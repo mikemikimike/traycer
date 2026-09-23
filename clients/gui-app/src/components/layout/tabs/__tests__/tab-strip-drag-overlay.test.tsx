@@ -93,7 +93,7 @@ describe("HeaderTabDragOverlay: ghost-carried identity + indicator state", () =>
     // it against nothing.
     expect(
       screen
-        .getByTestId("tab-chrome-center")
+        .getByTestId("tab-chrome-box")
         .style.getPropertyValue("--swatch-border"),
     ).toBe("#654321");
     // Identity icon (emoji) and the running-activity status render together.
@@ -135,7 +135,7 @@ describe("HeaderTabDragOverlay: ghost-carried identity + indicator state", () =>
     expect(screen.getByTestId("header-tab-approval-tab-1")).toBeTruthy();
     expect(
       screen
-        .getByTestId("tab-chrome-center")
+        .getByTestId("tab-chrome-box")
         .style.getPropertyValue("--swatch-border"),
     ).toBe("#334455");
   });

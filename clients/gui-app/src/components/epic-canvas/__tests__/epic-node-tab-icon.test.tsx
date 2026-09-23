@@ -67,9 +67,11 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
     const indicator = screen.getByRole("status", {
       name: "Task needs attention",
     });
-    const terminalGlyph = indicator.querySelector(".lucide-square-terminal");
-    expect(terminalGlyph?.getAttribute("class")).toContain("text-destructive");
-    expect(indicator.querySelector(".lucide-message-square-x")).toBeNull();
+    // A terminal failure draws the same shared "failed" glyph as any other
+    // failure now (D12) - there is no more surface-specific lucide icon to
+    // tell a TUI failure apart from a chat one.
+    const glyph = indicator.querySelector('[data-status-glyph="failed"]');
+    expect(glyph?.getAttribute("class")).toContain("text-destructive");
 
     act(() => {
       useAppLocalNotificationsStore
@@ -115,12 +117,14 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
     const completedIndicator = screen.getByRole("status", {
       name: "Task completed",
     });
-    expect(
-      completedIndicator.querySelector("svg")?.getAttribute("class"),
-    ).toContain("lucide-message-square-check");
+    const glyph = completedIndicator.querySelector(
+      '[data-status-glyph="unread"]',
+    );
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute("class")).toContain("text-info");
   });
 
-  it("shows the terminal failure glyph for a failed TUI agent", () => {
+  it("shows the shared failed glyph for a failed TUI agent", () => {
     render(
       <NotificationIndicatorsProvider
         indicators={{
@@ -149,8 +153,9 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
     const failure = screen.getByRole("status", {
       name: "Task needs attention",
     });
-    expect(failure.querySelector(".lucide-square-terminal")).not.toBeNull();
-    expect(failure.querySelector(".lucide-message-square-x")).toBeNull();
+    expect(
+      failure.querySelector('[data-status-glyph="failed"]'),
+    ).not.toBeNull();
   });
 });
 

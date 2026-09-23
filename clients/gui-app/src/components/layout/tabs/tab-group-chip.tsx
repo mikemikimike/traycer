@@ -33,7 +33,7 @@ export function TabGroupChip(props: {
             type="button"
             aria-label={`${group.name || "Unnamed group"}: ${group.collapsed ? "expand" : "collapse"} group`}
             aria-expanded={!group.collapsed}
-            className="relative mx-1 mb-2 flex min-h-6 max-w-48 shrink-0 items-center gap-1 rounded-md bg-[var(--swatch)] px-2 text-ui-xs font-medium text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [-webkit-app-region:no-drag]"
+            className="relative mx-1 flex min-h-6 self-center max-w-48 shrink-0 items-center gap-1 rounded-md bg-[var(--swatch)] px-2 text-ui-xs font-medium text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [-webkit-app-region:no-drag]"
             style={{ "--swatch": group.color } as CSSProperties}
             onClick={(event) => {
               event.preventDefault();
@@ -54,13 +54,6 @@ export function TabGroupChip(props: {
               }
             }}
           >
-            {!group.collapsed ? (
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 -bottom-2 h-0.5 bg-[var(--swatch)]"
-                style={{ "--swatch": group.color } as CSSProperties}
-              />
-            ) : null}
             <ChevronRight
               aria-hidden
               className={cn(

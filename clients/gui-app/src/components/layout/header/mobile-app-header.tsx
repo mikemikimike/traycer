@@ -81,7 +81,7 @@ export function MobileAppHeader(): ReactNode {
           "app" variant). They come before the surface-provided actions so a
           surface's own controls (e.g. the epic overflow) land outermost. */}
       <div className="flex shrink-0 items-center gap-1">
-        <RateLimitIconButton />
+        <RateLimitIconButton form="glyph" />
         {showGlobalResourceMonitor ? (
           // The owner of `app.resources.open` on this viewport. The footer
           // strip can be on screen at the same time (it is opt-in here rather
@@ -89,7 +89,7 @@ export function MobileAppHeader(): ReactNode {
           // is the one that survives an open keyboard or nav drawer.
           <ResourceMonitorPopover
             trigger="header-button"
-            className={undefined}
+            form="glyph"
             claimsOpenAction
           />
         ) : null}

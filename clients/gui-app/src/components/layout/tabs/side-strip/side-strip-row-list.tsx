@@ -100,7 +100,7 @@ export function SideStripRowList(props: {
       data-strip-axis="y"
       data-strip-edge={edge}
       className={cn(
-        SIDE_STRIP_LIST_CLASS,
+        SIDE_STRIP_LIST_CLASS[variant],
         "no-scrollbar min-h-0 flex-[0_1_auto] overflow-y-auto overscroll-y-contain [-webkit-app-region:no-drag]",
       )}
     >

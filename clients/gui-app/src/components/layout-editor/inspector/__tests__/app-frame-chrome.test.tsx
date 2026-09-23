@@ -176,11 +176,13 @@ describe("the two bars' clusters (R2-02, L-156)", () => {
  */
 describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
   const INACTIVE_TAB_CLASS =
-    "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm text-muted-foreground";
-  // `cn()` merges the conflicting text-color utility: `text-foreground`
-  // (same group as `text-muted-foreground`) wins because it is later.
+    "flex h-8 shrink-0 items-center rounded-xl border border-transparent px-3 text-ui-sm text-muted-foreground";
+  // `cn()` merges the conflicting border-color and text-color utilities:
+  // `border-canvas-border` (same group as `border-transparent`) and
+  // `text-foreground` (same group as `text-muted-foreground`) win because
+  // they are later (F4).
   const ACTIVE_TAB_CLASS =
-    "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm border border-border bg-foreground/5 text-foreground";
+    "flex h-8 shrink-0 items-center rounded-xl border px-3 text-ui-sm border-canvas-border bg-background text-foreground";
   const IDENTITY_DOT_CLASS =
     "size-5 shrink-0 rounded-full border border-border bg-foreground/10";
 
@@ -222,7 +224,7 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     expect(identity.className).toBe(IDENTITY_DOT_CLASS);
   });
 
-  it("draws the top row inside the top block: back/forward, New task, collapse", () => {
+  it("draws the top row inside the top block: back/forward and collapse only, no New Task (F7)", () => {
     render(
       <AppFrameSideStrip
         values={PRESET_VALUES.default}
@@ -235,19 +237,19 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     const strip = screen.getByTestId("app-frame-side-strip");
     const topBlock = strip.firstElementChild;
     if (topBlock === null) throw new Error("expected a top block");
-    // The arrows/New task/collapse row is the top block's own first row; the
-    // Inbox, All tasks and Tasks-label rows follow it inside the same block.
+    // The arrows/collapse row is the top block's own first row; the Inbox,
+    // All tasks, Home and New Task rows follow it inside the same block.
     const topRow = topBlock.firstElementChild;
     if (topRow === null) throw new Error("expected the top row");
     const glyphs = [...topRow.children].map((child) =>
       [...child.classList].find((cls) => cls.startsWith("lucide-")),
     );
-    // Back, forward, a spacer (no glyph class), New task, the collapse toggle.
+    // Back, forward, a spacer (no glyph class), the collapse toggle - New
+    // Task moved out of the first row and down after Home (F7).
     expect(glyphs).toEqual([
       "lucide-arrow-left",
       "lucide-arrow-right",
       undefined,
-      "lucide-plus",
       "lucide-panel-left-close",
     ]);
   });
@@ -288,13 +290,17 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
       throw new Error("expected the task row list");
     }
     const home = within(topBlock).getByText("Home");
+    const newTask = within(topBlock).getByText("New Task");
     const tasksLabel = within(topBlock).getByText("Tasks");
-    // Home is the nav row directly above the "Tasks" label, inside the top
-    // block - never a member of the task row list below it.
-    expect(home.parentElement?.nextElementSibling).toBe(
+    // Home sits directly above the primary New Task row (F7), which sits
+    // directly above the "Tasks" label, all inside the top block - neither is
+    // ever a member of the task row list below it.
+    expect(home.parentElement?.nextElementSibling).toBe(newTask.parentElement);
+    expect(newTask.parentElement?.nextElementSibling).toBe(
       tasksLabel.parentElement,
     );
     expect(within(taskList).queryByText("Home")).toBeNull();
+    expect(within(taskList).queryByText("New Task")).toBeNull();
   });
 
   it("sizes the fake tab rows from the tokens: a leading slot, then the title", () => {
@@ -333,9 +339,7 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     expect(foot.querySelector("svg.lucide-history")).toBeNull();
     expect(foot.querySelector("svg.lucide-bell")).toBeNull();
     expect(within(foot).getByText("Ada Lovelace")).not.toBeNull();
-    expect(
-      within(foot).getByText("This Mac · 2 agents running"),
-    ).not.toBeNull();
+    expect(within(foot).getByText("This Mac · 2 running")).not.toBeNull();
   });
 
   it("puts a header-hosted reading in the foot, and nowhere else", () => {

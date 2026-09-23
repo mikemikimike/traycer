@@ -101,7 +101,6 @@ function EpicNodeTabIconContent(props: {
         mutedClassName="text-muted-foreground"
         testId="chat-tab-spinner"
         defaultIcon={props.defaultIcon}
-        statusPresentation="message"
       />
     );
   }
@@ -187,8 +186,6 @@ function TerminalNodeTabIcon(props: {
       style={undefined}
       runningTitle={props.runningTitle}
       defaultIcon={props.defaultIcon}
-      statusPresentation="message"
-      agentSurface="tui"
     />
   );
 }

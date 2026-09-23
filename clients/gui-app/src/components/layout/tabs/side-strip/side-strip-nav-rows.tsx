@@ -1,9 +1,10 @@
 import type { ComponentPropsWithRef, ReactNode } from "react";
-import { History, Inbox } from "lucide-react";
+import { History, Inbox, Plus } from "lucide-react";
 import { useRouterState } from "@tanstack/react-router";
 import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { NotificationsPopover } from "@/components/notifications/notifications-popover";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverAnchor,
@@ -57,6 +58,75 @@ export function SideStripNavRows(props: {
     </>
   );
 }
+
+/**
+ * New Task (F7): the primary button that closes the nav list - after Home
+ * expanded, after All tasks on the rail - and does what the header's `+` does.
+ * Expanded, a row lined up with the nav rows, its shortcut trailing as All
+ * tasks' does; collapsed, a primary 32px tile.
+ */
+export function SideStripNewTask(props: {
+  readonly variant: SideTabRowVariant;
+  readonly onNewTab: () => void;
+}): ReactNode {
+  const collapsed = props.variant === "collapsed";
+  const placement = useColumnOverlayPlacement("top");
+  const chord = useBindingForAction("epic.new");
+  const shortcut = chord === null ? null : formatChordForDisplay(chord);
+  const tooltip =
+    shortcut === null ? NEW_TASK_LABEL : `${NEW_TASK_LABEL} (${shortcut})`;
+  return (
+    <TooltipWrapper
+      label={collapsed ? tooltip : null}
+      side={placement?.side ?? "right"}
+      sideOffset={6}
+      align={placement?.align}
+    >
+      <Button
+        type="button"
+        size={collapsed ? "nav-tile" : "nav-row"}
+        // Non-editable chrome, dimmed while a layout session is live (4.2).
+        data-layout-passive
+        data-testid="side-strip-new-task"
+        aria-label={collapsed ? NEW_TASK_LABEL : undefined}
+        onClick={props.onNewTab}
+        className={cn(
+          collapsed ? "self-center" : "w-full",
+          "[-webkit-app-region:no-drag]",
+        )}
+      >
+        <Plus
+          aria-hidden
+          className={cn(
+            SIDE_TAB_LEADING_CLASS,
+            collapsed && "me-0",
+            "shrink-0",
+          )}
+        />
+        {collapsed ? null : (
+          <>
+            <span
+              data-testid="side-strip-new-task-label"
+              className={cn(
+                SIDE_TAB_TITLE_CLASS,
+                "min-w-0 flex-1 truncate text-left",
+              )}
+            >
+              {NEW_TASK_LABEL}
+            </span>
+            {shortcut === null ? null : (
+              <span className="shrink-0 text-ui-xs font-normal text-primary-foreground/70">
+                {shortcut}
+              </span>
+            )}
+          </>
+        )}
+      </Button>
+    </TooltipWrapper>
+  );
+}
+
+const NEW_TASK_LABEL = "New Task";
 
 /** "Tasks" and the task count, above the task rows (expanded only). */
 export function SideStripTasksLabel(props: {

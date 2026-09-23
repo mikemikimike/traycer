@@ -11,7 +11,12 @@ import { useEpicAgentActivity } from "@/stores/agent-activity-store";
 import type { SideTabLiveAgents } from "./agent-meter";
 import { sideTabAgentCounts } from "./side-tab-live-agents";
 import type { RailBadgeKind } from "./rail-badge-kind";
+import {
+  PARTIAL_ACTIVITY_NOTICE,
+  UNKNOWN_ACTIVITY_TITLE,
+} from "@/components/notifications/notification-indicator-icon";
 import { StatusGlyph } from "@/components/notifications/status-glyph";
+import { UnknownActivityGlyph } from "@/components/notifications/unknown-activity-glyph";
 import {
   STATUS_GLYPH_LABEL,
   type StatusGlyphKind,
@@ -41,6 +46,12 @@ function stateGlyphOf(
  * holds a live session for, the working agents by name. A cold epic shows the
  * counts only, never invented rows. Mounted only while the card is open, so a
  * closed row subscribes to nothing here.
+ *
+ * Under `unserved` coverage (a known machine the plane does not reach) an
+ * empty count is not idleness: the state line says the status is unknown, and
+ * a positive count carries the notice that more may be running out of view.
+ * `indeterminate` keeps the plain reading, because "nothing is answering" is
+ * the connection pill's to say, once.
  */
 export function SideTabHoverCardBody(props: {
   readonly title: string;
@@ -50,6 +61,8 @@ export function SideTabHoverCardBody(props: {
 }): ReactNode {
   const glyph = stateGlyphOf(props.badge, props.agents);
   const counts = sideTabAgentCounts(props.agents);
+  const unserved = props.agents.coverage === "unserved";
+  const unknown = unserved && glyph === null;
   return (
     <div data-testid="side-tab-hover-card-body" className="flex flex-col gap-2">
       <div className="text-ui-sm font-medium break-words text-foreground">
@@ -59,10 +72,7 @@ export function SideTabHoverCardBody(props: {
         data-testid="side-tab-hover-card-state"
         className="flex items-center gap-1.5 text-muted-foreground"
       >
-        {glyph === null ? null : (
-          <StatusGlyph kind={glyph} className="size-3.5" label={null} />
-        )}
-        <span>{glyph === null ? "Idle" : STATUS_GLYPH_LABEL[glyph]}</span>
+        <HoverCardState glyph={glyph} unknown={unknown} />
         {counts === null ? null : (
           <span
             data-testid="side-tab-hover-card-counts"
@@ -72,11 +82,46 @@ export function SideTabHoverCardBody(props: {
           </span>
         )}
       </div>
+      {unserved && !unknown ? (
+        <div
+          data-testid="side-tab-hover-card-partial"
+          className="text-muted-foreground"
+        >
+          {PARTIAL_ACTIVITY_NOTICE}
+        </div>
+      ) : null}
       {props.epicId === null || counts === null ? null : (
         <WarmAgentList epicId={props.epicId} />
       )}
     </div>
   );
+}
+
+/** The state line's glyph and words: the state, else unknown, else "Idle". */
+function HoverCardState(props: {
+  readonly glyph: StatusGlyphKind | null;
+  readonly unknown: boolean;
+}): ReactNode {
+  if (props.glyph !== null) {
+    return (
+      <>
+        <StatusGlyph kind={props.glyph} className="size-3.5" label={null} />
+        <span>{STATUS_GLYPH_LABEL[props.glyph]}</span>
+      </>
+    );
+  }
+  if (props.unknown) {
+    return (
+      <>
+        {/* The sentence wraps; the glyph must not shrink beside it. */}
+        <span className="flex shrink-0">
+          <UnknownActivityGlyph testId="side-tab-hover-card-unknown" />
+        </span>
+        <span>{UNKNOWN_ACTIVITY_TITLE}</span>
+      </>
+    );
+  }
+  return <span>Idle</span>;
 }
 
 /**

@@ -29,6 +29,10 @@ import {
   EpicSessionContext,
   handleHostIds,
 } from "@/lib/registries/epic-session-registry";
+import {
+  __resetAgentActivityStoreForTests,
+  __setHostAgentActivityHealthForTests,
+} from "@/stores/agent-activity-store";
 import type { OpenEpicStoreHandle } from "@/stores/epics/open-epic/store";
 import type { TreeNode, TreeSlice } from "@/stores/epics/open-epic/types";
 import { useAppLocalNotificationsStore } from "@/stores/notifications/app-local-notifications-store";
@@ -246,6 +250,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useAppLocalNotificationsStore.getState().resetForTests();
+  __resetAgentActivityStoreForTests();
 });
 
 describe("<StripLiveAgentsPortal />", () => {
@@ -487,5 +492,66 @@ describe("<StripLiveAgentsPortal />", () => {
     expect(screen.getByTestId("strip-live-agent-chat-a").dataset.liveKind).toBe(
       "running",
     );
+  });
+});
+
+/**
+ * Per-agent `AgentActivityCoverage` (F8): each row asks coverage of its OWN
+ * host (`selectAgentActivityCoverage`), not the tab's session host, so an
+ * agent the activity plane cannot see for its own machine lists as unknown
+ * instead of silently vanishing like an idle one does.
+ */
+describe("<StripLiveAgentsPortal /> per-agent activity coverage", () => {
+  it("lists an unserved host's idle agent as unknown, drops a covered host's and a null host's idle agents, and lets attention outrank unknown", () => {
+    setTree([
+      chatNode("chat-unserved", null, 100),
+      chatNode("chat-covered", null, 100),
+      chatNode("chat-null-host", null, 100),
+      chatNode("chat-attention", null, 100),
+    ]);
+    // `setTree` puts every node on `HOST_ID` by default; give each row the
+    // host this case is actually about.
+    testState.chatById["chat-unserved"] = {
+      hostId: "host-b",
+      userId: "user-1",
+    };
+    testState.chatById["chat-covered"] = { hostId: "host-a", userId: "user-1" };
+    // No fixture at all -> `useEpicNodeHostIds` reads it as a null host, the
+    // "registry holds a session with no host yet" case `selectAgentActivityCoverage`
+    // documents as staying `indeterminate`.
+    delete testState.chatById["chat-null-host"];
+    testState.chatById["chat-attention"] = {
+      hostId: "host-b",
+      userId: "user-1",
+    };
+    seedHostIndicator("chat-attention", { pendingApproval: true });
+
+    // Only host-a's slice answers and covers itself; the plane answers overall
+    // but excludes host-b, which is exactly the `unserved` arm.
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+      servedBy: "local",
+      cloudSyncStatus: null,
+      stateFrameSeenThisEpoch: true,
+    });
+
+    const slotEl = document.createElement("div");
+    document.body.appendChild(slotEl);
+    act(() => {
+      publishLiveAgentsSlot(TAB_ID, slotEl);
+    });
+
+    renderPortal();
+
+    const unserved = screen.getByTestId("strip-live-agent-chat-unserved");
+    expect(unserved.dataset.liveKind).toBe("unknown");
+    expect(unserved.getAttribute("aria-label")).toContain(
+      "Agent status unknown",
+    );
+    expect(screen.queryByTestId("strip-live-agent-chat-covered")).toBeNull();
+    expect(screen.queryByTestId("strip-live-agent-chat-null-host")).toBeNull();
+    expect(
+      screen.getByTestId("strip-live-agent-chat-attention").dataset.liveKind,
+    ).toBe("approval");
   });
 });

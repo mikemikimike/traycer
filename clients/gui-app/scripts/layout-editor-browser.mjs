@@ -107,7 +107,7 @@
 //       macOS fullscreen), the 40px title row where the strip owns the title
 //       bar, the frame's 6px shell gap on every edge, and the dialog
 //       overlay's top under `.wco`.
-//       Row kit - the 10px badge on a 16px leading tile, and the group line as
+//       Row kit - the 10px badge on a 20x16 leading monogram tile, and the group line as
 //       one continuous line across its members.
 //   Phase 2c (switch). A14 - a real click on Position "Left" moves the strip in
 //       one frame as one history step; one undo restores the top, with the
@@ -130,6 +130,17 @@
 //       this guards), no pseudo-element arc left on the frame or a sheet, and
 //       both width handles as the hit in their gaps; left/right x none/macOS
 //       and top, in both themes.
+//   header - `header=app` at the top (staging round 1, F4): the active tab,
+//       the split pair's focused member and both drag overlays are one 32px
+//       box on the sheets' radius, centred in the header, with ground under
+//       it and nothing of the strip below the header; a real hover draws the
+//       same box. No controls, macOS and Windows, panel on either side, in
+//       both themes.
+//   running - the glyph set's running state is AgentSpinningDots' default
+//       dots on the expanded strip and the top header (F3), in both themes:
+//       advancing under an emulated `no-preference`, one steady visible frame
+//       with an unchanged status name under `reduce`; the collapsed rail shows
+//       the same work as meter turn pips with no spinner.
 //   join - the active row and tile take the panel's fill across the gap and
 //       over the sheet's border, with ground past the concave corners; nothing
 //       joins on the far side or over a route surface; the bridge holds over
@@ -141,8 +152,25 @@
 //   overlays - the hover card, the user menu (one click, no double toggle)
 //       and the Inbox drawer (level with the sheets) open toward the content
 //       and inside the window, on both edges.
+//   coverage - with a known host the activity plane does not reach, a task
+//       with no known agent hovers as unknown (never "Idle") with no meter
+//       pips, a running task's counts carry the partial notice and the account
+//       count reads as a floor; under a fleet union, and for a one-host
+//       account on a local plane, all three read plainly (F8).
 //   activity - the live agents under the active row in the Activity view,
 //       gone on a collapse and in the Layered view.
+//   striptop - the top block (F1, F7), left/right x none/macOS x rail/expanded
+//       in both themes: the rail as one column (the lights on macOS left, expand,
+//       Inbox, All tasks, New Task, a divider, Home, the tiles, the avatar),
+//       every part centred on the rail's axis, 32px nav tiles 4px apart, the
+//       divider midway, Home and the tiles evenly spaced, no history arrows;
+//       expanded, New Task after Home in Home's box with its icon and label
+//       level with Home's; New Task filled with the primary colour in both.
+//   stripresize - F9: a real drag on the strip's handle across the snap point
+//       switches the layout (tiles or rows, the top block, the joined item,
+//       the Activity view's live agents) with the pointer still down, both
+//       ways and on both edges; the store is written once, on release; Escape
+//       mid-drag restores the starting layout and width.
 //   placement - the tab strip and the sample sidebar selected by their own
 //       space, the placement bar beside them, a pictogram writing the edge, and
 //       a real drag lighting the zones and writing the edge it is dropped on.
@@ -156,7 +184,8 @@
 // and specs/sidebar-redesign/tickets/07.
 //
 // Set LAYOUT_EDITOR_BROWSER_PHASES to a comma list of parity, canvas, sides,
-// switch, strip, sheets, join, rail, overlays, activity, placement to run only
+// switch, strip, sheets, header, running, flip, moves, join, rail, striptop, stripresize, overlays, activity, placement,
+// readings, hostmenu, accountline to run only
 // those while iterating; every selected phase runs even after one fails, and
 // the run fails if any did.
 // ---------------------------------------------------------------------------
@@ -1031,7 +1060,7 @@ const LEFT_DOCK_COLUMN_GUTTER = 12;
 /** The band floor: `max(env(titlebar-area-height, 0px), 40px)` (6.3). */
 const TITLE_BAND_HEIGHT = 40;
 /** S-35: the expanded row's leading tile and the status badge on it. */
-const SIDE_TAB_LEADING_TILE = 16;
+const SIDE_TAB_LEADING_TILE = { width: 20, height: 16 };
 const SIDE_TAB_BADGE = 10;
 /** D4 and D5: the rail tile, its monogram chip, and the badge disc on the tile. */
 const SIDE_TAB_TILE_WIDTH = 40;
@@ -1446,7 +1475,7 @@ async function checkStripHits(client, variant) {
       const strayArrows = ${String(desktop)} ? 0 : strip.querySelectorAll('[data-testid^="history-nav-"]').length;
       const named = [
         ...arrows,
-        ["new task", q('[data-testid="tab-new"]')],
+        ["new task", q('[data-testid="side-strip-new-task"]')],
         ["collapse", q('[data-testid="side-tab-strip-collapse"]')],
         ["home", q('[data-testid="tab-home"]')],
         ["row", [...strip.querySelectorAll('[data-testid="header-tab-strip-scroll"] [data-side-tab]')].find((row) => row.getAttribute("data-active") !== "true") ?? null],
@@ -1968,11 +1997,11 @@ async function checkRowKit(client) {
       `badge ${String(kit.badge.kind)} ${boxText(kit.badge.rect)} on tile ${boxText(kit.tile)}`,
     );
     if (
-      Math.abs(kit.tile.width - SIDE_TAB_LEADING_TILE) > 0.5 ||
-      Math.abs(kit.tile.height - SIDE_TAB_LEADING_TILE) > 0.5
+      Math.abs(kit.tile.width - SIDE_TAB_LEADING_TILE.width) > 0.5 ||
+      Math.abs(kit.tile.height - SIDE_TAB_LEADING_TILE.height) > 0.5
     ) {
       violations.push(
-        `the leading tile is ${kit.tile.width.toFixed(1)}x${kit.tile.height.toFixed(1)}, expected ${String(SIDE_TAB_LEADING_TILE)}px square (S-35)`,
+        `the leading tile is ${kit.tile.width.toFixed(1)}x${kit.tile.height.toFixed(1)}, expected ${String(SIDE_TAB_LEADING_TILE.width)}x${String(SIDE_TAB_LEADING_TILE.height)} (S-35, R1)`,
       );
     }
     if (
@@ -2829,6 +2858,599 @@ async function runShellPhase(title, variants, run, summary) {
   console.log(`${title} passed: ${summary}`);
 }
 
+// --- header: the top placement's tabs are boxes on the ground (staging round 1, F4) ---
+
+/**
+ * The top placement with the REAL `AppHeader` (`header=app`), on each window
+ * chrome the header has to clear and with the panel on either side.
+ */
+const HEADER_VARIANTS = [
+  {
+    label: "no controls, sidebar left",
+    query: { tabs: "top", wco: "none", sidebar: "left" },
+  },
+  {
+    label: "no controls, sidebar right",
+    query: { tabs: "top", wco: "none", sidebar: "right" },
+  },
+  {
+    label: "macOS, sidebar left",
+    query: { tabs: "top", wco: "mac", sidebar: "left" },
+  },
+  {
+    label: "Windows, sidebar right",
+    query: { tabs: "top", wco: "win", sidebar: "right" },
+  },
+];
+
+/** The tab box: 32px, centred in the 40px header, on the sheets' own radius. */
+const HEADER_TAB_BOX_HEIGHT = 32;
+
+const HEADER_PROBE = (scope) => `(() => {
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  };
+  const radii = (node) => {
+    const style = getComputedStyle(node);
+    return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
+  };
+  const pseudo = (node) => [getComputedStyle(node, "::before").content, getComputedStyle(node, "::after").content].filter((value) => value !== "none" && value !== "normal");
+  const header = document.querySelector('[data-testid="app-header"]');
+  const strip = document.querySelector('[data-testid="tab-strip"]');
+  const scope = ${scope};
+  // In the strip, the selected tab's box; in a drag overlay, which has no tab
+  // roles, the one box it draws.
+  const activeBox = scope === null ? null : scope.matches('[data-testid="header-tab-drag-overlay"]')
+    ? scope.querySelector('[data-testid="tab-chrome-box"]')
+    : scope.querySelector('[role="tab"][aria-selected="true"] [data-testid="tab-chrome-box"]');
+  const activeRoot = activeBox === null ? null : activeBox.parentElement;
+  const sheet = document.querySelector('[data-shell-sheet="content"]');
+  // Every painted part of the strip: nothing may reach below the header.
+  const below = strip === null || header === null ? [] : [...strip.querySelectorAll("*")]
+    .filter((node) => {
+      const r = node.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(node).visibility !== "hidden";
+    })
+    .map((node) => ({ node, r: node.getBoundingClientRect() }))
+    .filter(({ r }) => r.bottom > header.getBoundingClientRect().bottom + 0.5)
+    .map(({ node, r }) => (node.getAttribute("data-testid") ?? node.tagName.toLowerCase()) + "@" + r.bottom.toFixed(1));
+  return {
+    header: box(header),
+    sheet: box(sheet),
+    sheetRadius: sheet === null ? null : getComputedStyle(sheet).borderTopLeftRadius,
+    active: box(activeBox),
+    activeRadii: activeBox === null ? null : radii(activeBox),
+    activeBorder: activeBox === null ? null : getComputedStyle(activeBox).borderTopWidth,
+    activePseudo: activeRoot === null ? [] : [...pseudo(activeRoot), ...pseudo(activeBox)],
+    caps: document.querySelectorAll('[data-testid^="tab-cap"], [data-testid="tab-baseline-cover"]').length,
+    newButton: box(document.querySelector('[data-testid="tab-new"]')),
+    below,
+    // A thin line wider than a tab's colour mark is a rule across a tab: the
+    // folder-baseline language F4 retired.
+    rules: strip === null ? [] : [...strip.querySelectorAll("*")]
+      .map((node) => ({ node, r: node.getBoundingClientRect() }))
+      .filter(({ node, r }) => r.height > 0 && r.height <= 3 && r.width > 32 && getComputedStyle(node).backgroundColor !== "rgba(0, 0, 0, 0)")
+      .map(({ node, r }) => (node.getAttribute("data-testid") ?? node.tagName.toLowerCase()) + " " + r.width.toFixed(0) + "x" + r.height.toFixed(1)),
+  };
+})()`;
+
+async function runHeaderPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "header",
+    HEADER_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `header ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          ...variant.query,
+          collapsed: 0,
+          dock: "right",
+          surface: "epic",
+          header: "app",
+        },
+        label,
+      );
+      const name = `header-${variant.query.wco}-${variant.query.sidebar}`;
+      const strip = "document.querySelector('[data-testid=\"tab-strip\"]')";
+      for (const theme of ["light", "dark"]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+        );
+        await evaluate(
+          client,
+          'window.__layoutCanvasProbe.activateEpicTab("fixture-epsilon")',
+        );
+        await moveTo(client, 1, 1);
+        await settle(client, 350);
+        await saveShot(client, `${name}-${theme}`);
+        const lone = await checkHeaderTabBox(
+          client,
+          strip,
+          `${label}, ${theme}, lone tab`,
+          null,
+          violations,
+          notes,
+        );
+        // An inactive tab's hover is the same box, without the border.
+        const alpha = await rectOf(
+          client,
+          '[data-testid="tab-epic-fixture-alpha"]',
+        );
+        if (alpha === null) violations.push(`${label}: no Alpha tab`);
+        else {
+          await moveTo(client, alpha.cx, alpha.cy);
+          await settle(client, 300);
+          const hover = await evaluate(
+            client,
+            `(() => {
+              const node = document.querySelector('[data-testid="tab-epic-fixture-alpha"] [data-testid="tab-hover-box"]');
+              if (node === null) return null;
+              const r = node.getBoundingClientRect();
+              const style = getComputedStyle(node);
+              return { y: r.y, height: r.height, radius: style.borderTopLeftRadius, opacity: style.opacity };
+            })()`,
+          );
+          await saveShot(client, `${name}-${theme}-hover`);
+          await moveTo(client, 1, 1);
+          if (hover === null)
+            violations.push(`${label}, ${theme}: Alpha draws no hover box`);
+          else if (lone !== null) {
+            notes.push(
+              `${label}, ${theme}: hover box y ${hover.y.toFixed(1)} h ${hover.height.toFixed(1)} r ${hover.radius} opacity ${hover.opacity}`,
+            );
+            if (
+              Math.abs(hover.y - lone.y) > 0.5 ||
+              Math.abs(hover.height - lone.height) > 0.5 ||
+              hover.radius !== lone.radius
+            )
+              violations.push(
+                `${label}, ${theme}: the hover box (y ${hover.y.toFixed(1)}, h ${hover.height.toFixed(1)}, r ${hover.radius}) is not the active box's (y ${lone.y.toFixed(1)}, h ${lone.height.toFixed(1)}, r ${lone.radius})`,
+              );
+            if (!(Number.parseFloat(hover.opacity) > 0.9))
+              violations.push(
+                `${label}, ${theme}: the hover box is not shown under a real hover (opacity ${hover.opacity})`,
+              );
+          }
+        }
+        // The split pair's focused member is the same box.
+        await evaluate(
+          client,
+          'window.__layoutCanvasProbe.activateStripItem("fixture-split")',
+        );
+        await settle(client, 350);
+        await saveShot(client, `${name}-${theme}-split`);
+        await checkHeaderTabBox(
+          client,
+          strip,
+          `${label}, ${theme}, split pair`,
+          lone,
+          violations,
+          notes,
+        );
+      }
+      // The drag overlays wear the same box: a lone tab, then the pair.
+      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("dark")');
+      await evaluate(
+        client,
+        'window.__layoutCanvasProbe.activateEpicTab("fixture-epsilon")',
+      );
+      await settle(client, 250);
+      const reference = await checkHeaderTabBox(
+        client,
+        strip,
+        `${label}, drag reference`,
+        null,
+        [],
+        [],
+      );
+      // Each dragged while it is the active item, so its overlay draws a box.
+      for (const [what, grab, activate] of [
+        [
+          "lone tab",
+          '[data-testid="tab-epic-fixture-epsilon"]',
+          'window.__layoutCanvasProbe.activateEpicTab("fixture-epsilon")',
+        ],
+        [
+          "split pair",
+          '[data-testid="tab-epic-fixture-beta"]',
+          'window.__layoutCanvasProbe.activateStripItem("fixture-split")',
+        ],
+      ]) {
+        await evaluate(client, activate);
+        await settle(client, 250);
+        const from = await rectOf(client, grab);
+        if (from === null) {
+          violations.push(`${label}: nothing to grab for the ${what} drag`);
+          continue;
+        }
+        await headerDragHold(client, from, 48);
+        await settle(client, 200);
+        await saveShot(client, `${name}-drag-${what.replaceAll(" ", "-")}`);
+        await checkHeaderTabBox(
+          client,
+          "document.querySelector('[data-testid=\"header-tab-drag-overlay\"]')",
+          `${label}, ${what} drag overlay`,
+          reference,
+          violations,
+          notes,
+        );
+        await headerDragReturn(client, from, 48);
+        await settle(client, 300);
+      }
+      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    `${String(HEADER_VARIANTS.length)} top-placement windows in both themes - the active tab, the split pair's focused member and both drag overlays are one ${String(HEADER_TAB_BOX_HEIGHT)}px box on the sheets' radius, centred in the header, with nothing of the strip below the header and ground under every box; an inactive tab's real hover is the same box`,
+  );
+}
+
+/**
+ * The active box in `scope`, checked against the design and, with a
+ * `reference`, against another box's geometry. Returns its y, height and
+ * radius, or null when there is none.
+ */
+async function checkHeaderTabBox(
+  client,
+  scope,
+  label,
+  reference,
+  violations,
+  notes,
+) {
+  const probe = await evaluate(client, HEADER_PROBE(scope));
+  const fail = (line) => violations.push(`${label}: ${line}`);
+  if (probe.header === null || probe.sheet === null) {
+    fail(
+      `no header (${String(probe.header !== null)}) or content sheet (${String(probe.sheet !== null)})`,
+    );
+    return null;
+  }
+  if (probe.caps > 0)
+    fail(
+      `${String(probe.caps)} folder-tab cap or baseline cover(s) still drawn`,
+    );
+  if (probe.rules.length > 0)
+    fail(
+      `a thin rule runs across the strip instead of a short colour mark: ${probe.rules.join(", ")}`,
+    );
+  if (probe.below.length > 0)
+    fail(
+      `part of the tab strip reaches below the header (bottom ${probe.header.bottom.toFixed(1)}): ${probe.below.join(", ")}`,
+    );
+  if (probe.active === null) {
+    fail("no active tab box");
+    return null;
+  }
+  const active = probe.active;
+  if (probe.activePseudo.length > 0)
+    fail(
+      `the active tab draws a pseudo-element (${probe.activePseudo.join(", ")})`,
+    );
+  if (Math.abs(active.height - HEADER_TAB_BOX_HEIGHT) > 0.5)
+    fail(
+      `the box is ${active.height.toFixed(1)}px tall, not ${String(HEADER_TAB_BOX_HEIGHT)}`,
+    );
+  if (probe.activeBorder !== "1px")
+    fail(`the box's border is ${String(probe.activeBorder)}, not 1px`);
+  if (
+    new Set(probe.activeRadii).size !== 1 ||
+    probe.activeRadii[0] !== probe.sheetRadius
+  )
+    fail(
+      `the box's corners are ${probe.activeRadii.join(" ")}, not the sheets' ${String(probe.sheetRadius)} on all four`,
+    );
+  const inOverlay = scope.includes("drag-overlay");
+  if (!inOverlay) {
+    if (Math.abs(active.cy - probe.header.cy) > 0.5)
+      fail(
+        `the box is not centred in the header: its centre ${active.cy.toFixed(1)}, the header's ${probe.header.cy.toFixed(1)}`,
+      );
+    if (
+      probe.newButton !== null &&
+      Math.abs(probe.newButton.cy - probe.header.cy) > 0.5
+    )
+      fail(
+        `the new-tab button is not centred: ${probe.newButton.cy.toFixed(1)} against ${probe.header.cy.toFixed(1)}`,
+      );
+    if (active.bottom > probe.header.bottom || active.bottom > probe.sheet.y)
+      fail(
+        `the box reaches ${active.bottom.toFixed(1)}, past the header (${probe.header.bottom.toFixed(1)}) or into the sheet (${probe.sheet.y.toFixed(1)})`,
+      );
+    // Pixels: ground under the box, in the header and in the shell gap.
+    const ground = await resolveRgb(client, "var(--shell-ground)");
+    for (const [where, y] of [
+      ["between the box and the header's bottom", active.bottom + 1.5],
+      ["in the shell gap under the box", probe.header.bottom + SHELL_GAP / 2],
+    ]) {
+      const pixel = await samplePixelAt(client, active.cx, y);
+      if (!sameRgb(pixel, ground, 2))
+        fail(
+          `no ground ${where} (${active.cx.toFixed(0)}, ${y.toFixed(0)}): ${rgbText(pixel)}, ground ${rgbText(ground)}`,
+        );
+    }
+  }
+  if (
+    reference !== null &&
+    (Math.abs(active.height - reference.height) > 0.5 ||
+      probe.activeRadii[0] !== reference.radius ||
+      (!inOverlay && Math.abs(active.y - reference.y) > 0.5))
+  )
+    fail(
+      `the box (y ${active.y.toFixed(1)}, h ${active.height.toFixed(1)}, r ${probe.activeRadii[0]}) is not the lone active tab's (y ${reference.y.toFixed(1)}, h ${reference.height.toFixed(1)}, r ${reference.radius})`,
+    );
+  notes.push(
+    `${label}: box ${boxText(active)} r ${probe.activeRadii[0]} in header ${boxText(probe.header)}, sheet top ${probe.sheet.y.toFixed(1)}`,
+  );
+  return { y: active.y, height: active.height, radius: probe.activeRadii[0] };
+}
+
+/** A real press on a header tab, dragged `dx` right and held (dnd-kit needs travel). */
+async function headerDragHold(client, from, dx) {
+  await moveTo(client, from.cx, from.cy);
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: from.cx,
+    y: from.cy,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+    pointerType: "mouse",
+  });
+  for (let step = 1; step <= 16; step += 1) {
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: from.cx + (dx * step) / 16,
+      y: from.cy,
+      button: "left",
+      buttons: 1,
+      pointerType: "mouse",
+    });
+    await delay(16);
+  }
+}
+
+/** Back to where the drag began, and released there, so nothing reorders. */
+async function headerDragReturn(client, from, dx) {
+  for (let step = 15; step >= 0; step -= 1) {
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: from.cx + (dx * step) / 16,
+      y: from.cy,
+      button: "left",
+      buttons: 1,
+      pointerType: "mouse",
+    });
+    await delay(16);
+  }
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: from.cx,
+    y: from.cy,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+    pointerType: "mouse",
+  });
+  await moveTo(client, 1, 1);
+}
+
+// --- running: the glyph set's running state is the app's AgentSpinningDots (staging round 1, F3) ---
+
+/** `AgentSpinningDots`' default ("dots") frames: what a running agent shows everywhere. */
+const RUNNING_DOTS_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+/** The tasks RAIL_ACTIVITY gives a live turn (Alpha, Zeta, Epsilon). */
+const RUNNING_TURN_TASKS = Object.values(RAIL_ACTIVITY).filter(
+  (entry) => entry.turn.length > 0,
+).length;
+
+const RUNNING_VARIANTS = [
+  {
+    label: "strip left, expanded",
+    query: { tabs: "left", wco: "none", sidebar: "right", collapsed: 0 },
+    expectGlyphs: true,
+  },
+  {
+    label: "strip left, collapsed",
+    query: { tabs: "left", wco: "none", sidebar: "right", collapsed: 1 },
+    // The rail tile carries running work as meter pips (D5), not a glyph.
+    expectGlyphs: false,
+  },
+  {
+    label: "top header",
+    query: {
+      tabs: "top",
+      wco: "none",
+      sidebar: "left",
+      collapsed: 0,
+      header: "app",
+    },
+    expectGlyphs: true,
+  },
+];
+
+const RUNNING_PROBE = `(() => {
+  const scope = document.querySelector('[data-testid="side-tab-strip"]') ?? document.querySelector('[data-testid="tab-strip"]');
+  if (scope === null) return { error: "no tab strip" };
+  return {
+    error: null,
+    glyphs: [...scope.querySelectorAll('[data-status-glyph="running"]')].map((node) => {
+      const r = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        tag: node.tagName.toLowerCase(),
+        svg: node.querySelector("svg") !== null || node.tagName.toLowerCase() === "svg",
+        frame: node.textContent,
+        visible: r.width > 0 && r.height > 0 && style.visibility !== "hidden" && Number(style.opacity) > 0,
+        // What assistive tech hears for it: the indicator's status name.
+        status: node.closest('[role="status"]')?.getAttribute("aria-label") ?? null,
+      };
+    }),
+    // The collapsed rail's tiles: running work is the meter's turn pips (D5),
+    // and no spinner of any kind sits on a tile.
+    tiles: [...scope.querySelectorAll('[data-side-tab="collapsed"][data-tile-kind="monogram"]')].map((tile) => ({
+      name: (tile.querySelector('[data-testid="side-tab-monogram-chip"]')?.textContent ?? "").trim(),
+      turnPips: tile.querySelectorAll('[data-testid="side-tab-meter"] [data-pip="turn"]').length,
+      spinner: tile.querySelector('[data-status-glyph="running"], .font-mono') !== null,
+    })),
+  };
+})()`;
+
+/** Each motion preference the running phase runs under, set through CDP rather than inherited. */
+const RUNNING_MOTION = ["no-preference", "reduce"];
+
+async function emulateReducedMotion(client, value) {
+  await client.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value }],
+  });
+}
+
+async function runRunningPhase(client, pageUrl, pageLoads) {
+  try {
+    await runShellPhase(
+      "running",
+      RUNNING_VARIANTS,
+      async (variant, violations, notes) => {
+        const label = `running ${variant.label}`;
+        const loadsAtStart = await openShellVariant(
+          client,
+          pageUrl,
+          pageLoads,
+          { ...variant.query, dock: "right", surface: "epic" },
+          label,
+        );
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+        );
+        for (const motion of RUNNING_MOTION) {
+          await emulateReducedMotion(client, motion);
+          for (const theme of ["light", "dark"]) {
+            await checkRunning(
+              client,
+              variant,
+              motion,
+              theme,
+              `${label}, ${motion}, ${theme}`,
+              violations,
+              notes,
+            );
+          }
+        }
+        await emulateReducedMotion(client, "");
+        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+        await closeShellVariant(
+          client,
+          pageLoads,
+          loadsAtStart,
+          label,
+          violations,
+        );
+      },
+      "the expanded strip and the top header draw running turns as AgentSpinningDots' default dots in both themes - advancing with motion, holding one visible frame under reduced motion with the same status name - and the collapsed rail shows them as turn pips with no spinner",
+    );
+  } finally {
+    // Later phases must not inherit an emulated preference.
+    await client.send("Emulation.setEmulatedMedia", {
+      media: "",
+      features: [],
+    });
+  }
+}
+
+async function checkRunning(
+  client,
+  variant,
+  motion,
+  theme,
+  label,
+  violations,
+  notes,
+) {
+  const fail = (line) => violations.push(`${label}: ${line}`);
+  await evaluate(
+    client,
+    `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+  );
+  await settle(client, 350);
+  await saveShot(
+    client,
+    `running-${variant.query.tabs}-${variant.query.collapsed === 1 ? "collapsed" : "expanded"}-${motion}-${theme}`,
+  );
+  const probe = await evaluate(client, RUNNING_PROBE);
+  // A second read a few ticks later: with motion it must have advanced, under
+  // reduced motion it must be the same frame.
+  await delay(250);
+  const later = await evaluate(client, RUNNING_PROBE);
+  if (probe.error !== null) {
+    fail(probe.error);
+    return;
+  }
+  if (later.error !== null || later.glyphs.length !== probe.glyphs.length) {
+    fail(
+      `the second sample is missing or differs in count (${later.error ?? `${String(later.glyphs.length)} vs ${String(probe.glyphs.length)}`})`,
+    );
+    return;
+  }
+  notes.push(
+    `${label}: ${String(probe.glyphs.length)} running glyph(s) ${JSON.stringify(probe.glyphs)} -> ${JSON.stringify(later.glyphs.map((glyph) => glyph.frame))}`,
+  );
+  if (!variant.expectGlyphs) {
+    // Every task RAIL_ACTIVITY gives a turn must carry turn pips on its tile,
+    // so zero glyphs here is a claim about a drawn meter rather than about an
+    // empty rail.
+    const running = probe.tiles.filter((tile) => tile.turnPips > 0);
+    notes.push(`${label}: tiles ${JSON.stringify(probe.tiles)}`);
+    if (running.length < RUNNING_TURN_TASKS)
+      fail(
+        `${String(running.length)} tile(s) show turn pips, expected ${String(RUNNING_TURN_TASKS)} (${JSON.stringify(probe.tiles)})`,
+      );
+    for (const tile of probe.tiles.filter((entry) => entry.spinner))
+      fail(
+        `the ${tile.name} tile draws a spinner; the rail shows running work as meter pips`,
+      );
+  }
+  if (variant.expectGlyphs && probe.glyphs.length === 0)
+    fail("no running glyph on a strip whose tabs have running turns");
+  probe.glyphs.forEach((glyph, index) => {
+    const next = later.glyphs[index];
+    if (
+      glyph.svg ||
+      glyph.frame.length !== 1 ||
+      !RUNNING_DOTS_FRAMES.includes(glyph.frame)
+    )
+      fail(
+        `a running glyph is not AgentSpinningDots' default dots (${JSON.stringify(glyph)})`,
+      );
+    if (!glyph.visible || !next.visible)
+      fail(`a running glyph is not visible (${JSON.stringify(glyph)})`);
+    if (glyph.status === null || next.status !== glyph.status)
+      fail(
+        `a running glyph's status name is missing or changed (${String(glyph.status)} -> ${String(next.status)})`,
+      );
+  });
+  const frames = (read) => read.glyphs.map((glyph) => glyph.frame).join("");
+  if (probe.glyphs.length === 0) return;
+  if (motion === "no-preference" && frames(later) === frames(probe))
+    fail(`the running dots did not advance in 250ms (${frames(probe)})`);
+  if (motion === "reduce" && frames(later) !== frames(probe))
+    fail(
+      `the running dots moved under reduced motion (${frames(probe)} -> ${frames(later)})`,
+    );
+}
+
 // --- sheets: the ground, four drawn corners, no pseudo arc, the handles in the gaps ---
 
 const SHEET_VARIANTS = [
@@ -2924,6 +3546,389 @@ async function runSheetsPhase(client, pageUrl, pageLoads) {
       );
     },
     `${String(SHEET_VARIANTS.length)} windows in both themes - the 6px ground on every side and between the sheets, every sheet's four corners drawn alike, no pseudo-element arc on the frame or a sheet, and the width handles as the hit in both gaps`,
+  );
+}
+
+// --- flip: the panel and the content stay two sheets across a live side change ---
+
+/**
+ * Staging round 1, F2: moving the panel to the other side left the chat
+ * drawn over the panel. A chat body is not inside the content sheet: the
+ * `StableTileSurfaceHost` plane paints it at the rect its slot reports, and
+ * the geometry coordinator only re-reads that rect on a SIZE change. A side
+ * flip moves the content sheet without resizing it, so the body stayed at the
+ * old x. Every tab placement, from each starting side (the load is what a
+ * reload restores), then a live flip and a live flip back.
+ */
+const FLIP_VARIANTS = [
+  { label: "tabs left, panel left", query: { tabs: "left", sidebar: "left" } },
+  {
+    label: "tabs left, panel right",
+    query: { tabs: "left", sidebar: "right" },
+  },
+  {
+    label: "tabs right, panel left",
+    query: { tabs: "right", sidebar: "left" },
+  },
+  {
+    label: "tabs right, panel right",
+    query: { tabs: "right", sidebar: "right" },
+  },
+  { label: "tabs top, panel left", query: { tabs: "top", sidebar: "left" } },
+  { label: "tabs top, panel right", query: { tabs: "top", sidebar: "right" } },
+];
+
+const FLIP_PROBE = `(() => {
+  const box = (node) => {
+    if (node === null || node === undefined) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom };
+  };
+  const q = (selector) => document.querySelector(selector);
+  // A collapsed panel stays mounted and hidden beside the rail sheet: the panel sheet on screen counts.
+  const panels = [...document.querySelectorAll('[data-shell-sheet="panel"]')];
+  return {
+    panel: box(panels.find((node) => node.getBoundingClientRect().width > 0)),
+    content: box(q('[data-shell-sheet="content"]')),
+    slot: box(q('[data-testid="tile-surface-slot"]')),
+    body: box(q("[data-fixture-hosted-body]")),
+    stripHandle: box(q('[data-testid="side-tab-strip-resize-handle"]')),
+    placement: q("[data-tab-strip-placement]")?.getAttribute("data-tab-strip-placement") ?? null,
+    strip: (() => {
+      const strip = q('[data-testid="side-tab-strip"]');
+      if (strip === null) return null;
+      return { edge: strip.getAttribute("data-edge"), collapsed: strip.getAttribute("data-collapsed"), rect: box(strip) };
+    })(),
+    rail: box(q("[data-fixture-collapsed-rail]")),
+    panelWidth: q("[data-fixture-panel]")?.getBoundingClientRect().width ?? null,
+  };
+})()`;
+
+async function runFlipPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "flip",
+    FLIP_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `flip ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          ...variant.query,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+        },
+        label,
+      );
+      const from = variant.query.sidebar;
+      const to = from === "left" ? "right" : "left";
+      await checkFlip(client, from, `${label}, on load`, violations, notes);
+      await saveShot(client, `flip-${variant.query.tabs}-${from}-load`);
+      for (const [side, step] of [
+        [to, "live flip"],
+        [from, "live flip back"],
+      ]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setSidebarSide(${JSON.stringify(side)})`,
+        );
+        await settle(client, 250);
+        await checkFlip(client, side, `${label}, ${step}`, violations, notes);
+        await saveShot(
+          client,
+          `flip-${variant.query.tabs}-${from}-${step.replaceAll(" ", "-")}`,
+        );
+      }
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    `${String(FLIP_VARIANTS.length)} windows - on load, after a live side flip and after flipping back, the panel sits on its side with the ${String(SHELL_GAP)}px ground beside the content sheet, and the hosted chat body fills its slot inside the content sheet without touching the panel`,
+  );
+}
+
+async function checkFlip(client, side, label, violations, notes) {
+  const { panel, content, slot, body } = await evaluate(client, FLIP_PROBE);
+  const fail = (line) => violations.push(`${label}: ${line}`);
+  if (panel === null || content === null || slot === null || body === null) {
+    fail(
+      `a box is missing: panel ${String(panel !== null)}, content ${String(content !== null)}, slot ${String(slot !== null)}, hosted body ${String(body !== null)}`,
+    );
+    return;
+  }
+  const gap =
+    side === "left" ? content.x - panel.right : panel.x - content.right;
+  if (Math.abs(gap - SHELL_GAP) > 0.5)
+    fail(
+      `the panel is not on the ${side} with the ${String(SHELL_GAP)}px ground beside the content: gap ${gap.toFixed(1)}px (panel ${boxText(panel)}, content ${boxText(content)})`,
+    );
+  if (!sameBoxWithin(body, slot, 1))
+    fail(
+      `the hosted chat body is not on its slot: body ${boxText(body)}, slot ${boxText(slot)}`,
+    );
+  const overlapX =
+    Math.min(body.right, panel.right) - Math.max(body.x, panel.x);
+  const overlapY =
+    Math.min(body.bottom, panel.bottom) - Math.max(body.y, panel.y);
+  if (overlapX > 0 && overlapY > 0)
+    fail(
+      `the hosted chat body overlays the panel by ${overlapX.toFixed(0)}x${overlapY.toFixed(0)}px (body ${boxText(body)}, panel ${boxText(panel)})`,
+    );
+  if (
+    body.x < content.x - 1 ||
+    body.right > content.right + 1 ||
+    body.y < content.y - 1 ||
+    body.bottom > content.bottom + 1
+  )
+    fail(
+      `the hosted chat body leaves the content sheet: body ${boxText(body)}, content ${boxText(content)}`,
+    );
+  notes.push(
+    `${label}: panel ${boxText(panel)}, content ${boxText(content)}, body ${boxText(body)}`,
+  );
+}
+
+// --- moves: every other layout change that moves or resizes the chat's slot ---
+
+/**
+ * The sibling sweep of F2: every other live change that moves the content
+ * sheet, with the hosted chat open. A strip side switch shifts the whole
+ * surface by the strip's width, with the content keeping its width; top and
+ * side trade the header for the strip; the strip's collapse and width drag and
+ * the panel's collapse to its rail resize the content. After each, the same
+ * assertions as the flip.
+ */
+const MOVE_VARIANTS = [
+  { label: "panel left", sidebar: "left" },
+  { label: "panel right", sidebar: "right" },
+];
+
+/** How far the moves phase drags the strip's width handle, and the slack on the width it lands at. */
+const STRIP_DRAG_PX = 60;
+const STRIP_DRAG_SLACK = 2;
+
+/** The content sheet widened (or narrowed) by what the column beside it gave up (or took). */
+function contentAbsorbed(columnBefore, columnAfter, before, after, what) {
+  const given = columnBefore - columnAfter;
+  const grown = after.content.width - before.content.width;
+  if (Math.abs(given) <= 1)
+    return [
+      `${what} did not change width (${columnBefore.toFixed(1)} -> ${columnAfter.toFixed(1)}px)`,
+    ];
+  if (Math.abs(grown - given) > 1)
+    return [
+      `the content sheet changed width by ${grown.toFixed(1)}px, not the ${given.toFixed(1)}px ${what} gave up`,
+    ];
+  return [];
+}
+
+function movedTabsTo(edge, before, after) {
+  const problems = [];
+  if (after.placement !== edge)
+    problems.push(
+      `the column's placement is ${String(after.placement)}, expected ${edge}`,
+    );
+  if (edge === "top" && after.strip !== null)
+    problems.push(
+      `a side strip is still drawn on the ${String(after.strip.edge)}`,
+    );
+  if (edge !== "top" && after.strip?.edge !== edge)
+    problems.push(
+      `the strip is on ${String(after.strip?.edge ?? "no edge")}, expected ${edge}`,
+    );
+  if (sameBoxWithin(before.content, after.content, 0.5))
+    problems.push(
+      `the content sheet did not move or resize (${boxText(after.content)})`,
+    );
+  return problems;
+}
+
+function stripCollapsedTo(collapsed, before, after) {
+  if (before.strip === null || after.strip === null)
+    return ["no side strip to collapse"];
+  const problems = [];
+  if (after.strip.collapsed !== String(collapsed))
+    problems.push(
+      `the strip's data-collapsed is ${String(after.strip.collapsed)}, expected ${String(collapsed)}`,
+    );
+  if (
+    collapsed &&
+    Math.abs(after.strip.rect.width - SIDE_STRIP_RAIL_WIDTH) > 0.5
+  )
+    problems.push(
+      `the collapsed strip is ${after.strip.rect.width.toFixed(1)}px, not the ${String(SIDE_STRIP_RAIL_WIDTH)}px rail`,
+    );
+  return [
+    ...problems,
+    ...contentAbsorbed(
+      before.strip.rect.width,
+      after.strip.rect.width,
+      before,
+      after,
+      "the strip",
+    ),
+  ];
+}
+
+function stripDraggedWider(before, after) {
+  if (
+    before.strip === null ||
+    after.strip === null ||
+    before.stripHandle === null
+  )
+    return ["no side strip or width handle to drag"];
+  const widened = after.strip.rect.width - before.strip.rect.width;
+  const problems = [];
+  if (Math.abs(widened - STRIP_DRAG_PX) > STRIP_DRAG_SLACK)
+    problems.push(
+      `the strip widened ${widened.toFixed(1)}px for a ${String(STRIP_DRAG_PX)}px drag`,
+    );
+  return [
+    ...problems,
+    ...contentAbsorbed(
+      before.strip.rect.width,
+      after.strip.rect.width,
+      before,
+      after,
+      "the strip",
+    ),
+  ];
+}
+
+function panelCollapsedTo(collapsed, before, after) {
+  if (before.panel === null || after.panel === null)
+    return ["no panel sheet on screen"];
+  const problems = [];
+  if (
+    collapsed &&
+    (after.rail === null ||
+      Math.abs(after.rail.width - SIDE_STRIP_RAIL_WIDTH) > 0.5)
+  )
+    problems.push(
+      `no ${String(SIDE_STRIP_RAIL_WIDTH)}px rail sheet (${after.rail === null ? "none" : boxText(after.rail)})`,
+    );
+  if (collapsed && after.panelWidth !== 0)
+    problems.push(`the panel is still ${String(after.panelWidth)}px wide`);
+  if (!collapsed && after.rail !== null)
+    problems.push(`the rail sheet is still drawn at ${boxText(after.rail)}`);
+  if (!collapsed && (after.panelWidth ?? 0) <= SIDE_STRIP_RAIL_WIDTH)
+    problems.push(
+      `the panel is ${String(after.panelWidth)}px wide, not expanded`,
+    );
+  return [
+    ...problems,
+    ...contentAbsorbed(
+      before.panel.width,
+      after.panel.width,
+      before,
+      after,
+      "the panel column",
+    ),
+  ];
+}
+
+async function runMovesPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "moves",
+    MOVE_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `moves ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: "left",
+          sidebar: variant.sidebar,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+        },
+        label,
+      );
+      // Each step first proves it happened - the destination is on screen and
+      // the content sheet's box changed the way that move changes it - so a
+      // move that silently did nothing cannot pass on the unchanged geometry.
+      const step = async (name, act, expect) => {
+        const before = await evaluate(client, FLIP_PROBE);
+        await act();
+        await settle(client, 300);
+        const after = await evaluate(client, FLIP_PROBE);
+        for (const problem of expect(before, after))
+          violations.push(`${label}, ${name}: ${problem}`);
+        await checkFlip(
+          client,
+          variant.sidebar,
+          `${label}, ${name}`,
+          violations,
+          notes,
+        );
+      };
+      const call = (expression) => () =>
+        evaluate(client, `window.__layoutCanvasProbe.${expression}`);
+      for (const [from, to] of [
+        ["left", "right"],
+        ["right", "left"],
+        ["left", "top"],
+        ["top", "right"],
+        ["right", "top"],
+        ["top", "left"],
+      ]) {
+        await step(
+          `tabs ${from} to ${to}`,
+          call(`setTabPlacement(${JSON.stringify(to)})`),
+          (before, after) => movedTabsTo(to, before, after),
+        );
+      }
+      await step("strip collapsed", call("setCollapsed(true)"), (b, a) =>
+        stripCollapsedTo(true, b, a),
+      );
+      await step("strip expanded", call("setCollapsed(false)"), (b, a) =>
+        stripCollapsedTo(false, b, a),
+      );
+      await step(
+        `strip dragged ${String(STRIP_DRAG_PX)}px wider`,
+        async () => {
+          const { stripHandle } = await evaluate(client, FLIP_PROBE);
+          if (stripHandle === null) return;
+          const from = {
+            x: stripHandle.x + stripHandle.width / 2,
+            y: stripHandle.y + stripHandle.height / 2,
+          };
+          const to = { x: from.x + STRIP_DRAG_PX, y: from.y };
+          await pressAt(client, from.x, from.y);
+          await moveInSteps(client, from, to);
+          await releaseAt(client, to.x, to.y);
+        },
+        stripDraggedWider,
+      );
+      await step(
+        "panel collapsed to its rail",
+        call("setPanelCollapsed(true)"),
+        (b, a) => panelCollapsedTo(true, b, a),
+      );
+      await saveShot(client, `moves-${variant.sidebar}-panel-collapsed`);
+      await step("panel expanded", call("setPanelCollapsed(false)"), (b, a) =>
+        panelCollapsedTo(false, b, a),
+      );
+      await saveShot(client, `moves-${variant.sidebar}-end`);
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "on both panel sides, after a strip side switch each way, top to each side and back, a strip collapse and expand, a strip width drag, and the panel collapsing to its rail and back, the hosted chat body stays on its slot inside the content sheet with the ground beside the panel",
   );
 }
 
@@ -3600,6 +4605,640 @@ async function checkPulseUnclipped(client, variant, fail, say) {
   }
 }
 
+// --- the strip's top block (F1, F7): the order, the rail's axis and rhythm, New Task ---
+
+const STRIP_TOP_VARIANTS = ["left", "right"].flatMap((tabs) =>
+  ["none", "mac"].flatMap((wco) =>
+    [1, 0].map((collapsed) => ({
+      label: `${tabs}, ${wco === "mac" ? "macOS" : "browser"}, ${collapsed === 1 ? "rail" : "expanded"}`,
+      shot: `top-${tabs}-${wco}-${collapsed === 1 ? "rail" : "expanded"}`,
+      // The panel on the strip's side, so the active tile joins it (D3).
+      query: { tabs, wco, collapsed, sidebar: tabs },
+    })),
+  ),
+);
+
+/** The collapsed nav tiles (expand, Inbox, All tasks, New Task, the avatar): 32px squares. */
+const STRIP_NAV_TILE = 32;
+
+const STRIP_TOP_PROBE = `(() => {
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  const strip = document.querySelector('[data-testid="side-tab-strip"]');
+  const q = (selector) => strip.querySelector(selector);
+  const primary = document.createElement("span");
+  primary.style.background = "var(--primary)";
+  document.body.append(primary);
+  const primaryFill = getComputedStyle(primary).backgroundColor;
+  primary.remove();
+  const newTask = q('[data-testid="side-strip-new-task"]');
+  const homeRow = q('[data-testid="tab-home"]');
+  const tiles = [...strip.querySelectorAll('[data-testid="header-tab-strip-scroll"] [data-side-tab="collapsed"]')].map((tile) => ({
+    text: (tile.querySelector('[data-testid="side-tab-monogram-chip"]')?.textContent ?? "").trim(),
+    joined: tile.hasAttribute("data-side-tab-joined"),
+    rect: box(tile),
+    chip: box(tile.querySelector('[data-testid="side-tab-monogram-chip"]')),
+    meter: box(tile.querySelector('[data-testid="side-tab-meter"]')),
+    badge: box(tile.querySelector('[data-testid="side-tab-rail-badge"]')),
+  }));
+  return {
+    strip: box(strip),
+    titleRow: box(q('[data-testid="side-strip-title-row"]')),
+    toggle: box(q('[data-testid="side-tab-strip-collapse"]')),
+    inbox: box(q('[data-testid="side-strip-inbox"]')),
+    allTasks: box(q('[data-testid="side-strip-all-tasks"]')),
+    newTask: box(newTask),
+    newTaskInTitleRow: newTask !== null && newTask.closest('[data-testid="side-strip-title-row"]') !== null,
+    newTaskFill: newTask === null ? null : getComputedStyle(newTask).backgroundColor,
+    newTaskText: newTask === null ? null : newTask.textContent.trim(),
+    newTaskIcon: box(newTask?.querySelector("svg") ?? null),
+    newTaskLabel: box(q('[data-testid="side-strip-new-task-label"]')),
+    primaryFill,
+    divider: box(q('[data-testid="side-strip-rail-divider"]')),
+    home: box(homeRow),
+    homeIcon: box(homeRow?.querySelector("svg") ?? null),
+    homeTitle: box(homeRow?.querySelector('[data-testid="side-tab-title"]') ?? null),
+    tasksLabel: box(q('[data-testid="side-strip-tasks-label"]')),
+    // The list's own items - a tile, a split pair, a group header - as the
+    // rhythm's units: a pair's members are spaced by its seam, not the gap.
+    items: [...(q('[data-testid="header-tab-strip-scroll"]')?.children ?? [])]
+      .map((node) => box(node))
+      .filter((rect) => rect.height > 0),
+    arrows: strip.querySelectorAll('[data-testid^="history-nav-"]').length,
+    inboxIcon: box(q('[data-testid="side-strip-inbox"] svg')),
+    inboxMark: box(q('[data-testid="side-strip-inbox-needs-you-badge"]') ?? q('[data-testid="side-strip-inbox-unknown-indicator"]')),
+    inboxUnknown: box(q('[data-testid="side-strip-inbox-unknown-indicator"]')),
+    inboxUnread: box(q('[data-testid="side-strip-inbox-unread-count"]') ?? q('[data-testid="side-strip-inbox-needs-you-count"]')),
+    rows: [...strip.querySelectorAll('[data-side-tab="expanded"]')].map((row) => {
+      const tile = row.querySelector('[data-testid="side-tab-leading-tile"]');
+      const letters = tile?.querySelector("span[aria-hidden]")?.firstChild ?? null;
+      let text = null;
+      if (letters !== null && letters.nodeType === Node.TEXT_NODE) {
+        const range = document.createRange();
+        range.selectNodeContents(letters);
+        text = box(range);
+      }
+      return {
+        title: (row.querySelector('[data-testid="side-tab-title"]')?.textContent ?? "").trim(),
+        titleRect: box(row.querySelector('[data-testid="side-tab-title"]')),
+        meter: box(row.querySelector('[data-testid="side-tab-meter"]')),
+        tile: box(tile),
+        text,
+      };
+    }),
+    avatar: box(q('[data-testid="user-menu-trigger"]')),
+    tiles,
+  };
+})()`;
+
+async function runStripTopPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "striptop",
+    STRIP_TOP_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `striptop ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        { ...variant.query, dock: "right", surface: "epic", account: 1 },
+        label,
+      );
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setIndicators(${JSON.stringify(RAIL_INDICATORS)}, {})`,
+      );
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      for (const theme of ["light", "dark"]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+        );
+        await settle(client, 600);
+        const fail = (line) => violations.push(`${label}, ${theme}: ${line}`);
+        const probe = await evaluate(client, STRIP_TOP_PROBE);
+        if (variant.query.collapsed === 1) {
+          checkRailColumn(probe, variant, fail);
+          await checkRailDividerDrawn(client, probe.divider, fail);
+        } else checkExpandedTop(probe, fail);
+        checkNewTaskPrimary(probe, fail);
+        await saveStripShot(client, probe.strip, `${variant.shot}-${theme}`);
+        if (theme === "dark")
+          notes.push(`${label}: ${describeStripTop(probe)}`);
+      }
+      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    `${String(STRIP_TOP_VARIANTS.length)} windows in both themes - the rail as one centred column (expand, Inbox, All tasks, New Task, a divider, Home, the tiles, the avatar) with an even rhythm and no history arrows, and the expanded New Task as a primary row after Home, aligned with it`,
+  );
+}
+
+/** The strip and 48px of what it joins, at 2x, so a shot shows the rail's detail. */
+async function saveStripShot(client, strip, name) {
+  if (SHOTS_DIR === null) return;
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: false,
+    clip: {
+      x: Math.max(0, strip.x - 48),
+      y: strip.y,
+      width: strip.width + 96,
+      height: strip.height,
+      scale: 2,
+    },
+  });
+  await mkdir(SHOTS_DIR, { recursive: true });
+  await writeFile(
+    path.join(SHOTS_DIR, `${name}.png`),
+    Buffer.from(shot.data, "base64"),
+  );
+}
+
+function describeStripTop(probe) {
+  const y = (name, rect) =>
+    rect === null ? `${name} -` : `${name} ${rect.y.toFixed(0)}`;
+  return [
+    y("toggle", probe.toggle),
+    y("inbox", probe.inbox),
+    y("all", probe.allTasks),
+    y("new", probe.newTask),
+    y("divider", probe.divider),
+    y("home", probe.home),
+    `tiles ${probe.tiles.map((tile) => tile.rect.y.toFixed(0)).join("/")}`,
+    y("avatar", probe.avatar),
+  ].join(", ");
+}
+
+function checkNewTaskPrimary(probe, fail) {
+  if (probe.newTask === null) {
+    fail("no New Task button (side-strip-new-task)");
+    return;
+  }
+  if (probe.newTaskInTitleRow)
+    fail("New Task sits in the title row, not after the nav rows (F7)");
+  if (probe.newTaskFill !== probe.primaryFill)
+    fail(
+      `New Task fills ${String(probe.newTaskFill)}, not the primary ${probe.primaryFill} (F7)`,
+    );
+}
+
+/**
+ * F1: one column, top to bottom - the title row (macOS left), expand, Inbox,
+ * All tasks, New Task, the divider, Home, the tiles, the avatar - every part
+ * centred on the rail's axis, the nav tiles 4px apart, the divider midway
+ * between New Task and Home, and Home spaced from the first tile as the tiles
+ * are from each other.
+ */
+function checkRailColumn(probe, variant, fail) {
+  if (probe.arrows > 0)
+    fail(
+      `${String(probe.arrows)} history arrow(s) in the rail; collapsed drops them`,
+    );
+  const ownsTitleBar =
+    variant.query.tabs === "left" && variant.query.wco === "mac";
+  const column = [
+    ...(ownsTitleBar ? [["title row", probe.titleRow]] : []),
+    ["expand", probe.toggle],
+    ["inbox", probe.inbox],
+    ["all tasks", probe.allTasks],
+    ["new task", probe.newTask],
+    ["divider", probe.divider],
+    ["home", probe.home],
+    ...probe.tiles.map((tile) => [`tile ${tile.text}`, tile.rect]),
+    ["avatar", probe.avatar],
+  ];
+  for (const [name, rect] of column)
+    if (rect === null) fail(`no ${name} in the rail`);
+  const present = column.filter(([, rect]) => rect !== null);
+  for (let index = 1; index < present.length; index += 1) {
+    const [aboveName, above] = present[index - 1];
+    const [name, rect] = present[index];
+    if (rect.y < above.y + above.height - 0.5)
+      fail(
+        `${name} (top ${rect.y.toFixed(1)}) is not below ${aboveName} (bottom ${(above.y + above.height).toFixed(1)})`,
+      );
+  }
+  const axis = probe.strip.x + probe.strip.width / 2;
+  const centred = [
+    ["expand", probe.toggle],
+    ["inbox", probe.inbox],
+    ["all tasks", probe.allTasks],
+    ["new task", probe.newTask],
+    ["divider", probe.divider],
+    ["home", probe.home],
+    ["avatar", probe.avatar],
+    ...probe.tiles.flatMap((tile) => [
+      [`${tile.text} chip`, tile.chip],
+      [`${tile.text} meter`, tile.meter],
+    ]),
+  ];
+  for (const [name, rect] of centred) {
+    if (rect === null) continue;
+    const centre = rect.x + rect.width / 2;
+    if (Math.abs(centre - axis) > 0.5)
+      fail(
+        `${name} is centred at x=${centre.toFixed(1)}, off the rail's axis x=${axis.toFixed(1)}`,
+      );
+  }
+  for (const [name, rect] of [
+    ["expand", probe.toggle],
+    ["inbox", probe.inbox],
+    ["all tasks", probe.allTasks],
+    ["new task", probe.newTask],
+    ["avatar", probe.avatar],
+  ]) {
+    if (rect === null) continue;
+    if (
+      Math.abs(rect.width - STRIP_NAV_TILE) > 0.5 ||
+      Math.abs(rect.height - STRIP_NAV_TILE) > 0.5
+    )
+      fail(
+        `${name} is ${boxText(rect)}, not a ${String(STRIP_NAV_TILE)}px tile`,
+      );
+  }
+  // The Inbox tile's mark sits on its glyph's top-right corner as a task
+  // badge sits on its chip: centred 1px out from that corner.
+  if (probe.inboxIcon !== null && probe.inboxMark !== null) {
+    const cx = probe.inboxMark.x + probe.inboxMark.width / 2;
+    const expectedX = probe.inboxIcon.x + probe.inboxIcon.width + 1;
+    const cy = probe.inboxMark.y + probe.inboxMark.height / 2;
+    const expectedY = probe.inboxIcon.y - 1;
+    if (Math.abs(cx - expectedX) > 0.75 || Math.abs(cy - expectedY) > 0.75)
+      fail(
+        `the Inbox mark ${boxText(probe.inboxMark)} is centred at (${cx.toFixed(1)}, ${cy.toFixed(1)}), not on the glyph's corner (${expectedX.toFixed(1)}, ${expectedY.toFixed(1)})`,
+      );
+  }
+  const gap = (above, below) =>
+    above === null || below === null
+      ? null
+      : below.y - (above.y + above.height);
+  const navGaps = [
+    gap(probe.toggle, probe.inbox),
+    gap(probe.inbox, probe.allTasks),
+    gap(probe.allTasks, probe.newTask),
+  ].filter((value) => value !== null);
+  if (navGaps.some((value) => Math.abs(value - navGaps[0]) > 0.5))
+    fail(
+      `the nav tiles are ${navGaps.map((value) => value.toFixed(1)).join("/")}px apart, not evenly`,
+    );
+  const aboveDivider = gap(probe.newTask, probe.divider);
+  const belowDivider = gap(probe.divider, probe.home);
+  if (
+    aboveDivider !== null &&
+    belowDivider !== null &&
+    Math.abs(aboveDivider - belowDivider) > 0.5
+  )
+    fail(
+      `the divider is ${aboveDivider.toFixed(1)}px below New Task and ${belowDivider.toFixed(1)}px above Home, not midway`,
+    );
+  const rhythm = [probe.home, ...probe.items].filter((rect) => rect !== null);
+  const itemGaps = rhythm
+    .slice(1)
+    .map((rect, index) => gap(rhythm[index], rect));
+  if (itemGaps.some((value) => Math.abs(value - itemGaps[0]) > 0.5))
+    fail(
+      `Home and the list's items are ${itemGaps.map((value) => value.toFixed(1)).join("/")}px apart, not evenly`,
+    );
+  for (const tile of probe.tiles) {
+    if (tile.badge === null || tile.chip === null) continue;
+    const t = tile.joined
+      ? { ...tile.rect, x: tile.chip.x + tile.chip.width / 2 - 20, width: 40 }
+      : tile.rect;
+    if (
+      tile.badge.x + tile.badge.width > t.x + t.width + 0.5 ||
+      tile.badge.y < t.y - 1.5
+    )
+      fail(
+        `the ${tile.text} badge ${boxText(tile.badge)} spills past its tile ${boxText(t)}`,
+      );
+  }
+}
+
+/** The divider's line against the ground 4px above it: a hairline that reads, in both themes. */
+async function checkRailDividerDrawn(client, divider, fail) {
+  if (divider === null) return;
+  const x = Math.round(divider.x + divider.width / 2);
+  const y = Math.round(divider.y);
+  const pixels = await regionPixels(client, x, y - 4, 1, 5);
+  const ground = pixels.slice(0, 3);
+  const line = pixels.slice(12, 15);
+  const ratio = contrastRatio(ground, line);
+  if (ratio < RAIL_DIVIDER_CONTRAST_FLOOR)
+    fail(
+      `the divider ${rgbText(line)} on the ground ${rgbText(ground)} is ${ratio.toFixed(2)}:1, under ${String(RAIL_DIVIDER_CONTRAST_FLOOR)}:1, so it does not read`,
+    );
+}
+
+/** Two monogram letters keep at least this much of their tile on each side. */
+const MONOGRAM_SIDE_CLEARANCE = 2.5;
+
+/** A hairline has to stand off the ground by at least this much to be seen. */
+const RAIL_DIVIDER_CONTRAST_FLOOR = 1.15;
+
+/** F7 expanded: Inbox, All tasks, Home, then New Task, level with Home's icon and title. */
+function checkExpandedTop(probe, fail) {
+  const column = [
+    ["inbox", probe.inbox],
+    ["all tasks", probe.allTasks],
+    ["home", probe.home],
+    ["new task", probe.newTask],
+    ["tasks label", probe.tasksLabel],
+  ];
+  for (const [name, rect] of column)
+    if (rect === null) fail(`no ${name} in the top block`);
+  const present = column.filter(([, rect]) => rect !== null);
+  for (let index = 1; index < present.length; index += 1) {
+    const [aboveName, above] = present[index - 1];
+    const [name, rect] = present[index];
+    if (rect.y < above.y + above.height - 0.5)
+      fail(`${name} is not below ${aboveName}`);
+  }
+  if (probe.newTask === null || probe.home === null) return;
+  if (
+    Math.abs(probe.newTask.x - probe.home.x) > 0.5 ||
+    Math.abs(probe.newTask.width - probe.home.width) > 0.5 ||
+    Math.abs(probe.newTask.height - probe.home.height) > 0.5
+  )
+    fail(
+      `New Task ${boxText(probe.newTask)} is not the Home row's box ${boxText(probe.home)}`,
+    );
+  if (
+    probe.newTaskIcon !== null &&
+    probe.homeIcon !== null &&
+    Math.abs(probe.newTaskIcon.x - probe.homeIcon.x) > 0.5
+  )
+    fail(
+      `New Task's icon is at x=${probe.newTaskIcon.x.toFixed(1)}, Home's at x=${probe.homeIcon.x.toFixed(1)}`,
+    );
+  if (
+    probe.newTaskLabel !== null &&
+    probe.homeTitle !== null &&
+    Math.abs(probe.newTaskLabel.x - probe.homeTitle.x) > 0.5
+  )
+    fail(
+      `New Task's label is at x=${probe.newTaskLabel.x.toFixed(1)}, Home's title at x=${probe.homeTitle.x.toFixed(1)}`,
+    );
+  if (probe.newTaskText !== null && !probe.newTaskText.startsWith("New Task"))
+    fail(`the button reads "${probe.newTaskText}", not "New Task"`);
+  const middle = (rect) => rect.y + rect.height / 2;
+  if (
+    probe.inboxUnknown !== null &&
+    probe.inboxUnread !== null &&
+    Math.abs(middle(probe.inboxUnknown) - middle(probe.inboxUnread)) > 0.5
+  )
+    fail(
+      `the Inbox's unavailable dot is centred at y=${middle(probe.inboxUnknown).toFixed(1)}, its count at y=${middle(probe.inboxUnread).toFixed(1)}`,
+    );
+  for (const row of probe.rows) {
+    if (row.meter !== null && row.titleRect !== null) {
+      if (Math.abs(middle(row.meter) - middle(row.titleRect)) > 0.5)
+        fail(
+          `"${row.title}": the meter is centred at y=${middle(row.meter).toFixed(1)}, the title at y=${middle(row.titleRect).toFixed(1)}`,
+        );
+    }
+    if (row.tile !== null && row.text !== null) {
+      const left = row.text.x - row.tile.x;
+      const right = row.tile.x + row.tile.width - (row.text.x + row.text.width);
+      if (left < MONOGRAM_SIDE_CLEARANCE || right < MONOGRAM_SIDE_CLEARANCE)
+        fail(
+          `"${row.title}": the monogram's letters stand ${left.toFixed(1)}px/${right.toFixed(1)}px from its tile's edges, under ${String(MONOGRAM_SIDE_CLEARANCE)}px`,
+        );
+    }
+  }
+}
+
+// --- F9: a handle drag across the snap point switches the layout live ---
+
+/** `SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX`: the midpoint of the 192px minimum and the rail. */
+const SIDE_STRIP_SNAP_BELOW = (192 + SIDE_STRIP_RAIL_WIDTH) / 2;
+const SIDE_STRIP_PERSIST_KEY = "traycer-gui-app:side-tab-strip";
+
+const STRIP_RESIZE_PROBE = `(() => {
+  const strip = document.querySelector('[data-testid="side-tab-strip"]');
+  const handle = strip.querySelector('[data-testid="side-tab-strip-resize-handle"]');
+  const r = strip.getBoundingClientRect();
+  const h = handle.getBoundingClientRect();
+  const joined = strip.querySelector("[data-side-tab-joined]");
+  let persisted = null;
+  try {
+    persisted = JSON.parse(localStorage.getItem(${JSON.stringify(SIDE_STRIP_PERSIST_KEY)}) ?? "null")?.state ?? null;
+  } catch {
+    persisted = null;
+  }
+  return {
+    width: r.width,
+    handle: { x: h.x + h.width / 2, y: h.y + h.height / 2 },
+    collapsed: strip.getAttribute("data-collapsed"),
+    tiles: strip.querySelectorAll('[data-side-tab="collapsed"]').length,
+    rows: strip.querySelectorAll('[data-side-tab="expanded"]').length,
+    divider: strip.querySelector('[data-testid="side-strip-rail-divider"]') !== null,
+    newTaskLabel: strip.querySelector('[data-testid="side-strip-new-task-label"]') !== null,
+    liveAgents: strip.querySelectorAll('[data-testid="side-strip-live-agents-slot"] [data-testid^="strip-live-agent-fixture-agent-"]').length,
+    joined: joined === null ? null : joined.getAttribute("data-side-tab"),
+    persisted,
+  };
+})()`;
+
+/**
+ * F9: the strip's layout follows a real handle drag across the snap point at
+ * the crossing, both ways and on both edges, with the pointer still down; the
+ * store is written once, on release; Escape mid-drag puts back the layout and
+ * the width the drag started from.
+ */
+async function runStripResizePhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "stripresize",
+    [
+      { label: "left", edge: "left" },
+      { label: "right", edge: "right" },
+    ],
+    async (variant, violations, notes) => {
+      const label = `stripresize ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: variant.edge,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          sidebar: variant.edge,
+          view: "activity",
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      await settle(client, 500);
+      // Toward the content grows the strip: right on a left strip.
+      const sign = variant.edge === "left" ? 1 : -1;
+      const probe = () => evaluate(client, STRIP_RESIZE_PROBE);
+      const expectLayout = (state, want, where) => {
+        const collapsed = want === "rail";
+        if (state.collapsed !== String(collapsed))
+          fail(
+            `${where}: data-collapsed=${String(state.collapsed)}, expected ${String(collapsed)}`,
+          );
+        if (
+          collapsed
+            ? state.tiles === 0 || state.rows > 0
+            : state.rows === 0 || state.tiles > 0
+        )
+          fail(
+            `${where}: ${String(state.tiles)} tiles and ${String(state.rows)} rows, expected the ${want} layout`,
+          );
+        if (state.divider !== collapsed)
+          fail(
+            `${where}: the rail divider is ${state.divider ? "drawn" : "absent"}, expected the ${want} top block`,
+          );
+        if (state.newTaskLabel === collapsed)
+          fail(
+            `${where}: the New Task label is ${state.newTaskLabel ? "drawn" : "absent"}, expected the ${want} top block`,
+          );
+        if (state.liveAgents > 0 === collapsed)
+          fail(
+            `${where}: ${String(state.liveAgents)} live agents under the active row, expected ${collapsed ? "none on the rail" : "Epsilon's 3"}`,
+          );
+        if (state.joined !== (collapsed ? "collapsed" : "expanded"))
+          fail(
+            `${where}: the joined item is ${String(state.joined)}, expected the ${want}'s`,
+          );
+      };
+      const expectWidth = (state, width, where) => {
+        if (Math.abs(state.width - width) > 1.5)
+          fail(
+            `${where}: the strip is ${state.width.toFixed(1)}px wide, expected ${String(width)}`,
+          );
+      };
+      const expectPersisted = (state, collapsed, where) => {
+        if (state.persisted?.collapsed !== collapsed)
+          fail(
+            `${where}: the stored collapsed flag is ${String(state.persisted?.collapsed)}, expected ${String(collapsed)}`,
+          );
+      };
+
+      // 1. Expanded -> under the snap point, pointer held: the rail's layout.
+      let state = await probe();
+      const startWidth = state.width;
+      const grip = state.handle;
+      const at = (width) => ({
+        x: grip.x + sign * (width - startWidth),
+        y: grip.y,
+      });
+      await pressAt(client, grip.x, grip.y);
+      await moveInSteps(client, grip, at(100));
+      await settle(client, 150);
+      state = await probe();
+      await saveShot(client, `stripresize-${variant.edge}-1-held-under-snap`);
+      // Snapped live to the rail (ruling): never a rail drawn in a wider strip.
+      expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "held under the snap point");
+      expectLayout(state, "rail", "held under the snap point");
+      expectPersisted(
+        state,
+        false,
+        "held under the snap point (nothing stored mid-drag)",
+      );
+      // 2. Back over it, still held: the expanded layout again.
+      await moveInSteps(client, at(100), at(220));
+      await settle(client, 150);
+      state = await probe();
+      await saveShot(client, `stripresize-${variant.edge}-2-held-over-snap`);
+      expectWidth(state, 220, "held back over the snap point");
+      expectLayout(state, "expanded", "held back over the snap point");
+      // 3. Under again and released: the rail, stored once.
+      await moveInSteps(client, at(220), at(100));
+      await releaseAt(client, at(100).x, at(100).y);
+      await settle(client, 300);
+      state = await probe();
+      expectWidth(
+        state,
+        SIDE_STRIP_RAIL_WIDTH,
+        "released under the snap point",
+      );
+      expectLayout(state, "rail", "released under the snap point");
+      expectPersisted(state, true, "released under the snap point");
+
+      // 4. From the rail, out past the snap point and held: expanded.
+      state = await probe();
+      const railGrip = state.handle;
+      const fromRail = (width) => ({
+        x: railGrip.x + sign * (width - SIDE_STRIP_RAIL_WIDTH),
+        y: railGrip.y,
+      });
+      await pressAt(client, railGrip.x, railGrip.y);
+      await moveInSteps(client, railGrip, fromRail(230));
+      await settle(client, 150);
+      state = await probe();
+      await saveShot(client, `stripresize-${variant.edge}-3-held-out-of-rail`);
+      expectWidth(state, 230, "held out of the rail");
+      expectLayout(state, "expanded", "held out of the rail");
+      expectPersisted(
+        state,
+        true,
+        "held out of the rail (nothing stored mid-drag)",
+      );
+      // 5. Escape, still held: the rail and its width, nothing stored.
+      await pressKey(client, "Escape");
+      await settle(client, 200);
+      state = await probe();
+      await saveShot(client, `stripresize-${variant.edge}-4-escaped`);
+      expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "after Escape");
+      expectLayout(state, "rail", "after Escape");
+      expectPersisted(state, true, "after Escape");
+      // The release that ends the cancelled drag changes nothing.
+      await releaseAt(client, fromRail(230).x, fromRail(230).y);
+      await settle(client, 200);
+      state = await probe();
+      expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "released after Escape");
+      expectLayout(state, "rail", "released after Escape");
+
+      // 6. Out of the rail and released: expanded at the released width.
+      await pressAt(client, railGrip.x, railGrip.y);
+      await moveInSteps(client, railGrip, fromRail(260));
+      await releaseAt(client, fromRail(260).x, fromRail(260).y);
+      await settle(client, 300);
+      state = await probe();
+      expectWidth(state, 260, "released out of the rail");
+      expectLayout(state, "expanded", "released out of the rail");
+      expectPersisted(state, false, "released out of the rail");
+      if (state.persisted?.widthPx !== 260)
+        fail(
+          `released out of the rail: the stored width is ${String(state.persisted?.widthPx)}, expected 260`,
+        );
+      say(
+        `snap below ${String(SIDE_STRIP_SNAP_BELOW)}px; final ${state.width.toFixed(0)}px, stored ${JSON.stringify(state.persisted)}`,
+      );
+
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "on both edges a real handle drag switches the strip between the rail and the expanded layout at the snap point with the pointer still down (tiles, top block, joined item, the Activity view's live agents), stores the result once on release, and Escape mid-drag restores the starting layout and width",
+  );
+}
+
 // --- overlays: the hover card, the user menu and the Inbox drawer, toward the content ---
 
 async function runOverlaysPhase(client, pageUrl, pageLoads) {
@@ -3735,6 +5374,790 @@ async function runOverlaysPhase(client, pageUrl, pageLoads) {
       );
     },
     "on both edges the hover card, the user menu (still open 750ms after one click) and the Inbox drawer (level with the sheets) open toward the content and inside the window",
+  );
+}
+
+// --- activity coverage: an unserved task's hover card (staging round 1, F8) ---
+
+/** The hover card's words and marks, read off the painted card. */
+const HOVER_CARD_READING = `(() => {
+  const card = document.querySelector('[data-testid="side-tab-hover-card"]');
+  if (card === null) return null;
+  const state = card.querySelector('[data-testid="side-tab-hover-card-state"]');
+  return {
+    state: state === null ? null : state.textContent,
+    unknownGlyph: card.querySelector('[data-testid="side-tab-hover-card-unknown"]') !== null,
+    partial: card.querySelector('[data-testid="side-tab-hover-card-partial"]')?.textContent ?? null,
+    counts: card.querySelector('[data-testid="side-tab-hover-card-counts"]')?.textContent ?? null,
+  };
+})()`;
+
+/** The agent pips a tab's meter draws, the attention pip left out. */
+const meterAgentPips = (epicId) => `(() => {
+  const close = document.querySelector('[data-testid="tab-close-epic-${epicId}"]');
+  const row = close === null ? null : close.closest("[data-side-tab]");
+  if (row === null) return null;
+  return row.querySelectorAll('[data-testid="side-tab-meter"] [data-pip="turn"], [data-testid="side-tab-meter"] [data-pip="background"]').length;
+})()`;
+
+/**
+ * Alpha's meter (one running agent) in the expanded row, found by its close
+ * button, or on the rail, found by its "AR" monogram: whether it draws the
+ * floor's "+" and what it announces.
+ */
+const alphaMeter = (collapsed) => `(() => {
+  const tile = ${String(collapsed)}
+    ? [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"]')].find((node) => (node.querySelector('[data-testid="side-tab-monogram-chip"]')?.textContent ?? "").trim() === "AR") ?? null
+    : document.querySelector('[data-testid="tab-close-epic-fixture-alpha"]')?.closest("[data-side-tab]") ?? null;
+  const meter = tile?.querySelector('[data-testid="side-tab-meter"]') ?? null;
+  if (meter === null) return null;
+  const floor = meter.querySelector('[data-testid="side-tab-meter-floor"]');
+  const r = floor === null ? null : floor.getBoundingClientRect();
+  return {
+    label: meter.getAttribute("aria-label"),
+    floor: r === null ? null : { width: r.width, height: r.height },
+    pips: meter.querySelectorAll("[data-pip]").length,
+  };
+})()`;
+
+/** The fixture's own computer, which the `hosts=1` and `solo=1` directories list. */
+const FIXTURE_STUDIO_HOST = "fixture-host-studio";
+/** Where `setActivity` writes the union's rows; no directory lists it. */
+const FIXTURE_ACTIVITY_HOST = "test-local-host";
+
+async function runCoveragePhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "coverage",
+    [
+      // Three known hosts, a local plane on this one: the other two unserved.
+      {
+        label: "partial",
+        fleet: { hosts: 1 },
+        studio: "partial",
+        covered: false,
+      },
+      // The same three hosts under a cloud union that spans them.
+      { label: "fleet", fleet: { hosts: 1 }, studio: "fleet", covered: true },
+      // One known host under a local plane: the whole account is in view.
+      {
+        label: "single-host",
+        fleet: { solo: 1 },
+        studio: "partial",
+        covered: true,
+      },
+    ],
+    async (variant, violations, notes) => {
+      const label = `coverage ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: "left",
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          account: 1,
+          ...variant.fleet,
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      // The rows' slice answers as a local plane; the studio's own slice
+      // carries the variant's reach.
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivityCoverage(${JSON.stringify(FIXTURE_ACTIVITY_HOST)}, "partial")`,
+      );
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivityCoverage(${JSON.stringify(FIXTURE_STUDIO_HOST)}, ${JSON.stringify(variant.studio)})`,
+      );
+      await settle(client, 300);
+      const frame = await rectOf(client, SURFACE_FRAME);
+      const hover = async (epicId) => {
+        const row = await rowRect(client, `epic:${epicId}`);
+        await moveTo(client, row.cx, row.cy);
+        await settle(client, 1200);
+        const reading = await evaluate(client, HOVER_CARD_READING);
+        await saveShot(client, `coverage-${variant.label}-${epicId}`);
+        await moveTo(client, frame.cx, frame.cy);
+        await settle(client, 500);
+        return reading;
+      };
+
+      // Beta has no agent in the union and no badge: its silence is the claim.
+      const beta = await hover("fixture-beta");
+      if (beta === null) fail("beta's hover card did not open");
+      else if (!variant.covered) {
+        if (!beta.unknownGlyph || beta.state?.includes("Idle"))
+          fail(
+            `beta, unserved, reads "${beta.state}" with${beta.unknownGlyph ? "" : "out"} the unknown glyph, not unknown`,
+          );
+        if (beta.partial !== null)
+          fail(
+            `beta, unknown, also carries the partial notice "${beta.partial}"`,
+          );
+      } else if (beta.unknownGlyph || beta.state !== "Idle") {
+        fail(`beta, covered, reads "${beta.state}", not "Idle"`);
+      }
+      const betaPips = await evaluate(client, meterAgentPips("fixture-beta"));
+      if (betaPips !== 0 && betaPips !== null)
+        fail(
+          `beta's meter draws ${String(betaPips)} agent pips with nothing known running`,
+        );
+
+      // Alpha has one running agent: a count that is a floor when unserved.
+      const alpha = await hover("fixture-alpha");
+      if (alpha === null) fail("alpha's hover card did not open");
+      else {
+        if (alpha.counts !== "1 running")
+          fail(`alpha's counts read "${alpha.counts}", not "1 running"`);
+        const wantsNotice = !variant.covered;
+        if ((alpha.partial !== null) !== wantsNotice)
+          fail(
+            `alpha ${wantsNotice ? "lacks" : "carries"} the partial notice (${String(alpha.partial)})`,
+          );
+      }
+
+      // Alpha's meter, in the row and on the 60px rail: one pip, and a "+"
+      // with "1+ running" exactly when the count is a floor (R1-A1).
+      const checkMeter = (where, meter) => {
+        if (meter === null) {
+          fail(`alpha's ${where} meter is not drawn`);
+          return;
+        }
+        if (meter.pips !== 1)
+          fail(
+            `alpha's ${where} meter draws ${String(meter.pips)} pips, not 1`,
+          );
+        const wantsFloor = !variant.covered;
+        const drawn =
+          meter.floor !== null &&
+          meter.floor.width > 0 &&
+          meter.floor.height > 0;
+        if (drawn !== wantsFloor)
+          fail(
+            `alpha's ${where} meter ${wantsFloor ? "lacks" : "draws"} the floor's "+"`,
+          );
+        const wantsLabel = wantsFloor ? "1+ running" : "1 running";
+        if (meter.label !== wantsLabel)
+          fail(
+            `alpha's ${where} meter announces "${String(meter.label)}", not "${wantsLabel}"`,
+          );
+      };
+      const rowMeter = await evaluate(client, alphaMeter(false));
+      // A single covered agent is the leading glyph's to show; only a floor
+      // mounts the row's meter.
+      if (variant.covered) {
+        if (rowMeter !== null)
+          fail(
+            `alpha's row mounts a meter for one covered agent (${JSON.stringify(rowMeter)})`,
+          );
+      } else {
+        checkMeter("row", rowMeter);
+      }
+      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(true)");
+      await settle(client, 400);
+      const railMeter = await evaluate(client, alphaMeter(true));
+      checkMeter("rail", railMeter);
+      await saveShot(client, `coverage-${variant.label}-rail`);
+      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
+      await settle(client, 400);
+
+      // The account's running count: a total only when every host is in view.
+      const footLine = await evaluate(
+        client,
+        `document.querySelector('[data-testid="side-strip-host-line"]')?.textContent ?? null`,
+      );
+      // The visible line is the short form ("9+ running"); the full
+      // "9+ agents running" is the row's accessible name.
+      const running = /(\d+)(\+?) (?:agents? )?running/.exec(footLine ?? "");
+      if (running === null)
+        fail(
+          `the account row reads "${String(footLine)}", with no running count`,
+        );
+      else if ((running[2] === "+") === variant.covered)
+        fail(
+          `the account row reads "${footLine}", ${variant.covered ? "a floor where it is a total" : "a total where it is a floor"}`,
+        );
+      say(
+        `beta ${JSON.stringify(beta)}; beta meter agent pips ${String(betaPips)}; alpha ${JSON.stringify(alpha)}; alpha row meter ${JSON.stringify(rowMeter)}; alpha rail meter ${JSON.stringify(railMeter)}; account row "${String(footLine)}"`,
+      );
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "with a known host out of the plane's reach, a task with no known agent hovers as unknown (never Idle) with no meter pips, a running task carries the partial notice and the account count is a floor; under a fleet union, and for a one-host account on a local plane, Idle, plain counts and a total",
+  );
+}
+
+// --- the strip foot's readings row (staging round 1, F6) ---
+
+/** The readings row's `gap-2` (the rail's own 8px tile gap), and the foot's `gap-2` above the account row. */
+const READINGS_GAP_PX = 8;
+const FOOT_GAP_PX = 8;
+
+const READINGS_PROBE = `(() => {
+  const box = (selector) => {
+    const node = document.querySelector(selector);
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  };
+  // Each tile's readings: shown whole inside its one-row line, hidden on the
+  // clipped wrap row, or cut by the line's edge (the mush this row must avoid).
+  const readings = (button, itemSelector) => {
+    const tile = document.querySelector('[data-testid="side-strip-readings"] ' + button);
+    if (tile === null) return null;
+    return [...tile.querySelectorAll(itemSelector)].map((item) => {
+      const line = item.parentElement.getBoundingClientRect();
+      const r = item.getBoundingClientRect();
+      const inside = r.left >= line.left - 0.5 && r.right <= line.right + 0.5 && r.top >= line.top - 0.5 && r.bottom <= line.bottom + 0.5;
+      const outside = r.top >= line.bottom - 0.5 || r.right <= line.left + 0.5 || r.left >= line.right - 0.5;
+      const truncated = [...item.querySelectorAll(".truncate")].some((node) => node.scrollWidth > node.clientWidth);
+      return { text: item.textContent.trim(), state: inside ? (truncated ? "truncated" : "shown") : outside ? "hidden" : "cut" };
+    });
+  };
+  return {
+    row: box('[data-testid="side-strip-readings"]'),
+    usage: box('[data-testid="side-strip-readings"] [data-testid="rate-limit-header-button"]'),
+    resource: box('[data-testid="side-strip-readings"] [data-testid="resource-monitor-header-button"]'),
+    usageReadings: readings('[data-testid="rate-limit-header-button"]', '[data-testid="rate-limit-strip-reading"]'),
+    resourceReadings: readings('[data-testid="resource-monitor-header-button"]', '[data-testid^="status-bar-resource-metric-"]'),
+    account: box('[data-testid="user-menu-trigger"]'),
+    strip: box('[data-testid="side-tab-strip"]'),
+  };
+})()`;
+
+async function runReadingsPhase(client, pageUrl, pageLoads) {
+  const variants = [];
+  for (const edge of ["left", "right"]) {
+    for (const readings of ["both", "usage", "resource", "none"]) {
+      variants.push({
+        label: `${edge} ${readings}`,
+        edge,
+        readings,
+        collapsed: 0,
+      });
+    }
+    variants.push({
+      label: `${edge} both collapsed`,
+      edge,
+      readings: "both",
+      collapsed: 1,
+    });
+  }
+  await runShellPhase(
+    "readings",
+    variants,
+    async (variant, violations, notes) => {
+      const label = `readings ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: variant.edge,
+          collapsed: variant.collapsed,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          sidebar: variant.edge,
+          account: 1,
+          hosts: 1,
+          readings: variant.readings,
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      const near = (a, b, tolerance) => Math.abs(a - b) <= tolerance;
+      // The seeded readings land a tick after mount: the usage poll's two
+      // fetches and the resource stream's first snapshot.
+      await settle(client, 600);
+      const m = await evaluate(client, READINGS_PROBE);
+      const expected = {
+        usage: variant.readings === "both" || variant.readings === "usage",
+        resource:
+          variant.readings === "both" || variant.readings === "resource",
+      };
+      for (const key of ["usage", "resource"]) {
+        const drawn = m[key] !== null && m[key].width > 0;
+        if (drawn !== expected[key])
+          fail(
+            `${key} is ${drawn ? "drawn" : "absent"}, expected ${expected[key] ? "drawn" : "absent"}`,
+          );
+      }
+      if (variant.readings === "none") {
+        if (m.row !== null && m.row.height > 0)
+          fail(`the row takes ${boxText(m.row)} with no reading in it`);
+      } else if (m.row === null || m.account === null) {
+        fail("no readings row or no account row");
+      } else if (variant.collapsed === 1) {
+        // Collapsed: rail-wide tiles stacked, centred on the rail, above the avatar.
+        const tiles = [m.usage, m.resource];
+        for (const tile of tiles) {
+          if (!near(tile.width, 40, 0.5))
+            fail(`a tile is ${tile.width}px wide, expected 40`);
+          if (!near(tile.cx, m.strip.cx, 1))
+            fail(
+              `a tile ${boxText(tile)} is off the rail's centre ${m.strip.cx}`,
+            );
+        }
+        if (
+          !near(m.resource.y, m.usage.y + m.usage.height + READINGS_GAP_PX, 0.5)
+        )
+          fail(
+            `the tiles are not stacked ${READINGS_GAP_PX}px apart: ${boxText(m.usage)} / ${boxText(m.resource)}`,
+          );
+        if (m.resource.y + m.resource.height > m.account.y)
+          fail("the tiles overlap the avatar tile");
+        say(`tiles ${boxText(m.usage)} ${boxText(m.resource)}`);
+      } else {
+        // One row, flush with the account row's edges, directly above it.
+        if (
+          !near(m.row.x, m.account.x, 0.5) ||
+          !near(m.row.width, m.account.width, 0.5)
+        )
+          fail(
+            `the row ${boxText(m.row)} does not span the account row ${boxText(m.account)}`,
+          );
+        if (!near(m.account.y - (m.row.y + m.row.height), FOOT_GAP_PX, 0.5))
+          fail(
+            `the row is not ${FOOT_GAP_PX}px above the account row: ${boxText(m.row)} / ${boxText(m.account)}`,
+          );
+        const drawn = [m.usage, m.resource].filter(
+          (b) => b !== null && b.width > 0,
+        );
+        if (drawn.length === 2) {
+          const half = (m.row.width - READINGS_GAP_PX) / 2;
+          for (const b of drawn) {
+            if (!near(b.width, half, 0.5))
+              fail(`a half is ${b.width}px, expected ${half}`);
+            if (!near(b.y, m.row.y, 0.5) || !near(b.height, m.row.height, 0.5))
+              fail(`${boxText(b)} is not on the row ${boxText(m.row)}`);
+          }
+          if (
+            !near(m.usage.x, m.row.x, 0.5) ||
+            !near(m.resource.x + m.resource.width, m.row.x + m.row.width, 0.5)
+          )
+            fail("usage is not first and resources last");
+          say(
+            `halves ${m.usage.width.toFixed(1)} + ${m.resource.width.toFixed(1)} of ${m.row.width.toFixed(1)}`,
+          );
+        } else if (drawn.length === 1) {
+          if (!near(drawn[0].width, m.row.width, 0.5))
+            fail(`the one reading is ${drawn[0].width}px of ${m.row.width}`);
+          say(`full ${drawn[0].width.toFixed(1)} of ${m.row.width.toFixed(1)}`);
+        }
+      }
+      // What each tile draws: whole readings only, the first always, and at
+      // full width more than one - never a reading cut by the tile's edge,
+      // never an icon alone in an empty box. Collapsed, the glyph alone.
+      for (const [key, items, total] of [
+        ["usage", m.usageReadings, 2],
+        ["resource", m.resourceReadings, 3],
+      ]) {
+        if (!expected[key] || items === null) continue;
+        if (variant.collapsed === 1) {
+          if (items.length > 0)
+            fail(
+              `the collapsed ${key} tile draws readings ${JSON.stringify(items)}`,
+            );
+          continue;
+        }
+        if (items.length !== total)
+          fail(
+            `the ${key} tile holds ${items.length} readings, expected ${total}`,
+          );
+        const bad = items.filter(
+          (item) => item.state === "cut" || item.state === "truncated",
+        );
+        if (bad.length > 0) fail(`the ${key} tile cuts ${JSON.stringify(bad)}`);
+        const shown = items.filter((item) => item.state === "shown");
+        const full = variant.readings !== "both";
+        if (shown.length === 0 || items[0].state !== "shown")
+          fail(
+            `the ${key} tile does not show its first reading: ${JSON.stringify(items)}`,
+          );
+        if (full && shown.length < 2)
+          fail(
+            `the full-width ${key} tile shows only ${shown.length} reading(s)`,
+          );
+        say(
+          `${key} ${full ? "full" : "half"} shows ${shown.map((item) => JSON.stringify(item.text)).join(" ")}${shown.length < items.length ? ` (${items.length - shown.length} in the popover)` : ""}`,
+        );
+      }
+      // At rest, before any click leaves focus (and its tooltip) on a reading.
+      for (const theme of ["light", "dark"]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+        );
+        await settle(client, 250);
+        await saveShot(
+          client,
+          `readings-${variant.edge}-${variant.readings}${variant.collapsed === 1 ? "-collapsed" : ""}-${theme}`,
+        );
+      }
+      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      // Each reading's popover opens toward the content and inside the window.
+      const viewport = await evaluate(
+        client,
+        "({ width: window.innerWidth, height: window.innerHeight })",
+      );
+      for (const [key, dialog] of [
+        ["usage", "Usage limits"],
+        ["resource", "Resources"],
+      ]) {
+        const anchor = m[key];
+        if (anchor === null || anchor.width === 0) continue;
+        await pressAndRelease(client, anchor.cx, anchor.cy, "left");
+        await settle(client, 500);
+        const box = await rectOf(
+          client,
+          `[role="dialog"][aria-label="${dialog}"]`,
+        );
+        if (box === null) {
+          fail(`the ${key} popover did not open`);
+        } else {
+          const toward =
+            variant.edge === "left"
+              ? box.x >= anchor.x + anchor.width - 0.5
+              : box.x + box.width <= anchor.x + 0.5;
+          if (!toward)
+            fail(
+              `the ${key} popover ${boxText(box)} does not open toward the content`,
+            );
+          if (
+            box.x < 0 ||
+            box.y < 0 ||
+            box.x + box.width > viewport.width ||
+            box.y + box.height > viewport.height
+          )
+            fail(`the ${key} popover ${boxText(box)} leaves the window`);
+          await saveShot(
+            client,
+            `readings-${variant.edge}-${variant.readings}-${variant.collapsed === 1 ? "collapsed-" : ""}${key}-popover`,
+          );
+        }
+        await pressKey(client, "Escape");
+        await settle(client, 300);
+      }
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "on both edges: two readings split the row in half, one takes all of it, none draws no row; collapsed they stack as 40px tiles; each popover opens toward the content inside the window",
+  );
+}
+
+// --- the account menu's Host section (staging round 1, F5) ---
+
+const HOST_MENU_PROBE = `(() => {
+  const section = document.querySelector('[data-testid="user-menu-host-section"]');
+  if (section === null) return null;
+  return [...section.querySelectorAll('[data-testid^="user-menu-host-option-"]')].map((row) => ({
+    hostId: row.getAttribute("data-testid").slice("user-menu-host-option-".length),
+    text: row.textContent,
+    checked: row.getAttribute("aria-checked") === "true",
+    disabled: row.hasAttribute("data-disabled"),
+    pending: row.querySelector('[data-testid^="user-menu-host-activating-"]') !== null,
+    box: (() => { const r = row.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }; })(),
+  }));
+})()`;
+
+async function runHostMenuPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "hostmenu",
+    [
+      { label: "left", query: { tabs: "left", sidebar: "left" } },
+      { label: "right", query: { tabs: "right", sidebar: "right" } },
+      { label: "top", query: { tabs: "top", sidebar: "left", header: "app" } },
+    ],
+    async (variant, violations, notes) => {
+      const label = `hostmenu ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          ...variant.query,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          account: 1,
+          hosts: 1,
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      const openMenu = async () => {
+        const trigger = await rectOf(
+          client,
+          '[data-testid="user-menu-trigger"]',
+        );
+        await pressAndRelease(client, trigger.cx, trigger.cy, "left");
+        await settle(client, 600);
+        return await evaluate(client, HOST_MENU_PROBE);
+      };
+      let rows = await openMenu();
+      if (rows === null) {
+        fail("the menu has no Host section");
+      } else {
+        say(
+          rows
+            .map(
+              (row) =>
+                `${row.text}${row.checked ? " [x]" : ""}${row.disabled ? " (inert)" : ""}`,
+            )
+            .join(" | "),
+        );
+        if (rows.length !== 3) fail(`${rows.length} host rows, expected 3`);
+        const offline = rows.find((row) => row.hostId === "fixture-host-mini");
+        if (offline === undefined || !offline.disabled)
+          fail("the host with no route is not inert");
+        else if (!/offline/.test(offline.text))
+          fail(`the offline host says "${offline.text}", not offline`);
+        const checked = rows.filter((row) => row.checked);
+        if (checked.length !== 1 || checked[0].hostId !== "fixture-host-studio")
+          fail(
+            `the check is on ${checked.map((row) => row.hostId).join(", ") || "nothing"}, not this machine's host`,
+          );
+        for (const theme of ["light", "dark"]) {
+          await evaluate(
+            client,
+            `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+          );
+          await settle(client, 250);
+          await saveShot(client, `hostmenu-${variant.label}-${theme}`);
+        }
+        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+        const target = rows.find((row) => !row.checked && !row.disabled);
+        if (target === undefined) {
+          fail("no online host to switch to");
+        } else {
+          // The switch is held in flight (R1-A2): the menu closes on the pick
+          // and unmounts its rows, and a reopened menu must still know a
+          // switch is running - every row held, the spinner on the target,
+          // the check where it was, and a click sending nothing more.
+          await evaluate(
+            client,
+            "window.__layoutCanvasProbe.holdActivations()",
+          );
+          const countBefore = await evaluate(
+            client,
+            "window.__layoutCanvasProbe.activationCount()",
+          );
+          await pressAndRelease(client, target.box.cx, target.box.cy, "left");
+          await settle(client, 1200);
+          const menuGone =
+            (await rectOf(client, '[data-testid="user-menu-content"]')) ===
+            null;
+          if (!menuGone) fail("the menu stayed open after a switch");
+          rows = await openMenu();
+          if (rows === null) {
+            fail("the reopened menu has no Host section");
+          } else {
+            const open = rows.filter((row) => !row.disabled);
+            if (open.length > 0)
+              fail(
+                `mid-switch, ${open.map((row) => row.hostId).join(", ")} still take a click`,
+              );
+            const pending = rows
+              .filter((row) => row.pending)
+              .map((row) => row.hostId);
+            if (pending.length !== 1 || pending[0] !== target.hostId)
+              fail(
+                `mid-switch, the spinner is on ${pending.join(", ") || "nothing"}, not ${target.hostId}`,
+              );
+            const still = rows.find((row) => row.checked);
+            if (still?.hostId !== "fixture-host-studio")
+              fail(
+                `mid-switch, the check moved to ${still?.hostId ?? "nothing"} early`,
+              );
+            await saveShot(client, `hostmenu-${variant.label}-pending`);
+            const again = rows.find((row) => row.hostId === target.hostId);
+            await pressAndRelease(client, again.box.cx, again.box.cy, "left");
+            await settle(client, 400);
+          }
+          const sent =
+            (await evaluate(
+              client,
+              "window.__layoutCanvasProbe.activationCount()",
+            )) - countBefore;
+          if (sent !== 1) fail(`one switch sent ${sent} activations`);
+          else
+            say(
+              `mid-switch the reopened menu holds every row, spinner on ${target.hostId}, 1 activation sent`,
+            );
+          await pressKey(client, "Escape");
+          await settle(client, 300);
+          await evaluate(
+            client,
+            "window.__layoutCanvasProbe.releaseActivations()",
+          );
+          await settle(client, 800);
+          rows = await openMenu();
+          if (
+            rows !== null &&
+            rows.some(
+              (row) =>
+                row.pending ||
+                (row.disabled && row.hostId !== "fixture-host-mini"),
+            )
+          )
+            fail("after the switch settled, rows are still held");
+          const now = rows?.find((row) => row.checked) ?? null;
+          if (now === null || now.hostId !== target.hostId)
+            fail(
+              `after clicking ${target.hostId} the check is on ${now?.hostId ?? "nothing"}`,
+            );
+          else say(`switched to ${target.hostId}`);
+          await saveShot(client, `hostmenu-${variant.label}-switched`);
+        }
+      }
+      await pressKey(client, "Escape");
+      await settle(client, 300);
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "the strip's and the header's account menu list every host, the unreachable one inert, a switch in flight holds every row across a close and reopen with one activation sent, and once it settles the check is on the picked host",
+  );
+}
+
+// --- the account row's second line: the count stays whole, the host name gives way ---
+
+const ACCOUNT_LINE_PROBE = `(() => {
+  const row = document.querySelector('[data-testid="user-menu-trigger"]');
+  const line = row?.querySelector('[data-testid="side-strip-host-line"]') ?? null;
+  if (line === null) return null;
+  const box = (node) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width }; };
+  const [name, count] = line.children;
+  const column = line.parentElement;
+  return {
+    text: line.textContent,
+    full: [...row.querySelectorAll(".sr-only")].map((node) => node.textContent).join(" | "),
+    column: box(column),
+    name: name === undefined ? null : { ...box(name), clipped: name.scrollWidth > name.clientWidth + 0.5 },
+    count: count === undefined ? null : { ...box(count), text: count.textContent, clipped: count.scrollWidth > count.clientWidth + 0.5 },
+  };
+})()`;
+
+async function runAccountLinePhase(client, pageUrl, pageLoads) {
+  const variants = [];
+  for (const edge of ["left", "right"])
+    for (const width of [240, 192])
+      variants.push({ label: `${edge} ${width}`, edge, width });
+  await runShellPhase(
+    "accountline",
+    variants,
+    async (variant, violations, notes) => {
+      const label = `accountline ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: variant.edge,
+          sidebar: variant.edge,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          account: 1,
+          hosts: 1,
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setStripWidth(${variant.width})`,
+      );
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      // The rows' slice answers as a local plane, as in the coverage phase.
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivityCoverage(${JSON.stringify(FIXTURE_ACTIVITY_HOST)}, "partial")`,
+      );
+      // A lower bound first (the local plane reaches this host only), then a
+      // fleet union's exact count.
+      for (const [coverage, short, full] of [
+        ["partial", "9+ running", "9+ agents running"],
+        ["fleet", "9 running", "9 agents running"],
+      ]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setActivityCoverage("fixture-host-studio", ${JSON.stringify(coverage)})`,
+        );
+        await settle(client, 400);
+        const m = await evaluate(client, ACCOUNT_LINE_PROBE);
+        if (m === null) {
+          fail(`${coverage}: no host line`);
+          continue;
+        }
+        if (m.count === null || !m.count.text.endsWith(short))
+          fail(
+            `${coverage}: the line reads "${m.text}", expected "... ${short}"`,
+          );
+        else if (m.count.clipped || m.count.right > m.column.right + 0.5)
+          fail(
+            `${coverage}: the count "${m.count.text}" is cut: ends at ${m.count.right}, the row's text at ${m.column.right}`,
+          );
+        if (!m.full.includes(full))
+          fail(`${coverage}: the accessible text "${m.full}" lacks "${full}"`);
+        say(
+          `${coverage}: "${m.text}"${m.name?.clipped ? " (host name truncated)" : ""}, name "${m.full}"`,
+        );
+        for (const theme of ["light", "dark"]) {
+          await evaluate(
+            client,
+            `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+          );
+          await settle(client, 200);
+          await saveShot(
+            client,
+            `accountline-${variant.edge}-${variant.width}-${coverage}-${theme}`,
+          );
+        }
+        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      }
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "at 240px and the 192px minimum on both edges the account line reads '<host> · N running' with the count whole (the host name gives way), and the full 'N agents running' stays in the row's accessible text",
   );
 }
 
@@ -4328,11 +6751,21 @@ function selectedPhases() {
     "switch",
     "strip",
     "sheets",
+    "header",
+    "running",
+    "flip",
+    "moves",
     "join",
     "rail",
+    "striptop",
+    "stripresize",
     "overlays",
+    "coverage",
     "activity",
     "placement",
+    "readings",
+    "hostmenu",
+    "accountline",
   ];
   const raw = process.env.LAYOUT_EDITOR_BROWSER_PHASES;
   if (raw === undefined || raw.trim() === "") return new Set(all);
@@ -4623,11 +7056,21 @@ try {
         ),
     ],
     ["sheets", () => runSheetsPhase(client, canvasUrl, pageLoads)],
+    ["header", () => runHeaderPhase(client, canvasUrl, pageLoads)],
+    ["running", () => runRunningPhase(client, canvasUrl, pageLoads)],
+    ["flip", () => runFlipPhase(client, canvasUrl, pageLoads)],
+    ["moves", () => runMovesPhase(client, canvasUrl, pageLoads)],
     ["join", () => runJoinPhase(client, canvasUrl, pageLoads)],
     ["rail", () => runRailPhase(client, canvasUrl, pageLoads)],
+    ["striptop", () => runStripTopPhase(client, canvasUrl, pageLoads)],
+    ["stripresize", () => runStripResizePhase(client, canvasUrl, pageLoads)],
     ["overlays", () => runOverlaysPhase(client, canvasUrl, pageLoads)],
+    ["coverage", () => runCoveragePhase(client, canvasUrl, pageLoads)],
     ["activity", () => runActivityPhase(client, canvasUrl, pageLoads)],
     ["placement", () => runPlacementPhase(client, canvasUrl, pageLoads)],
+    ["readings", () => runReadingsPhase(client, canvasUrl, pageLoads)],
+    ["hostmenu", () => runHostMenuPhase(client, canvasUrl, pageLoads)],
+    ["accountline", () => runAccountLinePhase(client, canvasUrl, pageLoads)],
   ];
   const failures = [];
   for (const [phase, run] of runs) {
@@ -5077,7 +7520,12 @@ async function waitFor(targetClient, label, expression) {
   }
   const state = await evaluate(
     targetClient,
-    `({ body: document.body.innerHTML.slice(0, 4000), viteError: document.querySelector("vite-error-overlay")?.shadowRoot?.textContent ?? "" })`,
+    `({ body: document.body.innerHTML.slice(0, 4000), viteError: document.querySelector("vite-error-overlay")?.shadowRoot?.textContent ?? "",
+      fixtureModuleRan: Array.isArray(window.__layoutCanvasErrors),
+      fixtureErrors: window.__layoutCanvasErrors,
+      rootProperties: Object.keys(document.getElementById("root") ?? {}),
+      resources: performance.getEntriesByType("resource").slice(-5).map(({name, duration, responseStatus}) => ({name, duration, responseStatus})),
+    })`,
   );
   throw new Error(
     `Timed out waiting for ${label}:\n${JSON.stringify(state, null, 2)}`,
@@ -5563,17 +8011,14 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
     await flush(client);
     await delay(400);
 
-    // The editor's own TAB, under that same stroke (L-138, L-163). Its top
-    // edge and the frame's top run share a line - the header is `h-10` and the
-    // tab `h-9`, so the tab starts 4px down and the frame's stroke sits at 4px
-    // - and while the tab wore the colour on its SILHOUETTE the two met at its
-    // shoulders and read as one broken line. What must hold is that the colour
-    // is the tab's AREA and the ordinary border is its edge.
+    // The editor's own TAB, under that same stroke (L-138, L-163). Its box
+    // sits 2px below the frame's top run (F4), and while the tab wore the
+    // colour on its EDGE the two read as one broken line. What must hold is
+    // that the colour is the tab's AREA and the ordinary border is its edge.
     //
-    // Read, not counted. The fill IS the target colour now, so a pixel probe
-    // would have to exclude the filled silhouette - an S-curve - to see a
-    // stroke at all, and even the cap bands either side of the label carry
-    // that fill inside the curve. A computed-style read asks the declarations
+    // Read, not counted. The fill IS the target colour, so a pixel probe would
+    // have to exclude the filled box to see a stroke at all. A computed-style
+    // read asks the declarations
     // themselves, so nothing it reports depends on antialiasing, on the dot
     // phase, or on where the label happens to fall. Both sides of every
     // comparison are normalised through one element's `color`, so a theme that
@@ -5593,22 +8038,15 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
           return getComputedStyle(probe).color;
         };
         const amber = resolve("var(--warning-foreground)");
-        const edges = [...tab.querySelectorAll('[data-testid^="tab-cap-outline-"]')]
-          .map((path) => ({
-            name: path.getAttribute("data-testid"),
-            paint: getComputedStyle(path).stroke,
-          }));
-        const centre = tab.querySelector('[data-testid="tab-chrome-center"]');
-        if (centre !== null) {
-          edges.push({
-            name: "tab-chrome-center border-top",
-            paint: getComputedStyle(centre).borderTopColor,
-          });
-        }
+        const box = tab.querySelector('[data-testid="tab-chrome-box"]');
+        const edges = box === null ? [] : ["Top", "Right", "Bottom", "Left"].map((side) => ({
+          name: "tab-chrome-box border-" + side.toLowerCase(),
+          paint: getComputedStyle(box)["border" + side + "Color"],
+        }));
         const result = {
           error: null,
           amber,
-          fill: centre === null ? null : resolve(getComputedStyle(centre).backgroundColor),
+          fill: box === null ? null : resolve(getComputedStyle(box).backgroundColor),
           edges: edges.map((edge) => ({
             name: edge.name,
             paint: edge.paint === "none" ? "none" : resolve(edge.paint),

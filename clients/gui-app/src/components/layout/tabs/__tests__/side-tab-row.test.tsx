@@ -17,6 +17,7 @@ import {
 import { SideSplitRowPair } from "../side-strip/side-split-row-pair";
 import type { SideTabLiveAgents } from "../side-strip/agent-meter";
 import { NO_LIVE_AGENTS } from "../side-strip/side-tab-live-agents";
+import type { AgentActivityCoverage } from "@/lib/agent-activity";
 import {
   SIDE_SPLIT_PAIR_CLASS,
   SIDE_TAB_ACTIVE_CLASS,
@@ -24,6 +25,8 @@ import {
   SIDE_TAB_GROUP_LINE_SEAT_CLASS,
   SIDE_TAB_LEADING_BADGE_POSITION_CLASS,
   SIDE_TAB_LEADING_CLASS,
+  SIDE_TAB_LEADING_TILE_CLASS,
+  SIDE_TAB_LEADING_TILE_SLOT_CLASS,
   SIDE_TAB_ROW_CLASS,
   SIDE_TAB_SESSION_ACTIVE_CLASS,
   SIDE_TAB_TILE_ACTIVE_CLASS,
@@ -87,8 +90,12 @@ function baseProps(): SideTabRowProps {
   };
 }
 
-function agents(turn: number, background: number): SideTabLiveAgents {
-  return { turn, background };
+function agents(
+  turn: number,
+  background: number,
+  coverage: AgentActivityCoverage,
+): SideTabLiveAgents {
+  return { turn, background, coverage };
 }
 
 function renderRow(overrides: Partial<SideTabRowProps>): HTMLElement {
@@ -196,15 +203,32 @@ describe("SideTabRow expanded trailing slot", () => {
   });
 
   it("shows the row meter only once more than one agent is live", () => {
-    const one = renderRow({ agents: agents(1, 0) });
+    const one = renderRow({ agents: agents(1, 0, "covered") });
     expect(
       trailing(one).querySelector('[data-testid="side-tab-meter"]'),
     ).toBeNull();
     cleanup();
 
-    const several = renderRow({ agents: agents(1, 2) });
+    const several = renderRow({ agents: agents(1, 2, "covered") });
     expect(
       trailing(several).querySelector('[data-testid="side-tab-meter"]'),
+    ).not.toBeNull();
+  });
+
+  it("mounts the row meter for a single unserved agent (a floor), not for a single covered one (F8 round 3)", () => {
+    const covered = renderRow({ agents: agents(1, 0, "covered") });
+    expect(
+      trailing(covered).querySelector('[data-testid="side-tab-meter"]'),
+    ).toBeNull();
+    cleanup();
+
+    const unserved = renderRow({ agents: agents(1, 0, "unserved") });
+    const meter = trailing(unserved).querySelector(
+      '[data-testid="side-tab-meter"]',
+    );
+    expect(meter).not.toBeNull();
+    expect(
+      meter?.querySelector('[data-testid="side-tab-meter-floor"]'),
     ).not.toBeNull();
   });
 
@@ -212,7 +236,7 @@ describe("SideTabRow expanded trailing slot", () => {
     const waiting = renderRow({
       badge: "approval",
       waitingLabel: "Approve",
-      agents: agents(2, 1),
+      agents: agents(2, 1, "covered"),
     });
     expect(
       trailing(waiting).querySelector('[data-testid="side-tab-meter"]'),
@@ -220,7 +244,10 @@ describe("SideTabRow expanded trailing slot", () => {
     expect(screen.getByTestId("side-tab-waiting-chip")).not.toBeNull();
     cleanup();
 
-    const failed = renderRow({ badge: "failed", agents: agents(2, 1) });
+    const failed = renderRow({
+      badge: "failed",
+      agents: agents(2, 1, "covered"),
+    });
     expect(
       trailing(failed).querySelector('[data-testid="side-tab-meter"]'),
     ).toBeNull();
@@ -323,15 +350,18 @@ describe("SideTabRow expanded paint", () => {
     expect(row.querySelector('[data-testid="side-tab-rail-badge"]')).toBeNull();
   });
 
-  it("shows a coloured tab's monogram on a tinted 16px tile with the corner badge", () => {
+  it("shows a coloured tab's monogram on a tinted 20x16 tile with the corner badge", () => {
     const row = renderRow({ tint: "#3366ff", badge: "failed" });
     const leading = byTestId(row, "side-tab-leading");
     expect(leading.dataset.leading).toBe("tile");
-    expect(hasClasses(leading, SIDE_TAB_LEADING_CLASS)).toBe(true);
+    expect(hasClasses(leading, SIDE_TAB_LEADING_TILE_SLOT_CLASS.monogram)).toBe(
+      true,
+    );
     expect(leading.querySelector('[data-testid="leading-glyph"]')).toBeNull();
     const tile = byTestId(row, "side-tab-leading-tile");
     expect(tile.textContent).toBe("FL");
     expect(tile.dataset.tinted).toBe("true");
+    expect(hasClasses(tile, SIDE_TAB_LEADING_TILE_CLASS)).toBe(true);
     expect(hasClasses(tile, SIDE_TAB_TINT_FILL_CLASS)).toBe(true);
     expect(tile.style.getPropertyValue("--side-tab-tint")).toBe("#3366ff");
     const badge = byTestId(leading, "side-tab-rail-badge");
@@ -346,12 +376,16 @@ describe("SideTabRow expanded paint", () => {
     expect(tile.contains(badgeWrapper)).toBe(false);
   });
 
-  it("shows a custom icon on its tile, neutral when the tab has no colour", () => {
+  it("shows a custom icon on its 16px tile, neutral when the tab has no colour", () => {
     const row = renderRow({
       tint: null,
       tile: { kind: "icon", icon: <span data-testid="custom-icon">🚀</span> },
       badge: "approval",
     });
+    const leading = byTestId(row, "side-tab-leading");
+    expect(hasClasses(leading, SIDE_TAB_LEADING_TILE_SLOT_CLASS.icon)).toBe(
+      true,
+    );
     const tile = byTestId(row, "side-tab-leading-tile");
     expect(tile.querySelector('[data-testid="custom-icon"]')).not.toBeNull();
     expect(tile.dataset.tinted).toBe("false");
@@ -533,12 +567,18 @@ describe("SideTabRow collapsed", () => {
   });
 
   it("mounts the meter under the monogram, empty or not", () => {
-    const empty = renderRow({ variant: "collapsed", agents: agents(0, 0) });
+    const empty = renderRow({
+      variant: "collapsed",
+      agents: agents(0, 0, "covered"),
+    });
     const emptyMeter = byTestId(empty, "side-tab-meter");
     expect(emptyMeter.getAttribute("role")).toBeNull();
     cleanup();
 
-    const busy = renderRow({ variant: "collapsed", agents: agents(2, 1) });
+    const busy = renderRow({
+      variant: "collapsed",
+      agents: agents(2, 1, "covered"),
+    });
     const busyMeter = byTestId(busy, "side-tab-meter");
     expect(busyMeter.querySelectorAll("[data-pip]")).toHaveLength(3);
   });

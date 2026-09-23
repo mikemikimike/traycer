@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -11,18 +11,31 @@ import {
 import { LazyMotion, domAnimation } from "motion/react";
 import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
+import type { HostDirectoryEntry } from "@traycer-clients/shared/host-client/host-directory";
+import type { LocalHostSnapshot } from "@traycer-clients/shared/platform/runner-host";
+import { createRendererContextFixture } from "@traycer-clients/shared/test-fixtures/request-context";
+import type { HostListResponse } from "@traycer/protocol/host/host-status";
+import { providersListResponseSchema } from "@traycer/protocol/host/provider-schemas";
+import { rateLimitUsageResponseSchemaV40 } from "@traycer/protocol/host/rate-limit/schemas";
+import { RateLimitPollProvider } from "@/providers/rate-limit-poll-provider";
+import { createResourcesStore } from "@/stores/resources/resources-store";
+import { resourcesRegistry } from "@/stores/resources/resources-registry";
 import { RootDndProvider } from "@/components/epic-canvas/dnd/root-dnd-provider";
 import {
   PanelTaskHeader,
   SidebarWidthResizeHandle,
 } from "@/components/epic-canvas/sidebar/epic-sidebar-column";
 import { StripLiveAgentsPortal } from "@/components/epic-canvas/sidebar/strip-live-agents";
+import { StableTileSurfaceHost } from "@/components/epic-canvas/surface-host/stable-tile-surface-host";
+import { TileSurfaceSlot } from "@/components/epic-canvas/surface-host/tile-surface-slot";
+import { EpicSurfaceSheets } from "@/components/epic-tabs/epic-surface";
 import { LayoutEditor } from "@/components/layout-editor/layout-editor";
 import {
   LAYOUT_REGION_IDS,
   regionFacts,
 } from "@/components/layout-editor/regions/region-facts";
 import { AppColumnFrame } from "@/components/layout/app-column-frame";
+import { AppHeader } from "@/components/layout/header/app-header";
 import {
   appColumnChrome,
   sideStripOwnsTitleBar,
@@ -38,10 +51,13 @@ import type { AgentActivityByEpic } from "@traycer/protocol/host/agent/activity"
 import {
   HostRuntimeProvider,
   hostRpcRegistry,
+  useHostBinding,
   type HostRpcRegistry,
   type MessengerFactory,
 } from "@/lib/host";
 import { useArrangementValue } from "@/lib/layout-overrides";
+import { cn } from "@/lib/utils";
+import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import {
   insertRailDivider,
   sideTabStripEdge,
@@ -55,8 +71,17 @@ import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import { createPersistentMemoryHistory } from "@/lib/persistent-history";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
-import { __setAgentActivityStateForTests } from "@/stores/agent-activity-store";
-import { useSidebarWidthPx } from "@/stores/epics/left-panel-store";
+import {
+  __setAgentActivityStateForTests,
+  __setHostAgentActivityHealthForTests,
+} from "@/stores/agent-activity-store";
+import {
+  useLeftPanelStore,
+  useMainPanelCollapsed,
+  useSidebarWidthPx,
+} from "@/stores/epics/left-panel-store";
+import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
+import type { EpicCanvasTileRef } from "@/stores/epics/canvas/types";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import type { EpicStreamClientFactory } from "@/stores/epics/open-epic/store";
 import { openStoreForTest } from "@/stores/epics/open-epic/test-support/open-store-for-test";
@@ -108,7 +133,7 @@ import "@/components/layout-editor/layout-editor.css";
  *   over the editing outline when the outline was the column's own `outline`
  *   (LV2-04), so the frame's pixels are measured under the same condition that
  *   broke it. It also carries the editor's own TAB, in the real `TabChrome`,
- *   bottom-aligned exactly as the strip aligns it. For `left` and `right` the
+ *   in the same 36px frame the strip gives a tab. For `left` and `right` the
  *   `strip` slot is the REAL `SideTabStrip` over a seeded tabs store (top
  *   block, rows through `useStripTabItem`, the session row, the foot), and a
  *   band kind of `"band"` draws the REAL `DesktopMenuHeader variant="title-band"`;
@@ -132,8 +157,9 @@ import "@/components/layout-editor/layout-editor.css";
  * the real values. `&surface=sample|epic` picks what the surface frame holds
  * (the sample workspace's route sheet, or a task's panel and content sheets
  * with the real width handle between them), `&sidebar=left|right` and
- * `&view=layered|activity` seed the arrangement, and `&account=1` signs a
- * fixture user in, so the foot draws the account row. What cannot be
+ * `&view=layered|activity` seed the arrangement, `&account=1` signs a
+ * fixture user in, so the foot draws the account row, and `&header=app` puts
+ * the REAL `AppHeader` and its tab strip in the top placement's header slot. What cannot be
  * simulated here - native window controls,
  * real `env()` values, `-webkit-app-region`, the menu bar's native popups and
  * the signed-in foot - is the Staging pass's (tickets/12, "Staging checklist").
@@ -159,9 +185,9 @@ const SESSION_TAB_COLOR: string | null =
 /**
  * The editor's own tab, on the geometry that puts it under the frame (L-163).
  *
- * `app-shell.tsx` gives the header `h-10` and the strip bottom-aligns an `h-9`
- * tab inside it, so the tab's top edge and the editing frame's dotted stroke,
- * held 4px inside the column, are the same line to within a rounding error.
+ * `app-shell.tsx` gives the header `h-10` and a tab an `h-9` frame, and the
+ * tab's box sits 2px inside that frame, so its top edge runs 2px under the
+ * editing frame's dotted stroke, held 4px inside the column.
  * The real `TabChrome` in its `session` state is what paints the tab, and it
  * reads only props, so A9 can ask this specimen what the product does. The
  * width is fixed because a tab's width is a SIMULATED fact here, the same
@@ -217,6 +243,24 @@ interface CanvasVariant {
   readonly view: SideStripView;
   /** Signed in, so the foot draws the account row and the strip the Inbox. */
   readonly account: boolean;
+  /**
+   * Three hosts in the directory (staging round 1, F5): two dialable, one
+   * with no route, so the account menu's Host section draws every row state.
+   */
+  readonly hosts: boolean;
+  /**
+   * This computer's host alone, with a registry that lists nothing else (F8):
+   * a one-host account, the case a local activity plane must still read idle.
+   */
+  readonly solo: boolean;
+  /** Which readings the header (the strip foot, beside a side strip) holds (F6). */
+  readonly readings: "none" | "usage" | "resource" | "both";
+  /**
+   * `app` mounts the REAL `AppHeader` at the top placement, so its tab strip
+   * (Home, the seeded tabs and split pair, the new-tab button) is measured as
+   * it ships; `specimen` is the session-tab specimen the canvas phases use.
+   */
+  readonly header: "specimen" | "app";
 }
 
 interface LayoutCanvasProbe {
@@ -268,6 +312,8 @@ interface LayoutCanvasProbe {
    * ACTIVE tinted tile, not the activation path.
    */
   readonly activateEpicTab: (epicId: string) => void;
+  /** The same for any strip item, the split pair included (`fixture-split`). */
+  readonly activateStripItem: (itemId: string) => void;
   /**
    * What the host answered for `host.notifications.indicatorState`, per epic
    * and per agent: the rail badges and the waiting pulse read the epics, the
@@ -279,8 +325,34 @@ interface LayoutCanvasProbe {
   ) => void;
   /** The activity plane's working and turn agents per epic: the meters read it. */
   readonly setActivity: (byEpic: AgentActivityByEpic) => void;
+  /**
+   * One host's own activity stream (F8): `fleet` a cloud union that vouches
+   * for every host, `partial` a local plane that answers for this host only,
+   * `none` a stream not open. The union's rows stay where `setActivity` put
+   * them; this is the reach, stated for a host the directory knows.
+   */
+  readonly setActivityCoverage: (
+    hostId: string,
+    coverage: "fleet" | "partial" | "none",
+  ) => void;
   readonly setCollapsed: (collapsed: boolean) => void;
+  /** The strip's width, through the writer its resize handle uses. */
+  readonly setStripWidth: (widthPx: number) => void;
   readonly setStripView: (view: SideStripView) => void;
+  /** The panel's side, through the writer the dock rows and the placement bar use. */
+  readonly setSidebarSide: (side: EdgeSide) => void;
+  /** The tab strip's edge, through the writer the placement bar and the dock row use. */
+  readonly setTabPlacement: (placement: TabStripPlacement) => void;
+  /** The task panel collapsed to its rail, through the store the rail's toggle writes. */
+  readonly setPanelCollapsed: (collapsed: boolean) => void;
+  /**
+   * Holds every host activation until `releaseActivations` (R1-A2), so the
+   * driver can reopen the account menu while a switch is still in flight;
+   * `activationCount` is how many reached the authority.
+   */
+  readonly holdActivations: () => void;
+  readonly releaseActivations: () => void;
+  readonly activationCount: () => number;
 }
 
 declare global {
@@ -316,10 +388,56 @@ function readVariant(): CanvasVariant {
     sidebar: params.get("sidebar") === "right" ? "right" : "left",
     view: params.get("view") === "activity" ? "activity" : "layered",
     account: params.get("account") === "1",
+    hosts: params.get("hosts") === "1",
+    solo: params.get("solo") === "1",
+    readings: readReadings(params.get("readings")),
+    header: params.get("header") === "app" ? "app" : "specimen",
   };
 }
 
+function readReadings(value: string | null): CanvasVariant["readings"] {
+  return value === "usage" || value === "resource" || value === "both"
+    ? value
+    : "none";
+}
+
 const VARIANT = readVariant();
+
+/**
+ * The `hosts=1` fleet (staging round 1, F5): this computer's host ("Mac
+ * Studio", which the authority derives as the window's host), a remote this
+ * window can dial, and one with no route - the row the account menu's Host
+ * section draws inert. The remotes are both the directory's (the remote
+ * fetcher) and the mock authority's fleet, so an Activate from the menu goes
+ * through the real authority engine.
+ */
+const FIXTURE_LOCAL_HOST: LocalHostSnapshot = {
+  hostId: "fixture-host-studio",
+  websocketUrl: "ws://127.0.0.1:9/studio",
+  version: "1.2.3",
+  pid: 1,
+  systemHostName: "mac-studio.local",
+  displayName: "Mac Studio",
+  availability: "available",
+};
+const FIXTURE_REMOTE_HOSTS: readonly HostDirectoryEntry[] = [
+  {
+    hostId: "fixture-host-builder",
+    label: "linux-builder",
+    kind: "remote",
+    websocketUrl: "ws://127.0.0.1:9/builder",
+    version: "1.2.3",
+    transportDialability: "dialable",
+  },
+  {
+    hostId: "fixture-host-mini",
+    label: "mac-mini",
+    kind: "remote",
+    websocketUrl: null,
+    version: "1.2.3",
+    transportDialability: "not-dialable",
+  },
+];
 
 /** The shipped defaults with the variant's stored placement, which `reset` returns to. */
 const VARIANT_SNAPSHOT: LayoutSnapshot = {
@@ -329,6 +447,14 @@ const VARIANT_SNAPSHOT: LayoutSnapshot = {
     tabStripPlacement: VARIANT.tabs,
     sidebarSide: VARIANT.sidebar,
     sideStripView: VARIANT.view,
+    usageHost:
+      VARIANT.readings === "usage" || VARIANT.readings === "both"
+        ? "header"
+        : DEFAULT_LAYOUT_SNAPSHOT.arrangement.usageHost,
+    resourceHost:
+      VARIANT.readings === "resource" || VARIANT.readings === "both"
+        ? "header"
+        : DEFAULT_LAYOUT_SNAPSHOT.arrangement.resourceHost,
   },
 };
 
@@ -342,23 +468,245 @@ function resetLayout(): void {
   if (VARIANT.tabs !== "top") {
     useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
   }
+  // The three readings the strip's resource tile has to fit (F6).
+  if (VARIANT.readings !== "none") {
+    useLayoutStore.getState().setRegionValues("resourceMonitor", {
+      cpu: true,
+      memory: true,
+      processes: false,
+      ramShare: true,
+    });
+  }
 }
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
 
+/**
+ * What the account's host registry says under `hosts=1`: mac-mini last
+ * checked in a day ago and is offline, which is what gives its row the word.
+ * The fixture has no authn, whose fetch answers a signed-out `null`, so the
+ * registry query is answered with this whenever it holds anything else.
+ */
+const FIXTURE_REGISTRY: HostListResponse = {
+  hosts: FIXTURE_REMOTE_HOSTS.map((entry) => ({
+    hostId: entry.hostId,
+    displayName: entry.label,
+    platform: "darwin",
+    kind: "personal",
+    publicKey: "fixture",
+    createdAt: "2026-09-01T00:00:00.000Z",
+    updatePolicy: "manual",
+    status: {
+      connectivity: entry.websocketUrl === null ? "offline" : "connectable",
+      viewerReachability: "unknown",
+      clientCloud: "ok",
+      updateState: "current",
+      appVersion: entry.version,
+      lastSeenAt: new Date(Date.now() - 86_400_000).toISOString(),
+    },
+  })),
+};
+if (VARIANT.hosts) {
+  queryClient.getQueryCache().subscribe(() => {
+    for (const query of queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ["auth", "registered-hosts"] })) {
+      if (query.state.data !== FIXTURE_REGISTRY)
+        queryClient.setQueryData(query.queryKey, FIXTURE_REGISTRY);
+    }
+  });
+}
+
+/**
+ * The indicator answer `setIndicators` last gave, kept on EVERY
+ * `host.notifications.indicatorState` entry rather than written once. A
+ * one-shot write reached only the entries that existed at that instant: an
+ * entry keyed by an epic set the strip settled on a beat later, or a mock
+ * reply landing after the write, left the rail's badges empty on a cold first
+ * load. Re-applied on every cache event, so there is no window and no timer.
+ */
+let fixtureIndicators: HostNotificationsIndicatorStateResponse | null = null;
+/**
+ * Compared by value: `setQueryData` shares structure with what was there, so
+ * the stored object is never the answer itself. The guard stops the write's
+ * own synchronous cache event from re-entering.
+ */
+let applyingFixtureIndicators = false;
+function applyFixtureIndicators(): void {
+  if (fixtureIndicators === null || applyingFixtureIndicators) return;
+  const answer = JSON.stringify(fixtureIndicators);
+  applyingFixtureIndicators = true;
+  try {
+    for (const query of queryClient.getQueryCache().findAll()) {
+      if (query.queryKey[1] !== "host.notifications.indicatorState") continue;
+      if (JSON.stringify(query.state.data) === answer) continue;
+      queryClient.setQueryData(query.queryKey, fixtureIndicators);
+    }
+  } finally {
+    applyingFixtureIndicators = false;
+  }
+}
+queryClient.getQueryCache().subscribe(applyFixtureIndicators);
+
 const runnerHost = new MockRunnerHost({
   signInUrl: "http://127.0.0.1:9/sign-in",
   authnBaseUrl: "http://127.0.0.1:9",
-  localHost: null,
-  hosts: [],
+  localHost: VARIANT.hosts || VARIANT.solo ? FIXTURE_LOCAL_HOST : null,
+  hosts: VARIANT.hosts ? FIXTURE_REMOTE_HOSTS : [],
   workspaceFolderPickerPaths: undefined,
   hasLocalHost: undefined,
   traycerCli: undefined,
 });
 
+/**
+ * The authority's `activate`, wrapped so the driver can hold a switch in
+ * flight (R1-A2): the mock authority answers at once, so without a hold there
+ * is no pending state to look at. Calls are counted when they reach the
+ * authority, which is what a second, unguarded switch would change.
+ */
+let heldActivations: Array<() => void> | null = null;
+let activationCount = 0;
+{
+  const authority = runnerHost.selectionAuthority;
+  const activate = authority.activate.bind(authority);
+  Reflect.set(authority, "activate", async (hostId: string) => {
+    activationCount += 1;
+    const held = heldActivations;
+    if (held !== null)
+      await new Promise<void>((resolve) => {
+        held.push(resolve);
+      });
+    return activate(hostId);
+  });
+}
+
 let requestCounter = 0;
+
+/**
+ * Two signed-in providers, so the usage tile has two real readings to fit
+ * (F6): Codex and Claude Code, the pair the glyph's two slots stand for.
+ */
+const FIXTURE_PROVIDERS = providersListResponseSchema.parse({
+  providers: (["codex", "claude-code"] as const).map((providerId) => ({
+    providerId,
+    enabled: true,
+    disabledBy: null,
+    selected: { kind: "bundled" },
+    candidates: [],
+    authPending: false,
+    checkedAt: null,
+    apiKey: { supported: false, configured: false, source: null },
+    auth: {
+      status: "authenticated",
+      badgeText: null,
+      label: null,
+      detail: null,
+    },
+  })),
+  native: null,
+});
+
+const FIXTURE_RESETS_AT = Date.now() + 2 * 3_600_000;
+
+/** Codex at 19% of its 5h window, Claude Code at 62% of its own. */
+function fixtureRateLimitUsage(providerId: string | undefined) {
+  const window = (usedPercent: number, durationMinutes: number) => ({
+    usedPercent,
+    resetsAt: FIXTURE_RESETS_AT,
+    durationMinutes,
+  });
+  return rateLimitUsageResponseSchemaV40.parse({
+    totalTokens: 0,
+    remainingTokens: 0,
+    providerRateLimits:
+      providerId === "codex"
+        ? {
+            provider: "codex",
+            available: true,
+            planType: "pro",
+            limitId: null,
+            limitName: null,
+            primary: window(19, 300),
+            secondary: window(23, 10_080),
+            extraWindows: [],
+            credits: null,
+            individualLimit: null,
+            resetCredits: null,
+            rateLimitReachedType: null,
+          }
+        : {
+            provider: "claude-code",
+            available: true,
+            subscriptionType: "max",
+            fiveHour: window(62, 300),
+            sevenDay: window(41, 10_080),
+            sevenDayOpus: null,
+            sevenDaySonnet: null,
+            modelScoped: [],
+            extraUsage: null,
+          },
+  });
+}
+
+/**
+ * This computer's resource stream, answered once (F6): the host tree at 14%
+ * CPU and 3.2 GB of a 32 GB machine, which is what the resource tile reads.
+ * The fixture mounts no `ResourcesStreamMount`, so the global entry is this.
+ */
+if (VARIANT.readings !== "none") {
+  const sampledAt = Date.now();
+  resourcesRegistry.acquireGlobal("fixture", FIXTURE_LOCAL_HOST.hostId, () =>
+    createResourcesStore({
+      scope: { kind: "global" },
+      streamClientFactory: (_scope, callbacks) => {
+        queueMicrotask(() => {
+          callbacks.onScopeSupport("supported");
+          callbacks.onSnapshot({
+            epicId: "__global__",
+            sampledAt,
+            app: {
+              sampledAt,
+              hostTotalMemoryBytes: 32 * 1024 ** 3,
+              process: {
+                pid: 10,
+                parentPid: null,
+                rootPid: 10,
+                name: "traycer-host",
+                command: "traycer-host",
+                cpuPercent: 2,
+                rssBytes: 400 * 1024 ** 2,
+                pssBytes: null,
+                privateBytes: null,
+                descriptor: null,
+              },
+              processCount: 1,
+              cpuPercent: 2,
+              rssBytes: 400 * 1024 ** 2,
+              pssBytes: null,
+              privateBytes: null,
+            },
+            owners: [],
+            epic: null,
+            epics: [],
+            hostTree: {
+              sampledAt,
+              processCount: 12,
+              cpuPercent: 14,
+              rssBytes: 3.2 * 1024 ** 3,
+              pssBytes: null,
+              privateBytes: null,
+            },
+            other: null,
+            restricted: null,
+          });
+        });
+        return { close: () => undefined, setDemand: () => undefined };
+      },
+    }),
+  );
+}
 
 /**
  * A messenger that answers the three calls the runtime makes on startup and
@@ -390,6 +738,9 @@ const messengerFactory: MessengerFactory<HostRpcRegistry> = ({ registry }) =>
       }),
       "host.notifications.indicatorState": () => ({ epics: {}, chats: {} }),
       "epic.getTaskContexts": () => ({ tasks: {} }),
+      "providers.list": () => FIXTURE_PROVIDERS,
+      "host.getRateLimitUsage": (params) =>
+        fixtureRateLimitUsage(params.providerId),
     },
   });
 
@@ -480,16 +831,28 @@ function buildProbe(): LayoutCanvasProbe {
         activeItemId: tabItemId({ kind: "epic", id: epicId }),
       });
     },
-    // The fixture has no usable host, so the indicator query never runs; its
-    // cache entry is answered in its place, which is what a reply would write.
+    activateStripItem: (itemId) => {
+      useTabsStore.setState({ activeItemId: itemId });
+    },
+    // Stands in for the host's reply; `applyFixtureIndicators` keeps every
+    // indicator entry answered with it, including ones that appear later.
     setIndicators: (epics, chats) => {
-      for (const query of queryClient.getQueryCache().findAll()) {
-        if (query.queryKey[1] !== "host.notifications.indicatorState") continue;
-        queryClient.setQueryData(query.queryKey, { epics, chats });
-      }
+      fixtureIndicators = { epics, chats };
+      applyFixtureIndicators();
     },
     setActivity: (byEpic) => {
       __setAgentActivityStateForTests(byEpic, "local", null);
+    },
+    setStripWidth: (widthPx) => {
+      useSideTabStripStore.getState().setWidthPx(widthPx);
+    },
+    setActivityCoverage: (hostId, coverage) => {
+      __setHostAgentActivityHealthForTests(hostId, {
+        connectionStatus: coverage === "none" ? "connecting" : "open",
+        servedBy: coverage === "fleet" ? "cloud" : "local",
+        cloudSyncStatus: coverage === "fleet" ? "connected" : null,
+        stateFrameSeenThisEpoch: coverage !== "none",
+      });
     },
     setCollapsed: (collapsed) => {
       useSideTabStripStore.getState().setCollapsed(collapsed);
@@ -499,6 +862,24 @@ function buildProbe(): LayoutCanvasProbe {
       useLayoutStore
         .getState()
         .setArrangement({ ...arrangement, sideStripView: view });
+    },
+    setSidebarSide: (side) => {
+      writeArrangementField("sidebarSide", side);
+    },
+    setTabPlacement: (placement) => {
+      writeArrangementField("tabStripPlacement", placement);
+    },
+    holdActivations: () => {
+      heldActivations = [];
+    },
+    releaseActivations: () => {
+      const held = heldActivations ?? [];
+      heldActivations = null;
+      for (const resolve of held) resolve();
+    },
+    activationCount: () => activationCount,
+    setPanelCollapsed: (collapsed) => {
+      useLeftPanelStore.getState().setMainCollapsed(EPIC_SURFACE_ID, collapsed);
     },
   };
 }
@@ -510,6 +891,7 @@ function buildProbe(): LayoutCanvasProbe {
  * on the column is painted underneath this, the shipped `::after` frame is not.
  */
 function FixtureHeader(): ReactNode {
+  if (VARIANT.header === "app") return <AppHeader variant="app" />;
   return (
     <header
       data-fixture-header
@@ -613,53 +995,136 @@ const EPIC_SURFACE_SESSION =
   VARIANT.surface === "epic" ? openEpicSurfaceSession() : null;
 
 /**
- * A task's surface as `EpicSurface` lays it out: the panel sheet on the stored
- * sidebar side, the REAL width handle in the gap, and the content sheet beside
- * it. What the panel holds below its REAL task header, and the whole content
- * sheet, are stand-ins (the real panel and canvas need a live host), with the
- * real sheet markers and classes, so the sheet CSS, the joined tab, the handle
- * and the ground between them are what ships. The live agents list is the
- * real portal, owned here as the epic surface owns it (D9).
+ * Epsilon's one chat tile, in a one-pane canvas: its body is a HOSTED
+ * surface, painted by the real `StableTileSurfaceHost` plane at the rect its
+ * real `TileSurfaceSlot` reports, as every chat body is in the app.
+ */
+const EPIC_SURFACE_CHAT: EpicCanvasTileRef = {
+  id: "fixture-epsilon-chat",
+  instanceId: "fixture-epsilon-chat",
+  type: "chat",
+  name: "Plan the migration",
+  hostId: "fixture-host",
+};
+
+function seedEpicSurfaceCanvas(): void {
+  const paneId = "fixture-epsilon-pane";
+  useEpicCanvasStore.setState((state) => ({
+    canvasByTabId: {
+      ...state.canvasByTabId,
+      [EPIC_SURFACE_ID]: {
+        root: {
+          kind: "pane",
+          id: paneId,
+          tabInstanceIds: [EPIC_SURFACE_CHAT.instanceId],
+          activeTabId: EPIC_SURFACE_CHAT.instanceId,
+          previewTabId: null,
+          activationHistory: [EPIC_SURFACE_CHAT.instanceId],
+        },
+        activePaneId: paneId,
+        tilesByInstanceId: {
+          [EPIC_SURFACE_CHAT.instanceId]: EPIC_SURFACE_CHAT,
+        },
+        sizesByGroupId: {},
+      },
+    },
+  }));
+}
+
+/** What the plane paints for the hosted chat: a marked box filling its rect. */
+function renderFixtureHostedBody(): ReactNode {
+  return (
+    <div
+      data-fixture-hosted-body
+      className="flex h-full w-full items-center justify-center border-2 border-dashed border-info bg-info/10 text-ui-sm"
+    >
+      Hosted chat body
+    </div>
+  );
+}
+
+/**
+ * A task's surface as `EpicSurface` lays it out, through the REAL
+ * `EpicSurfaceSheets`: the panel sheet on the stored sidebar side, the REAL
+ * width handle in the gap, and the content sheet beside it. What the panel
+ * holds below its REAL task header is a stand-in (the real panel needs a live
+ * host). The content sheet holds a REAL `TileSurfaceSlot`, and the REAL
+ * `StableTileSurfaceHost` plane sits over the surface as `TopLevelTabHost`
+ * mounts it, so the hosted chat body is positioned by the shipped geometry
+ * coordinator. The live agents list is the real portal, owned here as the
+ * epic surface owns it (D9).
  */
 function EpicSurfaceStandIn(): ReactNode {
   const sidebarSide = useArrangementValue("sidebarSide");
   const sidebarWidthPx = useSidebarWidthPx();
-  const handle = <SidebarWidthResizeHandle side={sidebarSide} hidden={false} />;
+  const mainCollapsed = useMainPanelCollapsed(EPIC_SURFACE_ID);
+  const handle = (
+    <SidebarWidthResizeHandle side={sidebarSide} hidden={mainCollapsed} />
+  );
   const panel = (
     <div
       data-shell-sheet="panel"
       data-epic-sidebar-panel
       data-fixture-panel
-      className="flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background"
+      className={cn(
+        "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
+        mainCollapsed && "hidden",
+      )}
       style={{ width: sidebarWidthPx }}
     >
       <PanelTaskHeader epicId={EPIC_SURFACE_ID} tabId={EPIC_SURFACE_ID} />
     </div>
   );
-  return (
+  // `EpicSidebarColumn`'s collapsed rail sheet, at the rail's 60px (D4): the
+  // panel stays mounted and hidden beside it, as in the app.
+  const collapsedRail = mainCollapsed ? (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
-      data-epic-surface={EPIC_SURFACE_ID}
-    >
-      {EPIC_SURFACE_SESSION === null ? null : (
-        <EpicSessionContext value={EPIC_SURFACE_SESSION}>
-          <StripLiveAgentsPortal
+      data-shell-sheet="panel"
+      data-fixture-collapsed-rail
+      className="w-15 shrink-0 overflow-clip bg-background"
+    />
+  ) : null;
+  if (EPIC_SURFACE_SESSION === null) return null;
+  return (
+    // `TopLevelTabHost`'s own box: the plane's coordinate origin.
+    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-clip">
+      <EpicSessionContext value={EPIC_SURFACE_SESSION}>
+        <StripLiveAgentsPortal
+          epicId={EPIC_SURFACE_ID}
+          tabId={EPIC_SURFACE_ID}
+        />
+        <EpicSurfaceSheets
+          tabId={EPIC_SURFACE_ID}
+          sidebarSide={sidebarSide}
+          sidebar={
+            // Fragment order as `EpicSidebarColumn` renders it: the handle
+            // finds the panel as its sibling on the sidebar's side.
+            sidebarSide === "right" ? (
+              <>
+                {handle}
+                {panel}
+                {collapsedRail}
+              </>
+            ) : (
+              <>
+                {collapsedRail}
+                {panel}
+                {handle}
+              </>
+            )
+          }
+        >
+          <TileSurfaceSlot
+            node={EPIC_SURFACE_CHAT}
             epicId={EPIC_SURFACE_ID}
-            tabId={EPIC_SURFACE_ID}
+            paneId="fixture-epsilon-pane"
+            viewTabId={EPIC_SURFACE_ID}
+            tabSelected
+            canvasPaneActive
           />
-        </EpicSessionContext>
-      )}
-      {/* Fragment order as `EpicSidebarColumn` renders it: the handle finds
-          the panel as its sibling on the sidebar's side. */}
-      {sidebarSide === "right" ? null : panel}
-      {sidebarSide === "right" ? null : handle}
-      <div
-        data-shell-sheet="content"
-        data-fixture-content
-        className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas"
-      />
-      {sidebarSide === "right" ? handle : null}
-      {sidebarSide === "right" ? panel : null}
+        </EpicSurfaceSheets>
+      </EpicSessionContext>
+      <StableTileSurfaceHost renderRecordBody={renderFixtureHostedBody} />
     </div>
   );
 }
@@ -717,6 +1182,32 @@ export function CanvasFixture(): ReactNode {
   );
 }
 
+/**
+ * A signed-in request context for the readings variants (F6), which is what
+ * lets a host query run at all: the fixture's AuthService has no session, so
+ * every `useHostQuery` stays disabled without one. Set once the runtime has
+ * started (it renders nothing before), and before anything under it mounts;
+ * the other variants keep their seeded caches and never fetch.
+ */
+function FixtureRequestContext(props: {
+  readonly children: ReactNode;
+}): ReactNode {
+  const binding = useHostBinding();
+  const [ready, setReady] = useState(VARIANT.readings === "none");
+  useLayoutEffect(() => {
+    if (ready || binding === null) return;
+    // The client announces the new context itself ("auth-changed").
+    const unsubscribe = binding.hostClient.onChange(() => {
+      setReady(true);
+    });
+    binding.hostClient.setRequestContext(
+      createRendererContextFixture({ bearerToken: "fixture" }),
+    );
+    return unsubscribe;
+  }, [binding, ready]);
+  return ready ? props.children : null;
+}
+
 export function Providers(props: { readonly children: ReactNode }): ReactNode {
   return (
     <QueryClientProvider client={queryClient}>
@@ -726,12 +1217,22 @@ export function Providers(props: { readonly children: ReactNode }): ReactNode {
           messengerFactory={messengerFactory}
           invalidator={null}
           requestId={null}
-          remoteFetcher={() => Promise.resolve({ kind: "hosts", entries: [] })}
+          remoteFetcher={() =>
+            Promise.resolve({
+              kind: "hosts",
+              entries: VARIANT.hosts ? FIXTURE_REMOTE_HOSTS : [],
+            })
+          }
           fallback={<div data-fixture-runtime-fallback />}
         >
           <LazyMotion features={domAnimation}>
             <TooltipProvider>
-              <SampleSceneProvider>{props.children}</SampleSceneProvider>
+              {/* The app shell's usage poll, which is what fills the usage
+                  tile's cache; the readings variants only (F6). */}
+              <FixtureRequestContext>
+                {VARIANT.readings === "none" ? null : <RateLimitPollProvider />}
+                <SampleSceneProvider>{props.children}</SampleSceneProvider>
+              </FixtureRequestContext>
             </TooltipProvider>
           </LazyMotion>
         </HostRuntimeProvider>
@@ -792,6 +1293,7 @@ function applyVariant(variant: CanvasVariant): void {
   // A task window has no layout session, so no Customizing tab: Epsilon is
   // the active tab, which is what the join and the Activity view are about.
   seedSideStripTabs(variant.surface === "sample");
+  if (variant.surface === "epic") seedEpicSurfaceCanvas();
 }
 
 applyVariant(VARIANT);

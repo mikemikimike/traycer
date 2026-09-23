@@ -10,8 +10,9 @@ import { useEpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import { useRegisteredEpicTitleGenerating } from "@/lib/epic-selectors";
 import { cn } from "@/lib/utils";
 import { SplitMemberChrome } from "./split-tab-chrome";
-import { TabChromeBackground } from "./tab-chrome-background";
+import { TabChromeBackground, TabColorMark } from "./tab-chrome-background";
 import { useHeaderTabTitle } from "./header-tab-presentation";
+import { TAB_BOX_CLASS } from "./tab-chrome-tokens";
 import {
   tabAppearance,
   type HeaderTab,
@@ -85,7 +86,6 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
           activityStatus={activityStatus}
           indicatorState={props.indicatorState}
           tabId={props.tab.id}
-          statusPresentation="message"
         />
         {props.titleControl ?? (
           <span
@@ -128,7 +128,7 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
  * matches a `display: none` element, so one marker covers both states.
  *
  * What it PAINTS depends on the state, because only one of the two leaves it
- * anything to draw (L-138). At rest the tab wears the colour as a cap along
+ * anything to draw (L-138). At rest the tab wears the colour as a cap inside
  * its bottom edge, and this is that cap. Active, `TabChrome` fills the tab's
  * own silhouette with the same colour, so there is nothing left here to draw.
  */
@@ -144,7 +144,8 @@ function SessionTabMark(props: {
       // runtime value here, so it travels as a custom property and every fill
       // is a rule rather than a string built in JS.
       data-layout-session-tab={props.isActive ? "filled" : "rest"}
-      className="pointer-events-none absolute inset-x-0 bottom-0"
+      // Where every tab's colour mark sits (F4), at the cap's own weight.
+      className="pointer-events-none absolute bottom-1 left-1/2 w-6 -translate-x-1/2 rounded-full"
       style={{ "--layout-session-tab-color": props.color } as CSSProperties}
     />
   );
@@ -200,15 +201,15 @@ export function TabChrome(props: {
     return (
       <>
         {props.color !== null && !props.session ? (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-[1.5px] bg-[var(--swatch)]"
-            style={{ "--swatch": props.color } as CSSProperties}
-          />
+          <TabColorMark color={props.color} />
         ) : null}
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-x-2 inset-y-1 rounded-md bg-accent/45 opacity-0 transition-opacity duration-150 ease-out group-focus-visible/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100 group-hover/tab:opacity-100"
+          data-testid="tab-hover-box"
+          className={cn(
+            TAB_BOX_CLASS,
+            "bg-foreground/5 opacity-0 transition-opacity duration-150 ease-out group-focus-visible/tab:opacity-100 group-has-[:focus-visible]/tab:opacity-100 group-hover/tab:opacity-100",
+          )}
         />
       </>
     );
@@ -217,7 +218,7 @@ export function TabChrome(props: {
     <TabChromeBackground
       // ACTIVE, the editor's tab is the colour and wears none of it on its
       // edge (L-163): the fill is the token at full strength and the stroke is
-      // the ordinary tab border, so the frame around the screen owns the only
+      // the sheets' border, so the frame around the screen owns the only
       // amber LINE while a session is live and this tab is the only amber
       // OBJECT. A dilution cannot do that job: every share of the token over
       // `--background` trades the tab reading as coloured against its own
@@ -225,7 +226,7 @@ export function TabChrome(props: {
       // the built-in palettes is 4.5% - a tab indistinguishable from the strip
       // it sits in. Nor can a stroke in the colour, because the frame's dotted
       // run and the tab's top edge share a line to within a quarter of a pixel
-      // and read as one broken stroke where they meet.
+      // and read as one broken stroke.
       // `layout-editor-contrast.test.ts` measures the label on this fill.
       fill={
         props.session
@@ -234,10 +235,9 @@ export function TabChrome(props: {
       }
       borderColor={
         props.session
-          ? "var(--color-border)"
-          : (props.color ?? "var(--color-border)")
+          ? "var(--canvas-border)"
+          : (props.color ?? "var(--canvas-border)")
       }
-      coversBaseline
       className="transition-opacity duration-300 ease-spring"
     />
   );

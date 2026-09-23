@@ -1,12 +1,24 @@
 /**
  * `SideStripFoot` (D6): the account row's name, host line (host label plus
- * "N agents running"), health dot, collapsed avatar-only state, and the
- * signed-out fallback. Mounted through the real `SideTabStrip` so
- * `ColumnEdgeContext` and the real auth/agent-activity/selection-authority
- * stores are exactly what production reads.
+ * "N running"), health dot, collapsed avatar-only state, and the signed-out
+ * fallback. Mounted through the real `SideTabStrip` so `ColumnEdgeContext`
+ * and the real auth/agent-activity/selection-authority stores are exactly
+ * what production reads.
+ *
+ * The visible `side-strip-host-line` is `aria-hidden` and carries the SHORT
+ * form ("Ada's Mac · 3 running") so the count fits the strip; the full form
+ * ("Ada's Mac · 3 agents running") lives in an sr-only span beside it and
+ * therefore in the row button's accessible name. Every case with a running
+ * count asserts both.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -17,7 +29,10 @@ import {
 } from "@tanstack/react-router";
 import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
-import { mockLocalHostEntry } from "@traycer-clients/shared/host-client/mock/mock-host-directory";
+import {
+  mockLocalHostEntry,
+  mockRemoteHostEntry,
+} from "@traycer-clients/shared/host-client/mock/mock-host-directory";
 import type { IHostMessenger } from "@traycer-clients/shared/host-transport/host-messenger";
 import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -33,6 +48,7 @@ import { WindowsBridgeContext } from "@/providers/windows-bridge-context";
 import type { HostLeaseSnapshot } from "@traycer-clients/shared/host-selection/selection-authority-contract";
 import {
   __resetAgentActivityStoreForTests,
+  __setHostAgentActivityHealthForTests,
   __setHostAgentActivityStateForTests,
 } from "@/stores/agent-activity-store";
 import { useAuthStore } from "@/stores/auth/auth-store";
@@ -102,18 +118,6 @@ vi.mock("@/hooks/host/use-host-lease", async (importOriginal) => {
   };
 });
 
-// The foot renders `HeaderBarCluster` too, which is unrelated to the account
-// row this suite is about and brings its own layout-override dependency.
-vi.mock("@/components/layout/header/header-actions", async (importOriginal) => {
-  const actual =
-    await importOriginal<
-      typeof import("@/components/layout/header/header-actions")
-    >();
-  return {
-    ...actual,
-    HeaderBarCluster: () => null,
-  };
-});
 vi.mock("@/components/layout/header/app-update-button", () => ({
   AppUpdateHeaderButton: () => null,
 }));
@@ -174,6 +178,63 @@ function renderStrip(): void {
             requestId={null}
             remoteFetcher={() =>
               Promise.resolve({ kind: "hosts", entries: [] })
+            }
+            fallback={<div data-testid="runtime-fallback">…</div>}
+          >
+            <TooltipProvider>
+              <WindowsBridgeContext.Provider
+                value={{ bridge: null, hasHydrated: true }}
+              >
+                <SideTabStrip edge="left" ownsTitleBar={false} />
+              </WindowsBridgeContext.Provider>
+            </TooltipProvider>
+          </HostRuntimeProvider>
+        </RunnerHostProvider>
+      </QueryClientProvider>
+    ),
+  });
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => null,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([indexRoute]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  render(<RouterProvider router={router} />);
+}
+
+/**
+ * Like {@link renderStrip}, but the real `HostDirectoryService` settles with
+ * exactly `hostIds` as its known hosts - `useAccountActivityCoverage` reads
+ * this directory, not the `seedHost` double `useHostDirectoryEntry` is mocked
+ * onto, so a case that needs the directory to have OPINIONS about which hosts
+ * exist (as opposed to `renderStrip`'s empty, merely-settled listing) goes
+ * through here instead.
+ */
+function renderStripWithKnownHosts(hostIds: readonly string[]): void {
+  const runnerHost = createRunnerHost();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const rootRoute = createRootRoute({
+    component: () => (
+      <QueryClientProvider client={queryClient}>
+        <RunnerHostProvider runnerHost={runnerHost}>
+          <HostRuntimeProvider
+            registry={hostRpcRegistry}
+            messengerFactory={makeMessengerFactory()}
+            invalidator={null}
+            requestId={null}
+            remoteFetcher={() =>
+              Promise.resolve({
+                kind: "hosts",
+                entries: hostIds.map((hostId) => ({
+                  ...mockRemoteHostEntry,
+                  hostId,
+                })),
+              })
             }
             fallback={<div data-testid="runtime-fallback">…</div>}
           >
@@ -283,15 +344,21 @@ describe("SideStripFoot", () => {
     __setHostAgentActivityStateForTests(
       "host-a",
       { "epic-1": { working: ["agent-1"], turn: [] } },
-      "local",
-      null,
+      "cloud",
+      "connected",
     );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+    });
     renderStrip();
     await screen.findByTestId("side-tab-strip");
 
     expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
-      "Ada's Mac · 1 agent running",
+      "Ada's Mac · 1 running",
     );
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 1 agent running/ }),
+    ).toBeTruthy();
   });
 
   it("shows the plural 'N agents running'", async () => {
@@ -302,15 +369,44 @@ describe("SideStripFoot", () => {
         "epic-1": { working: ["agent-1"], turn: [] },
         "epic-2": { working: ["agent-2"], turn: [] },
       },
-      "local",
-      null,
+      "cloud",
+      "connected",
     );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+    });
     renderStrip();
     await screen.findByTestId("side-tab-strip");
 
     expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
-      "Ada's Mac · 2 agents running",
+      "Ada's Mac · 2 running",
     );
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 2 agents running/ }),
+    ).toBeTruthy();
+  });
+
+  it("never truncates the running count - the host name gives way first", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      { "epic-1": { working: ["agent-1"], turn: [] } },
+      "cloud",
+      "connected",
+    );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+    });
+    renderStrip();
+    await screen.findByTestId("side-tab-strip");
+
+    const line = screen.getByTestId("side-strip-host-line");
+    const spans = line.querySelectorAll("span");
+    expect(spans).toHaveLength(2);
+    const [hostNameSpan, countSpan] = spans;
+    expect(hostNameSpan.className).toContain("truncate");
+    expect(countSpan.className).toContain("shrink-0");
+    expect(countSpan.className).not.toContain("truncate");
   });
 
   it.each([
@@ -377,5 +473,189 @@ describe("SideStripFoot", () => {
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     const identity = await screen.findByTestId("user-menu-identity");
     expect(identity.textContent).toContain("Ada Lovelace");
+  });
+});
+
+/**
+ * The host line's running count under `ActivityFleetCoverage` (F8): a union
+ * that does not reach every host is a lower bound, so the line marks it with
+ * a trailing "+" and always says "agents" (plural) rather than claiming an
+ * exact, possibly understated, total.
+ */
+describe("SideStripFoot host line under account activity coverage (F8)", () => {
+  beforeEach(() => {
+    resetSharedState();
+    signIn();
+  });
+
+  afterEach(() => {
+    cleanup();
+    useAuthStore.getState().setSignedOut();
+    resetSharedState();
+  });
+
+  it("does not count a reconnecting host's retained agent", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      { "epic-1": { working: ["agent-1"], turn: [] } },
+      "cloud",
+      "connected",
+    );
+    // Deliberately not attested `open` this epoch - a reconnect keeps the
+    // working set on record but must not be read as a live count.
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "reconnecting",
+    });
+    renderStrip();
+    await screen.findByTestId("side-tab-strip");
+
+    expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
+      "Ada's Mac",
+    );
+  });
+
+  it("reads an exact 'N agents running' under a fleet-spanning union - the shortcut needs no directory", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      {
+        "epic-1": { working: ["agent-1"], turn: [] },
+        "epic-2": { working: ["agent-2"], turn: [] },
+        "epic-3": { working: ["agent-3"], turn: [] },
+      },
+      "cloud",
+      "connected",
+    );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+      servedBy: "cloud",
+      cloudSyncStatus: "connected",
+      stateFrameSeenThisEpoch: true,
+    });
+    renderStrip();
+    await screen.findByTestId("side-tab-strip");
+
+    expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
+      "Ada's Mac · 3 running",
+    );
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 3 agents running/ }),
+    ).toBeTruthy();
+  });
+
+  it("reads a lower-bound 'N+ agents running' when the account has no known hosts (indeterminate coverage)", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      {
+        "epic-1": { working: ["agent-1"], turn: [] },
+        "epic-2": { working: ["agent-2"], turn: [] },
+        "epic-3": { working: ["agent-3"], turn: [] },
+      },
+      "local",
+      null,
+    );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+      servedBy: "local",
+      cloudSyncStatus: null,
+      stateFrameSeenThisEpoch: true,
+    });
+    renderStrip();
+    await screen.findByTestId("side-tab-strip");
+
+    expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
+      "Ada's Mac · 3+ running",
+    );
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 3\+ agents running/ }),
+    ).toBeTruthy();
+  });
+
+  it("keeps 'agents' plural for a single agent when the account has no known hosts - '1+ agents running'", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      { "epic-1": { working: ["agent-1"], turn: [] } },
+      "local",
+      null,
+    );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+      servedBy: "local",
+      cloudSyncStatus: null,
+      stateFrameSeenThisEpoch: true,
+    });
+    renderStrip();
+    await screen.findByTestId("side-tab-strip");
+
+    expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
+      "Ada's Mac · 1+ running",
+    );
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 1\+ agents running/ }),
+    ).toBeTruthy();
+  });
+
+  it("reads an exact 'N agents running' with no '+' when the single known host's own narrow plane covers it", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      {
+        "epic-1": { working: ["agent-1"], turn: [] },
+        "epic-2": { working: ["agent-2"], turn: [] },
+        "epic-3": { working: ["agent-3"], turn: [] },
+      },
+      "local",
+      null,
+    );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+      servedBy: "local",
+      cloudSyncStatus: null,
+      stateFrameSeenThisEpoch: true,
+    });
+    renderStripWithKnownHosts(["host-a"]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
+        "Ada's Mac · 3 running",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 3 agents running/ }),
+    ).toBeTruthy();
+  });
+
+  it("reads 'N+ agents running' when one of two known hosts is unserved", async () => {
+    seedHost("host-a", "Ada's Mac", "ready");
+    __setHostAgentActivityStateForTests(
+      "host-a",
+      {
+        "epic-1": { working: ["agent-1"], turn: [] },
+        "epic-2": { working: ["agent-2"], turn: [] },
+        "epic-3": { working: ["agent-3"], turn: [] },
+      },
+      "local",
+      null,
+    );
+    __setHostAgentActivityHealthForTests("host-a", {
+      connectionStatus: "open",
+      servedBy: "local",
+      cloudSyncStatus: null,
+      stateFrameSeenThisEpoch: true,
+    });
+    // "host-b" is known to the directory but never gets a slice of its own.
+    renderStripWithKnownHosts(["host-a", "host-b"]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("side-strip-host-line").textContent).toBe(
+        "Ada's Mac · 3+ running",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: /Ada's Mac · 3\+ agents running/ }),
+    ).toBeTruthy();
   });
 });

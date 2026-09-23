@@ -59,7 +59,8 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
       "components/layout/header/history-button.tsx": 1,
       "components/notifications/notifications-bell.tsx": 1,
       "components/auth/user-menu.tsx": 1,
-      "components/layout/tabs/side-strip/side-strip-nav-rows.tsx": 1,
+      // F7 moved the add button here as New Task, with its own leaf marker.
+      "components/layout/tabs/side-strip/side-strip-nav-rows.tsx": 2,
       "components/layout/tabs/side-strip/side-strip-foot.tsx": 1,
     },
     deviation: null,

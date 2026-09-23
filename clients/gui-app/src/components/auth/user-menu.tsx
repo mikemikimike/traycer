@@ -6,11 +6,26 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HostOptionRow } from "@/components/settings/host-scope/host-option-row";
+import {
+  ACTIVATE_HOST_HINT,
+  AVAILABLE_HOST_ROW_SURFACE_STATE,
+  isHostOptionSelectable,
+} from "@/components/settings/host-scope/host-option-model";
+import { useHostOptions } from "@/components/settings/host-scope/use-host-options";
+import { useMakeActiveHost } from "@/components/settings/host-scope/use-host-scope";
+import { useRegisteredHostsPollLiveness } from "@/hooks/auth/use-registered-hosts-query";
+import { useRefreshHostDirectoryOnOpen } from "@/hooks/host/use-refresh-host-directory-on-open";
+import { useHostBinding } from "@/lib/host";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
 import { computeInitials } from "@/lib/auth/compute-initials";
 import { resolvePlatformBaseUrl } from "@/lib/auth/platform-base-url";
 import { useRunnerHost } from "@/providers/use-runner-host";
@@ -18,7 +33,7 @@ import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store
 import { getSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import { useDesktopDialogStore } from "@/stores/dialogs/desktop-dialog-store";
 import { ExternalLink, LayersPlus, LogOut, Settings } from "lucide-react";
-import { useState, type ReactElement } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { ignoreError } from "@/lib/browser-view/ignore-error";
@@ -37,6 +52,8 @@ export interface UserMenuProps {
    * takes a ref; the menu toggles it open through Radix's own trigger.
    */
   readonly trigger: ReactElement | null;
+  /** What the trigger's tooltip says, or `null` for the person's name. */
+  readonly triggerTooltip: string | null;
 }
 
 /** The signed-in person's avatar: their picture, or their initials. */
@@ -85,7 +102,7 @@ export function UserMenu(props: UserMenuProps) {
       />
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <TooltipWrapper
-          label={open ? null : props.userName}
+          label={open ? null : (props.triggerTooltip ?? props.userName)}
           side={placement?.side ?? "top"}
           sideOffset={6}
           align={placement?.align}
@@ -132,6 +149,7 @@ export function UserMenu(props: UserMenuProps) {
             </span>
           </div>
           <DropdownMenuSeparator />
+          <UserMenuHostSection tooltipSide={placement?.side ?? "left"} />
           <DropdownMenuItem
             onSelect={() => {
               setOpen(false);
@@ -208,6 +226,83 @@ export function UserMenu(props: UserMenuProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+    </>
+  );
+}
+
+/**
+ * The account menu's Host section (F5): every host, the check on the one this
+ * window uses, and a click that switches to it. It is Settings' Activate in
+ * another place - the same write through `useMakeActiveHost` - drawn with the
+ * shared `HostOptionRow` under `bind`, so an unreachable host is inert and
+ * says so in the row's own word. Mounted only while the menu is open, so the
+ * host lists and their liveness poll run only while someone is looking. A
+ * switch still in flight from any surface holds every row, and its own row
+ * carries the spinner, so a reopened menu cannot start a second one.
+ */
+function UserMenuHostSection(props: {
+  readonly tooltipSide: "top" | "right" | "bottom" | "left";
+}): ReactNode {
+  const binding = useHostBinding();
+  useRefreshHostDirectoryOnOpen(true, binding?.directory ?? null);
+  useRegisteredHostsPollLiveness();
+  const { hosts, activeHostId } = useHostOptions();
+  const { makeActive, activatingHostId } = useMakeActiveHost(hosts);
+  if (hosts.length === 0) return null;
+  return (
+    <>
+      <DropdownMenuLabel>Host</DropdownMenuLabel>
+      <DropdownMenuRadioGroup
+        value={activeHostId ?? ""}
+        onValueChange={(hostId) => {
+          if (hostId !== activeHostId) makeActive(hostId);
+        }}
+        data-testid="user-menu-host-section"
+      >
+        {hosts.map((host) => {
+          const active = host.hostId === activeHostId;
+          const selectable =
+            activatingHostId === null &&
+            isHostOptionSelectable(
+              host,
+              "bind",
+              AVAILABLE_HOST_ROW_SURFACE_STATE,
+            );
+          return (
+            <TooltipWrapper
+              key={host.hostId}
+              label={active || !selectable ? null : ACTIVATE_HOST_HINT}
+              side={props.tooltipSide}
+              sideOffset={6}
+              align={undefined}
+            >
+              <DropdownMenuRadioItem
+                value={host.hostId}
+                disabled={!selectable}
+                data-testid={`user-menu-host-option-${host.hostId}`}
+              >
+                <HostOptionRow
+                  host={host}
+                  picked={active}
+                  active={active}
+                  intent="bind"
+                  surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
+                  updateView={null}
+                />
+                {host.hostId === activatingHostId ? (
+                  <AgentSpinningDots
+                    className="ml-auto"
+                    testId={`user-menu-host-activating-${host.hostId}`}
+                    variant={undefined}
+                    tone="muted"
+                  />
+                ) : null}
+              </DropdownMenuRadioItem>
+            </TooltipWrapper>
+          );
+        })}
+      </DropdownMenuRadioGroup>
+      <DropdownMenuSeparator />
     </>
   );
 }

@@ -305,8 +305,8 @@ function StripPairPreview(props: {
       data-testid={`tab-strip-pair-preview-${props.tabKind}-${props.tabId}`}
       data-side={side}
       className={cn(
-        "pointer-events-none absolute inset-y-1 z-30 rounded-sm bg-primary/20 ring-2 ring-primary",
-        side === "left" ? "left-1 right-1/2" : "left-1/2 right-1",
+        "pointer-events-none absolute inset-y-0.5 z-30 rounded-xl bg-primary/20 ring-2 ring-primary",
+        side === "left" ? "left-0.5 right-1/2" : "left-1/2 right-0.5",
       )}
     />
   );

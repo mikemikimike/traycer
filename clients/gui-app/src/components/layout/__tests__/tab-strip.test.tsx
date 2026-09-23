@@ -1,10 +1,7 @@
 import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
 import { INERT_ROOT_STATE_PORT } from "@/stores/epics/open-epic/test-support/root-state-port-fixture";
 import { TabStrip } from "@/components/layout/tabs/tab-strip";
-import {
-  SplitMemberChrome,
-  SplitTabLayout,
-} from "@/components/layout/tabs/split-tab-chrome";
+import { SplitMemberChrome } from "@/components/layout/tabs/split-tab-chrome";
 import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { paneTabRefs } from "@/stores/epics/canvas/actions";
@@ -801,17 +798,11 @@ describe("<TabStrip />", () => {
   it("uses the project color for the active outline while keeping the neutral fill", () => {
     render(<TabChrome isActive color="#12ab34" session={false} />);
 
-    const center = screen.getByTestId("tab-chrome-center");
-    expect(center.style.getPropertyValue("--swatch")).toBe(
+    const box = screen.getByTestId("tab-chrome-box");
+    expect(box.style.getPropertyValue("--swatch")).toBe(
       "var(--color-background)",
     );
-    expect(center.style.getPropertyValue("--swatch-border")).toBe("#12ab34");
-    expect(
-      screen.getByTestId("tab-cap-outline-left").getAttribute("stroke"),
-    ).toBe("#12ab34");
-    expect(
-      screen.getByTestId("tab-cap-outline-right").getAttribute("stroke"),
-    ).toBe("#12ab34");
+    expect(box.style.getPropertyValue("--swatch-border")).toBe("#12ab34");
   });
 
   it("keeps the project color on an inactive tab", () => {
@@ -824,39 +815,64 @@ describe("<TabStrip />", () => {
     ).toContain("--swatch: #12ab34;");
   });
 
+  it("draws an inactive lone tab's color as the color mark, and no mark on the active one (F4 round 2)", () => {
+    const { rerender } = render(
+      <TabChrome isActive={false} color="#12ab34" session={false} />,
+    );
+    expect(
+      screen.getByTestId("tab-color-mark").style.getPropertyValue("--swatch"),
+    ).toBe("#12ab34");
+
+    rerender(<TabChrome isActive color="#12ab34" session={false} />);
+    // The box's own border carries the color once the tab is active; nothing
+    // left for the mark to draw.
+    expect(screen.queryByTestId("tab-color-mark")).toBeNull();
+  });
+
   /**
-   * The editing signal on the tab (L-87, L-138, L-163): ACTIVE, the editor's
-   * own tab IS the colour and wears none of it on its edge. The fill is the
-   * colour the tab is handed, at full strength, and the stroke is the ordinary
-   * border every other active tab gets - so the frame around the screen owns
-   * the only amber line while a session is live.
-   *
-   * Both halves are pinned, because each one alone passed while the tab was a
-   * ring: a colour on the silhouette's stroke traces the skirt that hangs
-   * below the header baseline and lands on the frame's own line.
+   * The editing signal on the tab (L-87, L-138, L-163, F4): ACTIVE, the
+   * editor's own tab IS the colour and wears none of it on its edge. The
+   * fill is the colour the tab is handed, at full strength, and the border is
+   * the ordinary canvas border every other active tab gets - so the frame
+   * around the screen owns the only amber line while a session is live.
    */
   it("fills the editor's own tab instead of outlining it like every other", () => {
     render(<TabChrome isActive color="var(--warning-foreground)" session />);
 
-    const center = screen.getByTestId("tab-chrome-center");
-    expect(center.style.getPropertyValue("--swatch")).toBe(
+    const box = screen.getByTestId("tab-chrome-box");
+    expect(box.style.getPropertyValue("--swatch")).toBe(
       "var(--warning-foreground)",
     );
-    expect(center.style.getPropertyValue("--swatch-border")).toBe(
-      "var(--color-border)",
+    expect(box.style.getPropertyValue("--swatch-border")).toBe(
+      "var(--canvas-border)",
     );
-    for (const side of ["left", "right"]) {
-      expect(
-        screen.getByTestId(`tab-cap-outline-${side}`).getAttribute("stroke"),
-      ).toBe("var(--color-border)");
-    }
-    // The baseline cover takes the same fill, so the seam into the content
-    // below the tab is closed in the colour rather than in the app background.
-    expect(
-      screen
-        .getByTestId("tab-baseline-cover")
-        .style.getPropertyValue("--swatch"),
-    ).toBe("var(--warning-foreground)");
+  });
+
+  /**
+   * F4: the active tab is one box, not the old two-cap silhouette - a single
+   * `tab-chrome-box` on the sheets' own geometry, and none of the shapes it
+   * replaced.
+   */
+  it("draws the active tab as exactly one box on the sheets' geometry, no silhouette left", () => {
+    render(<TabChrome isActive color="#12ab34" session={false} />);
+
+    expect(screen.getAllByTestId("tab-chrome-box")).toHaveLength(1);
+    const box = screen.getByTestId("tab-chrome-box");
+    expect(box.className).toContain("rounded-xl");
+    expect(box.className).toContain("inset-0.5");
+    expect(screen.queryByTestId("tab-cap-left")).toBeNull();
+    expect(screen.queryByTestId("tab-cap-right")).toBeNull();
+    expect(screen.queryByTestId("tab-chrome-center")).toBeNull();
+    expect(screen.queryByTestId("tab-baseline-cover")).toBeNull();
+  });
+
+  it("draws an inactive tab's hover state as the same box geometry", () => {
+    render(<TabChrome isActive={false} color={null} session={false} />);
+
+    const hoverBox = screen.getByTestId("tab-hover-box");
+    expect(hoverBox.className).toContain("rounded-xl");
+    expect(hoverBox.className).toContain("inset-0.5");
+    expect(screen.queryByTestId("tab-chrome-box")).toBeNull();
   });
 
   /**
@@ -1030,91 +1046,36 @@ describe("<TabStrip />", () => {
   });
 
   it("uses the manual color for a focused split member and retains the primary fallback", () => {
-    const { rerender, container } = render(
-      <SplitMemberChrome focused color="#12ab34" />,
-    );
+    const { rerender } = render(<SplitMemberChrome focused color="#12ab34" />);
     expect(
       screen
-        .getByTestId("tab-chrome-center")
+        .getByTestId("tab-chrome-box")
         .style.getPropertyValue("--swatch-border"),
-    ).toBe("#12ab34");
-    expect(
-      screen.getByTestId("tab-cap-outline-left").getAttribute("stroke"),
-    ).toBe("#12ab34");
-    expect(
-      screen.getByTestId("tab-cap-outline-right").getAttribute("stroke"),
     ).toBe("#12ab34");
 
     rerender(<SplitMemberChrome focused color={null} />);
     expect(
       screen
-        .getByTestId("tab-chrome-center")
+        .getByTestId("tab-chrome-box")
         .style.getPropertyValue("--swatch-border"),
-    ).toBe("var(--color-primary)");
-    expect(
-      screen.getByTestId("tab-cap-outline-left").getAttribute("stroke"),
-    ).toBe("var(--color-primary)");
-    expect(
-      screen.getByTestId("tab-cap-outline-right").getAttribute("stroke"),
     ).toBe("var(--color-primary)");
 
     rerender(<SplitMemberChrome focused={false} color="#12ab34" />);
-    expect(screen.queryByTestId("tab-chrome-center")).toBeNull();
-    expect(screen.queryByTestId("tab-baseline-cover")).toBeNull();
-    expect(screen.queryByTestId("tab-cap-left")).toBeNull();
-    expect(screen.queryByTestId("tab-cap-right")).toBeNull();
-    expect(container.querySelector("span")?.className).toContain(
-      "group-hover/tab:bg-accent/20",
-    );
+    expect(screen.queryByTestId("tab-chrome-box")).toBeNull();
+    const hoverBox = screen.getByTestId("tab-hover-box");
+    expect(hoverBox.className).toContain("rounded-xl");
+    expect(hoverBox.className).toContain("inset-0.5");
+    expect(hoverBox.className).toContain("group-hover/tab:bg-foreground/5");
+    // An unfocused colored member has no box to wear its color in, so it
+    // gets the same short mark a lone tab does (F4 round 2). The focused
+    // member above never draws one - its box border carries the color.
+    expect(
+      screen.getByTestId("tab-color-mark").style.getPropertyValue("--swatch"),
+    ).toBe("#12ab34");
+
+    rerender(<SplitMemberChrome focused={false} color={null} />);
+    expect(screen.queryByTestId("tab-color-mark")).toBeNull();
   });
-
-  it.each([
-    {
-      side: "left",
-      leftColor: "#f97316",
-      rightColor: null,
-      expectedLeft: "#f97316",
-      expectedRight: "var(--color-primary)",
-    },
-    {
-      side: "right",
-      leftColor: null,
-      rightColor: "#f97316",
-      expectedLeft: "var(--color-primary)",
-      expectedRight: "#f97316",
-    },
-  ])(
-    "keeps the $side split member underline color independent",
-    ({ leftColor, rightColor, expectedLeft, expectedRight }) => {
-      render(
-        <SplitTabLayout
-          leftColor={leftColor}
-          rightColor={rightColor}
-          splitId="split-colors"
-          selectedSide={null}
-          control={<span data-testid="split-control" />}
-          left={<span data-testid="split-left" />}
-          right={<span data-testid="split-right" />}
-        />,
-      );
-
-      // The group underline takes `text-primary` as a class now, so only the
-      // two members carry a per-side value.
-      expect(
-        screen.getByTestId("split-tab-group-underline-split-colors").className,
-      ).toContain("text-primary");
-      expect(
-        screen
-          .getByTestId("split-tab-group-underline-left-split-colors")
-          .style.getPropertyValue("--swatch"),
-      ).toBe(expectedLeft);
-      expect(
-        screen
-          .getByTestId("split-tab-group-underline-right-split-colors")
-          .style.getPropertyValue("--swatch"),
-      ).toBe(expectedRight);
-    },
-  );
 
   it("shows the pair highlight on the approach half during a merge", async () => {
     openEpicFixture(EPIC_A);
@@ -1334,7 +1295,7 @@ describe("<TabStrip />", () => {
 
     expect(closeSlot.className).toContain("header-tab-trailing-slot");
     expect(closeSlot.className).not.toContain("group-hover/tab:w-5");
-    expect(hoverChrome?.className).toContain("rounded-md");
+    expect(hoverChrome?.className).toContain("rounded-xl");
     expect(hoverChrome?.className).toContain("group-hover/tab:opacity-100");
     // :focus-visible (keyboard-only), NOT :focus-within - a mouse-drag reorder
     // focuses the tab div without activating it, and :focus-within would leave
@@ -1400,12 +1361,6 @@ describe("<TabStrip />", () => {
     // Distinct from the unconditional divider between the halves - a fix that
     // reused that divider would leave the group-to-tab boundary still blank.
     expect(screen.getByTestId("split-tab-divider-split-a")).toBeDefined();
-    expect(
-      screen.getByTestId("split-tab-group-underline-left-split-a").className,
-    ).toContain("bg-current");
-    expect(
-      screen.getByTestId("split-tab-group-underline-right-split-a").className,
-    ).toContain("bg-current");
 
     const plainC = screen.getByTestId(`tab-epic-${EPIC_C.id}`);
     const plainD = screen.getByTestId(`tab-epic-${tabD.id}`);
@@ -1485,37 +1440,26 @@ describe("<TabStrip />", () => {
     const router = buildRouter("/epics/e-a/e-a");
     render(<RouterProvider router={router} />);
 
-    // Purely cosmetic geometry (frame width, underline thickness, member
-    // padding) is not asserted via Tailwind class strings - those break on
-    // any restyle without proving behavior. The focus semantics that matter
-    // are the data-focused-side/data-focused attributes and bg-primary state
-    // asserted below.
+    // Purely cosmetic geometry (frame width, member padding) is not asserted
+    // via Tailwind class strings - those break on any restyle without proving
+    // behavior. The focus semantics that matter are the
+    // data-focused-side/data-focused attributes and the box below (F4 round
+    // 2 dropped the group underline; the focused member's own box is now
+    // what says which side is focused).
     await screen.findByTestId("split-tab-group-split-a");
     const trigger = screen.getByTestId("split-quick-actions-split-a");
     const indicator = screen.getByTestId("split-focus-indicator-split-a");
-    const controlUnderline = screen.getByTestId(
-      "split-tab-group-underline-control-split-a",
-    );
-    const leftUnderline = screen.getByTestId(
-      "split-tab-group-underline-left-split-a",
-    );
-    const rightUnderline = screen.getByTestId(
-      "split-tab-group-underline-right-split-a",
-    );
     const leftTab = screen.getByTestId("tab-epic-e-a");
     const rightTab = screen.getByTestId("tab-epic-e-b");
     const leftPane = indicator.querySelector('[data-split-pane="left"]');
     const rightPane = indicator.querySelector('[data-split-pane="right"]');
-    expect(controlUnderline.className).toContain("bg-current");
     expect(screen.queryByTestId("split-tab-divider-split-a")).toBeNull();
-    expect(leftUnderline.className).not.toContain("bg-current");
-    expect(rightUnderline.className).toContain("bg-current");
     expect(
       within(leftTab)
-        .getByTestId("tab-chrome-center")
+        .getByTestId("tab-chrome-box")
         .style.getPropertyValue("--swatch-border"),
     ).toBe("var(--color-primary)");
-    expect(within(rightTab).queryByTestId("tab-chrome-center")).toBeNull();
+    expect(within(rightTab).queryByTestId("tab-chrome-box")).toBeNull();
     expect(screen.queryByTestId("split-member-focus-accent")).toBeNull();
     expect(trigger.className).toContain("text-info-foreground");
     expect(
@@ -1544,18 +1488,16 @@ describe("<TabStrip />", () => {
     expect(rightPane?.getAttribute("width")).toBe("8");
     expect(leftPane?.getAttribute("fill")).toBe("none");
     expect(rightPane?.getAttribute("fill")).toBe("currentColor");
-    expect(leftUnderline.className).toContain("bg-current");
-    expect(rightUnderline.className).not.toContain("bg-current");
     expect(leftTab.className).toContain(
       "px-[var(--header-tab-padding,1.25rem)]",
     );
     expect(rightTab.className).toContain(
       "px-[var(--header-tab-padding,1.25rem)]",
     );
-    expect(within(leftTab).queryByTestId("tab-chrome-center")).toBeNull();
+    expect(within(leftTab).queryByTestId("tab-chrome-box")).toBeNull();
     expect(
       within(rightTab)
-        .getByTestId("tab-chrome-center")
+        .getByTestId("tab-chrome-box")
         .style.getPropertyValue("--swatch-border"),
     ).toBe("var(--color-primary)");
 
@@ -1731,9 +1673,13 @@ describe("<TabStrip />", () => {
     const indicator = await screen.findByTestId(
       `header-tab-failure-${EPIC_A.id}`,
     );
-    expect(indicator.getAttribute("class")).toContain(
-      "lucide-message-square-x",
-    );
+    // Same shared glyph vocabulary the side strip and Agents tree draw (F3,
+    // D12), not a surface-specific lucide tone icon.
+    expect(
+      indicator
+        .querySelector("[data-status-glyph]")
+        ?.getAttribute("data-status-glyph"),
+    ).toBe("failed");
     expect(screen.queryByTestId(`header-tab-done-${EPIC_A.id}`)).toBeNull();
   });
 
@@ -1779,9 +1725,13 @@ describe("<TabStrip />", () => {
     const backgroundIcon = await screen.findByTestId(
       `header-tab-background-activity-${EPIC_A.id}`,
     );
-    expect(backgroundIcon.getAttribute("class")).toContain(
-      "lucide-message-square-clock",
-    );
+    // Same shared glyph vocabulary the side strip and Agents tree draw (F3,
+    // D12), not a surface-specific lucide tone icon.
+    expect(
+      backgroundIcon
+        .querySelector("[data-status-glyph]")
+        ?.getAttribute("data-status-glyph"),
+    ).toBe("background");
     expect(screen.queryByTestId(`header-tab-activity-${EPIC_A.id}`)).toBeNull();
     expect(anyTooltipHasText("Background activity — agent idle")).toBe(true);
   });

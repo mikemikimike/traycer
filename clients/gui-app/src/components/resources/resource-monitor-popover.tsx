@@ -168,6 +168,16 @@ import {
 } from "@/lib/host/plan-restricted-copy";
 import { isMobileApp } from "@/lib/mobile-app";
 import { cn } from "@/lib/utils";
+import { StatusBarMetric } from "@/components/layout/status-bar/status-bar-resource-segment";
+import { useStatusBarResourceMetricViews } from "@/components/layout/status-bar/use-status-bar-resource-views";
+import {
+  STRIP_READOUT_LINE_CLASS,
+  type ReadingButtonForm,
+} from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import {
+  statusBarResourceSegmentLabel,
+  type StatusBarResourceMetricView,
+} from "@/lib/resources/status-bar-resource-reading";
 import { useCloudEpicTasksQuery } from "@/hooks/epics/use-cloud-epic-tasks-query";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import type { ClosedTilePayload } from "@/stores/epics/canvas/store";
@@ -240,7 +250,12 @@ const ROW_HOVER_REVEAL =
 export type ResourceMonitorPopoverTrigger =
   | {
       readonly trigger: "header-button";
-      readonly className: string | undefined;
+      /**
+       * The header's glyph, or a strip tile (F6): an outlined box the width it
+       * is given, beside the usage button as its equal and so in that button's
+       * own treatment, holding the readings where it has room for them.
+       */
+      readonly form: ReadingButtonForm;
     }
   | {
       readonly trigger: "custom";
@@ -554,6 +569,14 @@ function ScopedResourceMonitorPopover(props: {
   // click on the (otherwise event-swallowing) drag area dismisses the popover.
   useTitleBarDragSuppression("resource-monitor", open);
   const scope = props.scope;
+  // The status bar segment's own readings, for the strip's readings tile.
+  // Every source under it is a store or context read, so the header's icon
+  // button pays nothing for asking.
+  const views = useStatusBarResourceMetricViews({
+    hostId: scope.hostId,
+    hostLabel: scope.hostLabel,
+    hasExplicitPick: props.hasExplicitPick,
+  });
   const tooltipLabel = watchesNamedHost(scope, props.hasExplicitPick)
     ? `Resources · ${scope.hostLabel}`
     : "Resources";
@@ -585,13 +608,23 @@ function ScopedResourceMonitorPopover(props: {
             <PopoverTrigger asChild>
               <Button
                 type="button"
-                variant="muted"
-                size="icon-sm"
-                aria-label="Resources"
+                variant={props.trigger.form === "glyph" ? "muted" : "outline"}
+                size={props.trigger.form === "glyph" ? "icon-sm" : "sm"}
+                aria-label={
+                  props.trigger.form === "readout"
+                    ? statusBarResourceSegmentLabel(views)
+                    : "Resources"
+                }
                 data-testid="resource-monitor-header-button"
-                className={cn(props.trigger.className)}
+                className={cn(
+                  props.trigger.form !== "glyph" && "w-full shadow-xs",
+                )}
               >
-                <Cpu className="size-3.5" />
+                {props.trigger.form === "readout" ? (
+                  <StripResourceReadout views={views} />
+                ) : (
+                  <Cpu className="size-3.5" />
+                )}
               </Button>
             </PopoverTrigger>
           </TooltipWrapper>
@@ -5204,4 +5237,33 @@ function buildProcessRows(input: {
 
 function countLabel(count: number, singular: string, plural: string): string {
   return `${formatProcessCount(count)} ${count === 1 ? singular : plural}`;
+}
+
+/**
+ * The resource readings inside the strip's readings tile (F6): the status
+ * bar segment's metrics, drawn the same way, on the strip's one-row line that
+ * shows only whole readings - the first at half width, more as it widens.
+ * The chip rides on the line, so it centres with the readings it heads the
+ * way the usage tile's provider icons do. With every metric switched off it
+ * says what it is rather than leaving the chip alone in a wide box.
+ */
+function StripResourceReadout(props: {
+  readonly views: ReadonlyArray<StatusBarResourceMetricView>;
+}): ReactNode {
+  if (props.views.length === 0) {
+    return (
+      <>
+        <Cpu className="size-3.5" />
+        <span className="text-ui-xs text-muted-foreground">Resources</span>
+      </>
+    );
+  }
+  return (
+    <span className={cn(STRIP_READOUT_LINE_CLASS, "text-muted-foreground")}>
+      <Cpu className="size-3.5 shrink-0 text-foreground" />
+      {props.views.map((view) => (
+        <StatusBarMetric key={view.metric} view={view} />
+      ))}
+    </span>
+  );
 }

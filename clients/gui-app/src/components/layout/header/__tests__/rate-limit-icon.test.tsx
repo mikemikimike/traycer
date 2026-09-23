@@ -19,6 +19,10 @@ import {
 } from "@/lib/keybindings/dispatch";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { RUNNING_LOW_TEXT_CLASS_NAME } from "@/lib/rate-limits/window-severity";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 const DYNAMIC_ACTION_ROUTER: KeybindingRouter = {
   getPathname: () => "/",
@@ -119,13 +123,25 @@ import { RateLimitIconButton } from "@/components/layout/header/rate-limit-icon"
 function iconTree() {
   return (
     <TooltipProvider>
-      <RateLimitIconButton />
+      <RateLimitIconButton form="glyph" />
     </TooltipProvider>
   );
 }
 
 function renderIcon() {
   return render(iconTree());
+}
+
+function readoutTree() {
+  return (
+    <TooltipProvider>
+      <RateLimitIconButton form="readout" />
+    </TooltipProvider>
+  );
+}
+
+function renderReadout() {
+  return render(readoutTree());
 }
 
 // Exact class-token membership, not substring containment - the button's base
@@ -143,6 +159,7 @@ afterEach(() => {
   hasExplicitPick = false;
   useHeaderRateLimitBarsCalled = false;
   useTitleBarDragStore.setState({ suppressors: new Set() });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
 
 describe("<RateLimitIconButton />", () => {
@@ -485,6 +502,66 @@ describe("<RateLimitIconButton />", () => {
       expect(tooltip.textContent).toBe(
         `Usage limits · Other Machine (${formatChordForDisplay("mod+shift+u")})`,
       );
+    });
+  });
+
+  describe("accessible name (R1-A3)", () => {
+    function twoProviderBars(): ReadonlyArray<HeaderRateLimitBar> {
+      return [
+        {
+          providerId: "codex",
+          windowLabel: "5h",
+          usedPercent: 19,
+          severity: "healthy",
+          degraded: false,
+        },
+        {
+          providerId: "claude-code",
+          windowLabel: "5h",
+          usedPercent: 62,
+          severity: "healthy",
+          degraded: false,
+        },
+      ];
+    }
+
+    it("names a populated readout from its provider, window and used percentage", () => {
+      bars = twoProviderBars();
+      renderReadout();
+
+      expect(
+        screen.getByRole("button", {
+          name: "Usage limits: Codex 5h 19% used, Claude Code 5h 62% used",
+        }),
+      ).toBeTruthy();
+    });
+
+    it("switches to remaining phrasing under the remaining amount preference", () => {
+      bars = twoProviderBars();
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { amount: "remaining" });
+      renderReadout();
+
+      expect(
+        screen.getByRole("button", {
+          name: "Usage limits: Codex 5h 81% remaining, Claude Code 5h 38% remaining",
+        }),
+      ).toBeTruthy();
+    });
+
+    it("names an empty readout plainly", () => {
+      bars = [];
+      renderReadout();
+
+      expect(screen.getByRole("button", { name: "Usage limits" })).toBeTruthy();
+    });
+
+    it("keeps the plain 'Usage limits' name for the glyph form", () => {
+      bars = twoProviderBars();
+      renderIcon();
+
+      expect(screen.getByRole("button", { name: "Usage limits" })).toBeTruthy();
     });
   });
 

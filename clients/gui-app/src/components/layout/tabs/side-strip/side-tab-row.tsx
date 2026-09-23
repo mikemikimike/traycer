@@ -27,16 +27,19 @@ import {
   type SideTabTile,
 } from "../tab-identity";
 import { SideTabMeter, type SideTabLiveAgents } from "./agent-meter";
+import { sideTabAgentsAreFloor } from "./side-tab-live-agents";
 import { SideTabRailBadge } from "./side-tab-rail-badge";
 import type { RailBadgeKind } from "./rail-badge-kind";
 import {
   SIDE_TAB_ACTIVE_CLASS,
   SIDE_TAB_GROUP_LINE_CLASS,
+  SIDE_TAB_DROP_LINE_SEAT_CLASS,
   SIDE_TAB_GROUP_LINE_SEAT_CLASS,
   SIDE_TAB_HOVER_CLASS,
   SIDE_TAB_LEADING_BADGE_POSITION_CLASS,
   SIDE_TAB_LEADING_CLASS,
   SIDE_TAB_LEADING_TILE_CLASS,
+  SIDE_TAB_LEADING_TILE_SLOT_CLASS,
   SIDE_TAB_RAIL_BADGE_POSITION_CLASS,
   SIDE_TAB_ROW_CLASS,
   SIDE_TAB_SESSION_ACTIVE_CLASS,
@@ -252,7 +255,10 @@ export function SideTabRow(props: SideTabRowProps) {
         ) : (
           <ExpandedContent {...props} />
         )}
-        <SideTabDropIndicator side={props.dropIndicator} />
+        <SideTabDropIndicator
+          side={props.dropIndicator}
+          variant={props.variant}
+        />
         <SideTabPairPreview side={props.pairPreview} />
       </div>
     </SideTabRowHoverCard>
@@ -274,6 +280,7 @@ function hoverCardAllowed(props: SideTabRowProps): boolean {
 
 function SideTabDropIndicator(props: {
   readonly side: SideTabRowProps["dropIndicator"];
+  readonly variant: SideTabRowVariant;
 }) {
   if (props.side === null) return null;
   return (
@@ -286,7 +293,7 @@ function SideTabDropIndicator(props: {
       transition={{ duration: 0.12, ease: "easeOut" }}
       className={cn(
         "pointer-events-none absolute inset-x-2 z-20 origin-center",
-        props.side === "before" ? "-top-0.5" : "-bottom-0.5",
+        SIDE_TAB_DROP_LINE_SEAT_CLASS[props.variant][props.side],
       )}
     >
       <DropLine
@@ -417,7 +424,12 @@ function LeadingSlot(props: SideTabRowProps) {
     <span
       data-testid="side-tab-leading"
       data-leading="tile"
-      className={cn(SIDE_TAB_LEADING_CLASS, "relative flex shrink-0")}
+      className={cn(
+        SIDE_TAB_LEADING_TILE_SLOT_CLASS[
+          tile.kind === "icon" ? "icon" : "monogram"
+        ],
+        "relative flex shrink-0",
+      )}
     >
       <span
         data-testid="side-tab-leading-tile"
@@ -560,7 +572,12 @@ function trailingStatus(props: {
       </Badge>
     );
   }
-  if (props.agents.turn + props.agents.background > 1) {
+  // One agent is the leading glyph's to show, unless it is a floor: then the
+  // meter carries the "+" that says more may be running out of view.
+  if (
+    props.agents.turn + props.agents.background > 1 ||
+    sideTabAgentsAreFloor(props.agents)
+  ) {
     return (
       <SideTabMeter agents={props.agents} attention={props.badge} size="row" />
     );

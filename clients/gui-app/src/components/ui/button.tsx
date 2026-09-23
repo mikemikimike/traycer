@@ -143,6 +143,13 @@ const buttonVariants = cva(
           "size-6 rounded-sm in-data-[slot=button-group]:rounded-md [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-7 rounded-sm in-data-[slot=button-group]:rounded-md",
         "icon-lg": "size-9",
+        // The vertical strip's nav controls (Inbox, All tasks, Home), as a
+        // Button: `nav-tile` is the collapsed rail's 32px tile, `nav-row` the
+        // expanded strip's 32px row. The row's padding is 1px short of the
+        // nav row's 8px because the base's transparent border sits inside the
+        // box, so the icon and label land where a nav row's do.
+        "nav-tile": "size-8 rounded-lg",
+        "nav-row": "h-8 justify-start gap-2 rounded-lg px-1.75",
         "section-label":
           "h-8 min-w-0 max-w-full shrink justify-start gap-1.5 px-1",
         // A full-width clickable ROW instead of a centered control: content

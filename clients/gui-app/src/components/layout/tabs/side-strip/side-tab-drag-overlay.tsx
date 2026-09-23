@@ -8,7 +8,7 @@ import { useSurfaceNotificationIndicatorState } from "@/components/notifications
 import { useEpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import { useRegisteredEpicTitleGenerating } from "@/lib/epic-selectors";
 import { cn } from "@/lib/utils";
-import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import { useSideStripCollapsed } from "@/stores/layout/side-tab-strip-store";
 import { tabAppearance, type HeaderTab } from "@/stores/tabs/types";
 import type {
   HeaderStripItem,
@@ -40,7 +40,7 @@ export function SideTabDragOverlay(props: {
   readonly isActive: boolean;
 }): ReactNode {
   const { item, source } = props;
-  const collapsed = useSideTabStripStore((state) => state.collapsed);
+  const collapsed = useSideStripCollapsed();
   const tearOff = useEpicDndStore((state) => state.headerTearOffPreview);
   // Ghosted while a merge target is highlighted, which this overlay covers.
   const mergeTargeted = useEpicDndStore(
@@ -200,7 +200,6 @@ function OverlayTabRow(props: {
       activityStatus={activityStatus}
       indicatorState={indicatorState}
       tabId={tab.id}
-      statusPresentation="glyph"
     />
   );
   return (

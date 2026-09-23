@@ -187,7 +187,8 @@ Host scope: tab tiles use `useTabHostId()` / `useTabHostClient()`; app-wide
 surfaces use `useEffectiveHostId()` / `useHostClient()`. Don't mix.
 `useEffectiveHostId()` is the selection authority's DERIVED host (selection
 model §1) — one decider per app, delivered to every window. Settings ▸ Activate
-is the only UI gesture that changes it; no picker anywhere writes it, and
+and the account menu's Host section are the only UI gestures that change it,
+both through the one seam (`useMakeActiveHost`); no other picker writes it, and
 `HostDirectoryService.selectById` is lint-restricted to the one authority
 bridge. Surface pickers write a per-surface pin (`useSurfaceHostPin`), and a
 surface with no usable pin resolves its default before `useEffectiveHostId()`.

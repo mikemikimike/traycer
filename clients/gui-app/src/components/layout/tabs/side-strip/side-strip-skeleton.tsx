@@ -25,7 +25,7 @@ export function SideStripSkeleton(props: {
       aria-busy
       aria-label="Restoring open tabs"
       className={cn(
-        SIDE_STRIP_LIST_CLASS,
+        SIDE_STRIP_LIST_CLASS[props.variant],
         "min-h-0 flex-[0_1_auto] overflow-hidden [-webkit-app-region:no-drag]",
       )}
     >

@@ -2555,8 +2555,8 @@ function leadingStatusKinds(nodeId: string): readonly string[] {
 
 /**
  * The `data-status-glyph` kind drawn inside a leading status testid, for the
- * sidebar tree's `statusPresentation="glyph"` rows (D12's shared vocabulary,
- * not the lucide tone icon other surfaces render for the same testid).
+ * sidebar tree's rows (D12's shared vocabulary, which every surface now
+ * draws - only a tone the glyph set has no shape for keeps a lucide icon).
  */
 function statusGlyphKind(testId: string): string | null {
   return (
@@ -3026,8 +3026,8 @@ describe("chat row leading status icon", () => {
     };
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["done"]);
-    // The tree draws every state through the shared D12 glyph vocabulary
-    // (`statusPresentation="glyph"`), not a surface-specific tone icon.
+    // The tree draws every state through the shared D12 glyph vocabulary,
+    // not a surface-specific tone icon.
     expect(statusGlyphKind("chat-sidebar-spinner-done-chat-child")).toBe(
       "unread",
     );

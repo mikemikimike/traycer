@@ -168,6 +168,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -192,6 +193,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -219,6 +221,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -241,6 +244,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -261,6 +265,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -285,6 +290,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -320,6 +326,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -355,6 +362,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -407,6 +415,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl="https://example.com/ada.png"
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={null}
       />,
     );
@@ -445,6 +454,7 @@ describe("<UserMenu />", () => {
         email="ada@example.com"
         avatarUrl={null}
         showAppSettings={false}
+        triggerTooltip={null}
         trigger={
           <button type="button" data-testid="custom-trigger">
             Custom

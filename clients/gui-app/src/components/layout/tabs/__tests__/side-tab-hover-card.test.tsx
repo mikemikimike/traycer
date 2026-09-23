@@ -5,8 +5,14 @@
  * way), and live counts through the real `agent-activity-store`. A cold epic
  * (no registry session) must show counts only, never invented names.
  */
-import { afterEach, describe, expect, it } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import type {
   ChatProjection,
   TuiAgentProjection,
@@ -18,15 +24,43 @@ import {
 } from "@/stores/epics/open-epic/test-support/open-store-for-test";
 import { __getOpenEpicRegistryForTests } from "@/lib/registries/epic-session-registry";
 import {
+  PARTIAL_ACTIVITY_NOTICE,
+  UNKNOWN_ACTIVITY_TITLE,
+} from "@/components/notifications/notification-indicator-icon";
+import type { AgentActivityCoverage } from "@/lib/agent-activity";
+import {
   __resetAgentActivityStoreForTests,
   __setAgentActivityStateForTests,
+  __setHostAgentActivityHealthForTests,
 } from "@/stores/agent-activity-store";
 import { SideTabHoverCardBody } from "../side-strip/side-tab-hover-card";
+import type { SideTabLiveAgents } from "../side-strip/agent-meter";
 import {
   NO_LIVE_AGENTS,
   sideTabAgentCounts,
+  useSideTabLiveAgents,
 } from "../side-strip/side-tab-live-agents";
-import type { SideTabLiveAgents } from "../side-strip/agent-meter";
+
+// `useSideTabLiveAgents` (used by the single "end to end" case below) reads
+// `useAccountActivityCoverage`, which asks the host directory through
+// `useHostBinding()`. This suite has no `HostRuntimeProvider`, so the real
+// hook already reads `null` - unsettled - everywhere except that one case,
+// which opts into a known-hosts list through this ref.
+const knownHostIdsRef = vi.hoisted((): { value: readonly string[] | null } => ({
+  value: null,
+}));
+
+vi.mock("@/lib/host", () => ({
+  useHostBinding: () =>
+    knownHostIdsRef.value === null
+      ? null
+      : {
+          directory: {
+            knownHostIds: () => knownHostIdsRef.value,
+            onChange: () => ({ dispose: () => undefined }),
+          },
+        },
+}));
 
 const fakeStreamClientFactory: EpicStreamClientFactory = () => ({
   applyUpdate: () => undefined,
@@ -105,8 +139,12 @@ function openEpic(epicId: string): OpenedStoreForTest {
   return handle;
 }
 
-function agents(turn: number, background: number): SideTabLiveAgents {
-  return { turn, background };
+function agents(
+  turn: number,
+  background: number,
+  coverage: AgentActivityCoverage,
+): SideTabLiveAgents {
+  return { turn, background, coverage };
 }
 
 afterEach(() => {
@@ -115,6 +153,7 @@ afterEach(() => {
   for (const handle of handles) handle.dispose();
   handles.length = 0;
   __resetAgentActivityStoreForTests();
+  knownHostIdsRef.value = null;
 });
 
 describe("SideTabHoverCardBody", () => {
@@ -124,7 +163,7 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId="epic-cold"
         badge={null}
-        agents={agents(2, 1)}
+        agents={agents(2, 1, "covered")}
       />,
     );
     expect(screen.getByText("Fix login")).not.toBeNull();
@@ -163,7 +202,7 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId="epic-warm"
         badge={null}
-        agents={agents(1, 1)}
+        agents={agents(1, 1, "covered")}
       />,
     );
 
@@ -208,7 +247,7 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId="epic-warm-untitled"
         badge={null}
-        agents={agents(1, 0)}
+        agents={agents(1, 0, "covered")}
       />,
     );
 
@@ -230,7 +269,7 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId="epic-warm-idle"
         badge={null}
-        agents={NO_LIVE_AGENTS}
+        agents={{ ...NO_LIVE_AGENTS, coverage: "covered" }}
       />,
     );
     expect(screen.queryByTestId("side-tab-hover-card-counts")).toBeNull();
@@ -253,7 +292,7 @@ describe("SideTabHoverCardBody", () => {
           title="Fix login"
           epicId={null}
           badge={badge}
-          agents={agents(2, 0)}
+          agents={agents(2, 0, "covered")}
         />,
       );
       expect(
@@ -268,7 +307,7 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId={null}
         badge={null}
-        agents={agents(1, 0)}
+        agents={agents(1, 0, "covered")}
       />,
     );
     expect(
@@ -281,7 +320,7 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId={null}
         badge={null}
-        agents={agents(0, 1)}
+        agents={agents(0, 1, "covered")}
       />,
     );
     expect(
@@ -290,9 +329,109 @@ describe("SideTabHoverCardBody", () => {
   });
 });
 
+describe("SideTabHoverCardBody under unserved/indeterminate coverage (F8 round 2)", () => {
+  it("shows the unknown glyph and title, never Idle, under unserved coverage with no badge and no agents", () => {
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge={null}
+        agents={agents(0, 0, "unserved")}
+      />,
+    );
+    const state = screen.getByTestId("side-tab-hover-card-state");
+    expect(state.textContent).toContain(UNKNOWN_ACTIVITY_TITLE);
+    expect(state.textContent).not.toContain("Idle");
+    expect(screen.getByTestId("side-tab-hover-card-unknown")).toBeTruthy();
+    expect(screen.queryByTestId("side-tab-hover-card-partial")).toBeNull();
+  });
+
+  it("keeps the running state and adds the partial notice when unserved coverage still has agents", () => {
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge={null}
+        agents={agents(1, 0, "unserved")}
+      />,
+    );
+    const state = screen.getByTestId("side-tab-hover-card-state");
+    expect(state.textContent).toContain("Running");
+    expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
+    expect(screen.getByTestId("side-tab-hover-card-partial").textContent).toBe(
+      PARTIAL_ACTIVITY_NOTICE,
+    );
+  });
+
+  it("keeps the badge state and adds the partial notice when unserved coverage has a badge but no agents", () => {
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge="approval"
+        agents={agents(0, 0, "unserved")}
+      />,
+    );
+    const state = screen.getByTestId("side-tab-hover-card-state");
+    expect(state.textContent).toContain("Needs approval");
+    expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
+    expect(screen.getByTestId("side-tab-hover-card-partial").textContent).toBe(
+      PARTIAL_ACTIVITY_NOTICE,
+    );
+  });
+
+  it("reads plain Idle with no partial line under indeterminate coverage - nothing answering is the pill's story, not a per-row one", () => {
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge={null}
+        agents={agents(0, 0, "indeterminate")}
+      />,
+    );
+    const state = screen.getByTestId("side-tab-hover-card-state");
+    expect(state.textContent).toBe("Idle");
+    expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
+    expect(screen.queryByTestId("side-tab-hover-card-partial")).toBeNull();
+  });
+
+  it("reads plain Idle with no unknown glyph or partial notice end to end, when a single narrow-plane host is the account's only known host", () => {
+    const HOST_A = "host-a";
+    // Narrow (non-fleet-spanning) but covers itself, and is the account's
+    // sole known host - `selectKnownHostsActivityCoverage` reads this as
+    // `covered`, not `unserved`: the whole reason the account-wide selector
+    // exists rather than reusing the per-host one directly.
+    __setHostAgentActivityHealthForTests(HOST_A, {
+      connectionStatus: "open",
+      servedBy: "local",
+      cloudSyncStatus: null,
+      stateFrameSeenThisEpoch: true,
+    });
+    knownHostIdsRef.value = [HOST_A];
+
+    const { result } = renderHook(() => useSideTabLiveAgents("epic-unknown"));
+    expect(result.current.coverage).toBe("covered");
+
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge={null}
+        agents={result.current}
+      />,
+    );
+    const state = screen.getByTestId("side-tab-hover-card-state");
+    expect(state.textContent).toBe("Idle");
+    expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
+    expect(screen.queryByTestId("side-tab-hover-card-partial")).toBeNull();
+  });
+});
+
 describe("sideTabAgentCounts", () => {
   it("joins running and background counts with a middle dot", () => {
-    expect(sideTabAgentCounts(agents(3, 1))).toBe("3 running · 1 background");
+    expect(sideTabAgentCounts(agents(3, 1, "covered"))).toBe(
+      "3 running · 1 background",
+    );
   });
 
   it("is null with no live agent", () => {

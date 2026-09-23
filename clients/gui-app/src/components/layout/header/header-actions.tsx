@@ -13,6 +13,7 @@ import {
   type EdgeSide,
 } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
+import type { ReadingButtonForm } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import { admitsLocalPlane, useAuthStore } from "@/stores/auth/auth-store";
 
 /**
@@ -36,9 +37,9 @@ export function HeaderBarCluster(props: {
   const placements = useBarPlacements();
   return barClusterRegionsAt(placements, "header", props.side).map((region) =>
     region === "usageLimits" ? (
-      <HeaderUsageRegion key={region} />
+      <HeaderUsageRegion key={region} form="glyph" />
     ) : (
-      <HeaderResourceRegion key={region} />
+      <HeaderResourceRegion key={region} form="glyph" />
     ),
   );
 }
@@ -59,7 +60,10 @@ export function HeaderBarCluster(props: {
  * button it wraps registers nothing of its own, which is why the picture below
  * is the un-registering one (two elements on one key displace each other).
  */
-export function HeaderUsageRegion(): ReactNode {
+export function HeaderUsageRegion(props: {
+  /** How the button draws: the header's glyph, or a strip tile (F6). */
+  readonly form: ReadingButtonForm;
+}): ReactNode {
   const shown = useRegionShown("usageLimits");
   const { ref, editing } = useLayoutRegion({
     regionId: "usageLimits",
@@ -71,9 +75,11 @@ export function HeaderUsageRegion(): ReactNode {
     <LayoutRegionContextMenu regionId="usageLimits">
       <span
         ref={ref}
-        className={cn(editing ? "inline-flex items-center gap-2" : "contents")}
+        className={cn(
+          editing ? "inline-flex items-center gap-2 empty:hidden" : "contents",
+        )}
       >
-        {shown ? <RateLimitIconButton /> : null}
+        {shown ? <RateLimitIconButton form={props.form} /> : null}
         {/* Hidden and pointed at: the passive depiction in place, never the
           live control - it fetches (L-14, L-62). */}
         {shown ? null : <GhostRegionPicture regionId="usageLimits" />}
@@ -95,7 +101,10 @@ export function HeaderUsageRegion(): ReactNode {
  * monitor only while `resourceHost` names the strip, so the two can never both
  * be mounted on a desktop viewport.
  */
-export function HeaderResourceRegion(): ReactNode {
+export function HeaderResourceRegion(props: {
+  /** How the button draws: the header's glyph, or a strip tile (F6). */
+  readonly form: ReadingButtonForm;
+}): ReactNode {
   const shown = useRegionShown("resourceMonitor");
   const { ref, editing } = useLayoutRegion({
     regionId: "resourceMonitor",
@@ -105,12 +114,14 @@ export function HeaderResourceRegion(): ReactNode {
     <LayoutRegionContextMenu regionId="resourceMonitor">
       <span
         ref={ref}
-        className={cn(editing ? "inline-flex items-center gap-2" : "contents")}
+        className={cn(
+          editing ? "inline-flex items-center gap-2 empty:hidden" : "contents",
+        )}
       >
         {shown ? (
           <ResourceMonitorPopover
             trigger="header-button"
-            className={undefined}
+            form={props.form}
             claimsOpenAction
           />
         ) : null}
@@ -155,6 +166,7 @@ export function HeaderIdentity(props: HeaderIdentityProps): ReactNode {
         avatarUrl={profile.avatarUrl ?? null}
         showAppSettings={props.showAppSettings}
         trigger={null}
+        triggerTooltip={null}
       />
     );
   }

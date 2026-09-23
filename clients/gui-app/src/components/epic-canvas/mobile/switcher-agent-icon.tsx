@@ -72,7 +72,6 @@ function SwitcherChatIcon(props: {
           <HarnessIcon harnessId={harnessId} className="size-4" />
         )
       }
-      statusPresentation="message"
     />
   );
 }
@@ -121,7 +120,6 @@ function SwitcherTuiAgentIcon(props: {
       style={undefined}
       testIdPrefix={SWITCHER_AGENT_TEST_ID_PREFIX}
       idleIcon={idleIcon}
-      statusPresentation="message"
     />
   );
 }

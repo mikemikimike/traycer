@@ -84,7 +84,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
       )}
     >
       <DesktopMenuBar />
-      {showTabStrip ? <HistoryNavButtons orientation="row" /> : null}
+      {showTabStrip ? <HistoryNavButtons /> : null}
       {/* The header's LEFT cluster (L-156): its own box, because the header
           row has no gap of its own and the right-hand cluster's box is the
           one this mirrors. It sits left of the tab strip and right of the
@@ -121,7 +121,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
       ) : null}
       <div
         className={cn(
-          "relative z-10 flex min-w-0 flex-1 items-center self-end",
+          "relative z-10 flex min-w-0 flex-1 items-center",
           draggable && "[-webkit-app-region:drag]",
         )}
       >

@@ -86,8 +86,6 @@ export function SplitTabDragOverlay(props: SplitTabDragOverlayProps) {
         </div>
       ) : (
         <SplitTabLayout
-          leftColor={splitMemberColor(item.left, leftGhost)}
-          rightColor={splitMemberColor(item.right, rightGhost)}
           splitId={item.id}
           selectedSide={props.isActive ? item.focusedSide : null}
           control={
@@ -151,12 +149,4 @@ function SplitMemberOverlay(props: {
       />
     </div>
   );
-}
-
-function splitMemberColor(
-  member: HeaderStripMember,
-  ghost: HeaderTabDragGhost | null,
-): string | null {
-  if (ghost !== null) return ghost.appearance?.color ?? null;
-  return member.kind === "tab" ? (member.tab.appearance?.color ?? null) : null;
 }

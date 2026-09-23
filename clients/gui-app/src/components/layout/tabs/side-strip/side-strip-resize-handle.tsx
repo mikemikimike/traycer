@@ -1,4 +1,5 @@
 import { useRef, type ReactNode, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import {
   GROUND_RESIZE_HANDLE_LINE_CLASS,
   pointerDragHandleAxisClassName,
@@ -6,7 +7,10 @@ import {
 } from "@/components/epic-canvas/canvas/use-pointer-drag-commit";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
-import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import {
+  useSideStripCollapsed,
+  useSideTabStripStore,
+} from "@/stores/layout/side-tab-strip-store";
 import {
   SIDE_STRIP_MAX_WIDTH_PX,
   SIDE_STRIP_MIN_WIDTH_PX,
@@ -26,9 +30,9 @@ const HANDLE_EDGE_CLASS: Record<EdgeSide, string> = {
 interface StripDragState {
   readonly strip: HTMLElement;
   readonly startWidth: number;
-  /** The inline width React last rendered, put back before the store write. */
-  readonly initialStyleWidth: string;
   latestWidth: number;
+  /** The layout the strip draws for `latestWidth`: the stored one until a crossing. */
+  drawnCollapsed: boolean;
 }
 
 /**
@@ -39,6 +43,13 @@ interface StripDragState {
  * grows it. A release below the snap point collapses the strip and keeps the
  * stored width; from the rail, a release past it expands. Double-click resets
  * to the default width.
+ *
+ * The layout follows the drag (F9): the frame that carries the width across
+ * the snap point switches the strip between the rail and the expanded layout
+ * through the store's transient `dragCollapsed`, rendered synchronously so the
+ * new layout and the new width paint together. That is the only render a drag
+ * makes; the release (or a cancel) clears it in the same batch as its store
+ * write.
  */
 export function SideStripResizeHandle(props: {
   readonly edge: EdgeSide;
@@ -46,7 +57,7 @@ export function SideStripResizeHandle(props: {
 }): ReactNode {
   const { edge, stripRef } = props;
   const widthPx = useSideTabStripStore((state) => state.widthPx);
-  const collapsed = useSideTabStripStore((state) => state.collapsed);
+  const collapsed = useSideStripCollapsed();
   const dragRef = useRef<StripDragState | null>(null);
   const sign = edge === "right" ? -1 : 1;
 
@@ -59,8 +70,8 @@ export function SideStripResizeHandle(props: {
       dragRef.current = {
         strip,
         startWidth,
-        initialStyleWidth: strip.style.width,
         latestWidth: startWidth,
+        drawnCollapsed: useSideTabStripStore.getState().collapsed,
       };
       return true;
     },
@@ -69,6 +80,18 @@ export function SideStripResizeHandle(props: {
       if (drag === null) return;
       const nextWidth = previewWidthOf(drag.startWidth + deltaPx * sign);
       drag.latestWidth = nextWidth;
+      const nextCollapsed = collapsesAt(nextWidth);
+      if (nextCollapsed !== drag.drawnCollapsed) {
+        drag.drawnCollapsed = nextCollapsed;
+        const state = useSideTabStripStore.getState();
+        // Synchronous, so the width written below lands after React's own
+        // write of the strip's width for the new layout, in the same frame.
+        flushSync(() => {
+          state.setDragCollapsed(
+            nextCollapsed === state.collapsed ? null : nextCollapsed,
+          );
+        });
+      }
       drag.strip.style.width = `${nextWidth}px`;
     },
     onDragCommit: () => {
@@ -78,16 +101,15 @@ export function SideStripResizeHandle(props: {
       // The width as rendered after the last frame, so a floor or cap the
       // strip's own classes apply (S-43, the 40vw cap) is what gets stored.
       const renderedWidth = drag.strip.getBoundingClientRect().width;
-      // Back to what React rendered, so a release that changes no store value
-      // (a rail dragged but not past the snap point) leaves no stray width.
-      drag.strip.style.width = drag.initialStyleWidth;
       commitReleasedWidth(drag.latestWidth, renderedWidth);
+      settleStripWidth(drag.strip);
     },
     onDragCancel: () => {
       const drag = dragRef.current;
       dragRef.current = null;
       if (drag === null) return;
-      drag.strip.style.width = drag.initialStyleWidth;
+      useSideTabStripStore.getState().setDragCollapsed(null);
+      settleStripWidth(drag.strip);
     },
     onReset: () => {
       const state = useSideTabStripStore.getState();
@@ -119,33 +141,53 @@ export function SideStripResizeHandle(props: {
 }
 
 /**
- * The width a drag frame shows: below the snap point it tracks the pointer
- * down to the rail, above it never goes under the minimum, so the preview is
- * the width a release there commits.
+ * The width a drag frame shows: below the snap point the rail's own width, the
+ * moment the pointer crosses it, so the rail is never drawn in a wider strip;
+ * above it the pointer's width, never under the minimum. The preview is the
+ * width a release there commits.
  */
 function previewWidthOf(rawWidth: number): number {
-  const floor =
-    rawWidth < SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX
-      ? SIDE_STRIP_RAIL_WIDTH_PX
-      : SIDE_STRIP_MIN_WIDTH_PX;
-  return Math.min(SIDE_STRIP_MAX_WIDTH_PX, Math.max(floor, rawWidth));
+  if (rawWidth < SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX)
+    return SIDE_STRIP_RAIL_WIDTH_PX;
+  return Math.min(
+    SIDE_STRIP_MAX_WIDTH_PX,
+    Math.max(SIDE_STRIP_MIN_WIDTH_PX, rawWidth),
+  );
+}
+
+/** Whether a drag at this width draws, and a release there commits, the rail. */
+function collapsesAt(width: number): boolean {
+  return width < SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX;
 }
 
 /**
  * A released drag: below the snap point collapses, anything else expands at
- * the width the strip rendered.
+ * the width the strip rendered. The drag's live layout clears in the same
+ * batch, so the strip never draws the pre-drag layout in between.
  */
 function commitReleasedWidth(
   draggedWidth: number,
   renderedWidth: number,
 ): void {
   const state = useSideTabStripStore.getState();
-  if (draggedWidth < SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX) {
+  state.setDragCollapsed(null);
+  if (collapsesAt(draggedWidth)) {
     state.setCollapsed(true);
     return;
   }
   state.setWidthPx(Math.round(renderedWidth));
   state.setCollapsed(false);
+}
+
+/**
+ * Leaves the strip at the width its stored state renders. React skips a style
+ * write whose value it rendered last, and after a crossing that is the drag's
+ * layout's width, not the DOM's; so the width is written here rather than
+ * handed back to an inline value React may never rewrite.
+ */
+function settleStripWidth(strip: HTMLElement): void {
+  const { collapsed, widthPx } = useSideTabStripStore.getState();
+  strip.style.width = `${collapsed ? SIDE_STRIP_RAIL_WIDTH_PX : widthPx}px`;
 }
 
 /**

@@ -1,17 +1,24 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { AgentActivityCoverage } from "@/lib/agent-activity";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import { cn } from "@/lib/utils";
 import type { RailBadgeKind } from "./rail-badge-kind";
+import { sideTabAgentsAreFloor } from "./side-tab-live-agents";
 import {
   SIDE_TAB_METER_CLASS,
   SIDE_TAB_METER_MORE_CLASS,
   SIDE_TAB_METER_PIP_CLASS,
 } from "./side-strip-tokens";
 
-/** A task's live agents by tier, from `useEpicAgentActivity`. */
+/**
+ * A task's live agents by tier, from `useEpicAgentActivity`, and whether the
+ * activity plane reaches every machine they could be on. Under `unserved` the
+ * counts are what is known, a floor, and the meter says so.
+ */
 export interface SideTabLiveAgents {
   readonly turn: number;
   readonly background: number;
+  readonly coverage: AgentActivityCoverage;
 }
 
 /** The most pips a meter draws; the rest become "+N". */
@@ -36,15 +43,19 @@ const PIP_FILL: Readonly<Record<MeterPip, string>> = {
   unread: "bg-info",
 };
 
-/** "2 running, 1 background, waiting for you" - the meter's accessible name. */
+/**
+ * "2 running, 1 background, waiting for you" - the meter's accessible name.
+ * A floor says "2+ running", the account row's "N+" language.
+ */
 function sideTabMeterLabel(
   agents: SideTabLiveAgents,
   attention: RailBadgeKind | null,
 ): string {
+  const floor = sideTabAgentsAreFloor(agents) ? "+" : "";
   const parts: string[] = [];
-  if (agents.turn > 0) parts.push(`${String(agents.turn)} running`);
+  if (agents.turn > 0) parts.push(`${String(agents.turn)}${floor} running`);
   if (agents.background > 0) {
-    parts.push(`${String(agents.background)} background`);
+    parts.push(`${String(agents.background)}${floor} background`);
   }
   if (attention !== null) parts.push(ATTENTION_LABEL[attention]);
   return parts.join(", ");
@@ -61,7 +72,9 @@ const ATTENTION_LABEL: Readonly<Record<RailBadgeKind, string>> = {
  * The meter (D5): one pip per live agent - a breathing pip for a turn, a
  * hollow one for background work - then one coloured pip for the task's
  * attention state, which is never the one cut. At most four pips; the agents
- * that do not fit become "+N". Static when motion is off.
+ * that do not fit become "+N". A trailing "+" marks known agents on a plane
+ * that misses a machine: two pips and "+" read as the account row's "2+".
+ * Static when motion is off.
  *
  * The tile always mounts it, empty or not, so the monogram above it stays put;
  * the row mounts it only when it has something to say.
@@ -85,6 +98,7 @@ export function SideTabMeter(props: {
     pips.push({ kind: ATTENTION_PIP[attention], slot: pips.length });
   }
   const more = agentCount - shownAgents;
+  const floor = sideTabAgentsAreFloor(agents);
   const label = sideTabMeterLabel(agents, attention);
   return (
     <span
@@ -121,6 +135,18 @@ export function SideTabMeter(props: {
           )}
         >
           +{more}
+        </span>
+      ) : null}
+      {floor ? (
+        <span
+          aria-hidden
+          data-testid="side-tab-meter-floor"
+          className={cn(
+            "text-muted-foreground",
+            SIDE_TAB_METER_MORE_CLASS[size],
+          )}
+        >
+          +
         </span>
       ) : null}
     </span>

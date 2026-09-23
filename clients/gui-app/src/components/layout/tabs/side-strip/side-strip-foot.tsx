@@ -3,12 +3,19 @@ import { ChevronsUpDown } from "lucide-react";
 import type { HostLeaseStatus } from "@traycer-clients/shared/host-selection/selection-authority-contract";
 import { UserMenu, UserMenuAvatar } from "@/components/auth/user-menu";
 import { AppUpdateHeaderButton } from "@/components/layout/header/app-update-button";
-import { HeaderBarCluster } from "@/components/layout/header/header-actions";
+import {
+  HeaderResourceRegion,
+  HeaderUsageRegion,
+} from "@/components/layout/header/header-actions";
+import { useRegionGhost } from "@/components/layout-editor/use-layout-region";
+import { useBarPlacements, useRegionShown } from "@/lib/layout-overrides";
+import { barClusterRegionsAt } from "@/lib/layout/layout-arrangement";
 import { SignInButton } from "@/components/layout/header/sign-in-button";
 import { useEffectiveHostId } from "@/hooks/host/use-effective-host-id";
 import { useHostDirectoryEntry } from "@/hooks/host/use-host-directory-entry";
 import { useHostLease } from "@/hooks/host/use-host-lease";
 import { cn } from "@/lib/utils";
+import { useAccountActivityCoverage } from "@/hooks/agent/use-account-activity-coverage";
 import { useAccountRunningAgentCount } from "@/stores/agent-activity-store";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import type { SideTabRowVariant } from "./side-tab-row";
@@ -42,18 +49,60 @@ export function SideStripFoot(props: {
       )}
     >
       <AppUpdateHeaderButton layout={collapsed ? "icon" : "row"} />
-      <div
-        className={cn(
-          "flex items-center gap-2 empty:hidden",
-          collapsed ? "flex-col" : "flex-wrap px-1",
-        )}
-      >
-        <HeaderBarCluster side="left" />
-        <HeaderBarCluster side="right" />
-      </div>
+      <SideStripReadings collapsed={collapsed} />
       <SideStripAccount variant={props.variant} />
     </div>
   );
+}
+
+/**
+ * The header-hosted readings (usage, then resources, in the header's own
+ * left-then-right order) as ONE row above the account row (F6): each an equal
+ * share of the width, so two split it in half and one takes all of it.
+ * Collapsed, they stack as rail-wide tiles. The regions stay mounted while
+ * Hidden (the editor's ghost needs its host), so the row hides itself when
+ * none of them draws.
+ */
+function SideStripReadings(props: { readonly collapsed: boolean }): ReactNode {
+  const placements = useBarPlacements();
+  const regions = [
+    ...barClusterRegionsAt(placements, "header", "left"),
+    ...barClusterRegionsAt(placements, "header", "right"),
+  ];
+  const drawn = {
+    usageLimits: useRegionDrawn("usageLimits"),
+    resourceMonitor: useRegionDrawn("resourceMonitor"),
+  };
+  const empty = !regions.some((region) => drawn[region]);
+  // A 40px rail tile has no room for a reading, so it keeps the glyph.
+  const form = props.collapsed ? "tile" : "readout";
+  return (
+    <div
+      data-testid="side-strip-readings"
+      className={cn(
+        "gap-2",
+        props.collapsed
+          ? "flex w-10 flex-col"
+          : "grid auto-cols-fr grid-flow-col",
+        empty && "hidden",
+      )}
+    >
+      {regions.map((region) =>
+        region === "usageLimits" ? (
+          <HeaderUsageRegion key={region} form={form} />
+        ) : (
+          <HeaderResourceRegion key={region} form={form} />
+        ),
+      )}
+    </div>
+  );
+}
+
+/** Whether a reading draws anything: shown, or ghosted by the editor. */
+function useRegionDrawn(regionId: "usageLimits" | "resourceMonitor"): boolean {
+  const shown = useRegionShown(regionId);
+  const ghost = useRegionGhost(regionId);
+  return shown || ghost;
 }
 
 function SideStripAccount(props: {
@@ -61,6 +110,7 @@ function SideStripAccount(props: {
 }): ReactNode {
   const profile = useAuthStore((state) => state.profile);
   const isSignedIn = useAuthStore((state) => state.status === "signed-in");
+  const host = useAccountHostReading();
   if (!isSignedIn || profile === null) {
     return <SignInButton layout="compact" />;
   }
@@ -71,12 +121,19 @@ function SideStripAccount(props: {
       email={profile.email}
       avatarUrl={avatarUrl}
       showAppSettings
+      // The row's second line is shortened to fit; the tooltip says it whole.
+      triggerTooltip={
+        host.fullLine === null
+          ? profile.userName
+          : `${profile.userName} · ${host.fullLine}`
+      }
       trigger={
         <AccountRowButton
           variant={props.variant}
           userName={profile.userName}
           email={profile.email}
           avatarUrl={avatarUrl}
+          host={host}
         />
       }
     />
@@ -94,12 +151,19 @@ function AccountRowButton(
     readonly userName: string;
     readonly email: string;
     readonly avatarUrl: string | null;
+    readonly host: AccountHostReading;
   },
 ): ReactNode {
-  const { variant, userName, email, avatarUrl, className, ...buttonProps } =
-    props;
+  const {
+    variant,
+    userName,
+    email,
+    avatarUrl,
+    host,
+    className,
+    ...buttonProps
+  } = props;
   const collapsed = variant === "collapsed";
-  const host = useAccountHostReading();
   const avatar = (
     <span className="relative flex shrink-0">
       <UserMenuAvatar userName={userName} email={email} avatarUrl={avatarUrl} />
@@ -135,13 +199,28 @@ function AccountRowButton(
             <span className="truncate text-ui-sm font-medium text-foreground">
               {userName}
             </span>
-            {host.line === null ? null : (
-              <span
-                data-testid="side-strip-host-line"
-                className="truncate text-ui-xs text-muted-foreground"
-              >
-                {host.line}
-              </span>
+            {host.fullLine === null ? null : (
+              <>
+                {/* The row's name says the count in full; the line is short. */}
+                <span className="sr-only">{host.fullLine}</span>
+                <span
+                  aria-hidden
+                  data-testid="side-strip-host-line"
+                  className="flex min-w-0 text-ui-xs text-muted-foreground"
+                >
+                  {host.hostName === null ? null : (
+                    <span className="truncate">{host.hostName}</span>
+                  )}
+                  {host.running === null ? null : (
+                    // The count never truncates: the host name gives way first.
+                    <span className="shrink-0 whitespace-pre">
+                      {host.hostName === null
+                        ? host.running.short
+                        : ` · ${host.running.short}`}
+                    </span>
+                  )}
+                </span>
+              </>
             )}
           </span>
           <ChevronsUpDown
@@ -185,28 +264,43 @@ function hostHealthOf(status: HostLeaseStatus | null): HostHealth {
   }
 }
 
+interface AccountHostReading {
+  readonly health: HostHealth;
+  readonly hostName: string | null;
+  /** `9 running` for the row, `9 agents running` for its name and tooltip. */
+  readonly running: { readonly short: string; readonly full: string } | null;
+  /** The second line in full: `Mac Studio · 9 agents running`. */
+  readonly fullLine: string | null;
+}
+
 /**
  * The app-wide host's health and the account row's second line: the host's
  * name, then how many agents are running across the account, when any are.
+ * The row shows the count as `N running` so it fits the strip whole; the
+ * words `agents running` stay in the row's accessible name and tooltip.
  */
-function useAccountHostReading(): {
-  readonly health: HostHealth;
-  readonly line: string | null;
-} {
+function useAccountHostReading(): AccountHostReading {
   const hostId = useEffectiveHostId();
   const entry = useHostDirectoryEntry(hostId);
   const lease = useHostLease(hostId);
   const running = useAccountRunningAgentCount();
+  // A union that does not reach every host is a lower bound, never a total.
+  const bound = useAccountActivityCoverage() === "covered" ? "" : "+";
   const runningText =
     running === 0
       ? null
-      : `${running} ${running === 1 ? "agent" : "agents"} running`;
+      : {
+          short: `${running}${bound} running`,
+          full: `${running}${bound} ${running === 1 && bound === "" ? "agent" : "agents"} running`,
+        };
   const hostName = entry?.label ?? null;
-  const parts = [hostName, runningText].filter(
+  const parts = [hostName, runningText?.full ?? null].filter(
     (part): part is string => part !== null,
   );
   return {
     health: hostHealthOf(lease?.status ?? null),
-    line: parts.length === 0 ? null : parts.join(" · "),
+    hostName,
+    running: runningText,
+    fullLine: parts.length === 0 ? null : parts.join(" · "),
   };
 }

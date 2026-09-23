@@ -25,13 +25,20 @@ import {
   createRoute,
   createRouter,
   RouterProvider,
+  type RouterHistory,
 } from "@tanstack/react-router";
+import { pointerEvent } from "@/components/epic-canvas/canvas/__tests__/test-pointer-events";
 import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
+import {
+  SIDE_STRIP_RAIL_WIDTH_PX,
+  SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX,
+} from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { EpicWaitingReason } from "@/hooks/epic/use-epic-activity-status";
 import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
 import type { ActionId } from "@/lib/keybindings/actions";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
+import { createPersistentMemoryHistory } from "@/lib/persistent-history";
 import type { SurfaceNotificationIndicators } from "@/stores/notifications/notification-indicator-state";
 import { __resetTabNavigationControllerForTesting } from "@/lib/tab-navigation";
 import { installTabSyncCoordinator } from "@/lib/tab-sync/tab-sync-coordinator";
@@ -192,9 +199,8 @@ vi.mock("@/lib/epic-selectors", async (importOriginal) => {
 // The foot's controls each bring a host, auth or runner dependency of their
 // own; what this suite asks of the foot is that it stands, in order.
 vi.mock("@/components/layout/header/header-actions", () => ({
-  HeaderBarCluster: (props: { readonly side: string }) => (
-    <span data-testid={`foot-cluster-${props.side}`} />
-  ),
+  HeaderUsageRegion: () => <span data-testid="foot-usage" />,
+  HeaderResourceRegion: () => <span data-testid="foot-resource" />,
 }));
 vi.mock("@/components/layout/header/app-update-button", () => ({
   AppUpdateHeaderButton: () => <span data-testid="foot-update" />,
@@ -238,12 +244,9 @@ const STRIP_KEYBINDING_IDS: ReadonlyArray<ActionId> = [
   "epic.close",
 ];
 
-const FOOT_ORDER = [
-  "foot-update",
-  "foot-cluster-left",
-  "foot-cluster-right",
-  "foot-account",
-];
+// The shipped arrangement keeps both readings in the status bar, so the
+// readings row stands empty (and hidden) between the update row and the account.
+const FOOT_ORDER = ["foot-update", "side-strip-readings", "foot-account"];
 
 let queryClient: QueryClient;
 
@@ -259,7 +262,11 @@ const LEFT_STRIP: StripOptions = {
   hydrated: true,
 };
 
-function buildRouter(initialPath: string, strip: StripOptions) {
+function buildRouter(
+  initialPath: string,
+  strip: StripOptions,
+  history: RouterHistory | undefined,
+) {
   const rootRoute = createRootRoute({
     component: () => (
       <QueryClientProvider client={queryClient}>
@@ -293,22 +300,40 @@ function buildRouter(initialPath: string, strip: StripOptions) {
     path: "/elsewhere",
     component: () => null,
   });
+  // New Task (F7) navigates to a fresh draft; this route is what its
+  // navigation resolves to, mirroring `tab-strip.test.tsx`'s own draft route.
+  const draftRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/draft/$draftId",
+    component: () => null,
+  });
   return createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
       epicTabRoute,
       epicRoute,
       elsewhereRoute,
+      draftRoute,
     ]),
-    history: createMemoryHistory({ initialEntries: [initialPath] }),
+    history: history ?? createMemoryHistory({ initialEntries: [initialPath] }),
   });
+}
+
+/** Settles a router navigation issued through the tab-navigation coordinator. */
+async function flushNav(): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
 async function renderStrip(
   initialPath: string,
   strip: StripOptions,
 ): Promise<HTMLElement> {
-  render(<RouterProvider router={buildRouter(initialPath, strip)} />);
+  render(
+    <RouterProvider router={buildRouter(initialPath, strip, undefined)} />,
+  );
   return screen.findByTestId("side-tab-strip");
 }
 
@@ -325,7 +350,11 @@ function resetStores(): void {
   useEpicCanvasStore.getState().clearAllTitleGenerationPending();
   useLandingDraftStore.setState({ drafts: [], activeDraftId: null });
   useTabsStore.setState(useTabsStore.getInitialState(), true);
-  useSideTabStripStore.setState({ widthPx: 240, collapsed: false });
+  useSideTabStripStore.setState({
+    widthPx: 240,
+    collapsed: false,
+    dragCollapsed: null,
+  });
   useAuthStore.setState({ status: "signed-in", profile: AUTH_PROFILE });
 }
 
@@ -462,7 +491,7 @@ function openGroupWithTabAndSplit(): void {
 
 function expectTopBlockAndFoot(): void {
   expect(screen.getByTestId("side-strip-top-block")).toBeDefined();
-  expect(screen.getByTestId("tab-new")).toBeDefined();
+  expect(screen.getByTestId("side-strip-new-task")).toBeDefined();
   expect(screen.getByTestId("side-tab-strip-collapse")).toBeDefined();
   const foot = screen.getByTestId("side-strip-foot");
   expect(
@@ -628,7 +657,7 @@ describe("<SideTabStrip />", () => {
 
   it("shows the Alt-digit badges in leader mode", async () => {
     openEpicTabs(["Alpha", "Beta"]);
-    const router = buildRouter("/elsewhere", LEFT_STRIP);
+    const router = buildRouter("/elsewhere", LEFT_STRIP, undefined);
     render(
       <KeybindingProvider router={router}>
         <RouterProvider router={router} />
@@ -811,7 +840,13 @@ describe("<SideTabStrip />", () => {
     expect(titleRow.className).toContain(
       "wco:pl-[var(--window-leading-inset)]",
     );
-    expect(titleRow.contains(screen.getByTestId("tab-new"))).toBe(true);
+    // The collapse toggle lives in the title row; New Task moved out of it (F7).
+    expect(
+      titleRow.contains(screen.getByTestId("side-tab-strip-collapse")),
+    ).toBe(true);
+    expect(titleRow.contains(screen.getByTestId("side-strip-new-task"))).toBe(
+      false,
+    );
     cleanup();
 
     await renderStrip("/", LEFT_STRIP);
@@ -1086,6 +1121,300 @@ describe("<SideTabStrip />", () => {
           .getByTestId("tab-epic-e-beta")
           .getAttribute("data-side-tab-joined"),
       ).toBeNull();
+    });
+  });
+
+  describe("New Task and the collapsed rail (F1, F7)", () => {
+    const precedes = (a: HTMLElement, b: HTMLElement): boolean =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    it("orders the rail: toggle, inbox, all tasks, new task, divider, home", async () => {
+      setHomeTabEnabled(true);
+      useSideTabStripStore.setState({ collapsed: true });
+      await renderStrip("/", LEFT_STRIP);
+
+      const toggle = screen.getByTestId("side-tab-strip-collapse");
+      const inbox = screen.getByTestId("side-strip-inbox");
+      const allTasks = screen.getByTestId("side-strip-all-tasks");
+      const newTask = screen.getByTestId("side-strip-new-task");
+      const divider = screen.getByTestId("side-strip-rail-divider");
+      const home = screen.getByTestId("tab-home");
+
+      expect(precedes(toggle, inbox)).toBe(true);
+      expect(precedes(inbox, allTasks)).toBe(true);
+      expect(precedes(allTasks, newTask)).toBe(true);
+      expect(precedes(newTask, divider)).toBe(true);
+      expect(precedes(divider, home)).toBe(true);
+    });
+
+    it("shows the rail divider even when Home is not drawn", async () => {
+      setHomeTabEnabled(false);
+      useSideTabStripStore.setState({ collapsed: true });
+      await renderStrip("/", LEFT_STRIP);
+
+      expect(screen.getByTestId("side-strip-rail-divider")).toBeDefined();
+      expect(screen.queryByTestId("tab-home")).toBeNull();
+    });
+
+    it('gives the collapsed New Task tile an aria-label of "New Task"', async () => {
+      useSideTabStripStore.setState({ collapsed: true });
+      await renderStrip("/", LEFT_STRIP);
+
+      expect(
+        screen.getByTestId("side-strip-new-task").getAttribute("aria-label"),
+      ).toBe("New Task");
+    });
+
+    it("orders the expanded rows: all tasks, home, new task, tasks label - never inside the title row", async () => {
+      setHomeTabEnabled(true);
+      await renderStrip("/", { ...LEFT_STRIP, ownsTitleBar: true });
+
+      const allTasks = screen.getByTestId("side-strip-all-tasks");
+      const home = screen.getByTestId("tab-home");
+      const newTask = screen.getByTestId("side-strip-new-task");
+      const tasksLabel = screen.getByTestId("side-strip-tasks-label");
+      const titleRow = screen.getByTestId("side-strip-title-row");
+
+      expect(precedes(allTasks, home)).toBe(true);
+      expect(precedes(home, newTask)).toBe(true);
+      expect(precedes(newTask, tasksLabel)).toBe(true);
+      expect(titleRow.contains(newTask)).toBe(false);
+    });
+
+    it("draws no history-nav arrows in the collapsed rail, even with a real history stack", async () => {
+      useSideTabStripStore.setState({ collapsed: true });
+      const router = buildRouter(
+        "/",
+        LEFT_STRIP,
+        createPersistentMemoryHistory(
+          "/",
+          "side-tab-strip-rail-history-nav-collapsed",
+        ),
+      );
+      render(<RouterProvider router={router} />);
+      await screen.findByTestId("side-tab-strip");
+
+      expect(screen.queryByTestId("history-nav-back")).toBeNull();
+      expect(screen.queryByTestId("history-nav-forward")).toBeNull();
+      cleanup();
+
+      // Sanity: the same kind of available history DOES draw the arrows once
+      // expanded, so the absence above is a real one and not an artifact of
+      // history availability in this harness.
+      useSideTabStripStore.setState({ collapsed: false });
+      const expandedRouter = buildRouter(
+        "/",
+        LEFT_STRIP,
+        createPersistentMemoryHistory(
+          "/",
+          "side-tab-strip-rail-history-nav-expanded",
+        ),
+      );
+      render(<RouterProvider router={expandedRouter} />);
+      await screen.findByTestId("side-tab-strip");
+      expect(screen.getByTestId("history-nav-back")).toBeDefined();
+    });
+
+    it.each([
+      { collapsed: false, label: "expanded" },
+      { collapsed: true, label: "collapsed" },
+    ])(
+      "$label: clicking New Task opens a new draft tab",
+      async ({ collapsed }) => {
+        useSideTabStripStore.setState({ collapsed });
+        const router = buildRouter("/", LEFT_STRIP, undefined);
+        render(<RouterProvider router={router} />);
+        await screen.findByTestId("side-strip-new-task");
+
+        fireEvent.click(screen.getByTestId("side-strip-new-task"));
+        await flushNav();
+
+        expect(router.state.location.pathname).toMatch(/^\/draft\//);
+      },
+    );
+  });
+
+  describe("the resize handle drags the live collapsed layout (F9)", () => {
+    const RESIZE_POINTER_ID = 41;
+    const DRAG_ANCHOR_X = 500;
+    const START_WIDTH = 240; // matches resetStores' default widthPx
+    /** Comfortably on either side of the snap point, and past the minimum. */
+    const UNDER_SNAP_WIDTH = SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX - 26;
+    const OVER_SNAP_WIDTH = SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX + 174;
+
+    /** The strip's own rect, tracking whatever width it is currently drawn at. */
+    function stubStripRect(strip: HTMLElement): void {
+      vi.spyOn(strip, "getBoundingClientRect").mockImplementation(() => {
+        const width = Number.parseFloat(strip.style.width);
+        return new DOMRect(0, 0, Number.isNaN(width) ? 0 : width, 800);
+      });
+    }
+
+    function downHandle(handle: HTMLElement, atX: number): void {
+      fireEvent(
+        handle,
+        pointerEvent("pointerdown", {
+          pointerId: RESIZE_POINTER_ID,
+          clientX: atX,
+          clientY: 10,
+          button: 0,
+        }),
+      );
+    }
+    /** Moves the pointer so the strip previews `targetWidth`, from `fromWidth`. */
+    function moveTo(
+      handle: HTMLElement,
+      fromWidth: number,
+      targetWidth: number,
+    ): void {
+      fireEvent(
+        handle,
+        pointerEvent("pointermove", {
+          pointerId: RESIZE_POINTER_ID,
+          clientX: DRAG_ANCHOR_X + (targetWidth - fromWidth),
+          clientY: 10,
+          button: 0,
+        }),
+      );
+    }
+    function releaseHandle(handle: HTMLElement): void {
+      fireEvent(
+        handle,
+        pointerEvent("pointerup", {
+          pointerId: RESIZE_POINTER_ID,
+          clientX: 0,
+          clientY: 10,
+          button: 0,
+        }),
+      );
+    }
+    function cancelHandle(handle: HTMLElement): void {
+      fireEvent(
+        handle,
+        pointerEvent("pointercancel", {
+          pointerId: RESIZE_POINTER_ID,
+          clientX: 0,
+          clientY: 10,
+          button: 0,
+        }),
+      );
+    }
+
+    it("draws the live collapsed rail once a drag crosses under the snap point, before anything is stored", async () => {
+      const strip = await renderStrip("/", LEFT_STRIP);
+      stubStripRect(strip);
+      const handle = screen.getByTestId("side-tab-strip-resize-handle");
+      expect(screen.queryByTestId("side-strip-rail-divider")).toBeNull();
+
+      downHandle(handle, DRAG_ANCHOR_X);
+      moveTo(handle, START_WIDTH, UNDER_SNAP_WIDTH);
+
+      expect(strip.getAttribute("data-collapsed")).toBe("true");
+      expect(screen.getByTestId("side-strip-rail-divider")).toBeDefined();
+      // Held below the snap point, the rail's own width is drawn flat -
+      // never the tracked pointer position.
+      expect(strip.style.width).toBe(`${SIDE_STRIP_RAIL_WIDTH_PX}px`);
+      expect(useSideTabStripStore.getState()).toMatchObject({
+        collapsed: false,
+        dragCollapsed: true,
+      });
+
+      releaseHandle(handle);
+    });
+
+    it("returns to the expanded layout once the drag re-crosses back over the snap point", async () => {
+      const strip = await renderStrip("/", LEFT_STRIP);
+      stubStripRect(strip);
+      const handle = screen.getByTestId("side-tab-strip-resize-handle");
+
+      downHandle(handle, DRAG_ANCHOR_X);
+      moveTo(handle, START_WIDTH, UNDER_SNAP_WIDTH);
+      expect(strip.getAttribute("data-collapsed")).toBe("true");
+
+      moveTo(handle, START_WIDTH, OVER_SNAP_WIDTH);
+
+      expect(strip.getAttribute("data-collapsed")).toBe("false");
+      expect(screen.queryByTestId("side-strip-rail-divider")).toBeNull();
+      // Above the snap point, the width tracks the pointer again (at least
+      // the minimum), not the rail's flat width.
+      expect(strip.style.width).toBe(`${OVER_SNAP_WIDTH}px`);
+      expect(useSideTabStripStore.getState().dragCollapsed).toBeNull();
+
+      releaseHandle(handle);
+    });
+
+    it("commits the rail on release under the snap point, keeping the stored width", async () => {
+      const strip = await renderStrip("/", LEFT_STRIP);
+      stubStripRect(strip);
+      const handle = screen.getByTestId("side-tab-strip-resize-handle");
+
+      downHandle(handle, DRAG_ANCHOR_X);
+      moveTo(handle, START_WIDTH, UNDER_SNAP_WIDTH);
+      releaseHandle(handle);
+
+      expect(useSideTabStripStore.getState()).toMatchObject({
+        collapsed: true,
+        dragCollapsed: null,
+        widthPx: START_WIDTH,
+      });
+    });
+
+    it("expands from the rail once a drag out passes the snap point, and stores the width", async () => {
+      useSideTabStripStore.setState({ collapsed: true });
+      const strip = await renderStrip("/", LEFT_STRIP);
+      stubStripRect(strip);
+      const handle = screen.getByTestId("side-tab-strip-resize-handle");
+      const fromWidth = SIDE_STRIP_RAIL_WIDTH_PX;
+
+      downHandle(handle, DRAG_ANCHOR_X);
+      moveTo(handle, fromWidth, OVER_SNAP_WIDTH);
+      releaseHandle(handle);
+
+      expect(useSideTabStripStore.getState()).toMatchObject({
+        collapsed: false,
+        dragCollapsed: null,
+        widthPx: OVER_SNAP_WIDTH,
+      });
+    });
+
+    it("pointercancel mid-drag after a crossing restores the starting layout and stores nothing", async () => {
+      const strip = await renderStrip("/", LEFT_STRIP);
+      stubStripRect(strip);
+      const handle = screen.getByTestId("side-tab-strip-resize-handle");
+
+      downHandle(handle, DRAG_ANCHOR_X);
+      moveTo(handle, START_WIDTH, UNDER_SNAP_WIDTH);
+      expect(strip.getAttribute("data-collapsed")).toBe("true");
+
+      cancelHandle(handle);
+
+      expect(strip.getAttribute("data-collapsed")).toBe("false");
+      expect(strip.style.width).toBe(`${START_WIDTH}px`);
+      expect(useSideTabStripStore.getState()).toMatchObject({
+        collapsed: false,
+        dragCollapsed: null,
+        widthPx: START_WIDTH,
+      });
+    });
+
+    it("blur mid-drag after a crossing restores the starting layout and stores nothing", async () => {
+      const strip = await renderStrip("/", LEFT_STRIP);
+      stubStripRect(strip);
+      const handle = screen.getByTestId("side-tab-strip-resize-handle");
+
+      downHandle(handle, DRAG_ANCHOR_X);
+      moveTo(handle, START_WIDTH, UNDER_SNAP_WIDTH);
+      expect(strip.getAttribute("data-collapsed")).toBe("true");
+
+      fireEvent(window, new Event("blur"));
+
+      expect(strip.getAttribute("data-collapsed")).toBe("false");
+      expect(strip.style.width).toBe(`${START_WIDTH}px`);
+      expect(useSideTabStripStore.getState()).toMatchObject({
+        collapsed: false,
+        dragCollapsed: null,
+        widthPx: START_WIDTH,
+      });
     });
   });
 });

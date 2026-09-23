@@ -463,10 +463,11 @@ describe("TabStrip title", () => {
       screen.queryByTestId(`tab-title-generating-${TAB.instanceId}`),
     ).toBeNull();
     const failure = screen.getByTestId(`chat-tab-spinner-failure-${CHAT_ID}`);
-    expect(failure.getAttribute("class")).toContain("lucide-message-square-x");
-    expect(failure.getAttribute("class")).not.toContain(
-      "lucide-square-terminal",
-    );
+    expect(
+      failure
+        .querySelector("[data-status-glyph]")
+        ?.getAttribute("data-status-glyph"),
+    ).toBe("failed");
   });
 
   it("shows the chat's unread-done status instead of the title spinner", async () => {

@@ -170,23 +170,6 @@ vi.mock("@/lib/epic-selectors", async (importOriginal) => {
   };
 });
 
-// Only `HeaderBarCluster` is stubbed - it renders nothing under the default
-// arrangement anyway (S-03's bar readings live in the strip, not the header),
-// and stubbing it keeps this suite from also depending on the layout-override
-// store. `HeaderNotificationsBell` and `HeaderIdentity` stay REAL: they are
-// exactly the boundary this suite exists to cross.
-vi.mock("@/components/layout/header/header-actions", async (importOriginal) => {
-  const actual =
-    await importOriginal<
-      typeof import("@/components/layout/header/header-actions")
-    >();
-  return {
-    ...actual,
-    HeaderBarCluster: (props: { readonly side: string }) => (
-      <span data-testid={`foot-cluster-${props.side}`} />
-    ),
-  };
-});
 vi.mock("@/components/layout/header/app-update-button", () => ({
   AppUpdateHeaderButton: () => <span data-testid="foot-update" />,
 }));

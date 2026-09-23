@@ -8,7 +8,10 @@ import { Cpu } from "lucide-react";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { UNAVAILABLE_DASH } from "@/lib/resources/memory-metric";
-import type { StatusBarResourceMetricView } from "@/lib/resources/status-bar-resource-reading";
+import {
+  statusBarResourceSegmentLabel,
+  type StatusBarResourceMetricView,
+} from "@/lib/resources/status-bar-resource-reading";
 import { cn } from "@/lib/utils";
 import { useStatusBarResourceMetricViews } from "@/components/layout/status-bar/use-status-bar-resource-views";
 
@@ -143,25 +146,6 @@ export function StatusBarResourceSegment(props: StatusBarResourceSegmentProps) {
 }
 
 /**
- * The button's whole accessible name: what it is, then each metric the strip is
- * showing and what it currently reads.
- *
- * `label: value` per metric, in the order they are drawn, so the name matches
- * the readout left to right. An unavailable metric says so rather than being
- * dropped — a name that silently omitted it would leave a reader who turned
- * the metric on with no way to tell it from one this build never draws.
- */
-function statusBarResourceSegmentLabel(
-  views: ReadonlyArray<StatusBarResourceMetricView>,
-): string {
-  if (views.length === 0) return "Resources, no metrics selected";
-  const readings = views
-    .map((view) => `${view.label} ${view.value ?? "unavailable"}`)
-    .join(", ");
-  return `Resources: ${readings}`;
-}
-
-/**
  * `TooltipWrapper` degrades to a transparent `Slot` when its label is null, so
  * a metric with a number costs no tooltip machinery while an unavailable one
  * always carries its sentence — the dash alone cannot distinguish "no data
@@ -171,7 +155,7 @@ function statusBarResourceSegmentLabel(
  * repo's idiom (`MetricBlock`): an em dash is decoration, and a screen reader
  * left with it hears punctuation where a value should be.
  */
-function StatusBarMetric(props: {
+export function StatusBarMetric(props: {
   readonly view: StatusBarResourceMetricView;
 }) {
   const { view } = props;
