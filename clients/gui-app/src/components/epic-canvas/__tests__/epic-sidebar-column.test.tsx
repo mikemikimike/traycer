@@ -25,6 +25,9 @@ import {
   openStoreForTest,
   type OpenedStoreForTest,
 } from "@/stores/epics/open-epic/test-support/open-store-for-test";
+import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
+import { useTabsStore } from "@/stores/tabs/store";
+import { tabAutoTint } from "@/components/layout/tabs/tab-identity";
 
 const sidebarRenderCounts = vi.hoisted(() => ({
   liveHost: 0,
@@ -71,10 +74,18 @@ vi.mock("@/components/epic-canvas/sidebar/epic-sidebar-rail", () => ({
 
 // The snapshot scope reads session-bound selectors; stub them so the live
 // branch renders against the fake handle without a full projector store.
-vi.mock("@/lib/epic-selectors", () => ({
-  useEpicSnapshotLoaded: () => true,
-  useEpicSnapshotFetchError: () => null,
-}));
+// Everything else (incl. `useRegisteredEpicTitle` /
+// `useRegisteredEpicTitleGenerating`, which the panel task header reads) stays
+// real: both fall back safely to `null`/`false` for an epic id with no
+// registered handle, which is every case in this file.
+vi.mock("@/lib/epic-selectors", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/epic-selectors")>();
+  return {
+    ...actual,
+    useEpicSnapshotLoaded: () => true,
+    useEpicSnapshotFetchError: () => null,
+  };
+});
 
 const EPIC_ID = "sidebar-column-epic";
 const TAB_ID = "sidebar-column-tab";
@@ -155,6 +166,8 @@ describe("<EpicSidebarColumn />", () => {
       mainCollapsedByTabId: {},
       sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
     });
+    useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
+    useTabsStore.setState(useTabsStore.getInitialState(), true);
   });
 
   afterEach(() => {
@@ -486,5 +499,75 @@ describe("<EpicSidebarColumn />", () => {
     expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(
       DEFAULT_SIDEBAR_WIDTH_PX,
     );
+  });
+});
+
+describe("<EpicSidebarColumn /> panel task header", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useLeftPanelStore.setState({
+      mainCollapsedByTabId: {},
+      sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
+    });
+    useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
+    useTabsStore.setState(useTabsStore.getInitialState(), true);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("tints the chip with the tab's own colour when it has one", () => {
+    useEpicCanvasStore
+      .getState()
+      .openEpicTabWithId(TAB_ID, EPIC_ID, "Header Task");
+    // `setTabCustomization` writes onto the strip's own layout item, so the
+    // ref has to be present in it first - unlike the epic-canvas tab record,
+    // this store has no seed for a ref that was never opened through it.
+    useTabsStore.getState().ensurePresent({ kind: "epic", id: TAB_ID });
+    useTabsStore
+      .getState()
+      .setTabCustomization({ kind: "epic", id: TAB_ID }, { color: "#3355ee" });
+
+    renderColumn();
+
+    expect(screen.getByTestId("epic-sidebar-task-header")).not.toBeNull();
+    expect(screen.getByText("Header Task")).not.toBeNull();
+    const chip = screen.getByTestId("side-tab-monogram-chip");
+    expect(chip.style.getPropertyValue("--side-tab-tint")).toBe("#3355ee");
+  });
+
+  it("falls back to the epic's auto tint when the tab has no colour", () => {
+    useEpicCanvasStore
+      .getState()
+      .openEpicTabWithId(TAB_ID, EPIC_ID, "Header Task");
+
+    renderColumn();
+
+    const chip = screen.getByTestId("side-tab-monogram-chip");
+    expect(chip.style.getPropertyValue("--side-tab-tint")).toBe(
+      tabAutoTint(EPIC_ID),
+    );
+  });
+
+  it("shows no header while the panel is collapsed", () => {
+    useEpicCanvasStore
+      .getState()
+      .openEpicTabWithId(TAB_ID, EPIC_ID, "Header Task");
+
+    renderColumn();
+    expect(screen.getByTestId("epic-sidebar-task-header")).not.toBeNull();
+
+    act(() => {
+      useLeftPanelStore.getState().setMainCollapsed(TAB_ID, true);
+    });
+
+    expect(screen.queryByTestId("epic-sidebar-task-header")).toBeNull();
+  });
+
+  it("renders no header when the tab cannot be resolved", () => {
+    renderColumn();
+
+    expect(screen.queryByTestId("epic-sidebar-task-header")).toBeNull();
   });
 });

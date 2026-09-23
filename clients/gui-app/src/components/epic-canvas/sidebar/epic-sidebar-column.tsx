@@ -29,11 +29,23 @@ import {
 import { SidebarKeybindingBridge } from "@/components/epic-canvas/sidebar/sidebar-keybinding-bridge";
 import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { SnapshotLoadingProvider } from "@/components/epic-canvas/snapshots/snapshot-loading-context";
+import { useHeaderTabTitle } from "@/components/layout/tabs/header-tab-presentation";
+import { PanelTaskHeaderBody } from "@/components/epic-canvas/sidebar/panel-task-header-body";
+import { MonogramChip } from "@/components/layout/tabs/monogram-chip";
+import {
+  sideTabTileOf,
+  tabAutoTint,
+} from "@/components/layout/tabs/tab-identity";
+import { useHeaderTabAppearance } from "@/hooks/appearance/use-header-tab-appearance";
 import {
   useEpicSnapshotFetchError,
   useEpicSnapshotLoaded,
+  useRegisteredEpicTitleGenerating,
 } from "@/lib/epic-selectors";
+import { useHeaderTabForRef } from "@/stores/tabs/use-header-tabs";
+import { tabAppearance, type HeaderTab } from "@/stores/tabs/types";
 import {
+  GROUND_RESIZE_HANDLE_LINE_CLASS,
   pointerDragHandleAxisClassName,
   usePointerDragCommit,
 } from "@/components/epic-canvas/canvas/use-pointer-drag-commit";
@@ -115,12 +127,15 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
       <SidebarArtwork />
       <SidebarProvider defaultOpen className="h-full min-h-0 w-full flex-col">
         {mainCollapsed ? null : (
-          <ColumnRail
-            epicId={epicId}
-            tabId={tabId}
-            orientation="horizontal"
-            sessionReady={sessionReady}
-          />
+          <>
+            <ColumnRail
+              epicId={epicId}
+              tabId={tabId}
+              orientation="horizontal"
+              sessionReady={sessionReady}
+            />
+            <PanelTaskHeader epicId={epicId} tabId={tabId} />
+          </>
         )}
         <SidebarKeybindingBridge tabId={tabId} />
         <div className="min-h-0 flex-1">
@@ -198,6 +213,51 @@ function ColumnRail(props: {
 }
 
 /**
+ * The panel sheet's header (D12): the task's rail tile chip and its title, so
+ * the panel says which task it belongs to. The chip is the strip's own, in
+ * the tab colour or else the epic's auto tint (D11).
+ */
+export function PanelTaskHeader(props: {
+  readonly epicId: string;
+  readonly tabId: string;
+}) {
+  const tab = useHeaderTabAppearance(
+    useHeaderTabForRef({ kind: "epic", id: props.tabId }),
+  );
+  if (tab === null) return null;
+  return <PanelTaskHeaderRow epicId={props.epicId} tab={tab} />;
+}
+
+function PanelTaskHeaderRow(props: {
+  readonly epicId: string;
+  readonly tab: HeaderTab;
+}) {
+  const { resolvedTabName, displayName } = useHeaderTabTitle(props.tab);
+  const titleGenerating = useRegisteredEpicTitleGenerating(props.epicId);
+  const appearance = tabAppearance(props.tab);
+  const Icon = props.tab.icon;
+  const tile = sideTabTileOf({
+    appearance,
+    title: resolvedTabName,
+    titleGenerating,
+    fallback: Icon === null ? null : <Icon className="size-3.5" />,
+  });
+  return (
+    <PanelTaskHeaderBody
+      testId="epic-sidebar-task-header"
+      chip={
+        <MonogramChip
+          tile={tile}
+          tint={appearance?.color ?? tabAutoTint(props.epicId)}
+          tinted={tile.kind !== "generating"}
+        />
+      }
+      title={displayName}
+    />
+  );
+}
+
+/**
  * Panel bodies gate on snapshot state via `SnapshotGate`; this scope feeds
  * them the same context the canvas side provides in `epic-shell.tsx`. Only
  * rendered while the session handle is non-null (the selectors require it).
@@ -249,7 +309,7 @@ function isSidebarPanelElement(
  * sidebar, so both read as "toward the canvas grows the panel" regardless
  * of which edge the canvas is on.
  */
-function SidebarWidthResizeHandle(props: {
+export function SidebarWidthResizeHandle(props: {
   readonly side: EdgeSide;
   readonly hidden: boolean;
 }) {
@@ -330,6 +390,7 @@ function SidebarWidthResizeHandle(props: {
       className={cn(
         "relative z-10 shrink-0 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
         pointerDragHandleAxisClassName("horizontal"),
+        GROUND_RESIZE_HANDLE_LINE_CLASS,
         "md:mx-[calc(var(--shell-gap)/-2)] md:w-0",
         hidden && "hidden",
       )}

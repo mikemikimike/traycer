@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tabMonogram } from "../side-strip/tab-monogram";
+import { tabMonogram } from "../tab-monogram";
 
 describe("tabMonogram", () => {
   it("takes the first letter of each of the first two words", () => {

@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { EpicRouteSessionBody } from "@/components/epic-canvas/epic-route-session-body";
 import { MobileEpicHeaderActionsBinder } from "@/components/epic-canvas/mobile/epic-mobile-header-actions";
 import { EpicSidebarColumn } from "@/components/epic-canvas/sidebar/epic-sidebar-column";
+import { StripLiveAgentsPortal } from "@/components/epic-canvas/sidebar/strip-live-agents";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useArrangementValue } from "@/lib/layout-overrides";
 import {
@@ -85,6 +86,13 @@ export function EpicSurface(props: EpicSurfaceProps) {
                   effects below unmounted. Self-gates on mobile, so desktop
                   registers nothing either way. */}
               <MobileEpicHeaderActionsBinder tabId={props.tabId} />
+              {/* The Activity view's live agents, drawn in the strip under
+                  this tab's row but owned here, inside this pane's session
+                  (D9). */}
+              <StripLiveAgentsPortal
+                epicId={props.epicId}
+                tabId={props.tabId}
+              />
               <div
                 className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
                 data-epic-surface={props.tabId}

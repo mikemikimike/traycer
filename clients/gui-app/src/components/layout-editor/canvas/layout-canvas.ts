@@ -10,6 +10,8 @@ import {
 } from "@/components/layout-editor/canvas/hover-chip";
 import { armCanvasDrag } from "@/components/layout-editor/canvas/region-drag";
 import { createSelectionRing } from "@/components/layout-editor/canvas/selection-ring";
+import { armSurfaceDrag } from "@/components/layout-editor/canvas/surface-drag";
+import { SURFACE_PLACEMENT } from "@/components/layout-editor/canvas/surface-placement";
 import {
   LAYOUT_REGION_IDS,
   regionFacts,
@@ -23,6 +25,8 @@ import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,
   useLayoutEditorStore,
+  type LayoutEditorState,
+  type PlacementSurfaceId,
 } from "@/stores/layout/layout-editor-store";
 import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 
@@ -95,16 +99,17 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
           node: hovered.node,
           placement: chipPlacement(hoveredRegion),
         });
-      const selected =
-        state.selected === null
-          ? null
-          : preferredRegionInstance(state, state.selected);
       // Identity-guarded inside the controller, so this costs nothing on the
       // notifications that did not move the selection. Where the ring's node
       // IS is not this hook's business at all: the controller re-reads the
       // rect every frame, so every reflow of the canvas under it is followed
-      // without anything here having to notice one (L-90).
-      ring.track(selected?.node ?? null);
+      // without anything here having to notice one (L-90). A placement write
+      // that REMOUNTS a surface (the top strip and the vertical one are two
+      // components) re-registers it, which is a notification; between the
+      // old element leaving and the new one registering the ring is held
+      // rather than put away, so it travels to the new element.
+      const node = selectedNode(state);
+      if (node !== null || state.selectedSurface === null) ring.track(node);
     };
 
     const onPointerMove = (event: PointerEvent): void => {
@@ -127,13 +132,22 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       if (!(target instanceof Node) || !column.contains(target)) return;
       const state = useLayoutEditorStore.getState();
       state.setKeyboardNav(false);
-      state.select(regionUnder(target, column));
+      const member = memberNodeUnder(target, column);
+      const regionId = regionUnder(target, column);
+      // A surface is selected only through its OWN space: a region inside it
+      // (the Home tab, a rail icon) and a rail divider stay what they were.
+      const surface =
+        regionId === null && member === null
+          ? surfaceNodeUnder(target, column)
+          : null;
+      if (surface === null) state.select(regionId);
+      else state.selectSurface(surface.id);
       // A session on its way out, or a shell still gliding, has boxes that are
       // about to move or are already a snapshot; neither is something to
       // measure a drag against.
       if (state.leaving || layoutTransitionRunning()) return;
-      const member = memberNodeUnder(target, column);
       if (member !== null) armCanvasDrag({ event, node: member });
+      else if (surface !== null) armPlacementDrag(event, surface, column);
     };
 
     // Leaving the canvas drops the canvas's own hover. The inspector's rows
@@ -201,6 +215,61 @@ function memberNodeUnder(
   const node = element?.closest('[data-layout-draggable="1"]') ?? null;
   if (!(node instanceof HTMLElement) || !column.contains(node)) return null;
   return node;
+}
+
+/**
+ * The placement surface whose own space is under a press, or `null`. Resolved
+ * past any region-less element inside it (a task tab is not a region), which is
+ * what makes the whole strip a handle.
+ */
+function surfaceNodeUnder(
+  target: Node,
+  column: HTMLElement,
+): { readonly id: PlacementSurfaceId; readonly node: HTMLElement } | null {
+  const element = target instanceof Element ? target : target.parentElement;
+  const node = element?.closest("[data-layout-surface]") ?? null;
+  if (!(node instanceof HTMLElement) || !column.contains(node)) return null;
+  const value = node.getAttribute("data-layout-surface");
+  if (value === "topBar" || value === "sidebar") return { id: value, node };
+  return null;
+}
+
+/**
+ * Arm the drag of a surface onto an edge. The tab strip's edges are the app
+ * column's; the sidebar's are the content's it sits beside, which is its
+ * parent on the canvas.
+ */
+function armPlacementDrag(
+  event: PointerEvent,
+  surface: { readonly id: PlacementSurfaceId; readonly node: HTMLElement },
+  column: HTMLElement,
+): void {
+  const facts = SURFACE_PLACEMENT[surface.id];
+  const container =
+    surface.id === "topBar" ? column : surface.node.parentElement;
+  if (container === null) return;
+  armSurfaceDrag({
+    event,
+    node: surface.node,
+    container,
+    edges: facts.edges,
+    current: facts.current(getLayoutSnapshot().arrangement),
+    onDrop: facts.write,
+  });
+}
+
+/** The element the ring is on: the selected region's, or the selected surface's. */
+function selectedNode(
+  state: Pick<
+    LayoutEditorState,
+    "instances" | "selected" | "selectedSurface" | "surfaceNodes"
+  >,
+): HTMLElement | null {
+  if (state.selected !== null)
+    return preferredRegionInstance(state, state.selected)?.node ?? null;
+  if (state.selectedSurface !== null)
+    return state.surfaceNodes.get(state.selectedSurface) ?? null;
+  return null;
 }
 
 function regionIdOf(node: HTMLElement | null): RegionId | null {

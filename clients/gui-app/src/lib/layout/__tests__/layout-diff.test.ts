@@ -8,6 +8,7 @@ import {
   resetEverything,
   revertProvider,
   sidebarSideChanged,
+  sideStripViewChanged,
   tabStripPlacementChanged,
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
@@ -128,6 +129,7 @@ describe("what the page can see as changed", () => {
       { dock: [...DEFAULT_ARRANGEMENT.dock].reverse() },
       { tabStripPlacement: "left" },
       { sidebarSide: "right" },
+      { sideStripView: "activity" },
     ];
     for (const patch of eachOne) {
       expect(
@@ -178,6 +180,29 @@ describe("the tab strip's placement and the sidebar's side", () => {
   });
 });
 
+/** D8: the vertical strip's view, as its own two-arrangement comparator and in the payload. */
+describe("the vertical strip's view", () => {
+  it("sideStripViewChanged compares the two arrangements handed to it", () => {
+    expect(sideStripViewChanged(DEFAULT_ARRANGEMENT, DEFAULT_ARRANGEMENT)).toBe(
+      false,
+    );
+    expect(
+      sideStripViewChanged(
+        { ...DEFAULT_ARRANGEMENT, sideStripView: "activity" },
+        DEFAULT_ARRANGEMENT,
+      ),
+    ).toBe(true);
+  });
+
+  it("the snapshot builder emits the property", () => {
+    const properties = layoutSnapshotProperties(
+      snapshotWith({ ...DEFAULT_ARRANGEMENT, sideStripView: "activity" }),
+    );
+
+    expect(properties.layout_side_strip_view).toBe("activity");
+  });
+});
+
 describe("Reset everything (L-20)", () => {
   it("puts back the preset, every value and every arrangement field", () => {
     const before: LayoutSnapshot = {
@@ -197,6 +222,8 @@ describe("Reset everything (L-20)", () => {
         // sidebar side too.
         tabStripPlacement: "right",
         sidebarSide: "right",
+        // D8: and the vertical strip's view.
+        sideStripView: "activity",
       },
     };
 
@@ -208,6 +235,7 @@ describe("Reset everything (L-20)", () => {
     expect(anythingChanged(after)).toBe(false);
     expect(after.arrangement.tabStripPlacement).toBe("top");
     expect(after.arrangement.sidebarSide).toBe("left");
+    expect(after.arrangement.sideStripView).toBe("layered");
   });
 
   it("never hands a divider id back out, which is the one field it keeps", () => {

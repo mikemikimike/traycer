@@ -17,11 +17,12 @@ import type {
 import type { HeaderTabDragData } from "../header-tab-dnd";
 import { splitSlotLabel, useHeaderTabTitle } from "../header-tab-presentation";
 import { TabLeadingIcon } from "../tab-leading-icon";
-import { tabWaitingReason } from "../tab-waiting";
+import { sideTabWaitingLabel, tabWaitingReason } from "../tab-waiting";
+import { NO_LIVE_AGENTS, useSideTabLiveAgents } from "./side-tab-live-agents";
 import { railBadgeOf } from "./rail-badge-kind";
+import { sideTabTileOf, tabAutoTint } from "../tab-identity";
 import { SideSplitRowPair } from "./side-split-row-pair";
 import { SideTabRow, type SideTabRowVariant } from "./side-tab-row";
-import { sideTabTileOf, sideTabWaitingLabel } from "./side-tab-tile";
 import { SIDE_TAB_DRAG_OVERLAY_CLASS } from "./side-strip-tokens";
 
 /**
@@ -154,12 +155,14 @@ function OverlayMember(props: {
       active={props.focused}
       session={null}
       tint={null}
+      autoTint={null}
       groupLine={null}
       leading={icon}
       tile={{ kind: "icon", icon }}
       badge={null}
+      agents={NO_LIVE_AGENTS}
       title={label}
-      titleText={label}
+      hoverCardBody={label}
       leaderBadge={null}
       close={null}
       waitingLabel={null}
@@ -185,6 +188,7 @@ function OverlayTabRow(props: {
     null,
   );
   const activityStatus = useEpicActivityStatus(epicId);
+  const agents = useSideTabLiveAgents(epicId);
   const titleGenerating = useRegisteredEpicTitleGenerating(epicId);
   const appearance = ghost === null ? tabAppearance(tab) : ghost.appearance;
   const indicatorState = ghost?.indicatorState ?? liveIndicator;
@@ -196,6 +200,7 @@ function OverlayTabRow(props: {
       activityStatus={activityStatus}
       indicatorState={indicatorState}
       tabId={tab.id}
+      statusPresentation="glyph"
     />
   );
   return (
@@ -205,6 +210,7 @@ function OverlayTabRow(props: {
       active={props.active}
       session={null}
       tint={appearance?.color ?? null}
+      autoTint={epicId === null ? null : tabAutoTint(epicId)}
       groupLine={null}
       leading={leading}
       tile={sideTabTileOf({
@@ -213,9 +219,10 @@ function OverlayTabRow(props: {
         titleGenerating,
         fallback: leading,
       })}
-      badge={railBadgeOf(indicatorState, activityStatus)}
+      badge={railBadgeOf(indicatorState)}
+      agents={agents}
       title={displayName}
-      titleText={displayName}
+      hoverCardBody={displayName}
       leaderBadge={null}
       close={null}
       waitingLabel={sideTabWaitingLabel(tabWaitingReason(indicatorState, null))}

@@ -6,6 +6,7 @@ import type { AgentActivityCoverage } from "@/lib/agent-activity";
 import {
   attentionTone,
   DONE_TONE,
+  statusGlyphKindOfTone,
   terminalFailureTone,
   type AgentNotificationSurface,
   type IndicatorTone,
@@ -13,6 +14,8 @@ import {
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { useStatusGlyphTooltipOpen } from "@/components/notifications/status-glyph-focus";
+import { StatusGlyph } from "@/components/notifications/status-glyph";
+import type { StatusGlyphKind } from "@/components/notifications/status-glyph-kind";
 import { cn } from "@/lib/utils";
 
 export const BACKGROUND_ACTIVITY_TITLE = "Background activity — agent idle";
@@ -66,7 +69,11 @@ interface NotificationIndicatorIconProps {
   readonly style: CSSProperties | undefined;
   readonly runningTitle: string;
   readonly defaultIcon: ReactNode;
-  readonly statusPresentation: "message" | "spinner";
+  /**
+   * `"glyph"` draws every state in the strip's shared glyph set (D12) instead
+   * of the tone icons; a tone the set has no shape for keeps its icon.
+   */
+  readonly statusPresentation: "message" | "spinner" | "glyph";
   /** Agent surface whose identity owns the failure glyph. "Terminal" in the
    * indicator state means a latest outcome, not necessarily a TUI agent. */
   readonly agentSurface: AgentNotificationSurface;
@@ -87,7 +94,18 @@ export function NotificationIndicatorIcon(
   if (tone !== null) {
     return <IndicatorTonePresentation tone={tone} indicatorProps={props} />;
   }
+  const glyph = props.statusPresentation === "glyph";
   if (props.running === "turn") {
+    if (glyph) {
+      return (
+        <GlyphStatus
+          kind="running"
+          tooltip={props.runningTitle}
+          testId={`${props.testIdPrefix}-activity-${props.subjectId}`}
+          indicatorProps={props}
+        />
+      );
+    }
     return (
       <IndicatorSpan indicatorProps={props} tooltip={props.runningTitle}>
         <AgentSpinningDots
@@ -99,6 +117,16 @@ export function NotificationIndicatorIcon(
     );
   }
   if (props.running === "background") {
+    if (glyph) {
+      return (
+        <GlyphStatus
+          kind="background"
+          tooltip={BACKGROUND_ACTIVITY_TITLE}
+          testId={`${props.testIdPrefix}-background-activity-${props.subjectId}`}
+          indicatorProps={props}
+        />
+      );
+    }
     return (
       <IndicatorSpan indicatorProps={props} tooltip={BACKGROUND_ACTIVITY_TITLE}>
         <BackgroundActivityGlyph
@@ -140,10 +168,39 @@ function IndicatorTonePresentation(props: {
   readonly tone: IndicatorTone;
   readonly indicatorProps: NotificationIndicatorIconProps;
 }): ReactNode {
-  if (props.indicatorProps.statusPresentation === "message") {
-    return <IndicatorStatus {...props} />;
+  const presentation = props.indicatorProps.statusPresentation;
+  const glyph =
+    presentation === "glyph" ? statusGlyphKindOfTone(props.tone) : null;
+  if (glyph !== null) {
+    return (
+      <GlyphStatus
+        kind={glyph}
+        tooltip={props.tone.title}
+        testId={`${props.indicatorProps.testIdPrefix}-${props.tone.testId}-${props.indicatorProps.subjectId}`}
+        indicatorProps={props.indicatorProps}
+      />
+    );
   }
-  return <IndicatorDot {...props} />;
+  if (presentation === "spinner") return <IndicatorDot {...props} />;
+  return <IndicatorStatus {...props} />;
+}
+
+function GlyphStatus(props: {
+  readonly kind: StatusGlyphKind;
+  readonly tooltip: string;
+  readonly testId: string;
+  readonly indicatorProps: NotificationIndicatorIconProps;
+}): ReactNode {
+  return (
+    <IndicatorSpan
+      indicatorProps={props.indicatorProps}
+      tooltip={props.tooltip}
+    >
+      <span data-testid={props.testId} className="contents">
+        <StatusGlyph kind={props.kind} className="size-3.5" label={null} />
+      </span>
+    </IndicatorSpan>
+  );
 }
 
 function IndicatorStatus(props: {

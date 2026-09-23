@@ -1,19 +1,33 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  ChevronsUpDown,
   History,
   House,
-  PanelLeft,
+  Inbox,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
+  type LucideIcon,
 } from "lucide-react";
 import {
   depictDockRows,
   depictRegion,
 } from "@/components/layout-editor/region-depiction";
+import { PanelTaskHeaderBody } from "@/components/epic-canvas/sidebar/panel-task-header-body";
+import {
+  LIVE_AGENTS_LIST_CLASS,
+  LiveAgentRowView,
+  type LiveAgentKind,
+} from "@/components/epic-canvas/sidebar/live-agent-row";
 import {
   barClusterRegions,
+  liveAgentsInStrip,
+  sideTabJoinsPanel,
   type BarHost,
   type BarRegionId,
   type EdgeSide,
@@ -23,10 +37,24 @@ import type { LayoutValues } from "@/lib/layout/layout-values";
 import { railDisplayEntries } from "@/lib/layout/rail";
 import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
 import {
+  SideTabMeter,
+  type SideTabLiveAgents,
+} from "@/components/layout/tabs/side-strip/agent-meter";
+import { MonogramChip } from "@/components/layout/tabs/monogram-chip";
+import { tabAutoTint } from "@/components/layout/tabs/tab-identity";
+import {
+  SIDE_STRIP_ACCOUNT_ROW_CLASS,
+  SIDE_STRIP_FOOT_CLASS,
+  SIDE_STRIP_HOST_DOT_CLASS,
+  SIDE_STRIP_INSET_CLASS,
   SIDE_STRIP_LIST_CLASS,
+  SIDE_STRIP_NAV_TILE_CLASS,
+  SIDE_STRIP_SECTION_LABEL_CLASS,
   SIDE_TAB_ACTIVE_CLASS,
   SIDE_TAB_LEADING_CLASS,
   SIDE_TAB_ROW_CLASS,
+  SIDE_TAB_TILE_ACTIVE_CLASS,
+  SIDE_TAB_TILE_CLASS,
   SIDE_TAB_TITLE_CLASS,
 } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import type {
@@ -52,22 +80,89 @@ import { cn } from "@/lib/utils";
  *
  * What stays with each caller is PLACEMENT - the miniature draws these inside
  * a 1000x620 frame with the app's own bars and paddings, the specimen draws
- * one of them on a stage - so nothing here takes a size or a padding. The one
- * flag is `AppFrameTabEntries`' `layout`: the tab entries are chrome whose
- * orientation IS the placement, not a size choice a caller makes.
+ * one of them on a stage - so nothing here takes a size or a padding. The
+ * side strip takes its edge and whether it is collapsed: both are what the
+ * strip IS at that placement, not a size choice a caller makes.
  */
 export interface AppFrame {
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
 }
 
-/** The tabs beside the home tab, which are chrome rather than regions. */
-const APP_FRAME_TABS: ReadonlyArray<{
+/** A task tab in the picture, which is chrome rather than a region. */
+export interface AppFrameTask {
+  /** Seeds the auto tint (D11), as an epic id does. */
+  readonly id: string;
   readonly label: string;
+  readonly monogram: string;
   readonly active: boolean;
+  readonly agents: SideTabLiveAgents;
+}
+
+/** The active task, whose panel sheet the frame draws beside the strip. */
+const APP_FRAME_ACTIVE_TASK: AppFrameTask = {
+  id: "app-frame-sample",
+  label: "Sample chat",
+  monogram: "SC",
+  active: true,
+  agents: { turn: 1, background: 2 },
+};
+
+/** The tasks in every picture of the frame: the top bar's tabs, the strip's rows and tiles. */
+const APP_FRAME_TABS: ReadonlyArray<AppFrameTask> = [
+  {
+    id: "app-frame-onboarding",
+    label: "Onboarding flow",
+    monogram: "OF",
+    active: false,
+    agents: { turn: 1, background: 0 },
+  },
+  APP_FRAME_ACTIVE_TASK,
+  {
+    id: "app-frame-release",
+    label: "Release notes",
+    monogram: "RN",
+    active: false,
+    agents: { turn: 0, background: 0 },
+  },
+];
+
+/** Minutes ago, for a sample agent's idle time. */
+const minutesAgo = (minutes: number): number => Date.now() - minutes * 60_000;
+
+/**
+ * The active task's agents in every picture: one waiting on a reply (its chip
+ * in place of a time), one nested background agent, one more at the top. At
+ * rest, so no row draws the running spinner.
+ */
+const APP_FRAME_LIVE_AGENTS: ReadonlyArray<{
+  readonly nodeId: string;
+  readonly title: string;
+  readonly kind: LiveAgentKind;
+  readonly depth: number;
+  readonly updatedAt: number;
 }> = [
-  { label: "Start page", active: false },
-  { label: "Sample chat", active: true },
+  {
+    nodeId: "app-frame-agent-plan",
+    title: "Plan the migration",
+    kind: "interview",
+    depth: 0,
+    updatedAt: minutesAgo(2),
+  },
+  {
+    nodeId: "app-frame-agent-tests",
+    title: "Write the tests",
+    kind: "background",
+    depth: 1,
+    updatedAt: minutesAgo(6),
+  },
+  {
+    nodeId: "app-frame-agent-index",
+    title: "Rebuild the index",
+    kind: "background",
+    depth: 0,
+    updatedAt: minutesAgo(14),
+  },
 ];
 
 /**
@@ -90,11 +185,7 @@ export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
         values={values}
         arrangement={arrangement}
       />
-      <AppFrameTabEntries
-        values={values}
-        arrangement={arrangement}
-        layout="row"
-      />
+      <AppFrameTabEntries values={values} arrangement={arrangement} />
       <span className="flex-1" />
       <AppFrameBarCluster
         host="header"
@@ -110,47 +201,14 @@ export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
 }
 
 /**
- * The fake tabs, as a horizontal row (the top bar, alongside Home) or a
- * vertical column of rows (a side strip, where Home draws separately as its
- * own full row - `AppFrameSideHomeRow`).
- *
- * The row layout is the top bar's original markup, untouched, so `top` keeps
- * drawing exactly what it drew before this split. The column layout sizes its
- * rows from `side-strip-tokens.ts`, the strip's own proportions: a leading
- * slot, then the title at the row's own text size, nothing invented.
+ * The fake tabs as the top bar draws them, alongside Home: the top bar's
+ * original markup, untouched. The side strip draws the same tasks through
+ * `AppFrameSideStrip`, as rows or rail tiles.
  */
 export function AppFrameTabEntries({
   values,
   arrangement,
-  layout,
-}: AppFrame & { readonly layout: "row" | "column" }): ReactNode {
-  if (layout === "column") {
-    return (
-      <div className={SIDE_STRIP_LIST_CLASS}>
-        {APP_FRAME_TABS.map((tab) => (
-          <span
-            key={tab.label}
-            className={cn(
-              "flex items-center text-muted-foreground",
-              SIDE_TAB_ROW_CLASS,
-              tab.active && cn("text-foreground", SIDE_TAB_ACTIVE_CLASS),
-            )}
-          >
-            <span
-              aria-hidden
-              className={cn(
-                SIDE_TAB_LEADING_CLASS,
-                "shrink-0 rounded-full bg-foreground/10",
-              )}
-            />
-            <span className={cn(SIDE_TAB_TITLE_CLASS, "truncate")}>
-              {tab.label}
-            </span>
-          </span>
-        ))}
-      </div>
-    );
-  }
+}: AppFrame): ReactNode {
   return (
     <>
       <AppFrameRegion
@@ -160,7 +218,7 @@ export function AppFrameTabEntries({
       />
       {APP_FRAME_TABS.map((tab) => (
         <span
-          key={tab.label}
+          key={tab.id}
           className={cn(
             "flex h-7 shrink-0 items-center rounded-sm px-2.5 text-ui-sm text-muted-foreground",
             tab.active &&
@@ -174,18 +232,152 @@ export function AppFrameTabEntries({
   );
 }
 
+/** A task's monogram chip, the strip's and the panel header's own (D11). */
+function AppFrameTaskChip(props: { readonly task: AppFrameTask }): ReactNode {
+  return (
+    <MonogramChip
+      tile={{ kind: "monogram", text: props.task.monogram }}
+      tint={tabAutoTint(props.task.id)}
+      tinted
+    />
+  );
+}
+
 /**
- * Home in the side strip: a full row with a house glyph and its label, the
- * shape `SideHomeRow` draws (ticket 11), rather than the top strip's
- * icon-only item stretched by the column.
+ * The vertical strip as the shell draws it on the ground (D3-D6): the top
+ * block (history arrows, New task, the collapse toggle), the Inbox and All
+ * tasks rows, Home, "Tasks" and its count, the task rows, and the foot with
+ * the header-hosted readings over the account row. Collapsed, the 60px rail:
+ * 32px icon tiles, then a 40x44 tile per task (its monogram chip over its
+ * meter), then the avatar.
  *
- * Gated on the same `homeTab` region value the top bar reads, so hiding Home
- * removes this row exactly as it removes the top bar's.
+ * The frame beside it is always a task's, so the active task joins its panel
+ * sheet exactly when the live strip's does (`sideTabJoinsPanel`), through the
+ * same `data-side-tab-joined` marker and the same bridge span, which the
+ * shipped stylesheet paints. In the Activity view the expanded strip lists
+ * the active task's live agents under its row (D9).
+ *
+ * Takes no size or padding: the strip's width and its place in the frame stay
+ * with the caller. `relative`, because the bridge is positioned in it.
  */
-function AppFrameSideHomeRow(props: {
-  readonly values: LayoutValues;
+export function AppFrameSideStrip({
+  values,
+  arrangement,
+  edge,
+  collapsed,
+}: AppFrame & {
+  readonly edge: EdgeSide;
+  readonly collapsed: boolean;
 }): ReactNode {
-  if (props.values.homeTab.shown !== "shown") return null;
+  const joined = sideTabJoinsPanel(
+    arrangement.tabStripPlacement,
+    arrangement.sidebarSide,
+    true,
+  );
+  const liveAgents = liveAgentsInStrip(
+    arrangement.tabStripPlacement,
+    collapsed,
+    arrangement.sideStripView,
+  );
+  const CollapseIcon = COLLAPSE_ICON[edge][collapsed ? "expand" : "collapse"];
+  const home = values.homeTab.shown === "shown";
+  return (
+    <div
+      data-testid="app-frame-side-strip"
+      data-collapsed={collapsed}
+      className="relative flex flex-1 flex-col text-canvas-foreground"
+    >
+      {collapsed ? (
+        <div className="flex flex-col items-center gap-1 pt-2">
+          {home ? <AppFrameNavTile icon={House} /> : null}
+          <AppFrameNavTile icon={Plus} />
+          <AppFrameNavTile icon={CollapseIcon} />
+          <AppFrameNavTile icon={Inbox} />
+          <AppFrameNavTile icon={History} />
+        </div>
+      ) : (
+        <div className={cn("flex flex-col gap-1 pt-2", SIDE_STRIP_INSET_CLASS)}>
+          <div className="flex h-7 items-center gap-1 text-muted-foreground">
+            <ArrowLeft aria-hidden className="size-4 shrink-0" />
+            <ArrowRight aria-hidden className="size-4 shrink-0" />
+            <span className="flex-1" />
+            <Plus aria-hidden className="size-4 shrink-0" />
+            <CollapseIcon aria-hidden className="ml-2 size-4 shrink-0" />
+          </div>
+          <AppFrameNavRow icon={Inbox} label="Inbox" />
+          <AppFrameNavRow icon={History} label="All tasks" />
+          {home ? <AppFrameNavRow icon={House} label="Home" /> : null}
+          <div
+            className={cn(
+              SIDE_STRIP_SECTION_LABEL_CLASS,
+              "flex items-center text-muted-foreground",
+            )}
+          >
+            <span className="min-w-0 flex-1">Tasks</span>
+            <span className="tabular-nums">{APP_FRAME_TABS.length}</span>
+          </div>
+        </div>
+      )}
+      <div className={cn(SIDE_STRIP_LIST_CLASS, collapsed && "items-center")}>
+        {APP_FRAME_TABS.map((task) => (
+          <Fragment key={task.id}>
+            {collapsed ? (
+              <AppFrameTaskTile task={task} joined={joined ? edge : null} />
+            ) : (
+              <AppFrameTaskRow task={task} joined={joined ? edge : null} />
+            )}
+            {task.active && liveAgents ? <AppFrameLiveAgents /> : null}
+          </Fragment>
+        ))}
+      </div>
+      <span className="flex-1" />
+      <div
+        data-testid="app-frame-side-strip-foot"
+        className={cn(
+          SIDE_STRIP_FOOT_CLASS,
+          "flex flex-col",
+          collapsed ? "items-center" : "items-stretch",
+        )}
+      >
+        <div
+          className={cn(
+            "flex items-center gap-2 empty:hidden",
+            collapsed ? "flex-col" : "flex-wrap px-1",
+          )}
+        >
+          <AppFrameBarCluster
+            host="header"
+            side="left"
+            values={values}
+            arrangement={arrangement}
+          />
+          <AppFrameBarCluster
+            host="header"
+            side="right"
+            values={values}
+            arrangement={arrangement}
+          />
+        </div>
+        <AppFrameAccount collapsed={collapsed} />
+      </div>
+      <span aria-hidden data-side-tab-join-bridge={edge} />
+    </div>
+  );
+}
+
+const COLLAPSE_ICON: Readonly<
+  Record<EdgeSide, Readonly<Record<"collapse" | "expand", LucideIcon>>>
+> = {
+  left: { collapse: PanelLeftClose, expand: PanelLeftOpen },
+  right: { collapse: PanelRightClose, expand: PanelRightOpen },
+};
+
+/** An expanded nav row (Inbox, All tasks, Home): the row's own box and type. */
+function AppFrameNavRow(props: {
+  readonly icon: LucideIcon;
+  readonly label: string;
+}): ReactNode {
+  const Icon = props.icon;
   return (
     <span
       className={cn(
@@ -193,76 +385,150 @@ function AppFrameSideHomeRow(props: {
         SIDE_TAB_ROW_CLASS,
       )}
     >
-      <House aria-hidden className={cn(SIDE_TAB_LEADING_CLASS, "shrink-0")} />
-      <span className={cn(SIDE_TAB_TITLE_CLASS, "truncate")}>Home</span>
+      <Icon aria-hidden className={cn(SIDE_TAB_LEADING_CLASS, "shrink-0")} />
+      <span className={cn(SIDE_TAB_TITLE_CLASS, "truncate")}>
+        {props.label}
+      </span>
+    </span>
+  );
+}
+
+/** A collapsed nav control: the rail's 32px icon tile. */
+function AppFrameNavTile(props: { readonly icon: LucideIcon }): ReactNode {
+  const Icon = props.icon;
+  return (
+    <span
+      className={cn(
+        SIDE_STRIP_NAV_TILE_CLASS,
+        "flex shrink-0 items-center justify-center text-muted-foreground",
+      )}
+    >
+      <Icon aria-hidden className="size-4" />
     </span>
   );
 }
 
 /**
- * The vertical strip's own frame: a top block (history, New task, the
- * collapse toggle, Home), the tab entries as a column, and a foot holding the
- * header-hosted readings and the header's own glyphs - the trailing half of
- * today's top bar, moved down here because the header itself does not draw
- * while the strip is vertical (S-03, ticket 11).
- *
- * Takes no size, padding or edge: the border that meets the canvas, the
- * strip's width and its placement in the frame all stay with the caller,
- * exactly as the rest of this file's exports take no size of their own.
+ * An expanded task row: the empty 16px leading slot of an uncoloured, idle
+ * task, the title, and the meter while more than one agent is live.
  */
-export function AppFrameSideStrip({
-  values,
-  arrangement,
-}: AppFrame): ReactNode {
+function AppFrameTaskRow(props: {
+  readonly task: AppFrameTask;
+  readonly joined: EdgeSide | null;
+}): ReactNode {
+  const { task } = props;
   return (
-    <div data-testid="app-frame-side-strip" className="flex flex-1 flex-col">
-      <div className="flex items-center gap-1 p-2">
-        <ArrowLeft
-          aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <ArrowRight
-          aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <span className="flex-1" />
-        <Plus aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        <PanelLeft
-          aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-      </div>
-      <AppFrameSideHomeRow values={values} />
-      <AppFrameTabEntries
-        values={values}
-        arrangement={arrangement}
-        layout="column"
-      />
-      <span className="flex-1" />
-      <div
-        data-testid="app-frame-side-strip-foot"
-        className="flex flex-wrap items-center gap-1 p-2"
+    <span
+      {...(task.active && props.joined !== null
+        ? { "data-side-tab-joined": props.joined }
+        : {})}
+      className={cn(
+        "flex items-center text-muted-foreground",
+        SIDE_TAB_ROW_CLASS,
+        task.active && cn("text-foreground", SIDE_TAB_ACTIVE_CLASS),
+      )}
+    >
+      <span aria-hidden className={cn(SIDE_TAB_LEADING_CLASS, "shrink-0")} />
+      <span className={cn(SIDE_TAB_TITLE_CLASS, "min-w-0 flex-1 truncate")}>
+        {task.label}
+      </span>
+      {task.agents.turn + task.agents.background > 1 ? (
+        <SideTabMeter agents={task.agents} attention={null} size="row" />
+      ) : null}
+    </span>
+  );
+}
+
+/** A rail tile: the task's monogram chip over its meter, 40x44. */
+function AppFrameTaskTile(props: {
+  readonly task: AppFrameTask;
+  readonly joined: EdgeSide | null;
+}): ReactNode {
+  const { task } = props;
+  return (
+    <span
+      {...(task.active && props.joined !== null
+        ? { "data-side-tab-joined": props.joined }
+        : {})}
+      className={cn(
+        "flex shrink-0 items-center justify-center",
+        SIDE_TAB_TILE_CLASS,
+        task.active && SIDE_TAB_TILE_ACTIVE_CLASS,
+      )}
+    >
+      <AppFrameTaskChip task={task} />
+      <SideTabMeter agents={task.agents} attention={null} size="tile" />
+    </span>
+  );
+}
+
+/** The active task's panel header: its chip and title, as the real panel draws them. */
+export function AppFramePanelTaskHeader(): ReactNode {
+  return (
+    <PanelTaskHeaderBody
+      testId={null}
+      chip={<AppFrameTaskChip task={APP_FRAME_ACTIVE_TASK} />}
+      title={APP_FRAME_ACTIVE_TASK.label}
+    />
+  );
+}
+
+/** The sample agents' rows, as list items: the strip's list and the panel's tree draw them. */
+export function AppFrameLiveAgentItems(): ReactNode {
+  return APP_FRAME_LIVE_AGENTS.map((agent) => (
+    <li key={agent.nodeId}>
+      <LiveAgentRowView {...agent} onClick={undefined} />
+    </li>
+  ));
+}
+
+/** The active task's live agents under its row, as the Activity view lists them (D9). */
+function AppFrameLiveAgents(): ReactNode {
+  return (
+    <ul data-testid="app-frame-live-agents" className={LIVE_AGENTS_LIST_CLASS}>
+      <AppFrameLiveAgentItems />
+    </ul>
+  );
+}
+
+/** The foot's account row (avatar, name, host line), or the avatar tile alone. */
+function AppFrameAccount(props: { readonly collapsed: boolean }): ReactNode {
+  const avatar = (
+    <span className="relative flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-micro font-medium text-muted-foreground">
+      AL
+      <span className={cn(SIDE_STRIP_HOST_DOT_CLASS, "bg-success")} />
+    </span>
+  );
+  if (props.collapsed) {
+    return (
+      <span
+        className={cn(
+          SIDE_STRIP_NAV_TILE_CLASS,
+          "flex shrink-0 items-center justify-center",
+        )}
       >
-        <AppFrameBarCluster
-          host="header"
-          side="left"
-          values={values}
-          arrangement={arrangement}
-        />
-        <AppFrameBarCluster
-          host="header"
-          side="right"
-          values={values}
-          arrangement={arrangement}
-        />
-        <History
-          aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-        <Bell aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        <span className="size-5 shrink-0 rounded-full border border-border bg-foreground/10" />
-      </div>
-    </div>
+        {avatar}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn("flex min-w-0 items-center", SIDE_STRIP_ACCOUNT_ROW_CLASS)}
+    >
+      {avatar}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-ui-sm font-medium text-foreground">
+          Ada Lovelace
+        </span>
+        <span className="truncate text-ui-xs text-muted-foreground">
+          This Mac · 2 agents running
+        </span>
+      </span>
+      <ChevronsUpDown
+        aria-hidden
+        className="size-3.5 shrink-0 text-muted-foreground"
+      />
+    </span>
   );
 }
 
@@ -455,8 +721,9 @@ function AppFrameBarCluster(props: {
 
 /**
  * The real rail: the arrangement's own entries, dividers and stacks included
- * (L-155, L-166), in the order the list beside them is in. Each panel brings
- * its own rail frame, so this adds no spacing of its own.
+ * (L-155, L-166), in the order the list beside them is in, across the top of
+ * the panel sheet as the expanded panel draws it. Each panel brings its own
+ * rail frame, so this adds no spacing of its own.
  *
  * A stacked pair is drawn inside the same capsule the real rail draws, through
  * the same component (L-11, L-167): the card is a picture of the app at rest,
@@ -479,14 +746,14 @@ export function AppFrameRailEntries({
       // preset card is a picture of the app AT REST, and there a divider draws
       // the column's own gap again rather than a line. The hairline this used
       // to draw was a picture of something the sidebar never shows.
-      return <span key={entry.id} className="h-1 w-full shrink-0" />;
+      return <span key={entry.id} className="h-full w-1 shrink-0" />;
     }
     if (entry.kind === "stack") {
       return (
         <LeftPanelRailStack
           key={entry.id}
           stackId={entry.id}
-          orientation="vertical"
+          orientation="horizontal"
           first={depictRailRegion(entry.top, values, arrangement)}
           second={depictRailRegion(entry.bottom, values, arrangement)}
         />

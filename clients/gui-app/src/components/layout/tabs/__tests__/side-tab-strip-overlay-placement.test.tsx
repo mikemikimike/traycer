@@ -1,7 +1,7 @@
 /**
  * D7 (overlay placement): the real `SideTabStrip` provides `ColumnEdgeContext`
- * with its own edge, and the foot's real `NotificationsBell` and `UserMenu`
- * (behind `HeaderNotificationsBell` / `HeaderIdentity`) must actually read it
+ * with its own edge, and the strip's real Inbox drawer (`SideStripNavRows`,
+ * top block) and real `UserMenu` (foot's account row) must actually read it
  * through that boundary - a context wired at the wrong layer would still pass
  * a unit test on the hook alone. Everything else in the strip (rows, keybinding
  * registration, indicator batching) is `side-tab-strip.test.tsx`'s concern and
@@ -89,8 +89,14 @@ vi.mock("@/hooks/host/use-host-directory-entry", async (importOriginal) => {
     >();
   return {
     ...actual,
-    useHostDirectoryEntry: (hostId: string) => {
-      if (hostId.length === 0 || directoryRef.value === null) return null;
+    useHostDirectoryEntry: (hostId: string | null) => {
+      if (
+        hostId === null ||
+        hostId.length === 0 ||
+        directoryRef.value === null
+      ) {
+        return null;
+      }
       return directoryRef.value.findById(hostId);
     },
   };
@@ -321,7 +327,7 @@ describe("<SideTabStrip /> real overlay placement, right edge (D7)", () => {
     resetSharedState();
   });
 
-  it("opens the bell's popover and the user menu toward the content (side=left, align=end)", async () => {
+  it("opens the Inbox drawer and the user menu toward the content (side=left, align=start/end)", async () => {
     renderHarness(
       <WindowsBridgeContext.Provider
         value={{ bridge: null, hasHydrated: true }}
@@ -334,25 +340,48 @@ describe("<SideTabStrip /> real overlay placement, right edge (D7)", () => {
     // Each click re-queries the trigger: while the popover is open,
     // `TooltipWrapper` drops to a transparent `Slot.Root` (its `label` goes
     // `null`) at the same tree position as the `Tooltip` it replaces, so React
-    // unmounts and remounts the button - a `bell` reference captured before
-    // the open click is detached by the time this closes it.
-    fireEvent.pointerDown(screen.getByTestId("notifications-bell"));
-    fireEvent.click(screen.getByTestId("notifications-bell"));
+    // unmounts and remounts the button - a captured reference before the open
+    // click is detached by the time this closes it.
+    fireEvent.pointerDown(screen.getByTestId("side-strip-inbox"));
+    fireEvent.click(screen.getByTestId("side-strip-inbox"));
     await screen.findByTestId("notifications-popover");
-    const bellContent = popoverContentFor("notifications-popover");
-    expect(bellContent.getAttribute("data-side")).toBe("left");
-    expect(bellContent.getAttribute("data-align")).toBe("end");
+    // The drawer shares the same open state the bell reads elsewhere.
+    expect(useNotificationsPopoverStore.getState().open).toBe(true);
+    const drawer = screen.getByTestId("side-strip-inbox-drawer");
+    expect(drawer.getAttribute("data-side")).toBe("left");
+    expect(drawer.getAttribute("data-align")).toBe("start");
 
-    fireEvent.click(screen.getByTestId("notifications-bell"));
+    fireEvent.click(screen.getByTestId("side-strip-inbox"));
     await waitFor(() => {
       expect(screen.queryByTestId("notifications-popover")).toBeNull();
     });
+    expect(useNotificationsPopoverStore.getState().open).toBe(false);
 
     const userTrigger = screen.getByTestId("user-menu-trigger");
-    fireEvent.click(userTrigger);
+    // The account row's trigger is a custom Radix trigger: it opens on Radix's
+    // own pointerdown, not a plain click (see `user-menu.test.tsx`).
+    fireEvent.pointerDown(userTrigger, { button: 0, ctrlKey: false });
     const menu = await screen.findByTestId("user-menu-content");
     expect(menu.getAttribute("data-side")).toBe("left");
     expect(menu.getAttribute("data-align")).toBe("end");
+  });
+
+  it("opens the Inbox drawer toward the content on the opposite edge (side=right, align=start)", async () => {
+    renderHarness(
+      <WindowsBridgeContext.Provider
+        value={{ bridge: null, hasHydrated: true }}
+      >
+        <SideTabStrip edge="left" ownsTitleBar={false} />
+      </WindowsBridgeContext.Provider>,
+    );
+    await screen.findByTestId("side-tab-strip");
+
+    fireEvent.pointerDown(screen.getByTestId("side-strip-inbox"));
+    fireEvent.click(screen.getByTestId("side-strip-inbox"));
+    await screen.findByTestId("notifications-popover");
+    const drawer = screen.getByTestId("side-strip-inbox-drawer");
+    expect(drawer.getAttribute("data-side")).toBe("right");
+    expect(drawer.getAttribute("data-align")).toBe("start");
   });
 });
 

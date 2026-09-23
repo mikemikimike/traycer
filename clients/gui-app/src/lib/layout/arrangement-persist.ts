@@ -15,6 +15,7 @@ import {
   type LayoutArrangement,
   type StatusBarProviderLimits,
   type StatusBarProviderLimitSelection,
+  type SideStripView,
   type StatusBarShownProfiles,
   type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
@@ -126,6 +127,7 @@ const ARRANGEMENT_FIELDS: ReadonlyArray<keyof LayoutArrangement> = [
   "dividerSeq",
   "tabStripPlacement",
   "sidebarSide",
+  "sideStripView",
 ];
 
 /**
@@ -214,6 +216,10 @@ export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
     sidebarSide: persistedSide(
       stored.sidebarSide,
       DEFAULT_ARRANGEMENT.sidebarSide,
+    ),
+    sideStripView: persistedSideStripView(
+      stored.sideStripView,
+      DEFAULT_ARRANGEMENT.sideStripView,
     ),
   });
 }
@@ -420,6 +426,14 @@ function persistedTabStripPlacement(
   return value === "top" || value === "left" || value === "right"
     ? value
     : fallback;
+}
+
+/** The stored strip view, when it names one this build knows (L-133). */
+function persistedSideStripView(
+  value: unknown,
+  fallback: SideStripView,
+): SideStripView {
+  return value === "layered" || value === "activity" ? value : fallback;
 }
 
 /** The remembered set, holding only ids this build has a reading for (L-160). */

@@ -85,6 +85,24 @@ export function chatDescendantKind(
 }
 
 /**
+ * A chat's OWN state, in the order its own glyph (`NotificationIndicatorIcon`)
+ * says it: attention first, then a live turn or background work, then done,
+ * then a terminal failure. A newer live turn outranks an older unread terminal
+ * failure here, which is what separates it from {@link chatDescendantKind}'s
+ * collapsed-parent order.
+ */
+export function ownChatStatusKind(
+  indicatorState: NotificationIndicatorState,
+  tier: AgentActivityTier | undefined,
+): ChatDescendantStatusKind | null {
+  if (attentionTone(indicatorState) === null) {
+    if (tier !== undefined) return activityTierKind(tier);
+    if (indicatorState.unreadDone) return "done";
+  }
+  return chatDescendantKind(indicatorState, tier);
+}
+
+/**
  * The archived ids a panel should hide, after the reveal exception.
  *
  * `chatIds` are the rows the caller renders; `notificationIndicators` is the

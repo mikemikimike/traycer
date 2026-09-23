@@ -1,5 +1,11 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cancelLayoutDrag,
+  layoutDragActive,
+} from "@/components/layout-editor/canvas/drag-engine";
+import { armSurfaceDrag } from "@/components/layout-editor/canvas/surface-drag";
+import { SURFACE_PLACEMENT } from "@/components/layout-editor/canvas/surface-placement";
 import { LayoutEditor } from "@/components/layout-editor/layout-editor";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
@@ -96,6 +102,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cancelLayoutDrag();
   cleanup();
   document.body.replaceChildren();
   useLayoutEditorStore.getState().endSession();
@@ -246,6 +253,102 @@ describe("the mounted editor root", () => {
 
     // The menu dismisses itself; the level the user was reading stays open.
     expect(useLayoutEditorStore.getState().selected).toBe("usageLimits");
+  });
+
+  // Finding 1 (final-review/canvas-and-editor): Escape used to only pop the
+  // inspector selection, leaving an in-hand surface drag's own listeners
+  // live - the pointer release right after still wrote the placement. The
+  // fix consumes Escape as a drag cancel first (L-31's own top rung), before
+  // it ever reaches `popInspectorLevel`.
+  it("Escape cancels an in-flight surface drag instead of deselecting it (finding 1)", () => {
+    const column = mountColumn();
+    render(<LayoutEditor column={column} />);
+
+    act(() => {
+      openSession();
+      useLayoutEditorStore.getState().selectSurface("topBar");
+    });
+
+    const container = document.createElement("div");
+    container.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 200,
+      height: 100,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const node = document.createElement("div");
+    container.append(node);
+    document.body.append(container);
+
+    const arm = (event: Event): void => {
+      if (!(event instanceof PointerEvent)) return;
+      armSurfaceDrag({
+        event,
+        node,
+        container,
+        edges: SURFACE_PLACEMENT.topBar.edges,
+        current: SURFACE_PLACEMENT.topBar.current(
+          useLayoutStore.getState().arrangement,
+        ),
+        onDrop: SURFACE_PLACEMENT.topBar.write,
+      });
+    };
+    node.addEventListener("pointerdown", arm);
+    act(() => {
+      node.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          pointerId: 1,
+          button: 0,
+          clientX: 100,
+          clientY: 50,
+        }),
+      );
+    });
+    node.removeEventListener("pointerdown", arm);
+    act(() => {
+      // Crosses the activation distance, landing solidly inside the left
+      // band - a real drop here would write `tabStripPlacement`.
+      window.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerId: 1,
+          clientX: 10,
+          clientY: 56,
+        }),
+      );
+    });
+
+    expect(layoutDragActive()).toBe(true);
+    expect(document.querySelectorAll("[data-layout-drop-zone]").length).toBe(3);
+
+    const before = useLayoutEditorStore.getState().history.past.length;
+    const arrangementBefore = useLayoutStore.getState().arrangement;
+
+    act(() => {
+      escape(document.body);
+    });
+
+    // The drag is torn down, not the selection.
+    expect(layoutDragActive()).toBe(false);
+    expect(document.querySelectorAll("[data-layout-drop-zone]").length).toBe(0);
+    expect(useLayoutEditorStore.getState().selectedSurface).toBe("topBar");
+
+    // The drag's own listeners are gone, so the release that follows the
+    // cancel writes nothing.
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }),
+      );
+    });
+
+    expect(useLayoutStore.getState().arrangement).toBe(arrangementBefore);
+    expect(useLayoutEditorStore.getState().history.past.length).toBe(before);
   });
 
   it("draws the shared back row over every level below the index (L-89)", () => {

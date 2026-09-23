@@ -3,6 +3,7 @@ import type {
   LayoutArrangement,
   OrderGroupId,
   BarHost,
+  SideStripView,
   TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
@@ -178,6 +179,14 @@ export const TAB_STRIP_PLACEMENT_OPTIONS: ReadonlyArray<{
   { value: "top", label: "Top" },
   { value: "left", label: "Left" },
   { value: "right", label: "Right" },
+];
+
+export const SIDE_STRIP_VIEW_OPTIONS: ReadonlyArray<{
+  readonly value: SideStripView;
+  readonly label: string;
+}> = [
+  { value: "layered", label: "Layered" },
+  { value: "activity", label: "Activity" },
 ];
 
 export const EDGE_SIDE_OPTIONS: ReadonlyArray<SegmentOption> = [

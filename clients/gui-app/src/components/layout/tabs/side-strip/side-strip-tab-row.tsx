@@ -4,13 +4,16 @@ import { LeaderDigitBadge } from "@/components/ui/leader-digit-badge";
 import { leaderDigitFor } from "@/components/ui/leader-digit-shortcuts";
 import { useEpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import { useRegisteredEpicTitleGenerating } from "@/lib/epic-selectors";
+import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import type { HeaderTab } from "@/stores/tabs/types";
 import {
   StripTabContextMenu,
   StripTabTitleInput,
 } from "../strip-tab-item-parts";
 import { TabLeadingIcon } from "../tab-leading-icon";
+import { sideTabWaitingLabel } from "../tab-waiting";
 import type { StripTabItem, StripTabItemInput } from "../use-strip-tab-item";
+import { useSideTabLiveAgents } from "./side-tab-live-agents";
 import { railBadgeOf } from "./rail-badge-kind";
 import type { DropIndicator } from "./side-strip-item-input";
 import { SIDE_TAB_TITLE_INPUT_CLASS } from "./side-strip-tokens";
@@ -19,7 +22,9 @@ import {
   type SideGroupLine,
   type SideTabRowVariant,
 } from "./side-tab-row";
-import { sideTabTileOf, sideTabWaitingLabel } from "./side-tab-tile";
+import { SideTabHoverCardBody } from "./side-tab-hover-card";
+import { joinedAttribute } from "./side-tab-join";
+import { sideTabTileOf, tabAutoTint } from "../tab-identity";
 
 /**
  * One task tab's row over its `useStripTabItem` result, inside the tab's own
@@ -33,6 +38,8 @@ export function SideStripTabRow(props: {
   readonly variant: SideTabRowVariant;
   readonly groupLine: SideGroupLine | null;
   readonly dropIndicator: DropIndicator;
+  /** The edge this row joins its panel sheet on (D3); `null` for a plain row. */
+  readonly joined: EdgeSide | null;
 }): ReactNode {
   const { item, input, rootRef } = props;
   const { tab, isActive } = input;
@@ -40,6 +47,8 @@ export function SideStripTabRow(props: {
   const activityStatus = useEpicActivityStatus(epicId);
   const titleGenerating = useRegisteredEpicTitleGenerating(epicId);
   const pairPreview = useTopLevelStripPairPreview(tab.kind, tab.id);
+  const agents = useSideTabLiveAgents(epicId);
+  const badge = railBadgeOf(item.indicatorState);
   // The bare status glyph: the custom icon, when there is one, is the tile.
   const leading = (
     <TabLeadingIcon
@@ -49,6 +58,7 @@ export function SideStripTabRow(props: {
       activityStatus={activityStatus}
       indicatorState={item.indicatorState}
       tabId={tab.id}
+      statusPresentation="glyph"
     />
   );
   return (
@@ -58,6 +68,7 @@ export function SideStripTabRow(props: {
           frame={{
             ...item.dragListeners,
             ...item.rootProps,
+            ...joinedAttribute(props.joined),
             ref: rootRef,
             className: "cursor-pointer [-webkit-app-region:no-drag]",
           }}
@@ -65,6 +76,7 @@ export function SideStripTabRow(props: {
           active={isActive}
           session={sessionOf(tab, isActive)}
           tint={item.appearance?.color ?? null}
+          autoTint={epicId === null ? null : tabAutoTint(epicId)}
           groupLine={props.groupLine}
           leading={leading}
           tile={sideTabTileOf({
@@ -73,7 +85,8 @@ export function SideStripTabRow(props: {
             titleGenerating,
             fallback: leading,
           })}
-          badge={railBadgeOf(item.indicatorState, activityStatus)}
+          badge={badge}
+          agents={agents}
           title={
             item.rename.isEditing ? (
               <StripTabTitleInput
@@ -85,7 +98,14 @@ export function SideStripTabRow(props: {
               item.displayName
             )
           }
-          titleText={item.displayName}
+          hoverCardBody={
+            <SideTabHoverCardBody
+              title={item.displayName}
+              epicId={epicId}
+              badge={badge}
+              agents={agents}
+            />
+          }
           leaderBadge={
             item.leaderBadge === null ? null : (
               <LeaderDigitBadge

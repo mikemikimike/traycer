@@ -41,13 +41,16 @@ import {
   type SideStripItemProps,
 } from "./side-strip-item-input";
 import { SideSplitRowPair } from "./side-split-row-pair";
+import { SideStripLiveAgentsSlot } from "./side-strip-live-agents-slot";
 import { SideStripTabRow } from "./side-strip-tab-row";
+import { joinedAttribute, useSideTabJoinedEdge } from "./side-tab-join";
 import {
   SideTabRow,
   type SideGroupLine,
   type SideRowFrame,
   type SideTabRowVariant,
 } from "./side-tab-row";
+import { NO_LIVE_AGENTS } from "./side-tab-live-agents";
 
 /**
  * A split pair: one reorder frame (the split's drop slot, never a merge
@@ -121,10 +124,28 @@ export function SideSplitItem(
       handlers={props.handlers}
     />
   );
+  // The focused half's live agents, right under that half and inside the
+  // pair, so the pair stays one drag and join unit (D9).
+  const liveAgents = (side: "left" | "right"): ReactNode =>
+    focusedSide === side ? (
+      <SideStripLiveAgentsSlot
+        tab={memberTab(item[side])}
+        active={props.isActive}
+      />
+    ) : null;
+  // The pair joins as one unit, through the half that sits against the strip.
+  const [pairNode, setPairNode] = useState<HTMLDivElement | null>(null);
+  const joined = useSideTabJoinedEdge(
+    props.isActive,
+    (edge) => memberTab(item[edge])?.kind === "epic",
+    pairNode,
+  );
   const pairFrame: SideRowFrame = {
+    ref: setPairNode,
     role: "group",
     "aria-label": "Split tab group",
     "data-active": props.isActive ? "true" : "false",
+    ...joinedAttribute(joined),
   };
   return (
     <m.div
@@ -141,8 +162,18 @@ export function SideSplitItem(
         frame={pairFrame}
         variant={props.variant}
         testId={`split-tab-group-${item.id}`}
-        first={member("left")}
-        second={member("right")}
+        first={
+          <>
+            {member("left")}
+            {liveAgents("left")}
+          </>
+        }
+        second={
+          <>
+            {member("right")}
+            {liveAgents("right")}
+          </>
+        }
       />
     </m.div>
   );
@@ -204,6 +235,7 @@ function SideSplitTabMember(
       variant={props.variant}
       groupLine={props.groupLine}
       dropIndicator={props.dropIndicator}
+      joined={null}
     />
   );
 }
@@ -248,12 +280,14 @@ function SideFillableMember(
       active={props.focused}
       session={null}
       tint={null}
+      autoTint={null}
       groupLine={props.groupLine}
       leading={icon}
       tile={{ kind: "icon", icon }}
       badge={null}
+      agents={NO_LIVE_AGENTS}
       title={label}
-      titleText={label}
+      hoverCardBody={label}
       leaderBadge={null}
       close={null}
       waitingLabel={null}

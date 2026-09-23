@@ -6,8 +6,11 @@ import {
   worstRailBadge,
   type RailBadgeKind,
 } from "../side-strip/rail-badge-kind";
-import { SIDE_TAB_BADGE_CLASS } from "../side-strip/side-strip-tokens";
-import type { EpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
+import {
+  SIDE_TAB_BADGE_CLASS,
+  SIDE_TAB_RAIL_BADGE_CLASS,
+} from "../side-strip/side-strip-tokens";
+import { STATUS_GLYPH_LABEL } from "@/components/notifications/status-glyph-kind";
 import {
   EMPTY_NOTIFICATION_INDICATOR_STATE,
   type NotificationIndicatorState,
@@ -34,11 +37,6 @@ const ALL_FLAGS: ReadonlyArray<Flag> = [
   "failure",
   "done",
 ];
-const ACTIVITIES: ReadonlyArray<EpicActivityStatus> = [
-  "idle",
-  "turn",
-  "background",
-];
 
 function subsets(): ReadonlyArray<ReadonlyArray<Flag>> {
   const out: Flag[][] = [];
@@ -48,66 +46,51 @@ function subsets(): ReadonlyArray<ReadonlyArray<Flag>> {
   return out;
 }
 
-/** Lower is stronger, written out independently of the implementation. */
+/** Lower is stronger, written out independently of the implementation (D5). */
 const STRENGTH: Readonly<Record<RailBadgeKind | "none", number>> = {
-  waiting: 0,
-  failed: 1,
-  "unread-done": 2,
-  running: 3,
+  reply: 0,
+  approval: 1,
+  failed: 2,
+  unread: 3,
   none: 4,
 };
 
-type PrecedenceCase = readonly [
-  ReadonlyArray<Flag>,
-  EpicActivityStatus,
-  RailBadgeKind | null,
-];
+type PrecedenceCase = readonly [ReadonlyArray<Flag>, RailBadgeKind | null];
 
 const PRECEDENCE: ReadonlyArray<PrecedenceCase> = [
-  [[], "idle", null],
-  [[], "turn", "running"],
-  [[], "background", "running"],
-  [["done"], "idle", "unread-done"],
-  [["done"], "turn", "unread-done"],
-  [["failure"], "idle", "failed"],
-  [["failure", "done"], "background", "failed"],
-  [["interview"], "idle", "waiting"],
-  [["approval"], "idle", "waiting"],
-  [["approval", "failure"], "turn", "waiting"],
-  [["interview", "failure", "done"], "background", "waiting"],
-  [["interview", "approval"], "idle", "waiting"],
+  [[], null],
+  [["done"], "unread"],
+  [["failure"], "failed"],
+  [["failure", "done"], "failed"],
+  [["interview"], "reply"],
+  [["approval"], "approval"],
+  [["approval", "failure"], "approval"],
+  [["interview", "failure", "done"], "reply"],
+  // Both waiting reasons pending: reply breaks the tie.
+  [["interview", "approval"], "reply"],
 ];
 
 describe("railBadgeOf", () => {
-  it.each(PRECEDENCE)(
-    "%j with activity %s gives %s",
-    (flags, activity, badge) => {
-      expect(railBadgeOf(indicator(flags), activity)).toBe(badge);
-    },
-  );
+  it.each(PRECEDENCE)("%j gives %s", (flags, badge) => {
+    expect(railBadgeOf(indicator(flags))).toBe(badge);
+  });
 
-  it("never gets weaker when a flag or activity is added", () => {
+  it("never gets weaker when a flag is added", () => {
     for (const flags of subsets()) {
-      for (const activity of ACTIVITIES) {
-        const base = railBadgeOf(indicator(flags), activity) ?? "none";
-        for (const extra of ALL_FLAGS) {
-          const more =
-            railBadgeOf(indicator([...flags, extra]), activity) ?? "none";
-          expect(STRENGTH[more]).toBeLessThanOrEqual(STRENGTH[base]);
-        }
-        const busier = railBadgeOf(indicator(flags), "turn") ?? "none";
-        expect(STRENGTH[busier]).toBeLessThanOrEqual(STRENGTH[base]);
+      const base = railBadgeOf(indicator(flags)) ?? "none";
+      for (const extra of ALL_FLAGS) {
+        const more = railBadgeOf(indicator([...flags, extra])) ?? "none";
+        expect(STRENGTH[more]).toBeLessThanOrEqual(STRENGTH[base]);
       }
     }
   });
 
-  it("gives no waiting badge for a pending fork alone", () => {
+  it("gives no badge for a pending fork alone", () => {
     const forkOnly: NotificationIndicatorState = {
       ...EMPTY_NOTIFICATION_INDICATOR_STATE,
       pendingFork: true,
     };
-    expect(railBadgeOf(forkOnly, "idle")).toBeNull();
-    expect(railBadgeOf(forkOnly, "turn")).toBe("running");
+    expect(railBadgeOf(forkOnly)).toBeNull();
   });
 });
 
@@ -118,43 +101,59 @@ describe("worstRailBadge", () => {
   });
 
   it("picks the strongest badge across mixed children", () => {
-    expect(worstRailBadge([null, "running", "unread-done"])).toBe(
-      "unread-done",
+    expect(worstRailBadge([null, "unread", "failed"])).toBe("failed");
+    expect(worstRailBadge(["unread", "failed", null, "approval"])).toBe(
+      "approval",
     );
-    expect(worstRailBadge(["unread-done", "failed", null, "running"])).toBe(
-      "failed",
+    expect(worstRailBadge(["unread", "failed", "reply", "approval"])).toBe(
+      "reply",
     );
-    expect(
-      worstRailBadge(["running", "failed", "waiting", "unread-done"]),
-    ).toBe("waiting");
-    expect(worstRailBadge(["running", null])).toBe("running");
+    expect(worstRailBadge(["unread", null])).toBe("unread");
   });
 });
 
 describe("SideTabRailBadge", () => {
   it.each([
-    ["waiting", "text-warning-foreground"],
-    ["failed", "text-destructive"],
-    ["unread-done", "text-success-foreground"],
-  ] as const)("paints %s as a dot in the registry tone", (kind, toneClass) => {
-    render(<SideTabRailBadge kind={kind} testId="badge" />);
+    ["approval", SIDE_TAB_RAIL_BADGE_CLASS],
+    ["reply", SIDE_TAB_RAIL_BADGE_CLASS],
+    ["failed", SIDE_TAB_RAIL_BADGE_CLASS],
+    ["unread", SIDE_TAB_RAIL_BADGE_CLASS],
+  ] as const)("renders the %s glyph on a tile badge", (kind, sizeClass) => {
+    render(<SideTabRailBadge kind={kind} size="tile" testId="badge" />);
     const badge = screen.getByTestId("badge");
     expect(badge.dataset.kind).toBe(kind);
+    for (const token of sizeClass.split(" ")) {
+      expect(badge.classList.contains(token)).toBe(true);
+    }
+    expect(badge.getAttribute("aria-label")).toBe(STATUS_GLYPH_LABEL[kind]);
+    expect(badge.querySelector(`[data-status-glyph="${kind}"]`)).not.toBeNull();
+  });
+
+  it("renders on a leading-slot badge with the smaller glyph size", () => {
+    render(<SideTabRailBadge kind="approval" size="leading" testId="badge" />);
+    const badge = screen.getByTestId("badge");
     for (const token of SIDE_TAB_BADGE_CLASS.split(" ")) {
       expect(badge.classList.contains(token)).toBe(true);
     }
-    expect(badge.classList.contains("bg-current")).toBe(true);
-    expect(badge.classList.contains(toneClass)).toBe(true);
-    expect(badge.getAttribute("aria-label")).not.toBe("");
+    const glyph = badge.querySelector('[data-status-glyph="approval"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.classList.contains("size-2.5")).toBe(true);
+    // The wrapper already carries the accessible name; the inner glyph must
+    // not double it up for assistive tech.
+    expect(glyph?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("paints running as the muted spinner inside the ringed badge", () => {
-    render(<SideTabRailBadge kind="running" testId="badge" />);
-    const badge = screen.getByTestId("badge");
-    expect(badge.dataset.kind).toBe("running");
-    expect(badge.classList.contains("ring-canvas")).toBe(true);
-    const spinner = badge.firstElementChild;
-    expect(spinner).not.toBeNull();
-    expect(spinner?.classList.contains("text-muted-foreground")).toBe(true);
+  it("gives approval a diamond shape distinct from reply's bubble", () => {
+    render(<SideTabRailBadge kind="approval" size="tile" testId="a" />);
+    render(<SideTabRailBadge kind="reply" size="tile" testId="b" />);
+    const approvalPath = screen
+      .getByTestId("a")
+      .querySelector('[data-status-glyph="approval"] path');
+    const replyPath = screen
+      .getByTestId("b")
+      .querySelector('[data-status-glyph="reply"] path');
+    expect(approvalPath?.getAttribute("d")).not.toBe(
+      replyPath?.getAttribute("d"),
+    );
   });
 });

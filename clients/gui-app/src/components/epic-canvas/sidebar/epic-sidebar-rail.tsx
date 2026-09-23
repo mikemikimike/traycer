@@ -351,8 +351,11 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
               "relative flex items-center gap-1 bg-background",
               orientation === "vertical" &&
                 "h-full w-12 shrink-0 flex-col justify-start overflow-y-auto py-2",
+              // Safe centring: a rail wider than the panel (a task with
+              // pull requests at the default width) starts at its first
+              // icon rather than clipping it out of scroll reach.
               orientation === "horizontal" &&
-                "h-10 w-full min-w-0 flex-row justify-center overflow-x-auto px-2",
+                "h-10 w-full min-w-0 flex-row justify-center-safe overflow-x-auto px-2",
             )}
           >
             {items.map((item) => {

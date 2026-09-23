@@ -154,6 +154,7 @@ export function HeaderIdentity(props: HeaderIdentityProps): ReactNode {
         email={profile.email}
         avatarUrl={profile.avatarUrl ?? null}
         showAppSettings={props.showAppSettings}
+        trigger={null}
       />
     );
   }

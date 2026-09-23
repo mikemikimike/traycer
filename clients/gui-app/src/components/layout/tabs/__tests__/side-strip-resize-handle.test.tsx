@@ -9,6 +9,7 @@ import { useRef, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { pointerEvent } from "@/components/epic-canvas/canvas/__tests__/test-pointer-events";
+import { GROUND_RESIZE_HANDLE_LINE_CLASS } from "@/components/epic-canvas/canvas/use-pointer-drag-commit";
 import { SideStripResizeHandle } from "@/components/layout/tabs/side-strip/side-strip-resize-handle";
 import {
   SIDE_STRIP_DEFAULT_WIDTH_PX,
@@ -237,6 +238,17 @@ describe("SideStripResizeHandle", () => {
 
     expect(useSideTabStripStore.getState().widthPx).toBe(218);
     expect(handle.getAttribute("aria-valuenow")).toBe("218");
+  });
+
+  it("carries the shared ground hover/drag line, and paints over it (finding 9)", () => {
+    const { handle } = renderHandle("left", 240, 0);
+
+    for (const token of GROUND_RESIZE_HANDLE_LINE_CLASS.split(" ")) {
+      expect(handle.classList.contains(token)).toBe(true);
+    }
+    // The split-pair join bridge paints at z-21 and must stay above this
+    // handle, so it cannot climb past z-20.
+    expect(handle.classList.contains("z-20")).toBe(true);
   });
 
   it("names the rail in the slider's value text", () => {

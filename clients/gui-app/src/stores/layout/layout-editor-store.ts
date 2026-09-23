@@ -87,6 +87,14 @@ export interface RegionInstance {
   readonly node: HTMLElement;
 }
 
+/**
+ * The two surfaces a canvas selection can hold that are not regions (D14): the
+ * tab strip and the sidebar, keyed by their `SurfaceGroupId`. Neither is a
+ * region - the strip is not one at all, and the sidebar's regions are its rail
+ * icons - so they are selected as surfaces and placed by the placement bar.
+ */
+export type PlacementSurfaceId = "topBar" | "sidebar";
+
 /** The one level below a region section: a provider's own limits (L-26). */
 export interface InspectorLevel {
   readonly kind: "usage-provider";
@@ -110,6 +118,19 @@ export interface LayoutEditorState {
   readonly leaving: boolean;
   readonly instances: ReadonlyMap<RegionInstanceKey, RegionInstance>;
   readonly selected: RegionId | null;
+  /**
+   * A selected SURFACE, the other kind of canvas selection. Never set together
+   * with {@link selected}: each setter clears the other, so the ring and the
+   * inspector each have one thing to point at.
+   */
+  readonly selectedSurface: PlacementSurfaceId | null;
+  /**
+   * The element drawing each placement surface right now, registered by
+   * `useLayoutSurface`. A placement write remounts the strip (the top strip and
+   * the vertical one are different components), so the ring and the bar
+   * re-resolve the node off this map rather than holding the old one (L-90).
+   */
+  readonly surfaceNodes: ReadonlyMap<PlacementSurfaceId, HTMLElement>;
   readonly level: InspectorLevel | null;
   readonly hovered: RegionId | null;
   /**
@@ -167,6 +188,15 @@ export interface LayoutEditorState {
     node: HTMLElement,
   ) => void;
   readonly select: (regionId: RegionId | null) => void;
+  readonly selectSurface: (surface: PlacementSurfaceId) => void;
+  readonly registerSurfaceNode: (
+    surface: PlacementSurfaceId,
+    node: HTMLElement,
+  ) => void;
+  readonly unregisterSurfaceNode: (
+    surface: PlacementSurfaceId,
+    node: HTMLElement,
+  ) => void;
   readonly openLevel: (level: InspectorLevel) => void;
   /**
    * One rung of the Escape ladder (L-31, C-26): the provider level, then the
@@ -202,6 +232,7 @@ const SESSION_DEFAULTS = {
   leaving: false,
   instances: new Map<RegionInstanceKey, RegionInstance>(),
   selected: null,
+  selectedSurface: null,
   level: null,
   hovered: null,
   keyboardNav: false,
@@ -218,6 +249,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
   persist(
     (set, get) => ({
       ...SESSION_DEFAULTS,
+      surfaceNodes: new Map<PlacementSurfaceId, HTMLElement>(),
       dockMode: "right",
       floatPosition: null,
       lockedBy: "none",
@@ -227,6 +259,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           // The nodes on screen belong to the app, not to the session: a
           // region that registered before the session opened stays registered.
           instances: get().instances,
+          surfaceNodes: get().surfaceNodes,
           session,
           entrySnapshot: getLayoutSnapshot(),
         });
@@ -234,7 +267,11 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       },
       endSession: () => {
         stopWatchingLayoutWrites();
-        set({ ...SESSION_DEFAULTS, instances: get().instances });
+        set({
+          ...SESSION_DEFAULTS,
+          instances: get().instances,
+          surfaceNodes: get().surfaceNodes,
+        });
       },
       registerInstance: (instance) =>
         set((state) => {
@@ -258,9 +295,36 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       // trackpad is 120 full repaints a second of state that did not move
       // (G1-04).
       select: (selected) => {
-        if (get().selected === selected) return;
-        set({ selected, level: null });
+        const state = get();
+        if (state.selected === selected && state.selectedSurface === null)
+          return;
+        set({ selected, selectedSurface: null, level: null });
       },
+      selectSurface: (selectedSurface) => {
+        const state = get();
+        if (
+          state.selectedSurface === selectedSurface &&
+          state.selected === null
+        )
+          return;
+        set({ selectedSurface, selected: null, level: null });
+      },
+      registerSurfaceNode: (surface, node) =>
+        set((state) => {
+          if (state.surfaceNodes.get(surface) === node) return state;
+          const surfaceNodes = new Map(state.surfaceNodes);
+          surfaceNodes.set(surface, node);
+          return { surfaceNodes };
+        }),
+      unregisterSurfaceNode: (surface, node) =>
+        set((state) => {
+          // Node-checked like `unregisterInstance`: the strip's next copy may
+          // register before the old one tears down.
+          if (state.surfaceNodes.get(surface) !== node) return state;
+          const surfaceNodes = new Map(state.surfaceNodes);
+          surfaceNodes.delete(surface);
+          return { surfaceNodes };
+        }),
       openLevel: (level) => set({ level }),
       popInspectorLevel: () => {
         const state = get();
@@ -268,8 +332,8 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           set({ level: null });
           return true;
         }
-        if (state.selected !== null) {
-          set({ selected: null });
+        if (state.selected !== null || state.selectedSurface !== null) {
+          set({ selected: null, selectedSurface: null });
           return true;
         }
         return false;

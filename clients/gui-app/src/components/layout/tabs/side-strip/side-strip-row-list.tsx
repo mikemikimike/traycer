@@ -1,4 +1,12 @@
-import { Fragment, memo, useMemo, useRef, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import * as m from "motion/react-m";
 import type { HostNotificationsEntityRef } from "@traycer/protocol/host/notifications/contracts";
 import { VERTICAL_STRIP_AXIS } from "@/components/epic-canvas/dnd/strip-axis";
@@ -27,8 +35,10 @@ import {
   type SideStripHandlers,
   type SideStripItemProps,
 } from "./side-strip-item-input";
+import { SideStripLiveAgentsSlot } from "./side-strip-live-agents-slot";
 import { SideSplitItem } from "./side-strip-split-item";
 import { SideStripTabRow } from "./side-strip-tab-row";
+import { useSideTabJoinedEdge } from "./side-tab-join";
 import { SIDE_STRIP_LIST_CLASS } from "./side-strip-tokens";
 import { SideTabGroupHeader } from "./side-tab-group-header";
 import type { SideTabRowVariant } from "./side-tab-row";
@@ -271,6 +281,19 @@ function SideTabItem(
     props.handlers,
   );
   const { rootRef, ...item } = useStripTabItem(input);
+  const [rowNode, setRowNode] = useState<HTMLDivElement | null>(null);
+  const bindRow = useCallback(
+    (node: HTMLDivElement | null) => {
+      rootRef(node);
+      setRowNode(node);
+    },
+    [rootRef],
+  );
+  const joined = useSideTabJoinedEdge(
+    props.isActive,
+    () => props.tab.kind === "epic",
+    rowNode,
+  );
   return (
     <m.div
       ref={frameRef}
@@ -286,7 +309,7 @@ function SideTabItem(
     >
       <SideStripTabRow
         item={item}
-        rootRef={rootRef}
+        rootRef={bindRow}
         input={input}
         variant={props.variant}
         groupLine={
@@ -295,7 +318,9 @@ function SideTabItem(
             : { color: props.groupLine, seat: "row" }
         }
         dropIndicator={props.dropIndicator}
+        joined={joined}
       />
+      <SideStripLiveAgentsSlot tab={props.tab} active={props.isActive} />
     </m.div>
   );
 }

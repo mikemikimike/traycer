@@ -29,6 +29,7 @@ describe("<ChatProgressIcon /> outside an EpicSessionProvider", () => {
         mutedClassName=""
         testId="icon"
         defaultIcon={undefined}
+        statusPresentation="message"
       />,
     );
 

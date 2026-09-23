@@ -25,7 +25,12 @@ import type { TabGroup } from "@/stores/tabs/tab-groups";
 import { TabGroupEditor } from "../tab-group-editor";
 import { railBadgeOf, worstRailBadge } from "./rail-badge-kind";
 import type { SideTabRowVariant } from "./side-tab-row";
-import { firstGraphemes } from "./tab-monogram";
+import { firstGraphemes } from "../tab-monogram";
+import {
+  SIDE_TAB_MONOGRAM_CHIP_CLASS,
+  SIDE_TAB_MONOGRAM_CLASS,
+  SIDE_TAB_TINT_FILL_CLASS,
+} from "../tab-identity";
 import { SideTabRailBadge } from "./side-tab-rail-badge";
 import {
   SIDE_TAB_BADGE_POSITION_CLASS,
@@ -33,11 +38,11 @@ import {
   SIDE_TAB_GROUP_HEADER_CLASS,
   SIDE_TAB_GROUP_PILL_CLASS,
   SIDE_TAB_HOVER_CLASS,
+  SIDE_TAB_METER_CLASS,
+  SIDE_TAB_RAIL_BADGE_POSITION_CLASS,
   SIDE_TAB_ROW_CLASS,
-  SIDE_TAB_MONOGRAM_CLASS,
   SIDE_TAB_TILE_CLASS,
   SIDE_TAB_TILE_HOVER_CLASS,
-  SIDE_TAB_TINT_FILL_CLASS,
 } from "./side-strip-tokens";
 
 export interface SideTabGroupHeaderProps {
@@ -53,8 +58,8 @@ export interface SideTabGroupHeaderProps {
 
 /**
  * A tab group in the vertical strip (S-19): a 28px row with the colour pill,
- * the name, the member count and a chevron on hover, or in the rail a 32px
- * tile with the name's first grapheme. A click collapses or expands the group;
+ * the name, the member count and a chevron on hover, or in the rail a 40x44
+ * tile with the name's first grapheme on a chip in the group colour. A click collapses or expands the group;
  * right-click and the context-menu keys open the shared group editor. A
  * collapsed group carries its members' worst notification badge (S-30).
  */
@@ -103,9 +108,8 @@ export function SideTabGroupHeader(props: SideTabGroupHeaderProps): ReactNode {
             props.variant === "collapsed"
               ? cn(
                   SIDE_TAB_TILE_CLASS,
-                  SIDE_TAB_TINT_FILL_CLASS,
                   SIDE_TAB_TILE_HOVER_CLASS,
-                  "justify-center self-center",
+                  "justify-center self-center text-muted-foreground hover:text-foreground",
                 )
               : cn(
                   SIDE_TAB_ROW_CLASS,
@@ -121,9 +125,21 @@ export function SideTabGroupHeader(props: SideTabGroupHeaderProps): ReactNode {
           }
         >
           {props.variant === "collapsed" ? (
-            <span aria-hidden className={SIDE_TAB_MONOGRAM_CLASS}>
-              {firstGrapheme(group.name)}
-            </span>
+            <>
+              <span
+                aria-hidden
+                className={cn(
+                  SIDE_TAB_MONOGRAM_CHIP_CLASS,
+                  SIDE_TAB_TINT_FILL_CLASS,
+                  SIDE_TAB_MONOGRAM_CLASS,
+                  "flex items-center justify-center",
+                )}
+              >
+                {firstGrapheme(group.name)}
+              </span>
+              {/* The meter's footprint, so the chip lines up with the task tiles'. */}
+              <span aria-hidden className={SIDE_TAB_METER_CLASS.tile} />
+            </>
           ) : (
             <>
               <span
@@ -148,7 +164,10 @@ export function SideTabGroupHeader(props: SideTabGroupHeaderProps): ReactNode {
             </>
           )}
           {group.collapsed ? (
-            <CollapsedGroupBadge memberEntities={props.memberEntities} />
+            <CollapsedGroupBadge
+              memberEntities={props.memberEntities}
+              size={props.variant === "collapsed" ? "tile" : "leading"}
+            />
           ) : null}
         </button>
       </PopoverAnchor>
@@ -171,11 +190,12 @@ export function SideTabGroupHeader(props: SideTabGroupHeaderProps): ReactNode {
 /**
  * A collapsed group's worst member notification, read from the strip's
  * indicator batch. Mounted only while the group is collapsed, so an expanded
- * header does not subscribe to the notifications store. Running is not rolled
- * up: activity is a per-epic subscription hook (S-30).
+ * header does not subscribe to the notifications store. Running is never a
+ * badge: the meter carries it (D5).
  */
 function CollapsedGroupBadge(props: {
   readonly memberEntities: ReadonlyArray<HostNotificationsEntityRef>;
+  readonly size: "tile" | "leading";
 }): ReactNode {
   const indicators = useContext(NotificationIndicatorsContext);
   const byId = useAppLocalNotificationsStore((state) => state.byId);
@@ -183,14 +203,24 @@ function CollapsedGroupBadge(props: {
     props.memberEntities.map((entity) =>
       railBadgeOf(
         selectNotificationIndicatorState({ byId }, entity, null, indicators),
-        "idle",
       ),
     ),
   );
   if (badge === null) return null;
   return (
-    <span className={cn(SIDE_TAB_BADGE_POSITION_CLASS, "pointer-events-none")}>
-      <SideTabRailBadge kind={badge} testId="side-tab-group-badge" />
+    <span
+      className={cn(
+        props.size === "tile"
+          ? SIDE_TAB_RAIL_BADGE_POSITION_CLASS
+          : SIDE_TAB_BADGE_POSITION_CLASS,
+        "pointer-events-none",
+      )}
+    >
+      <SideTabRailBadge
+        kind={badge}
+        size={props.size}
+        testId="side-tab-group-badge"
+      />
     </span>
   );
 }

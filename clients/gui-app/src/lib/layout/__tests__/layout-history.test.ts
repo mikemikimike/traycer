@@ -86,6 +86,25 @@ describe("undo and redo", () => {
     expect(redone?.snapshot.arrangement.sidebarSide).toBe("left");
   });
 
+  // D8: same pin as above, for the vertical strip's view.
+  it("carries the vertical strip's view through a stored travel step", () => {
+    const before: LayoutSnapshot = {
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView: "activity" },
+    };
+    const after: LayoutSnapshot = {
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: DEFAULT_ARRANGEMENT,
+    };
+    const history = recordLayoutChange(EMPTY_LAYOUT_HISTORY, before);
+
+    const undone = undoLayout(history, after);
+    expect(undone?.snapshot.arrangement.sideStripView).toBe("activity");
+
+    const redone = redoLayout(undone?.history ?? EMPTY_LAYOUT_HISTORY, before);
+    expect(redone?.snapshot.arrangement.sideStripView).toBe("layered");
+  });
+
   it("keeps the newest entries once the cap is reached", () => {
     let history: LayoutHistory = EMPTY_LAYOUT_HISTORY;
     for (let step = 0; step < LAYOUT_HISTORY_CAP + 5; step += 1) {
@@ -166,6 +185,22 @@ describe("rebasing the entry snapshot on an external write", () => {
 
     expect(rebased.arrangement.sidebarSide).toBe("right");
     expect(rebased.arrangement.tabStripPlacement).toBe("left");
+  });
+
+  it("keeps the entry's own strip view while taking the other writer's sidebar side (D8)", () => {
+    const viewEntry: LayoutSnapshot = {
+      ...entry,
+      arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView: "activity" },
+    };
+    const next: LayoutSnapshot = {
+      ...previous,
+      arrangement: { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
+    };
+
+    const rebased = rebaseLayoutSnapshot(viewEntry, previous, next);
+
+    expect(rebased.arrangement.sideStripView).toBe("activity");
+    expect(rebased.arrangement.sidebarSide).toBe("right");
   });
 
   it("takes a region the other writer changed and leaves a region it did not", () => {

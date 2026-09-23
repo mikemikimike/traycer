@@ -48,6 +48,18 @@ import { tabItemId, tabRefKey } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { useTitleBarDragStore } from "@/stores/layout/title-bar-drag-store";
 import type { TabRef } from "@/stores/tabs/types";
+import { useAuthStore } from "@/stores/auth/auth-store";
+
+// The foot's account row shows a signed-in user (never `SignInButton`, which
+// reaches `useAuthService` and throws outside a `<HostRuntimeProvider>` this
+// harness does not mount - the strip's own render is what every case here is
+// about).
+const AUTH_PROFILE = {
+  userId: "u-1",
+  userName: "Ada",
+  email: "ada@example.com",
+  avatarUrl: null,
+};
 
 /** Live registrations per action id, and the most ever live at once. */
 const registrations = vi.hoisted(
@@ -183,15 +195,37 @@ vi.mock("@/components/layout/header/header-actions", () => ({
   HeaderBarCluster: (props: { readonly side: string }) => (
     <span data-testid={`foot-cluster-${props.side}`} />
   ),
-  HeaderNotificationsBell: () => <span data-testid="foot-bell" />,
-  HeaderIdentity: () => <span data-testid="foot-identity" />,
 }));
 vi.mock("@/components/layout/header/app-update-button", () => ({
   AppUpdateHeaderButton: () => <span data-testid="foot-update" />,
 }));
-vi.mock("@/components/layout/header/history-button", () => ({
-  HistoryButton: () => <span data-testid="foot-history" />,
+
+// The Inbox nav row (top block) and the foot's account row both reach a host
+// directory entry through `<HostRuntimeProvider>`, which this harness does not
+// mount - this suite is about the strip's own structure, not host content.
+vi.mock("@/hooks/host/use-host-directory-entry", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/hooks/host/use-host-directory-entry")
+    >();
+  return { ...actual, useHostDirectoryEntry: () => null };
+});
+vi.mock("@/hooks/notifications/use-notification-host", () => ({
+  useNotificationResolveHostId: () => null,
+  useNotificationResolveHost: () => ({ hostId: null, client: null }),
 }));
+
+// The account row's real `UserMenu` reaches `useRunnerHost()`, which this
+// harness does not provide - this suite only needs the account row to stand,
+// not the menu's own behaviour (covered by `user-menu.test.tsx`).
+vi.mock("@/components/auth/user-menu", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/components/auth/user-menu")>();
+  return {
+    ...actual,
+    UserMenu: () => <span data-testid="foot-account" />,
+  };
+});
 
 installTabSyncCoordinator({ readyPromise: Promise.resolve() });
 
@@ -208,9 +242,7 @@ const FOOT_ORDER = [
   "foot-update",
   "foot-cluster-left",
   "foot-cluster-right",
-  "foot-history",
-  "foot-bell",
-  "foot-identity",
+  "foot-account",
 ];
 
 let queryClient: QueryClient;
@@ -294,6 +326,7 @@ function resetStores(): void {
   useLandingDraftStore.setState({ drafts: [], activeDraftId: null });
   useTabsStore.setState(useTabsStore.getInitialState(), true);
   useSideTabStripStore.setState({ widthPx: 240, collapsed: false });
+  useAuthStore.setState({ status: "signed-in", profile: AUTH_PROFILE });
 }
 
 /** Opens one epic tab per name, the first one active. */
@@ -314,7 +347,37 @@ function openEpicTabs(names: ReadonlyArray<string>): ReadonlyArray<TabRef> {
   return refs;
 }
 
-function openSplitPair(): void {
+/** Opens the History system tab as the active tab, no epic tabs. */
+function openHistoryTab(): void {
+  const ref: TabRef = { kind: "history", id: "history" };
+  useTabsStore.setState({
+    version: 2,
+    items: [{ kind: "tab", id: tabItemId(ref), ref }],
+    activeItemId: tabItemId(ref),
+    stripOrder: [ref],
+    systemTabs: {
+      history: {
+        id: "history",
+        kind: "history",
+        name: "History",
+        lastPath: null,
+      },
+      settings: null,
+    },
+  });
+}
+
+/** Writes the arrangement's `sidebarSide` alone, leaving every other field. */
+function setSidebarSide(side: EdgeSide): void {
+  useLayoutStore.setState({
+    arrangement: {
+      ...useLayoutStore.getState().arrangement,
+      sidebarSide: side,
+    },
+  });
+}
+
+function openSplitPair(focusedSide: "left" | "right"): void {
   const left: TabRef = { kind: "epic", id: "e-alpha" };
   const right: TabRef = { kind: "epic", id: "e-beta" };
   useEpicCanvasStore
@@ -331,14 +394,26 @@ function openSplitPair(): void {
         id: "split-a",
         left: { kind: "tab", ref: left },
         right: { kind: "tab", ref: right },
-        focusedSide: "left",
-        routeBackingSide: "left",
+        focusedSide,
+        routeBackingSide: focusedSide,
         leftRatio: 0.5,
       },
     ],
     activeItemId: "split-a",
     stripOrder: [left, right],
     systemTabs: { history: null, settings: null },
+  });
+}
+
+/** Sets the strip vertical (required for `useLiveAgentsInStrip`) and its
+ * view, leaving every other arrangement field. */
+function setSideStripView(view: "layered" | "activity"): void {
+  useLayoutStore.setState({
+    arrangement: {
+      ...useLayoutStore.getState().arrangement,
+      tabStripPlacement: "left",
+      sideStripView: view,
+    },
   });
 }
 
@@ -647,7 +722,7 @@ describe("<SideTabStrip />", () => {
   });
 
   it("renders a split as one joined pair, left member first, with no quick actions", async () => {
-    openSplitPair();
+    openSplitPair("left");
     await renderStrip("/elsewhere", LEFT_STRIP);
 
     const pair = screen.getByTestId("split-tab-group-split-a");
@@ -667,6 +742,41 @@ describe("<SideTabStrip />", () => {
         ?.getAttribute("data-strip-item-mergeable"),
     ).toBe("false");
     expect(screen.queryByTestId("split-quick-actions-split-a")).toBeNull();
+  });
+
+  describe("the split pair's live-agents slot placement (D9, finding 7)", () => {
+    it.each([
+      { focusedSide: "left" as const },
+      { focusedSide: "right" as const },
+    ])(
+      "places the slot right after the focused member, inside the pair ($focusedSide focused)",
+      async ({ focusedSide }) => {
+        openSplitPair(focusedSide);
+        setSideStripView("activity");
+        await renderStrip("/elsewhere", LEFT_STRIP);
+
+        const pair = screen.getByTestId("split-tab-group-split-a");
+        const leftRow = within(pair).getByTestId("tab-epic-e-alpha");
+        const rightRow = within(pair).getByTestId("tab-epic-e-beta");
+        const seam = within(pair).getByTestId("side-split-row-pair-seam");
+        const slot = within(pair).getByTestId("side-strip-live-agents-slot");
+        expect(pair.contains(slot)).toBe(true);
+
+        const follows = (a: HTMLElement, b: HTMLElement): boolean =>
+          (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+          0;
+
+        if (focusedSide === "left") {
+          expect(follows(leftRow, slot)).toBe(true);
+          expect(follows(slot, seam)).toBe(true);
+          expect(follows(seam, rightRow)).toBe(true);
+        } else {
+          expect(follows(leftRow, seam)).toBe(true);
+          expect(follows(seam, rightRow)).toBe(true);
+          expect(follows(rightRow, slot)).toBe(true);
+        }
+      },
+    );
   });
 
   it("shows the waiting chip on a row whose agent waits for a reply", async () => {
@@ -715,8 +825,18 @@ describe("<SideTabStrip />", () => {
       ownsTitleBar: true,
     });
 
-    expect(strip.style.width).toBe("56px");
+    expect(strip.style.width).toBe("60px");
     expect(strip.className).toContain(
+      "wco:min-w-[var(--window-leading-inset)]",
+    );
+  });
+
+  it("collapses to the 60px rail with no macOS inset floor when it does not own the title bar", async () => {
+    useSideTabStripStore.setState({ collapsed: true });
+    const strip = await renderStrip("/", LEFT_STRIP);
+
+    expect(strip.style.width).toBe("60px");
+    expect(strip.className).not.toContain(
       "wco:min-w-[var(--window-leading-inset)]",
     );
   });
@@ -831,6 +951,142 @@ describe("<SideTabStrip />", () => {
     expect(
       screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
     ).toBe("failed");
+  });
+
+  describe("the leading slot's glyph presentation (D12, finding 4)", () => {
+    it("shows the shared approval glyph on an uncoloured row, not the message warning bubble", async () => {
+      openEpicTabs(["Alpha"]);
+      indicatorState.value = {
+        epics: {
+          "e-alpha": {
+            unreadFailure: false,
+            unreadDone: false,
+            pendingApproval: true,
+            pendingInterview: false,
+            pendingFork: false,
+          },
+        },
+        chats: {},
+      };
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      const row = screen.getByTestId("tab-epic-e-alpha");
+      const leading = within(row).getByTestId("side-tab-leading");
+      expect(leading.getAttribute("data-leading")).toBe("glyph");
+      expect(
+        leading.querySelector('[data-status-glyph="approval"]'),
+      ).not.toBeNull();
+    });
+
+    it("shows the glyph's unread dot for an unread completion, not the old completion icon", async () => {
+      openEpicTabs(["Alpha"]);
+      indicatorState.value = {
+        epics: {
+          "e-alpha": {
+            unreadFailure: false,
+            unreadDone: true,
+            pendingApproval: false,
+            pendingInterview: false,
+            pendingFork: false,
+          },
+        },
+        chats: {},
+      };
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      const row = screen.getByTestId("tab-epic-e-alpha");
+      const leading = within(row).getByTestId("side-tab-leading");
+      expect(
+        leading.querySelector('[data-status-glyph="unread"]'),
+      ).not.toBeNull();
+    });
+  });
+
+  describe("the joined active row (D3)", () => {
+    it("joins the active epic row's edge when the strip and the sidebar share a side", async () => {
+      setSidebarSide("left");
+      openEpicTabs(["Alpha", "Beta"]);
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      expect(
+        screen
+          .getByTestId("tab-epic-e-alpha")
+          .getAttribute("data-side-tab-joined"),
+      ).toBe("left");
+      expect(
+        screen
+          .getByTestId("tab-epic-e-beta")
+          .getAttribute("data-side-tab-joined"),
+      ).toBeNull();
+      expect(
+        document.querySelector('[data-side-tab-join-bridge="left"]'),
+      ).not.toBeNull();
+    });
+
+    it("joins on the right edge when the strip and the sidebar are both right", async () => {
+      setSidebarSide("right");
+      openEpicTabs(["Alpha"]);
+      await renderStrip("/elsewhere", { ...LEFT_STRIP, edge: "right" });
+
+      expect(
+        screen
+          .getByTestId("tab-epic-e-alpha")
+          .getAttribute("data-side-tab-joined"),
+      ).toBe("right");
+    });
+
+    it("does not join when the strip and the sidebar are on opposite sides", async () => {
+      setSidebarSide("right");
+      openEpicTabs(["Alpha"]);
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      expect(
+        screen
+          .getByTestId("tab-epic-e-alpha")
+          .getAttribute("data-side-tab-joined"),
+      ).toBeNull();
+    });
+
+    it("does not join a non-epic active surface, even on a matching side", async () => {
+      setSidebarSide("left");
+      openHistoryTab();
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      const history = screen.getByTestId("tab-history-history");
+      expect(history.getAttribute("data-side-tab-joined")).toBeNull();
+    });
+
+    it("keeps the join on the collapsed tile", async () => {
+      setSidebarSide("left");
+      openEpicTabs(["Alpha"]);
+      useSideTabStripStore.setState({ collapsed: true });
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      expect(
+        screen
+          .getByTestId("tab-epic-e-alpha")
+          .getAttribute("data-side-tab-joined"),
+      ).toBe("left");
+    });
+
+    it("joins the split pair container, on its strip-side epic member, and never a member row", async () => {
+      setSidebarSide("left");
+      openSplitPair("left");
+      await renderStrip("/elsewhere", LEFT_STRIP);
+
+      const pair = screen.getByTestId("split-tab-group-split-a");
+      expect(pair.getAttribute("data-side-tab-joined")).toBe("left");
+      expect(
+        screen
+          .getByTestId("tab-epic-e-alpha")
+          .getAttribute("data-side-tab-joined"),
+      ).toBeNull();
+      expect(
+        screen
+          .getByTestId("tab-epic-e-beta")
+          .getAttribute("data-side-tab-joined"),
+      ).toBeNull();
+    });
   });
 });
 

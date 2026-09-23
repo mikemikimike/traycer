@@ -187,7 +187,27 @@ describe("SideTabGroupHeader", () => {
     // Waiting outranks a failure and an unread result in the rail (S-17).
     expect(
       screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
-    ).toBe("waiting");
+    ).toBe("approval");
+  });
+
+  it("breaks a tie between approval and reply members in favour of reply", () => {
+    renderHeader({
+      group: seedGroup(true),
+      variant: "expanded",
+      memberEntities: [{ epicId: "e-1" }, { epicId: "e-2" }],
+      indicators: {
+        epics: {
+          "e-1": { ...QUIET, pendingApproval: true },
+          "e-2": { ...QUIET, pendingInterview: true },
+        },
+        chats: {},
+      },
+      columnSide: null,
+    });
+
+    expect(
+      screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
+    ).toBe("reply");
   });
 
   it("draws no badge on an expanded group, whatever its members hold", () => {

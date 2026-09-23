@@ -131,6 +131,27 @@ export const LAYOUT = defineSettingsSection("layout", {
       "position",
     ],
   },
+  /**
+   * What the vertical strip shows (D8): a surface-level row beside Position,
+   * drawn by `SideStripViewRow` on both hosts.
+   */
+  sideStripView: {
+    kind: "row",
+    group: "topBar",
+    search: { anchor: "layout-side-strip-view" },
+    label: "View",
+    description:
+      "Layered lists tabs only. Activity also lists the active task's live agents and what needs you.",
+    availableWhen: isSurfacePlacementRowAvailable,
+    keywords: [
+      "view",
+      "activity",
+      "layered",
+      "live agents",
+      "needs you",
+      "vertical tabs",
+    ],
+  },
   taskTabLayout: {
     kind: "row",
     group: "topBar",

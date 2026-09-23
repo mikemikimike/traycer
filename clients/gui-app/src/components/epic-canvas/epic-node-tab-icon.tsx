@@ -101,6 +101,7 @@ function EpicNodeTabIconContent(props: {
         mutedClassName="text-muted-foreground"
         testId="chat-tab-spinner"
         defaultIcon={props.defaultIcon}
+        statusPresentation="message"
       />
     );
   }

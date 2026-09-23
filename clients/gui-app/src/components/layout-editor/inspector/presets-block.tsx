@@ -23,6 +23,8 @@ import {
 } from "@/lib/layout/layout-presets";
 import {
   type AppFrame,
+  AppFramePanelTaskHeader,
+  AppFrameLiveAgentItems,
   AppFrameComposerStack,
   AppFrameRailEntries,
   AppFrameRegion,
@@ -30,7 +32,12 @@ import {
   AppFrameStatusBarRow,
   AppFrameTopBar,
 } from "@/components/layout-editor/inspector/app-frame-chrome";
-import { SIDE_STRIP_DEFAULT_WIDTH_PX } from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import {
+  SIDE_STRIP_DEFAULT_WIDTH_PX,
+  SIDE_STRIP_RAIL_WIDTH_PX,
+} from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import { DEFAULT_SIDEBAR_WIDTH_PX } from "@/stores/epics/left-panel-store";
+import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -394,15 +401,20 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
  * stage and the canvas use, under the CURRENT arrangement (2.2) - never a
  * reflowed or hand-drawn lookalike.
  *
- * The frame it is drawn into is the app's own: a top bar, or a side strip
- * where the stored placement puts the tabs (S-03), with real tab labels, a
- * transcript with a few turns in it, the dock the preset produces, a
- * composer box and the status strip. That part is inert static markup, and it
- * is there because a card that was 60% empty `bg-card` read as a near-black
- * rectangle in every dark preset, where `--card` and `--background` are the
- * same colour (I-03). Everything in it that is not this card's own placement
- * comes from `app-frame-chrome.tsx`, which the page's specimens draw from
- * too, so the two pictures cannot disagree about the app (R1-04).
+ * The frame it is drawn into is the app's own shell: the ground, a top bar or
+ * a side strip on it where the stored placement puts the tabs (S-03), and the
+ * surface frame's two sheets - a task's panel (its rail across the top, its
+ * header, its agents) on the stored sidebar side and the content (a
+ * transcript with a few turns in it, the dock the preset produces, a composer
+ * box) - then the status strip. The strip is the user's own: the 60px rail
+ * while it is collapsed, its active task joined to the panel sheet where the
+ * live one joins, and its live agents listed in the Activity view. That part
+ * is inert static markup, and it is there because a card that was 60% empty
+ * `bg-card` read as a near-black rectangle in every dark preset, where
+ * `--card` and `--background` are the same colour (I-03). Everything in it
+ * that is not this card's own placement comes from `app-frame-chrome.tsx`,
+ * which the page's specimens draw from too, so the two pictures cannot
+ * disagree about the app (R1-04).
  *
  * Platform-neutral: the real frame draws a slim title band above a vertical
  * strip on Windows, on Linux, and on macOS with the strip at the right
@@ -446,12 +458,16 @@ function PresetMiniature(props: {
     return () => observer.disconnect();
   }, []);
 
+  const collapsed = useSideTabStripStore((state) => state.collapsed);
   const frame = { values, arrangement };
   const edge = sideTabStripEdge(arrangement.tabStripPlacement);
 
-  const rail = <MiniatureRail {...frame} />;
-  const canvas = (
-    <div className="flex min-w-0 flex-1 flex-col">
+  const panel = <MiniaturePanel {...frame} />;
+  const content = (
+    <div
+      data-shell-sheet="content"
+      className="flex min-w-0 flex-1 flex-col overflow-clip bg-canvas"
+    >
       <MiniatureChatArea {...frame} />
       <div className="px-6 py-2">
         <AppFrameComposerStack {...frame} />
@@ -459,19 +475,23 @@ function PresetMiniature(props: {
       <MiniatureComposerFoot {...frame} />
     </div>
   );
+  const strip =
+    edge === null ? null : (
+      <MiniatureSideStrip {...frame} edge={edge} collapsed={collapsed} />
+    );
 
   return (
     <div
       ref={boxRef}
       inert
       data-testid="preset-miniature"
-      className="relative w-full overflow-hidden rounded border border-border bg-background"
+      className="relative w-full overflow-hidden rounded border border-border bg-shell-ground"
       style={{
         aspectRatio: `${MINIATURE_FRAME_WIDTH} / ${MINIATURE_FRAME_HEIGHT}`,
       }}
     >
       <div
-        className="absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-background"
+        className="absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-shell-ground text-canvas-foreground"
         style={{
           width: MINIATURE_FRAME_WIDTH,
           height: MINIATURE_FRAME_HEIGHT,
@@ -480,23 +500,18 @@ function PresetMiniature(props: {
       >
         {edge === null ? <MiniatureTopBar {...frame} /> : null}
         <div className="flex min-h-0 flex-1">
-          {edge === "left" ? (
-            <MiniatureSideStrip {...frame} edge={edge} />
-          ) : null}
-          {arrangement.sidebarSide === "left" ? (
-            <>
-              {rail}
-              {canvas}
-            </>
-          ) : (
-            <>
-              {canvas}
-              {rail}
-            </>
-          )}
-          {edge === "right" ? (
-            <MiniatureSideStrip {...frame} edge={edge} />
-          ) : null}
+          {edge === "left" ? strip : null}
+          {/* The shell's own surface frame: its margin is the ground around
+              the sheets, and it gives them their border and radius. */}
+          <div
+            data-testid="preset-miniature-surface"
+            className="task-surface-frame flex min-h-0 min-w-0 flex-1 gap-(--shell-gap)"
+          >
+            {arrangement.sidebarSide === "left" ? panel : null}
+            {content}
+            {arrangement.sidebarSide === "right" ? panel : null}
+          </div>
+          {edge === "right" ? strip : null}
         </div>
         <MiniatureStatusBar {...frame} />
       </div>
@@ -504,37 +519,43 @@ function PresetMiniature(props: {
   );
 }
 
-/** The app's own 40px bar, holding the frame chrome's top-bar row. */
+/** The app's own 40px bar on the ground, holding the frame chrome's top-bar row. */
 function MiniatureTopBar({ values, arrangement }: AppFrame): ReactNode {
   return (
-    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+    <div className="flex h-10 shrink-0 items-center gap-2 px-3">
       <AppFrameTopBar values={values} arrangement={arrangement} />
     </div>
   );
 }
 
 /**
- * The vertical strip, at its real width, scaled with everything else here.
- *
- * The border that meets the canvas is drawn here, not by `AppFrameSideStrip`:
- * in the real frame that hairline belongs to `task-surface-frame-beside-edge`
- * (tech plan 6.6), the canvas's own box, so the caller that places the strip
- * beside the canvas is the caller that owns it.
+ * The vertical strip on the ground, at its real width (the rail's while it is
+ * collapsed), scaled with everything else here.
  */
 function MiniatureSideStrip({
   values,
   arrangement,
   edge,
-}: AppFrame & { readonly edge: EdgeSide }): ReactNode {
+  collapsed,
+}: AppFrame & {
+  readonly edge: EdgeSide;
+  readonly collapsed: boolean;
+}): ReactNode {
   return (
     <div
-      className={cn(
-        "flex h-full shrink-0 flex-col border-border",
-        edge === "left" ? "border-r" : "border-l",
-      )}
-      style={{ width: SIDE_STRIP_DEFAULT_WIDTH_PX }}
+      className="flex h-full shrink-0 flex-col"
+      style={{
+        width: collapsed
+          ? SIDE_STRIP_RAIL_WIDTH_PX
+          : SIDE_STRIP_DEFAULT_WIDTH_PX,
+      }}
     >
-      <AppFrameSideStrip values={values} arrangement={arrangement} />
+      <AppFrameSideStrip
+        values={values}
+        arrangement={arrangement}
+        edge={edge}
+        collapsed={collapsed}
+      />
     </div>
   );
 }
@@ -615,26 +636,37 @@ function MiniatureComposerFoot({ values, arrangement }: AppFrame): ReactNode {
 function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
   if (!statusBarHostsAnyRegion(arrangement)) return null;
   return (
-    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border px-3">
+    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border/90 bg-canvas px-3">
       <AppFrameStatusBarRow values={values} arrangement={arrangement} />
     </div>
   );
 }
 
 /**
- * The app's own rail column, holding the frame chrome's entries (L-155), with
- * its border on the edge that faces the canvas.
+ * The task's panel sheet at its default width: the rail across its top as the
+ * expanded panel draws it, holding the frame chrome's entries (L-155), the
+ * task header (D12), and the Agents tree.
  */
-function MiniatureRail({ values, arrangement }: AppFrame): ReactNode {
+function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div
-      data-testid="preset-miniature-rail"
-      className={cn(
-        "flex w-12 shrink-0 flex-col items-center gap-1 border-border py-3",
-        arrangement.sidebarSide === "left" ? "border-r" : "border-l",
-      )}
+      data-shell-sheet="panel"
+      className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-background"
+      style={{ width: DEFAULT_SIDEBAR_WIDTH_PX }}
     >
-      <AppFrameRailEntries values={values} arrangement={arrangement} />
+      {/* Each rail picture comes in the vertical rail's 48px column frame
+          (`HOST_CONTEXT_CLASS.rail`); across the panel's top it hugs its
+          icon instead, as the horizontal rail's tiles do. */}
+      <div
+        data-testid="preset-miniature-rail"
+        className="flex h-10 w-full min-w-0 shrink-0 flex-row items-center justify-center-safe gap-1 overflow-hidden px-2 [&_[data-layout-depiction=rail]]:w-auto [&_[data-layout-depiction=rail]]:py-0"
+      >
+        <AppFrameRailEntries values={values} arrangement={arrangement} />
+      </div>
+      <AppFramePanelTaskHeader />
+      <ul className="flex flex-col gap-0.5 px-2 pt-1">
+        <AppFrameLiveAgentItems />
+      </ul>
     </div>
   );
 }

@@ -44,6 +44,12 @@ export type EdgeSide = "left" | "right";
 export type TabStripPlacement = "top" | EdgeSide;
 
 /**
+ * What the vertical strip shows (D8): `layered` keeps it to tabs, `activity`
+ * also lists the active task's live agents under its row.
+ */
+export type SideStripView = "layered" | "activity";
+
+/**
  * The two regions that name a bar AND an end of it, each for itself (L-156).
  *
  * In this order, which is the order a cluster holding both draws them: usage
@@ -206,6 +212,8 @@ export interface LayoutArrangement {
    * of the tab strip's own placement (S-06).
    */
   readonly sidebarSide: EdgeSide;
+  /** What the vertical strip shows (D8); ignored while the tabs are at the top. */
+  readonly sideStripView: SideStripView;
 }
 
 /** Every provider that reports account rate limits, in the strip's own order. */
@@ -316,6 +324,7 @@ export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
   dividerSeq: DEFAULT_RAIL_DIVIDER_SEQ,
   tabStripPlacement: "top",
   sidebarSide: "left",
+  sideStripView: "layered",
 };
 
 /** What a provider draws until told otherwise: its tightest limit, and only that. */
@@ -559,17 +568,39 @@ export function sideTabStripEdge(
 }
 
 /**
+ * Whether the vertical strip's active tab joins its panel sheet like a folder
+ * tab (D3): the strip and the epic sidebar share an edge and the active
+ * surface is an epic, so the panel sheet is the strip's neighbour. A collapsed
+ * panel still counts, because its rail is still a sheet.
+ */
+export function sideTabJoinsPanel(
+  placement: TabStripPlacement,
+  sidebarSide: EdgeSide,
+  activeSurfaceIsEpic: boolean,
+): boolean {
+  return activeSurfaceIsEpic && sideTabStripEdge(placement) === sidebarSide;
+}
+
+/**
+ * Whether the strip lists the active task's live agents under its row (D9):
+ * only the expanded vertical strip in the Activity view has room for them.
+ */
+export function liveAgentsInStrip(
+  placement: TabStripPlacement,
+  stripCollapsed: boolean,
+  view: SideStripView,
+): boolean {
+  return placement !== "top" && !stripCollapsed && view === "activity";
+}
+
+/**
  * The palette's "Toggle vertical tabs" command (S-25): `top` becomes `left`,
  * the default side for a vertical strip (S-05); either side becomes `top`.
- * Touches no other field.
  */
 export function toggleVerticalTabs(
-  arrangement: LayoutArrangement,
-): LayoutArrangement {
-  return {
-    ...arrangement,
-    tabStripPlacement: arrangement.tabStripPlacement === "top" ? "left" : "top",
-  };
+  placement: TabStripPlacement,
+): TabStripPlacement {
+  return placement === "top" ? "left" : "top";
 }
 
 // ── Reordering ──────────────────────────────────────────────────────────────

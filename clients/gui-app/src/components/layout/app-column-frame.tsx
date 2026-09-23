@@ -2,11 +2,7 @@ import type { ReactNode } from "react";
 import { DesktopMenuHeader } from "@/components/layout/header/desktop-menu-header";
 import type { AppColumnChrome } from "@/components/layout/header/app-title-band-kind";
 import { SWIPE_NAV_SCREEN_ATTRIBUTE } from "@/components/layout/shell/screen-snapshot";
-import {
-  sideTabStripEdge,
-  type TabStripPlacement,
-} from "@/lib/layout/layout-arrangement";
-import { cn } from "@/lib/utils";
+import { sideTabStripEdge } from "@/lib/layout/layout-arrangement";
 
 export interface AppColumnFrameSlots {
   readonly columnRef: (node: HTMLDivElement | null) => void;
@@ -28,13 +24,6 @@ export interface AppColumnFrameSlots {
  * band, typed as a pair so a side strip can never come with the header.
  */
 export type AppColumnFrameProps = AppColumnFrameSlots & AppColumnChrome;
-
-// Static strings so Tailwind sees every utility it has to generate.
-const SURFACE_FRAME_CLASS: Record<TabStripPlacement, string> = {
-  top: "md:task-surface-frame",
-  left: "md:task-surface-frame-beside-left",
-  right: "md:task-surface-frame-beside-right",
-};
 
 /**
  * The app column's structure: the header or title band at the top, a side tab
@@ -84,12 +73,7 @@ export function AppColumnFrame(props: AppColumnFrameProps): ReactNode {
               epic status row and sidebar rail sat under the app header until
               a tab switch remounted the surface. A clipped box has no scroll
               offset to drift. */}
-            <div
-              className={cn(
-                "relative flex min-h-0 flex-1 overflow-clip",
-                SURFACE_FRAME_CLASS[placement],
-              )}
-            >
+            <div className="relative flex min-h-0 flex-1 overflow-clip md:task-surface-frame">
               {props.surface}
             </div>
             {props.mainTail}

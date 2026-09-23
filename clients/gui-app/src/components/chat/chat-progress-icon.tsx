@@ -40,6 +40,8 @@ interface ChatProgressIconProps {
    * when no notification status, running state, or read-only lock replaces it.
    */
   readonly defaultIcon: ReactNode | undefined;
+  /** How a status draws: `"glyph"` in the shared glyph set (the sidebar tree). */
+  readonly statusPresentation: "message" | "glyph";
 }
 
 export function ChatProgressIcon(props: ChatProgressIconProps) {
@@ -101,6 +103,7 @@ export function ChatProgressIcon(props: ChatProgressIconProps) {
         mutedClassName={props.mutedClassName}
         testId={props.testId}
         defaultIcon={props.defaultIcon}
+        statusPresentation={props.statusPresentation}
       />
     );
   }
@@ -114,6 +117,7 @@ export function ChatProgressIcon(props: ChatProgressIconProps) {
       testId={props.testId}
       subjectId={props.chatId}
       defaultIcon={props.defaultIcon}
+      statusPresentation={props.statusPresentation}
     />
   );
 }
@@ -127,6 +131,7 @@ function ChatProgressIconWithHandle(props: {
   readonly testId: string;
   readonly subjectId: string;
   readonly defaultIcon: ReactNode | undefined;
+  readonly statusPresentation: "message" | "glyph";
 }) {
   // `useStore(api, selector)` instead of `props.handle.store(...)`: the
   // bound-store call form isn't recognizable as a hook to the React Compiler,
@@ -161,6 +166,7 @@ function ChatProgressIconWithHandle(props: {
       mutedClassName={props.mutedClassName}
       testId={props.testId}
       defaultIcon={props.defaultIcon}
+      statusPresentation={props.statusPresentation}
     />
   );
 }
@@ -175,6 +181,7 @@ function ChatProgressPresentation(props: {
   readonly mutedClassName: string;
   readonly testId: string;
   readonly defaultIcon: ReactNode | undefined;
+  readonly statusPresentation: "message" | "glyph";
 }) {
   const icon = useChatIconDisplay(props.className, props.mutedClassName);
   let idleIcon: ReactNode;
@@ -214,7 +221,7 @@ function ChatProgressPresentation(props: {
       style={icon.style}
       runningTitle="Agent in progress"
       defaultIcon={idleIcon}
-      statusPresentation="message"
+      statusPresentation={props.statusPresentation}
       agentSurface="gui"
     />
   );

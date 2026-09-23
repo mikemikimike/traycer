@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { writeArrangement } from "@/lib/layout/arrangement-gestures";
+import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import { ACTION_META } from "@/lib/keybindings/actions";
 import { registerDynamicActionHandler } from "@/lib/keybindings/dispatch";
 import { toggleVerticalTabs } from "@/lib/layout/layout-arrangement";
@@ -16,7 +16,8 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
  * The build gate reads the action's own `desktopOnly` flag, the same fact the
  * palette filters its row on.
  *
- * The write is a recorded gesture, so a toggle made while the layout editor is
+ * The write goes through the surface placements' one writer (D14), a
+ * recorded gesture, so a toggle made while the layout editor is
  * open is one Undo step that Discard takes back; with no editor open it is a
  * plain layout write.
  */
@@ -28,8 +29,11 @@ export function TabStripKeybindingBridge(): ReactNode {
     return registerDynamicActionHandler("app.tabs.vertical.toggle", () => {
       // Read at invocation: the handler is registered once and the
       // arrangement changes underneath it.
-      writeArrangement(
-        toggleVerticalTabs(useLayoutStore.getState().arrangement),
+      writeArrangementField(
+        "tabStripPlacement",
+        toggleVerticalTabs(
+          useLayoutStore.getState().arrangement.tabStripPlacement,
+        ),
       );
     });
   }, []);

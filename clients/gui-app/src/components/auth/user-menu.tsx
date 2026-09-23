@@ -18,7 +18,7 @@ import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store
 import { getSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import { useDesktopDialogStore } from "@/stores/dialogs/desktop-dialog-store";
 import { ExternalLink, LayersPlus, LogOut, Settings } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { ignoreError } from "@/lib/browser-view/ignore-error";
@@ -31,6 +31,30 @@ export interface UserMenuProps {
   readonly email: string;
   readonly avatarUrl: string | null;
   readonly showAppSettings: boolean;
+  /**
+   * The element that opens the menu, or `null` for the avatar button. A custom
+   * trigger (the strip foot's account row) must be one focusable element that
+   * takes a ref; the menu toggles it open through Radix's own trigger.
+   */
+  readonly trigger: ReactElement | null;
+}
+
+/** The signed-in person's avatar: their picture, or their initials. */
+export function UserMenuAvatar(props: {
+  readonly userName: string;
+  readonly email: string;
+  readonly avatarUrl: string | null;
+}) {
+  return (
+    <Avatar size="sm">
+      {props.avatarUrl !== null ? (
+        <AvatarImage src={props.avatarUrl} alt="" />
+      ) : null}
+      <AvatarFallback>
+        {computeInitials(props.userName, props.email)}
+      </AvatarFallback>
+    </Avatar>
+  );
 }
 
 /**
@@ -47,7 +71,6 @@ export function UserMenu(props: UserMenuProps) {
   const [signOutOpen, setSignOutOpen] = useState<boolean>(false);
   const settingsChord = useBindingForAction("app.settings.open");
   useTitleBarDragSuppression("user-menu", open);
-  const initials = computeInitials(props.userName, props.email);
   const manageSubscriptionUrl = resolvePlatformBaseUrl(runnerHost.signInUrl);
   return (
     <>
@@ -68,25 +91,26 @@ export function UserMenu(props: UserMenuProps) {
           align={placement?.align}
         >
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Open user menu"
-              // Non-editable chrome, dimmed while a layout session is live (4.2).
-              data-layout-passive
-              data-testid="user-menu-trigger"
-              className="rounded-full"
-              onClick={() => {
-                setOpen((value) => !value);
-              }}
-            >
-              <Avatar size="sm">
-                {props.avatarUrl !== null ? (
-                  <AvatarImage src={props.avatarUrl} alt="" />
-                ) : null}
-                <AvatarFallback>{initials}</AvatarFallback>
-              </Avatar>
-            </Button>
+            {props.trigger ?? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Open user menu"
+                // Non-editable chrome, dimmed while a layout session is live (4.2).
+                data-layout-passive
+                data-testid="user-menu-trigger"
+                className="rounded-full"
+                onClick={() => {
+                  setOpen((value) => !value);
+                }}
+              >
+                <UserMenuAvatar
+                  userName={props.userName}
+                  email={props.email}
+                  avatarUrl={props.avatarUrl}
+                />
+              </Button>
+            )}
           </DropdownMenuTrigger>
         </TooltipWrapper>
         <DropdownMenuContent

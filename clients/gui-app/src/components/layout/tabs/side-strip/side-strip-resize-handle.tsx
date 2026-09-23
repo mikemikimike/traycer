@@ -1,5 +1,6 @@
 import { useRef, type ReactNode, type RefObject } from "react";
 import {
+  GROUND_RESIZE_HANDLE_LINE_CLASS,
   pointerDragHandleAxisClassName,
   usePointerDragCommit,
 } from "@/components/epic-canvas/canvas/use-pointer-drag-commit";
@@ -108,9 +109,10 @@ export function SideStripResizeHandle(props: {
       aria-label="Resize tabs"
       data-testid="side-tab-strip-resize-handle"
       className={cn(
-        "absolute inset-y-0 z-20 transition-colors hover:bg-border focus-visible:bg-ring focus-visible:outline-hidden [-webkit-app-region:no-drag]",
+        "absolute inset-y-0 z-20 focus-visible:bg-ring focus-visible:outline-hidden [-webkit-app-region:no-drag]",
         HANDLE_EDGE_CLASS[edge],
         pointerDragHandleAxisClassName("horizontal"),
+        GROUND_RESIZE_HANDLE_LINE_CLASS,
       )}
     />
   );

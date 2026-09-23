@@ -41,6 +41,8 @@ export function TerminalAgentProgressIcon(props: {
   readonly testIdPrefix: string;
   /** Identity glyph for the idle slot (harness brand, static bot, …). */
   readonly idleIcon: ReactNode;
+  /** How a status draws: `"glyph"` in the shared glyph set (the sidebar tree). */
+  readonly statusPresentation: "message" | "glyph";
 }) {
   const isActive = useEpicActiveAgentIds().has(props.nodeId);
   const tier = useEpicAgentActivityTiers().get(props.nodeId);
@@ -64,7 +66,7 @@ export function TerminalAgentProgressIcon(props: {
       style={props.style}
       runningTitle="Agent in progress"
       defaultIcon={props.idleIcon}
-      statusPresentation="message"
+      statusPresentation={props.statusPresentation}
       agentSurface="tui"
     />
   );

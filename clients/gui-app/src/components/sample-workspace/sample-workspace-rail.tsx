@@ -1,5 +1,6 @@
 import { useState, type MouseEvent } from "react";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
+import { useLayoutSurface } from "@/components/layout-editor/use-layout-surface";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
@@ -52,6 +53,9 @@ export function SampleWorkspaceRail() {
   const rail = useLayoutRail();
   const sidebarSide = useArrangementValue("sidebarSide");
   const dividersEditing = useRailDividersEditing();
+  // The canvas's sidebar: its empty space selects the surface, and it is what
+  // the placement bar and a drag to the other edge move (D14).
+  const surfaceRef = useLayoutSurface("sidebar");
   const visibilityOverrideById = usePanelVisibilityOverrides();
   // The icon the pointer was over, or null for the rail's own empty space -
   // which is still a menu, because it is the only way back to a panel with no
@@ -70,6 +74,7 @@ export function SampleWorkspaceRail() {
         }}
       >
         <aside
+          ref={surfaceRef}
           aria-label="Sample sidebar"
           {...{ [LAYOUT_CLUSTER_ATTRIBUTE]: "" }}
           className={cn(

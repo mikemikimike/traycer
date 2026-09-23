@@ -1505,12 +1505,13 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     registry (`components/layout-editor/layout-search.definitions.ts`), so a region added
     without a hand-written entry is still findable.
   - **Surface rows.**
-    Four rows belong to a SURFACE rather than to a region, because what they place is not a region.
-    The Tabs card opens with **`Position`** (`arrangement.tabStripPlacement`: Top, Left or Right; keywords "vertical tabs" and "side tabs"), then `Task tab layout`.
+    Five rows belong to a SURFACE rather than to a region, because what they place is not a region.
+    The Tabs card opens with **`Position`** (`arrangement.tabStripPlacement`: Top, Left or Right; keywords "vertical tabs" and "side tabs"), then **`View`** (`arrangement.sideStripView`: Layered or Activity), then `Task tab layout`.
+    `View` is disabled while the tabs are at the top, with the reason "Applies when tabs are at the left or right." in place of its description, and its stored value is kept.
     `Task tab layout` is disabled while the tabs sit at a side, with the reason "Applies when tabs are at the top." in place of its description, and its stored value is kept.
     The Sidebar card opens with **`Side`** (`arrangement.sidebarSide`: Left or Right).
-    `Position` and `Side` are `TabStripPositionRow` and `SidebarSideRow` in `components/layout-editor/inspector/rows/surface-placement-rows.tsx`.
-    The docked inspector draws the same two rows under its Tabs and Sidebar headings.
+    `Position`, `View` and `Side` are `TabStripPositionRow`, `SideStripViewRow` and `SidebarSideRow` in `components/layout-editor/inspector/rows/surface-placement-rows.tsx`.
+    The docked inspector draws the same three rows under its Tabs and Sidebar headings.
     Each host frames them its own way: an `InspectorRow` in the dock, and on this page a `SettingsRow` that carries its search anchor.
     Both write one recorded gesture and revert against the shipped arrangement.
     The page's filter and the dock's filter both match these rows by their own label and keywords, so "vertical tabs" finds `Position` there as it does in Settings search.

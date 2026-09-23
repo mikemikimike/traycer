@@ -89,6 +89,29 @@ export function cancelLayoutDrag(): void {
  * level, and neither may be stolen by a hand that did not move.
  */
 export function armLayoutDrag(input: LayoutDragInput): void {
+  armLayoutGesture({
+    event: input.event,
+    onStart: (move) => {
+      const target = input.resolve();
+      // One member cannot be reordered, and a target the list no longer has is
+      // not one to pick up.
+      if (target === null || target.items.length < 2) return;
+      if (target.index < 0 || target.index >= target.items.length) return;
+      startLayoutDrag(target, move, input);
+    },
+  });
+}
+
+/**
+ * The arm phase every editor drag shares: the reorder above and the canvas's
+ * drop of a surface onto an edge (`surface-drag.ts`). `onStart` runs with the
+ * move that crossed the activation distance; a gesture it starts takes the one
+ * drag slot with {@link holdLayoutDrag}.
+ */
+export function armLayoutGesture(input: {
+  readonly event: PointerEvent;
+  readonly onStart: (move: PointerEvent) => void;
+}): void {
   const { event } = input;
   if (event.button !== 0 || stopActiveDrag !== null) return;
   const originX = event.clientX;
@@ -113,12 +136,7 @@ export function armLayoutDrag(input: LayoutDragInput): void {
     if (move.pointerId !== event.pointerId) return;
     if (!dragStarted(move.clientX - originX, move.clientY - originY)) return;
     disarm();
-    const target = input.resolve();
-    // One member cannot be reordered, and a target the list no longer has is
-    // not one to pick up.
-    if (target === null || target.items.length < 2) return;
-    if (target.index < 0 || target.index >= target.items.length) return;
-    startLayoutDrag(target, move, input);
+    input.onStart(move);
   }
 
   function onPointerUp(up: PointerEvent): void {
@@ -130,6 +148,18 @@ export function armLayoutDrag(input: LayoutDragInput): void {
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
   stopActiveDrag = disarm;
+}
+
+/**
+ * Make `stop` the one live drag, so a session exit tears it down and no second
+ * drag arms under it. The returned release gives the slot back, and only if
+ * `stop` still holds it.
+ */
+export function holdLayoutDrag(stop: () => void): () => void {
+  stopActiveDrag = stop;
+  return () => {
+    if (stopActiveDrag === stop) stopActiveDrag = null;
+  };
 }
 
 function startLayoutDrag(
@@ -286,7 +316,7 @@ function startLayoutDrag(
  * else: the listener takes itself off on that click, and a macrotask later in
  * case the release produced none (a pointer that left the element).
  */
-function swallowNextClick(): void {
+export function swallowNextClick(): void {
   const swallow = (click: MouseEvent): void => {
     click.preventDefault();
     click.stopPropagation();

@@ -62,6 +62,7 @@ import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-s
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
+import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
 import "@/lib/theme-applier";
 import "@/index.css";
 import "@/components/layout-editor/layout-editor.css";
@@ -672,10 +673,12 @@ useLayoutEditorStore.getState().beginSession({
 for (const regionId of useLayoutStore.getState().arrangement.dock)
   useLayoutStore.getState().setRegionValues(regionId, { size: "chip" });
 
-// The stored tab strip placement and sidebar side the preset miniature is
-// drawn from, from `?tabs=top|left|right&sidebar=left|right` (default: the
-// shipped `top` and `left`). The driver reopens the page once per pair and
-// asks the miniature where it drew the strip and the rail.
+// The stored tab strip placement, sidebar side and strip view the preset
+// miniature is drawn from, and the strip's collapsed flag, from
+// `?tabs=top|left|right&sidebar=left|right&view=layered|activity&collapsed=0|1`
+// (default: the shipped `top`, `left`, `layered`, expanded). The driver
+// reopens the page once per variant and compares the miniature's structure
+// with the live canvas's.
 function applyPlacementQuery(): void {
   const params = new URLSearchParams(window.location.search);
   const tabs = params.get("tabs");
@@ -685,7 +688,9 @@ function applyPlacementQuery(): void {
     ...arrangement,
     tabStripPlacement: tabs === "left" || tabs === "right" ? tabs : "top",
     sidebarSide: sidebar === "right" ? "right" : "left",
+    sideStripView: params.get("view") === "activity" ? "activity" : "layered",
   });
+  useSideTabStripStore.getState().setCollapsed(params.get("collapsed") === "1");
 }
 
 applyPlacementQuery();

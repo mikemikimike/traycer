@@ -867,12 +867,6 @@ describe("TopLevelSurfaceMount: single-sheet route marker (D1/D2)", () => {
     useLayoutStore.setState(useLayoutStore.getInitialState(), true);
   });
 
-  const SURFACE_FRAME_CLASS: Record<TabStripPlacement, string> = {
-    top: "md:task-surface-frame",
-    left: "md:task-surface-frame-beside-left",
-    right: "md:task-surface-frame-beside-right",
-  };
-
   function renderHostInColumn(placement: TabStripPlacement) {
     return render(
       <AppColumnFrame
@@ -930,9 +924,9 @@ describe("TopLevelSurfaceMount: single-sheet route marker (D1/D2)", () => {
       renderHostInColumn(placement);
 
       const frame = surfaceFrame();
-      expect(frame.classList.contains(SURFACE_FRAME_CLASS[placement])).toBe(
-        true,
-      );
+      // The beside-left/beside-right utilities are gone: every placement
+      // gets the same plain `task-surface-frame`.
+      expect(frame.classList.contains("md:task-surface-frame")).toBe(true);
       expect(frame.contains(surfaceRef(HISTORY))).toBe(true);
       expect(surfaceRef(HISTORY).dataset.shellSheet).toBe("route");
       expect(surfaceRef(EPIC_A).hasAttribute("data-shell-sheet")).toBe(false);

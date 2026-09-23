@@ -37,6 +37,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="idle"
         indicatorState={idleState()}
         tabId="tab-long-icon"
+        statusPresentation="message"
       />,
     );
     const manual = document.querySelector('[data-slot="tab-custom-icon"]');
@@ -57,6 +58,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="idle"
         indicatorState={idleState()}
         tabId="tab-grapheme-icon"
+        statusPresentation="message"
       />,
     );
     const manual = document.querySelector('[data-slot="tab-custom-icon"]');
@@ -73,6 +75,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="idle"
         indicatorState={idleState()}
         tabId="tab-order"
+        statusPresentation="message"
       />,
     );
     const status = document.querySelector('[data-slot="tab-status-icon"]');
@@ -99,6 +102,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="idle"
         indicatorState={idleState()}
         tabId="tab-status"
+        statusPresentation="message"
       />,
     );
     const status = document.querySelector('[data-slot="tab-status-icon"]');
@@ -113,6 +117,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="idle"
         indicatorState={idleState()}
         tabId="tab-status"
+        statusPresentation="message"
       />,
     );
     expect(document.querySelector('[data-slot="tab-status-icon"]')).toBe(
@@ -130,6 +135,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="turn"
         indicatorState={idleState()}
         tabId="tab-3"
+        statusPresentation="message"
       />,
     );
     expect(screen.getByText("🚀")).toBeTruthy();
@@ -146,6 +152,7 @@ describe("TabLeadingIcon status and manual icon", () => {
           unreadNonTerminalFailure: true,
         }}
         tabId="tab-3"
+        statusPresentation="message"
       />,
     );
     expect(screen.queryByTestId("header-tab-activity-tab-3")).toBeNull();
@@ -162,6 +169,7 @@ describe("TabLeadingIcon status and manual icon", () => {
         activityStatus="turn"
         indicatorState={idleState()}
         tabId="tab-4"
+        statusPresentation="message"
       />,
     );
     expect(screen.getByTestId("header-tab-activity-tab-4")).toBeTruthy();

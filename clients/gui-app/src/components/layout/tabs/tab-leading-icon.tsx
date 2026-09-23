@@ -4,7 +4,7 @@ import type { NotificationIndicatorState } from "@/stores/notifications/notifica
 import type { EpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import type { HeaderTabAppearance, TabIcon } from "@/stores/tabs/types";
 import { cn } from "@/lib/utils";
-import { firstGraphemes } from "./side-strip/tab-monogram";
+import { firstGraphemes } from "./tab-monogram";
 
 /** Paints custom identity beside the resolved activity and notification state. */
 export function TabLeadingIcon(props: {
@@ -14,6 +14,11 @@ export function TabLeadingIcon(props: {
   readonly activityStatus: EpicActivityStatus;
   readonly indicatorState: NotificationIndicatorState;
   readonly tabId: string;
+  /**
+   * How the status is drawn: the horizontal strip's message icons, or the
+   * shared glyph set the side strip and the Agents tree use (D12).
+   */
+  readonly statusPresentation: "message" | "glyph";
 }) {
   const identity = props.identity;
   const iconCharacters = firstGraphemes(identity?.icon ?? "", 2);
@@ -53,7 +58,7 @@ export function TabLeadingIcon(props: {
           style={undefined}
           runningTitle="Task activity in progress"
           defaultIcon={defaultIcon}
-          statusPresentation="message"
+          statusPresentation={props.statusPresentation}
           agentSurface="gui"
         />
       </span>

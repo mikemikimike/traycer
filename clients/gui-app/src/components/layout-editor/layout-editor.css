@@ -636,6 +636,48 @@
 }
 
 /* ---------------------------------------------------------------
+   Surface placement (D14)
+
+   The placement bar sits over the canvas beside the selected surface, above
+   the ring and the chip it would otherwise fight; the drop zones light the
+   edges a surface in hand can take, the one under the pointer brightest.
+   --------------------------------------------------------------- */
+
+[data-layout-placement-bar] {
+  z-index: var(--layout-editor-frame-z);
+}
+
+[data-layout-editing="1"] [data-layout-surface] {
+  cursor: grab;
+}
+
+[data-layout-editing="1"] [data-layout-surface-dragging="1"] {
+  cursor: grabbing;
+  opacity: 0.6;
+}
+
+[data-layout-drop-zone] {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--layout-editor-chip-z);
+  pointer-events: none;
+  border: 1px dashed color-mix(in srgb, var(--ring) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ring) 8%, transparent);
+  transition: background-color var(--layout-editor-ring-duration)
+    var(--layout-editor-ease);
+}
+
+/* The foreground hairline carries the 3:1 the ring's accent alone misses on
+   the light palettes (see the ring below); the fill keeps the ring's identity. */
+[data-layout-drop-zone][data-over="1"] {
+  border-style: solid;
+  border-color: var(--foreground);
+  background: color-mix(in srgb, var(--ring) 24%, transparent);
+}
+
+/* ---------------------------------------------------------------
    Reduced motion
 
    The dim still happens - it is the state, not an effect - but it crossfades

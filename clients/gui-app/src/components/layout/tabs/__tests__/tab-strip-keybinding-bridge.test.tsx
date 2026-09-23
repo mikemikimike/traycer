@@ -103,6 +103,22 @@ describe("<TabStripKeybindingBridge />", () => {
     expect(placement()).toBe("top");
   });
 
+  // Finding 8: this toggle now goes through the same one writer
+  // (`writeArrangementField`) as the placement bar's drop and the dock's
+  // rows - a gesture that touches a field this action does not own would be
+  // a second write path.
+  it("touches only tabStripPlacement", () => {
+    const before = useLayoutStore.getState().arrangement;
+    render(<TabStripKeybindingBridge />);
+
+    toggle();
+
+    expect(useLayoutStore.getState().arrangement).toEqual({
+      ...before,
+      tabStripPlacement: "left",
+    });
+  });
+
   it("registers nothing in the installed mobile app", () => {
     setMobileApp(true);
     render(<TabStripKeybindingBridge />);

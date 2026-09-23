@@ -8,31 +8,39 @@ import {
 } from "@testing-library/react";
 import { createRef, type ComponentPropsWithRef, type ReactNode } from "react";
 import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
+import { useThemeLibraryStore } from "@/stores/settings/theme-library-store";
 import {
   SideTabRow,
   type SideTabRowClose,
   type SideTabRowProps,
 } from "../side-strip/side-tab-row";
 import { SideSplitRowPair } from "../side-strip/side-split-row-pair";
+import type { SideTabLiveAgents } from "../side-strip/agent-meter";
+import { NO_LIVE_AGENTS } from "../side-strip/side-tab-live-agents";
 import {
   SIDE_SPLIT_PAIR_CLASS,
   SIDE_TAB_ACTIVE_CLASS,
-  SIDE_TAB_COLORLESS_TILE_CLASS,
   SIDE_TAB_GROUP_LINE_CLASS,
   SIDE_TAB_GROUP_LINE_SEAT_CLASS,
+  SIDE_TAB_LEADING_BADGE_POSITION_CLASS,
   SIDE_TAB_LEADING_CLASS,
   SIDE_TAB_ROW_CLASS,
   SIDE_TAB_SESSION_ACTIVE_CLASS,
   SIDE_TAB_TILE_ACTIVE_CLASS,
   SIDE_TAB_TILE_CLASS,
   SIDE_TAB_TILE_HOVER_CLASS,
-  SIDE_TAB_TINT_FILL_CLASS,
 } from "../side-strip/side-strip-tokens";
 import { SESSION_TAB_LABEL_CLASS } from "../header-tab-visual";
+import {
+  SIDE_TAB_COLORLESS_TILE_CLASS,
+  SIDE_TAB_MONOGRAM_CHIP_CLASS,
+  SIDE_TAB_TINT_FILL_CLASS,
+} from "../tab-identity";
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  useThemeLibraryStore.setState({ panelAnimations: true });
 });
 
 const ROW_TEST_ID = "tab-epic-e1";
@@ -62,12 +70,14 @@ function baseProps(): SideTabRowProps {
     active: false,
     session: null,
     tint: null,
+    autoTint: null,
     groupLine: null,
     leading: <span data-testid="leading-glyph" />,
     tile: { kind: "monogram", text: "FL" },
     badge: null,
+    agents: NO_LIVE_AGENTS,
     title: "Fix login",
-    titleText: "Fix login",
+    hoverCardBody: <div data-testid="hover-card-probe">Fix login</div>,
     leaderBadge: null,
     close: null,
     waitingLabel: null,
@@ -75,6 +85,10 @@ function baseProps(): SideTabRowProps {
     pairPreview: null,
     dragSource: false,
   };
+}
+
+function agents(turn: number, background: number): SideTabLiveAgents {
+  return { turn, background };
 }
 
 function renderRow(overrides: Partial<SideTabRowProps>): HTMLElement {
@@ -181,6 +195,38 @@ describe("SideTabRow expanded trailing slot", () => {
     expect(trailing(row).childElementCount).toBe(0);
   });
 
+  it("shows the row meter only once more than one agent is live", () => {
+    const one = renderRow({ agents: agents(1, 0) });
+    expect(
+      trailing(one).querySelector('[data-testid="side-tab-meter"]'),
+    ).toBeNull();
+    cleanup();
+
+    const several = renderRow({ agents: agents(1, 2) });
+    expect(
+      trailing(several).querySelector('[data-testid="side-tab-meter"]'),
+    ).not.toBeNull();
+  });
+
+  it("prefers the waiting chip, then the failed chip, over the row meter", () => {
+    const waiting = renderRow({
+      badge: "approval",
+      waitingLabel: "Approve",
+      agents: agents(2, 1),
+    });
+    expect(
+      trailing(waiting).querySelector('[data-testid="side-tab-meter"]'),
+    ).toBeNull();
+    expect(screen.getByTestId("side-tab-waiting-chip")).not.toBeNull();
+    cleanup();
+
+    const failed = renderRow({ badge: "failed", agents: agents(2, 1) });
+    expect(
+      trailing(failed).querySelector('[data-testid="side-tab-meter"]'),
+    ).toBeNull();
+    expect(screen.getByTestId("side-tab-failed-chip")).not.toBeNull();
+  });
+
   it("closes without activating the row", () => {
     const onClose = vi.fn();
     const onRowClick = vi.fn();
@@ -217,6 +263,23 @@ function dwell(row: HTMLElement): void {
   });
 }
 
+// jsdom has no global `AnimationEvent`, so React's vendor-prefix probe lands
+// on `webkitAnimationEnd` rather than plain `animationend`
+// (`chat-dock-compact-chip.test.tsx` hit the same gap), and a bare `Event`
+// carries no `animationName`. Set it by hand before dispatch so
+// `useWaitingPulse`'s name check can see it.
+function fireWaitingPulseAnimationEnd(
+  element: Element,
+  animationName: string,
+): void {
+  const event = new Event("webkitAnimationEnd", {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, "animationName", { value: animationName });
+  fireEvent(element, event);
+}
+
 describe("SideTabRow expanded paint", () => {
   it("lays out leading, title, trailing in that order", () => {
     const row = renderRow({});
@@ -247,7 +310,7 @@ describe("SideTabRow expanded paint", () => {
   });
 
   it("shows the status glyph alone for a tab with neither icon nor colour", () => {
-    const row = renderRow({ tint: null, badge: "running" });
+    const row = renderRow({ tint: null, badge: "unread" });
     const leading = byTestId(row, "side-tab-leading");
     expect(leading.dataset.leading).toBe("glyph");
     expect(hasClasses(leading, SIDE_TAB_LEADING_CLASS)).toBe(true);
@@ -271,23 +334,30 @@ describe("SideTabRow expanded paint", () => {
     expect(tile.dataset.tinted).toBe("true");
     expect(hasClasses(tile, SIDE_TAB_TINT_FILL_CLASS)).toBe(true);
     expect(tile.style.getPropertyValue("--side-tab-tint")).toBe("#3366ff");
-    expect(byTestId(leading, "side-tab-rail-badge").dataset.kind).toBe(
-      "failed",
-    );
+    const badge = byTestId(leading, "side-tab-rail-badge");
+    expect(badge.dataset.kind).toBe("failed");
+    // The badge sits in reserved space beside the tile, not on it (finding
+    // 8): its positioned wrapper is a sibling of the chip, never inside it.
+    const badgeWrapper = badge.parentElement;
+    if (badgeWrapper === null) throw new Error("expected a badge wrapper");
+    expect(
+      hasClasses(badgeWrapper, SIDE_TAB_LEADING_BADGE_POSITION_CLASS),
+    ).toBe(true);
+    expect(tile.contains(badgeWrapper)).toBe(false);
   });
 
   it("shows a custom icon on its tile, neutral when the tab has no colour", () => {
     const row = renderRow({
       tint: null,
       tile: { kind: "icon", icon: <span data-testid="custom-icon">🚀</span> },
-      badge: "waiting",
+      badge: "approval",
     });
     const tile = byTestId(row, "side-tab-leading-tile");
     expect(tile.querySelector('[data-testid="custom-icon"]')).not.toBeNull();
     expect(tile.dataset.tinted).toBe("false");
     expect(hasClasses(tile, SIDE_TAB_COLORLESS_TILE_CLASS)).toBe(true);
     expect(tile.style.getPropertyValue("--side-tab-tint")).toBe("");
-    expect(byTestId(row, "side-tab-rail-badge").dataset.kind).toBe("waiting");
+    expect(byTestId(row, "side-tab-rail-badge").dataset.kind).toBe("approval");
   });
 
   it("fills the active row and not an inactive one", () => {
@@ -329,9 +399,21 @@ describe("SideTabRow expanded paint", () => {
     );
   });
 
-  it("keeps the hover card closed while expanded", () => {
+  it("opens the hover card body on hover, expanded as well as collapsed", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const row = renderRow({});
+    dwell(row);
+    expect(hoverCard()?.textContent).toBe("Fix login");
+    expect(
+      hoverCard()?.querySelector('[data-testid="hover-card-probe"]'),
+    ).not.toBeNull();
+  });
+
+  it("keeps the hover card closed while a row is being renamed", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const row = renderRow({
+      title: <input data-testid="rename-input" defaultValue="Fix login" />,
+    });
     dwell(row);
     expect(hoverCard()).toBeNull();
   });
@@ -355,7 +437,7 @@ describe("SideTabRow collapsed", () => {
     expect(row.querySelector('[data-testid="side-tab-leading"]')).toBeNull();
   });
 
-  it("is the 32px tile itself, with active drawn as an inset ring on the tile", () => {
+  it("is the 40x44 tile itself, filled the same as an active expanded row", () => {
     const row = renderRow({
       variant: "collapsed",
       active: true,
@@ -363,7 +445,6 @@ describe("SideTabRow collapsed", () => {
     });
     expect(hasClasses(row, SIDE_TAB_TILE_CLASS)).toBe(true);
     expect(hasClasses(row, SIDE_TAB_TILE_ACTIVE_CLASS)).toBe(true);
-    expect(hasClasses(row, SIDE_TAB_ACTIVE_CLASS)).toBe(false);
     expect(hasClasses(row, SIDE_TAB_ROW_CLASS)).toBe(false);
     cleanup();
     const idle = renderRow({ variant: "collapsed", active: false });
@@ -371,14 +452,43 @@ describe("SideTabRow collapsed", () => {
     expect(hasClasses(idle, SIDE_TAB_TILE_ACTIVE_CLASS)).toBe(false);
   });
 
-  it("tints the monogram tile with the tab colour", () => {
+  it("tints the monogram chip with the tab colour, leaving the tile itself untinted", () => {
     const row = renderRow({ variant: "collapsed", tint: "#22aa66" });
     expect(row.dataset.tileKind).toBe("monogram");
+    expect(row.dataset.tint).toBe("tab");
     expect(row.dataset.tinted).toBe("true");
     expect(row.textContent).toBe("FL");
-    expect(row.style.getPropertyValue("--side-tab-tint")).toBe("#22aa66");
-    expect(hasClasses(row, SIDE_TAB_TINT_FILL_CLASS)).toBe(true);
+    expect(hasClasses(row, SIDE_TAB_TINT_FILL_CLASS)).toBe(false);
+    expect(row.style.getPropertyValue("--side-tab-tint")).toBe("");
+    const chip = byTestId(row, "side-tab-monogram-chip");
+    expect(hasClasses(chip, SIDE_TAB_MONOGRAM_CHIP_CLASS)).toBe(true);
+    expect(hasClasses(chip, SIDE_TAB_TINT_FILL_CLASS)).toBe(true);
+    expect(chip.style.getPropertyValue("--side-tab-tint")).toBe("#22aa66");
     expect(hasClasses(row, SIDE_TAB_ACTIVE_CLASS)).toBe(false);
+  });
+
+  it("tints the chip with the auto tint when the tab has no explicit colour", () => {
+    const auto = "light-dark(oklch(0.6 0.13 125), oklch(0.72 0.12 125))";
+    const row = renderRow({ variant: "collapsed", tint: null, autoTint: auto });
+    expect(row.dataset.tint).toBe("auto");
+    expect(row.dataset.tinted).toBe("true");
+    const chip = byTestId(row, "side-tab-monogram-chip");
+    expect(chip.style.getPropertyValue("--side-tab-tint")).toBe(auto);
+  });
+
+  it("lets an explicit tab colour win over the auto tint", () => {
+    const auto = "light-dark(oklch(0.6 0.13 125), oklch(0.72 0.12 125))";
+    const row = renderRow({
+      variant: "collapsed",
+      tint: "#22aa66",
+      autoTint: auto,
+    });
+    expect(row.dataset.tint).toBe("tab");
+    expect(
+      byTestId(row, "side-tab-monogram-chip").style.getPropertyValue(
+        "--side-tab-tint",
+      ),
+    ).toBe("#22aa66");
   });
 
   it("gives a colourless tab the neutral tile", () => {
@@ -388,29 +498,33 @@ describe("SideTabRow collapsed", () => {
       tile: { kind: "icon", icon: <svg data-testid="custom-icon" /> },
     });
     expect(row.dataset.tileKind).toBe("icon");
+    expect(row.dataset.tint).toBe("none");
     expect(row.dataset.tinted).toBe("false");
-    expect(hasClasses(row, SIDE_TAB_COLORLESS_TILE_CLASS)).toBe(true);
-    expect(row.style.getPropertyValue("--side-tab-tint")).toBe("");
+    const chip = byTestId(row, "side-tab-monogram-chip");
+    expect(hasClasses(chip, SIDE_TAB_COLORLESS_TILE_CLASS)).toBe(true);
+    expect(chip.style.getPropertyValue("--side-tab-tint")).toBe("");
     expect(row.querySelector('[data-testid="custom-icon"]')).not.toBeNull();
   });
 
-  it("shows a neutral tile with the muted spinner while the title generates", () => {
+  it("shows a neutral tile with the muted spinner while the title generates, ignoring an available tint", () => {
     const row = renderRow({
       variant: "collapsed",
       tint: "#22aa66",
       tile: { kind: "generating" },
     });
     expect(row.dataset.tileKind).toBe("generating");
-    expect(hasClasses(row, SIDE_TAB_COLORLESS_TILE_CLASS)).toBe(true);
-    expect(hasClasses(row, SIDE_TAB_TINT_FILL_CLASS)).toBe(false);
+    expect(row.dataset.tint).toBe("none");
+    const chip = byTestId(row, "side-tab-monogram-chip");
+    expect(hasClasses(chip, SIDE_TAB_COLORLESS_TILE_CLASS)).toBe(true);
+    expect(hasClasses(chip, SIDE_TAB_TINT_FILL_CLASS)).toBe(false);
     const spinner = screen.getByTestId("side-tab-tile-generating");
     expect(spinner.classList.contains("text-muted-foreground")).toBe(true);
     expect(row.textContent).not.toContain("FL");
   });
 
   it("puts the one badge on the tile", () => {
-    const row = renderRow({ variant: "collapsed", badge: "waiting" });
-    expect(byTestId(row, "side-tab-rail-badge").dataset.kind).toBe("waiting");
+    const row = renderRow({ variant: "collapsed", badge: "approval" });
+    expect(byTestId(row, "side-tab-rail-badge").dataset.kind).toBe("approval");
     cleanup();
     const quiet = renderRow({ variant: "collapsed", badge: null });
     expect(
@@ -418,7 +532,18 @@ describe("SideTabRow collapsed", () => {
     ).toBeNull();
   });
 
-  it("opens the full title as a hover card on the content-facing side", () => {
+  it("mounts the meter under the monogram, empty or not", () => {
+    const empty = renderRow({ variant: "collapsed", agents: agents(0, 0) });
+    const emptyMeter = byTestId(empty, "side-tab-meter");
+    expect(emptyMeter.getAttribute("role")).toBeNull();
+    cleanup();
+
+    const busy = renderRow({ variant: "collapsed", agents: agents(2, 1) });
+    const busyMeter = byTestId(busy, "side-tab-meter");
+    expect(busyMeter.querySelectorAll("[data-pip]")).toHaveLength(3);
+  });
+
+  it("opens the hover card body on the content-facing side", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     for (const [edge, side] of [
       ["left", "right"],
@@ -426,16 +551,12 @@ describe("SideTabRow collapsed", () => {
     ] as const) {
       render(
         <ColumnEdgeContext.Provider value={edge}>
-          <SideTabRow
-            {...baseProps()}
-            variant="collapsed"
-            titleText="Fix the login bug on Safari"
-          />
+          <SideTabRow {...baseProps()} variant="collapsed" />
         </ColumnEdgeContext.Provider>,
       );
       dwell(screen.getByTestId(ROW_TEST_ID));
       const card = hoverCard();
-      expect(card?.textContent).toBe("Fix the login bug on Safari");
+      expect(card?.textContent).toBe("Fix login");
       expect(card?.dataset.side).toBe(side);
       expect(card?.dataset.align).toBe("start");
       cleanup();
@@ -444,13 +565,7 @@ describe("SideTabRow collapsed", () => {
 
   it("falls back to right/center outside a column", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(
-      <SideTabRow
-        {...baseProps()}
-        variant="collapsed"
-        titleText="Fix the login bug on Safari"
-      />,
-    );
+    render(<SideTabRow {...baseProps()} variant="collapsed" />);
     dwell(screen.getByTestId(ROW_TEST_ID));
     const card = hoverCard();
     expect(card?.dataset.side).toBe("right");
@@ -484,6 +599,71 @@ describe("SideTabRow collapsed", () => {
     expect(ref.current).not.toBeNull();
     expect(ref.current).toBe(expandedRow);
     expect(ref.current?.dataset.sideTab).toBe("collapsed");
+  });
+});
+
+describe("SideTabRow entry pulse", () => {
+  function renderPulse(overrides: Partial<SideTabRowProps>): {
+    readonly row: HTMLElement;
+    readonly rerender: (next: ReactNode) => void;
+  } {
+    const utils = render(<SideTabRow {...baseProps()} {...overrides} />);
+    return { row: screen.getByTestId(ROW_TEST_ID), rerender: utils.rerender };
+  }
+
+  it("does not pulse on mount, even with a waiting badge already set", () => {
+    const { row } = renderPulse({ badge: "approval" });
+    expect(row.dataset.waitingPulse).toBeUndefined();
+  });
+
+  it.each(["approval", "reply"] as const)(
+    "pulses when the badge transitions from none into %s",
+    (badge) => {
+      const { row, rerender } = renderPulse({ badge: null });
+      expect(row.dataset.waitingPulse).toBeUndefined();
+      rerender(<SideTabRow {...baseProps()} badge={badge} />);
+      expect(row.dataset.waitingPulse).toBe("true");
+    },
+  );
+
+  it("clears on its own animationend event, and ignores another animation's", () => {
+    const { row, rerender } = renderPulse({ badge: null });
+    rerender(<SideTabRow {...baseProps()} badge="approval" />);
+    expect(row.dataset.waitingPulse).toBe("true");
+
+    fireWaitingPulseAnimationEnd(row, "some-other-animation");
+    expect(row.dataset.waitingPulse).toBe("true");
+
+    fireWaitingPulseAnimationEnd(row, "side-strip-waiting-pulse");
+    expect(row.dataset.waitingPulse).toBeUndefined();
+  });
+
+  it.each(["failed", "unread"] as const)(
+    "never pulses for a %s badge",
+    (badge) => {
+      const { row, rerender } = renderPulse({ badge: null });
+      rerender(<SideTabRow {...baseProps()} badge={badge} />);
+      expect(row.dataset.waitingPulse).toBeUndefined();
+    },
+  );
+
+  it("does not pulse again on a later re-render while still waiting", () => {
+    const { row, rerender } = renderPulse({ badge: null });
+    rerender(<SideTabRow {...baseProps()} badge="approval" />);
+    fireWaitingPulseAnimationEnd(row, "side-strip-waiting-pulse");
+    expect(row.dataset.waitingPulse).toBeUndefined();
+
+    rerender(<SideTabRow {...baseProps()} badge="approval" active />);
+    expect(row.dataset.waitingPulse).toBeUndefined();
+  });
+
+  it("does not pulse when motion is disabled", () => {
+    useThemeLibraryStore
+      .getState()
+      .setAppearancePreference({ panelAnimations: false });
+    const { row, rerender } = renderPulse({ badge: null });
+    rerender(<SideTabRow {...baseProps()} badge="approval" />);
+    expect(row.dataset.waitingPulse).toBeUndefined();
   });
 });
 

@@ -227,6 +227,11 @@ function rebaseArrangement(
       previous.sidebarSide,
       next.sidebarSide,
     ),
+    sideStripView: pick(
+      entry.sideStripView,
+      previous.sideStripView,
+      next.sideStripView,
+    ),
   };
   return resolvePersistedArrangement(rebased);
 }

@@ -425,6 +425,22 @@ export function getEpicAgentActivity(epicId: string): EpicAgentActivity {
   );
 }
 
+/**
+ * How many agents are working (turn or background) across every epic and
+ * host, for the account row. An agent two hosts both report counts once.
+ */
+export function useAccountRunningAgentCount(): number {
+  return useAgentActivityStore((state) => {
+    const working = new Set<string>();
+    for (const host of state.byHost.values()) {
+      for (const activity of host.byEpic.values()) {
+        for (const agentId of activity.working) working.add(agentId);
+      }
+    }
+    return working.size;
+  });
+}
+
 export function subscribeAgentActivity(listener: () => void): () => void {
   let previous = useAgentActivityStore.getState().byHost;
   return useAgentActivityStore.subscribe((state) => {

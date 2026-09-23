@@ -1,30 +1,42 @@
-import type { EpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
+import { tabWaitingReason } from "../tab-waiting";
+import type { StatusGlyphKind } from "@/components/notifications/status-glyph-kind";
 
-/** The collapsed rail's single status badge, strongest first (S-17). */
-export type RailBadgeKind = "waiting" | "failed" | "unread-done" | "running";
+/**
+ * The one state on a task that needs the user (D5), drawn as the tile's
+ * corner badge and as the meter's attention pip. Running is not here: the
+ * meter carries it.
+ */
+export type RailBadgeKind = Extract<
+  StatusGlyphKind,
+  "approval" | "reply" | "failed" | "unread"
+>;
 
+/**
+ * Approval and reply are one tier (both are waiting on the user); reply breaks
+ * the tie, the order `tabWaitingReason` uses for a single task.
+ */
 const RAIL_BADGE_RANK: Readonly<Record<RailBadgeKind, number>> = {
-  waiting: 0,
-  failed: 1,
-  "unread-done": 2,
-  running: 3,
+  reply: 0,
+  approval: 1,
+  failed: 2,
+  unread: 3,
 };
 
 /**
- * The one badge a collapsed tile shows. Waiting ranks first here, unlike the
- * shared glyph's order, because the rail has room for a single mark and a
- * blocked agent is the one the user can unblock. A pending fork is the host's
- * own business and gives no badge.
+ * The one badge a task shows: waiting (as approval or reply), then failed,
+ * then unread-done. The indicator already carries a warm session's waiting
+ * reason (`withWaitingIndicator`). When both a question and an approval are
+ * pending the reply wins, the order `tabWaitingReason` uses. A pending fork is
+ * the host's own business and gives no badge.
  */
 export function railBadgeOf(
   indicator: NotificationIndicatorState,
-  activity: EpicActivityStatus,
 ): RailBadgeKind | null {
-  if (indicator.pendingInterview || indicator.pendingApproval) return "waiting";
+  const waiting = tabWaitingReason(indicator, null);
+  if (waiting !== null) return waiting;
   if (indicator.unreadFailure) return "failed";
-  if (indicator.unreadDone) return "unread-done";
-  if (activity !== "idle") return "running";
+  if (indicator.unreadDone) return "unread";
   return null;
 }
 

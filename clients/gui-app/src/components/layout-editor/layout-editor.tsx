@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import "@/components/layout-editor/layout-editor.css";
 import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
+import {
+  cancelLayoutDrag,
+  layoutDragActive,
+} from "@/components/layout-editor/canvas/drag-engine";
 import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas";
 import { useFloatingDock } from "@/components/layout-editor/inspector/dock-modes";
 import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
@@ -10,6 +14,7 @@ import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layo
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import { SurfacePlacementBar } from "@/components/layout-editor/surface-placement-bar";
 import { TooltipsSuppressedProvider } from "@/components/ui/tooltip-wrapper";
 import {
   initializeLayoutEditorWindow,
@@ -129,6 +134,13 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (ownsItsOwnEscape(event.target)) return;
       event.preventDefault();
+      // A gesture in hand is the ladder's first rung: Escape puts it back and
+      // the release that follows writes nothing, the way the dock's keyboard
+      // grab cancels.
+      if (layoutDragActive()) {
+        cancelLayoutDrag();
+        return;
+      }
       if (useLayoutEditorStore.getState().popInspectorLevel()) return;
       closeLayoutEditor("escape");
     };
@@ -170,6 +182,9 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
         <LayoutFormHostContext value="inspector">
           <InspectorBody />
         </LayoutFormHostContext>
+        {/* Portalled over the canvas, but a React child here so its labels
+          open like the panel's own. */}
+        <SurfacePlacementBar />
       </TooltipsSuppressedProvider>
     </div>
   );

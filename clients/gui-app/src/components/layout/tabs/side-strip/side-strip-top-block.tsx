@@ -14,6 +14,8 @@ import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
 import { TabStripNewButton } from "../tab-strip-new-button";
 import { SideHomeRow } from "./side-home-row";
+import { SideStripNavRows, SideStripTasksLabel } from "./side-strip-nav-rows";
+import { SideStripNeedsYou } from "./side-strip-needs-you";
 import type { SideTabRowVariant } from "./side-tab-row";
 import { SIDE_STRIP_INSET_CLASS } from "./side-strip-tokens";
 
@@ -30,14 +32,18 @@ export interface SideStripTopBlockProps {
   readonly onNewTab: () => void;
   /** Collapses the strip to the rail or expands it, easing the width. */
   readonly onToggleCollapsed: () => void;
+  /** How many tabs the rows below list, for the "Tasks" label. */
+  readonly taskCount: number;
 }
 
 /**
  * What leads in the header, in the strip (S-03): history back and forward,
- * New task beside the collapse toggle (S-21), then Home. On macOS with the
- * strip at the left the first row is the title bar: a drag row that reserves
- * the traffic lights and puts the arrows right of them (S-04). Collapsed, it
- * is one centred column.
+ * New task beside the collapse toggle (S-21), the Inbox and All tasks nav rows
+ * (D6), the Activity view's Needs you block (D10), Home, then the "Tasks"
+ * label over the rows. On macOS with the strip at
+ * the left the first row is the title bar: a drag row that reserves the
+ * traffic lights and puts the arrows right of them (S-04). Collapsed, it is one
+ * centred column with the nav rows as tiles after the controls, and no label.
  */
 export function SideStripTopBlock(props: SideStripTopBlockProps): ReactNode {
   const collapsed = props.variant === "collapsed";
@@ -54,7 +60,8 @@ export function SideStripTopBlock(props: SideStripTopBlockProps): ReactNode {
   return (
     <div
       data-testid="side-strip-top-block"
-      className="flex shrink-0 flex-col gap-1 pb-1"
+      // No bottom padding: the row list's own 8px inset below it is the gap.
+      className="flex shrink-0 flex-col gap-1"
     >
       {props.ownsTitleBar ? (
         // The title bar. Its empty space is the window's drag region; the
@@ -83,6 +90,8 @@ export function SideStripTopBlock(props: SideStripTopBlockProps): ReactNode {
           <FirstRow controls={controls} />
         ) : null}
         {collapsed ? <HistoryNavButtons orientation="column" /> : null}
+        {collapsed ? null : <SideStripNavRows variant={props.variant} />}
+        {collapsed ? null : <SideStripNeedsYou />}
         {props.homeTabDrawn ? (
           <SideHomeRow
             variant={props.variant}
@@ -93,8 +102,11 @@ export function SideStripTopBlock(props: SideStripTopBlockProps): ReactNode {
         {collapsed ? (
           <div className="flex flex-col items-center gap-1 [-webkit-app-region:no-drag]">
             {controls}
+            <SideStripNavRows variant={props.variant} />
           </div>
-        ) : null}
+        ) : (
+          <SideStripTasksLabel count={props.taskCount} />
+        )}
       </div>
     </div>
   );

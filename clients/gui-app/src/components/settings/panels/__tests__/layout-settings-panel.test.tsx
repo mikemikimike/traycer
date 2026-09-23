@@ -807,6 +807,47 @@ describe("Settings - Layout", () => {
       ).toBe("true");
     });
 
+    it("opens the Tabs card with View, disabled at the top and writable once vertical (D8)", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      const tabs = surface("topBar");
+      const view = tabs.querySelector(
+        "[data-settings-anchor='layout-side-strip-view']",
+      );
+      expect(view?.textContent).toContain("View");
+      const viewGroup = within(tabs).getByRole("radiogroup", {
+        name: "Tabs view",
+      });
+      expect(
+        within(viewGroup)
+          .getAllByRole<HTMLButtonElement>("radio")
+          .every((option) => option.disabled),
+      ).toBe(true);
+      expect(tabs.textContent).toContain(
+        "Applies when tabs are at the left or right.",
+      );
+
+      await user.click(
+        within(
+          screen.getByRole("radiogroup", { name: "Tabs position" }),
+        ).getByRole("radio", { name: "Left" }),
+      );
+
+      expect(
+        within(viewGroup)
+          .getAllByRole<HTMLButtonElement>("radio")
+          .every((option) => option.disabled),
+      ).toBe(false);
+      await user.click(
+        within(viewGroup).getByRole("radio", { name: "Activity" }),
+      );
+
+      expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
+        "activity",
+      );
+    });
+
     it("opens the Sidebar card with Side, which writes the sidebar's side", async () => {
       const user = userEvent.setup();
       renderPanel();
@@ -848,7 +889,7 @@ describe("Settings - Layout", () => {
       ).toBeTruthy();
     });
 
-    it("withholds Position and Side in the installed mobile app, and never disables Task tab layout there", () => {
+    it("withholds Position, View and Side in the installed mobile app, and never disables Task tab layout there", () => {
       setMobileApp(true);
       useLayoutStore.setState({
         ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -861,6 +902,9 @@ describe("Settings - Layout", () => {
 
       expect(
         screen.queryByRole("radiogroup", { name: "Tabs position" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("radiogroup", { name: "Tabs view" }),
       ).toBeNull();
       expect(
         screen.queryByRole("radiogroup", { name: "Sidebar side" }),
@@ -888,6 +932,19 @@ describe("Settings - Layout", () => {
         }).map((result) => result.entry.anchor);
 
         expect(anchors).toContain("layout-tab-strip-placement");
+      },
+    );
+
+    it.each(["activity", "live agents", "needs you"])(
+      "finds View when searching %s (D8)",
+      (query) => {
+        const anchors = searchSettings(query, {
+          runnerHost: null,
+          featureSettings: null,
+          mobileApp: false,
+        }).map((result) => result.entry.anchor);
+
+        expect(anchors).toContain("layout-side-strip-view");
       },
     );
   });

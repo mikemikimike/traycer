@@ -318,6 +318,7 @@ function renderIcon() {
       mutedClassName="text-muted-foreground"
       testId={TEST_ID}
       defaultIcon={undefined}
+      statusPresentation="message"
     />,
   );
 }

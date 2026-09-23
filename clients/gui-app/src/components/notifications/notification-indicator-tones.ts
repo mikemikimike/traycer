@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { GlobeAlert } from "@/components/notifications/globe-alert";
 import { MessageSquareQuestionMark } from "@/components/notifications/message-square-question-mark";
+import type { StatusGlyphKind } from "@/components/notifications/status-glyph-kind";
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 import type {
   HostNotificationKind,
@@ -186,4 +187,27 @@ export function notificationFeedTone(
     return input.resolvedAt === null ? APPROVAL_TONE : RESOLVED_APPROVAL_TONE;
   }
   return null;
+}
+
+/**
+ * The shared glyph a tone draws as (D12): failures (terminal or not) as
+ * failed, a question as reply, an approval as approval, an unread completion
+ * as unread. `null` for a tone the set has no shape for (a fork, a browser
+ * hand-off, a resolved prompt), which keeps its own icon.
+ */
+export function statusGlyphKindOfTone(
+  tone: IndicatorTone,
+): StatusGlyphKind | null {
+  switch (tone.testId) {
+    case "failure":
+      return "failed";
+    case "interview":
+      return "reply";
+    case "approval":
+      return "approval";
+    case "done":
+      return "unread";
+    default:
+      return null;
+  }
 }

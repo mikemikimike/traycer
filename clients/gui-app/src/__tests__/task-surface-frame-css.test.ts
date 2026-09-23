@@ -68,12 +68,12 @@ describe.each([
   "task-surface-frame-beside-left",
   "task-surface-frame-beside-right",
 ])("%s", (name) => {
-  it("extends task-surface-frame rather than duplicating its declarations", () => {
-    // Ticket 02: "Extend, don't duplicate" - the beside utilities carry no
-    // geometry of their own any more (the old top-only concave-corner tricks
-    // and title-band tuck are gone), they just compose the shared sheet.
-    const body = utilityBody(name).replace(/\s+/g, " ").trim();
-    expect(body).toBe("@apply task-surface-frame;");
+  it("no longer exists: every placement composes the same plain task-surface-frame", () => {
+    // The beside utilities carried no geometry of their own (they just
+    // `@apply task-surface-frame`), so the placement-specific wrapper was
+    // pure duplication; callers now put `task-surface-frame` on the surface
+    // frame directly for every placement.
+    expect(css.includes(`@utility ${name} {`)).toBe(false);
   });
 });
 

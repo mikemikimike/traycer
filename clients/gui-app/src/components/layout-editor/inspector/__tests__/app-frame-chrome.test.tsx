@@ -184,7 +184,7 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
   const IDENTITY_DOT_CLASS =
     "size-5 shrink-0 rounded-full border border-border bg-foreground/10";
 
-  it("renders the top bar's row exactly as before, glyph for glyph", () => {
+  it("renders the top bar's row glyph for glyph: three fake tasks, the spacer, History, Bell, the identity dot", () => {
     render(
       <div data-testid="row">
         <AppFrameTopBar
@@ -196,34 +196,50 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
 
     expect(screen.queryByTestId("app-frame-side-strip")).toBeNull();
     const row = screen.getByTestId("row");
-    // Nothing hosts at the header by default, so the row is exactly: the two
-    // fake tabs, the spacer, History, Bell, the identity dot.
+    // Nothing hosts at the header by default, so the row is exactly: the
+    // three fake tasks, the spacer, History, Bell, the identity dot.
     const children = [...row.children];
-    expect(children).toHaveLength(6);
-    const [startPage, sampleChat, spacer, history, bell, identity] = children;
-    expect(startPage.tagName).toBe("SPAN");
-    expect(startPage.className).toBe(INACTIVE_TAB_CLASS);
-    expect(startPage.textContent).toBe("Start page");
+    expect(children).toHaveLength(7);
+    const [
+      onboarding,
+      sampleChat,
+      releaseNotes,
+      spacer,
+      history,
+      bell,
+      identity,
+    ] = children;
+    expect(onboarding.tagName).toBe("SPAN");
+    expect(onboarding.className).toBe(INACTIVE_TAB_CLASS);
+    expect(onboarding.textContent).toBe("Onboarding flow");
     expect(sampleChat.className).toBe(ACTIVE_TAB_CLASS);
     expect(sampleChat.textContent).toBe("Sample chat");
+    expect(releaseNotes.className).toBe(INACTIVE_TAB_CLASS);
+    expect(releaseNotes.textContent).toBe("Release notes");
     expect(spacer.className).toBe("flex-1");
     expect(history.classList.contains("lucide-history")).toBe(true);
     expect(bell.classList.contains("lucide-bell")).toBe(true);
     expect(identity.className).toBe(IDENTITY_DOT_CLASS);
   });
 
-  it("draws the top block as one row: history left, New task and collapse right", () => {
+  it("draws the top row inside the top block: back/forward, New task, collapse", () => {
     render(
       <AppFrameSideStrip
         values={PRESET_VALUES.default}
         arrangement={DEFAULT_ARRANGEMENT}
+        edge="left"
+        collapsed={false}
       />,
     );
 
     const strip = screen.getByTestId("app-frame-side-strip");
     const topBlock = strip.firstElementChild;
     if (topBlock === null) throw new Error("expected a top block");
-    const glyphs = [...topBlock.children].map((child) =>
+    // The arrows/New task/collapse row is the top block's own first row; the
+    // Inbox, All tasks and Tasks-label rows follow it inside the same block.
+    const topRow = topBlock.firstElementChild;
+    if (topRow === null) throw new Error("expected the top row");
+    const glyphs = [...topRow.children].map((child) =>
       [...child.classList].find((cls) => cls.startsWith("lucide-")),
     );
     // Back, forward, a spacer (no glyph class), New task, the collapse toggle.
@@ -232,15 +248,17 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
       "lucide-arrow-right",
       undefined,
       "lucide-plus",
-      "lucide-panel-left",
+      "lucide-panel-left-close",
     ]);
   });
 
-  it("draws Home as its own row, above the fake tabs, gated on the region", () => {
+  it("draws Home as its own nav row inside the top block, gated on the region", () => {
     render(
       <AppFrameSideStrip
         values={PRESET_VALUES.default}
         arrangement={DEFAULT_ARRANGEMENT}
+        edge="left"
+        collapsed={false}
       />,
     );
 
@@ -255,19 +273,28 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
           homeTab: { shown: "shown" },
         }}
         arrangement={DEFAULT_ARRANGEMENT}
+        edge="left"
+        collapsed={false}
       />,
     );
 
     const strip = screen.getByTestId("app-frame-side-strip");
-    const home = within(strip).getByText("Home");
-    const tabList =
-      within(strip).getByText("Sample chat").parentElement?.parentElement;
-    if (tabList === null || tabList === undefined) {
-      throw new Error("expected the fake tabs' column");
+    const topBlock = strip.firstElementChild;
+    if (!(topBlock instanceof HTMLElement)) {
+      throw new Error("expected a top block");
     }
-    // Home precedes the fake-tab column as a sibling, not a member of it.
-    expect(home.parentElement?.nextElementSibling).toBe(tabList);
-    expect(within(tabList).queryByText("Home")).toBeNull();
+    const taskList = topBlock.nextElementSibling;
+    if (!(taskList instanceof HTMLElement)) {
+      throw new Error("expected the task row list");
+    }
+    const home = within(topBlock).getByText("Home");
+    const tasksLabel = within(topBlock).getByText("Tasks");
+    // Home is the nav row directly above the "Tasks" label, inside the top
+    // block - never a member of the task row list below it.
+    expect(home.parentElement?.nextElementSibling).toBe(
+      tasksLabel.parentElement,
+    );
+    expect(within(taskList).queryByText("Home")).toBeNull();
   });
 
   it("sizes the fake tab rows from the tokens: a leading slot, then the title", () => {
@@ -275,6 +302,8 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
       <AppFrameSideStrip
         values={PRESET_VALUES.default}
         arrangement={DEFAULT_ARRANGEMENT}
+        edge="left"
+        collapsed={false}
       />,
     );
 
@@ -282,25 +311,31 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     const sampleChat = within(strip).getByText("Sample chat");
     const row = sampleChat.parentElement;
     if (row === null) throw new Error("expected the row");
-    expect(row.children).toHaveLength(2);
     const leading = row.children[0];
     expect(leading.className).toContain("size-4");
     expect(sampleChat.className).toContain("text-[0.8125rem]");
+    // Sample chat carries more than one live agent (turn 1 + background 2),
+    // so its row also draws the meter after the title.
+    expect(row.children).toHaveLength(3);
   });
 
-  it("lays the foot out as a wrapping row with History, Bell and the identity dot", () => {
+  it("lays the foot out with the header-hosted clusters over the account row, and no History/Bell", () => {
     render(
       <AppFrameSideStrip
         values={PRESET_VALUES.default}
         arrangement={DEFAULT_ARRANGEMENT}
+        edge="left"
+        collapsed={false}
       />,
     );
 
     const foot = screen.getByTestId("app-frame-side-strip-foot");
-    expect(foot.className).toContain("flex-wrap");
-    expect(foot.querySelector("svg.lucide-history")).not.toBeNull();
-    expect(foot.querySelector("svg.lucide-bell")).not.toBeNull();
-    expect(foot.lastElementChild?.className).toBe(IDENTITY_DOT_CLASS);
+    expect(foot.querySelector("svg.lucide-history")).toBeNull();
+    expect(foot.querySelector("svg.lucide-bell")).toBeNull();
+    expect(within(foot).getByText("Ada Lovelace")).not.toBeNull();
+    expect(
+      within(foot).getByText("This Mac · 2 agents running"),
+    ).not.toBeNull();
   });
 
   it("puts a header-hosted reading in the foot, and nowhere else", () => {
@@ -308,6 +343,8 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
       <AppFrameSideStrip
         values={PRESET_VALUES.default}
         arrangement={{ ...DEFAULT_ARRANGEMENT, resourceHost: "header" }}
+        edge="left"
+        collapsed={false}
       />,
     );
 
@@ -316,5 +353,166 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     const strip = screen.getByTestId("app-frame-side-strip");
     const topBlock = strip.firstElementChild;
     expect(topBlock?.textContent.includes("cpu")).toBe(false);
+  });
+
+  it("collapsed: draws one tile per task with a monogram chip, and no row titles", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+        edge="left"
+        collapsed
+      />,
+    );
+
+    const strip = screen.getByTestId("app-frame-side-strip");
+    expect(strip.dataset.collapsed).toBe("true");
+    // No row titles: the task labels never render as text collapsed.
+    expect(within(strip).queryByText("Onboarding flow")).toBeNull();
+    expect(within(strip).queryByText("Sample chat")).toBeNull();
+    expect(within(strip).queryByText("Release notes")).toBeNull();
+    // One monogram-chip tile per task, in task order.
+    const chips = within(strip).getAllByTestId("side-tab-monogram-chip");
+    expect(chips.map((chip) => chip.textContent)).toEqual(["OF", "SC", "RN"]);
+  });
+
+  it.each(["left", "right"] as const)(
+    "marks the active row joined exactly when the strip edge (%s) matches the sidebar side",
+    (edge) => {
+      render(
+        <AppFrameSideStrip
+          values={PRESET_VALUES.default}
+          arrangement={{
+            ...DEFAULT_ARRANGEMENT,
+            tabStripPlacement: edge,
+            sidebarSide: edge,
+          }}
+          edge={edge}
+          collapsed={false}
+        />,
+      );
+      const strip = screen.getByTestId("app-frame-side-strip");
+      const activeRow = within(strip).getByText("Sample chat").parentElement;
+      expect(activeRow?.getAttribute("data-side-tab-joined")).toBe(edge);
+      cleanup();
+
+      const otherEdge = edge === "left" ? "right" : "left";
+      render(
+        <AppFrameSideStrip
+          values={PRESET_VALUES.default}
+          arrangement={{
+            ...DEFAULT_ARRANGEMENT,
+            tabStripPlacement: edge,
+            sidebarSide: otherEdge,
+          }}
+          edge={edge}
+          collapsed={false}
+        />,
+      );
+      const strip2 = screen.getByTestId("app-frame-side-strip");
+      const activeRow2 = within(strip2).getByText("Sample chat").parentElement;
+      expect(activeRow2?.hasAttribute("data-side-tab-joined")).toBe(false);
+    },
+  );
+
+  it("collapsed: marks the active tile joined exactly when the strip edge matches the sidebar side", () => {
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={{
+          ...DEFAULT_ARRANGEMENT,
+          tabStripPlacement: "left",
+          sidebarSide: "left",
+        }}
+        edge="left"
+        collapsed
+      />,
+    );
+    const strip = screen.getByTestId("app-frame-side-strip");
+    const activeChip = within(strip).getAllByTestId(
+      "side-tab-monogram-chip",
+    )[1];
+    const activeTile = activeChip.parentElement;
+    expect(activeTile?.getAttribute("data-side-tab-joined")).toBe("left");
+  });
+
+  it("draws the Activity list only for an expanded strip in the Activity view", () => {
+    const base = { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" as const };
+
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={{ ...base, sideStripView: "layered" }}
+        edge="left"
+        collapsed={false}
+      />,
+    );
+    expect(screen.queryByTestId("app-frame-live-agents")).toBeNull();
+    cleanup();
+
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={{ ...base, sideStripView: "activity" }}
+        edge="left"
+        collapsed
+      />,
+    );
+    expect(screen.queryByTestId("app-frame-live-agents")).toBeNull();
+    cleanup();
+
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={{ ...base, sideStripView: "activity" }}
+        edge="left"
+        collapsed={false}
+      />,
+    );
+    expect(screen.getByTestId("app-frame-live-agents")).not.toBeNull();
+  });
+
+  // Finding 5: the depiction's live-agent rows are the SAME
+  // `LiveAgentRowView` the real Activity list draws, through the shared
+  // `AppFrameLiveAgentItems`, so this picture cannot show anatomy (indent,
+  // waiting chip vs. idle time) the real list does not.
+  it("draws the sample rows with the real row anatomy: nested indent, a waiting chip, and idle time", () => {
+    const base = { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" as const };
+    render(
+      <AppFrameSideStrip
+        values={PRESET_VALUES.default}
+        arrangement={{ ...base, sideStripView: "activity" }}
+        edge="left"
+        collapsed={false}
+      />,
+    );
+
+    const list = screen.getByTestId("app-frame-live-agents");
+    const plan = within(list).getByText("Plan the migration").closest("button");
+    const tests = within(list).getByText("Write the tests").closest("button");
+    const index = within(list).getByText("Rebuild the index").closest("button");
+    if (plan === null || tests === null || index === null) {
+      throw new Error("expected all three sample rows to render as buttons");
+    }
+
+    // "Write the tests" is the one nested (depth 1) row; the other two sit
+    // at the base depth (0).
+    const depth0 = Number.parseInt(plan.style.paddingInlineStart, 10);
+    const depth1 = Number.parseInt(tests.style.paddingInlineStart, 10);
+    expect(Number.parseInt(index.style.paddingInlineStart, 10)).toBe(depth0);
+    expect(depth1 - depth0).toBe(16); // INDENT_PX
+
+    // The waiting (interview) row shows its chip, not the time; the two
+    // background rows show the time, not a chip.
+    expect(
+      within(plan).getByTestId("strip-live-agent-waiting-chip").textContent,
+    ).toBe("Reply");
+    expect(within(plan).queryByTestId("chat-row-idle-time")).toBeNull();
+    for (const row of [tests, index]) {
+      expect(
+        within(row).queryByTestId("strip-live-agent-waiting-chip"),
+      ).toBeNull();
+      expect(within(row).getByTestId("chat-row-idle-time")).toBeTruthy();
+    }
   });
 });

@@ -203,7 +203,8 @@ export type AnalyticsNotificationSurface =
   | "center"
   | "toast"
   | "native"
-  | "home";
+  | "home"
+  | "strip";
 
 export type AnalyticsNotificationAcknowledgmentSource =
   | "explicit_action"
@@ -1825,6 +1826,7 @@ const EVENT_PROPERTY_KEYS = new Map<AnalyticsEvent, ReadonlyArray<string>>([
       "layout_resource_side",
       "layout_tab_strip_placement",
       "layout_sidebar_side",
+      "layout_side_strip_view",
       "layout_dock_reordered",
       "layout_toolbar_left_reordered",
       "layout_toolbar_right_reordered",
@@ -1971,6 +1973,7 @@ const EXACT_PROPERTY_VALUES: {
   layout_resource_side: new Set(["left", "right"]),
   layout_tab_strip_placement: new Set(["top", "left", "right"]),
   layout_sidebar_side: new Set(["left", "right"]),
+  layout_side_strip_view: new Set(["layered", "activity"]),
   permission: new Set(["denied", "granted", "unavailable"]),
   pressure_tier: ANALYTICS_RESOURCE_PRESSURE_TIERS,
   provider: ANALYTICS_PROVIDERS,
@@ -2113,7 +2116,7 @@ const EVENT_EXACT_PROPERTY_VALUES = new Map<string, ReadonlySet<string>>([
     // whole event failed validation and never reached `posthog.capture`, so
     // every activation from Home was silently unrecorded while the TYPE
     // (`AnalyticsNotificationSurface`) said it was a legal value.
-    new Set(["center", "toast", "native", "home"]),
+    new Set(["center", "toast", "native", "home", "strip"]),
   ),
   ...eventValueEntries(
     [AnalyticsEvent.SessionImportStarted],

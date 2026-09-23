@@ -99,12 +99,13 @@
 //       foot, the handle) is the hit target at its centre; a right strip sits
 //       left of a right-docked inspector; with the inspector docked left on
 //       macOS its header keeps the 82px inset and the strip's title row 12px.
-//       A12 - the rail is 56px (at least 82px on macOS with the strip at the
-//       left) with monograms drawn; the active ring on a tinted tile in both
+//       A12 - the rail is 60px (at least 82px on macOS with the strip at the
+//       left) with 40x44 tiles, each a 26x22 monogram chip over its meter; an
+//       active tile's rim changes fill and its chip keeps its tint in both
 //       themes.
 //       A13 - the band per platform (40px, strip top at its bottom, hidden in
 //       macOS fullscreen), the 40px title row where the strip owns the title
-//       bar, the -1px tuck only while a band is displayed, and the dialog
+//       bar, the frame's 6px shell gap on every edge, and the dialog
 //       overlay's top under `.wco`.
 //       Row kit - the 10px badge on a 16px leading tile, and the group line as
 //       one continuous line across its members.
@@ -117,17 +118,51 @@
 //       new-window request 30px into the content, and none toward the window
 //       edge until the pointer leaves the viewport.
 //
+// ---------------------------------------------------------------------------
+// THE SHEET SHELL (specs/sidebar-redesign, ticket 07)
+//
+// `layout-editor-canvas.html` with `surface=epic` (a task's panel and content
+// sheets, the real width handle between them), `sidebar=`, `view=` and
+// `account=1`:
+//
+//   sheets - the 6px ground on every side and between the sheets, each
+//       sheet's four corners alike (a clipped arc next to the strip is the bug
+//       this guards), no pseudo-element arc left on the frame or a sheet, and
+//       both width handles as the hit in their gaps; left/right x none/macOS
+//       and top, in both themes.
+//   join - the active row and tile take the panel's fill across the gap and
+//       over the sheet's border, with ground past the concave corners; nothing
+//       joins on the far side or over a route surface; the bridge holds over
+//       the hovered resize handle and after a reorder settles, and gives way
+//       while its row is cut by the list's edge.
+//   rail - 60px, each tile's meter (pips, the attention pip, "+N") and badge
+//       kind as a 14px disc at the top-right; the waiting pulse painted past
+//       the last row with the list's padding holding its 8px spread.
+//   overlays - the hover card, the user menu (one click, no double toggle)
+//       and the Inbox drawer (level with the sheets) open toward the content
+//       and inside the window, on both edges.
+//   activity - the live agents under the active row in the Activity view,
+//       gone on a collapse and in the Layered view.
+//   placement - the tab strip and the sample sidebar selected by their own
+//       space, the placement bar beside them, a pictogram writing the edge, and
+//       a real drag lighting the zones and writing the edge it is dropped on.
+//
+// Set LAYOUT_EDITOR_BROWSER_SHOTS to a directory to keep those phases'
+// screenshots.
+//
 // What these fixtures cannot mount (native controls, real `env()` values,
-// `-webkit-app-region`, the menu bar's popups, the signed-in foot) is the
-// Staging checklist's: specs/side-tabs/tickets/12-browser-and-staging.md.
+// `-webkit-app-region`, the menu bar's popups, the real notification feed,
+// guest browser views) is the Staging checklist's: specs/side-tabs/tickets/12
+// and specs/sidebar-redesign/tickets/07.
 //
 // Set LAYOUT_EDITOR_BROWSER_PHASES to a comma list of parity, canvas, sides,
-// switch, strip to run only those while iterating; every selected phase runs
-// even after one fails, and the run fails if any did.
+// switch, strip, sheets, join, rail, overlays, activity, placement to run only
+// those while iterating; every selected phase runs even after one fails, and
+// the run fails if any did.
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer as createTcpServer } from "node:net";
 import path from "node:path";
@@ -535,6 +570,12 @@ const INSTALL_PIXEL_TOOLS = `(() => {
     if (shot.width === 0) return null;
     return [shot.data[0], shot.data[1], shot.data[2]];
   };
+  window.__regionPixels = async (base64) => {
+    const shot = await decode(base64);
+    const rgb = [];
+    for (let i = 0; i < shot.data.length; i += 4) rgb.push(shot.data[i], shot.data[i + 1], shot.data[i + 2]);
+    return rgb;
+  };
   window.__countShot = async (base64, horizontal, target, tolerance) => {
     const shot = await decode(base64);
     return window.__countLit(shot, horizontal, target, tolerance);
@@ -682,7 +723,46 @@ const MINIATURE_PLACEMENTS = [
   { tabs: "left", sidebar: "right" },
   { tabs: "right", sidebar: "left" },
   { tabs: "top", sidebar: "right" },
+  { tabs: "top", sidebar: "left" },
+  { tabs: "left", sidebar: "left", collapsed: 1 },
+  { tabs: "right", sidebar: "left", collapsed: 1 },
+  { tabs: "left", sidebar: "left", view: "activity" },
+  { tabs: "right", sidebar: "right", view: "activity" },
 ];
+
+/**
+ * The shell's structure in one frame, relative to the frame's origin and in
+ * the frame's own px: the strip, the two sheets, whether the active task is
+ * joined, and whether the strip lists live agents. `frameSelector` is the
+ * miniature's scaled 1000x620 box, or the live app column.
+ */
+const SHELL_STRUCTURE_PROBE = (frameSelector, scope) => `(() => {
+  const scope = ${scope === null ? "document" : `document.querySelector(${JSON.stringify(scope)})`};
+  const frameNode = document.querySelector(${JSON.stringify(frameSelector)});
+  const origin = frameNode.getBoundingClientRect();
+  const scale = origin.width / frameNode.offsetWidth;
+  const rect = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: (r.x - origin.x) / scale, y: (r.y - origin.y) / scale, width: r.width / scale, height: r.height / scale };
+  };
+  return {
+    strip: rect(scope.querySelector('[data-testid="side-tab-strip"], [data-testid="app-frame-side-strip"]')),
+    panel: rect(scope.querySelector('[data-shell-sheet="panel"]')),
+    content: rect(scope.querySelector('[data-shell-sheet="content"]')),
+    joined: scope.querySelector("[data-side-tab-joined]") !== null,
+    liveAgents: scope.querySelector('[data-testid="strip-live-agents"], [data-testid="app-frame-live-agents"]') !== null,
+    agentRows: [...scope.querySelectorAll('[data-testid="strip-live-agents"] [data-live-kind], [data-testid="app-frame-live-agents"] [data-live-kind]')].map((row) => {
+      const chip = row.querySelector('[data-testid="strip-live-agent-waiting-chip"]');
+      return {
+        box: rect(row),
+        indent: parseFloat(getComputedStyle(row).paddingInlineStart),
+        chip: chip === null ? null : chip.textContent,
+        time: row.querySelector('[data-testid="chat-row-idle-time"]') !== null,
+      };
+    }),
+  };
+})()`;
 
 /**
  * Where the miniature drew the strip and the rail, in its own scaled frame.
@@ -711,11 +791,18 @@ const MINIATURE_PLACEMENT_PROBE = `(() => {
   };
 })()`;
 
-async function runParityPlacementVariants(client, pageUrl, pageLoads) {
+async function runParityPlacementVariants(
+  client,
+  pageUrl,
+  canvasUrl,
+  pageLoads,
+) {
   const violations = [];
   const notes = [];
   for (const placement of MINIATURE_PLACEMENTS) {
-    const label = `miniature tabs=${placement.tabs} sidebar=${placement.sidebar}`;
+    const label = `miniature ${Object.entries(placement)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(" ")}`;
     const loadsAtStart = await openVariant(
       client,
       variantUrl(pageUrl, placement),
@@ -777,7 +864,24 @@ async function runParityPlacementVariants(client, pageUrl, pageLoads) {
     notes.push(
       `${label}: strip ${drawn.strip === null ? "none" : boxText(drawn.strip)}, rail ${boxText(drawn.rail)}, frame ${boxText(drawn.frame)}`,
     );
+    const pictured = await evaluate(
+      client,
+      SHELL_STRUCTURE_PROBE(
+        '[data-testid="preset-miniature"] > div',
+        '[data-testid="preset-miniature"]',
+      ),
+    );
     assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
+    await compareWithLiveFrame(
+      client,
+      canvasUrl,
+      pageLoads,
+      placement,
+      pictured,
+      label,
+      violations,
+      notes,
+    );
   }
   assert.deepEqual(
     violations,
@@ -786,14 +890,139 @@ async function runParityPlacementVariants(client, pageUrl, pageLoads) {
   );
   for (const note of notes) console.log(`  ${note}`);
   console.log(
-    `preset miniature placements passed: ${String(MINIATURE_PLACEMENTS.length)} stored placement/side pairs, each drawn on its stored edge and side`,
+    `preset miniature placements passed: ${String(MINIATURE_PLACEMENTS.length)} stored placement/side/strip variants, each drawn on its stored edge and side, and each matching the live frame at the miniature's 1000x620: the strip, both sheets, the join and the live agents`,
   );
+}
+
+/**
+ * The live canvas at the miniature's own 1000x620, holding a task (its panel
+ * and content sheets), against the picture: every box across the frame and
+ * its top within 1px, and the join and the Activity list alike. The bottom is
+ * not compared: the picture carries the status strip the fixture's column
+ * does not mount.
+ */
+async function compareWithLiveFrame(
+  client,
+  canvasUrl,
+  pageLoads,
+  placement,
+  pictured,
+  label,
+  violations,
+  notes,
+) {
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: 1000,
+    height: 620,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  try {
+    const liveLabel = `${label}, live`;
+    const loadsAtStart = await openVariant(
+      client,
+      variantUrl(canvasUrl, {
+        collapsed: 0,
+        view: "layered",
+        ...placement,
+        wco: "none",
+        dock: "right",
+        surface: "epic",
+        account: 1,
+      }),
+      liveLabel,
+      SHELL_READY,
+      pageLoads,
+    );
+    if (placement.view === "activity") {
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      // The picture's first agent waits on a reply, so the live one does too.
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setIndicators({}, ${JSON.stringify({ "fixture-agent-plan": { ...NO_INDICATOR, pendingInterview: true } })})`,
+      );
+    }
+    await settle(client, 400);
+    const live = await evaluate(
+      client,
+      SHELL_STRUCTURE_PROBE("[data-layout-column]", null),
+    );
+    for (const part of ["strip", "panel", "content"]) {
+      const a = pictured[part];
+      const b = live[part];
+      if ((a === null) !== (b === null)) {
+        violations.push(
+          `${label}: the ${part} is ${a === null ? "missing from the picture" : "drawn in the picture"} but ${b === null ? "absent" : "present"} live`,
+        );
+        continue;
+      }
+      if (a === null) continue;
+      for (const key of ["x", "y", "width"]) {
+        if (Math.abs(a[key] - b[key]) > 1)
+          violations.push(
+            `${label}: the ${part}'s ${key} is ${a[key].toFixed(1)} in the picture, ${b[key].toFixed(1)} live`,
+          );
+      }
+    }
+    if (pictured.joined !== live.joined)
+      violations.push(
+        `${label}: the picture ${pictured.joined ? "joins" : "does not join"} the active task to its panel, the live strip ${live.joined ? "does" : "does not"}`,
+      );
+    if (pictured.liveAgents !== live.liveAgents)
+      violations.push(
+        `${label}: the picture ${pictured.liveAgents ? "lists" : "does not list"} live agents in the strip, the live strip ${live.liveAgents ? "does" : "does not"}`,
+      );
+    // Row anatomy, not only presence: a waiting root (its chip, no time), a
+    // nested agent (one indent step, its time) and a second root, alike.
+    if (pictured.agentRows.length !== live.agentRows.length) {
+      violations.push(
+        `${label}: the picture lists ${String(pictured.agentRows.length)} live agents, the live strip ${String(live.agentRows.length)}`,
+      );
+    } else {
+      for (const [index, a] of pictured.agentRows.entries()) {
+        const b = live.agentRows[index];
+        const row = `live agent ${String(index + 1)}`;
+        if (Math.abs(a.indent - b.indent) > 0.5)
+          violations.push(
+            `${label}: ${row} is indented ${String(a.indent)}px in the picture, ${String(b.indent)}px live`,
+          );
+        if (a.chip !== b.chip)
+          violations.push(
+            `${label}: ${row} carries chip ${String(a.chip)} in the picture, ${String(b.chip)} live`,
+          );
+        if (a.time !== b.time)
+          violations.push(
+            `${label}: ${row} ${a.time ? "shows" : "has no"} idle time in the picture, live it ${b.time ? "does" : "does not"}`,
+          );
+        for (const key of ["x", "height"]) {
+          if (Math.abs(a.box[key] - b.box[key]) > 1)
+            violations.push(
+              `${label}: ${row}'s ${key} is ${a.box[key].toFixed(1)} in the picture, ${b.box[key].toFixed(1)} live`,
+            );
+        }
+      }
+    }
+    notes.push(
+      `${label}: matches live - strip ${live.strip === null ? "none" : boxText(live.strip)}, panel ${boxText(live.panel)}, content ${boxText(live.content)}, joined ${String(live.joined)}, live agents ${String(live.liveAgents)}${live.agentRows.map((row) => ` [x ${row.box.x.toFixed(1)} indent ${String(row.indent)} ${row.chip ?? (row.time ? "time" : "-")}]`).join("")}`,
+    );
+    assertNoReloadSince(pageLoads, loadsAtStart, liveLabel, violations);
+  } finally {
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 1500,
+      height: 1200,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+  }
 }
 
 // --- phase 2b: the side placements (A9 generalised, A11, A12, A13) ----------
 
-/** The strip's own numbers (side-strip-tokens.ts, S-18, S-20), restated so a drift is a failure. */
-const SIDE_STRIP_RAIL_WIDTH = 56;
+/** The strip's own numbers (side-strip-tokens.ts, D4, S-20), restated so a drift is a failure. */
+const SIDE_STRIP_RAIL_WIDTH = 60;
 const SIDE_STRIP_DEFAULT_WIDTH = 240;
 /** `env(titlebar-area-x, 82px)`: the fallback the fixture's `.wco` stands on (6.4). */
 const WCO_LEADING_INSET_FALLBACK = 82;
@@ -801,19 +1030,21 @@ const WCO_LEADING_INSET_FALLBACK = 82;
 const LEFT_DOCK_COLUMN_GUTTER = 12;
 /** The band floor: `max(env(titlebar-area-height, 0px), 40px)` (6.3). */
 const TITLE_BAND_HEIGHT = 40;
-/** S-35 and S-17: the leading tile and the status badge on it. */
+/** S-35: the expanded row's leading tile and the status badge on it. */
 const SIDE_TAB_LEADING_TILE = 16;
 const SIDE_TAB_BADGE = 10;
-const SIDE_TAB_TILE = 32;
+/** D4 and D5: the rail tile, its monogram chip, and the badge disc on the tile. */
+const SIDE_TAB_TILE_WIDTH = 40;
+const SIDE_TAB_TILE_HEIGHT = 44;
+const SIDE_TAB_MONOGRAM_CHIP = { width: 26, height: 22 };
+const SIDE_TAB_RAIL_BADGE = 14;
+/** `--shell-gap`: the ground between the window edge, the strip and every sheet (D1). */
+const SHELL_GAP = 6;
 /**
- * How far apart a tile's pixel at the ring position and its own fill have to
- * be, as a WCAG contrast ratio, to count as a ring at all: a missing ring
- * samples the fill twice and reads 1.00. The inactive control must stay under
- * it, so the probe is seen to tell a ring from none.
+ * How far apart two fills have to be, as a WCAG contrast ratio, to count as
+ * two fills at all: the same fill sampled twice reads 1.00.
  */
-const RING_PRESENT_FLOOR = 1.2;
-/** WCAG 1.4.11: what the active ring, a non-text state indicator, owes its fill in each theme. */
-const NON_TEXT_CONTRAST = 3;
+const FILL_DIFFERS_FLOOR = 1.05;
 /** A pixel is the session fill when every channel is this close to the painted token. */
 const SOLID_FILL_TOLERANCE = 12;
 
@@ -876,7 +1107,7 @@ const SIDE_VARIANTS = [
     label: "rail left",
     query: { tabs: "left", collapsed: 1, wco: "none", dock: "right" },
     session: false,
-    checks: ["rail", "ringLegibility"],
+    checks: ["rail", "tileFill"],
   },
   {
     label: "rail left, macOS",
@@ -1047,7 +1278,7 @@ const SIDE_CHECKS = {
   besideInspector: checkBesideInspector,
   dockLeftInset: checkDockLeftInset,
   rail: checkRail,
-  ringLegibility: checkRingLegibility,
+  tileFill: checkTileFill,
   rowKit: checkRowKit,
 };
 
@@ -1282,10 +1513,11 @@ async function checkStripHits(client, variant) {
 }
 
 /**
- * A13 and the surface's tuck (S-04, 6.2, 6.3, review-09 M1): the band's
+ * A13 and the surface frame's inset (S-04, 6.2, 6.3, D1): the band's
  * presence and height, the strip's top against the band's bottom, the 40px
- * title row where the strip owns the title bar, the -1px pull-up only while a
- * band is displayed, and where a dialog overlay starts under `.wco`.
+ * title row where the strip owns the title bar, the frame one shell gap in
+ * from the band or the window top in every case (the sheets replaced the -1px
+ * tuck of review-09 M1), and where a dialog overlay starts under `.wco`.
  */
 async function checkTitleBand(client, variant, base) {
   const violations = [];
@@ -1357,10 +1589,9 @@ async function checkTitleBand(client, variant, base) {
       }
     }
   }
-  const pullUp = shown ? "-1px" : "0px";
-  if (band.surfaceMarginTop !== pullUp) {
+  if (band.surfaceMarginTop !== `${String(SHELL_GAP)}px`) {
     violations.push(
-      `the surface frame's margin-top is ${String(band.surfaceMarginTop)}, expected ${pullUp}: the 1px tuck applies only while a band is displayed (review-09 M1; class "${String(band.surfaceClass)}")`,
+      `the surface frame's margin-top is ${String(band.surfaceMarginTop)}, expected the ${String(SHELL_GAP)}px shell gap under the band or the window top (D1; class "${String(band.surfaceClass)}")`,
     );
   }
   if (variant.query.wco === "mac" && variant.query.tabs === "left") {
@@ -1471,9 +1702,11 @@ async function checkDockLeftInset(client) {
 }
 
 /**
- * A12: the collapsed rail is 56px (never under the 82px inset on macOS with the
- * strip at the left), and each monogram tile is a centred 32px square with its
- * letters actually drawn: ink inside the tile that is not the tile's fill.
+ * A12 and D4: the collapsed rail is 60px (never under the 82px inset on macOS
+ * with the strip at the left, D15), and each monogram tile is a centred 40x44
+ * tile holding a 26x22 chip with its letters actually drawn (ink inside the
+ * chip that is not the chip's fill) over the meter's row, which every tile
+ * mounts so the monogram never moves.
  */
 async function checkRail(client, variant, base) {
   const violations = [];
@@ -1492,25 +1725,36 @@ async function checkRail(client, variant, base) {
       : base.strip.width < floor - 0.5
   ) {
     violations.push(
-      `the rail is ${base.strip.width.toFixed(1)}px wide, expected ${exact ? "" : "at least "}${String(floor)}px (S-18)`,
+      `the rail is ${base.strip.width.toFixed(1)}px wide, expected ${exact ? "" : "at least "}${String(floor)}px (D4, D15)`,
     );
   }
   const tiles = await evaluate(
     client,
     `(() => [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"][data-tile-kind="monogram"]')].map((tile) => {
-      const r = tile.getBoundingClientRect();
-      return { text: (tile.textContent ?? "").trim(), rect: { x: r.x, y: r.y, width: r.width, height: r.height } };
+      const box = (node) => {
+        if (node === null) return null;
+        const r = node.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      };
+      const chip = tile.querySelector('[data-testid="side-tab-monogram-chip"]');
+      const meter = tile.querySelector('[data-testid="side-tab-meter"]');
+      return {
+        text: (chip?.textContent ?? "").trim(),
+        rect: box(tile),
+        chip: box(chip),
+        meter: box(meter),
+      };
     }))()`,
   );
   if (tiles.length === 0) violations.push("no monogram tile in the rail");
   const stripCentre = base.strip.x + base.strip.width / 2;
   for (const tile of tiles) {
     if (
-      Math.abs(tile.rect.width - SIDE_TAB_TILE) > 0.5 ||
-      Math.abs(tile.rect.height - SIDE_TAB_TILE) > 0.5
+      Math.abs(tile.rect.width - SIDE_TAB_TILE_WIDTH) > 0.5 ||
+      Math.abs(tile.rect.height - SIDE_TAB_TILE_HEIGHT) > 0.5
     ) {
       violations.push(
-        `the "${tile.text}" tile is ${tile.rect.width.toFixed(1)}x${tile.rect.height.toFixed(1)}, expected ${String(SIDE_TAB_TILE)}px square (S-17)`,
+        `the "${tile.text}" tile is ${tile.rect.width.toFixed(1)}x${tile.rect.height.toFixed(1)}, expected ${String(SIDE_TAB_TILE_WIDTH)}x${String(SIDE_TAB_TILE_HEIGHT)} (D4)`,
       );
     }
     const tileCentre = tile.rect.x + tile.rect.width / 2;
@@ -1519,14 +1763,35 @@ async function checkRail(client, variant, base) {
         `the "${tile.text}" tile is centred at x=${tileCentre.toFixed(1)}, the rail at x=${stripCentre.toFixed(1)}`,
       );
     }
+    if (tile.chip === null) {
+      violations.push(`the "${tile.text}" tile draws no monogram chip`);
+      continue;
+    }
+    if (
+      Math.abs(tile.chip.width - SIDE_TAB_MONOGRAM_CHIP.width) > 0.5 ||
+      Math.abs(tile.chip.height - SIDE_TAB_MONOGRAM_CHIP.height) > 0.5
+    ) {
+      violations.push(
+        `the "${tile.text}" chip is ${tile.chip.width.toFixed(1)}x${tile.chip.height.toFixed(1)}, expected ${String(SIDE_TAB_MONOGRAM_CHIP.width)}x${String(SIDE_TAB_MONOGRAM_CHIP.height)}`,
+      );
+    }
+    if (tile.meter === null) {
+      violations.push(
+        `the "${tile.text}" tile mounts no meter, so its monogram moves when one arrives`,
+      );
+    } else if (tile.meter.y < tile.chip.y + tile.chip.height - 0.5) {
+      violations.push(
+        `the "${tile.text}" meter starts at y=${tile.meter.y.toFixed(1)}, inside the chip ending at y=${(tile.chip.y + tile.chip.height).toFixed(1)}`,
+      );
+    }
     if (tile.text.length === 0) {
       violations.push(
         `a monogram tile at ${boxText(tile.rect)} has no letters`,
       );
       continue;
     }
-    // Ink: pixels in the tile's middle that differ from the fill beside them.
-    const ink = await inkInside(client, tile.rect);
+    // Ink: pixels in the chip's middle that differ from the fill beside them.
+    const ink = await inkInside(client, tile.chip);
     if (ink < 4) {
       violations.push(
         `the "${tile.text}" monogram paints ${String(ink)} ink pixels, so its letters are not drawn`,
@@ -1540,19 +1805,20 @@ async function checkRail(client, variant, base) {
 }
 
 /**
- * The collapsed tile's active ring on TINTED tiles, in both themes (review-10
- * H1, S-36): the orange `Delta` tile is made the active one through the tabs
- * store (the fixture has no epic routes for a click's navigation to land on),
- * and the ring's pixel is compared with the same pixel before the tile was
- * active, which is what the tile paints there with no ring. An inactive tinted tile is sampled
- * the same way as the control, so the probe is seen to read 1.00 where no ring
- * is drawn.
+ * The rail tile's two fills in both themes (D4, D11), replacing the tinted
+ * tile's active ring, which the tile no longer draws: the tint lives on the
+ * chip (`data-tint` is `tab` for a coloured tab, `auto` for a task without
+ * one), and the ACTIVE tile paints its own fill around the chip. Delta (a tab
+ * colour) and Epsilon (none, so its own hue) are read inactive and then active,
+ * at the tile's rim, beside the chip.
  */
-async function checkRingLegibility(client) {
+async function checkTileFill(client) {
   const violations = [];
   const notes = [];
   try {
-    await measureRingLegibility(client, violations, notes);
+    for (const theme of ["light", "dark"]) {
+      await measureTileFill(client, theme, violations, notes);
+    }
   } finally {
     // The theme is persisted, so the next variant's document would boot in
     // the last one set here; every variant starts from the shipped "system".
@@ -1561,84 +1827,96 @@ async function checkRingLegibility(client) {
   return { violations, notes };
 }
 
-async function measureRingLegibility(client, violations, notes) {
-  for (const theme of ["light", "dark"]) {
-    await evaluate(
+const TILES_BY_MONOGRAM_PROBE = `(() => {
+  const tiles = [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"][data-tile-kind="monogram"]')];
+  const box = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  return Object.fromEntries(tiles.map((tile) => {
+    const chip = tile.querySelector('[data-testid="side-tab-monogram-chip"]');
+    return [(chip?.textContent ?? "").trim(), {
+      rect: box(tile),
+      chip: chip === null ? null : box(chip),
+      tint: tile.getAttribute("data-tint"),
+      active: tile.getAttribute("data-active"),
+    }];
+  }));
+})()`;
+
+async function measureTileFill(client, theme, violations, notes) {
+  await evaluate(
+    client,
+    `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+  );
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  await evaluate(
+    client,
+    'window.__layoutCanvasProbe.activateEpicTab("fixture-zeta")',
+  );
+  await moveTo(client, 1, 1);
+  await flush(client);
+  await delay(200);
+  const cases = [
+    { monogram: "DM", epicId: "fixture-delta", tint: "tab" },
+    { monogram: "EC", epicId: "fixture-epsilon", tint: "auto" },
+  ];
+  const rimOf = (tile) => ({ x: tile.rect.x + 3, y: tile.rect.y + 3 });
+  const resting = await evaluate(client, TILES_BY_MONOGRAM_PROBE);
+  for (const entry of cases) {
+    const tile = resting[entry.monogram];
+    if (tile === undefined || tile.chip === null) {
+      violations.push(`${theme}: no "${entry.monogram}" tile with a chip`);
+      continue;
+    }
+    if (tile.tint !== entry.tint) {
+      violations.push(
+        `${theme}: the "${entry.monogram}" tile is data-tint=${String(tile.tint)}, expected ${entry.tint} (D11)`,
+      );
+    }
+    const rim = rimOf(tile);
+    const inactiveRim = await samplePixelAt(client, rim.x, rim.y);
+    const chipPixel = await samplePixelAt(
       client,
-      `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+      tile.chip.x + 2,
+      tile.chip.y + tile.chip.height / 2,
     );
-    await evaluate(client, "window.__layoutCanvasProbe.reset()");
     await evaluate(
       client,
-      'window.__layoutCanvasProbe.activateEpicTab("fixture-epsilon")',
+      `window.__layoutCanvasProbe.activateEpicTab(${JSON.stringify(entry.epicId)})`,
+    );
+    await flush(client);
+    await delay(200);
+    const active = (await evaluate(client, TILES_BY_MONOGRAM_PROBE))[
+      entry.monogram
+    ];
+    const activeRim = await samplePixelAt(client, rim.x, rim.y);
+    const fillRatio = contrastRatio(inactiveRim, activeRim);
+    const chipRatio = contrastRatio(chipPixel, inactiveRim);
+    notes.push(
+      `${theme}: "${entry.monogram}" (${String(tile.tint)}) rim rgb(${String(inactiveRim)}) -> active rgb(${String(activeRim)}) = ${fillRatio.toFixed(2)}:1; chip rgb(${String(chipPixel)}) against the rim ${chipRatio.toFixed(2)}:1`,
+    );
+    if (active?.active !== "true") {
+      violations.push(
+        `${theme}: "${entry.monogram}" is data-active=${String(active?.active)} after activating it`,
+      );
+    }
+    if (fillRatio < FILL_DIFFERS_FLOOR) {
+      violations.push(
+        `${theme}: the active "${entry.monogram}" tile paints the same rim as at rest (${fillRatio.toFixed(2)}:1), so nothing marks it active`,
+      );
+    }
+    if (chipRatio < FILL_DIFFERS_FLOOR) {
+      violations.push(
+        `${theme}: the "${entry.monogram}" chip paints its tile's own fill (${chipRatio.toFixed(2)}:1), so its tint is not drawn`,
+      );
+    }
+    await evaluate(
+      client,
+      'window.__layoutCanvasProbe.activateEpicTab("fixture-zeta")',
     );
     await flush(client);
     await delay(150);
-    const tilesProbe = `(() => {
-      const tiles = [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"][data-tinted="true"]')];
-      const pick = (text) => tiles.find((node) => (node.textContent ?? "").trim() === text) ?? null;
-      const box = (node) => {
-        if (node === null) return null;
-        const r = node.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height, active: node.getAttribute("data-active") };
-      };
-      return { delta: box(pick("DM")), alpha: box(pick("AR")) };
-    })()`;
-    // The ring's position on the tile's leading edge, halfway down, and the
-    // same pixel with no ring: what the tile paints there while inactive.
-    const edgeOf = (box) => ({ x: box.x + 1, y: box.y + box.height / 2 });
-    const resting = await evaluate(client, tilesProbe);
-    if (resting.delta === null || resting.alpha === null) {
-      violations.push(
-        `${theme}: the tinted Delta ("DM") and Alpha ("AR") tiles are not both in the rail`,
-      );
-      continue;
-    }
-    const deltaEdge = edgeOf(resting.delta);
-    const withoutRing = await samplePixelAt(client, deltaEdge.x, deltaEdge.y);
-    await evaluate(
-      client,
-      'window.__layoutCanvasProbe.activateEpicTab("fixture-delta")',
-    );
-    await moveTo(client, 1, 1);
-    await flush(client);
-    await delay(250);
-    await flush(client);
-    const tiles = await evaluate(client, tilesProbe);
-    if (tiles.delta.active !== "true" || tiles.alpha.active === "true") {
-      violations.push(
-        `${theme}: Delta is data-active=${String(tiles.delta.active)} and Alpha data-active=${String(tiles.alpha.active)}, expected only Delta active`,
-      );
-      continue;
-    }
-    const ring = await samplePixelAt(client, deltaEdge.x, deltaEdge.y);
-    const active = {
-      ring,
-      fill: withoutRing,
-      ratio: contrastRatio(ring, withoutRing),
-    };
-    // The control: an inactive tinted tile's edge against its own interior.
-    const alphaEdge = edgeOf(tiles.alpha);
-    const alphaRim = await samplePixelAt(client, alphaEdge.x, alphaEdge.y);
-    const alphaFill = await samplePixelAt(client, alphaEdge.x + 4, alphaEdge.y);
-    const control = { ratio: contrastRatio(alphaRim, alphaFill) };
-    notes.push(
-      `${theme}: active tinted ring rgb(${String(active.ring)}) where the inactive tile paints rgb(${String(active.fill)}) = ${active.ratio.toFixed(2)}:1; inactive tinted tile edge ${control.ratio.toFixed(2)}:1`,
-    );
-    if (active.ratio < RING_PRESENT_FLOOR) {
-      violations.push(
-        `${theme}: the active ring on a tinted tile reads ${active.ratio.toFixed(2)}:1 against the tile's own fill, which is no ring (S-36)`,
-      );
-    } else if (active.ratio < NON_TEXT_CONTRAST) {
-      violations.push(
-        `${theme}: the active ring on a tinted tile is ${active.ratio.toFixed(2)}:1 against its fill, under the ${String(NON_TEXT_CONTRAST)}:1 a non-text indicator owes`,
-      );
-    }
-    if (control.ratio >= RING_PRESENT_FLOOR) {
-      violations.push(
-        `${theme}: an INACTIVE tinted tile reads ${control.ratio.toFixed(2)}:1 at the ring position, so the probe cannot tell a ring from none`,
-      );
-    }
   }
 }
 
@@ -1666,6 +1944,7 @@ async function checkRowKit(client) {
       };
       const badge = strip.querySelector('[data-side-tab="expanded"] [data-testid="side-tab-leading"] [data-testid="side-tab-rail-badge"]');
       const tile = badge === null ? null : badge.closest('[data-testid="side-tab-leading"]').querySelector('[data-testid="side-tab-leading-tile"]');
+      const title = badge === null ? null : badge.closest('[data-side-tab]').querySelector('[data-testid="side-tab-title"]');
       const lines = [...strip.querySelectorAll('[data-testid="side-tab-group-line"]')].map((line) => ({
         rect: rect(line),
         color: getComputedStyle(line).backgroundColor,
@@ -1675,6 +1954,7 @@ async function checkRowKit(client) {
         scroller: scroller === null ? null : rect(scroller),
         badge: badge === null ? null : { rect: rect(badge), kind: badge.getAttribute("data-kind"), color: getComputedStyle(badge).backgroundColor },
         tile: tile === null ? null : rect(tile),
+        title: title === null ? null : rect(title),
         lines,
       };
     })()`,
@@ -1705,14 +1985,30 @@ async function checkRowKit(client) {
     }
     const badgeCx = kit.badge.rect.x + kit.badge.rect.width / 2;
     const badgeCy = kit.badge.rect.y + kit.badge.rect.height / 2;
-    const cornerX = kit.tile.x + kit.tile.width;
-    const cornerY = kit.tile.y;
-    if (
-      Math.abs(badgeCx - cornerX) > SIDE_TAB_BADGE / 2 ||
-      Math.abs(badgeCy - cornerY) > SIDE_TAB_BADGE / 2
+    // A8: the badge sits in the space reserved beside the tile, level with its
+    // top, so it never covers the monogram and its 2px ring never reaches the
+    // title.
+    const tileRight = kit.tile.x + kit.tile.width;
+    if (kit.badge.rect.x < tileRight - 0.5) {
+      violations.push(
+        `the badge starts at x=${kit.badge.rect.x.toFixed(1)}, over the leading tile that ends at x=${tileRight.toFixed(1)}, so it covers the monogram`,
+      );
+    }
+    if (Math.abs(kit.badge.rect.y - (kit.tile.y - 2)) > 0.5) {
+      violations.push(
+        `the badge's top is at y=${kit.badge.rect.y.toFixed(1)}, not 2px above the tile's top at y=${kit.tile.y.toFixed(1)}`,
+      );
+    }
+    if (kit.title === null) {
+      violations.push(
+        "the badged row has no title to measure the badge against",
+      );
+    } else if (
+      kit.badge.rect.x + kit.badge.rect.width + 2 >
+      kit.title.x + 0.5
     ) {
       violations.push(
-        `the badge is centred at (${badgeCx.toFixed(1)}, ${badgeCy.toFixed(1)}), not at the tile's top-right corner (${cornerX.toFixed(1)}, ${cornerY.toFixed(1)})`,
+        `the badge's ring ends at x=${(kit.badge.rect.x + kit.badge.rect.width + 2).toFixed(1)}, past the title's start at x=${kit.title.x.toFixed(1)}`,
       );
     }
     if (kit.scroller !== null && kit.badge.rect.y - 2 < kit.scroller.y - 0.5) {
@@ -2372,10 +2668,1672 @@ function translateY(transform) {
   return Number(match[1] ?? match[2]);
 }
 
+// --- the sheet shell: sheets, the joined tab, the rail, overlays, Activity, placement ---
+
+/** The box the frame's margin and the sheets live in (`AppColumnFrame`). */
+const SURFACE_FRAME = "[data-layout-column] main > div";
+
+const SHELL_READY =
+  "window.__layoutCanvasProbe?.ready === true && document.querySelector('[data-shell-sheet]') !== null";
+
+/** Where the shell phases keep their screenshots, when the run asks for them. */
+const SHOTS_DIR = process.env.LAYOUT_EDITOR_BROWSER_SHOTS ?? null;
+
+/** The waiting pulse's ring spread (`side-strip-waiting-pulse` in index.css). */
+const WAITING_PULSE_SPREAD = 8;
+
+/** A 16px square around each corner, compared with the top-left one mirrored. */
+const CORNER_REGION = 16;
+const CORNER_MEAN_CEILING = 2;
+
+const NO_INDICATOR = {
+  unreadFailure: false,
+  pendingFork: false,
+  pendingApproval: false,
+  pendingInterview: false,
+  unreadDone: false,
+};
+
+/** One badge per kind, and meters from one pip to "+N" (the rail expectations below). */
+const RAIL_INDICATORS = {
+  "fixture-alpha": { ...NO_INDICATOR, pendingApproval: true },
+  "fixture-beta": { ...NO_INDICATOR, pendingInterview: true },
+  "fixture-gamma": { ...NO_INDICATOR, unreadDone: true },
+};
+
+const RAIL_ACTIVITY = {
+  "fixture-alpha": { working: ["a1"], turn: ["a1"] },
+  "fixture-zeta": {
+    working: ["z1", "z2", "z3", "z4", "z5"],
+    turn: ["z1", "z2"],
+  },
+  "fixture-epsilon": {
+    working: [
+      "fixture-agent-plan",
+      "fixture-agent-tests",
+      "fixture-agent-index",
+    ],
+    turn: ["fixture-agent-plan", "fixture-agent-tests"],
+  },
+};
+
+/**
+ * What each tile draws from those: the meter holds four pips at most, the
+ * attention pip included and never cut, and the rest is "+N". Delta's failure
+ * is the seed's local notification.
+ */
+const RAIL_EXPECTED = {
+  AR: { badge: "approval", pips: 2, more: null },
+  BR: { badge: "reply", pips: 1, more: null },
+  GN: { badge: "unread", pips: 1, more: null },
+  DM: { badge: "failed", pips: 1, more: null },
+  EC: { badge: null, pips: 3, more: null },
+  ZS: { badge: null, pips: 4, more: "+1" },
+};
+
+async function saveShot(client, name) {
+  if (SHOTS_DIR === null) return;
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: false,
+  });
+  await mkdir(SHOTS_DIR, { recursive: true });
+  await writeFile(
+    path.join(SHOTS_DIR, `${name}.png`),
+    Buffer.from(shot.data, "base64"),
+  );
+}
+
+/** A region's pixels as a flat rgb array, decoded in the page. */
+async function regionPixels(client, x, y, width, height) {
+  await ensurePixelTools(client);
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    clip: { x, y, width, height, scale: 1 },
+    captureBeyondViewport: false,
+  });
+  return await evaluate(
+    client,
+    `window.__regionPixels(${JSON.stringify(shot.data)})`,
+  );
+}
+
+function sameRgb(left, right, tolerance) {
+  if (left === null || right === null) return false;
+  return left.every(
+    (channel, index) => Math.abs(channel - right[index]) <= tolerance,
+  );
+}
+
+function rgbText(rgb) {
+  return rgb === null ? "null" : `rgb(${rgb.join(",")})`;
+}
+
+async function settle(client, ms) {
+  await flush(client);
+  await delay(ms);
+  await flush(client);
+}
+
+async function openShellVariant(client, pageUrl, pageLoads, query, label) {
+  const loadsAtStart = await openVariant(
+    client,
+    variantUrl(pageUrl, query),
+    label,
+    SHELL_READY,
+    pageLoads,
+  );
+  await evaluate(client, INSTALL_PIXEL_TOOLS);
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  await moveTo(client, 1, 1);
+  await settle(client, 350);
+  return loadsAtStart;
+}
+
+async function closeShellVariant(
+  client,
+  pageLoads,
+  loadsAtStart,
+  label,
+  violations,
+) {
+  const errors = await evaluate(client, "window.__layoutCanvasErrors");
+  if (errors.length > 0) {
+    violations.push(
+      `${label}: the fixture raised ${String(errors.length)} uncaught error(s):\n${errors.join("\n")}`,
+    );
+  }
+  assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
+}
+
+/** Runs each variant, catching a stall as that variant's violation, then asserts the phase. */
+async function runShellPhase(title, variants, run, summary) {
+  const violations = [];
+  const notes = [];
+  for (const variant of variants) {
+    try {
+      await run(variant, violations, notes);
+    } catch (error) {
+      violations.push(
+        `${variant.label}: stopped: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  console.log(`\n--- ${title} ---`);
+  for (const note of notes) console.log(`  ${note}`);
+  assert.deepEqual(
+    violations,
+    [],
+    `The ${title} phase failed (${String(violations.length)}):\n${violations.map((line) => `  - ${line}`).join("\n")}`,
+  );
+  console.log(`${title} passed: ${summary}`);
+}
+
+// --- sheets: the ground, four drawn corners, no pseudo arc, the handles in the gaps ---
+
+const SHEET_VARIANTS = [
+  {
+    label: "left, sidebar left",
+    query: { tabs: "left", wco: "none", sidebar: "left" },
+  },
+  {
+    label: "right, sidebar right",
+    query: { tabs: "right", wco: "none", sidebar: "right" },
+  },
+  {
+    label: "left, macOS, sidebar right",
+    query: { tabs: "left", wco: "mac", sidebar: "right" },
+  },
+  {
+    label: "right, macOS, sidebar left",
+    query: { tabs: "right", wco: "mac", sidebar: "left" },
+  },
+  {
+    label: "top, sidebar left",
+    query: { tabs: "top", wco: "none", sidebar: "left" },
+  },
+];
+
+const SHEETS_PROBE = `(() => {
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  };
+  const frame = document.querySelector(${JSON.stringify(SURFACE_FRAME)});
+  const pseudo = (node) => [getComputedStyle(node, "::before").content, getComputedStyle(node, "::after").content];
+  const sheets = [...document.querySelectorAll("[data-shell-sheet]")].map((node) => ({
+    id: node.getAttribute("data-shell-sheet"),
+    rect: box(node),
+    border: getComputedStyle(node).borderTopWidth,
+    radius: getComputedStyle(node).borderTopLeftRadius,
+    pseudo: pseudo(node),
+  }));
+  return {
+    frame: box(frame),
+    frameMargin: getComputedStyle(frame).margin,
+    framePseudo: pseudo(frame),
+    sheets,
+    strip: box(document.querySelector('[data-testid="side-tab-strip"]')),
+    stripHandle: box(document.querySelector('[data-testid="side-tab-strip-resize-handle"]')),
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+  };
+})()`;
+
+const HIT_PROBE = (x, y, selector) =>
+  `document.elementFromPoint(${String(x)}, ${String(y)})?.closest(${JSON.stringify(selector)}) != null`;
+
+async function runSheetsPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "sheets",
+    SHEET_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `sheets ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        { ...variant.query, collapsed: 0, dock: "right", surface: "epic" },
+        label,
+      );
+      for (const theme of ["light", "dark"]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+        );
+        await settle(client, 250);
+        await checkSheets(
+          client,
+          variant,
+          `${label}, ${theme}`,
+          violations,
+          notes,
+        );
+        await saveShot(
+          client,
+          `sheets-${variant.query.tabs}-${variant.query.wco}-${variant.query.sidebar}-${theme}`,
+        );
+      }
+      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    `${String(SHEET_VARIANTS.length)} windows in both themes - the 6px ground on every side and between the sheets, every sheet's four corners drawn alike, no pseudo-element arc on the frame or a sheet, and the width handles as the hit in both gaps`,
+  );
+}
+
+async function checkSheets(client, variant, label, violations, notes) {
+  const probe = await evaluate(client, SHEETS_PROBE);
+  const ground = await resolveRgb(client, "var(--shell-ground)");
+  const fail = (line) => violations.push(`${label}: ${line}`);
+  if (probe.frameMargin !== `${String(SHELL_GAP)}px`)
+    fail(
+      `the surface frame's margin is ${probe.frameMargin}, not the ${String(SHELL_GAP)}px shell gap`,
+    );
+  if (probe.framePseudo.some((content) => content !== "none"))
+    fail(
+      `the surface frame still draws a pseudo-element (${probe.framePseudo.join(", ")}): the old beside-edge arc`,
+    );
+  const panel = probe.sheets.find((sheet) => sheet.id === "panel");
+  const content = probe.sheets.find((sheet) => sheet.id === "content");
+  if (panel === undefined || content === undefined) {
+    fail(
+      `expected a panel and a content sheet, found ${probe.sheets.map((sheet) => sheet.id).join(", ")}`,
+    );
+    return;
+  }
+  const means = [];
+  for (const sheet of probe.sheets) {
+    if (sheet.border !== "1px")
+      fail(`the ${sheet.id} sheet's border is ${sheet.border}`);
+    if (!(Number.parseFloat(sheet.radius) > 0))
+      fail(`the ${sheet.id} sheet has no radius`);
+    if (sheet.pseudo.some((value) => value !== "none"))
+      fail(
+        `the ${sheet.id} sheet draws a pseudo-element (${sheet.pseudo.join(", ")})`,
+      );
+    for (const [corner, mean] of await cornerAsymmetry(client, sheet.rect)) {
+      means.push(`${sheet.id}/${corner} ${mean.toFixed(2)}`);
+      if (mean >= CORNER_MEAN_CEILING)
+        fail(
+          `the ${sheet.id} sheet's ${corner} corner differs from its top-left one mirrored (mean ${mean.toFixed(2)} per channel): a clipped or overdrawn arc`,
+        );
+    }
+  }
+  // The ground: between the sheets, over the content sheet, and at the far edge.
+  const [left, right] =
+    panel.rect.x < content.rect.x
+      ? [panel.rect, content.rect]
+      : [content.rect, panel.rect];
+  const gapX = (left.x + left.width + right.x) / 2;
+  const midY = content.rect.y + content.rect.height * 0.75;
+  const spots = {
+    "between the sheets": [gapX, midY],
+    "above the content sheet": [
+      content.rect.cx,
+      content.rect.y - SHELL_GAP / 2,
+    ],
+    "below the content sheet": [
+      content.rect.cx,
+      content.rect.y + content.rect.height + SHELL_GAP / 2,
+    ],
+  };
+  if (probe.strip === null || probe.strip.x > probe.frame.x) {
+    spots["at the window's left edge"] = [probe.frame.x - SHELL_GAP / 2, midY];
+  }
+  if (probe.strip === null || probe.strip.x < probe.frame.x) {
+    spots["at the window's right edge"] = [
+      probe.frame.x + probe.frame.width + SHELL_GAP / 2,
+      midY,
+    ];
+  }
+  for (const [where, [x, y]] of Object.entries(spots)) {
+    const pixel = await samplePixelAt(client, x, y);
+    if (!sameRgb(pixel, ground, 2))
+      fail(
+        `the ground is not showing ${where} (${x.toFixed(0)}, ${y.toFixed(0)}): ${rgbText(pixel)}, ground ${rgbText(ground)}`,
+      );
+  }
+  // The handles are the hit in the gaps they sit in.
+  if (
+    !(await evaluate(
+      client,
+      HIT_PROBE(gapX, midY, '[data-testid="epic-sidebar-resize-handle"]'),
+    ))
+  )
+    fail(
+      `the gap between the sheets at x=${gapX.toFixed(1)} is not the panel's width handle`,
+    );
+  if (probe.strip !== null) {
+    const stripGapX =
+      probe.strip.x < probe.frame.x
+        ? probe.strip.x + probe.strip.width + SHELL_GAP / 2
+        : probe.strip.x - SHELL_GAP / 2;
+    if (
+      !(await evaluate(
+        client,
+        HIT_PROBE(
+          stripGapX,
+          midY,
+          '[data-testid="side-tab-strip-resize-handle"]',
+        ),
+      ))
+    )
+      fail(
+        `the gap between the strip and the frame at x=${stripGapX.toFixed(1)} is not the strip's width handle`,
+      );
+  }
+  notes.push(
+    `${label}: ground ${rgbText(ground)}, corners ${means.join(", ")}`,
+  );
+}
+
+/**
+ * Each corner's 16px square against the top-left one mirrored onto it, as a
+ * mean per channel: an arc clipped on one side, or overdrawn, breaks the
+ * symmetry (the wave-1 check, and the bug a strip's neighbour corner had).
+ */
+async function cornerAsymmetry(client, rect) {
+  const size = CORNER_REGION;
+  const x = Math.round(rect.x) - 3;
+  const y = Math.round(rect.y) - 3;
+  const right = Math.round(rect.x + rect.width) + 3 - size;
+  const bottom = Math.round(rect.y + rect.height) + 3 - size;
+  const topLeft = await regionPixels(client, x, y, size, size);
+  const at = (pixels, i, j) =>
+    pixels.slice((j * size + i) * 3, (j * size + i) * 3 + 3);
+  const out = [];
+  for (const [corner, cx, cy, flipX, flipY] of [
+    ["top-right", right, y, true, false],
+    ["bottom-left", x, bottom, false, true],
+    ["bottom-right", right, bottom, true, true],
+  ]) {
+    const pixels = await regionPixels(client, cx, cy, size, size);
+    let total = 0;
+    for (let j = 0; j < size; j += 1) {
+      for (let i = 0; i < size; i += 1) {
+        const a = at(topLeft, i, j);
+        const b = at(
+          pixels,
+          flipX ? size - 1 - i : i,
+          flipY ? size - 1 - j : j,
+        );
+        for (let k = 0; k < 3; k += 1) total += Math.abs(a[k] - b[k]);
+      }
+    }
+    out.push([corner, total / (size * size * 3)]);
+  }
+  return out;
+}
+
+// --- the joined tab (D3) and its four T05 risks ---
+
+const JOIN_VARIANTS = [
+  {
+    label: "left, sidebar left",
+    query: { tabs: "left", sidebar: "left", surface: "epic" },
+    joins: "left",
+  },
+  {
+    label: "right, sidebar right",
+    query: { tabs: "right", sidebar: "right", surface: "epic" },
+    joins: "right",
+  },
+  {
+    label: "left, sidebar right",
+    query: { tabs: "left", sidebar: "right", surface: "epic" },
+    joins: null,
+  },
+  {
+    label: "left, sidebar left, a route surface",
+    query: { tabs: "left", sidebar: "left", surface: "sample" },
+    joins: null,
+  },
+];
+
+const JOIN_PROBE = `(() => {
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  };
+  const joined = document.querySelector("[data-side-tab-joined]");
+  const bridge = document.querySelector("[data-side-tab-join-bridge]");
+  const active = document.querySelector('[data-testid="side-tab-strip"] [data-side-tab][data-active="true"]');
+  const list = document.querySelector('[data-testid="side-tab-strip"] [data-strip-axis="y"]');
+  return {
+    joined: joined === null ? null : { edge: joined.getAttribute("data-side-tab-joined"), rect: box(joined), text: joined.textContent.trim() },
+    bridge: bridge === null || getComputedStyle(bridge).display === "none" ? null : box(bridge),
+    active: box(active),
+    list: box(list),
+    panel: box(document.querySelector('[data-shell-sheet="panel"]')),
+    strip: box(document.querySelector('[data-testid="side-tab-strip"]')),
+    handle: box(document.querySelector('[data-testid="side-tab-strip-resize-handle"]')),
+  };
+})()`;
+
+async function runJoinPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "joined tab",
+    JOIN_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `join ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        { ...variant.query, collapsed: 0, wco: "none", dock: "right" },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      const ground = await resolveRgb(client, "var(--shell-ground)");
+      if (variant.joins === null) {
+        const probe = await evaluate(client, JOIN_PROBE);
+        if (probe.joined !== null)
+          fail(
+            `a row is joined (${probe.joined.edge}) where the predicate does not hold`,
+          );
+        if (probe.bridge !== null)
+          fail(
+            `the bridge paints at ${boxText(probe.bridge)} with nothing joined`,
+          );
+        say(
+          `nothing joined, bridge ${probe.bridge === null ? "hidden" : "shown"}`,
+        );
+      } else {
+        await checkJoinPaint(client, variant, "expanded", ground, fail, say);
+        await checkJoinOverHandle(client, variant, fail, say);
+        await checkJoinScrolledOut(client, variant, ground, fail, say);
+        await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(true)");
+        await settle(client, 400);
+        await checkJoinPaint(client, variant, "collapsed", ground, fail, say);
+        await evaluate(
+          client,
+          "window.__layoutCanvasProbe.setCollapsed(false)",
+        );
+        await settle(client, 400);
+        await checkJoinAfterReorder(client, variant, fail, say);
+      }
+      await saveShot(
+        client,
+        `join-${variant.query.tabs}-${variant.query.sidebar}-${variant.query.surface}`,
+      );
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "the active row and tile take the panel's fill and run it across the gap over the sheet's border on both edges, the ground stays past its concave corners, nothing joins on the far side or over a route, and the bridge holds over the resize handle, after a reorder settles, and gives way while its row is scrolled part out",
+  );
+}
+
+/** J1-J3: the row, the bridge over the gap and the sheet's border, and the ground past the corner. */
+async function checkJoinPaint(client, variant, state, ground, fail, say) {
+  const probe = await evaluate(client, JOIN_PROBE);
+  if (probe.joined === null) {
+    fail(`${state}: no row or tile is joined`);
+    return;
+  }
+  if (probe.joined.edge !== variant.joins)
+    fail(
+      `${state}: the joined row is open to the ${probe.joined.edge}, expected ${variant.joins}`,
+    );
+  if (probe.bridge === null) {
+    fail(`${state}: the bridge is not painting`);
+    return;
+  }
+  const row = probe.joined.rect;
+  const panel = probe.panel;
+  const fill = await samplePixelAt(
+    client,
+    panel.cx,
+    panel.y + panel.height * 0.75,
+  );
+  const onLeft = variant.joins === "left";
+  const rowEnd = onLeft ? row.x + row.width - 2 : row.x + 2;
+  const gapX = onLeft
+    ? (probe.strip.x + probe.strip.width + panel.x) / 2
+    : (panel.x + panel.width + probe.strip.x) / 2;
+  const borderX = onLeft ? panel.x + 0.5 : panel.x + panel.width - 0.5;
+  const spots = {
+    "the row's sheet-side end": [rowEnd, row.cy],
+    "the gap": [gapX, row.cy],
+    "the sheet's border": [borderX, row.cy],
+  };
+  for (const [where, [x, y]] of Object.entries(spots)) {
+    const pixel = await samplePixelAt(client, x, y);
+    if (!sameRgb(pixel, fill, 3))
+      fail(
+        `${state}: ${where} at (${x.toFixed(1)}, ${y.toFixed(0)}) is ${rgbText(pixel)}, not the panel's fill ${rgbText(fill)}`,
+      );
+  }
+  // Past the concave corners the gap is ground again.
+  for (const y of [row.y - 10, row.y + row.height + 10]) {
+    const pixel = await samplePixelAt(client, gapX, y);
+    if (!sameRgb(pixel, ground, 2))
+      fail(
+        `${state}: the gap ${y < row.y ? "above" : "below"} the join (y=${y.toFixed(0)}) is ${rgbText(pixel)}, not the ground ${rgbText(ground)}`,
+      );
+  }
+  if (
+    Math.abs(probe.bridge.y - row.y) > 0.5 ||
+    Math.abs(probe.bridge.height - row.height) > 0.5
+  )
+    fail(
+      `${state}: the bridge ${boxText(probe.bridge)} is not level with its row ${boxText(row)}`,
+    );
+  say(
+    `${state}: "${probe.joined.text}" joined ${probe.joined.edge}, fill ${rgbText(fill)} across the gap and the border, bridge ${boxText(probe.bridge)}`,
+  );
+}
+
+/** The handle's hover line is drawn under the bridge, and the handle still takes the pointer there. */
+async function checkJoinOverHandle(client, variant, fail, say) {
+  const before = await evaluate(client, JOIN_PROBE);
+  const row = before.joined.rect;
+  const x = before.handle.cx;
+  const fill = await samplePixelAt(
+    client,
+    before.panel.cx,
+    before.panel.y + before.panel.height * 0.75,
+  );
+  await moveTo(client, x, row.cy);
+  await settle(client, 400);
+  const hovered = await evaluate(
+    client,
+    `document.querySelector('[data-testid="side-tab-strip-resize-handle"]').matches(":hover")`,
+  );
+  const pixel = await samplePixelAt(client, x, row.cy);
+  await saveShot(client, `join-handle-${variant.joins}`);
+  await moveTo(client, 1, 1);
+  await settle(client, 200);
+  if (!hovered)
+    fail("the resize handle is not the hit where the bridge crosses it");
+  if (!sameRgb(pixel, fill, 3))
+    fail(
+      `the hovered handle's line cuts the joined band at x=${x.toFixed(1)}: ${rgbText(pixel)}, fill ${rgbText(fill)}`,
+    );
+  say(`handle hovered under the bridge: ${rgbText(pixel)}`);
+}
+
+/** A row part out of the list is a plain active row, so the bridge never paints over the chrome around the list. */
+async function checkJoinScrolledOut(client, variant, ground, fail, say) {
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: 1500,
+    height: 340,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  try {
+    await settle(client, 300);
+    const overflow = await evaluate(
+      client,
+      `(() => { const list = document.querySelector('[data-testid="side-tab-strip"] [data-strip-axis="y"]'); return list.scrollHeight - list.clientHeight; })()`,
+    );
+    if (overflow < 40) {
+      fail(
+        `the row list does not overflow at 340px (${String(overflow)}px), so the scrolled-out case is not measured`,
+      );
+      return;
+    }
+    // Half of the active row past the list's bottom edge, beside the foot.
+    await evaluate(
+      client,
+      `(() => {
+      const list = document.querySelector('[data-testid="side-tab-strip"] [data-strip-axis="y"]');
+      const row = document.querySelector('[data-testid="side-tab-strip"] [data-side-tab][data-active="true"]');
+      const r = row.getBoundingClientRect();
+      const l = list.getBoundingClientRect();
+      list.scrollTop += r.y + r.height / 2 - (l.y + l.height);
+    })()`,
+    );
+    await settle(client, 300);
+    const cut = await evaluate(client, JOIN_PROBE);
+    await saveShot(client, `join-scrolled-out-${variant.joins}`);
+    if (cut.joined !== null)
+      fail(
+        `a row cut by the list's edge is still joined (row ${boxText(cut.joined.rect)}, list ${boxText(cut.list)})`,
+      );
+    if (cut.bridge !== null)
+      fail(
+        `the bridge paints at ${boxText(cut.bridge)} for a row cut by the list's edge`,
+      );
+    const gapX =
+      variant.joins === "left"
+        ? (cut.strip.x + cut.strip.width + cut.panel.x) / 2
+        : (cut.panel.x + cut.panel.width + cut.strip.x) / 2;
+    const listBottom = cut.list.y + cut.list.height;
+    const cutRow = await evaluate(
+      client,
+      `(() => { const r = document.querySelector('[data-testid="side-tab-strip"] [data-side-tab][data-active="true"]').getBoundingClientRect(); return { y: r.y, bottom: r.y + r.height }; })()`,
+    );
+    if (!(cutRow.y < listBottom && cutRow.bottom > listBottom))
+      fail(
+        `the active row [${cutRow.y.toFixed(0)}, ${cutRow.bottom.toFixed(0)}] is not cut by the list's bottom edge at ${listBottom.toFixed(0)}`,
+      );
+    for (const [where, y] of [
+      ["beside the row's visible half", listBottom - 4],
+      ["beside the foot", listBottom + 4],
+    ]) {
+      const pixel = await samplePixelAt(client, gapX, y);
+      if (!sameRgb(pixel, ground, 2))
+        fail(
+          `the gap ${where} (y=${y.toFixed(0)}) is ${rgbText(pixel)}, not the ground ${rgbText(ground)}`,
+        );
+    }
+    await evaluate(
+      client,
+      `document.querySelector('[data-testid="side-tab-strip"] [data-side-tab][data-active="true"]').scrollIntoView({ block: "nearest" })`,
+    );
+    await settle(client, 300);
+    const back = await evaluate(client, JOIN_PROBE);
+    if (back.joined === null || back.bridge === null)
+      fail("the row did not join again once wholly back in the list");
+    say(
+      `list overflow ${String(overflow)}px: joined while cut ${String(cut.joined !== null)}, joined once back in view ${String(back.joined !== null)}`,
+    );
+  } finally {
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 1500,
+      height: 1200,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await settle(client, 300);
+  }
+}
+
+/** The bridge is level with its row once a reorder that moved it has settled. */
+async function checkJoinAfterReorder(client, variant, fail, say) {
+  const epsilon = await rowRect(client, "epic:fixture-epsilon");
+  const delta = await rowRect(client, "epic:fixture-delta");
+  await pressAt(client, epsilon.cx, epsilon.cy);
+  await moveInSteps(
+    client,
+    { x: epsilon.cx, y: epsilon.cy },
+    { x: epsilon.cx, y: delta.cy - 8 },
+  );
+  await delay(250);
+  await releaseAt(client, epsilon.cx, delta.cy - 8);
+  await settle(client, 900);
+  const probe = await evaluate(client, JOIN_PROBE);
+  const moved = await rowRect(client, "epic:fixture-epsilon");
+  if (moved.y >= epsilon.y - 1)
+    fail(
+      `the reorder did not move Epsilon (${epsilon.y.toFixed(0)} -> ${moved.y.toFixed(0)})`,
+    );
+  if (probe.joined === null || probe.bridge === null) {
+    fail("after the reorder nothing is joined");
+    return;
+  }
+  if (
+    Math.abs(probe.bridge.y - probe.joined.rect.y) > 0.5 ||
+    Math.abs(probe.bridge.height - probe.joined.rect.height) > 0.5
+  )
+    fail(
+      `after the reorder settled the bridge ${boxText(probe.bridge)} is not level with its row ${boxText(probe.joined.rect)}`,
+    );
+  await saveShot(client, `join-after-reorder-${variant.joins}`);
+  say(
+    `reorder: Epsilon ${epsilon.y.toFixed(0)} -> ${moved.y.toFixed(0)}, bridge ${boxText(probe.bridge)}`,
+  );
+}
+
+// --- the rail: 60px, the meter, the badge per state; the pulse unclipped ---
+
+async function runRailPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "rail",
+    [
+      { label: "left", query: { tabs: "left" } },
+      { label: "right", query: { tabs: "right" } },
+    ],
+    async (variant, violations, notes) => {
+      const label = `rail ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        // The panel on the far side, so no tile is joined.
+        {
+          ...variant.query,
+          collapsed: 1,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          sidebar: variant.query.tabs === "left" ? "right" : "left",
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setIndicators(${JSON.stringify(RAIL_INDICATORS)}, {})`,
+      );
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      await settle(client, 1400);
+      await checkRailTiles(client, fail, say);
+      await saveShot(client, `rail-${variant.label}`);
+      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
+      await settle(client, 400);
+      await checkPulseUnclipped(client, variant, fail, say);
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "a 60px rail on both edges, every tile's meter (pips, the attention pip, \"+N\") and its badge by kind in a 14px disc at the top-right, and the waiting pulse painted past the last row at the list's scrolled edge",
+  );
+}
+
+const RAIL_TILES_PROBE = `(() => {
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  const strip = document.querySelector('[data-testid="side-tab-strip"]');
+  const tiles = [...strip.querySelectorAll('[data-side-tab="collapsed"][data-tile-kind="monogram"]')];
+  return {
+    strip: box(strip),
+    tiles: Object.fromEntries(tiles.map((tile) => {
+      const badge = tile.querySelector('[data-testid="side-tab-rail-badge"]');
+      const more = tile.querySelector('[data-testid="side-tab-meter-more"]');
+      return [(tile.querySelector('[data-testid="side-tab-monogram-chip"]')?.textContent ?? "").trim(), {
+        rect: box(tile),
+        badge: badge === null ? null : { kind: badge.getAttribute("data-kind"), rect: box(badge), radius: getComputedStyle(badge).borderTopLeftRadius },
+        pips: tile.querySelectorAll("[data-pip]").length,
+        more: more === null ? null : more.textContent.trim(),
+      }];
+    })),
+  };
+})()`;
+
+async function checkRailTiles(client, fail, say) {
+  const probe = await evaluate(client, RAIL_TILES_PROBE);
+  if (Math.abs(probe.strip.width - SIDE_STRIP_RAIL_WIDTH) > 0.5)
+    fail(
+      `the rail is ${probe.strip.width.toFixed(1)}px wide, not ${String(SIDE_STRIP_RAIL_WIDTH)}`,
+    );
+  for (const [monogram, expected] of Object.entries(RAIL_EXPECTED)) {
+    const tile = probe.tiles[monogram];
+    if (tile === undefined) {
+      fail(
+        `no ${monogram} tile in the rail (tiles: ${Object.keys(probe.tiles).join(", ")})`,
+      );
+      continue;
+    }
+    if (tile.pips !== expected.pips)
+      fail(
+        `${monogram}: ${String(tile.pips)} pips, expected ${String(expected.pips)}`,
+      );
+    if (tile.more !== expected.more)
+      fail(
+        `${monogram}: overflow "${String(tile.more)}", expected "${String(expected.more)}"`,
+      );
+    const kind = tile.badge?.kind ?? null;
+    if (kind !== expected.badge)
+      fail(
+        `${monogram}: badge ${String(kind)}, expected ${String(expected.badge)}`,
+      );
+    if (tile.badge !== null) {
+      const b = tile.badge.rect;
+      if (
+        Math.abs(b.width - SIDE_TAB_RAIL_BADGE) > 0.5 ||
+        Math.abs(b.height - SIDE_TAB_RAIL_BADGE) > 0.5
+      )
+        fail(
+          `${monogram}: the badge is ${boxText(b)}, not a ${String(SIDE_TAB_RAIL_BADGE)}px disc`,
+        );
+      if (Number.parseFloat(tile.badge.radius) < SIDE_TAB_RAIL_BADGE / 2)
+        fail(
+          `${monogram}: the badge's radius is ${tile.badge.radius}, so it is not a disc`,
+        );
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      const t = tile.rect;
+      if (cx < t.x + t.width / 2 || cy > t.y + t.height / 2)
+        fail(
+          `${monogram}: the badge ${boxText(b)} is not at the tile's top-right ${boxText(t)}`,
+        );
+    }
+  }
+  say(
+    Object.entries(probe.tiles)
+      .map(
+        ([monogram, tile]) =>
+          `${monogram} ${String(tile.pips)} pip(s)${tile.more === null ? "" : ` ${tile.more}`}${tile.badge === null ? "" : ` ${tile.badge.kind}`}`,
+      )
+      .join("; "),
+  );
+}
+
+/**
+ * The pulse's ring reaches 8px past its row; at the list's bottom edge, with
+ * the list scrolled to its end, the list's own padding has to hold it.
+ */
+async function checkPulseUnclipped(client, variant, fail, say) {
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: 1500,
+    height: 420,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  try {
+    await evaluate(
+      client,
+      `window.__layoutCanvasProbe.setIndicators(${JSON.stringify(RAIL_INDICATORS)}, {})`,
+    );
+    await evaluate(
+      client,
+      `(() => { const list = document.querySelector('[data-testid="side-tab-strip"] [data-strip-axis="y"]'); list.scrollTop = list.scrollHeight; })()`,
+    );
+    await settle(client, 400);
+    const zeta = await rowRect(client, "epic:fixture-zeta");
+    const list = await rectOf(
+      client,
+      '[data-testid="side-tab-strip"] [data-strip-axis="y"]',
+    );
+    const spot = { x: zeta.cx, y: zeta.y + zeta.height + 2 };
+    const quiet = await samplePixelAt(client, spot.x, spot.y);
+    await evaluate(
+      client,
+      `window.__layoutCanvasProbe.setIndicators(${JSON.stringify({ ...RAIL_INDICATORS, "fixture-zeta": { ...NO_INDICATOR, pendingApproval: true } })}, {})`,
+    );
+    // Held a third into its first ring: the spread is past 2px and the colour still shows.
+    const held = await evaluate(
+      client,
+      `(() => {
+      const row = document.querySelector('[data-testid="tab-close-epic-fixture-zeta"]').closest("[data-side-tab]");
+      const rings = row.getAnimations().filter((animation) => animation.animationName === "side-strip-waiting-pulse");
+      for (const ring of rings) { ring.pause(); ring.currentTime = 200; }
+      return rings.length;
+    })()`,
+    );
+    await flush(client);
+    const pulsing = await samplePixelAt(client, spot.x, spot.y);
+    await saveShot(client, `pulse-${variant.label}`);
+    await evaluate(
+      client,
+      `document.querySelector('[data-testid="tab-close-epic-fixture-zeta"]').closest("[data-side-tab]").getAnimations().forEach((animation) => animation.finish())`,
+    );
+    if (held === 0) {
+      fail("Zeta going into waiting started no pulse");
+      return;
+    }
+    const room = list.y + list.height - (zeta.y + zeta.height);
+    if (room < WAITING_PULSE_SPREAD - 0.5)
+      fail(
+        `the last row ends ${room.toFixed(1)}px above the list's clip, less than the pulse's ${String(WAITING_PULSE_SPREAD)}px spread`,
+      );
+    if (sameRgb(quiet, pulsing, 6))
+      fail(
+        `the pulse is not painted 2px below the last row (${rgbText(pulsing)}, quiet ${rgbText(quiet)}): the list clips it`,
+      );
+    say(
+      `pulse below the last row: ${rgbText(quiet)} -> ${rgbText(pulsing)}, ${room.toFixed(1)}px to the list's clip`,
+    );
+  } finally {
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 1500,
+      height: 1200,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await settle(client, 300);
+  }
+}
+
+// --- overlays: the hover card, the user menu and the Inbox drawer, toward the content ---
+
+async function runOverlaysPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "overlays",
+    [
+      { label: "left", edge: "left" },
+      { label: "right", edge: "right" },
+    ],
+    async (variant, violations, notes) => {
+      const label = `overlays ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: variant.edge,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          sidebar: variant.edge,
+          account: 1,
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      const strip = await rectOf(client, '[data-testid="side-tab-strip"]');
+      const frame = await rectOf(client, SURFACE_FRAME);
+      const viewport = await evaluate(
+        client,
+        "({ width: window.innerWidth, height: window.innerHeight })",
+      );
+      // Toward the content from what it is anchored to: the row, the account
+      // row, or (for the drawer) the whole strip column.
+      const placed = (name, box, anchor) => {
+        if (box === null) {
+          fail(`${name} did not open`);
+          return;
+        }
+        const towardContent =
+          variant.edge === "left"
+            ? box.x >= anchor.x + anchor.width - 0.5
+            : box.x + box.width <= anchor.x + 0.5;
+        if (!towardContent)
+          fail(
+            `${name} ${boxText(box)} does not open toward the content from its anchor ${boxText(anchor)}`,
+          );
+        if (
+          box.x < 0 ||
+          box.y < 0 ||
+          box.x + box.width > viewport.width ||
+          box.y + box.height > viewport.height
+        )
+          fail(`${name} ${boxText(box)} leaves the window`);
+        say(`${name} ${boxText(box)}`);
+      };
+
+      const alpha = await rowRect(client, "epic:fixture-alpha");
+      await moveTo(client, alpha.cx, alpha.cy);
+      await settle(client, 1200);
+      placed(
+        "the hover card",
+        await rectOf(client, '[data-testid="side-tab-hover-card"]'),
+        alpha,
+      );
+      await saveShot(client, `overlay-hover-${variant.edge}`);
+      await moveTo(client, frame.cx, frame.cy);
+      await settle(client, 400);
+
+      const trigger = await rectOf(client, '[data-testid="user-menu-trigger"]');
+      await pressAndRelease(client, trigger.cx, trigger.cy, "left");
+      await settle(client, 250);
+      const early = await rectOf(client, '[role="menu"]');
+      await delay(500);
+      const menu = await rectOf(client, '[role="menu"]');
+      if (early !== null && menu === null)
+        fail("the user menu opened and closed again on one click");
+      placed("the user menu", menu, trigger);
+      await saveShot(client, `overlay-menu-${variant.edge}`);
+      await client.send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+      await client.send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+      await settle(client, 300);
+
+      const inbox = await rectOf(client, '[data-testid="side-strip-inbox"]');
+      await pressAndRelease(client, inbox.cx, inbox.cy, "left");
+      await settle(client, 600);
+      const drawer = await rectOf(
+        client,
+        '[data-testid="side-strip-inbox-drawer"]',
+      );
+      placed("the Inbox drawer", drawer, strip);
+      if (drawer !== null) {
+        if (
+          Math.abs(drawer.y - frame.y) > 1 ||
+          Math.abs(drawer.y + drawer.height - (frame.y + frame.height)) > 1
+        )
+          fail(
+            `the Inbox drawer ${boxText(drawer)} is not level with the sheets ${boxText(frame)}`,
+          );
+      }
+      await saveShot(client, `overlay-inbox-${variant.edge}`);
+      await client.send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+      await client.send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+      await settle(client, 300);
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "on both edges the hover card, the user menu (still open 750ms after one click) and the Inbox drawer (level with the sheets) open toward the content and inside the window",
+  );
+}
+
+// --- the Activity view (D9): the live agents under the active row, only while expanded ---
+
+const LIVE_AGENTS_PROBE = `(() => {
+  const slot = document.querySelector('[data-testid="side-strip-live-agents-slot"]');
+  const rows = slot === null ? [] : [...slot.querySelectorAll('[data-testid^="strip-live-agent-fixture-agent-"]')];
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  return {
+    slot: box(slot),
+    rows: rows.map((row) => row.getAttribute("data-testid")),
+    active: box(document.querySelector('[data-testid="side-tab-strip"] [data-side-tab][data-active="true"]')),
+    strip: box(document.querySelector('[data-testid="side-tab-strip"]')),
+    // Where each title's text starts: the task's, then each live agent's.
+    titles: ["Epsilon cleanup", "Plan the migration", "Write the tests", "Rebuild the index"].map((text) => {
+      const strip = document.querySelector('[data-testid="side-tab-strip"]');
+      const walker = document.createTreeWalker(strip, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        if (node.data.trim() !== text) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return range.getBoundingClientRect().x;
+      }
+      return null;
+    }),
+  };
+})()`;
+
+async function runActivityPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "activity",
+    [
+      { label: "left", edge: "left" },
+      { label: "right", edge: "right" },
+    ],
+    async (variant, violations, notes) => {
+      const label = `activity ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: variant.edge,
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          sidebar: variant.edge,
+          view: "activity",
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
+      );
+      await settle(client, 500);
+      const shown = await evaluate(client, LIVE_AGENTS_PROBE);
+      await saveShot(client, `activity-${variant.edge}`);
+      if (shown.rows.length !== 3)
+        fail(
+          `the strip lists ${String(shown.rows.length)} live agents, expected Epsilon's 3`,
+        );
+      // One 16px step (INDENT_PX) per level, the first from the task's title.
+      const [task, plan, tests, index] = shown.titles;
+      const steps = [
+        ["Plan the migration", plan, task, 16],
+        ["Write the tests", tests, task, 32],
+        ["Rebuild the index", index, task, 16],
+      ];
+      for (const [name, x, from, step] of steps) {
+        if (x === null || from === null)
+          fail(`no title text for ${x === null ? name : "the task"}`);
+        else if (Math.abs(x - from - step) > 0.5)
+          fail(
+            `${name}'s title starts ${(x - from).toFixed(1)}px past the task's title, expected ${String(step)}`,
+          );
+      }
+      if (shown.slot !== null && shown.active !== null) {
+        if (shown.slot.y < shown.active.y + shown.active.height - 0.5)
+          fail(
+            `the live agents ${boxText(shown.slot)} are not under the active row ${boxText(shown.active)}`,
+          );
+        if (
+          shown.slot.x < shown.strip.x ||
+          shown.slot.x + shown.slot.width > shown.strip.x + shown.strip.width
+        )
+          fail(
+            `the live agents ${boxText(shown.slot)} leave the strip ${boxText(shown.strip)}`,
+          );
+      }
+      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(true)");
+      await settle(client, 400);
+      const collapsed = await evaluate(client, LIVE_AGENTS_PROBE);
+      if (collapsed.rows.length !== 0)
+        fail(
+          `the collapsed rail still lists ${String(collapsed.rows.length)} live agents`,
+        );
+      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
+      await settle(client, 400);
+      const back = await evaluate(client, LIVE_AGENTS_PROBE);
+      if (back.rows.length !== 3)
+        fail(
+          `expanded again, the strip lists ${String(back.rows.length)} live agents`,
+        );
+      await evaluate(
+        client,
+        'window.__layoutCanvasProbe.setStripView("layered")',
+      );
+      await settle(client, 400);
+      const layered = await evaluate(client, LIVE_AGENTS_PROBE);
+      if (layered.rows.length !== 0)
+        fail(
+          `the Layered view still lists ${String(layered.rows.length)} live agents in the strip`,
+        );
+      notes.push(
+        `${label}: ${String(shown.rows.length)} under the active row at ${shown.slot === null ? "-" : boxText(shown.slot)}, titles at ${shown.titles.map((x) => (x === null ? "-" : x.toFixed(1))).join(" / ")}; collapsed ${String(collapsed.rows.length)}, expanded ${String(back.rows.length)}, layered ${String(layered.rows.length)}`,
+      );
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "on both edges the active task's live agents sit under its row while the strip is expanded in the Activity view, and leave on a collapse or the Layered view",
+  );
+}
+
+// --- the placement bar and the surface drag (D14, T09) ---
+
+const PLACEMENT_PROBE = `(() => {
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  };
+  const bar = document.querySelector("[data-layout-placement-bar]");
+  const aside = document.querySelector('aside[aria-label="Sample sidebar"]');
+  const body = document.querySelector("[data-sample-workspace-body]");
+  return {
+    placement: document.querySelector("[data-tab-strip-placement]")?.getAttribute("data-tab-strip-placement") ?? null,
+    stripEdge: document.querySelector('[data-testid="side-tab-strip"]')?.getAttribute("data-edge") ?? null,
+    strip: box(document.querySelector('[data-testid="side-tab-strip"]')),
+    spacer: box(document.querySelector('[data-testid="side-strip-drag-spacer"]')),
+    ring: box(document.querySelector('[data-layout-selection-ring][data-on="1"]')),
+    bar: bar === null ? null : {
+      surface: bar.getAttribute("data-layout-placement-bar"),
+      rect: box(bar),
+      edges: [...bar.querySelectorAll("[data-placement-edge]")].map((node) => ({ edge: node.getAttribute("data-placement-edge"), checked: node.getAttribute("aria-checked"), rect: box(node) })),
+      views: bar.querySelector('[role="radiogroup"][aria-label="Tabs view"]') !== null,
+    },
+    lit: [...document.querySelectorAll('[data-surface-placement-row][data-lit="1"]')].map((node) => node.getAttribute("data-surface-placement-row")),
+    aside: box(aside),
+    sidebarSide: aside === null || body === null ? null : (aside.getBoundingClientRect().x > body.getBoundingClientRect().x + body.getBoundingClientRect().width / 2 ? "right" : "left"),
+    column: box(document.querySelector("[data-layout-column]")),
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+  };
+})()`;
+
+async function runPlacementPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "placement",
+    [{ label: "left" }],
+    async (variant, violations, notes) => {
+      const label = `placement ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: "left",
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "sample",
+        },
+        label,
+      );
+      await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
+      await settle(client, 600);
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+
+      // The strip: selected by its own space, the bar beside it.
+      let probe = await evaluate(client, PLACEMENT_PROBE);
+      await pressAndRelease(client, probe.spacer.cx, probe.spacer.cy, "left");
+      await settle(client, 600);
+      probe = await evaluate(client, PLACEMENT_PROBE);
+      await saveShot(client, "placement-strip-bar");
+      checkBar(probe, "topBar", ["top", "left", "right"], "left", true, fail);
+      if (
+        probe.bar !== null &&
+        probe.strip !== null &&
+        probe.bar.rect.x < probe.strip.x + probe.strip.width
+      )
+        fail(
+          `the bar ${boxText(probe.bar.rect)} covers the strip ${boxText(probe.strip)} it places`,
+        );
+      if (!probe.lit.includes("topBar"))
+        fail(`the dock's placement row is not lit (${probe.lit.join(", ")})`);
+      say(
+        `strip bar ${probe.bar === null ? "-" : boxText(probe.bar.rect)}, ring ${probe.ring === null ? "-" : boxText(probe.ring)}, lit ${probe.lit.join(", ")}`,
+      );
+
+      // A pictogram writes the edge, and the bar follows the strip.
+      const right = probe.bar?.edges.find((edge) => edge.edge === "right");
+      if (right !== undefined) {
+        await pressAndRelease(client, right.rect.cx, right.rect.cy, "left");
+        await settle(client, 600);
+        probe = await evaluate(client, PLACEMENT_PROBE);
+        await saveShot(client, "placement-strip-right");
+        if (probe.placement !== "right" || probe.stripEdge !== "right")
+          fail(
+            `the right pictogram left the strip at ${String(probe.placement)} (edge ${String(probe.stripEdge)})`,
+          );
+        checkBar(
+          probe,
+          "topBar",
+          ["top", "left", "right"],
+          "right",
+          true,
+          fail,
+        );
+        if (
+          probe.bar !== null &&
+          probe.strip !== null &&
+          probe.bar.rect.x + probe.bar.rect.width > probe.strip.x
+        )
+          fail(
+            `on the right, the bar ${boxText(probe.bar.rect)} covers the strip ${boxText(probe.strip)}`,
+          );
+        say(
+          `pictogram -> ${String(probe.placement)}, bar ${probe.bar === null ? "-" : boxText(probe.bar.rect)}`,
+        );
+      }
+
+      await checkPlacementKeys(client, fail, say);
+      await checkEscapeCancelsDrag(client, fail, say);
+
+      // Dragged by its own space to the left band, then to the top band.
+      for (const edge of ["left", "top"]) {
+        probe = await evaluate(client, PLACEMENT_PROBE);
+        const mid = await dragSurfaceTo(client, probe.spacer, edge);
+        probe = await evaluate(client, PLACEMENT_PROBE);
+        checkDrop(mid, edge, fail);
+        if (probe.placement !== edge)
+          fail(
+            `dropping the strip on the ${edge} band left it at ${String(probe.placement)}`,
+          );
+        say(
+          `strip dragged to ${edge}: zones ${mid.zones.map((zone) => `${zone.edge}${zone.current ? "*" : ""}${zone.over ? "!" : ""}`).join(" ")}, in hand ${String(mid.dragging)} -> ${String(probe.placement)}`,
+        );
+      }
+
+      // The sidebar: back to a side strip first, then selected by its empty space.
+      await evaluate(client, "window.__layoutCanvasProbe.reset()");
+      await evaluate(client, "window.__layoutCanvasProbe.clearSelection()");
+      await settle(client, 500);
+      probe = await evaluate(client, PLACEMENT_PROBE);
+      const asideSpot = {
+        cx: probe.aside.cx,
+        cy: probe.aside.y + probe.aside.height - 24,
+      };
+      await pressAndRelease(client, asideSpot.cx, asideSpot.cy, "left");
+      await settle(client, 600);
+      probe = await evaluate(client, PLACEMENT_PROBE);
+      await saveShot(client, "placement-sidebar-bar");
+      checkBar(probe, "sidebar", ["left", "right"], "left", false, fail);
+      const sidebarRight = probe.bar?.edges.find(
+        (edge) => edge.edge === "right",
+      );
+      if (sidebarRight !== undefined) {
+        await pressAndRelease(
+          client,
+          sidebarRight.rect.cx,
+          sidebarRight.rect.cy,
+          "left",
+        );
+        await settle(client, 600);
+        probe = await evaluate(client, PLACEMENT_PROBE);
+        await saveShot(client, "placement-sidebar-right");
+        if (probe.sidebarSide !== "right")
+          fail(
+            `the right pictogram left the sidebar on the ${String(probe.sidebarSide)}`,
+          );
+        say(
+          `sidebar pictogram -> ${String(probe.sidebarSide)}, bar ${probe.bar === null ? "-" : boxText(probe.bar.rect)}`,
+        );
+      }
+      probe = await evaluate(client, PLACEMENT_PROBE);
+      const back = await dragSurfaceTo(
+        client,
+        { cx: probe.aside.cx, cy: probe.aside.y + probe.aside.height - 24 },
+        "left",
+      );
+      probe = await evaluate(client, PLACEMENT_PROBE);
+      checkDrop(back, "left", fail);
+      if (probe.sidebarSide !== "left")
+        fail(
+          `dropping the sidebar on the left band left it on the ${String(probe.sidebarSide)}`,
+        );
+      say(
+        `sidebar dragged to left: zones ${back.zones.map((zone) => `${zone.edge}${zone.current ? "*" : ""}${zone.over ? "!" : ""}`).join(" ")} -> ${String(probe.sidebarSide)}`,
+      );
+
+      await evaluate(client, "window.__layoutCanvasProbe.endSession()");
+      await settle(client, 400);
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "the strip and the sidebar each selected by their own space, the bar beside them (never over them) with its pictograms checked on the current edge, a pictogram writing the edge, and a drag lighting every zone with the current one marked, lighting the one under the pointer, and writing it on release",
+  );
+}
+
+const KEY_CODES = {
+  Escape: 27,
+  Tab: 9,
+  Home: 36,
+  End: 35,
+  ArrowLeft: 37,
+  ArrowRight: 39,
+};
+
+/**
+ * One real key press, held 60ms as a finger holds it. Radix moves roving
+ * focus on a timer and checks a radio only while an arrow is still down, so
+ * a zero-length press would test a keyboard no one has.
+ */
+async function pressKey(client, key) {
+  const event = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key] };
+  await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...event });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...event });
+}
+
+/** Where focus is, and what each of a radio group's items says about itself. */
+const RADIO_GROUP_PROBE = (groupSelector) => `(() => {
+  const group = document.querySelector(${JSON.stringify(groupSelector)});
+  if (group === null) return null;
+  const items = [...group.querySelectorAll('[role="radio"]')];
+  return {
+    items: items.map((node) => ({ label: node.getAttribute("aria-label") ?? node.textContent, checked: node.getAttribute("aria-checked"), tabIndex: node.tabIndex })),
+    focused: items.findIndex((node) => node === document.activeElement),
+    placement: document.querySelector("[data-tab-strip-placement]")?.getAttribute("data-tab-strip-placement") ?? null,
+  };
+})()`;
+
+/**
+ * The bar's two radio groups by real keys (finding 3): one Tab stop each,
+ * arrows move focus and check the item they land on, Home and End move focus
+ * only. The strip stands on the right when this starts.
+ */
+async function checkPlacementKeys(client, fail, say) {
+  const groups = [
+    {
+      name: "Tabs position",
+      selector:
+        '[data-layout-placement-bar] [role="radiogroup"][aria-label="Tabs position"]',
+    },
+    {
+      name: "Tabs view",
+      selector:
+        '[data-layout-placement-bar] [role="radiogroup"][aria-label="Tabs view"]',
+    },
+  ];
+  for (const group of groups) {
+    const read = () => evaluate(client, RADIO_GROUP_PROBE(group.selector));
+    let state = await read();
+    if (state === null) {
+      fail(`${group.name}: no radio group in the bar`);
+      continue;
+    }
+    await evaluate(
+      client,
+      `document.querySelector(${JSON.stringify(`${group.selector} [role="radio"][aria-checked="true"]`)}).focus()`,
+    );
+    const start = (await read()).focused;
+    const count = state.items.length;
+    const steps = [
+      { key: "ArrowLeft", focus: (start - 1 + count) % count, checks: true },
+      { key: "ArrowRight", focus: start, checks: true },
+      { key: "Home", focus: 0, checks: false },
+      { key: "End", focus: count - 1, checks: false },
+    ];
+    let checked = start;
+    const trail = [];
+    for (const step of steps) {
+      await pressKey(client, step.key);
+      await settle(client, 400);
+      state = await read();
+      if (step.checks) checked = step.focus;
+      const expected = state?.items[step.focus]?.label;
+      if (state === null) {
+        fail(`${group.name}: the group is gone after ${step.key}`);
+        break;
+      }
+      if (state.focused !== step.focus)
+        fail(
+          `${group.name}: ${step.key} left focus on ${state.focused === -1 ? "nothing in the group" : state.items[state.focused].label}, expected ${String(expected)}`,
+        );
+      const nowChecked = state.items.findIndex(
+        (item) => item.checked === "true",
+      );
+      if (nowChecked !== checked)
+        fail(
+          `${group.name}: after ${step.key} ${state.items[nowChecked]?.label ?? "nothing"} is checked, expected ${state.items[checked].label}`,
+        );
+      trail.push(
+        `${step.key}->${state.focused === -1 ? "-" : state.items[state.focused].label}${nowChecked === state.focused ? "*" : ""}`,
+      );
+    }
+    // One Tab stop: Tab from the item in hand leaves the group.
+    await evaluate(
+      client,
+      `document.querySelector(${JSON.stringify(`${group.selector} [role="radio"][aria-checked="true"]`)}).focus()`,
+    );
+    await pressKey(client, "Tab");
+    await settle(client, 200);
+    const tabbed = await read();
+    if (tabbed !== null && tabbed.focused !== -1)
+      fail(
+        `${group.name}: Tab from the checked item landed on ${tabbed.items[tabbed.focused].label}, a second stop in the same group`,
+      );
+    if (
+      group.name === "Tabs position" &&
+      state !== null &&
+      state.placement !== "right"
+    )
+      fail(
+        `${group.name}: the keys left the strip at ${String(state.placement)}, expected back on the right`,
+      );
+    say(`${group.name} keys: ${trail.join(" ")} (* = checked)`);
+  }
+  await evaluate(client, "document.activeElement?.blur()");
+}
+
+/**
+ * Escape while the strip is in hand (finding 1): the zones go at once, the
+ * selection stays (Escape spent itself on the drag), and the release after
+ * writes nothing and records no history.
+ */
+async function checkEscapeCancelsDrag(client, fail, say) {
+  const before = await evaluate(client, PLACEMENT_PROBE);
+  const depth = await evaluate(
+    client,
+    "window.__layoutCanvasProbe.historyDepth()",
+  );
+  const from = before.spacer;
+  await pressAt(client, from.cx, from.cy);
+  const armed = { x: from.cx + 12, y: from.cy + 12 };
+  await moveInSteps(client, { x: from.cx, y: from.cy }, armed);
+  await settle(client, 150);
+  const started = await evaluate(client, DROP_ZONES_PROBE);
+  const zone = started.zones.find((candidate) => candidate.edge === "left");
+  const target = zone === undefined ? armed : { x: zone.cx, y: zone.cy };
+  await moveInSteps(client, armed, target);
+  await settle(client, 150);
+  const mid = await evaluate(client, DROP_ZONES_PROBE);
+  checkDrop(mid, "left", fail);
+  await pressKey(client, "Escape");
+  await settle(client, 200);
+  const cancelled = await evaluate(client, DROP_ZONES_PROBE);
+  await saveShot(client, "placement-drag-escaped");
+  await releaseAt(client, target.x, target.y);
+  await settle(client, 600);
+  const after = await evaluate(client, PLACEMENT_PROBE);
+  const released = await evaluate(client, DROP_ZONES_PROBE);
+  const depthAfter = await evaluate(
+    client,
+    "window.__layoutCanvasProbe.historyDepth()",
+  );
+  if (cancelled.dragging || cancelled.zones.length > 0)
+    fail(
+      `Escape mid-drag left ${String(cancelled.zones.length)} drop zones${cancelled.dragging ? " and the strip in hand" : ""}`,
+    );
+  if (released.dragging || released.zones.length > 0)
+    fail(
+      `the release after Escape left ${String(released.zones.length)} drop zones${released.dragging ? " and the strip in hand" : ""}`,
+    );
+  if (after.placement !== before.placement)
+    fail(
+      `the release after Escape moved the strip from ${String(before.placement)} to ${String(after.placement)}`,
+    );
+  if (depthAfter !== depth)
+    fail(
+      `the release after Escape recorded history (${String(depth)} -> ${String(depthAfter)})`,
+    );
+  if (after.bar === null || after.ring === null)
+    fail(
+      "Escape mid-drag also cleared the selection: it should only put the strip back",
+    );
+  say(
+    `Escape mid-drag: zones ${String(mid.zones.length)} -> ${String(cancelled.zones.length)}, placement ${String(before.placement)} -> ${String(after.placement)}, history ${String(depth)} -> ${String(depthAfter)}, still selected ${String(after.bar !== null)}`,
+  );
+}
+
+function checkBar(probe, surface, edges, current, views, fail) {
+  if (probe.bar === null) {
+    fail(`no placement bar for ${surface}`);
+    return;
+  }
+  if (probe.bar.surface !== surface)
+    fail(`the bar is for ${probe.bar.surface}, expected ${surface}`);
+  const drawn = probe.bar.edges.map((edge) => edge.edge);
+  if (drawn.join(",") !== edges.join(","))
+    fail(
+      `the ${surface} bar offers ${drawn.join(", ")}, expected ${edges.join(", ")}`,
+    );
+  const checked = probe.bar.edges
+    .filter((edge) => edge.checked === "true")
+    .map((edge) => edge.edge);
+  if (checked.join(",") !== current)
+    fail(
+      `the ${surface} bar checks ${checked.join(", ") || "nothing"}, expected ${current}`,
+    );
+  if (probe.bar.views !== views)
+    fail(
+      `the ${surface} bar ${views ? "lacks" : "carries"} the Tabs view pair`,
+    );
+  const r = probe.bar.rect;
+  if (
+    r.x < 0 ||
+    r.y < 0 ||
+    r.x + r.width > probe.viewport.width ||
+    r.y + r.height > probe.viewport.height
+  )
+    fail(`the ${surface} bar ${boxText(r)} leaves the window`);
+  if (probe.ring === null) fail(`no selection ring around the ${surface}`);
+}
+
+function checkDrop(mid, edge, fail) {
+  if (!mid.dragging)
+    fail(`dragging toward ${edge}: the surface in hand is not marked`);
+  const over = mid.zones.filter((zone) => zone.over).map((zone) => zone.edge);
+  if (over.join(",") !== edge)
+    fail(
+      `dragging toward ${edge}: the zone under the pointer is ${over.join(", ") || "none"}`,
+    );
+  if (mid.zones.filter((zone) => zone.current).length !== 1)
+    fail(
+      `dragging toward ${edge}: ${String(mid.zones.filter((zone) => zone.current).length)} zones marked current`,
+    );
+}
+
+const DROP_ZONES_PROBE = `(() => ({
+  dragging: document.querySelector('[data-layout-surface-dragging="1"]') !== null,
+  zones: [...document.querySelectorAll("[data-layout-drop-zone]")].map((node) => {
+    const r = node.getBoundingClientRect();
+    return { edge: node.getAttribute("data-layout-drop-zone"), current: node.getAttribute("data-current") === "1", over: node.getAttribute("data-over") === "1", cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  }),
+}))()`;
+
+/** Press on the surface's own space, pass the activation distance, then into the edge's band. */
+async function dragSurfaceTo(client, from, edge) {
+  await pressAt(client, from.cx, from.cy);
+  const armed = { x: from.cx + 12, y: from.cy + 12 };
+  await moveInSteps(client, { x: from.cx, y: from.cy }, armed);
+  await settle(client, 150);
+  const started = await evaluate(client, DROP_ZONES_PROBE);
+  const zone = started.zones.find((candidate) => candidate.edge === edge);
+  const target = zone === undefined ? armed : { x: zone.cx, y: zone.cy };
+  await moveInSteps(client, armed, target);
+  await settle(client, 150);
+  const mid = await evaluate(client, DROP_ZONES_PROBE);
+  await saveShot(client, `placement-drag-${edge}`);
+  await releaseAt(client, target.x, target.y);
+  await settle(client, 600);
+  return mid;
+}
+
 // --- side placements: shared helpers ---------------------------------------
 
 function selectedPhases() {
-  const all = ["parity", "canvas", "sides", "switch", "strip"];
+  const all = [
+    "parity",
+    "canvas",
+    "sides",
+    "switch",
+    "strip",
+    "sheets",
+    "join",
+    "rail",
+    "overlays",
+    "activity",
+    "placement",
+  ];
   const raw = process.env.LAYOUT_EDITOR_BROWSER_PHASES;
   if (raw === undefined || raw.trim() === "") return new Set(all);
   const picked = raw
@@ -2418,17 +4376,27 @@ async function openVariant(client, url, label, readyExpression, pageLoads) {
     // check's persisted theme is restored and was ruled out. A page that hangs
     // because of what it renders hangs again here and still fails, and a
     // retry is never silent.
-    if (
-      !(error instanceof Error) ||
-      !error.message.startsWith("Timed out sending CDP command")
-    )
-      throw error;
+    //
+    // The same single retry covers a first boot whose module graph never ran
+    // (`#root` still empty at the deadline): the `--force` dev server answers
+    // an import it is still optimizing with a 504 and no reload, which the
+    // next navigation always settles.
+    if (!(error instanceof Error) || !stalledBoot(error.message)) throw error;
     console.error(
       `\n  WARNING ${label}: the page stopped answering CDP (${error.message}); navigating ONCE more. This is the open question in tickets/12; report it with this run's output.\n`,
     );
     await navigateAndSettle(client, url, label, readyExpression, pageLoads);
   }
   return pageLoads.count;
+}
+
+/** A CDP timeout, or a readiness timeout on a document whose module never ran. */
+function stalledBoot(message) {
+  if (message.startsWith("Timed out sending CDP command")) return true;
+  return (
+    message.startsWith("Timed out waiting for") &&
+    message.includes('<div id=\\"root\\"></div>')
+  );
 }
 
 async function navigateAndSettle(
@@ -2638,7 +4606,10 @@ try {
   // report every red rather than the first.
   const runs = [
     ["parity", () => runParityPhase(client, pageUrl, pageLoads)],
-    ["parity", () => runParityPlacementVariants(client, pageUrl, pageLoads)],
+    [
+      "parity",
+      () => runParityPlacementVariants(client, pageUrl, canvasUrl, pageLoads),
+    ],
     ["canvas", () => runCanvasPhase(client, canvasUrl, pageLoads)],
     ["sides", () => runSidePlacementPhase(client, canvasUrl, pageLoads)],
     ["switch", () => runLiveSwitchPhase(client, canvasUrl, pageLoads)],
@@ -2651,6 +4622,12 @@ try {
           pageLoads,
         ),
     ],
+    ["sheets", () => runSheetsPhase(client, canvasUrl, pageLoads)],
+    ["join", () => runJoinPhase(client, canvasUrl, pageLoads)],
+    ["rail", () => runRailPhase(client, canvasUrl, pageLoads)],
+    ["overlays", () => runOverlaysPhase(client, canvasUrl, pageLoads)],
+    ["activity", () => runActivityPhase(client, canvasUrl, pageLoads)],
+    ["placement", () => runPlacementPhase(client, canvasUrl, pageLoads)],
   ];
   const failures = [];
   for (const [phase, run] of runs) {

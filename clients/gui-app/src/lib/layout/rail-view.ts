@@ -8,7 +8,7 @@ import {
   type RailEntry,
 } from "@/lib/layout/rail";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
-import { writeArrangement } from "@/lib/layout/arrangement-gestures";
+import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import type {
   EdgeSide,
   LayoutArrangement,
@@ -138,11 +138,9 @@ export function clearRailVisibilityOverrides(): void {
 
 /**
  * The per-epic sidebar's side (S-06), written from the rail's own "Move
- * sidebar to..." menu item (S-32) through `writeArrangement`
- * (`lib/layout/arrangement-gestures.ts`), the same recorded-gesture writer
- * every other arrangement writer uses.
+ * sidebar to..." menu item (S-32) through `writeArrangementField`, the
+ * surface placements' one writer (D14).
  */
 export function setSidebarSide(side: EdgeSide): void {
-  const arrangement = useLayoutStore.getState().arrangement;
-  writeArrangement({ ...arrangement, sidebarSide: side });
+  writeArrangementField("sidebarSide", side);
 }

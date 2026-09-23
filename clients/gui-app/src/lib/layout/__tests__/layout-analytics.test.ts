@@ -106,13 +106,13 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     expect(properties.layout_mic_shown).toBe("hidden");
     expect(properties.changed_from_default_count).toBe(1);
     // Every other declared key is still present and still "default" - the
-    // event is dense, never sparse (L-55). The fourteen beside the per-setting
+    // event is dense, never sparse (L-55). The fifteen beside the per-setting
     // keys are the built-ins the snapshot carries: the preset, the count, the
     // four placement fields the two bar readings pick (L-156), the tab strip
-    // placement and the sidebar side (S-01, S-06), the minimap side and the
-    // five reorder flags.
+    // placement, the sidebar side (S-01, S-06) and the strip's view (D8), the
+    // minimap side and the five reorder flags.
     expect(Object.keys(properties)).toHaveLength(
-      LAYOUT_SETTING_PROPERTY_KEYS.length + 14,
+      LAYOUT_SETTING_PROPERTY_KEYS.length + 15,
     );
   });
 
@@ -341,6 +341,39 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
     ).toBeNull();
   });
 
+  it("sends a snapshot with each vertical strip view, sanitized intact (D8)", () => {
+    for (const sideStripView of ["layered", "activity"] as const) {
+      const properties = layoutSnapshotProperties({
+        ...DEFAULT_LAYOUT_SNAPSHOT,
+        arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView },
+      });
+
+      expect(properties.layout_side_strip_view).toBe(sideStripView);
+      expect(
+        sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, properties),
+        sideStripView,
+      ).toEqual(properties);
+      expect(
+        Analytics.getInstance().track(
+          AnalyticsEvent.LayoutSnapshot,
+          properties,
+        ),
+        sideStripView,
+      ).toBe(true);
+    }
+  });
+
+  it("drops the whole event on a strip view this build does not know (D8)", () => {
+    const base = layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT);
+
+    expect(
+      sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, {
+        ...base,
+        layout_side_strip_view: "focused",
+      }),
+    ).toBeNull();
+  });
+
   it("sends layout_editor_session, including a session with no first change", () => {
     const summary = layoutEditorSessionChangeSummary(
       DEFAULT_LAYOUT_SNAPSHOT,
@@ -409,6 +442,7 @@ describe("structural parity: LayoutValues cannot drift from the declared propert
       "layout_resource_side",
       "layout_tab_strip_placement",
       "layout_sidebar_side",
+      "layout_side_strip_view",
       "layout_dock_reordered",
       "layout_toolbar_left_reordered",
       "layout_toolbar_right_reordered",

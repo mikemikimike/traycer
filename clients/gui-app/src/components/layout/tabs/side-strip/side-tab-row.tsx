@@ -1,10 +1,14 @@
 import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { useState } from "react";
-import type { ComponentPropsWithRef, CSSProperties, ReactNode } from "react";
+import type {
+  AnimationEvent,
+  ComponentPropsWithRef,
+  CSSProperties,
+  ReactNode,
+} from "react";
 import { X } from "lucide-react";
 import * as m from "motion/react-m";
 import type { MergeSide } from "@/components/epic-canvas/dnd/strip-drag-model";
-import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropLine } from "@/components/ui/drop-line";
@@ -13,31 +17,32 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import { cn } from "@/lib/utils";
 import { SESSION_TAB_LABEL_CLASS } from "../header-tab-visual";
+import { MonogramChip } from "../monogram-chip";
+import {
+  SIDE_TAB_COLORLESS_TILE_CLASS,
+  SIDE_TAB_TINT_FILL_CLASS,
+  type SideTabTile,
+} from "../tab-identity";
+import { SideTabMeter, type SideTabLiveAgents } from "./agent-meter";
 import { SideTabRailBadge } from "./side-tab-rail-badge";
 import type { RailBadgeKind } from "./rail-badge-kind";
 import {
   SIDE_TAB_ACTIVE_CLASS,
-  SIDE_TAB_BADGE_POSITION_CLASS,
-  SIDE_TAB_COLORLESS_TILE_CLASS,
   SIDE_TAB_GROUP_LINE_CLASS,
   SIDE_TAB_GROUP_LINE_SEAT_CLASS,
   SIDE_TAB_HOVER_CLASS,
+  SIDE_TAB_LEADING_BADGE_POSITION_CLASS,
   SIDE_TAB_LEADING_CLASS,
   SIDE_TAB_LEADING_TILE_CLASS,
-  SIDE_TAB_MONOGRAM_CLASS,
+  SIDE_TAB_RAIL_BADGE_POSITION_CLASS,
   SIDE_TAB_ROW_CLASS,
   SIDE_TAB_SESSION_ACTIVE_CLASS,
   SIDE_TAB_TILE_ACTIVE_CLASS,
   SIDE_TAB_TILE_CLASS,
   SIDE_TAB_TILE_HOVER_CLASS,
-  SIDE_TAB_TINT_FILL_CLASS,
   SIDE_TAB_TITLE_CLASS,
   SIDE_TAB_TRAILING_CLASS,
 } from "./side-strip-tokens";
@@ -52,12 +57,6 @@ export interface SideGroupLine {
   readonly color: string;
   readonly seat: SideGroupLineSeat;
 }
-
-/** What a collapsed row's tile shows. */
-export type SideTabTile =
-  | { readonly kind: "icon"; readonly icon: ReactNode }
-  | { readonly kind: "monogram"; readonly text: string }
-  | { readonly kind: "generating" };
 
 export interface SideTabRowClose {
   /** "Close <title>". */
@@ -89,6 +88,11 @@ export interface SideTabRowProps {
   readonly session: "active" | "rest" | null;
   /** The tab colour, `#rrggbb`. */
   readonly tint: string | null;
+  /**
+   * The rail tile's monogram tint when the tab has no colour (D11): a stable
+   * hue from the epic id, or `null` for a tab that is not a task.
+   */
+  readonly autoTint: string | null;
   /** The group line's segment, on a group member. */
   readonly groupLine: SideGroupLine | null;
   /**
@@ -101,15 +105,20 @@ export interface SideTabRowProps {
    * leading slot a custom icon, or a monogram when the tab has a colour.
    */
   readonly tile: SideTabTile;
-  /** The status badge on whichever tile is shown. */
-  readonly badge: RailBadgeKind | null;
   /**
-   * The title. A string is painted as one faded line with `titleText` as its
-   * tooltip; any other node (the rename input) is rendered as given.
+   * The one state that needs the user (D5): the badge on whichever tile is
+   * shown, the meter's attention pip, and what starts the entry pulse.
+   */
+  readonly badge: RailBadgeKind | null;
+  /** The task's live agents, drawn by the meter. */
+  readonly agents: SideTabLiveAgents;
+  /**
+   * The title. A string is painted as one faded line, the hover card carrying
+   * it in full; any other node (the rename input) is rendered as given.
    */
   readonly title: ReactNode;
-  /** The full title for the tooltip and the collapsed hover card. */
-  readonly titleText: string;
+  /** What the hover card shows: the title, the state, the counts and, warm, the agents. */
+  readonly hoverCardBody: ReactNode;
   readonly leaderBadge: ReactNode | null;
   readonly close: SideTabRowClose | null;
   readonly waitingLabel: "Approve" | "Reply" | null;
@@ -132,43 +141,77 @@ function tileTinted(tint: string | null, tile: SideTabTile): tint is string {
   return tint !== null && tile.kind !== "generating";
 }
 
+/** Where a rail tile's monogram tint comes from, if it has one. */
+type TileTint = "tab" | "auto" | "none";
+
+function tileTintOf(props: SideTabRowProps): TileTint {
+  if (props.tile.kind === "generating") return "none";
+  if (props.tint !== null) return "tab";
+  return props.autoTint === null ? "none" : "auto";
+}
+
+/**
+ * Pulses a row or tile twice when its task goes INTO waiting (approval or
+ * reply): only on the transition, never on mount or a re-render, never in a
+ * loop, and not at all while motion is off. The pulse ends with its animation.
+ */
+function useWaitingPulse(badge: RailBadgeKind | null): {
+  readonly pulsing: boolean;
+  readonly onAnimationEnd: (event: AnimationEvent<HTMLDivElement>) => void;
+} {
+  const motionEnabled = useMotionEnabled();
+  const waiting = badge === "approval" || badge === "reply";
+  const [wasWaiting, setWasWaiting] = useState(waiting);
+  const [pulsing, setPulsing] = useState(false);
+  if (waiting !== wasWaiting) {
+    setWasWaiting(waiting);
+    setPulsing(waiting && motionEnabled);
+  }
+  const onAnimationEnd = (event: AnimationEvent<HTMLDivElement>): void => {
+    if (event.animationName === "side-strip-waiting-pulse") setPulsing(false);
+  };
+  return { pulsing, onAnimationEnd };
+}
+
 /**
  * One tab in the vertical strip, as paint only: behaviour arrives through
  * `frame` and the state props. Expanded, the inline order is leading, title,
- * trailing on either strip edge; collapsed, the row is the 32px tile itself.
+ * trailing on either strip edge; collapsed, the row is the 40x44 tile itself.
  */
 export function SideTabRow(props: SideTabRowProps) {
   const { frame } = props;
   const collapsed = props.variant === "collapsed";
   const sessionActive = props.session === "active";
-  const tinted = collapsed && tileTinted(props.tint, props.tile);
+  const tileTint = collapsed ? tileTintOf(props) : "none";
+  const pulse = useWaitingPulse(props.badge);
   return (
     <SideTabRowHoverCard
       allowed={hoverCardAllowed(props)}
-      titleText={props.titleText}
+      body={props.hoverCardBody}
     >
       <div
         {...frame}
         data-side-tab={props.variant}
         data-active={props.active}
         data-tile-kind={collapsed ? props.tile.kind : undefined}
-        data-tinted={collapsed ? tinted : undefined}
+        data-tinted={collapsed ? tileTint !== "none" : undefined}
+        data-tint={collapsed ? tileTint : undefined}
+        data-waiting-pulse={pulse.pulsing ? true : undefined}
+        onAnimationEnd={(event) => {
+          frame.onAnimationEnd?.(event);
+          pulse.onAnimationEnd(event);
+        }}
         className={cn(
           "group/side-tab relative flex items-center outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50",
           collapsed
             ? cn(SIDE_TAB_TILE_CLASS, "shrink-0 justify-center self-center")
             : SIDE_TAB_ROW_CLASS,
           collapsed
-            ? collapsedFill(props, tinted)
+            ? collapsedFill(props)
             : expandedFill(props.active, sessionActive),
           props.dragSource && "opacity-0",
           frame.className,
         )}
-        style={
-          tinted
-            ? ({ "--side-tab-tint": props.tint } as CSSProperties)
-            : undefined
-        }
       >
         {props.groupLine === null ? null : (
           <span
@@ -194,8 +237,17 @@ export function SideTabRow(props: SideTabRowProps) {
         )}
         {collapsed ? (
           <>
-            <TileContent tile={props.tile} />
-            <CornerBadge badge={props.badge} />
+            <MonogramChip
+              tile={props.tile}
+              tint={tileTint === "tab" ? props.tint : props.autoTint}
+              tinted={tileTint !== "none"}
+            />
+            <SideTabMeter
+              agents={props.agents}
+              attention={props.badge}
+              size="tile"
+            />
+            <CornerBadge badge={props.badge} size="tile" />
           </>
         ) : (
           <ExpandedContent {...props} />
@@ -208,12 +260,12 @@ export function SideTabRow(props: SideTabRowProps) {
 }
 
 /**
- * Only a collapsed row has a hover card, and it stays shut on a row a drag is
- * from or over.
+ * Tiles and rows have a hover card; it stays shut while a row is being
+ * renamed, and on a row a drag is from or over.
  */
 function hoverCardAllowed(props: SideTabRowProps): boolean {
   return (
-    props.variant === "collapsed" &&
+    typeof props.title === "string" &&
     !props.dragSource &&
     props.dropIndicator === null &&
     props.pairPreview === null
@@ -275,24 +327,19 @@ function expandedFill(active: boolean, sessionActive: boolean): string {
   );
 }
 
-/** The collapsed tile's fill is its own colour; active and hover are an inset ring on it. */
-function collapsedFill(props: SideTabRowProps, tinted: boolean): string {
-  return cn(
-    collapsedTileFill(props.session === "active", tinted),
-    props.active
-      ? SIDE_TAB_TILE_ACTIVE_CLASS
-      : cn(
-          SIDE_TAB_TILE_HOVER_CLASS,
-          "text-muted-foreground hover:text-foreground",
-        ),
-  );
-}
-
-function collapsedTileFill(sessionActive: boolean, tinted: boolean): string {
-  if (sessionActive) {
+/**
+ * The collapsed tile fills like an expanded row: the active fill, else a hover
+ * fill. The colour lives on the monogram chip inside it.
+ */
+function collapsedFill(props: SideTabRowProps): string {
+  if (props.session === "active") {
     return cn(SIDE_TAB_SESSION_ACTIVE_CLASS, SESSION_TAB_LABEL_CLASS);
   }
-  return tinted ? SIDE_TAB_TINT_FILL_CLASS : SIDE_TAB_COLORLESS_TILE_CLASS;
+  if (props.active) return SIDE_TAB_TILE_ACTIVE_CLASS;
+  return cn(
+    SIDE_TAB_TILE_HOVER_CLASS,
+    "text-muted-foreground hover:text-foreground",
+  );
 }
 
 /**
@@ -319,19 +366,33 @@ function SideSessionMark(props: {
   );
 }
 
-function CornerBadge(props: { readonly badge: RailBadgeKind | null }) {
+function CornerBadge(props: {
+  readonly badge: RailBadgeKind | null;
+  readonly size: "tile" | "leading";
+}) {
   if (props.badge === null) return null;
   return (
-    <span className={cn(SIDE_TAB_BADGE_POSITION_CLASS, "pointer-events-none")}>
-      <SideTabRailBadge kind={props.badge} testId="side-tab-rail-badge" />
+    <span
+      className={cn(
+        props.size === "tile"
+          ? SIDE_TAB_RAIL_BADGE_POSITION_CLASS
+          : SIDE_TAB_LEADING_BADGE_POSITION_CLASS,
+        "pointer-events-none",
+      )}
+    >
+      <SideTabRailBadge
+        kind={props.badge}
+        size={props.size}
+        testId="side-tab-rail-badge"
+      />
     </span>
   );
 }
 
 /**
  * The fixed 16px leading slot: a custom icon, or a coloured tab's monogram, on
- * a 16px tile carrying the status as a corner badge; otherwise the status
- * glyph alone.
+ * a 16px tile with the status as a badge in the space reserved beside it;
+ * otherwise the status glyph alone.
  */
 function LeadingSlot(props: SideTabRowProps) {
   const tile = props.tile;
@@ -378,7 +439,7 @@ function LeadingSlot(props: SideTabRowProps) {
           <span aria-hidden>{tile.text}</span>
         )}
       </span>
-      <CornerBadge badge={props.badge} />
+      <CornerBadge badge={props.badge} size="leading" />
     </span>
   );
 }
@@ -392,14 +453,9 @@ function ExpandedContent(props: SideTabRowProps) {
         className={cn(SIDE_TAB_TITLE_CLASS, "flex min-w-0 flex-1 items-center")}
       >
         {typeof props.title === "string" ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="block min-w-0 flex-1">
-                <span className="header-tab-title-text">{props.title}</span>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{props.titleText}</TooltipContent>
-          </Tooltip>
+          <span className="block min-w-0 flex-1">
+            <span className="header-tab-title-text">{props.title}</span>
+          </span>
         ) : (
           props.title
         )}
@@ -416,6 +472,8 @@ function ExpandedContent(props: SideTabRowProps) {
           leaderBadge={props.leaderBadge}
           close={props.close}
           waitingLabel={props.waitingLabel}
+          badge={props.badge}
+          agents={props.agents}
         />
       </span>
     </>
@@ -424,33 +482,34 @@ function ExpandedContent(props: SideTabRowProps) {
 
 /**
  * First match wins: the leader badge; the close button, always on the active
- * row and on hover or keyboard focus elsewhere; the waiting chip. The chip and
- * a hidden close share one grid cell so revealing the close swaps them in place.
+ * row and on hover or keyboard focus elsewhere; then the status, as the first
+ * of the waiting chip, the failed chip and the meter (more than one live
+ * agent). The status and a hidden close share one grid cell so revealing the
+ * close swaps them in place.
  */
 function TrailingContent(props: {
   readonly active: boolean;
   readonly leaderBadge: ReactNode | null;
   readonly close: SideTabRowClose | null;
   readonly waitingLabel: "Approve" | "Reply" | null;
+  readonly badge: RailBadgeKind | null;
+  readonly agents: SideTabLiveAgents;
 }) {
   if (props.leaderBadge !== null) return props.leaderBadge;
   const close = props.close;
-  const showChip =
-    props.waitingLabel !== null && !(close !== null && props.active);
+  const status = close !== null && props.active ? null : trailingStatus(props);
   return (
     <>
-      {showChip ? (
+      {status === null ? null : (
         <span
           className={cn(
             "col-start-1 row-start-1 flex",
             close !== null && YIELD_TO_CLOSE_CLASS,
           )}
         >
-          <Badge variant="warning" data-testid="side-tab-waiting-chip">
-            {props.waitingLabel}
-          </Badge>
+          {status}
         </span>
-      ) : null}
+      )}
       {close === null ? null : (
         <span
           data-revealed={props.active ? "always" : "on-hover-or-focus"}
@@ -481,37 +540,43 @@ function TrailingContent(props: {
   );
 }
 
-function TileContent(props: { readonly tile: SideTabTile }) {
-  switch (props.tile.kind) {
-    case "icon":
-      return props.tile.icon;
-    case "monogram":
-      return (
-        <span aria-hidden className={SIDE_TAB_MONOGRAM_CLASS}>
-          {props.tile.text}
-        </span>
-      );
-    case "generating":
-      return (
-        <AgentSpinningDots
-          className="size-3.5"
-          testId="side-tab-tile-generating"
-          variant="dots2"
-          tone="muted"
-        />
-      );
+/** The trailing status of an expanded row, or `null` when it has none to show. */
+function trailingStatus(props: {
+  readonly waitingLabel: "Approve" | "Reply" | null;
+  readonly badge: RailBadgeKind | null;
+  readonly agents: SideTabLiveAgents;
+}): ReactNode {
+  if (props.waitingLabel !== null) {
+    return (
+      <Badge variant="warning" data-testid="side-tab-waiting-chip">
+        {props.waitingLabel}
+      </Badge>
+    );
   }
+  if (props.badge === "failed") {
+    return (
+      <Badge variant="destructive" data-testid="side-tab-failed-chip">
+        Failed
+      </Badge>
+    );
+  }
+  if (props.agents.turn + props.agents.background > 1) {
+    return (
+      <SideTabMeter agents={props.agents} attention={props.badge} size="row" />
+    );
+  }
+  return null;
 }
 
 /**
- * The collapsed row's full title, on the side facing the content: left of a
- * right-edge strip, right of a left-edge strip. Always
- * mounted, so switching variants keeps the row element; closed whenever it is
- * not allowed (expanded, or the row is part of a drag).
+ * The row's or tile's hover card, on the side facing the content: left of a
+ * right-edge strip, right of a left-edge strip. Always mounted, so switching
+ * variants keeps the row element; closed whenever it is not allowed (a rename,
+ * or the row is part of a drag). Its body mounts only while it is open.
  */
 function SideTabRowHoverCard(props: {
   readonly allowed: boolean;
-  readonly titleText: string;
+  readonly body: ReactNode;
   readonly children: ReactNode;
 }) {
   const placement = useColumnOverlayPlacement("row");
@@ -523,13 +588,12 @@ function SideTabRowHoverCard(props: {
     >
       <HoverCardTrigger asChild>{props.children}</HoverCardTrigger>
       <HoverCardContent
-        appearance="tooltip"
         side={placement?.side ?? "right"}
         align={placement?.align ?? "center"}
         data-testid="side-tab-hover-card"
-        className="px-3 py-1.5 text-ui-xs"
+        className="w-[min(90vw,18rem)] p-3 text-ui-xs"
       >
-        {props.titleText}
+        {props.body}
       </HoverCardContent>
     </HoverCard>
   );

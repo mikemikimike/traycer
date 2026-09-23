@@ -13,6 +13,7 @@ import {
   withBarHost,
   withBarSide,
   insertRailDivider,
+  liveAgentsInStrip,
   moveCanvasOrderMember,
   movedWithin,
   moveRailEntry,
@@ -20,12 +21,15 @@ import {
   moveRailPanelToEnd,
   removeRailDivider,
   isStackedRailPanel,
+  sideTabJoinsPanel,
   sideTabStripEdge,
   stackRailPanels,
   toggleVerticalTabs,
   unstackRail,
   TOOLBAR_REGION_IDS,
+  type EdgeSide,
   type LayoutArrangement,
+  type SideStripView,
   type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import {
@@ -1415,42 +1419,108 @@ describe("the tab strip's placement and the sidebar's side (S-01, S-02, S-05, S-
     });
   });
 
-  describe("toggleVerticalTabs (S-25)", () => {
-    it("sends top to left, the default vertical side, touching no other field", () => {
-      const arrangement: LayoutArrangement = {
-        ...DEFAULT_ARRANGEMENT,
+  describe("sideTabJoinsPanel (D3)", () => {
+    it.each<{
+      readonly placement: TabStripPlacement;
+      readonly sidebarSide: EdgeSide;
+      readonly activeSurfaceIsEpic: boolean;
+      readonly joins: boolean;
+    }>([
+      {
+        placement: "top",
+        sidebarSide: "left",
+        activeSurfaceIsEpic: true,
+        joins: false,
+      },
+      {
+        placement: "top",
+        sidebarSide: "left",
+        activeSurfaceIsEpic: false,
+        joins: false,
+      },
+      {
+        placement: "top",
         sidebarSide: "right",
-        usageHost: "header",
-      };
+        activeSurfaceIsEpic: true,
+        joins: false,
+      },
+      {
+        placement: "top",
+        sidebarSide: "right",
+        activeSurfaceIsEpic: false,
+        joins: false,
+      },
+      {
+        placement: "left",
+        sidebarSide: "left",
+        activeSurfaceIsEpic: true,
+        joins: true,
+      },
+      {
+        placement: "left",
+        sidebarSide: "left",
+        activeSurfaceIsEpic: false,
+        joins: false,
+      },
+      {
+        placement: "left",
+        sidebarSide: "right",
+        activeSurfaceIsEpic: true,
+        joins: false,
+      },
+      {
+        placement: "left",
+        sidebarSide: "right",
+        activeSurfaceIsEpic: false,
+        joins: false,
+      },
+      {
+        placement: "right",
+        sidebarSide: "right",
+        activeSurfaceIsEpic: true,
+        joins: true,
+      },
+      {
+        placement: "right",
+        sidebarSide: "right",
+        activeSurfaceIsEpic: false,
+        joins: false,
+      },
+      {
+        placement: "right",
+        sidebarSide: "left",
+        activeSurfaceIsEpic: true,
+        joins: false,
+      },
+      {
+        placement: "right",
+        sidebarSide: "left",
+        activeSurfaceIsEpic: false,
+        joins: false,
+      },
+    ])(
+      "placement=$placement sidebarSide=$sidebarSide activeSurfaceIsEpic=$activeSurfaceIsEpic -> $joins",
+      ({ placement, sidebarSide, activeSurfaceIsEpic, joins }) => {
+        expect(
+          sideTabJoinsPanel(placement, sidebarSide, activeSurfaceIsEpic),
+        ).toBe(joins);
+      },
+    );
+  });
 
-      expect(toggleVerticalTabs(arrangement)).toEqual({
-        ...arrangement,
-        tabStripPlacement: "left",
-      });
+  // Finding 8: `toggleVerticalTabs` now maps one placement to another
+  // (`TabStripPlacement -> TabStripPlacement`), not a whole arrangement to
+  // another - every caller reads the CURRENT placement at invocation and
+  // sends the toggled value through `writeArrangementField`, so the "touches
+  // no other field" claim lives at that writer, not in this pure function.
+  describe("toggleVerticalTabs (S-25)", () => {
+    it("sends top to left, the default vertical side", () => {
+      expect(toggleVerticalTabs("top")).toBe("left");
     });
 
-    it("sends either side back to top, touching no other field", () => {
-      const leftArrangement: LayoutArrangement = {
-        ...DEFAULT_ARRANGEMENT,
-        tabStripPlacement: "left",
-        sidebarSide: "right",
-        usageHost: "header",
-      };
-      const rightArrangement: LayoutArrangement = {
-        ...DEFAULT_ARRANGEMENT,
-        tabStripPlacement: "right",
-        sidebarSide: "right",
-        usageHost: "header",
-      };
-
-      expect(toggleVerticalTabs(leftArrangement)).toEqual({
-        ...leftArrangement,
-        tabStripPlacement: "top",
-      });
-      expect(toggleVerticalTabs(rightArrangement)).toEqual({
-        ...rightArrangement,
-        tabStripPlacement: "top",
-      });
+    it("sends either side back to top", () => {
+      expect(toggleVerticalTabs("left")).toBe("top");
+      expect(toggleVerticalTabs("right")).toBe("top");
     });
   });
 
@@ -1516,6 +1586,141 @@ describe("the tab strip's placement and the sidebar's side (S-01, S-02, S-05, S-
 
       expect(arrangement.tabStripPlacement).toBe("right");
       expect(arrangement.sidebarSide).toBe("right");
+    });
+  });
+});
+
+/**
+ * D8: what the vertical strip shows, and D9's predicate for when it lists the
+ * active task's live agents under its row.
+ */
+describe("the vertical strip's view (D8, D9)", () => {
+  it("ships layered", () => {
+    expect(DEFAULT_ARRANGEMENT.sideStripView).toBe("layered");
+  });
+
+  describe("liveAgentsInStrip (D9)", () => {
+    it.each<{
+      readonly placement: TabStripPlacement;
+      readonly stripCollapsed: boolean;
+      readonly view: SideStripView;
+      readonly shown: boolean;
+    }>([
+      {
+        placement: "top",
+        stripCollapsed: false,
+        view: "layered",
+        shown: false,
+      },
+      {
+        placement: "top",
+        stripCollapsed: false,
+        view: "activity",
+        shown: false,
+      },
+      { placement: "top", stripCollapsed: true, view: "layered", shown: false },
+      {
+        placement: "top",
+        stripCollapsed: true,
+        view: "activity",
+        shown: false,
+      },
+      {
+        placement: "left",
+        stripCollapsed: false,
+        view: "layered",
+        shown: false,
+      },
+      {
+        placement: "left",
+        stripCollapsed: false,
+        view: "activity",
+        shown: true,
+      },
+      {
+        placement: "left",
+        stripCollapsed: true,
+        view: "layered",
+        shown: false,
+      },
+      {
+        placement: "left",
+        stripCollapsed: true,
+        view: "activity",
+        shown: false,
+      },
+      {
+        placement: "right",
+        stripCollapsed: false,
+        view: "layered",
+        shown: false,
+      },
+      {
+        placement: "right",
+        stripCollapsed: false,
+        view: "activity",
+        shown: true,
+      },
+      {
+        placement: "right",
+        stripCollapsed: true,
+        view: "layered",
+        shown: false,
+      },
+      {
+        placement: "right",
+        stripCollapsed: true,
+        view: "activity",
+        shown: false,
+      },
+    ])(
+      "placement=$placement stripCollapsed=$stripCollapsed view=$view -> $shown",
+      ({ placement, stripCollapsed, view, shown }) => {
+        expect(liveAgentsInStrip(placement, stripCollapsed, view)).toBe(shown);
+      },
+    );
+  });
+
+  describe("resolvePersistedArrangement", () => {
+    it("falls back to layered on an absent or unreadable value", () => {
+      expect(resolvePersistedArrangement({}).sideStripView).toBe("layered");
+
+      const junkViews: ReadonlyArray<unknown> = [
+        1,
+        "ACTIVITY",
+        null,
+        {},
+        "focused",
+      ];
+      for (const sideStripView of junkViews) {
+        expect(
+          resolvePersistedArrangement({ sideStripView }).sideStripView,
+          JSON.stringify(sideStripView),
+        ).toBe("layered");
+      }
+    });
+
+    it("keeps each valid view verbatim (L-133)", () => {
+      const views: ReadonlyArray<SideStripView> = ["layered", "activity"];
+      for (const sideStripView of views) {
+        expect(
+          resolvePersistedArrangement({ sideStripView }).sideStripView,
+        ).toBe(sideStripView);
+      }
+    });
+
+    it("keeps a stored activity view through a full persisted round trip", () => {
+      const stored: unknown = JSON.parse(
+        JSON.stringify({
+          ...DEFAULT_ARRANGEMENT,
+          tabStripPlacement: "left",
+          sideStripView: "activity",
+        }),
+      );
+
+      const arrangement = resolvePersistedArrangement(stored);
+
+      expect(arrangement.sideStripView).toBe("activity");
     });
   });
 });

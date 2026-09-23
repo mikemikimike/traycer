@@ -138,6 +138,16 @@ export function pointerDragHandleAxisClassName(axis: PointerDragAxis): string {
 }
 
 /**
+ * The line a width handle over the window ground (the side strip's, the epic
+ * panel's) paints while hovered or dragged: 2px of the focus-ring colour down
+ * the handle's centre, which reads on the ground in every theme where
+ * `bg-border` does not. Paint only; the axis class's `after:` hit area is
+ * untouched. A drag holds `:active` from press to release.
+ */
+export const GROUND_RESIZE_HANDLE_LINE_CLASS =
+  "before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-0.5 before:-translate-x-1/2 before:transition-colors before:content-[''] hover:before:bg-ring active:before:bg-ring";
+
+/**
  * In-flow split divider footprint with the original 1px separator painted in
  * its center. The whole 4px pointer region consumes layout space, so the old
  * visual returns without extending an invisible hit target over either

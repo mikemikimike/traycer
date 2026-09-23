@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
 import {
   SidebarSideRow,
+  SideStripViewRow,
   TabStripPositionRow,
 } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
@@ -136,6 +137,114 @@ describe("<TabStripPositionRow />", () => {
   });
 });
 
+describe("<SideStripViewRow /> (D8)", () => {
+  function withVerticalStrip(): void {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      layoutCarryDone: true,
+      arrangement: {
+        ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
+        tabStripPlacement: "left",
+      },
+    });
+  }
+
+  it("draws Layered / Activity over the stored view", () => {
+    render(<SideStripViewRow />);
+
+    const options = Array.from(
+      screen
+        .getByRole("radiogroup", { name: "Tabs view" })
+        .querySelectorAll("[role='radio']"),
+    );
+    expect(options.map((node) => node.textContent)).toEqual([
+      "Layered",
+      "Activity",
+    ]);
+    expect(options.map((node) => node.getAttribute("aria-checked"))).toEqual([
+      "true",
+      "false",
+    ]);
+    expect(screen.getByText("View")).toBeTruthy();
+  });
+
+  it("is disabled with a reason while the tabs are at the top, which is the shipped default", () => {
+    render(<SideStripViewRow />);
+
+    const options = screen
+      .getByRole("radiogroup", { name: "Tabs view" })
+      .querySelectorAll<HTMLButtonElement>("[role='radio']");
+    expect([...options].every((option) => option.disabled)).toBe(true);
+    expect(
+      screen.getByText("Applies when tabs are at the left or right."),
+    ).toBeTruthy();
+  });
+
+  it("is enabled with no status once the tabs move to a vertical strip", () => {
+    withVerticalStrip();
+    render(<SideStripViewRow />);
+
+    const options = screen
+      .getByRole("radiogroup", { name: "Tabs view" })
+      .querySelectorAll<HTMLButtonElement>("[role='radio']");
+    expect([...options].every((option) => option.disabled)).toBe(false);
+    expect(
+      screen.queryByText("Applies when tabs are at the left or right."),
+    ).toBeNull();
+  });
+
+  it("writes the store at rest, with no history", () => {
+    withVerticalStrip();
+    render(<SideStripViewRow />);
+
+    pick("Tabs view", "Activity");
+
+    expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
+      "activity",
+    );
+    expect(historyDepth()).toBe(0);
+  });
+
+  it("is one undo step in a session, and Discard puts it back", () => {
+    withVerticalStrip();
+    beginSession();
+    render(<SideStripViewRow />);
+
+    pick("Tabs view", "Activity");
+    expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
+      "activity",
+    );
+    expect(historyDepth()).toBe(1);
+
+    useLayoutEditorStore.getState().undo();
+    expect(useLayoutStore.getState().arrangement.sideStripView).toBe("layered");
+
+    useLayoutEditorStore.getState().redo();
+    expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
+      "activity",
+    );
+
+    useLayoutEditorStore.getState().discard();
+    expect(useLayoutStore.getState().arrangement.sideStripView).toBe("layered");
+  });
+
+  it("offers a revert only while the view differs from the shipped one", () => {
+    withVerticalStrip();
+    render(<SideStripViewRow />);
+    expect(
+      screen.queryByRole("button", { name: "Revert tabs view" }),
+    ).toBeNull();
+
+    pick("Tabs view", "Activity");
+    fireEvent.click(screen.getByRole("button", { name: "Revert tabs view" }));
+
+    expect(useLayoutStore.getState().arrangement.sideStripView).toBe("layered");
+    expect(
+      screen.queryByRole("button", { name: "Revert tabs view" }),
+    ).toBeNull();
+  });
+});
+
 describe("<SidebarSideRow />", () => {
   it("draws Left / Right over the stored side", () => {
     render(<SidebarSideRow />);
@@ -206,13 +315,16 @@ function indexGroup(label: string): HTMLElement | null {
 }
 
 describe("the dock's index", () => {
-  it("draws Position under Tabs and Side under Sidebar, and neither elsewhere", () => {
+  it("draws Position and View under Tabs and Side under Sidebar, and neither elsewhere", () => {
     render(<InspectorIndex onPreviewPreset={() => {}} />);
 
     const tabs = indexGroup("Tabs");
     const sidebar = indexGroup("Sidebar");
     expect(
       tabs?.querySelector("[role='radiogroup'][aria-label='Tabs position']"),
+    ).not.toBeNull();
+    expect(
+      tabs?.querySelector("[role='radiogroup'][aria-label='Tabs view']"),
     ).not.toBeNull();
     expect(
       sidebar?.querySelector("[role='radiogroup'][aria-label='Sidebar side']"),
@@ -243,12 +355,84 @@ describe("the dock's index", () => {
   });
 });
 
+/**
+ * `LitSurfacePlacementRow` (D14, ticket 09): the dock half of the canvas's
+ * placement bar, lit while its surface is the canvas selection.
+ */
+describe("the dock's placement row lights up with its surface", () => {
+  function litRow(surface: "topBar" | "sidebar"): HTMLElement | null {
+    return document.querySelector(`[data-surface-placement-row="${surface}"]`);
+  }
+
+  it("lights the Tabs row while topBar is selected, and no other row", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+    expect(litRow("topBar")?.hasAttribute("data-lit")).toBe(false);
+
+    act(() => {
+      useLayoutEditorStore.getState().selectSurface("topBar");
+    });
+
+    expect(litRow("topBar")?.getAttribute("data-lit")).toBe("1");
+    expect(litRow("sidebar")?.hasAttribute("data-lit")).toBe(false);
+  });
+
+  it("lights the Sidebar row while sidebar is selected", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+
+    act(() => {
+      useLayoutEditorStore.getState().selectSurface("sidebar");
+    });
+
+    expect(litRow("sidebar")?.getAttribute("data-lit")).toBe("1");
+    expect(litRow("topBar")?.hasAttribute("data-lit")).toBe(false);
+  });
+
+  it("un-lights once the surface is deselected", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+    act(() => {
+      useLayoutEditorStore.getState().selectSurface("topBar");
+    });
+    expect(litRow("topBar")?.getAttribute("data-lit")).toBe("1");
+
+    act(() => {
+      useLayoutEditorStore.getState().popInspectorLevel();
+    });
+
+    expect(litRow("topBar")?.hasAttribute("data-lit")).toBe(false);
+  });
+
+  // Finding 4: unlike the "vertical tabs" filter above, which the Tabs
+  // group's OWN keywords still match, this filter matches nothing about the
+  // Tabs surface at all. The group must still survive - and its placement
+  // row still light and be mountable for `scrollIntoView` - purely because
+  // it is the canvas SELECTION, not because the filter let it through.
+  it("keeps and lights the selected surface's row even under a filter the surface has nothing to do with", () => {
+    render(<InspectorIndex onPreviewPreset={() => {}} />);
+
+    act(() => {
+      useLayoutEditorStore.getState().selectSurface("topBar");
+      useLayoutEditorStore.getState().setFilter("minimap");
+    });
+
+    expect(indexGroup("Tabs")).not.toBeNull();
+    expect(litRow("topBar")?.getAttribute("data-lit")).toBe("1");
+    expect(
+      litRow("topBar")?.querySelector(
+        "[role='radiogroup'][aria-label='Tabs position']",
+      ),
+    ).not.toBeNull();
+    // The unrelated filter still does its job for everything else.
+    expect(indexGroup("Sidebar")).toBeNull();
+  });
+});
+
 describe("in the installed mobile app", () => {
-  it("draws neither row", () => {
+  it("draws none of the three rows (S-39)", () => {
     setMobileApp(true);
     render(
       <>
         <TabStripPositionRow />
+        <SideStripViewRow />
         <SidebarSideRow />
       </>,
     );

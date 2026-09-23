@@ -164,6 +164,9 @@ interface InspectorIndexProps {
 export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   const { onPreviewPreset } = props;
   const filter = useLayoutEditorStore((state) => state.filter);
+  const selectedSurface = useLayoutEditorStore(
+    (state) => state.selectedSurface,
+  );
   const snapshot = useLayoutSnapshot();
   const filterRef = useRef<HTMLInputElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -171,7 +174,9 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
 
   // A group with no region left has no divider left either, so one emptiness
   // test covers both kinds of line. A group whose own placement row matches
-  // stays for that row, with whatever regions still match under it.
+  // stays for that row, with whatever regions still match under it, and so
+  // does the group of the surface selected on the canvas: its placement row
+  // is the dock half of the bar, and has to be there to light (D14).
   const groups = SURFACE_GROUPS.map((group) => ({
     group,
     entries:
@@ -181,6 +186,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   })).filter(
     (entry) =>
       entry.entries.length > 0 ||
+      entry.group.id === selectedSurface ||
       surfacePlacementRowMatchesFilter(entry.group.id, filter),
   );
 
@@ -277,7 +283,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
             <div className="px-3.5 pt-3 pb-1 text-overline text-muted-foreground uppercase">
               {entry.group.label}
             </div>
-            <SurfacePlacementRow surface={entry.group.id} />
+            <LitSurfacePlacementRow surface={entry.group.id} />
             {entry.entries.map((item) => {
               if (item.kind === "divider") {
                 return (
@@ -379,6 +385,36 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+/**
+ * The surface's placement row, lit while that surface is selected on the
+ * canvas (D14) - the dock half of the placement bar, so the row and the bar
+ * read as one control. Brought into view on selection, because the index can
+ * be scrolled far past the Tabs group.
+ */
+function LitSurfacePlacementRow(props: {
+  readonly surface: SurfaceGroupId;
+}): ReactNode {
+  const { surface } = props;
+  const lit = useLayoutEditorStore(
+    (state) => state.selectedSurface === surface,
+  );
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (lit) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [lit]);
+  if (surface !== "topBar" && surface !== "sidebar") return null;
+  return (
+    <div
+      ref={ref}
+      data-surface-placement-row={surface}
+      data-lit={lit ? "1" : undefined}
+      className="data-lit:bg-foreground/5 data-lit:shadow-[inset_2px_0_0_var(--ring)]"
+    >
+      <SurfacePlacementRow surface={surface} />
     </div>
   );
 }

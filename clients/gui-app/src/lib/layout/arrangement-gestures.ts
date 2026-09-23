@@ -22,3 +22,16 @@ export function writeArrangement(arrangement: LayoutArrangement): void {
     useLayoutStore.getState().setArrangement(arrangement);
   });
 }
+
+/**
+ * One arrangement field, written against the arrangement as it is NOW. The
+ * surface placements' one writer: the dock's rows, the canvas's placement bar
+ * and its drop to an edge all call this, so the three can never write the
+ * same pick two ways (D14).
+ */
+export function writeArrangementField<K extends keyof LayoutArrangement>(
+  key: K,
+  value: LayoutArrangement[K],
+): void {
+  writeArrangement({ ...useLayoutStore.getState().arrangement, [key]: value });
+}

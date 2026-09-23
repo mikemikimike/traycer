@@ -16,12 +16,13 @@ import {
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 
 function miniatures(): ReadonlyArray<HTMLElement> {
   return screen.getAllByTestId("preset-miniature");
@@ -53,12 +54,14 @@ beforeEach(() => {
     dockMode: "right",
     lockedBy: "none",
   });
+  useSideTabStripStore.setState({ collapsed: false });
 });
 
 afterEach(() => {
   cleanup();
   useSettingsStore.setState({ taskTabLayout: "scroll" });
   useLayoutEditorStore.getState().endSession();
+  useSideTabStripStore.setState({ collapsed: false });
 });
 
 describe("the preset miniature (L-43, I-03, I-18)", () => {
@@ -148,6 +151,47 @@ describe("the preset miniature (L-43, I-03, I-18)", () => {
       );
       expect(scale).toBeGreaterThan(0);
       expect(scale).toBeLessThan(1);
+    }
+  });
+});
+
+// Finding 5: `MiniaturePanel` draws the same sample rows through the shared
+// `AppFrameLiveAgentItems` the Activity depiction uses, so the preset card's
+// panel cannot show a different row anatomy than that other picture does.
+describe("the preset miniature's panel (L-43): live agent row anatomy", () => {
+  it("shows the same nested indent, waiting chip and idle time as the Activity depiction", () => {
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      const plan = within(miniature)
+        .getByText("Plan the migration")
+        .closest("button");
+      const tests = within(miniature)
+        .getByText("Write the tests")
+        .closest("button");
+      const index = within(miniature)
+        .getByText("Rebuild the index")
+        .closest("button");
+      if (plan === null || tests === null || index === null) {
+        throw new Error("expected all three sample rows to render as buttons");
+      }
+
+      const depth0 = Number.parseInt(plan.style.paddingInlineStart, 10);
+      expect(Number.parseInt(index.style.paddingInlineStart, 10)).toBe(depth0);
+      expect(Number.parseInt(tests.style.paddingInlineStart, 10) - depth0).toBe(
+        16,
+      ); // INDENT_PX
+
+      expect(
+        within(plan).getByTestId("strip-live-agent-waiting-chip").textContent,
+      ).toBe("Reply");
+      expect(within(plan).queryByTestId("chat-row-idle-time")).toBeNull();
+      for (const row of [tests, index]) {
+        expect(
+          within(row).queryByTestId("strip-live-agent-waiting-chip"),
+        ).toBeNull();
+        expect(within(row).getByTestId("chat-row-idle-time")).toBeTruthy();
+      }
     }
   });
 });
@@ -277,11 +321,6 @@ describe('"Reset everything" is confirmed only where it cannot be undone (L-20, 
   });
 });
 
-/** Whether an element is the miniature's canvas column, by its own class. */
-function isCanvasColumn(el: Element | null): boolean {
-  return el !== null && el.className.includes("min-w-0");
-}
-
 /**
  * S-01, S-06, S-29: the miniature is a picture of the STORED arrangement, not
  * a fixed layout - it follows the tab strip placement and the sidebar side,
@@ -321,36 +360,95 @@ describe("the miniature follows the stored placement and sidebar side", () => {
     },
   );
 
-  it("keeps the top bar, and draws no side strip, for the stored `top` placement", () => {
+  it("keeps the top bar, on the ground with no border, and draws no side strip, for the stored `top` placement", () => {
     render(<PresetsBlock onPreviewPreset={() => {}} />);
 
     for (const miniature of miniatures()) {
       expect(
         within(miniature).queryByTestId("app-frame-side-strip"),
       ).toBeNull();
-      expect(frameOf(miniature).querySelector(".h-10.border-b")).not.toBeNull();
+      const topBar = frameOf(miniature).querySelector(
+        ".h-10.shrink-0.items-center",
+      );
+      expect(topBar).not.toBeNull();
+      // The bar sits on the shell's own ground now, not a bordered band.
+      expect(topBar?.classList.contains("border-b")).toBe(false);
     }
   });
 
   it.each(["left", "right"] as const)(
-    "orders the rail relative to the canvas for a %s sidebar, whatever the strip's placement",
+    "orders the task panel sheet relative to the content sheet for a %s sidebar, whatever the strip's placement",
     (side) => {
       setArrangement({ sidebarSide: side, tabStripPlacement: "right" });
       render(<PresetsBlock onPreviewPreset={() => {}} />);
 
       for (const miniature of miniatures()) {
-        const rail = within(miniature).getByTestId("preset-miniature-rail");
-        expect(rail.className).toContain(
-          side === "left" ? "border-r" : "border-l",
+        const surface = within(miniature).getByTestId(
+          "preset-miniature-surface",
         );
-        const canvasSibling =
+        const panel = surface.querySelector<HTMLElement>(
+          '[data-shell-sheet="panel"]',
+        );
+        const content = surface.querySelector('[data-shell-sheet="content"]');
+        if (panel === null || content === null) {
+          throw new Error("expected both the panel and content sheets");
+        }
+        expect(
           side === "left"
-            ? rail.nextElementSibling
-            : rail.previousElementSibling;
-        expect(isCanvasColumn(canvasSibling)).toBe(true);
+            ? panel.nextElementSibling
+            : panel.previousElementSibling,
+        ).toBe(content);
+        // The rail still lives across the panel's own top, whichever side it lands on.
+        expect(
+          within(panel).getByTestId("preset-miniature-rail"),
+        ).not.toBeNull();
       }
     },
   );
+
+  it("follows the collapsed store flag: a 60px strip collapsed, 240px expanded", () => {
+    setArrangement({ tabStripPlacement: "left" });
+    useSideTabStripStore.setState({ collapsed: true });
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      const strip = within(miniature).getByTestId("app-frame-side-strip");
+      const wrapper = strip.parentElement;
+      if (wrapper === null) {
+        throw new Error("expected the strip's width wrapper");
+      }
+      expect(wrapper.style.width).toBe("60px");
+    }
+    cleanup();
+
+    useSideTabStripStore.setState({ collapsed: false });
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      const strip = within(miniature).getByTestId("app-frame-side-strip");
+      const wrapper = strip.parentElement;
+      if (wrapper === null) {
+        throw new Error("expected the strip's width wrapper");
+      }
+      expect(wrapper.style.width).toBe("240px");
+    }
+  });
+
+  it("gives both sheets their own data-shell-sheet marker, panel and content alike", () => {
+    setArrangement({ sidebarSide: "left" });
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      const surface = within(miniature).getByTestId("preset-miniature-surface");
+      const sheets = [
+        ...surface.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
+      ];
+      expect(sheets.map((sheet) => sheet.dataset.shellSheet).sort()).toEqual([
+        "content",
+        "panel",
+      ]);
+    }
+  });
 
   it("never moves the placement or the sidebar side when a preset is clicked, and each click still lands (L-20, S-29)", () => {
     setArrangement({ tabStripPlacement: "left", sidebarSide: "right" });

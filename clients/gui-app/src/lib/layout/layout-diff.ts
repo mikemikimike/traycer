@@ -6,6 +6,7 @@ import {
   type EdgeSide,
   type LayoutArrangement,
   type OrderGroupId,
+  type SideStripView,
   type StatusBarProviderLimitSelection,
   type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
@@ -205,6 +206,14 @@ export function sidebarSideChanged(
   return a.sidebarSide !== b.sidebarSide;
 }
 
+/** Whether the vertical strip's view differs between two arrangements (D8). */
+export function sideStripViewChanged(
+  a: LayoutArrangement,
+  b: LayoutArrangement,
+): boolean {
+  return a.sideStripView !== b.sideStripView;
+}
+
 /** Whether ANY of where things live differs from the shipped arrangement. */
 export function arrangementChanged(arrangement: LayoutArrangement): boolean {
   return (
@@ -217,7 +226,8 @@ export function arrangementChanged(arrangement: LayoutArrangement): boolean {
     usageProvidersChanged(arrangement) ||
     mobileFooterChanged(arrangement) ||
     tabStripPlacementChanged(arrangement, DEFAULT_ARRANGEMENT) ||
-    sidebarSideChanged(arrangement, DEFAULT_ARRANGEMENT)
+    sidebarSideChanged(arrangement, DEFAULT_ARRANGEMENT) ||
+    sideStripViewChanged(arrangement, DEFAULT_ARRANGEMENT)
   );
 }
 
@@ -397,6 +407,7 @@ export interface LayoutSnapshotProperties {
   readonly layout_resource_side: EdgeSide;
   readonly layout_tab_strip_placement: TabStripPlacement;
   readonly layout_sidebar_side: EdgeSide;
+  readonly layout_side_strip_view: SideStripView;
   readonly layout_dock_reordered: boolean;
   readonly layout_toolbar_left_reordered: boolean;
   readonly layout_toolbar_right_reordered: boolean;
@@ -435,6 +446,7 @@ export function layoutSnapshotProperties(
     layout_resource_side: snapshot.arrangement.resourceSide,
     layout_tab_strip_placement: snapshot.arrangement.tabStripPlacement,
     layout_sidebar_side: snapshot.arrangement.sidebarSide,
+    layout_side_strip_view: snapshot.arrangement.sideStripView,
     layout_dock_reordered: reordered.has("dock"),
     layout_toolbar_left_reordered: reordered.has("toolbarLeft"),
     layout_toolbar_right_reordered: reordered.has("toolbarRight"),

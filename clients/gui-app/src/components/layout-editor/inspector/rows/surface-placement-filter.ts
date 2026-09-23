@@ -2,13 +2,18 @@ import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-g
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import type { SettingsRowDefinition } from "@/lib/settings-search/settings-definitions";
 
-/** The placement row a surface draws under its heading, if it has one. */
-function surfacePlacementRowDefinition(
+/** The placement rows a surface draws under its heading. */
+function surfacePlacementRowDefinitions(
   surface: SurfaceGroupId,
-): SettingsRowDefinition | null {
-  if (surface === "topBar") return LAYOUT.definitions.tabStripPlacement;
-  if (surface === "sidebar") return LAYOUT.definitions.sidebarSide;
-  return null;
+): ReadonlyArray<SettingsRowDefinition> {
+  if (surface === "topBar") {
+    return [
+      LAYOUT.definitions.tabStripPlacement,
+      LAYOUT.definitions.sideStripView,
+    ];
+  }
+  if (surface === "sidebar") return [LAYOUT.definitions.sidebarSide];
+  return [];
 }
 
 /** Whether a Settings row's label or keywords match a layout filter. */
@@ -24,13 +29,14 @@ export function settingsRowMatchesFilter(
 }
 
 /**
- * Whether the dock's index keeps a surface for its placement row: the row
+ * Whether the dock's index keeps a surface for its placement rows: one of them
  * exists on that surface and its own words match the filter.
  */
 export function surfacePlacementRowMatchesFilter(
   surface: SurfaceGroupId,
   query: string,
 ): boolean {
-  const row = surfacePlacementRowDefinition(surface);
-  return row !== null && settingsRowMatchesFilter(row, query);
+  return surfacePlacementRowDefinitions(surface).some((row) =>
+    settingsRowMatchesFilter(row, query),
+  );
 }

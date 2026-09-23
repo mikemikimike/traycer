@@ -12,6 +12,11 @@ import { LazyMotion, domAnimation } from "motion/react";
 import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
 import { RootDndProvider } from "@/components/epic-canvas/dnd/root-dnd-provider";
+import {
+  PanelTaskHeader,
+  SidebarWidthResizeHandle,
+} from "@/components/epic-canvas/sidebar/epic-sidebar-column";
+import { StripLiveAgentsPortal } from "@/components/epic-canvas/sidebar/strip-live-agents";
 import { LayoutEditor } from "@/components/layout-editor/layout-editor";
 import {
   LAYOUT_REGION_IDS,
@@ -28,22 +33,34 @@ import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip
 import { SampleSceneProvider } from "@/components/sample-workspace/sample-scene-provider";
 import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-workspace-body";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { HostNotificationsIndicatorStateResponse } from "@traycer/protocol/host/notifications/contracts";
+import type { AgentActivityByEpic } from "@traycer/protocol/host/agent/activity";
 import {
   HostRuntimeProvider,
   hostRpcRegistry,
   type HostRpcRegistry,
   type MessengerFactory,
 } from "@/lib/host";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import {
   insertRailDivider,
   sideTabStripEdge,
   stackRailPanels,
+  type EdgeSide,
+  type SideStripView,
   type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
+import { EpicSessionContext } from "@/lib/registries/epic-session-registry";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import { createPersistentMemoryHistory } from "@/lib/persistent-history";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
+import { __setAgentActivityStateForTests } from "@/stores/agent-activity-store";
+import { useSidebarWidthPx } from "@/stores/epics/left-panel-store";
+import { useAuthStore } from "@/stores/auth/auth-store";
+import type { EpicStreamClientFactory } from "@/stores/epics/open-epic/store";
+import { openStoreForTest } from "@/stores/epics/open-epic/test-support/open-store-for-test";
+import type { TreeNode } from "@/stores/epics/open-epic/types";
 import {
   useSettingsStore,
   type ThemeMode,
@@ -112,7 +129,12 @@ import "@/components/layout-editor/layout-editor.css";
  * `<html>` (except `mac-fullscreen`, where macOS drops the overlay). There is
  * no popup bridge, so the Windows band is its empty drag band, and the
  * `env(titlebar-area-*)` fallbacks (82px leading inset, 40px band) stand in for
- * the real values. What cannot be simulated here - native window controls,
+ * the real values. `&surface=sample|epic` picks what the surface frame holds
+ * (the sample workspace's route sheet, or a task's panel and content sheets
+ * with the real width handle between them), `&sidebar=left|right` and
+ * `&view=layered|activity` seed the arrangement, and `&account=1` signs a
+ * fixture user in, so the foot draws the account row. What cannot be
+ * simulated here - native window controls,
  * real `env()` values, `-webkit-app-region`, the menu bar's native popups and
  * the signed-in foot - is the Staging pass's (tickets/12, "Staging checklist").
  *
@@ -178,11 +200,23 @@ const NO_CANVAS_NODE: Readonly<Partial<Record<RegionId, string>>> = {
 /** The fixture's desktop stand-in: which window chrome `wco` simulates. */
 type FixtureWindowChrome = "none" | "mac" | "win" | "mac-fullscreen";
 
+/**
+ * What the app column's surface frame holds: the sample workspace, which is a
+ * route sheet in the app, or a task's two sheets (panel and content), which is
+ * what the joined tab and the Activity view are about.
+ */
+type FixtureSurface = "sample" | "epic";
+
 interface CanvasVariant {
   readonly tabs: TabStripPlacement;
   readonly collapsed: boolean;
   readonly wco: FixtureWindowChrome;
   readonly dock: LayoutDockMode;
+  readonly surface: FixtureSurface;
+  readonly sidebar: EdgeSide;
+  readonly view: SideStripView;
+  /** Signed in, so the foot draws the account row and the strip the Inbox. */
+  readonly account: boolean;
 }
 
 interface LayoutCanvasProbe {
@@ -234,6 +268,19 @@ interface LayoutCanvasProbe {
    * ACTIVE tinted tile, not the activation path.
    */
   readonly activateEpicTab: (epicId: string) => void;
+  /**
+   * What the host answered for `host.notifications.indicatorState`, per epic
+   * and per agent: the rail badges and the waiting pulse read the epics, the
+   * Activity list's waiting chips read the agents.
+   */
+  readonly setIndicators: (
+    epics: HostNotificationsIndicatorStateResponse["epics"],
+    chats: HostNotificationsIndicatorStateResponse["chats"],
+  ) => void;
+  /** The activity plane's working and turn agents per epic: the meters read it. */
+  readonly setActivity: (byEpic: AgentActivityByEpic) => void;
+  readonly setCollapsed: (collapsed: boolean) => void;
+  readonly setStripView: (view: SideStripView) => void;
 }
 
 declare global {
@@ -265,6 +312,10 @@ function readVariant(): CanvasVariant {
     wco:
       wco === "mac" || wco === "win" || wco === "mac-fullscreen" ? wco : "none",
     dock: dock === "left" || dock === "float" ? dock : "right",
+    surface: params.get("surface") === "epic" ? "epic" : "sample",
+    sidebar: params.get("sidebar") === "right" ? "right" : "left",
+    view: params.get("view") === "activity" ? "activity" : "layered",
+    account: params.get("account") === "1",
   };
 }
 
@@ -276,6 +327,8 @@ const VARIANT_SNAPSHOT: LayoutSnapshot = {
   arrangement: {
     ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
     tabStripPlacement: VARIANT.tabs,
+    sidebarSide: VARIANT.sidebar,
+    sideStripView: VARIANT.view,
   },
 };
 
@@ -427,6 +480,26 @@ function buildProbe(): LayoutCanvasProbe {
         activeItemId: tabItemId({ kind: "epic", id: epicId }),
       });
     },
+    // The fixture has no usable host, so the indicator query never runs; its
+    // cache entry is answered in its place, which is what a reply would write.
+    setIndicators: (epics, chats) => {
+      for (const query of queryClient.getQueryCache().findAll()) {
+        if (query.queryKey[1] !== "host.notifications.indicatorState") continue;
+        queryClient.setQueryData(query.queryKey, { epics, chats });
+      }
+    },
+    setActivity: (byEpic) => {
+      __setAgentActivityStateForTests(byEpic, "local", null);
+    },
+    setCollapsed: (collapsed) => {
+      useSideTabStripStore.getState().setCollapsed(collapsed);
+    },
+    setStripView: (view) => {
+      const { arrangement } = useLayoutStore.getState();
+      useLayoutStore
+        .getState()
+        .setArrangement({ ...arrangement, sideStripView: view });
+    },
   };
 }
 
@@ -445,6 +518,149 @@ function FixtureHeader(): ReactNode {
       <span className="self-center">Sample window</span>
       <SessionTabSpecimen />
     </header>
+  );
+}
+
+/**
+ * The sample workspace as the app mounts it: a route surface, which is one
+ * sheet. `TopLevelSurfaceMount` puts the marker and the clip on the mount; the
+ * fixture has no tab host, so it puts them on the same box around the body
+ * (the host's absolute placement aside, which a single surface fills anyway).
+ */
+function SampleRouteSheet(): ReactNode {
+  return (
+    <div
+      data-shell-sheet="route"
+      className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-clip"
+    >
+      {/* The canvas's own caption, from `sample-workspace-surface.tsx`:
+          passive rather than a region, and the one band of the column's
+          side edges that nothing opaque paints over. */}
+      <p
+        data-layout-passive
+        className="shrink-0 border-b px-4 py-2 text-ui-sm text-muted-foreground"
+      >
+        Sample content. Changes apply to your layout.
+      </p>
+      <SampleWorkspaceBody />
+    </div>
+  );
+}
+
+/** The active task in the `surface=epic` windows: Epsilon, which the seed makes active. */
+const EPIC_SURFACE_ID = "fixture-epsilon";
+
+/** Epsilon's agents, for the Activity view: two turns (one nested), one background. */
+const EPIC_SURFACE_AGENTS: ReadonlyArray<TreeNode> = [
+  chatNode("fixture-agent-plan", null, "Plan the migration"),
+  chatNode("fixture-agent-tests", "fixture-agent-plan", "Write the tests"),
+  chatNode("fixture-agent-index", null, "Rebuild the index"),
+];
+
+function chatNode(
+  id: string,
+  parentId: string | null,
+  title: string,
+): TreeNode {
+  return {
+    id,
+    parentId,
+    title,
+    type: "chat",
+    status: null,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+const noopStreamClientFactory: EpicStreamClientFactory = () => ({
+  applyUpdate: () => undefined,
+  awareness: () => undefined,
+  applyArtifactRoomUpdate: () => undefined,
+  artifactRoomAwareness: () => undefined,
+  retryMigration: () => undefined,
+  close: () => undefined,
+});
+
+/**
+ * Epsilon's session: a real open-epic store with its agents in the tree, so
+ * the REAL `StripLiveAgentsPortal` reads a session exactly as the epic surface
+ * hands it one. Built only for the `surface=epic` windows.
+ */
+function openEpicSurfaceSession() {
+  const handle = openStoreForTest({
+    epicId: EPIC_SURFACE_ID,
+    userId: null,
+    factories: {
+      streamClientFactory: noopStreamClientFactory,
+      laneSelection: null,
+    },
+    writeCommand: null,
+  });
+  const nodeById: Record<string, TreeNode> = {};
+  const childrenByParent: Record<string, string[]> = {};
+  const rootIds: string[] = [];
+  for (const node of EPIC_SURFACE_AGENTS) {
+    nodeById[node.id] = node;
+    if (node.parentId === null) rootIds.push(node.id);
+    else (childrenByParent[node.parentId] ??= []).push(node.id);
+  }
+  handle.store.setState({ tree: { rootIds, childrenByParent, nodeById } });
+  return handle;
+}
+
+const EPIC_SURFACE_SESSION =
+  VARIANT.surface === "epic" ? openEpicSurfaceSession() : null;
+
+/**
+ * A task's surface as `EpicSurface` lays it out: the panel sheet on the stored
+ * sidebar side, the REAL width handle in the gap, and the content sheet beside
+ * it. What the panel holds below its REAL task header, and the whole content
+ * sheet, are stand-ins (the real panel and canvas need a live host), with the
+ * real sheet markers and classes, so the sheet CSS, the joined tab, the handle
+ * and the ground between them are what ships. The live agents list is the
+ * real portal, owned here as the epic surface owns it (D9).
+ */
+function EpicSurfaceStandIn(): ReactNode {
+  const sidebarSide = useArrangementValue("sidebarSide");
+  const sidebarWidthPx = useSidebarWidthPx();
+  const handle = <SidebarWidthResizeHandle side={sidebarSide} hidden={false} />;
+  const panel = (
+    <div
+      data-shell-sheet="panel"
+      data-epic-sidebar-panel
+      data-fixture-panel
+      className="flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background"
+      style={{ width: sidebarWidthPx }}
+    >
+      <PanelTaskHeader epicId={EPIC_SURFACE_ID} tabId={EPIC_SURFACE_ID} />
+    </div>
+  );
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
+      data-epic-surface={EPIC_SURFACE_ID}
+    >
+      {EPIC_SURFACE_SESSION === null ? null : (
+        <EpicSessionContext value={EPIC_SURFACE_SESSION}>
+          <StripLiveAgentsPortal
+            epicId={EPIC_SURFACE_ID}
+            tabId={EPIC_SURFACE_ID}
+          />
+        </EpicSessionContext>
+      )}
+      {/* Fragment order as `EpicSidebarColumn` renders it: the handle finds
+          the panel as its sibling on the sidebar's side. */}
+      {sidebarSide === "right" ? null : panel}
+      {sidebarSide === "right" ? null : handle}
+      <div
+        data-shell-sheet="content"
+        data-fixture-content
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas"
+      />
+      {sidebarSide === "right" ? handle : null}
+      {sidebarSide === "right" ? panel : null}
+    </div>
   );
 }
 
@@ -486,18 +702,11 @@ export function CanvasFixture(): ReactNode {
           }
           banners={null}
           surface={
-            <div className="flex h-full min-h-0 w-full flex-col">
-              {/* The canvas's own caption, from `sample-workspace-surface.tsx`:
-                  passive rather than a region, and the one band of the column's
-                  side edges that nothing opaque paints over. */}
-              <p
-                data-layout-passive
-                className="shrink-0 border-b px-4 py-2 text-ui-sm text-muted-foreground"
-              >
-                Sample content. Changes apply to your layout.
-              </p>
-              <SampleWorkspaceBody />
-            </div>
+            VARIANT.surface === "epic" ? (
+              <EpicSurfaceStandIn />
+            ) : (
+              <SampleRouteSheet />
+            )
           }
           mainTail={null}
           tail={null}
@@ -563,12 +772,26 @@ function applyVariant(variant: CanvasVariant): void {
   if (variant.wco === "mac" || variant.wco === "win") {
     document.documentElement.classList.add("wco");
   }
+  if (variant.account) {
+    useAuthStore.getState().setSignedIn(
+      {
+        userId: "fixture-user",
+        userName: "Ada Lovelace",
+        email: "ada@example.com",
+        avatarUrl: null,
+      },
+      { userId: "fixture-user", username: "ada" },
+      [],
+    );
+  }
   resetLayout();
   const strip = useSideTabStripStore.getState();
   strip.resetWidth();
   strip.setCollapsed(variant.collapsed);
   useLayoutEditorStore.getState().setDockMode(variant.dock);
-  seedSideStripTabs(true);
+  // A task window has no layout session, so no Customizing tab: Epsilon is
+  // the active tab, which is what the join and the Activity view are about.
+  seedSideStripTabs(variant.surface === "sample");
 }
 
 applyVariant(VARIANT);

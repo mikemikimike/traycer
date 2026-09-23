@@ -7,6 +7,7 @@ import {
   type SideRowFrame,
   type SideTabRowVariant,
 } from "./side-tab-row";
+import { NO_LIVE_AGENTS } from "./side-tab-live-agents";
 
 const HOME_LABEL = "Home";
 
@@ -56,12 +57,14 @@ function SideHomeRowBody(props: SideHomeRowProps): ReactNode {
       active={isActive}
       session={null}
       tint={null}
+      autoTint={null}
       groupLine={null}
       leading={icon}
       tile={{ kind: "icon", icon }}
       badge={null}
+      agents={NO_LIVE_AGENTS}
       title={HOME_LABEL}
-      titleText={HOME_LABEL}
+      hoverCardBody={HOME_LABEL}
       leaderBadge={null}
       close={null}
       waitingLabel={null}

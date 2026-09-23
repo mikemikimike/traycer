@@ -215,6 +215,153 @@
   --dock-chip-ring-color: var(--color-destructive);
 }
 
+/* The side strip's meter: a running agent's pip breathes. The component sets
+   `data-breathing` only while motion is enabled, so reduced motion and the
+   app's animation switch leave the pip static at full strength. */
+@keyframes side-strip-pip-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+[data-pip][data-breathing="true"] {
+  animation: side-strip-pip-breathe 1.6s ease-in-out infinite;
+  animation-delay: var(--pip-delay);
+}
+
+/* A task going into waiting: its row or tile rings out twice in the warning
+   role, 1.2s in total, then stays still. Set only on the transition, and
+   only while motion is enabled. */
+@keyframes side-strip-waiting-pulse {
+  from {
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--color-warning) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+[data-side-tab][data-waiting-pulse="true"] {
+  animation: side-strip-waiting-pulse 600ms ease-out 2;
+}
+
+/* The joined tab (D3): the active row, tile or split pair beside its epic's
+   panel sheet takes the sheet's fill and border, open on the sheet side. The
+   strip's bridge, anchored to it, runs that fill across the list inset and the
+   shell gap over the sheet's border, and its pseudo-elements are the concave
+   corners where it meets the sheet. Unlayered, so the fill beats the row's
+   `bg-*` utility; sheets exist only from md, and so does the join. */
+[data-side-tab-join-bridge] {
+  display: none;
+}
+
+@variant md {
+  [data-side-tab-joined] {
+    position: relative;
+    anchor-name: --side-tab-joined;
+    background-color: var(--background);
+
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid var(--canvas-border);
+      border-radius: inherit;
+      pointer-events: none;
+    }
+  }
+
+  [data-side-tab-joined="left"] {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+
+    &::before {
+      border-inline-end-width: 0;
+    }
+  }
+
+  [data-side-tab-joined="right"] {
+    border-start-start-radius: 0;
+    border-end-start-radius: 0;
+
+    &::before {
+      border-inline-start-width: 0;
+    }
+  }
+
+  :has([data-side-tab-joined]) > [data-side-tab-join-bridge] {
+    --join-radius: var(--radius-lg);
+    --join-arc:
+      transparent calc(var(--join-radius) - 1px),
+      var(--canvas-border) calc(var(--join-radius) - 1px) var(--join-radius),
+      var(--background) var(--join-radius);
+    display: block;
+    position: absolute;
+    position-anchor: --side-tab-joined;
+    position-visibility: anchors-visible;
+    top: anchor(top);
+    bottom: anchor(bottom);
+    /* Over the strip's resize handle (z-20), whose hover line would otherwise
+       cut the joined band in two; the handle still takes the pointer here. */
+    z-index: 21;
+    border-block: 1px solid var(--canvas-border);
+    background-color: var(--background);
+    pointer-events: none;
+
+    &::before,
+    &::after {
+      content: "";
+      position: absolute;
+      width: var(--join-radius);
+      height: var(--join-radius);
+    }
+
+    &::before {
+      bottom: 100%;
+    }
+
+    &::after {
+      top: 100%;
+    }
+  }
+
+  /* The bridge ends 1px into the sheet, over its border. */
+  :has([data-side-tab-joined]) > [data-side-tab-join-bridge="left"] {
+    left: anchor(right);
+    right: calc(-1 * var(--shell-gap) - 1px);
+
+    &::before {
+      right: 0;
+      background: radial-gradient(circle at 0 0, var(--join-arc));
+    }
+
+    &::after {
+      right: 0;
+      background: radial-gradient(circle at 0 100%, var(--join-arc));
+    }
+  }
+
+  :has([data-side-tab-joined]) > [data-side-tab-join-bridge="right"] {
+    right: anchor(left);
+    left: calc(-1 * var(--shell-gap) - 1px);
+
+    &::before {
+      left: 0;
+      background: radial-gradient(circle at 100% 0, var(--join-arc));
+    }
+
+    &::after {
+      left: 0;
+      background: radial-gradient(circle at 100% 100%, var(--join-arc));
+    }
+  }
+}
+
 /* The thumb and fill share one response: quick eased follow while dragging,
    then a softer arrival on release or direct selection. The drag target has
    a small attraction to catalog stops; the brief follow gives it weight
@@ -1146,14 +1293,6 @@
   & [data-shell-sheet="route"] {
     background-color: var(--canvas);
   }
-}
-
-@utility task-surface-frame-beside-left {
-  @apply task-surface-frame;
-}
-
-@utility task-surface-frame-beside-right {
-  @apply task-surface-frame;
 }
 
 /* A portalled browser guest needs the same inner clip as its own sheet. */

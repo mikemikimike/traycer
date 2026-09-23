@@ -47,13 +47,20 @@ interface PlanLeafSet {
  */
 const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
   {
+    // The vertical strip is the same item in its other presentation (D6):
+    // history and the bell become the Inbox and All tasks nav rows, one
+    // marker on their shared row button, and identity becomes the foot's
+    // account row, the user menu's trigger there. The update control draws
+    // one marker per layout: the header's icon, and the foot's row.
     item: "app-header.tsx: history nav, update, history, bell, identity - but NOT HeaderBarCluster",
     files: {
       "components/layout/header/history-nav-buttons.tsx": 1,
-      "components/layout/header/app-update-button.tsx": 3,
+      "components/layout/header/app-update-button.tsx": 2,
       "components/layout/header/history-button.tsx": 1,
       "components/notifications/notifications-bell.tsx": 1,
       "components/auth/user-menu.tsx": 1,
+      "components/layout/tabs/side-strip/side-strip-nav-rows.tsx": 1,
+      "components/layout/tabs/side-strip/side-strip-foot.tsx": 1,
     },
     deviation: null,
   },

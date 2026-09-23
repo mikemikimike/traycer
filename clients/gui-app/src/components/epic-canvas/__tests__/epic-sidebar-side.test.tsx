@@ -20,14 +20,12 @@ import {
   useColumnOverlayPlacement,
 } from "@/components/layout/column-edge-context";
 import { pointerEvent } from "@/components/epic-canvas/canvas/__tests__/test-pointer-events";
+import { GROUND_RESIZE_HANDLE_LINE_CLASS } from "@/components/epic-canvas/canvas/use-pointer-drag-commit";
 import {
   DEFAULT_SIDEBAR_WIDTH_PX,
   useLeftPanelStore,
 } from "@/stores/epics/left-panel-store";
-import {
-  DEFAULT_ARRANGEMENT,
-  type TabStripPlacement,
-} from "@/lib/layout/layout-arrangement";
+import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 const EPIC_ID = "sidebar-side-epic";
@@ -143,6 +141,16 @@ function wrapperChildTestIds(): ReadonlyArray<string | undefined> {
   );
 }
 
+/** Every token of the shared ground hover/drag line, and no RESTING
+ * `before:bg-*` - only the `hover:`/`active:` variants the class carries. */
+function expectGroundResizeHandleLine(handle: HTMLElement): void {
+  for (const token of GROUND_RESIZE_HANDLE_LINE_CLASS.split(" ")) {
+    expect(handle.className).toContain(token);
+  }
+  const tokens = handle.className.split(/\s+/);
+  expect(tokens.some((token) => /^before:bg-/.test(token))).toBe(false);
+}
+
 describe("<EpicSidebarColumn /> side (S-06)", () => {
   it("matches today's order and classes with the default (left) side", () => {
     renderColumn("left");
@@ -156,10 +164,12 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
     // Sheet shell (ticket 02): the handle's hit target is centred in the
     // `--shell-gap` ground gap on either side now, not traced with a
-    // side-specific `before:` hairline - the gap itself separates the sheets.
+    // side-specific hairline - the gap itself separates the sheets. It
+    // carries the shared ground hover/drag line instead (finding 9/B6), with
+    // no resting `before:bg-*` - only the hover/active variants.
     expect(handle.className).toContain("md:mx-[calc(var(--shell-gap)/-2)]");
     expect(handle.className).toContain("md:w-0");
-    expect(handle.className).not.toMatch(/\bbefore:/);
+    expectGroundResizeHandleLine(handle);
   });
 
   it("orders the fragment [handle, panel] for a right sidebar with the same centred hit target", () => {
@@ -172,11 +182,11 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
     const panel = screen.getByTestId("epic-sidebar-column");
     expect(panel.dataset.shellSheet).toBe("panel");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    // No side-specific classes left to mirror: the centred hit target is the
-    // same on both sides now.
+    // No side-specific classes left to mirror: the centred hit target and
+    // the ground hover/drag line are the same on both sides now.
     expect(handle.className).toContain("md:mx-[calc(var(--shell-gap)/-2)]");
     expect(handle.className).toContain("md:w-0");
-    expect(handle.className).not.toMatch(/\bbefore:/);
+    expectGroundResizeHandleLine(handle);
   });
 
   it("puts the collapsed rail at the pane's outer edge on both sides, itself a sheet", () => {
@@ -368,12 +378,6 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
     expect(container.querySelector('[data-shell-sheet="route"]')).toBeNull();
   });
 
-  const SURFACE_FRAME_CLASS: Record<TabStripPlacement, string> = {
-    top: "md:task-surface-frame",
-    left: "md:task-surface-frame-beside-left",
-    right: "md:task-surface-frame-beside-right",
-  };
-
   it.each(["top", "left", "right"] as const)(
     "holds the two-sheet epic composition inside the placement's own surface frame, placement=%s",
     (placement) => {
@@ -400,9 +404,9 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
         "[data-layout-column] main > div",
       );
       if (frame === null) throw new Error("surface frame not rendered");
-      expect(frame.classList.contains(SURFACE_FRAME_CLASS[placement])).toBe(
-        true,
-      );
+      // The beside-left/beside-right utilities are gone: every placement
+      // gets the same plain `task-surface-frame`.
+      expect(frame.classList.contains("md:task-surface-frame")).toBe(true);
       const sheets = [
         ...frame.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
       ];

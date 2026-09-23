@@ -19,6 +19,7 @@ import {
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import {
   SidebarSideRow,
+  SideStripViewRow,
   TabStripPositionRow,
 } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
 import { settingsRowMatchesFilter } from "@/components/layout-editor/inspector/rows/surface-placement-filter";
@@ -415,13 +416,15 @@ function CustomizeLayoutRow(): ReactNode {
 }
 
 /**
- * The Tabs card's surface tier: where the strip sits, then how its tabs fit.
+ * The Tabs card's surface tier: where the strip sits, what a vertical strip
+ * shows, then how its tabs fit.
  * Both close with a `SettingsRow` rule, which the Home row under them needs.
  */
 function TabsSurfaceRows(): ReactNode {
   return (
     <>
       <TabStripPositionRow />
+      <SideStripViewRow />
       <TaskTabLayoutRow />
     </>
   );

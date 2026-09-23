@@ -61,31 +61,30 @@ describe("AppColumnFrame", () => {
     expect(column.firstElementChild).toBe(screen.getByTestId("header-slot"));
   });
 
-  it("puts a left strip before <main> with the left beside-frame", () => {
+  it("puts a left strip before <main>, and still frames the surface plainly", () => {
     renderFrame(LEFT_NONE);
 
     const strip = screen.getByTestId("strip-slot");
     const main = screen.getByRole("main");
     expect(precedes(strip, main)).toBe(true);
     expect(strip.nextElementSibling?.contains(main)).toBe(true);
-    expect(
-      surfaceFrame().classList.contains("md:task-surface-frame-beside-left"),
-    ).toBe(true);
+    // The beside-left/beside-right utilities are gone: every placement gets
+    // the same plain `task-surface-frame`.
     expect(surfaceFrame().classList.contains("md:task-surface-frame")).toBe(
-      false,
+      true,
     );
   });
 
-  it("puts a right strip after <main> with the right beside-frame", () => {
+  it("puts a right strip after <main>, and still frames the surface plainly", () => {
     renderFrame(RIGHT_BAND);
 
     const strip = screen.getByTestId("strip-slot");
     const main = screen.getByRole("main");
     expect(precedes(main, strip)).toBe(true);
     expect(strip.previousElementSibling?.contains(main)).toBe(true);
-    expect(
-      surfaceFrame().classList.contains("md:task-surface-frame-beside-right"),
-    ).toBe(true);
+    expect(surfaceFrame().classList.contains("md:task-surface-frame")).toBe(
+      true,
+    );
   });
 
   it("draws the title band and no header for band", () => {

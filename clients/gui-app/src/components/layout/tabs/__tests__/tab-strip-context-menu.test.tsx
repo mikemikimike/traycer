@@ -526,18 +526,25 @@ describe("the Tabs placement radio group", () => {
     ["left", "right"],
     ["right", "top"],
   ])("writes %s -> %s at rest, with no history", async (from, to) => {
+    const seeded = {
+      ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
+      tabStripPlacement: from,
+    };
     useLayoutStore.setState({
       ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: {
-        ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
-        tabStripPlacement: from,
-      },
+      arrangement: seeded,
     });
     renderTabMenu();
 
     fireEvent.click(await screen.findByTestId(`tab-strip-placement-${to}`));
 
     expect(placement()).toBe(to);
+    // Finding 8: the same writer every placement call site now shares
+    // (`writeArrangementField`) - every other field stays exactly as seeded.
+    expect(useLayoutStore.getState().arrangement).toEqual({
+      ...seeded,
+      tabStripPlacement: to,
+    });
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(0);
   });
 

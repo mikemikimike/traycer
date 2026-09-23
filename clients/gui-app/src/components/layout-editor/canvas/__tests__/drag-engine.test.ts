@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   armLayoutDrag,
   cancelLayoutDrag,
+  holdLayoutDrag,
   layoutDragActive,
 } from "@/components/layout-editor/canvas/drag-engine";
 
@@ -389,5 +390,54 @@ describe("the drag engine", () => {
     expect(translationOf(fixture.rows[2])).toBeCloseTo(40, 5);
 
     releasePointer();
+  });
+});
+
+/**
+ * The one-drag-slot primitive `surface-drag.ts` holds its live drag on, tested
+ * directly rather than only through the surface drag that wraps it.
+ */
+describe("holdLayoutDrag / cancelLayoutDrag", () => {
+  it("makes layoutDragActive() true, and cancelLayoutDrag() calls the stop", () => {
+    const stop = vi.fn();
+    let release: (() => void) | null = null;
+    release = holdLayoutDrag(() => {
+      stop();
+      release?.();
+    });
+
+    expect(layoutDragActive()).toBe(true);
+
+    cancelLayoutDrag();
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(layoutDragActive()).toBe(false);
+  });
+
+  it("releases the one drag slot only if it still holds it", () => {
+    const firstStop = vi.fn();
+    let releaseFirst: (() => void) | null = null;
+    releaseFirst = holdLayoutDrag(() => {
+      firstStop();
+      releaseFirst?.();
+    });
+
+    // A second drag takes the one slot before the first caller lets go.
+    const secondStop = vi.fn();
+    let releaseSecond: (() => void) | null = null;
+    releaseSecond = holdLayoutDrag(() => {
+      secondStop();
+      releaseSecond?.();
+    });
+
+    releaseFirst();
+
+    expect(layoutDragActive()).toBe(true);
+    expect(secondStop).not.toHaveBeenCalled();
+
+    cancelLayoutDrag();
+
+    expect(secondStop).toHaveBeenCalledOnce();
+    expect(layoutDragActive()).toBe(false);
   });
 });

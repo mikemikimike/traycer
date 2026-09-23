@@ -2554,6 +2554,20 @@ function leadingStatusKinds(nodeId: string): readonly string[] {
 }
 
 /**
+ * The `data-status-glyph` kind drawn inside a leading status testid, for the
+ * sidebar tree's `statusPresentation="glyph"` rows (D12's shared vocabulary,
+ * not the lucide tone icon other surfaces render for the same testid).
+ */
+function statusGlyphKind(testId: string): string | null {
+  return (
+    screen
+      .getByTestId(testId)
+      .querySelector("[data-status-glyph]")
+      ?.getAttribute("data-status-glyph") ?? null
+  );
+}
+
+/**
  * A row's read-only lock, which `ChatProgressIcon` renders in the IDLE slot -
  * so it appears only once no attention tone, activity tier or unread completion
  * has claimed the icon. Scoped to the row so a sibling's lock cannot satisfy it.
@@ -2843,7 +2857,7 @@ describe("chat descendant status rollup", () => {
     expect(backgroundIcon).toBeTruthy();
     expect(backgroundIcon.getAttribute("class")).toContain("opacity-60");
     expect(
-      backgroundIcon.querySelector(".lucide-message-square-clock"),
+      backgroundIcon.querySelector('[data-status-glyph="background"]'),
     ).not.toBeNull();
     expect(
       screen.queryByTestId("chat-descendant-status-running-chat-root"),
@@ -3012,17 +3026,28 @@ describe("chat row leading status icon", () => {
     };
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["done"]);
+    // The tree draws every state through the shared D12 glyph vocabulary
+    // (`statusPresentation="glyph"`), not a surface-specific tone icon.
+    expect(statusGlyphKind("chat-sidebar-spinner-done-chat-child")).toBe(
+      "unread",
+    );
 
     // Background activity outranks unread-done.
     testState.activeAgentIds = new Set(["chat-child"]);
     testState.activityTierById = new Map([["chat-child", "background"]]);
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["background-activity"]);
+    expect(
+      statusGlyphKind("chat-sidebar-spinner-background-activity-chat-child"),
+    ).toBe("background");
 
     // A running turn outranks background activity.
     testState.activityTierById = new Map([["chat-child", "turn"]]);
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["activity"]);
+    expect(statusGlyphKind("chat-sidebar-spinner-activity-chat-child")).toBe(
+      "running",
+    );
 
     // A pending approval outranks a running turn.
     testState.indicatorChats = {
@@ -3030,6 +3055,9 @@ describe("chat row leading status icon", () => {
     };
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["approval"]);
+    expect(statusGlyphKind("chat-sidebar-spinner-approval-chat-child")).toBe(
+      "approval",
+    );
 
     // A pending interview outranks a pending approval.
     testState.indicatorChats = {
@@ -3040,6 +3068,9 @@ describe("chat row leading status icon", () => {
     };
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["interview"]);
+    expect(statusGlyphKind("chat-sidebar-spinner-interview-chat-child")).toBe(
+      "reply",
+    );
 
     // A failure outranks everything, including a pending interview.
     testState.indicatorChats = {
@@ -3052,6 +3083,9 @@ describe("chat row leading status icon", () => {
     });
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["failure"]);
+    expect(statusGlyphKind("chat-sidebar-spinner-failure-chat-child")).toBe(
+      "failed",
+    );
 
     // Through all of it the trailing slot keeps the relative time: the icon
     // carries status, the slot carries time, and neither displaces the other.

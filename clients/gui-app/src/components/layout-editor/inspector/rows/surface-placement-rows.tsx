@@ -5,9 +5,10 @@ import {
 } from "@/components/layout-editor/inspector/inspector-row";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
-import { writeArrangement } from "@/lib/layout/arrangement-gestures";
+import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import {
   EDGE_SIDE_OPTIONS,
+  SIDE_STRIP_VIEW_OPTIONS,
   TAB_STRIP_PLACEMENT_OPTIONS,
   type SurfaceGroupId,
 } from "@/components/layout-editor/regions/region-grammar";
@@ -17,14 +18,16 @@ import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-av
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import {
   sidebarSideChanged,
+  sideStripViewChanged,
   tabStripPlacementChanged,
 } from "@/lib/layout/layout-diff";
 import type { SettingsRowDefinition } from "@/lib/settings-search/settings-definitions";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 /**
- * The two placements that belong to a SURFACE rather than to a region: where
- * the task tabs sit and which side of the task canvas the sidebar takes.
+ * The placements that belong to a SURFACE rather than to a region: where the
+ * task tabs sit, what their vertical strip shows, and which side of the task
+ * canvas the sidebar takes.
  *
  * Neither the tab strip nor the sidebar column is a region, so these rows sit
  * under their surface's heading on both hosts - the docked inspector's index
@@ -39,13 +42,21 @@ import { useLayoutStore } from "@/stores/layout/layout-store";
  */
 
 const TAB_STRIP_PLACEMENT_ROW = LAYOUT.definitions.tabStripPlacement;
+const SIDE_STRIP_VIEW_ROW = LAYOUT.definitions.sideStripView;
 const SIDEBAR_SIDE_ROW = LAYOUT.definitions.sidebarSide;
 
 /** The surface's own placement row, drawn under its heading in the dock. */
 export function SurfacePlacementRow(props: {
   readonly surface: SurfaceGroupId;
 }): ReactNode {
-  if (props.surface === "topBar") return <TabStripPositionRow />;
+  if (props.surface === "topBar") {
+    return (
+      <>
+        <TabStripPositionRow />
+        <SideStripViewRow />
+      </>
+    );
+  }
   if (props.surface === "sidebar") return <SidebarSideRow />;
   return null;
 }
@@ -53,14 +64,17 @@ export function SurfacePlacementRow(props: {
 /**
  * One placement row in the frame of the host drawing it, or nothing where its
  * definition says the build has no use for it (the installed mobile app).
+ * `status` says why the control is disabled; the dock shows it in place of
+ * the description.
  */
 function PlacementRow(props: {
   readonly row: SettingsRowDefinition;
   readonly control: ReactNode;
   readonly onRevert: (() => void) | null;
   readonly revertLabel: string;
+  readonly status: string | null;
 }): ReactNode {
-  const { row, control, onRevert, revertLabel } = props;
+  const { row, control, onRevert, revertLabel, status } = props;
   const page = useLayoutFormHost() === "page";
   const availability = useSettingsAvailabilityContext();
   if (!row.availableWhen(availability)) return null;
@@ -68,6 +82,7 @@ function PlacementRow(props: {
     return (
       <SettingsRow
         row={row}
+        status={status ?? undefined}
         control={
           <div className="flex items-center gap-1.5">
             {control}
@@ -83,7 +98,7 @@ function PlacementRow(props: {
     <InspectorRow
       top
       label={row.label}
-      description={row.description ?? undefined}
+      description={status ?? row.description ?? undefined}
       control={control}
       onRevert={onRevert ?? undefined}
       revertLabel={revertLabel}
@@ -100,14 +115,15 @@ export function TabStripPositionRow(): ReactNode {
       onRevert={
         tabStripPlacementChanged(arrangement, DEFAULT_ARRANGEMENT)
           ? () => {
-              writeArrangement({
-                ...arrangement,
-                tabStripPlacement: DEFAULT_ARRANGEMENT.tabStripPlacement,
-              });
+              writeArrangementField(
+                "tabStripPlacement",
+                DEFAULT_ARRANGEMENT.tabStripPlacement,
+              );
             }
           : null
       }
       revertLabel="Revert tabs position"
+      status={null}
       control={
         <SegmentedControl
           ariaLabel="Tabs position"
@@ -118,10 +134,49 @@ export function TabStripPositionRow(): ReactNode {
               (candidate) => candidate.value === next,
             );
             if (option === undefined) return;
-            writeArrangement({
-              ...arrangement,
-              tabStripPlacement: option.value,
-            });
+            writeArrangementField("tabStripPlacement", option.value);
+          }}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * What the vertical strip shows (D8). It only means something while the tabs
+ * are at an edge, so at the top the control is disabled and says why; the
+ * stored value is kept for the way back.
+ */
+export function SideStripViewRow(): ReactNode {
+  const arrangement = useLayoutStore((state) => state.arrangement);
+  const atTop = arrangement.tabStripPlacement === "top";
+  return (
+    <PlacementRow
+      row={SIDE_STRIP_VIEW_ROW}
+      onRevert={
+        sideStripViewChanged(arrangement, DEFAULT_ARRANGEMENT)
+          ? () => {
+              writeArrangementField(
+                "sideStripView",
+                DEFAULT_ARRANGEMENT.sideStripView,
+              );
+            }
+          : null
+      }
+      revertLabel="Revert tabs view"
+      status={atTop ? "Applies when tabs are at the left or right." : null}
+      control={
+        <SegmentedControl
+          ariaLabel="Tabs view"
+          options={SIDE_STRIP_VIEW_OPTIONS}
+          value={arrangement.sideStripView}
+          disabled={atTop}
+          onChange={(next) => {
+            const option = SIDE_STRIP_VIEW_OPTIONS.find(
+              (candidate) => candidate.value === next,
+            );
+            if (option === undefined) return;
+            writeArrangementField("sideStripView", option.value);
           }}
         />
       }
@@ -138,14 +193,15 @@ export function SidebarSideRow(): ReactNode {
       onRevert={
         sidebarSideChanged(arrangement, DEFAULT_ARRANGEMENT)
           ? () => {
-              writeArrangement({
-                ...arrangement,
-                sidebarSide: DEFAULT_ARRANGEMENT.sidebarSide,
-              });
+              writeArrangementField(
+                "sidebarSide",
+                DEFAULT_ARRANGEMENT.sidebarSide,
+              );
             }
           : null
       }
       revertLabel="Revert sidebar side"
+      status={null}
       control={
         <SegmentedControl
           ariaLabel="Sidebar side"
@@ -153,7 +209,7 @@ export function SidebarSideRow(): ReactNode {
           value={arrangement.sidebarSide}
           onChange={(next) => {
             if (next !== "left" && next !== "right") return;
-            writeArrangement({ ...arrangement, sidebarSide: next });
+            writeArrangementField("sidebarSide", next);
           }}
         />
       }

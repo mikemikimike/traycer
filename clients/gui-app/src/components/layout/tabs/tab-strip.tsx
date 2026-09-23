@@ -1,4 +1,5 @@
 import { tabRefKey } from "@/stores/tabs/layout";
+import { useLayoutSurface } from "@/components/layout-editor/use-layout-surface";
 import { HiddenTabsMenu } from "./hidden-tabs-menu";
 import { useHiddenHeaderTabs } from "./use-hidden-header-tabs";
 import { TabGroupChip } from "./tab-group-chip";
@@ -78,6 +79,7 @@ function TabStripBody() {
     itemCount: headerItemIds.length,
     extraRef: setScrollElement,
   });
+  const surfaceRef = useLayoutSurface("topBar");
 
   // On the empty landing route the strip draws nothing; the header's own
   // actions stay, so no control is lost.
@@ -88,6 +90,7 @@ function TabStripBody() {
   return (
     <TabStripIndicatorScope indicators={controller.indicators}>
       <div
+        ref={surfaceRef}
         role="tablist"
         aria-label="Open tabs"
         data-testid="tab-strip"

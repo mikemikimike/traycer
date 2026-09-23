@@ -37,10 +37,9 @@ import {
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
 import { LayoutRegionContextMenuWithItems } from "@/components/layout-editor/region-quick-verbs";
-import { writeArrangement } from "@/lib/layout/arrangement-gestures";
+import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import { TAB_STRIP_PLACEMENT_OPTIONS } from "@/components/layout-editor/regions/region-grammar";
 import { useArrangementValue } from "@/lib/layout-overrides";
-import { useLayoutStore } from "@/stores/layout/layout-store";
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -424,10 +423,7 @@ function TabStripPlacementMenuItems(): ReactNode {
             value={option.value}
             data-testid={`tab-strip-placement-${option.value}`}
             onSelect={() => {
-              writeArrangement({
-                ...useLayoutStore.getState().arrangement,
-                tabStripPlacement: option.value,
-              });
+              writeArrangementField("tabStripPlacement", option.value);
             }}
           >
             {option.label}

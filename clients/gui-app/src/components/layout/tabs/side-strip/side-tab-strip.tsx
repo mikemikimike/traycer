@@ -1,4 +1,11 @@
-import { useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import {
+  useCallback,
+  useRef,
+  useState,
+  type ReactNode,
+  type TransitionEvent,
+} from "react";
+import { useLayoutSurface } from "@/components/layout-editor/use-layout-surface";
 import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { isFramelessDesktop } from "@/components/layout/header/title-bar-drag";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
@@ -52,10 +59,18 @@ export function SideTabStrip(props: {
   const widthEasing = useCollapseWidthEasing();
   const dragClass = useStripDragClass();
   const stripRef = useRef<HTMLElement | null>(null);
+  const surfaceRef = useLayoutSurface("topBar");
+  const bindStrip = useCallback(
+    (node: HTMLElement | null) => {
+      stripRef.current = node;
+      surfaceRef(node);
+    },
+    [surfaceRef],
+  );
   return (
     <ColumnEdgeContext.Provider value={edge}>
       <nav
-        ref={stripRef}
+        ref={bindStrip}
         aria-label="Tabs"
         data-testid="side-tab-strip"
         data-edge={edge}
@@ -90,6 +105,7 @@ export function SideTabStrip(props: {
           onHomeTab={controller.onHomeTab}
           onNewTab={controller.onNewTab}
           onToggleCollapsed={widthEasing.toggle}
+          taskCount={controller.tabs.length}
         />
         <TabStripIndicatorScope indicators={controller.indicators}>
           {hydrated ? (
@@ -110,6 +126,9 @@ export function SideTabStrip(props: {
           className={cn("min-h-0 flex-1", dragClass)}
         />
         <SideStripFoot variant={variant} />
+        {/* The joined tab's run into its panel sheet (D3), anchored to the
+            joined row and drawn only while one exists (`index.css`). */}
+        <span aria-hidden data-side-tab-join-bridge={edge} />
         <SideStripResizeHandle edge={edge} stripRef={stripRef} />
         {controller.dialogs}
       </nav>

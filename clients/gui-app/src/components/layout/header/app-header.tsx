@@ -141,7 +141,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
         className="relative z-10 flex shrink-0 items-center gap-2"
         style={framelessDesktop ? NO_DRAG_STYLE : undefined}
       >
-        {!navDisabled ? <AppUpdateHeaderButton /> : null}
+        {!navDisabled ? <AppUpdateHeaderButton layout="icon" /> : null}
         {!navDisabled ? <HeaderBarCluster side="right" /> : null}
         {!navDisabled ? <HistoryButton /> : null}
         {showBell ? <HeaderNotificationsBell /> : null}

@@ -85,6 +85,7 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
           activityStatus={activityStatus}
           indicatorState={props.indicatorState}
           tabId={props.tab.id}
+          statusPresentation="message"
         />
         {props.titleControl ?? (
           <span

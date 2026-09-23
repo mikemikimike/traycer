@@ -18,10 +18,7 @@ import { useHostReachability } from "@/hooks/agent/use-host-reachability";
 import { useHostRefusesEpicStore } from "@/hooks/chats/use-host-refuses-epic-store";
 import { settleDetachedEpicMutation } from "@/lib/artifacts/detached-epic-mutation";
 import { UNKNOWN_HOST_PLACEHOLDER } from "@/lib/host/constants";
-import {
-  chatOpensPublishedCopy,
-  makeChatOpenTileRef,
-} from "@/lib/chats/chat-open-tile-ref";
+import { chatOpensPublishedCopy } from "@/lib/chats/chat-open-tile-ref";
 import { useEpicTileNavigation } from "@/hooks/epic/use-epic-tile-navigation";
 import { modifiersFromMouseEvent } from "@/lib/canvas/tile-open/intent";
 import {
@@ -80,7 +77,7 @@ import {
   terminalFailureTone,
   type IndicatorTone,
 } from "@/components/notifications/notification-indicator-tones";
-import { BackgroundActivityGlyph } from "@/components/notifications/background-activity-glyph";
+import { StatusGlyph } from "@/components/notifications/status-glyph";
 import {
   selectNotificationIndicatorState,
   EMPTY_INDICATOR_STATE_RESPONSE,
@@ -304,7 +301,8 @@ import {
 import { useNewConversationModalOpenStore } from "@/stores/epics/new-conversation-modal-open-store";
 import { useExistingChatSessionHandle } from "@/lib/registries/chat-session-registry";
 import { chatActivityIndicator } from "@/components/epic-canvas/renderers/chat-tile-session-state";
-import { type IndicatorRunningKind } from "@/components/notifications/notification-indicator-icon";
+import type { IndicatorRunningKind } from "@/components/notifications/notification-indicator-icon";
+import { statusGlyphKindOfTone } from "@/components/notifications/notification-indicator-tones";
 import { useEpicStore } from "@/hooks/use-epic-store";
 import type { OpenEpicState } from "@/stores/epics/open-epic/store";
 import { useHostClientForHostId } from "@/hooks/host/use-host-client-for-host-id";
@@ -313,6 +311,7 @@ import {
   useChatTreeSurface,
   useRevealRowControls,
 } from "@/components/epic-canvas/sidebar/chat-tree-surface";
+import { useChatRowOpenRef } from "@/components/epic-canvas/sidebar/use-chat-row-open-ref";
 
 interface ChatTreePanelBodyProps {
   readonly epicId: string;
@@ -1688,15 +1687,6 @@ const ChatNode = memo(function ChatNode(props: ChatNodeProps) {
     [archiveSupported, isArchived, archivePending, toggleArchive],
   );
 
-  // The tab must bind to the chat's OWNER host, not whichever host happens to
-  // be active: a connected peer host's chat reaches this tree through the
-  // shared projection, and binding it to the active host would open a tab
-  // that asks the wrong machine for the transcript. Downstream already
-  // honors the ref's hostId (`renderTile` wraps each ref in its own
-  // `TabHostProvider`), so the owner id is all that was missing. The FALLBACK
-  // for a row that carries no owner is the Epic SESSION's host - the host
-  // that projected the row - never the app-wide one, which during a re-point
-  // is a different machine from the one this tree is showing.
   // Declared HERE rather than beside `openRef` below, which is the only other
   // thing that reads it: the record-head lookup is keyed on the record
   // identity `(ownerUserId, chatId)`, and the content clock beneath it needs
@@ -1719,59 +1709,15 @@ const ChatNode = memo(function ChatNode(props: ChatNodeProps) {
     cloudChat,
     recordHead,
   });
-  const openHostId = ownerHostId ?? sessionHostId ?? UNKNOWN_HOST_PLACEHOLDER;
-  // The host that SERVES a published copy's read (the owner is unreachable by
-  // construction there) - the session's, for the reason above.
-  const readingHostId = sessionHostId ?? UNKNOWN_HOST_PLACEHOLDER;
-  // Same rule the cloud rows follow (user ruling: offline hosts show as
-  // readonly with a locked composer): a CHAT row whose owner host is
-  // unreachable opens the published copy, not a live tab that dials a dead
-  // host into a banner. Falls back to the live ref when the identity triple
-  // cannot be built (no owner user on the record) - a click always opens
-  // something.
-  const ownerReachability = useHostReachability(
-    ownerHostId ?? UNKNOWN_HOST_PLACEHOLDER,
-  );
-  // The other reason a reachable owner cannot serve the live chat: its build
-  // is older than this epic's store. Same source `ChatRowButton`'s lock reads,
-  // so the row never promises a published copy the click will not open.
-  const ownerRefusesStore = useHostRefusesEpicStore(ownerHostId, epicId);
-  // `ownerUserId` is declared ABOVE, beside the record-head read that keys on
-  // it - see the content-clock block. Main declared it here; our branch needed
-  // it earlier, so this is the same binding, not a dropped one.
-  const openRef = useCallback(
-    () =>
-      openableType === "chat"
-        ? makeChatOpenTileRef({
-            taskId: epicId,
-            chatId: nodeId,
-            ownerHostId,
-            ownerUserId,
-            ownerIsUnreachable: ownerReachability.status === "unreachable",
-            ownerRefusesStore,
-            name: nodeName,
-            sessionHostId: readingHostId,
-          })
-        : {
-            id: nodeId,
-            instanceId: uuidv4(),
-            type: openableType ?? "terminal-agent",
-            name: nodeName,
-            hostId: openHostId,
-          },
-    [
-      openableType,
-      ownerHostId,
-      ownerUserId,
-      ownerReachability.status,
-      ownerRefusesStore,
-      epicId,
-      nodeId,
-      nodeName,
-      readingHostId,
-      openHostId,
-    ],
-  );
+  const openRef = useChatRowOpenRef({
+    epicId,
+    nodeId,
+    nodeName,
+    openableType,
+    ownerHostId,
+    ownerUserId,
+    sessionHostId,
+  });
 
   const selectChatNode = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -2701,6 +2647,7 @@ function ChatRowOwnLeadingIcon(props: {
         mutedClassName="text-muted-foreground/70"
         testId="chat-sidebar-spinner"
         defaultIcon={undefined}
+        statusPresentation="glyph"
       />
     );
   }
@@ -2751,6 +2698,7 @@ function SidebarTerminalAgentProgressIcon(props: {
       style={icon.style}
       testIdPrefix="terminal-agent-sidebar"
       idleIcon={idleIcon}
+      statusPresentation="glyph"
     />
   );
 }
@@ -3592,7 +3540,9 @@ function ArchivedTitlePrefix(): ReactNode {
  * (`now` / `10m` / `4h` / `1d` / `1w` / short date). Isolated in its own leaf
  * so the shared 60s clock tick repaints this span rather than the whole row.
  */
-function ChatRowIdleTime(props: { readonly updatedAt: number }): ReactNode {
+export function ChatRowIdleTime(props: {
+  readonly updatedAt: number;
+}): ReactNode {
   const relative = useCompactRelativeTime(props.updatedAt);
   return (
     <span
@@ -3706,22 +3656,22 @@ function NestedChatStatusIcon(props: {
   );
 }
 
-function NestedChatStatusGlyph(props: {
+/**
+ * A status kind's glyph, from the shared glyph set (D12) like the row's own:
+ * the collapsed parent's rollup here, and each row of the strip's live agents
+ * list (D9).
+ */
+export function NestedChatStatusGlyph(props: {
   readonly kind: ChatDescendantStatusKind;
 }): ReactNode {
-  if (props.kind === "background") {
-    return <BackgroundActivityGlyph testId={undefined} />;
-  }
-  if (props.kind === "running") {
-    return (
-      <AgentSpinningDots
-        className={undefined}
-        testId={undefined}
-        variant={undefined}
-      />
-    );
+  if (props.kind === "running" || props.kind === "background") {
+    return <StatusGlyph kind={props.kind} className="size-3.5" label={null} />;
   }
   const tone = CHAT_DESCENDANT_STATUS_TONES[props.kind];
+  const glyph = statusGlyphKindOfTone(tone);
+  if (glyph !== null) {
+    return <StatusGlyph kind={glyph} className="size-3.5" label={null} />;
+  }
   const Icon = tone.Icon;
   return <Icon aria-hidden className={cn("size-3.5", tone.className)} />;
 }
