@@ -672,5 +672,23 @@ useLayoutEditorStore.getState().beginSession({
 for (const regionId of useLayoutStore.getState().arrangement.dock)
   useLayoutStore.getState().setRegionValues(regionId, { size: "chip" });
 
+// The stored tab strip placement and sidebar side the preset miniature is
+// drawn from, from `?tabs=top|left|right&sidebar=left|right` (default: the
+// shipped `top` and `left`). The driver reopens the page once per pair and
+// asks the miniature where it drew the strip and the rail.
+function applyPlacementQuery(): void {
+  const params = new URLSearchParams(window.location.search);
+  const tabs = params.get("tabs");
+  const sidebar = params.get("sidebar");
+  const { arrangement } = useLayoutStore.getState();
+  useLayoutStore.getState().setArrangement({
+    ...arrangement,
+    tabStripPlacement: tabs === "left" || tabs === "right" ? tabs : "top",
+    sidebarSide: sidebar === "right" ? "right" : "left",
+  });
+}
+
+applyPlacementQuery();
+
 const container = document.getElementById("root");
 if (container !== null) createRoot(container).render(<Fixture />);

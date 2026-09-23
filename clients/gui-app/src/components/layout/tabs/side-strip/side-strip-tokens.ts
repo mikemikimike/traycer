@@ -1,3 +1,5 @@
+import type { SideGroupLineSeat, SideTabRowVariant } from "./side-tab-row";
+
 /**
  * The vertical tab strip's visual constants, and their only home.
  * Pixel numbers are at a 16px root; `rounded-lg` is 8px (`--radius-lg` over
@@ -46,16 +48,43 @@ export const SIDE_TAB_TINT_FILL_CLASS =
 export const SIDE_TAB_COLORLESS_TILE_CLASS = "bg-foreground/8";
 /**
  * The group colour line down the group's inline-start edge, in the list's
- * inset outside the row fill; each member's segment reaches across the 2px
- * row gap so a group's segments join into one line.
+ * inset outside the row fill: 2px wide, 6px before the row's box.
  */
-export const SIDE_TAB_GROUP_LINE_CLASS = "w-0.5 -start-1.5 top-0 -bottom-0.5";
+export const SIDE_TAB_GROUP_LINE_CLASS = "w-0.5";
+/**
+ * Where each member's segment of the group line sits, so a group's segments
+ * join into one line at one x. A lone row's segment reaches across the 2px
+ * row gap below it. A split pair's members sit inside the pair's 2px padding:
+ * the top member's segment also covers the pair's top padding and the 4px
+ * seam, the bottom member's its bottom padding and the row gap. Expanded, the
+ * members are also 2px further in than a lone row, so their segments step 2px
+ * further out; collapsed, the pair is centred like a lone tile and they do not.
+ */
+export const SIDE_TAB_GROUP_LINE_SEAT_CLASS: Readonly<
+  Record<SideTabRowVariant, Readonly<Record<SideGroupLineSeat, string>>>
+> = {
+  expanded: {
+    row: "-start-1.5 top-0 -bottom-0.5",
+    "pair-top": "-start-2 -top-0.5 -bottom-1",
+    "pair-bottom": "-start-2 top-0 -bottom-1",
+  },
+  collapsed: {
+    row: "-start-1.5 top-0 -bottom-0.5",
+    "pair-top": "-start-1.5 -top-0.5 -bottom-1",
+    "pair-bottom": "-start-1.5 top-0 -bottom-1",
+  },
+};
 export const SIDE_TAB_GROUP_HEADER_CLASS = "h-7";
 /** A collapsed-rail tile: the collapsed row itself, 32px square. */
 export const SIDE_TAB_TILE_CLASS = "size-8 rounded-lg";
-/** The collapsed tile's active and hover states: an inset ring that reads on any fill. */
+/**
+ * The collapsed tile's active and hover states: an inset ring on the tile's
+ * own fill. The active ring is a state indicator, so it owes a tinted fill the
+ * 3:1 of a non-text indicator in both themes: 70% foreground measures about
+ * 6:1 on the orange tint in each theme, where 30% read about 2:1.
+ */
 export const SIDE_TAB_TILE_ACTIVE_CLASS =
-  "ring-2 ring-inset ring-foreground/30 text-foreground";
+  "ring-2 ring-inset ring-foreground/70 text-foreground";
 export const SIDE_TAB_TILE_HOVER_CLASS =
   "hover:ring-2 hover:ring-inset hover:ring-foreground/15";
 export const SIDE_TAB_MONOGRAM_CLASS = "text-[0.8125rem] font-semibold";

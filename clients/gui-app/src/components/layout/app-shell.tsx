@@ -12,10 +12,8 @@ import { AppHeader } from "@/components/layout/header/app-header";
 import {
   appColumnChrome,
   sideStripOwnsTitleBar,
-  type AppColumnChromeInput,
 } from "@/components/layout/header/app-title-band-kind";
-import { isFramelessDesktop } from "@/components/layout/header/title-bar-drag";
-import { useTabStripPlacement } from "@/components/layout/tabs/use-tab-strip-placement";
+import { useAppColumnChromeInput } from "@/components/layout/use-app-column-chrome-input";
 import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
 import { TabStripKeybindingBridge } from "@/components/layout/tabs/tab-strip-keybinding-bridge";
 import { MobileNavDrawer } from "@/components/layout/shell/mobile-nav-drawer";
@@ -39,8 +37,6 @@ import { useChatForkEventQuery } from "@/hooks/chats/use-chat-fork-queries";
 import { useAddressableHostId } from "@/hooks/host/use-addressable-host-id";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { PrimaryFocusCoordinatorProvider } from "@/lib/focus/primary-focus-coordinator-provider";
-import { resolveDesktopPlatform } from "@/lib/windows/desktop-capabilities";
-import { useRunnerHostOrNull } from "@/providers/use-runner-host";
 import { sideTabStripEdge } from "@/lib/layout/layout-arrangement";
 import { useStatusBarShown } from "@/stores/layout/layout-store";
 
@@ -97,18 +93,9 @@ export function AppShell(props: AppShellProps) {
   // the edit firewall on, and docks BESIDE (4.5). State rather than a ref
   // because the editor has to re-run its effects when the node arrives.
   const [appColumn, setAppColumn] = useState<HTMLDivElement | null>(null);
-  // The effective placement: `"top"` wherever the mobile header stands in for
-  // the desktop chrome, so the header and the strip never both render.
-  const placement = useTabStripPlacement();
-  const runnerHost = useRunnerHostOrNull();
-  const frameless = isFramelessDesktop();
-  const chromeInput: AppColumnChromeInput = {
-    placement,
-    platform: runnerHost === null ? null : resolveDesktopPlatform(runnerHost),
-    frameless,
-  };
+  const chromeInput = useAppColumnChromeInput();
   const chrome = appColumnChrome(chromeInput);
-  const stripEdge = sideTabStripEdge(placement);
+  const stripEdge = sideTabStripEdge(chromeInput.placement);
 
   return (
     <PrimaryFocusCoordinatorProvider>

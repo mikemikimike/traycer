@@ -78,6 +78,52 @@
 //       READ - fill against stroke - rather than sampled (L-163).
 //  A10. The selection ring's painted box is the region's box plus its padding,
 //       stays inside the window on the bottom row, and follows a dock switch.
+//
+// The canvas fixture mounts the shell's own `AppColumnFrame`; A1-A10 run it at
+// the `top` placement.
+//
+// ---------------------------------------------------------------------------
+// THE SIDE TAB STRIP (specs/side-tabs, ticket 12)
+//
+// Every variant below is a fresh navigation with its own query, and the
+// page-load guard re-baselines per variant.
+//
+//   Phase 1b (parity). The preset miniature draws the strip on the stored edge
+//       and the rail on the stored side, for every placement/side pair.
+//   Phase 2b (sides), `layout-editor-canvas.html?tabs=&collapsed=&wco=&dock=`
+//       with the real `SideTabStrip` and `DesktopMenuHeader` band:
+//       A9 generalised - the editing frame on all four column edges with no
+//       header, and the session row's solid `--warning-foreground` fill with
+//       `--background` text (L-163), sampled in pixels.
+//       A11 - every strip part (top block, Home, a row, the active close, the
+//       foot, the handle) is the hit target at its centre; a right strip sits
+//       left of a right-docked inspector; with the inspector docked left on
+//       macOS its header keeps the 82px inset and the strip's title row 12px.
+//       A12 - the rail is 56px (at least 82px on macOS with the strip at the
+//       left) with monograms drawn; the active ring on a tinted tile in both
+//       themes.
+//       A13 - the band per platform (40px, strip top at its bottom, hidden in
+//       macOS fullscreen), the 40px title row where the strip owns the title
+//       bar, the -1px tuck only while a band is displayed, and the dialog
+//       overlay's top under `.wco`.
+//       Row kit - the 10px badge on a 16px leading tile, and the group line as
+//       one continuous line across its members.
+//   Phase 2c (switch). A14 - a real click on Position "Left" moves the strip in
+//       one frame as one history step; one undo restores the top, with the
+//       selection ring heading for the moved node at once.
+//   Phase 3 (strip), `side-tab-strip.html?edge=left|right`: real-mouse y
+//       reorder with a neighbour stepping aside, a drop on a row's half that
+//       pairs two tabs, a split dragged whole, the tear-off preview and the
+//       new-window request 30px into the content, and none toward the window
+//       edge until the pointer leaves the viewport.
+//
+// What these fixtures cannot mount (native controls, real `env()` values,
+// `-webkit-app-region`, the menu bar's popups, the signed-in foot) is the
+// Staging checklist's: specs/side-tabs/tickets/12-browser-and-staging.md.
+//
+// Set LAYOUT_EDITOR_BROWSER_PHASES to a comma list of parity, canvas, sides,
+// switch, strip to run only those while iterating; every selected phase runs
+// even after one fails, and the run fails if any did.
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -623,12 +669,1908 @@ const TERMINALS_STACKED_ABOVE_BROWSERS = [
   "railComments",
 ];
 
+// --- phase 1b: the miniature's placements -----------------------------------
+
+/**
+ * Every stored tab strip placement and sidebar side the miniature has to draw,
+ * as the query the parity fixture reads. `top/left` is the shipped layout the
+ * base phase already covered.
+ */
+const MINIATURE_PLACEMENTS = [
+  { tabs: "left", sidebar: "left" },
+  { tabs: "right", sidebar: "right" },
+  { tabs: "left", sidebar: "right" },
+  { tabs: "right", sidebar: "left" },
+  { tabs: "top", sidebar: "right" },
+];
+
+/**
+ * Where the miniature drew the strip and the rail, in its own scaled frame.
+ * The strip is `app-frame-side-strip`'s box (the frame chrome's one copy),
+ * the rail is `preset-miniature-rail`, and the frame is the scaled 1000x620
+ * box both live in.
+ */
+const MINIATURE_PLACEMENT_PROBE = `(() => {
+  const box = document.querySelector('[data-testid="preset-miniature"]');
+  if (box === null) return { error: "no preset miniature rendered" };
+  const frame = box.firstElementChild;
+  const rail = box.querySelector('[data-testid="preset-miniature-rail"]');
+  const strip = box.querySelector('[data-testid="app-frame-side-strip"]');
+  if (frame === null || rail === null) return { error: "the miniature has no frame or no rail" };
+  const rect = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  return {
+    error: null,
+    frame: rect(frame),
+    rail: rect(rail),
+    strip: strip === null ? null : rect(strip),
+    frameWidth: frame.offsetWidth,
+    frameHeight: frame.offsetHeight,
+  };
+})()`;
+
+async function runParityPlacementVariants(client, pageUrl, pageLoads) {
+  const violations = [];
+  const notes = [];
+  for (const placement of MINIATURE_PLACEMENTS) {
+    const label = `miniature tabs=${placement.tabs} sidebar=${placement.sidebar}`;
+    const loadsAtStart = await openVariant(
+      client,
+      variantUrl(pageUrl, placement),
+      label,
+      "window.__layoutEditorProbe?.ready === true",
+      pageLoads,
+    );
+    await flush(client);
+    const drawn = await evaluate(client, MINIATURE_PLACEMENT_PROBE);
+    if (drawn.error !== null) {
+      violations.push(`${label}: ${drawn.error}`);
+      continue;
+    }
+    if (drawn.frameWidth !== 1000 || drawn.frameHeight !== 620) {
+      violations.push(
+        `${label}: the frame measures ${String(drawn.frameWidth)}x${String(drawn.frameHeight)} untransformed, expected 1000x620`,
+      );
+    }
+    const frameCentre = drawn.frame.x + drawn.frame.width / 2;
+    const railCentre = drawn.rail.x + drawn.rail.width / 2;
+    const railSide = railCentre < frameCentre ? "left" : "right";
+    if (railSide !== placement.sidebar) {
+      violations.push(
+        `${label}: the rail is drawn on the ${railSide} (centre ${railCentre.toFixed(1)} in a frame centred at ${frameCentre.toFixed(1)}), stored side ${placement.sidebar}`,
+      );
+    }
+    if (placement.tabs === "top") {
+      if (drawn.strip !== null) {
+        violations.push(
+          `${label}: a side strip is drawn for the top placement`,
+        );
+      }
+    } else if (drawn.strip === null) {
+      violations.push(`${label}: no side strip in the miniature`);
+    } else {
+      const atEdge =
+        placement.tabs === "left"
+          ? Math.abs(drawn.strip.x - drawn.frame.x) <= 1
+          : Math.abs(
+              drawn.strip.x +
+                drawn.strip.width -
+                (drawn.frame.x + drawn.frame.width),
+            ) <= 1;
+      if (!atEdge) {
+        violations.push(
+          `${label}: the strip at ${boxText(drawn.strip)} is not on the frame's ${placement.tabs} edge (frame ${boxText(drawn.frame)})`,
+        );
+      }
+      const railBeyondStrip =
+        placement.tabs === "left"
+          ? drawn.rail.x < drawn.strip.x + drawn.strip.width - 0.5
+          : drawn.rail.x + drawn.rail.width > drawn.strip.x + 0.5;
+      if (railBeyondStrip) {
+        violations.push(
+          `${label}: the rail at ${boxText(drawn.rail)} sits between the strip at ${boxText(drawn.strip)} and the window edge`,
+        );
+      }
+    }
+    notes.push(
+      `${label}: strip ${drawn.strip === null ? "none" : boxText(drawn.strip)}, rail ${boxText(drawn.rail)}, frame ${boxText(drawn.frame)}`,
+    );
+    assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    `The miniature's placements failed (${String(violations.length)}):\n${violations.map((line) => `  - ${line}`).join("\n")}\n\nmeasurements:\n${notes.map((line) => `  ${line}`).join("\n")}`,
+  );
+  for (const note of notes) console.log(`  ${note}`);
+  console.log(
+    `preset miniature placements passed: ${String(MINIATURE_PLACEMENTS.length)} stored placement/side pairs, each drawn on its stored edge and side`,
+  );
+}
+
+// --- phase 2b: the side placements (A9 generalised, A11, A12, A13) ----------
+
+/** The strip's own numbers (side-strip-tokens.ts, S-18, S-20), restated so a drift is a failure. */
+const SIDE_STRIP_RAIL_WIDTH = 56;
+const SIDE_STRIP_DEFAULT_WIDTH = 240;
+/** `env(titlebar-area-x, 82px)`: the fallback the fixture's `.wco` stands on (6.4). */
+const WCO_LEADING_INSET_FALLBACK = 82;
+/** `min(env(titlebar-area-x, 82px), 0.75rem)` while the inspector docks left (S-33). */
+const LEFT_DOCK_COLUMN_GUTTER = 12;
+/** The band floor: `max(env(titlebar-area-height, 0px), 40px)` (6.3). */
+const TITLE_BAND_HEIGHT = 40;
+/** S-35 and S-17: the leading tile and the status badge on it. */
+const SIDE_TAB_LEADING_TILE = 16;
+const SIDE_TAB_BADGE = 10;
+const SIDE_TAB_TILE = 32;
+/**
+ * How far apart a tile's pixel at the ring position and its own fill have to
+ * be, as a WCAG contrast ratio, to count as a ring at all: a missing ring
+ * samples the fill twice and reads 1.00. The inactive control must stay under
+ * it, so the probe is seen to tell a ring from none.
+ */
+const RING_PRESENT_FLOOR = 1.2;
+/** WCAG 1.4.11: what the active ring, a non-text state indicator, owes its fill in each theme. */
+const NON_TEXT_CONTRAST = 3;
+/** A pixel is the session fill when every channel is this close to the painted token. */
+const SOLID_FILL_TOLERANCE = 12;
+
+/**
+ * The windows under test, each a fresh navigation of the canvas fixture.
+ *
+ * `session` opens a layout session, because the right-docked inspector, the
+ * editing frame and the session row exist only inside one; the rail cases run
+ * at rest so a real click can make a TINTED tile the active one.
+ */
+const SIDE_VARIANTS = [
+  {
+    label: "left",
+    query: { tabs: "left", collapsed: 0, wco: "none", dock: "right" },
+    session: true,
+    checks: ["frame", "sessionRow", "hits", "band", "rowKit"],
+  },
+  {
+    label: "right",
+    query: { tabs: "right", collapsed: 0, wco: "none", dock: "right" },
+    session: true,
+    checks: ["frame", "sessionRow", "hits", "band", "besideInspector"],
+  },
+  {
+    label: "left, macOS",
+    query: { tabs: "left", collapsed: 0, wco: "mac", dock: "right" },
+    session: true,
+    checks: ["hits", "band"],
+  },
+  {
+    label: "right, macOS",
+    query: { tabs: "right", collapsed: 0, wco: "mac", dock: "right" },
+    session: true,
+    checks: ["hits", "band", "besideInspector"],
+  },
+  {
+    label: "left, Windows",
+    query: { tabs: "left", collapsed: 0, wco: "win", dock: "right" },
+    session: true,
+    checks: ["hits", "band"],
+  },
+  {
+    label: "right, macOS fullscreen",
+    query: {
+      tabs: "right",
+      collapsed: 0,
+      wco: "mac-fullscreen",
+      dock: "right",
+    },
+    session: true,
+    checks: ["band"],
+  },
+  {
+    label: "left, macOS, inspector docked left",
+    query: { tabs: "left", collapsed: 0, wco: "mac", dock: "left" },
+    session: true,
+    checks: ["hits", "dockLeftInset"],
+  },
+  {
+    label: "rail left",
+    query: { tabs: "left", collapsed: 1, wco: "none", dock: "right" },
+    session: false,
+    checks: ["rail", "ringLegibility"],
+  },
+  {
+    label: "rail left, macOS",
+    query: { tabs: "left", collapsed: 1, wco: "mac", dock: "right" },
+    session: false,
+    checks: ["rail"],
+  },
+  {
+    label: "rail right",
+    query: { tabs: "right", collapsed: 1, wco: "none", dock: "right" },
+    session: false,
+    checks: ["rail"],
+  },
+];
+
+/**
+ * What the band does in a window, from the chrome it simulates (S-04, 6.2):
+ * a macOS left strip owns the title bar and draws no band, a frameless window
+ * otherwise draws one, and macOS fullscreen keeps it in the tree but hidden.
+ */
+function expectedBand(query) {
+  if (query.wco === "none") return "absent";
+  if (query.tabs === "left" && query.wco !== "win") return "absent";
+  if (query.wco === "mac-fullscreen") return "hidden";
+  return "shown";
+}
+
+async function runSidePlacementPhase(client, pageUrl, pageLoads) {
+  const violations = [];
+  const notes = [];
+  for (const variant of SIDE_VARIANTS) {
+    const label = `side ${variant.label}`;
+    const step = { name: "open" };
+    try {
+      await runSideVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        variant,
+        label,
+        step,
+        violations,
+        notes,
+      );
+    } catch (error) {
+      violations.push(
+        `${label}: stopped at "${step.name}": ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  console.log(`\n--- side placements ---`);
+  for (const note of notes) console.log(`  ${note}`);
+  assert.deepEqual(
+    violations,
+    [],
+    `The side placements failed (${String(violations.length)}):\n${violations.map((line) => `  - ${line}`).join("\n")}`,
+  );
+  console.log(
+    `side placements passed: ${String(SIDE_VARIANTS.length)} windows - the frame on four edges with no header, the session row's solid fill, every strip part hit at its centre, the band per platform, the rail, the row kit`,
+  );
+}
+
+/** One window of the side phase; `step` names where it is, for a stall. */
+async function runSideVariant(
+  client,
+  pageUrl,
+  pageLoads,
+  variant,
+  label,
+  step,
+  violations,
+  notes,
+) {
+  const loadsAtStart = await openVariant(
+    client,
+    variantUrl(pageUrl, variant.query),
+    label,
+    "window.__layoutCanvasProbe?.ready === true && document.querySelector('[data-testid=\"side-tab-strip\"]') !== null",
+    pageLoads,
+  );
+  await evaluate(client, INSTALL_PIXEL_TOOLS);
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  if (variant.session) {
+    await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
+  }
+  await moveTo(client, 1, 1);
+  await flush(client);
+  await delay(450);
+  await flush(client);
+
+  step.name = "base probe";
+  const base = await evaluate(client, SIDE_VARIANT_PROBE);
+  if (base.error !== null) {
+    violations.push(`${label}: ${base.error}`);
+    return;
+  }
+  notes.push(
+    `${label}: column ${boxText(base.column)}, strip ${boxText(base.strip)} (data-edge=${String(base.edge)}), placement stamp ${String(base.placementStamp)}, band kind ${String(base.bandKind)}`,
+  );
+  // The strip is the stored edge's, flush with the column's edge, and the
+  // specimen header is never used beside it.
+  if (base.edge !== variant.query.tabs) {
+    violations.push(
+      `${label}: the strip carries data-edge=${String(base.edge)}, stored ${variant.query.tabs}`,
+    );
+  }
+  const offEdge =
+    variant.query.tabs === "left"
+      ? Math.abs(base.strip.x - base.column.x)
+      : Math.abs(
+          base.strip.x + base.strip.width - (base.column.x + base.column.width),
+        );
+  if (offEdge > 0.5) {
+    violations.push(
+      `${label}: the strip at ${boxText(base.strip)} is not on the column's ${variant.query.tabs} edge ${boxText(base.column)}`,
+    );
+  }
+  if (base.fixtureHeader) {
+    violations.push(
+      `${label}: the fixture's header specimen is mounted beside a side strip`,
+    );
+  }
+
+  for (const check of variant.checks) {
+    step.name = check;
+    const result = await SIDE_CHECKS[check](client, variant, base);
+    for (const line of result.violations)
+      violations.push(`${label} ${check}: ${line}`);
+    for (const line of result.notes) notes.push(`${label} ${check}: ${line}`);
+  }
+  if (variant.session) {
+    await evaluate(client, "window.__layoutCanvasProbe.endSession()");
+  }
+  const errors = await evaluate(client, "window.__layoutCanvasErrors");
+  if (errors.length > 0) {
+    violations.push(
+      `${label}: the fixture raised ${String(errors.length)} uncaught error(s):\n${errors.join("\n")}`,
+    );
+  }
+  assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
+}
+
+const SIDE_VARIANT_PROBE = `(() => {
+  const column = document.querySelector("[data-layout-column]");
+  const strip = document.querySelector('[data-testid="side-tab-strip"]');
+  if (column === null || strip === null) return { error: "no app column or no side strip" };
+  const rect = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  return {
+    error: null,
+    column: rect(column),
+    strip: rect(strip),
+    edge: strip.getAttribute("data-edge"),
+    placementStamp: column.getAttribute("data-tab-strip-placement"),
+    bandKind: column.getAttribute("data-app-title-band"),
+    fixtureHeader: document.querySelector("[data-fixture-header]") !== null,
+  };
+})()`;
+
+const SIDE_CHECKS = {
+  frame: checkSideFrame,
+  sessionRow: checkSessionRow,
+  hits: checkStripHits,
+  band: checkTitleBand,
+  besideInspector: checkBesideInspector,
+  dockLeftInset: checkDockLeftInset,
+  rail: checkRail,
+  ringLegibility: checkRingLegibility,
+  rowKit: checkRowKit,
+};
+
+/**
+ * A9 with the header absent: the editing frame is counted on all four edges of
+ * the column, including the edge the strip now takes and the top edge that the
+ * strip and the surface meet the window at.
+ */
+async function checkSideFrame(client, _variant, base) {
+  const violations = [];
+  const notes = [];
+  const target = await sampleAmber(client);
+  if (target === null) {
+    return { violations: ["could not sample --warning-foreground"], notes };
+  }
+  const frame = await readFrameGeometry(client);
+  if (
+    frame.inset !== DESIGNED_FRAME_INSET ||
+    frame.radius !== DESIGNED_FRAME_RADIUS
+  ) {
+    violations.push(
+      `the frame is inset ${String(frame.inset)}px with a ${String(frame.radius)}px radius, expected ${String(DESIGNED_FRAME_INSET)}px and ${String(DESIGNED_FRAME_RADIUS)}px (L-137)`,
+    );
+  }
+  const geometry = {
+    inset: frame.inset ?? DESIGNED_FRAME_INSET,
+    radius: frame.radius ?? DESIGNED_FRAME_RADIUS,
+  };
+  for (const edge of ["top", "bottom", "left", "right"]) {
+    const count = await countEdge(client, base.column, edge, target, geometry);
+    const ratio = count.along === 0 ? 0 : count.lit / count.along;
+    const quarters = count.quarters.map((quarter) =>
+      quarter.along === 0 ? 0 : quarter.lit / quarter.along,
+    );
+    notes.push(
+      `${edge}: ${String(count.lit)}/${String(count.along)} lit (${(ratio * 100).toFixed(1)}%), quarters ${quarters.map((share) => `${(share * 100).toFixed(0)}%`).join(" ")}`,
+    );
+    if (ratio < FRAME_LIT_FLOOR || ratio > FRAME_LIT_CEILING) {
+      violations.push(
+        `${edge}: ${(ratio * 100).toFixed(1)}% of the straight run is amber, expected a dotted ${String(FRAME_LIT_FLOOR * 100)}-${String(FRAME_LIT_CEILING * 100)}%; column ${boxText(base.column)}`,
+      );
+    }
+    for (const [index, share] of quarters.entries()) {
+      if (share >= FRAME_QUARTER_LIT_FLOOR) continue;
+      violations.push(
+        `${edge}: quarter ${String(index + 1)} is ${(share * 100).toFixed(1)}% amber, so part of the edge is covered or missing; column ${boxText(base.column)}`,
+      );
+    }
+  }
+  return { violations, notes };
+}
+
+/**
+ * The session row (L-163): the Customizing tab, active, is a SOLID
+ * `--warning-foreground` object with `--background` text. Sampled in pixels
+ * at three points of its fill clear of the label and the close button, so a
+ * dim, a wash or a translucent fill all read as the defect they are.
+ */
+async function checkSessionRow(client) {
+  const violations = [];
+  const notes = [];
+  const target = await sampleAmber(client);
+  const row = await evaluate(
+    client,
+    `(() => {
+      const marker = document.querySelector('[data-testid="side-tab-strip"] [data-layout-session-tab]');
+      if (marker === null) return { error: "no session row in the strip" };
+      const row = marker.closest("[data-side-tab]");
+      if (row === null) return { error: "the session marker is outside a row" };
+      const title = row.querySelector('[data-testid="side-tab-title"]');
+      const probe = document.createElement("span");
+      probe.style.display = "none";
+      row.append(probe);
+      const resolve = (value) => {
+        probe.style.color = "";
+        probe.style.color = value;
+        return getComputedStyle(probe).color;
+      };
+      const background = resolve("var(--background)");
+      probe.remove();
+      const r = row.getBoundingClientRect();
+      return {
+        error: null,
+        marker: marker.getAttribute("data-layout-session-tab"),
+        active: row.getAttribute("data-active"),
+        rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+        titleColor: title === null ? null : getComputedStyle(title).color,
+        background,
+      };
+    })()`,
+  );
+  if (row.error !== null) return { violations: [row.error], notes };
+  if (row.marker !== "filled" || row.active !== "true") {
+    violations.push(
+      `the session row is ${String(row.marker)} / active=${String(row.active)}, expected the filled, active Customizing tab`,
+    );
+  }
+  if (row.titleColor !== row.background) {
+    violations.push(
+      `the session row's label is ${String(row.titleColor)}, expected the --background colour ${String(row.background)}`,
+    );
+  }
+  const points = [
+    {
+      name: "leading padding",
+      x: row.rect.x + 3,
+      y: row.rect.y + row.rect.height / 2,
+    },
+    {
+      name: "top margin",
+      x: row.rect.x + row.rect.width * 0.55,
+      y: row.rect.y + 3,
+    },
+    {
+      name: "bottom margin",
+      x: row.rect.x + row.rect.width * 0.35,
+      y: row.rect.y + row.rect.height - 4,
+    },
+  ];
+  for (const point of points) {
+    const pixel = await samplePixelAt(client, point.x, point.y);
+    const off =
+      target === null || pixel === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(
+            ...pixel.map((channel, index) => Math.abs(channel - target[index])),
+          );
+    notes.push(
+      `session row ${point.name} paints rgb(${String(pixel)}) against the token rgb(${String(target)})`,
+    );
+    if (off > SOLID_FILL_TOLERANCE) {
+      violations.push(
+        `the session row's ${point.name} at (${point.x.toFixed(0)}, ${point.y.toFixed(0)}) paints rgb(${String(pixel)}), not the solid --warning-foreground rgb(${String(target)}) (L-163)`,
+      );
+    }
+  }
+  return { violations, notes };
+}
+
+/**
+ * A11: every strip part is the hit target at its own centre - the top block's
+ * buttons, Home, a row, the active row's close, every foot control and the
+ * resize handle - so nothing (a band, the inspector, the surface's corner, an
+ * overlay) sits over the strip where it takes input. A natively disabled
+ * button takes no pointer events by design; its tooltip wrapper of the same
+ * box is then the target, which is what the product built it for.
+ */
+async function checkStripHits(client, variant) {
+  const violations = [];
+  const notes = [];
+  // The arrows self-gate on the desktop's persistent history: a browser shell
+  // has its own back button, so there they must be absent, not merely skipped.
+  const desktop = variant.query.wco !== "none";
+  const parts = await evaluate(
+    client,
+    `(() => {
+      const strip = document.querySelector('[data-testid="side-tab-strip"]');
+      const q = (selector) => strip.querySelector(selector);
+      const arrows = ${String(desktop)}
+        ? [
+            ["back", q('[data-testid="history-nav-back"]')],
+            ["forward", q('[data-testid="history-nav-forward"]')],
+          ]
+        : [];
+      const strayArrows = ${String(desktop)} ? 0 : strip.querySelectorAll('[data-testid^="history-nav-"]').length;
+      const named = [
+        ...arrows,
+        ["new task", q('[data-testid="tab-new"]')],
+        ["collapse", q('[data-testid="side-tab-strip-collapse"]')],
+        ["home", q('[data-testid="tab-home"]')],
+        ["row", [...strip.querySelectorAll('[data-testid="header-tab-strip-scroll"] [data-side-tab]')].find((row) => row.getAttribute("data-active") !== "true") ?? null],
+        ["close", q('[data-revealed="always"] [data-testid^="tab-close-"]')],
+        ["handle", q('[data-testid="side-tab-strip-resize-handle"]')],
+      ];
+      const foot = q('[data-testid="side-strip-foot"]');
+      const footControls = foot === null ? [] : [...foot.querySelectorAll("button, a[href], [role='button']")];
+      footControls.forEach((node, index) => named.push(["foot " + (node.getAttribute("aria-label") ?? node.getAttribute("data-testid") ?? String(index)), node]));
+      if (foot !== null && footControls.length === 0) named.push(["foot (no control)", null]);
+      if (strayArrows > 0) named.push(["history arrows in a browser shell", strip.querySelector('[data-testid^="history-nav-"]'), "stray"]);
+      return named.map(([name, node, stray]) => {
+        if (stray === "stray") return { name, error: "drawn although the shell has no persistent history" };
+        if (node === null) return { name, error: "not in the strip" };
+        const r = node.getBoundingClientRect();
+        const x = r.x + r.width / 2;
+        const y = r.y + r.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        const own = hit !== null && (hit === node || node.contains(hit));
+        const wrapper = node.parentElement;
+        const w = wrapper === null ? null : wrapper.getBoundingClientRect();
+        const disabledWrapper =
+          node.disabled === true &&
+          hit === wrapper &&
+          w !== null &&
+          Math.abs(w.width - r.width) < 1 &&
+          Math.abs(w.height - r.height) < 1;
+        return {
+          name,
+          error: null,
+          width: r.width,
+          height: r.height,
+          x,
+          y,
+          ok: own || disabledWrapper,
+          disabled: node.disabled === true,
+          inStrip: hit !== null && strip.contains(hit),
+          hit: hit === null ? null : hit.tagName + "." + String(hit.getAttribute("class") ?? "").slice(0, 70) + (hit.getAttribute("data-testid") ? "#" + hit.getAttribute("data-testid") : ""),
+        };
+      });
+    })()`,
+  );
+  for (const part of parts) {
+    if (part.error !== null) {
+      violations.push(`${part.name}: ${part.error}`);
+      continue;
+    }
+    if (part.width === 0 || part.height === 0) {
+      violations.push(
+        `${part.name}: its box is ${String(part.width)}x${String(part.height)}`,
+      );
+      continue;
+    }
+    if (!part.ok) {
+      violations.push(
+        `${part.name}: elementFromPoint(${part.x.toFixed(0)}, ${part.y.toFixed(0)}) is ${String(part.hit)} (inside the strip: ${String(part.inStrip)})`,
+      );
+    }
+  }
+  notes.push(
+    `${String(parts.length)} parts hit-tested: ${parts.map((part) => part.name + (part.disabled ? " (disabled)" : "")).join(", ")}`,
+  );
+  return { violations, notes };
+}
+
+/**
+ * A13 and the surface's tuck (S-04, 6.2, 6.3, review-09 M1): the band's
+ * presence and height, the strip's top against the band's bottom, the 40px
+ * title row where the strip owns the title bar, the -1px pull-up only while a
+ * band is displayed, and where a dialog overlay starts under `.wco`.
+ */
+async function checkTitleBand(client, variant, base) {
+  const violations = [];
+  const notes = [];
+  const expected = expectedBand(variant.query);
+  const band = await evaluate(
+    client,
+    `(() => {
+      const band = document.querySelector('[data-testid="app-title-band"]');
+      const strip = document.querySelector('[data-testid="side-tab-strip"]');
+      const titleRow = document.querySelector('[data-testid="side-strip-title-row"]');
+      const surface = document.querySelector('[data-layout-column] main > div');
+      const overlay = document.createElement("div");
+      overlay.setAttribute("data-slot", "dialog-overlay");
+      overlay.style.position = "fixed";
+      overlay.style.pointerEvents = "none";
+      document.body.append(overlay);
+      const overlayTop = getComputedStyle(overlay).top;
+      overlay.remove();
+      const rect = (node) => {
+        const r = node.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      };
+      return {
+        band: band === null ? null : { rect: rect(band), display: getComputedStyle(band).display },
+        stripTop: strip.getBoundingClientRect().top,
+        titleRow: titleRow === null ? null : { rect: rect(titleRow), paddingLeft: getComputedStyle(titleRow).paddingLeft },
+        surfaceMarginTop: surface === null ? null : getComputedStyle(surface).marginTop,
+        surfaceClass: surface === null ? null : surface.getAttribute("class"),
+        overlayTop,
+        wco: document.documentElement.classList.contains("wco"),
+        bandVariable: getComputedStyle(document.documentElement).getPropertyValue("--app-title-band-height").trim(),
+      };
+    })()`,
+  );
+  const shown = band.band !== null && band.band.display !== "none";
+  notes.push(
+    `expected band ${expected}; band ${band.band === null ? "absent" : `${band.band.display} ${boxText(band.band.rect)}`}, strip top ${band.stripTop.toFixed(1)}, title row ${band.titleRow === null ? "none" : `${boxText(band.titleRow.rect)} pl=${band.titleRow.paddingLeft}`}, surface margin-top ${String(band.surfaceMarginTop)}, dialog overlay top ${band.overlayTop}, .wco=${String(band.wco)}`,
+  );
+  if (expected === "absent" && band.band !== null) {
+    violations.push(
+      `a title band is mounted (${band.band.display}) where the chrome draws none`,
+    );
+  }
+  if (expected === "hidden") {
+    if (band.band === null)
+      violations.push("no title band in the tree for a frameless right strip");
+    else if (shown)
+      violations.push(
+        `the band is displayed (${band.band.display}) with no window-controls overlay`,
+      );
+  }
+  if (expected === "shown") {
+    if (!shown) {
+      violations.push(
+        `the band is ${band.band === null ? "absent" : "hidden"} where the native controls need it`,
+      );
+    } else {
+      if (Math.abs(band.band.rect.height - TITLE_BAND_HEIGHT) > 0.5) {
+        violations.push(
+          `the band is ${band.band.rect.height.toFixed(1)}px tall, expected the ${String(TITLE_BAND_HEIGHT)}px floor of --app-title-band-height`,
+        );
+      }
+      const bandBottom = band.band.rect.y + band.band.rect.height;
+      if (Math.abs(bandBottom - band.stripTop) > 0.5) {
+        violations.push(
+          `the band ends at y=${bandBottom.toFixed(1)} and the strip starts at y=${band.stripTop.toFixed(1)}; the strip must start where the band ends`,
+        );
+      }
+    }
+  }
+  const pullUp = shown ? "-1px" : "0px";
+  if (band.surfaceMarginTop !== pullUp) {
+    violations.push(
+      `the surface frame's margin-top is ${String(band.surfaceMarginTop)}, expected ${pullUp}: the 1px tuck applies only while a band is displayed (review-09 M1; class "${String(band.surfaceClass)}")`,
+    );
+  }
+  if (variant.query.wco === "mac" && variant.query.tabs === "left") {
+    if (band.titleRow === null) {
+      violations.push(
+        "the strip draws no title row where it owns the title bar",
+      );
+    } else {
+      if (Math.abs(band.titleRow.rect.height - TITLE_BAND_HEIGHT) > 0.5) {
+        violations.push(
+          `the strip's title row is ${band.titleRow.rect.height.toFixed(1)}px tall, expected ${String(TITLE_BAND_HEIGHT)}px`,
+        );
+      }
+      if (Math.abs(band.titleRow.rect.y - base.column.y) > 0.5) {
+        violations.push(
+          `the strip's title row starts at y=${band.titleRow.rect.y.toFixed(1)}, not at the window top`,
+        );
+      }
+      if (
+        band.titleRow.paddingLeft !== `${String(WCO_LEADING_INSET_FALLBACK)}px`
+      ) {
+        violations.push(
+          `the title row pads ${band.titleRow.paddingLeft} at the leading edge, expected the ${String(WCO_LEADING_INSET_FALLBACK)}px traffic-light inset`,
+        );
+      }
+    }
+  } else if (band.titleRow !== null) {
+    violations.push(
+      "the strip draws a title row although it does not own the title bar",
+    );
+  }
+  if (band.wco) {
+    const overlayTop = shown ? `${String(TITLE_BAND_HEIGHT)}px` : "0px";
+    if (band.overlayTop !== overlayTop) {
+      violations.push(
+        `a dialog overlay starts at top ${band.overlayTop}, expected ${overlayTop} (--app-title-band-height is "${band.bandVariable}")`,
+      );
+    }
+  }
+  return { violations, notes };
+}
+
+/** A right strip sits left of a right-docked inspector, never under it (6.1). */
+async function checkBesideInspector(client, _variant, base) {
+  const violations = [];
+  const notes = [];
+  const inspector = await rectOf(client, "[data-layout-inspector]");
+  if (inspector === null)
+    return { violations: ["no inspector in the session"], notes };
+  notes.push(`inspector ${boxText(inspector)}, strip ${boxText(base.strip)}`);
+  if (base.strip.x + base.strip.width > inspector.x + 0.5) {
+    violations.push(
+      `the strip ends at x=${(base.strip.x + base.strip.width).toFixed(1)}, past the inspector's left edge at x=${inspector.x.toFixed(1)}`,
+    );
+  }
+  return { violations, notes };
+}
+
+/**
+ * The traffic-light reserve belongs to whatever sits at the window's top-left
+ * corner (S-28, S-33): with the inspector docked left its header keeps at
+ * least the 82px inset, and the strip's title row beside it drops to 12px.
+ */
+async function checkDockLeftInset(client) {
+  const violations = [];
+  const notes = [];
+  const read = await evaluate(
+    client,
+    `(() => {
+      const header = document.querySelector("[data-layout-inspector-header]");
+      const titleRow = document.querySelector('[data-testid="side-strip-title-row"]');
+      const inspector = document.querySelector("[data-layout-inspector]");
+      const column = document.querySelector("[data-layout-column]");
+      return {
+        headerPadding: header === null ? null : Number.parseFloat(getComputedStyle(header).paddingLeft),
+        titleRowPadding: titleRow === null ? null : Number.parseFloat(getComputedStyle(titleRow).paddingLeft),
+        inspectorLeft: inspector === null ? null : inspector.getBoundingClientRect().left,
+        columnLeft: column === null ? null : column.getBoundingClientRect().left,
+      };
+    })()`,
+  );
+  notes.push(
+    `inspector header pads ${String(read.headerPadding)}px, title row pads ${String(read.titleRowPadding)}px; inspector left ${String(read.inspectorLeft)}, column left ${String(read.columnLeft)}`,
+  );
+  if (
+    read.inspectorLeft === null ||
+    read.columnLeft === null ||
+    read.inspectorLeft > read.columnLeft
+  ) {
+    violations.push(
+      "the inspector is not docked at the window's left, so the reserve is untested",
+    );
+  }
+  if (
+    read.headerPadding === null ||
+    read.headerPadding < WCO_LEADING_INSET_FALLBACK
+  ) {
+    violations.push(
+      `the left-docked inspector's header pads ${String(read.headerPadding)}px, under the ${String(WCO_LEADING_INSET_FALLBACK)}px traffic-light inset`,
+    );
+  }
+  if (read.titleRowPadding !== LEFT_DOCK_COLUMN_GUTTER) {
+    violations.push(
+      `the strip's title row pads ${String(read.titleRowPadding)}px beside a left-docked inspector, expected the ${String(LEFT_DOCK_COLUMN_GUTTER)}px gutter`,
+    );
+  }
+  return { violations, notes };
+}
+
+/**
+ * A12: the collapsed rail is 56px (never under the 82px inset on macOS with the
+ * strip at the left), and each monogram tile is a centred 32px square with its
+ * letters actually drawn: ink inside the tile that is not the tile's fill.
+ */
+async function checkRail(client, variant, base) {
+  const violations = [];
+  const notes = [];
+  const floor =
+    variant.query.wco === "mac" && variant.query.tabs === "left"
+      ? Math.max(SIDE_STRIP_RAIL_WIDTH, WCO_LEADING_INSET_FALLBACK)
+      : SIDE_STRIP_RAIL_WIDTH;
+  const exact = floor === SIDE_STRIP_RAIL_WIDTH;
+  notes.push(
+    `rail ${base.strip.width.toFixed(1)}px wide (expected ${exact ? "" : "at least "}${String(floor)}px)`,
+  );
+  if (
+    exact
+      ? Math.abs(base.strip.width - floor) > 0.5
+      : base.strip.width < floor - 0.5
+  ) {
+    violations.push(
+      `the rail is ${base.strip.width.toFixed(1)}px wide, expected ${exact ? "" : "at least "}${String(floor)}px (S-18)`,
+    );
+  }
+  const tiles = await evaluate(
+    client,
+    `(() => [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"][data-tile-kind="monogram"]')].map((tile) => {
+      const r = tile.getBoundingClientRect();
+      return { text: (tile.textContent ?? "").trim(), rect: { x: r.x, y: r.y, width: r.width, height: r.height } };
+    }))()`,
+  );
+  if (tiles.length === 0) violations.push("no monogram tile in the rail");
+  const stripCentre = base.strip.x + base.strip.width / 2;
+  for (const tile of tiles) {
+    if (
+      Math.abs(tile.rect.width - SIDE_TAB_TILE) > 0.5 ||
+      Math.abs(tile.rect.height - SIDE_TAB_TILE) > 0.5
+    ) {
+      violations.push(
+        `the "${tile.text}" tile is ${tile.rect.width.toFixed(1)}x${tile.rect.height.toFixed(1)}, expected ${String(SIDE_TAB_TILE)}px square (S-17)`,
+      );
+    }
+    const tileCentre = tile.rect.x + tile.rect.width / 2;
+    if (Math.abs(tileCentre - stripCentre) > 1) {
+      violations.push(
+        `the "${tile.text}" tile is centred at x=${tileCentre.toFixed(1)}, the rail at x=${stripCentre.toFixed(1)}`,
+      );
+    }
+    if (tile.text.length === 0) {
+      violations.push(
+        `a monogram tile at ${boxText(tile.rect)} has no letters`,
+      );
+      continue;
+    }
+    // Ink: pixels in the tile's middle that differ from the fill beside them.
+    const ink = await inkInside(client, tile.rect);
+    if (ink < 4) {
+      violations.push(
+        `the "${tile.text}" monogram paints ${String(ink)} ink pixels, so its letters are not drawn`,
+      );
+    }
+  }
+  notes.push(
+    `${String(tiles.length)} monogram tiles: ${tiles.map((tile) => tile.text).join(" ")}`,
+  );
+  return { violations, notes };
+}
+
+/**
+ * The collapsed tile's active ring on TINTED tiles, in both themes (review-10
+ * H1, S-36): the orange `Delta` tile is made the active one through the tabs
+ * store (the fixture has no epic routes for a click's navigation to land on),
+ * and the ring's pixel is compared with the same pixel before the tile was
+ * active, which is what the tile paints there with no ring. An inactive tinted tile is sampled
+ * the same way as the control, so the probe is seen to read 1.00 where no ring
+ * is drawn.
+ */
+async function checkRingLegibility(client) {
+  const violations = [];
+  const notes = [];
+  try {
+    await measureRingLegibility(client, violations, notes);
+  } finally {
+    // The theme is persisted, so the next variant's document would boot in
+    // the last one set here; every variant starts from the shipped "system".
+    await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+  }
+  return { violations, notes };
+}
+
+async function measureRingLegibility(client, violations, notes) {
+  for (const theme of ["light", "dark"]) {
+    await evaluate(
+      client,
+      `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+    );
+    await evaluate(client, "window.__layoutCanvasProbe.reset()");
+    await evaluate(
+      client,
+      'window.__layoutCanvasProbe.activateEpicTab("fixture-epsilon")',
+    );
+    await flush(client);
+    await delay(150);
+    const tilesProbe = `(() => {
+      const tiles = [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"][data-tinted="true"]')];
+      const pick = (text) => tiles.find((node) => (node.textContent ?? "").trim() === text) ?? null;
+      const box = (node) => {
+        if (node === null) return null;
+        const r = node.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height, active: node.getAttribute("data-active") };
+      };
+      return { delta: box(pick("DM")), alpha: box(pick("AR")) };
+    })()`;
+    // The ring's position on the tile's leading edge, halfway down, and the
+    // same pixel with no ring: what the tile paints there while inactive.
+    const edgeOf = (box) => ({ x: box.x + 1, y: box.y + box.height / 2 });
+    const resting = await evaluate(client, tilesProbe);
+    if (resting.delta === null || resting.alpha === null) {
+      violations.push(
+        `${theme}: the tinted Delta ("DM") and Alpha ("AR") tiles are not both in the rail`,
+      );
+      continue;
+    }
+    const deltaEdge = edgeOf(resting.delta);
+    const withoutRing = await samplePixelAt(client, deltaEdge.x, deltaEdge.y);
+    await evaluate(
+      client,
+      'window.__layoutCanvasProbe.activateEpicTab("fixture-delta")',
+    );
+    await moveTo(client, 1, 1);
+    await flush(client);
+    await delay(250);
+    await flush(client);
+    const tiles = await evaluate(client, tilesProbe);
+    if (tiles.delta.active !== "true" || tiles.alpha.active === "true") {
+      violations.push(
+        `${theme}: Delta is data-active=${String(tiles.delta.active)} and Alpha data-active=${String(tiles.alpha.active)}, expected only Delta active`,
+      );
+      continue;
+    }
+    const ring = await samplePixelAt(client, deltaEdge.x, deltaEdge.y);
+    const active = {
+      ring,
+      fill: withoutRing,
+      ratio: contrastRatio(ring, withoutRing),
+    };
+    // The control: an inactive tinted tile's edge against its own interior.
+    const alphaEdge = edgeOf(tiles.alpha);
+    const alphaRim = await samplePixelAt(client, alphaEdge.x, alphaEdge.y);
+    const alphaFill = await samplePixelAt(client, alphaEdge.x + 4, alphaEdge.y);
+    const control = { ratio: contrastRatio(alphaRim, alphaFill) };
+    notes.push(
+      `${theme}: active tinted ring rgb(${String(active.ring)}) where the inactive tile paints rgb(${String(active.fill)}) = ${active.ratio.toFixed(2)}:1; inactive tinted tile edge ${control.ratio.toFixed(2)}:1`,
+    );
+    if (active.ratio < RING_PRESENT_FLOOR) {
+      violations.push(
+        `${theme}: the active ring on a tinted tile reads ${active.ratio.toFixed(2)}:1 against the tile's own fill, which is no ring (S-36)`,
+      );
+    } else if (active.ratio < NON_TEXT_CONTRAST) {
+      violations.push(
+        `${theme}: the active ring on a tinted tile is ${active.ratio.toFixed(2)}:1 against its fill, under the ${String(NON_TEXT_CONTRAST)}:1 a non-text indicator owes`,
+      );
+    }
+    if (control.ratio >= RING_PRESENT_FLOOR) {
+      violations.push(
+        `${theme}: an INACTIVE tinted tile reads ${control.ratio.toFixed(2)}:1 at the ring position, so the probe cannot tell a ring from none`,
+      );
+    }
+  }
+}
+
+/**
+ * The row kit in the expanded strip, at rest (review-10): the 10px badge on a
+ * 16px leading tile, drawn and not clipped; and the group line down the
+ * group's inline-start edge as ONE continuous line across its members,
+ * including the split pair's rows inside the pair's padding.
+ */
+async function checkRowKit(client) {
+  const violations = [];
+  const notes = [];
+  await evaluate(client, "window.__layoutCanvasProbe.endSession()");
+  await moveTo(client, 1, 1);
+  await flush(client);
+  await delay(300);
+  const kit = await evaluate(
+    client,
+    `(() => {
+      const strip = document.querySelector('[data-testid="side-tab-strip"]');
+      const scroller = strip.querySelector('[data-testid="header-tab-strip-scroll"]');
+      const rect = (node) => {
+        const r = node.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      };
+      const badge = strip.querySelector('[data-side-tab="expanded"] [data-testid="side-tab-leading"] [data-testid="side-tab-rail-badge"]');
+      const tile = badge === null ? null : badge.closest('[data-testid="side-tab-leading"]').querySelector('[data-testid="side-tab-leading-tile"]');
+      const lines = [...strip.querySelectorAll('[data-testid="side-tab-group-line"]')].map((line) => ({
+        rect: rect(line),
+        color: getComputedStyle(line).backgroundColor,
+        inPair: line.closest("[data-side-split-pair]") !== null,
+      }));
+      return {
+        scroller: scroller === null ? null : rect(scroller),
+        badge: badge === null ? null : { rect: rect(badge), kind: badge.getAttribute("data-kind"), color: getComputedStyle(badge).backgroundColor },
+        tile: tile === null ? null : rect(tile),
+        lines,
+      };
+    })()`,
+  );
+  if (kit.badge === null || kit.tile === null) {
+    violations.push(
+      "no status badge on an expanded row's leading tile (the seeded failure on Delta)",
+    );
+  } else {
+    notes.push(
+      `badge ${String(kit.badge.kind)} ${boxText(kit.badge.rect)} on tile ${boxText(kit.tile)}`,
+    );
+    if (
+      Math.abs(kit.tile.width - SIDE_TAB_LEADING_TILE) > 0.5 ||
+      Math.abs(kit.tile.height - SIDE_TAB_LEADING_TILE) > 0.5
+    ) {
+      violations.push(
+        `the leading tile is ${kit.tile.width.toFixed(1)}x${kit.tile.height.toFixed(1)}, expected ${String(SIDE_TAB_LEADING_TILE)}px square (S-35)`,
+      );
+    }
+    if (
+      Math.abs(kit.badge.rect.width - SIDE_TAB_BADGE) > 0.5 ||
+      Math.abs(kit.badge.rect.height - SIDE_TAB_BADGE) > 0.5
+    ) {
+      violations.push(
+        `the badge is ${kit.badge.rect.width.toFixed(1)}x${kit.badge.rect.height.toFixed(1)}, expected ${String(SIDE_TAB_BADGE)}px (S-17)`,
+      );
+    }
+    const badgeCx = kit.badge.rect.x + kit.badge.rect.width / 2;
+    const badgeCy = kit.badge.rect.y + kit.badge.rect.height / 2;
+    const cornerX = kit.tile.x + kit.tile.width;
+    const cornerY = kit.tile.y;
+    if (
+      Math.abs(badgeCx - cornerX) > SIDE_TAB_BADGE / 2 ||
+      Math.abs(badgeCy - cornerY) > SIDE_TAB_BADGE / 2
+    ) {
+      violations.push(
+        `the badge is centred at (${badgeCx.toFixed(1)}, ${badgeCy.toFixed(1)}), not at the tile's top-right corner (${cornerX.toFixed(1)}, ${cornerY.toFixed(1)})`,
+      );
+    }
+    if (kit.scroller !== null && kit.badge.rect.y - 2 < kit.scroller.y - 0.5) {
+      violations.push(
+        `the badge's ring reaches y=${(kit.badge.rect.y - 2).toFixed(1)}, above the scroller's top at y=${kit.scroller.y.toFixed(1)}, so it is clipped`,
+      );
+    }
+    const painted = await samplePixelAt(client, badgeCx, badgeCy);
+    const expected = await resolveRgb(client, kit.badge.color);
+    const off =
+      painted === null || expected === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(
+            ...painted.map((channel, index) =>
+              Math.abs(channel - expected[index]),
+            ),
+          );
+    notes.push(
+      `badge centre paints rgb(${String(painted)}), its colour is rgb(${String(expected)})`,
+    );
+    if (off > SOLID_FILL_TOLERANCE) {
+      violations.push(
+        `the badge's centre paints rgb(${String(painted)}), not its own colour rgb(${String(expected)}), so something covers it`,
+      );
+    }
+  }
+
+  const lines = kit.lines;
+  if (lines.length < 3) {
+    violations.push(
+      `${String(lines.length)} group line segments, expected one per member of the seeded group (Alpha and the Beta/Gamma pair)`,
+    );
+  } else {
+    notes.push(
+      `group line segments: ${lines.map((line) => `${boxText(line.rect)}${line.inPair ? " (in pair)" : ""}`).join(", ")}`,
+    );
+    const x0 = lines[0].rect.x;
+    for (const line of lines) {
+      if (Math.abs(line.rect.x - x0) > 0.5) {
+        violations.push(
+          `a group line segment${line.inPair ? " inside the split pair" : ""} sits at x=${line.rect.x.toFixed(1)}, the group's first at x=${x0.toFixed(1)}: the line steps sideways`,
+        );
+      }
+    }
+    for (let index = 1; index < lines.length; index += 1) {
+      const above = lines[index - 1].rect;
+      const below = lines[index].rect;
+      const gap = below.y - (above.y + above.height);
+      if (gap > 0.5) {
+        violations.push(
+          `the group line breaks for ${gap.toFixed(1)}px between y=${(above.y + above.height).toFixed(1)} and y=${below.y.toFixed(1)}`,
+        );
+      }
+    }
+    // The pixels, top to bottom down the first segment's centre column.
+    const top = lines[0].rect.y;
+    const bottom = lines.at(-1).rect.y + lines.at(-1).rect.height;
+    const colour = await resolveRgb(client, lines[0].color);
+    if (colour !== null) {
+      await ensurePixelTools(client);
+      const shot = await client.send("Page.captureScreenshot", {
+        format: "png",
+        clip: {
+          x: x0 + lines[0].rect.width / 2 - 0.5,
+          y: top,
+          width: 1,
+          height: Math.max(1, bottom - top),
+          scale: 1,
+        },
+        captureBeyondViewport: false,
+      });
+      const count = await evaluate(
+        client,
+        `window.__countShot(${JSON.stringify(shot.data)}, false, ${JSON.stringify(colour)}, 60)`,
+      );
+      const share = count.along === 0 ? 0 : count.lit / count.along;
+      notes.push(
+        `group line pixels: ${String(count.lit)}/${String(count.along)} in the group colour rgb(${String(colour)}) from y=${top.toFixed(1)} to y=${bottom.toFixed(1)}`,
+      );
+      if (share < 0.97) {
+        violations.push(
+          `only ${(share * 100).toFixed(1)}% of the group line's run from y=${top.toFixed(1)} to y=${bottom.toFixed(1)} is painted in the group colour, so it is not one continuous line`,
+        );
+      }
+    }
+  }
+  return { violations, notes };
+}
+
+// --- phase 2c: the live placement switch (A14) -----------------------------
+
+async function runLiveSwitchPhase(client, pageUrl, pageLoads) {
+  const violations = [];
+  const notes = [];
+  const label = "live switch";
+  const loadsAtStart = await openVariant(
+    client,
+    variantUrl(pageUrl, {
+      tabs: "top",
+      collapsed: 0,
+      wco: "none",
+      dock: "right",
+    }),
+    label,
+    "window.__layoutCanvasProbe?.ready === true",
+    pageLoads,
+  );
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
+  await moveTo(client, 1, 1);
+  await flush(client);
+  await delay(450);
+  await flush(client);
+
+  const radio = await evaluate(
+    client,
+    `(() => {
+      const group = document.querySelector('[data-layout-inspector] [role="radiogroup"][aria-label="Tabs position"]');
+      if (group === null) return null;
+      const left = [...group.querySelectorAll('[role="radio"]')].find((node) => (node.textContent ?? "").trim() === "Left") ?? null;
+      if (left === null) return null;
+      left.scrollIntoView({ block: "center" });
+      return true;
+    })()`,
+  );
+  if (radio === null) {
+    violations.push(
+      "A14: the inspector index shows no Tabs position radio labelled Left",
+    );
+  } else {
+    await flush(client);
+    const left = await rectOf(
+      client,
+      '[data-layout-inspector] [role="radiogroup"][aria-label="Tabs position"] [role="radio"]:nth-child(2)',
+    );
+    const depthBefore = await evaluate(
+      client,
+      "window.__layoutCanvasProbe.historyDepth()",
+    );
+    await moveTo(client, left.cx, left.cy);
+    await pressAndRelease(client, left.cx, left.cy, "left");
+    // ONE frame after the click, not a settle: the strip is where it will stay.
+    const first = await evaluate(
+      client,
+      `new Promise((resolve) => requestAnimationFrame(() => resolve(${STRIP_PLACEMENT_PROBE})))`,
+    );
+    await delay(500);
+    await flush(client);
+    const settled = await evaluate(client, STRIP_PLACEMENT_PROBE);
+    const depthAfter = await evaluate(
+      client,
+      "window.__layoutCanvasProbe.historyDepth()",
+    );
+    notes.push(
+      `one frame after the click: ${JSON.stringify(first)}; settled: ${JSON.stringify(settled)}; history ${String(depthBefore)} -> ${String(depthAfter)}`,
+    );
+    if (first.placement !== "left" || first.strip === null) {
+      violations.push(
+        `A14: one frame after a real click on Left the column is ${String(first.placement)} with ${first.strip === null ? "no strip" : "a strip"}`,
+      );
+    } else {
+      if (Math.abs(first.strip.x - first.column.x) > 0.5) {
+        violations.push(
+          `A14: the strip is at ${boxText(first.strip)}, not on the column's left edge ${boxText(first.column)}`,
+        );
+      }
+      if (
+        settled.strip === null ||
+        !sameBoxWithin(first.strip, settled.strip, 0.5)
+      ) {
+        violations.push(
+          `A14: the strip kept moving after the first frame (${boxText(first.strip)} -> ${settled.strip === null ? "gone" : boxText(settled.strip)}), so the switch is animated rather than one frame`,
+        );
+      }
+      if (first.header)
+        violations.push(
+          "A14: the header is still mounted beside the left strip",
+        );
+    }
+    if (depthAfter !== depthBefore + 1) {
+      violations.push(
+        `A14: the click cost ${String(depthAfter - depthBefore)} history steps, expected one`,
+      );
+    }
+
+    // The selection ring rides the moved node (L-90): select a rail icon beside
+    // the strip, undo the switch, and read the ring one frame later.
+    const icon = await rectOf(client, regionSelector("railBrowsers"));
+    await pressAndRelease(client, icon.cx, icon.cy, "left");
+    await delay(500);
+    await flush(client);
+    const ringBefore = await evaluate(client, ringProbe("railBrowsers"));
+    const undo = await rectOf(
+      client,
+      '[data-layout-inspector] button[aria-label="Undo"]',
+    );
+    if (ringBefore.error !== null || undo === null) {
+      violations.push(
+        `A14: ${ringBefore.error ?? "no Undo button in the inspector"}`,
+      );
+    } else {
+      await moveTo(client, undo.cx, undo.cy);
+      await pressAndRelease(client, undo.cx, undo.cy, "left");
+      const afterUndo = await evaluate(
+        client,
+        `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve({ placement: ${STRIP_PLACEMENT_PROBE}, ring: ${ringProbe("railBrowsers")} }))))`,
+      );
+      const depthUndone = await evaluate(
+        client,
+        "window.__layoutCanvasProbe.historyDepth()",
+      );
+      notes.push(
+        `after one undo: ${JSON.stringify(afterUndo.placement)}; ring ${afterUndo.ring.error ?? `${boxText(afterUndo.ring.ring)} on ${boxText(afterUndo.ring.region)}`} (was on ${boxText(ringBefore.region)}); history ${String(depthUndone)}`,
+      );
+      if (
+        afterUndo.placement.placement !== "top" ||
+        afterUndo.placement.strip !== null ||
+        !afterUndo.placement.header
+      ) {
+        violations.push(
+          `A14: one undo left the column at ${String(afterUndo.placement.placement)} (strip ${afterUndo.placement.strip === null ? "gone" : "still mounted"}, header ${String(afterUndo.placement.header)})`,
+        );
+      }
+      if (depthUndone !== depthBefore) {
+        violations.push(
+          `A14: after one undo the history is ${String(depthUndone)} deep, expected ${String(depthBefore)}`,
+        );
+      }
+      if (afterUndo.ring.error !== null) {
+        violations.push(`A14: after the undo ${afterUndo.ring.error}`);
+      } else {
+        // The ring springs from box to box by design (selection-ring.ts); what
+        // L-90 forbids is a ring that keeps aiming at the OLD coordinates until
+        // something re-tracks it. So: two frames after the undo it is already
+        // travelling toward the moved icon, and with nothing else done it
+        // lands on it.
+        const ringBox = (region) => ({
+          x: region.x - RING_PADDING,
+          y: region.y - RING_PADDING,
+          width: region.width + RING_PADDING * 2,
+          height: region.height + RING_PADDING * 2,
+        });
+        const expected = ringBox(afterUndo.ring.region);
+        if (Math.abs(afterUndo.ring.region.x - ringBefore.region.x) < 50) {
+          violations.push(
+            `A14: the undo did not move the selected icon (x ${ringBefore.region.x.toFixed(1)} -> ${afterUndo.ring.region.x.toFixed(1)}), so the ring's follow is untested`,
+          );
+        }
+        const gapBefore = Math.abs(ringBefore.ring.x - expected.x);
+        const gapAfter = Math.abs(afterUndo.ring.ring.x - expected.x);
+        if (gapAfter > gapBefore - 5) {
+          violations.push(
+            `A14: two frames after the undo the ring is ${gapAfter.toFixed(1)}px from the moved icon, having been ${gapBefore.toFixed(1)}px away: it is not heading for the node (L-90)`,
+          );
+        }
+        await delay(900);
+        await flush(client);
+        const landed = await evaluate(client, ringProbe("railBrowsers"));
+        notes.push(
+          `ring after it settles: ${landed.error ?? `${boxText(landed.ring)} on ${boxText(landed.region)}`}`,
+        );
+        if (landed.error !== null) {
+          violations.push(`A14: once settled, ${landed.error}`);
+        } else if (!sameBoxWithin(landed.ring, ringBox(landed.region), 1.5)) {
+          violations.push(
+            `A14: with nothing else done the ring settled at ${boxText(landed.ring)}, not on the moved icon's ring box ${boxText(ringBox(landed.region))} (L-90)`,
+          );
+        }
+      }
+    }
+  }
+  const errors = await evaluate(client, "window.__layoutCanvasErrors");
+  if (errors.length > 0) {
+    violations.push(
+      `the fixture raised ${String(errors.length)} uncaught error(s):\n${errors.join("\n")}`,
+    );
+  }
+  assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
+  console.log(`\n--- live placement switch ---`);
+  for (const note of notes) console.log(`  ${note}`);
+  assert.deepEqual(
+    violations,
+    [],
+    `The live placement switch failed (${String(violations.length)}):\n${violations.map((line) => `  - ${line}`).join("\n")}`,
+  );
+  console.log(
+    "live placement switch passed: a real click on Position Left moved the strip in one frame as one history step, and one undo restored the top, the selection ring heading for the moved node at once and landing on it with nothing re-tracked",
+  );
+}
+
+const STRIP_PLACEMENT_PROBE = `(() => {
+  const column = document.querySelector("[data-layout-column]");
+  const strip = document.querySelector('[data-testid="side-tab-strip"]');
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+  return {
+    placement: column === null ? null : column.getAttribute("data-tab-strip-placement"),
+    column: box(column),
+    strip: box(strip),
+    header: document.querySelector("[data-fixture-header]") !== null,
+  };
+})()`;
+
+// --- phase 3: the vertical strip's drag gesture (S-11) ----------------------
+
+/** Past the tear-off threshold (24px) into the content, as the brief states it. */
+const TEAR_OFF_PULL = 30;
+
+async function runSideStripDragPhase(client, pageUrl, pageLoads) {
+  const violations = [];
+  const notes = [];
+  for (const edge of ["left", "right"]) {
+    const label = `strip drag ${edge}`;
+    const loadsAtStart = await openVariant(
+      client,
+      variantUrl(pageUrl, { edge }),
+      label,
+      "window.__sideTabStripProbe?.ready === true && document.querySelectorAll('[data-strip-item-id]').length > 0",
+      pageLoads,
+    );
+    const say = (line) => notes.push(`${edge}: ${line}`);
+    const fail = (line) => violations.push(`${edge}: ${line}`);
+    const initial = await evaluate(
+      client,
+      "window.__sideTabStripProbe.items()",
+    );
+    say(`seeded items ${JSON.stringify(initial)}`);
+
+    // 1. Reorder along y: Epsilon up past Delta, with Delta stepping aside.
+    await resetStrip(client);
+    {
+      const epsilon = await rowRect(client, "epic:fixture-epsilon");
+      const delta = await rowRect(client, "epic:fixture-delta");
+      const deltaFrame = await frameIdOf(client, "epic:fixture-delta");
+      const target = { x: epsilon.cx, y: delta.cy - 8 };
+      const mid = await dragRow(
+        client,
+        epsilon,
+        target,
+        `[data-strip-item-id="${deltaFrame}"]`,
+      );
+      const items = await evaluate(
+        client,
+        "window.__sideTabStripProbe.items()",
+      );
+      say(
+        `reorder: mid-drag Delta frame transform "${String(mid.transform)}", overlay ${String(mid.overlay)}; items ${JSON.stringify(items)}`,
+      );
+      if (!mid.overlay)
+        fail("reorder: no drag overlay while the row is in hand");
+      if (translateY(mid.transform) <= 0) {
+        fail(
+          `reorder: Delta did not step aside mid-drag (its frame's transform is "${String(mid.transform)}")`,
+        );
+      }
+      const order = items.map((keys) => keys.join("+"));
+      if (
+        order.indexOf("epic:fixture-epsilon") === -1 ||
+        order.indexOf("epic:fixture-epsilon") >
+          order.indexOf("epic:fixture-delta")
+      ) {
+        fail(
+          `reorder: Epsilon is not before Delta after the drop: ${order.join(", ")}`,
+        );
+      }
+    }
+
+    // 2. A drop on a row's lower half pairs the two tabs into a split.
+    await resetStrip(client);
+    {
+      const zeta = await rowRect(client, "epic:fixture-zeta");
+      const epsilon = await rowRect(client, "epic:fixture-epsilon");
+      const target = { x: zeta.cx, y: epsilon.cy + epsilon.height / 4 };
+      const mid = await dragRow(client, zeta, target, null);
+      const items = await evaluate(
+        client,
+        "window.__sideTabStripProbe.items()",
+      );
+      say(
+        `pair: mid-drag preview ${String(mid.pairPreview)}; items ${JSON.stringify(items)}`,
+      );
+      if (mid.pairPreview === null)
+        fail("pair: no pair preview on the hovered row's half mid-drag");
+      const paired = items.some(
+        (keys) =>
+          keys.length === 2 &&
+          keys.includes("epic:fixture-epsilon") &&
+          keys.includes("epic:fixture-zeta"),
+      );
+      if (!paired)
+        fail(
+          `pair: dropping Zeta on Epsilon's lower half made no split of the two: ${JSON.stringify(items)}`,
+        );
+    }
+
+    // 3. A split drags whole: the pair, grabbed by its top member, moves up
+    // past Alpha as ONE item, and Alpha steps aside by the pair's extent. It
+    // stays inside its group: a drop that would split a group is repaired
+    // back by the layout (repairTabGroups), in both orientations.
+    await resetStrip(client);
+    {
+      const beta = await rowRect(client, "epic:fixture-beta");
+      const pair = await rectOf(client, '[data-strip-item-id="fixture-split"]');
+      const alpha = await rowRect(client, "epic:fixture-alpha");
+      const alphaFrame = await frameIdOf(client, "epic:fixture-alpha");
+      const target = {
+        x: beta.cx,
+        y: beta.cy - (pair.y + pair.height / 2 - alpha.cy) - 10,
+      };
+      const mid = await dragRow(
+        client,
+        beta,
+        target,
+        `[data-strip-item-id="${alphaFrame}"]`,
+      );
+      const items = await evaluate(
+        client,
+        "window.__sideTabStripProbe.items()",
+      );
+      say(
+        `split: pointer ${beta.cy.toFixed(0)} -> ${target.y.toFixed(0)}, overlay pair ${String(mid.overlayPair)}, Alpha frame "${String(mid.transform)}" (pair ${pair.height.toFixed(0)}px); items ${JSON.stringify(items)}`,
+      );
+      if (!mid.overlayPair) fail("split: the drag overlay is not the pair");
+      const step = translateY(mid.transform);
+      if (step < pair.height - 0.5) {
+        fail(
+          `split: Alpha stepped aside ${step.toFixed(1)}px mid-drag, less than the pair's ${pair.height.toFixed(1)}px, so the pair is not moving whole`,
+        );
+      }
+      const order = items.map((keys) => keys.join("+"));
+      if (
+        order[0] !== "epic:fixture-beta+epic:fixture-gamma" ||
+        order[1] !== "epic:fixture-alpha"
+      ) {
+        fail(
+          `split: the pair did not land whole above Alpha: ${order.join(", ")}`,
+        );
+      }
+    }
+
+    // 4. Pulled sideways into the content: the preview, then a new window.
+    await resetStrip(client);
+    {
+      const zeta = await rowRect(client, "epic:fixture-zeta");
+      const strip = await rectOf(client, '[data-testid="side-tab-strip"]');
+      const x =
+        edge === "left"
+          ? strip.x + strip.width + TEAR_OFF_PULL
+          : strip.x - TEAR_OFF_PULL;
+      const mid = await dragRow(client, zeta, { x, y: zeta.cy }, null);
+      const requests = await evaluate(
+        client,
+        "window.__sideTabStripProbe.detachRequests()",
+      );
+      say(
+        `tear-off into the content at x=${x.toFixed(0)}: preview ${String(mid.tearOff)}, requests ${JSON.stringify(requests)}`,
+      );
+      if (!mid.tearOff)
+        fail(
+          `tear-off: pulling ${String(TEAR_OFF_PULL)}px into the content showed no tear-off preview`,
+        );
+      if (!requests.includes("epic:fixture-zeta"))
+        fail(
+          "tear-off: releasing in the content requested no new window for Zeta",
+        );
+    }
+
+    // 5. Pulled toward the window edge: nothing, until the pointer leaves the viewport.
+    await resetStrip(client);
+    {
+      const zeta = await rowRect(client, "epic:fixture-zeta");
+      const far = await rectOf(client, "[data-fixture-far-side]");
+      const viewport = await evaluate(
+        client,
+        "({ width: window.innerWidth, height: window.innerHeight })",
+      );
+      const before = (
+        await evaluate(client, "window.__sideTabStripProbe.detachRequests()")
+      ).length;
+      // As far toward the window edge as the viewport goes: 4px from it, which
+      // is 44px past the band on the far side, beyond the 24px threshold.
+      const farX = edge === "left" ? far.x + 4 : far.x + far.width - 4;
+      const outsideX = edge === "left" ? -12 : viewport.width + 12;
+      const trace = await dragRowVia(client, zeta, [
+        { x: farX, y: zeta.cy },
+        { x: outsideX, y: zeta.cy },
+      ]);
+      const requests = await evaluate(
+        client,
+        "window.__sideTabStripProbe.detachRequests()",
+      );
+      say(
+        `toward the window edge: preview at the margin (x=${farX.toFixed(0)}) ${String(trace[0])}, outside the viewport (x=${String(outsideX)}) ${String(trace[1])}; requests ${JSON.stringify(requests.slice(before))}`,
+      );
+      if (trace[0])
+        fail(
+          "window edge: the pointer between the strip and the window edge already shows the tear-off preview",
+        );
+      if (!trace[1])
+        fail(
+          "window edge: the pointer outside the viewport shows no tear-off preview",
+        );
+      if (requests.length !== before + 1)
+        fail(
+          "window edge: releasing outside the viewport requested no new window",
+        );
+    }
+
+    const errors = await evaluate(client, "window.__sideTabStripErrors");
+    if (errors.length > 0)
+      fail(
+        `the fixture raised ${String(errors.length)} uncaught error(s):\n${errors.join("\n")}`,
+      );
+    assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
+  }
+  console.log(`\n--- vertical strip drag ---`);
+  for (const note of notes) console.log(`  ${note}`);
+  assert.deepEqual(
+    violations,
+    [],
+    `The vertical strip drag failed (${String(violations.length)}):\n${violations.map((line) => `  - ${line}`).join("\n")}`,
+  );
+  console.log(
+    "vertical strip drag passed on both edges: y reorder with a neighbour stepping aside, a pair into a split, a split dragged whole, the tear-off into the content, and none toward the window edge until the pointer left the viewport",
+  );
+}
+
+async function resetStrip(client) {
+  await evaluate(client, "window.__sideTabStripProbe.reset()");
+  await moveTo(client, 1, 1);
+  await flush(client);
+  await delay(250);
+  await flush(client);
+}
+
+/** The row of one tab (`epic:<id>`), by its close button's test id. */
+async function rowRect(client, key) {
+  const [kind, id] = key.split(":");
+  const box = await evaluate(
+    client,
+    `(() => {
+      const close = document.querySelector('[data-testid="tab-close-${kind}-${id}"]');
+      const row = close === null ? null : close.closest("[data-side-tab]");
+      if (row === null) return null;
+      const r = row.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+    })()`,
+  );
+  if (box === null) throw new Error(`no row for ${key} in the strip`);
+  return box;
+}
+
+async function frameIdOf(client, key) {
+  const [kind, id] = key.split(":");
+  return await evaluate(
+    client,
+    `document.querySelector('[data-testid="tab-close-${kind}-${id}"]')?.closest("[data-strip-item-id]")?.getAttribute("data-strip-item-id") ?? null`,
+  );
+}
+
+const DRAG_STATE_PROBE = (siblingSelector) => `(() => {
+  const sibling = ${siblingSelector === null ? "null" : `document.querySelector(${JSON.stringify(siblingSelector)})`};
+  const overlay = document.querySelector('[data-testid="header-tab-drag-overlay"]');
+  const preview = document.querySelector('[data-testid="side-tab-pair-preview"]');
+  return {
+    transform: sibling === null ? null : sibling.style.transform,
+    overlay: overlay !== null,
+    overlayPair: overlay !== null && overlay.querySelector('[data-testid^="split-tab-group-overlay-"]') !== null,
+    pairPreview: preview === null ? null : preview.getAttribute("data-side"),
+    tearOff: window.__sideTabStripProbe.tearOffPreview(),
+  };
+})()`;
+
+async function dragRow(client, from, to, siblingSelector) {
+  await pressAt(client, from.cx, from.cy);
+  await moveInSteps(client, { x: from.cx, y: from.cy }, to);
+  await delay(250);
+  await flush(client);
+  const mid = await evaluate(client, DRAG_STATE_PROBE(siblingSelector));
+  await releaseAt(client, to.x, to.y);
+  await delay(700);
+  await flush(client);
+  return mid;
+}
+
+/** A drag through several stops, reading the tear-off preview at each. */
+async function dragRowVia(client, from, stops) {
+  const seen = [];
+  let at = { x: from.cx, y: from.cy };
+  await pressAt(client, at.x, at.y);
+  for (const stop of stops) {
+    await moveInSteps(client, at, stop);
+    at = stop;
+    await delay(200);
+    await flush(client);
+    seen.push(
+      await evaluate(client, "window.__sideTabStripProbe.tearOffPreview()"),
+    );
+  }
+  await releaseAt(client, at.x, at.y);
+  await delay(700);
+  await flush(client);
+  return seen;
+}
+
+async function pressAt(client, x, y) {
+  await moveTo(client, x, y);
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x,
+    y,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+    pointerType: "mouse",
+  });
+}
+
+async function moveInSteps(client, from, to) {
+  const steps = 16;
+  for (let step = 1; step <= steps; step += 1) {
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: from.x + ((to.x - from.x) * step) / steps,
+      y: from.y + ((to.y - from.y) * step) / steps,
+      button: "left",
+      buttons: 1,
+      clickCount: 0,
+      pointerType: "mouse",
+    });
+  }
+}
+
+async function releaseAt(client, x, y) {
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x,
+    y,
+    button: "left",
+    buttons: 0,
+    clickCount: 1,
+    pointerType: "mouse",
+  });
+}
+
+function translateY(transform) {
+  if (typeof transform !== "string" || transform === "" || transform === "none")
+    return 0;
+  const match =
+    /translateY\((-?[\d.]+)px\)|translate3d\([^,]+,\s*(-?[\d.]+)px/.exec(
+      transform,
+    );
+  if (match === null) return 0;
+  return Number(match[1] ?? match[2]);
+}
+
+// --- side placements: shared helpers ---------------------------------------
+
+function selectedPhases() {
+  const all = ["parity", "canvas", "sides", "switch", "strip"];
+  const raw = process.env.LAYOUT_EDITOR_BROWSER_PHASES;
+  if (raw === undefined || raw.trim() === "") return new Set(all);
+  const picked = raw
+    .split(",")
+    .map((phase) => phase.trim())
+    .filter((phase) => phase.length > 0);
+  for (const phase of picked) {
+    if (!all.includes(phase)) {
+      throw new Error(
+        `unknown phase "${phase}"; the phases are ${all.join(", ")}`,
+      );
+    }
+  }
+  return new Set(picked);
+}
+
+function variantUrl(base, params) {
+  const url = new URL(base);
+  for (const [key, value] of Object.entries(params))
+    url.searchParams.set(key, String(value));
+  return url.toString();
+}
+
+/**
+ * A fresh navigation to one variant, and the load count it starts from: the
+ * page-load guard re-baselines per variant, so a reload DURING a variant is
+ * reported against that variant (critique G4).
+ */
+async function openVariant(client, url, label, readyExpression, pageLoads) {
+  try {
+    await navigateAndSettle(client, url, label, readyExpression, pageLoads);
+  } catch (error) {
+    // One renewed navigation, never more. The first load of "side rail left,
+    // macOS" stops answering CDP (a 15s `Runtime.evaluate` timeout) whenever
+    // the parity phase ran earlier in the same Chrome: reproduced with
+    // `parity,sides` and the full run, never with `sides` or `canvas,sides`
+    // alone, and the second navigation always settles and passes. So some
+    // origin state the parity fixture leaves behind is read by that variant's
+    // first boot; which state is the open question in tickets/12. The ring
+    // check's persisted theme is restored and was ruled out. A page that hangs
+    // because of what it renders hangs again here and still fails, and a
+    // retry is never silent.
+    if (
+      !(error instanceof Error) ||
+      !error.message.startsWith("Timed out sending CDP command")
+    )
+      throw error;
+    console.error(
+      `\n  WARNING ${label}: the page stopped answering CDP (${error.message}); navigating ONCE more. This is the open question in tickets/12; report it with this run's output.\n`,
+    );
+    await navigateAndSettle(client, url, label, readyExpression, pageLoads);
+  }
+  return pageLoads.count;
+}
+
+async function navigateAndSettle(
+  client,
+  url,
+  label,
+  readyExpression,
+  pageLoads,
+) {
+  const loadsBefore = pageLoads.count;
+  await client.send("Page.navigate", { url });
+  // No evaluation until the new document has loaded, so no probe races the
+  // navigation's commit.
+  const deadline = Date.now() + 30_000;
+  while (pageLoads.count === loadsBefore) {
+    if (Date.now() > deadline)
+      throw new Error(`${label} never fired its load event`);
+    await delay(25);
+  }
+  await waitForStablePage(client, label, readyExpression, pageLoads);
+}
+
+function assertNoReloadSince(pageLoads, loadsAtStart, label, violations) {
+  if (pageLoads.count === loadsAtStart) return;
+  violations.push(
+    `${label}: the page reloaded ${String(pageLoads.count - loadsAtStart)} time(s) during this variant, so its measurements describe a rebuilt document; re-run with the tree quiet`,
+  );
+}
+
+async function readFrameGeometry(client) {
+  const tokens = await evaluate(
+    client,
+    `(() => {
+      const style = getComputedStyle(document.querySelector("[data-layout-column]"));
+      return {
+        inset: style.getPropertyValue("--layout-editor-frame-inset").trim(),
+        radius: style.getPropertyValue("--layout-editor-frame-radius").trim(),
+      };
+    })()`,
+  );
+  return { inset: pxValue(tokens.inset), radius: pxValue(tokens.radius) };
+}
+
+/** One painted pixel, read off a 1x1 screenshot. */
+async function samplePixelAt(client, x, y) {
+  await ensurePixelTools(client);
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    clip: { x: Math.floor(x), y: Math.floor(y), width: 1, height: 1, scale: 1 },
+    captureBeyondViewport: false,
+  });
+  return await evaluate(
+    client,
+    `window.__samplePixel(${JSON.stringify(shot.data)})`,
+  );
+}
+
+/** A computed colour as the rgb triple the screenshot would paint it, through a swatch. */
+async function resolveRgb(client, cssColor) {
+  const spot = await evaluate(
+    client,
+    `(() => {
+      const node = document.createElement("div");
+      node.setAttribute("data-colour-swatch", "");
+      Object.assign(node.style, { position: "fixed", left: "700px", top: "700px", width: "8px", height: "8px", zIndex: "2147483000", background: ${JSON.stringify(cssColor)} });
+      document.body.append(node);
+      return { left: 700, top: 700 };
+    })()`,
+  );
+  const pixel = await samplePixelAt(client, spot.left + 4, spot.top + 4);
+  await evaluate(
+    client,
+    `document.querySelector("[data-colour-swatch]")?.remove()`,
+  );
+  return pixel;
+}
+
+/** Pixels in a tile's middle half that differ clearly from the tile's own fill at its padding. */
+async function inkInside(client, rect) {
+  await ensurePixelTools(client);
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    clip: {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      scale: 1,
+    },
+    captureBeyondViewport: false,
+  });
+  return await evaluate(
+    client,
+    `(async () => {
+      const image = new Image();
+      await new Promise((resolve, reject) => {
+        image.addEventListener("load", resolve);
+        image.addEventListener("error", () => reject(new Error("decode failed")));
+        image.src = "data:image/png;base64,${shot.data}";
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const at = (x, y) => { const i = (y * width + x) * 4; return [data[i], data[i + 1], data[i + 2]]; };
+      const fill = at(4, Math.floor(height / 2));
+      let ink = 0;
+      for (let y = Math.floor(height / 4); y < Math.ceil((height * 3) / 4); y += 1) {
+        for (let x = Math.floor(width / 4); x < Math.ceil((width * 3) / 4); x += 1) {
+          const p = at(x, y);
+          if (Math.abs(p[0] - fill[0]) + Math.abs(p[1] - fill[1]) + Math.abs(p[2] - fill[2]) > 90) ink += 1;
+        }
+      }
+      return ink;
+    })()`,
+  );
+}
+
+function relativeLuminance(rgb) {
+  const [r, g, b] = rgb.map((channel) => {
+    const c = channel / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(left, right) {
+  if (left === null || right === null) return 0;
+  const a = relativeLuminance(left);
+  const b = relativeLuminance(right);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 const fixturePath = "/src/__tests__/browser/layout-editor-browser.html";
 const canvasFixturePath = "/src/__tests__/browser/layout-editor-canvas.html";
+const sideStripFixturePath = "/src/__tests__/browser/side-tab-strip.html";
 const chromePath = await findChrome("the layout editor parity regression");
 const vitePort = await freePort();
 let chrome;
@@ -688,6 +2630,65 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   });
+  const origin = `http://127.0.0.1:${vitePort}`;
+  const canvasUrl = `${origin}${canvasFixturePath}`;
+  const phases = selectedPhases();
+  // Every selected phase runs even after one fails: each navigates to its own
+  // document, so a red phase says nothing about the next, and one run should
+  // report every red rather than the first.
+  const runs = [
+    ["parity", () => runParityPhase(client, pageUrl, pageLoads)],
+    ["parity", () => runParityPlacementVariants(client, pageUrl, pageLoads)],
+    ["canvas", () => runCanvasPhase(client, canvasUrl, pageLoads)],
+    ["sides", () => runSidePlacementPhase(client, canvasUrl, pageLoads)],
+    ["switch", () => runLiveSwitchPhase(client, canvasUrl, pageLoads)],
+    [
+      "strip",
+      () =>
+        runSideStripDragPhase(
+          client,
+          `${origin}${sideStripFixturePath}`,
+          pageLoads,
+        ),
+    ],
+  ];
+  const failures = [];
+  for (const [phase, run] of runs) {
+    if (!phases.has(phase)) continue;
+    try {
+      await run();
+    } catch (error) {
+      failures.push({ phase, error });
+      console.error(
+        `\n[${phase}] FAILED:\n${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  console.log(
+    `\nphases run: ${[...phases].join(", ")}; failed: ${failures.length === 0 ? "none" : failures.map((failure) => failure.phase).join(", ")}`,
+  );
+  if (failures.length > 0) {
+    throw new Error(
+      `${String(failures.length)} phase run(s) failed: ${failures.map((failure) => failure.phase).join(", ")} (details above)`,
+    );
+  }
+} finally {
+  client?.close();
+  if (chrome !== undefined) await terminateProcessTree(chrome);
+  viteProcess?.kill("SIGTERM");
+  if (chromeProfilePath !== undefined) {
+    await rm(chromeProfilePath, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+    });
+  }
+}
+
+// --- phase 1: the parity regression -----------------------------------------
+
+async function runParityPhase(client, pageUrl, pageLoads) {
+  await client.send("Page.navigate", { url: pageUrl });
   await waitForStablePage(
     client,
     "the layout editor fixture",
@@ -903,23 +2904,6 @@ try {
       .map((regionId) => `  - ${regionId}: ${coverage.noLiveLeaf[regionId]}`)
       .join("\n")}`,
   );
-
-  await runCanvasPhase(
-    client,
-    `http://127.0.0.1:${vitePort}${canvasFixturePath}`,
-    pageLoads,
-  );
-} finally {
-  client?.close();
-  if (chrome !== undefined) await terminateProcessTree(chrome);
-  viteProcess?.kill("SIGTERM");
-  if (chromeProfilePath !== undefined) {
-    await rm(chromeProfilePath, {
-      recursive: true,
-      force: true,
-      maxRetries: 3,
-    });
-  }
 }
 
 // --- process plumbing -------------------------------------------------------

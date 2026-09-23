@@ -44,6 +44,7 @@ import { SideSplitRowPair } from "./side-split-row-pair";
 import { SideStripTabRow } from "./side-strip-tab-row";
 import {
   SideTabRow,
+  type SideGroupLine,
   type SideRowFrame,
   type SideTabRowVariant,
 } from "./side-tab-row";
@@ -103,7 +104,14 @@ export function SideSplitItem(
           : props.memberOffset + Number(item.left.kind === "tab")
       }
       variant={props.variant}
-      groupLine={props.groupLine}
+      groupLine={
+        props.groupLine === null
+          ? null
+          : {
+              color: props.groupLine,
+              seat: side === "left" ? "pair-top" : "pair-bottom",
+            }
+      }
       dropIndicator={
         (side === "left" && props.dropIndicator === "before") ||
         (side === "right" && props.dropIndicator === "after")
@@ -154,7 +162,7 @@ interface SideSplitMemberProps {
   readonly stripIndex: number;
   readonly memberIndex: number;
   readonly variant: SideTabRowVariant;
-  readonly groupLine: string | null;
+  readonly groupLine: SideGroupLine | null;
   readonly dropIndicator: DropIndicator;
   readonly handlers: SideStripHandlers;
 }

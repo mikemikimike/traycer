@@ -14,7 +14,11 @@ import type { StripTabItem, StripTabItemInput } from "../use-strip-tab-item";
 import { railBadgeOf } from "./rail-badge-kind";
 import type { DropIndicator } from "./side-strip-item-input";
 import { SIDE_TAB_TITLE_INPUT_CLASS } from "./side-strip-tokens";
-import { SideTabRow, type SideTabRowVariant } from "./side-tab-row";
+import {
+  SideTabRow,
+  type SideGroupLine,
+  type SideTabRowVariant,
+} from "./side-tab-row";
 import { sideTabTileOf, sideTabWaitingLabel } from "./side-tab-tile";
 
 /**
@@ -27,7 +31,7 @@ export function SideStripTabRow(props: {
   readonly rootRef: (node: HTMLDivElement | null) => void;
   readonly input: StripTabItemInput;
   readonly variant: SideTabRowVariant;
-  readonly groupLine: string | null;
+  readonly groupLine: SideGroupLine | null;
   readonly dropIndicator: DropIndicator;
 }): ReactNode {
   const { item, input, rootRef } = props;

@@ -26,6 +26,7 @@ import {
   SIDE_TAB_BADGE_POSITION_CLASS,
   SIDE_TAB_COLORLESS_TILE_CLASS,
   SIDE_TAB_GROUP_LINE_CLASS,
+  SIDE_TAB_GROUP_LINE_SEAT_CLASS,
   SIDE_TAB_HOVER_CLASS,
   SIDE_TAB_LEADING_CLASS,
   SIDE_TAB_LEADING_TILE_CLASS,
@@ -40,6 +41,16 @@ import {
   SIDE_TAB_TRAILING_CLASS,
 } from "./side-strip-tokens";
 export type SideTabRowVariant = "expanded" | "collapsed";
+
+/** Where a row sits for its group-line segment: alone, or as a split pair's top or bottom member. */
+export type SideGroupLineSeat = "row" | "pair-top" | "pair-bottom";
+
+/** A group member's segment of the group colour line. */
+export interface SideGroupLine {
+  /** The group colour. */
+  readonly color: string;
+  readonly seat: SideGroupLineSeat;
+}
 
 /** What a collapsed row's tile shows. */
 export type SideTabTile =
@@ -77,8 +88,8 @@ export interface SideTabRowProps {
   readonly session: "active" | "rest" | null;
   /** The tab colour, `#rrggbb`. */
   readonly tint: string | null;
-  /** The group colour. */
-  readonly groupLine: string | null;
+  /** The group line's segment, on a group member. */
+  readonly groupLine: SideGroupLine | null;
   /**
    * Expanded: the status glyph, shown alone in the leading slot when the tab
    * has neither a custom icon nor a colour.
@@ -162,12 +173,18 @@ export function SideTabRow(props: SideTabRowProps) {
           <span
             aria-hidden
             data-testid="side-tab-group-line"
+            data-seat={props.groupLine.seat}
             className={cn(
               SIDE_TAB_GROUP_LINE_CLASS,
+              SIDE_TAB_GROUP_LINE_SEAT_CLASS[props.variant][
+                props.groupLine.seat
+              ],
               "pointer-events-none absolute bg-(--side-tab-group-line)",
             )}
             style={
-              { "--side-tab-group-line": props.groupLine } as CSSProperties
+              {
+                "--side-tab-group-line": props.groupLine.color,
+              } as CSSProperties
             }
           />
         )}

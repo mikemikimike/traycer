@@ -11,12 +11,20 @@ import {
 import { LazyMotion, domAnimation } from "motion/react";
 import { MockHostMessenger } from "@traycer-clients/shared/host-client/mock/mock-host-messenger";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
+import { RootDndProvider } from "@/components/epic-canvas/dnd/root-dnd-provider";
 import { LayoutEditor } from "@/components/layout-editor/layout-editor";
 import {
   LAYOUT_REGION_IDS,
   regionFacts,
 } from "@/components/layout-editor/regions/region-facts";
+import { AppColumnFrame } from "@/components/layout/app-column-frame";
+import {
+  appColumnChrome,
+  sideStripOwnsTitleBar,
+} from "@/components/layout/header/app-title-band-kind";
+import { useAppColumnChromeInput } from "@/components/layout/use-app-column-chrome-input";
 import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
+import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
 import { SampleSceneProvider } from "@/components/sample-workspace/sample-scene-provider";
 import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-workspace-body";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -28,11 +36,19 @@ import {
 } from "@/lib/host";
 import {
   insertRailDivider,
+  sideTabStripEdge,
   stackRailPanels,
+  type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
+import { createPersistentMemoryHistory } from "@/lib/persistent-history";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
+import {
+  useSettingsStore,
+  type ThemeMode,
+} from "@/stores/settings/settings-store";
+import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
 import {
   useLayoutEditorStore,
   type LayoutDockMode,
@@ -43,7 +59,10 @@ import {
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 import { sampleWorkspaceTabModule } from "@/stores/tabs/kinds/sample-workspace";
+import { tabItemId } from "@/stores/tabs/layout";
+import { useTabsStore } from "@/stores/tabs/store";
 import { tabAppearance } from "@/stores/tabs/types";
+import { seedSideStripTabs } from "./side-tab-strip-seed";
 import "@/lib/theme-applier";
 import "@/index.css";
 import "@/components/layout-editor/layout-editor.css";
@@ -63,18 +82,39 @@ import "@/components/layout-editor/layout-editor.css";
  *
  * What it mounts, and why that is the app:
  *
- * - `[data-layout-column]` with `app-shell.tsx`'s own classes, holding an
- *   opaque `relative z-20` header strip. That header is not decoration: it is
- *   the element that painted over the editing outline when the outline was the
- *   column's own `outline` (LV2-04), so the frame's pixels are measured under
- *   the same condition that broke it. It also carries the editor's own TAB, in
- *   the real `TabChrome`, bottom-aligned exactly as the strip aligns it.
+ * - `AppColumnFrame`, the shell's own composition of the app column
+ *   (`app-shell.tsx` renders the same component), inside the same
+ *   `RootDndProvider`, with the placement and band kind read through
+ *   `useAppColumnChromeInput` and `appColumnChrome`, exactly as the shell
+ *   reads them. For `top` its `header` slot is an opaque `relative z-20`
+ *   header specimen. That header is not decoration: it is the element that painted
+ *   over the editing outline when the outline was the column's own `outline`
+ *   (LV2-04), so the frame's pixels are measured under the same condition that
+ *   broke it. It also carries the editor's own TAB, in the real `TabChrome`,
+ *   bottom-aligned exactly as the strip aligns it. For `left` and `right` the
+ *   `strip` slot is the REAL `SideTabStrip` over a seeded tabs store (top
+ *   block, rows through `useStripTabItem`, the session row, the foot), and a
+ *   band kind of `"band"` draws the REAL `DesktopMenuHeader variant="title-band"`;
+ *   the specimen header is never used for a side placement.
  * - `SampleWorkspaceBody`, which is the sample rail, the sample transcript and
  *   minimap, the REAL chat lower dock with its real panels, and the REAL
  *   composer toolbar fed the scene's sample dictation control (L-98, L-116).
  * - `<LayoutEditor column={...} />` verbatim, so `useLayoutCanvas`,
  *   `installEditFirewall`, the selection ring, the hover chip and the
  *   inspector are the shipped wiring rather than a re-statement of it.
+ *
+ * The query `?tabs=top|left|right&collapsed=0|1&wco=none|mac|win|mac-fullscreen&dock=right|left|float`
+ * is read once before mount. It seeds the stored placement, the strip's
+ * collapsed flag and the inspector dock, and for a desktop `wco` it stands in
+ * for the preload and for `window-controls-overlay.ts`: `window.runnerHost` is
+ * the fixture's runner host carrying `menu.platform`, so `isFramelessDesktop()`
+ * and `resolveDesktopPlatform` answer as on that desktop, and `.wco` goes on
+ * `<html>` (except `mac-fullscreen`, where macOS drops the overlay). There is
+ * no popup bridge, so the Windows band is its empty drag band, and the
+ * `env(titlebar-area-*)` fallbacks (82px leading inset, 40px band) stand in for
+ * the real values. What cannot be simulated here - native window controls,
+ * real `env()` values, `-webkit-app-region`, the menu bar's native popups and
+ * the signed-in foot - is the Staging pass's (tickets/12, "Staging checklist").
  *
  * The session is begun through the editor store's own `beginSession`, which is
  * what `editor-session.ts` calls once past the door. Nothing here writes a
@@ -128,15 +168,27 @@ function SessionTabSpecimen(): ReactNode {
  */
 const NO_CANVAS_NODE: Readonly<Partial<Record<RegionId, string>>> = {
   homeTab:
-    "the real Home item is drawn by the tab strip, which reads the tabs store and the router; this fixture mounts no tab strip",
+    "at the top placement this fixture's header is a specimen with no tab strip; the real Home is measured in the side-strip variants, where the real SideTabStrip draws it",
   usageLimits:
     "the status bar's usage cluster resolves the watched host's rate-limit subscription, which needs a live host",
   resourceMonitor:
     "StatusBarResourceSegment resolves its readings through the desktop sampler and the resource registry, neither of which exists off Electron",
 };
 
+/** The fixture's desktop stand-in: which window chrome `wco` simulates. */
+type FixtureWindowChrome = "none" | "mac" | "win" | "mac-fullscreen";
+
+interface CanvasVariant {
+  readonly tabs: TabStripPlacement;
+  readonly collapsed: boolean;
+  readonly wco: FixtureWindowChrome;
+  readonly dock: LayoutDockMode;
+}
+
 interface LayoutCanvasProbe {
   readonly ready: boolean;
+  /** The query this document was mounted with, as parsed. */
+  readonly variant: CanvasVariant;
   readonly regionIds: ReadonlyArray<RegionId>;
   readonly noCanvasNode: Readonly<Partial<Record<RegionId, string>>>;
   /** Each region's own name, so the driver checks the chip against the product's word. */
@@ -172,6 +224,16 @@ interface LayoutCanvasProbe {
   readonly clearSelection: () => void;
   readonly snapshot: () => LayoutSnapshot;
   readonly historyDepth: () => number;
+  /** The stored theme mode; persisted, so a check that sets it restores `"system"` for the next document. */
+  readonly setTheme: (theme: ThemeMode) => void;
+  /**
+   * Makes one seeded epic tab the active item, as the strip's own activation
+   * leaves the tabs store once the route bridge has followed the navigation.
+   * The fixture's router has no epic routes and no route bridge, so a click's
+   * navigation lands nowhere; what the rail check measures is the paint of an
+   * ACTIVE tinted tile, not the activation path.
+   */
+  readonly activateEpicTab: (epicId: string) => void;
 }
 
 declare global {
@@ -191,6 +253,43 @@ declare global {
  * would then drop the join).
  */
 const RAIL_DIVIDER_INDEX = 3;
+
+function readVariant(): CanvasVariant {
+  const params = new URLSearchParams(window.location.search);
+  const tabs = params.get("tabs");
+  const wco = params.get("wco");
+  const dock = params.get("dock");
+  return {
+    tabs: tabs === "left" || tabs === "right" ? tabs : "top",
+    collapsed: params.get("collapsed") === "1",
+    wco:
+      wco === "mac" || wco === "win" || wco === "mac-fullscreen" ? wco : "none",
+    dock: dock === "left" || dock === "float" ? dock : "right",
+  };
+}
+
+const VARIANT = readVariant();
+
+/** The shipped defaults with the variant's stored placement, which `reset` returns to. */
+const VARIANT_SNAPSHOT: LayoutSnapshot = {
+  ...DEFAULT_LAYOUT_SNAPSHOT,
+  arrangement: {
+    ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
+    tabStripPlacement: VARIANT.tabs,
+  },
+};
+
+/**
+ * Back to the variant's layout. Beside a side strip Home is shown, so the
+ * strip's top block carries every control it can; the shipped default hides
+ * it, and at the top the fixture's header specimen has no Home to show.
+ */
+function resetLayout(): void {
+  useLayoutStore.getState().replaceAll(VARIANT_SNAPSHOT);
+  if (VARIANT.tabs !== "top") {
+    useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
+  }
+}
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -251,11 +350,12 @@ function regionNames(): Readonly<Record<string, string>> {
 function buildProbe(): LayoutCanvasProbe {
   return {
     ready: true,
+    variant: VARIANT,
     regionIds: LAYOUT_REGION_IDS,
     noCanvasNode: NO_CANVAS_NODE,
     names: regionNames(),
     reset: () => {
-      useLayoutStore.getState().replaceAll(DEFAULT_LAYOUT_SNAPSHOT);
+      resetLayout();
     },
     beginSession: () => {
       useLayoutEditorStore
@@ -319,17 +419,48 @@ function buildProbe(): LayoutCanvasProbe {
     },
     snapshot: () => getLayoutSnapshot(),
     historyDepth: () => useLayoutEditorStore.getState().history.past.length,
+    setTheme: (theme) => {
+      useSettingsStore.getState().setTheme(theme);
+    },
+    activateEpicTab: (epicId) => {
+      useTabsStore.setState({
+        activeItemId: tabItemId({ kind: "epic", id: epicId }),
+      });
+    },
   };
+}
+
+/**
+ * The fixture's header for the `top` placement: the paint-order condition
+ * LV2-04 measured, reproduced. An opaque positioned strip on its own stacking
+ * layer, flush with the column's top edge and both of its sides; an `outline`
+ * on the column is painted underneath this, the shipped `::after` frame is not.
+ */
+function FixtureHeader(): ReactNode {
+  return (
+    <header
+      data-fixture-header
+      className="relative z-20 flex h-10 shrink-0 items-end gap-3 border-b bg-canvas px-3 text-ui-sm"
+    >
+      <span className="self-center">Sample window</span>
+      <SessionTabSpecimen />
+    </header>
+  );
 }
 
 /**
  * The app column and the editor beside it, exactly as `app-shell.tsx` arranges
  * them: a flex ROW whose first child is the column and whose second is the
  * inspector, so a side dock reflows the app rather than covering it, and the
- * column is never an ancestor of the inspector (C-06).
+ * column is never an ancestor of the inspector (C-06). The column is the
+ * shell's own `AppColumnFrame`, fed the placement and band kind the way the
+ * shell computes them.
  */
 export function CanvasFixture(): ReactNode {
   const [column, setColumn] = useState<HTMLDivElement | null>(null);
+  const chromeInput = useAppColumnChromeInput();
+  const chrome = appColumnChrome(chromeInput);
+  const stripEdge = sideTabStripEdge(chromeInput.placement);
 
   useEffect(() => {
     window.__layoutCanvasProbe = buildProbe();
@@ -340,24 +471,21 @@ export function CanvasFixture(): ReactNode {
 
   return (
     <div className="flex min-h-safe-dvh bg-canvas text-canvas-foreground">
-      <div
-        ref={setColumn}
-        data-layout-column
-        className="relative flex h-safe-dvh min-w-0 flex-1 flex-col"
-      >
-        {/* The paint-order condition LV2-04 measured, reproduced: an opaque
-            positioned strip on its own stacking layer, flush with the column's
-            top edge and both of its sides. An `outline` on the column is
-            painted underneath this; the shipped `::after` frame is not. */}
-        <header
-          data-fixture-header
-          className="relative z-20 flex h-10 shrink-0 items-end gap-3 border-b bg-canvas px-3 text-ui-sm"
-        >
-          <span className="self-center">Sample window</span>
-          <SessionTabSpecimen />
-        </header>
-        <main className="relative flex min-h-0 flex-1 flex-col">
-          <div className="relative flex min-h-0 flex-1 overflow-clip">
+      <RootDndProvider>
+        <AppColumnFrame
+          columnRef={setColumn}
+          {...chrome}
+          header={<FixtureHeader />}
+          strip={
+            stripEdge === null ? null : (
+              <SideTabStrip
+                edge={stripEdge}
+                ownsTitleBar={sideStripOwnsTitleBar(chromeInput)}
+              />
+            )
+          }
+          banners={null}
+          surface={
             <div className="flex h-full min-h-0 w-full flex-col">
               {/* The canvas's own caption, from `sample-workspace-surface.tsx`:
                   passive rather than a region, and the one band of the column's
@@ -370,9 +498,11 @@ export function CanvasFixture(): ReactNode {
               </p>
               <SampleWorkspaceBody />
             </div>
-          </div>
-        </main>
-      </div>
+          }
+          mainTail={null}
+          tail={null}
+        />
+      </RootDndProvider>
       <LayoutEditor column={column} />
     </div>
   );
@@ -418,6 +548,31 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 Reflect.set(window, "__layoutCanvasErrors", fixtureErrors);
 
+/**
+ * The variant, applied before the first render so the first frame is already
+ * the window under test: the desktop stand-in, the stored placement, the
+ * strip's width and collapse, the inspector dock, and the seeded tabs.
+ */
+function applyVariant(variant: CanvasVariant): void {
+  if (variant.wco !== "none") {
+    Reflect.set(runnerHost, "menu", {
+      platform: variant.wco === "win" ? "win32" : "darwin",
+    });
+    Reflect.set(window, "runnerHost", runnerHost);
+  }
+  if (variant.wco === "mac" || variant.wco === "win") {
+    document.documentElement.classList.add("wco");
+  }
+  resetLayout();
+  const strip = useSideTabStripStore.getState();
+  strip.resetWidth();
+  strip.setCollapsed(variant.collapsed);
+  useLayoutEditorStore.getState().setDockMode(variant.dock);
+  seedSideStripTabs(true);
+}
+
+applyVariant(VARIANT);
+
 function buildRouter() {
   const rootRoute = createRootRoute({
     component: () => (
@@ -431,9 +586,16 @@ function buildRouter() {
     path: "/",
     component: () => null,
   });
+  // The desktop's own history where the fixture stands in for a desktop
+  // (`router.tsx` gives an Electron renderer a persistent memory history,
+  // session-scoped here), which is what the strip's back and forward arrows
+  // self-gate on; the browser shell's plain history otherwise.
   return createRouter({
     routeTree: rootRoute.addChildren([indexRoute]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history:
+      VARIANT.wco === "none"
+        ? createMemoryHistory({ initialEntries: ["/"] })
+        : createPersistentMemoryHistory("/", null),
   });
 }
 

@@ -18,6 +18,7 @@ import {
   SIDE_TAB_ACTIVE_CLASS,
   SIDE_TAB_COLORLESS_TILE_CLASS,
   SIDE_TAB_GROUP_LINE_CLASS,
+  SIDE_TAB_GROUP_LINE_SEAT_CLASS,
   SIDE_TAB_LEADING_CLASS,
   SIDE_TAB_ROW_CLASS,
   SIDE_TAB_SESSION_ACTIVE_CLASS,
@@ -297,13 +298,34 @@ describe("SideTabRow expanded paint", () => {
   });
 
   it("draws the group colour line outside the fill, joined across the gap", () => {
-    const row = renderRow({ groupLine: "#ff8800", active: true });
+    const row = renderRow({
+      groupLine: { color: "#ff8800", seat: "row" },
+      active: true,
+    });
     const line = byTestId(row, "side-tab-group-line");
     expect(line.style.getPropertyValue("--side-tab-group-line")).toBe(
       "#ff8800",
     );
     expect(hasClasses(line, SIDE_TAB_GROUP_LINE_CLASS)).toBe(true);
+    expect(hasClasses(line, SIDE_TAB_GROUP_LINE_SEAT_CLASS.expanded.row)).toBe(
+      true,
+    );
     expect(line.className).not.toContain("rounded");
+  });
+
+  it("places a split pair member's segment by its seat in the pair", () => {
+    const row = renderRow({
+      groupLine: { color: "#ff8800", seat: "pair-top" },
+      active: false,
+    });
+    const line = byTestId(row, "side-tab-group-line");
+    expect(line.getAttribute("data-seat")).toBe("pair-top");
+    expect(
+      hasClasses(line, SIDE_TAB_GROUP_LINE_SEAT_CLASS.expanded["pair-top"]),
+    ).toBe(true);
+    expect(hasClasses(line, SIDE_TAB_GROUP_LINE_SEAT_CLASS.expanded.row)).toBe(
+      false,
+    );
   });
 
   it("keeps the hover card closed while expanded", () => {

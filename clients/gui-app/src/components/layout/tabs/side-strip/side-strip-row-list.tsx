@@ -289,7 +289,11 @@ function SideTabItem(
         rootRef={rootRef}
         input={input}
         variant={props.variant}
-        groupLine={props.groupLine}
+        groupLine={
+          props.groupLine === null
+            ? null
+            : { color: props.groupLine, seat: "row" }
+        }
         dropIndicator={props.dropIndicator}
       />
     </m.div>
