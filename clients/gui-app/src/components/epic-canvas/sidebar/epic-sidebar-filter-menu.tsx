@@ -12,7 +12,7 @@ import type { EpicArtifactKind } from "@traycer/protocol/common/registry";
 import { EPIC_NODE_LABELS } from "@/lib/artifacts/node-display";
 import { Button } from "@/components/ui/button";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
-import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -165,7 +165,7 @@ function ViewDetailEntry<TDetail extends string>(props: {
   readonly children: ReactNode;
 }) {
   const [subOpen, setSubOpen] = useState(false);
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row");
   if (props.drillIn) {
     return (
       <DropdownMenuItem
@@ -198,7 +198,7 @@ function ViewDetailEntry<TDetail extends string>(props: {
       <DropdownMenuSubContent
         sideOffset={8}
         alignOffset={-4}
-        avoidCollisions={popoverSide === "left"}
+        avoidCollisions={placement?.side === "left"}
         className="min-w-52"
       >
         {props.children}
@@ -254,7 +254,10 @@ export function ChatFilterMenu(props: {
   const active =
     filterActive || archiveVisibilityChanged || isSortModeActive(sort);
   const menu = useViewMenuState<ChatViewDetail>(props.tabId, "chats");
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row") ?? {
+    side: "right" as const,
+    align: "start" as const,
+  };
 
   const detailProps = {
     filterOrigin: filter.origin,
@@ -296,8 +299,8 @@ export function ChatFilterMenu(props: {
         setTriggerElement={menu.setTriggerElement}
       />
       <DropdownMenuContent
-        side={popoverSide}
-        align="start"
+        side={placement.side}
+        align={placement.align}
         sideOffset={8}
         avoidCollisions={false}
         className={VIEW_MENU_CONTENT_CLASS}
@@ -403,7 +406,10 @@ export function ArtifactFilterMenu(props: {
   const filterCount = artifactFilterCount(filter);
   const active = filterActive || isSortModeActive(sort);
   const menu = useViewMenuState<ArtifactViewDetail>(props.tabId, "artifacts");
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row") ?? {
+    side: "right" as const,
+    align: "start" as const,
+  };
 
   const detailProps = {
     filterStatuses: filter.statuses,
@@ -442,8 +448,8 @@ export function ArtifactFilterMenu(props: {
         setTriggerElement={menu.setTriggerElement}
       />
       <DropdownMenuContent
-        side={popoverSide}
-        align="start"
+        side={placement.side}
+        align={placement.align}
         sideOffset={8}
         avoidCollisions={false}
         className={VIEW_MENU_CONTENT_CLASS}

@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { Plus } from "lucide-react";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { formatChordForDisplay } from "@/lib/keybindings/chord";
@@ -12,6 +13,7 @@ interface TabStripNewButtonProps {
 export function TabStripNewButton(
   props: TabStripNewButtonProps,
 ): React.ReactNode {
+  const placement = useColumnOverlayPlacement("top");
   const { onNewTab } = props;
   const chord = useBindingForAction("epic.new");
   const tooltip =
@@ -20,9 +22,9 @@ export function TabStripNewButton(
   return (
     <TooltipWrapper
       label={tooltip}
-      side="top"
+      side={placement?.side ?? "top"}
       sideOffset={undefined}
-      align={undefined}
+      align={placement?.align}
     >
       <button
         type="button"

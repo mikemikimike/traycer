@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { withoutTabRecovery } from "@/lib/tab-recovery/history";
 import { useSidebarCopyIdMenuEntry } from "@/components/epic-canvas/sidebar/use-sidebar-copy-id-menu-entry";
 /**
@@ -2144,6 +2145,7 @@ function ArtifactMoreMenu(props: {
   readonly entries: ReadonlyArray<SidebarRowMenuEntry>;
 }) {
   const { nodeId, nodeName, entries } = props;
+  const placement = useColumnOverlayPlacement("row");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2161,7 +2163,11 @@ function ArtifactMoreMenu(props: {
           <MoreHorizontal className="size-3" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-max">
+      <DropdownMenuContent
+        side={placement?.side}
+        align={placement?.align ?? "end"}
+        className="w-max"
+      >
         <SidebarDropdownMenuItems entries={entries} />
       </DropdownMenuContent>
     </DropdownMenu>

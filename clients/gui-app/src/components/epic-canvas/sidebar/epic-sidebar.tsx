@@ -257,7 +257,7 @@ import {
   BrowsersPanelActions,
   BrowsersPanelBody,
 } from "@/components/epic-canvas/sidebar/epic-browser-sidebar";
-import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { tileIntent } from "@/lib/canvas/tile-open/intent";
 const CHATS_PANEL_SKELETON = <ChatsPanelSkeleton />;
 const ARTIFACTS_PANEL_SKELETON = <ArtifactsPanelSkeleton />;
@@ -2251,7 +2251,7 @@ function ChatHeaderMoreMenu(props: {
   const menu = useHeaderMenu(props.tabId, "chats");
   const searchSelectedRef = useRef(false);
   const selectionEnabled = selection.canSelect && connectionStatus !== "closed";
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row");
 
   return (
     <DropdownMenu open={menu.open} onOpenChange={menu.handleOpenChange}>
@@ -2260,8 +2260,8 @@ function ChatHeaderMoreMenu(props: {
         testId="epic-sidebar-more-chats"
       />
       <DropdownMenuContent
-        side={popoverSide}
-        align="start"
+        side={placement?.side ?? "right"}
+        align={placement?.align ?? "start"}
         sideOffset={8}
         avoidCollisions={false}
         className="w-[var(--radix-dropdown-menu-content-available-width)] min-w-0 max-w-56"
@@ -2315,7 +2315,7 @@ function ArtifactHeaderMoreMenu(props: {
   const searchAvailable = useArtifactSearchAvailable();
   const searchSelectedRef = useRef(false);
   const menu = useHeaderMenu(props.tabId, "artifacts");
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row");
 
   return (
     <DropdownMenu open={menu.open} onOpenChange={menu.handleOpenChange}>
@@ -2324,8 +2324,8 @@ function ArtifactHeaderMoreMenu(props: {
         testId="epic-sidebar-more-artifacts"
       />
       <DropdownMenuContent
-        side={popoverSide}
-        align="start"
+        side={placement?.side ?? "right"}
+        align={placement?.align ?? "start"}
         sideOffset={8}
         avoidCollisions={false}
         className="w-[var(--radix-dropdown-menu-content-available-width)] min-w-0 max-w-52"
@@ -2462,6 +2462,10 @@ function SidebarSelectedChatArchiveButton(props: {
   );
 }
 function SidebarBulkSelectionActions() {
+  const placement = useColumnOverlayPlacement("row") ?? {
+    side: undefined,
+    align: "end" as const,
+  };
   const selection = useSidebarBulkSelection();
   const permissionRole = useEpicPermissionRole();
   const connectionStatus = useEpicConnectionStatus();
@@ -2551,7 +2555,7 @@ function SidebarBulkSelectionActions() {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent side={placement.side} align={placement.align}>
             <DropdownMenuItem
               data-testid="epic-sidebar-export-selected-markdown"
               disabled={!canExportSelected || exportArtifacts.isPending}

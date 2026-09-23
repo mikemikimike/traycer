@@ -11,6 +11,7 @@ import {
 } from "@/components/epic-tabs/pane-visibility-context";
 import { EpicViewTabContext } from "@/components/epic-canvas/view-tab-context";
 import { useTabSurfaceActivity } from "@/components/layout/tab-surface-activity-hooks";
+import { browserGuestCssSheetAnchorName } from "@/lib/browser-view/guest/persistent-browser-guest-host";
 import { setEpicSurfaceVisibility } from "@/lib/browser-view/tiles/surface-host-opened-tab";
 import { EpicSessionProvider } from "@/providers/epic-session-provider";
 import { AgentBrowserPip } from "@/components/epic-canvas/pip/agent-browser-pip";
@@ -85,7 +86,7 @@ export function EpicSurface(props: EpicSurfaceProps) {
                   registers nothing either way. */}
               <MobileEpicHeaderActionsBinder tabId={props.tabId} />
               <div
-                className="flex min-h-0 min-w-0 flex-1 flex-row"
+                className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
                 data-epic-surface={props.tabId}
               >
                 {/* DOM order follows `sidebarSide` (S-06), never CSS
@@ -93,7 +94,13 @@ export function EpicSurface(props: EpicSurfaceProps) {
                     screen. Split panes each render an `EpicSurface`, so both
                     follow the one global side. */}
                 {sidebarSide === "right" ? null : sidebarColumn}
-                <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                <div
+                  data-shell-sheet="content"
+                  style={{
+                    anchorName: browserGuestCssSheetAnchorName(props.tabId),
+                  }}
+                  className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas"
+                >
                   <EpicRouteSessionBody
                     epicId={props.epicId}
                     tabId={props.tabId}

@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { Check, Download, Terminal } from "lucide-react";
 import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import {
  * clean when there is no update.
  */
 export function AppUpdateHeaderButton() {
+  const placement = useColumnOverlayPlacement("foot");
   const { bridge, snapshot } = useDesktopAppUpdates();
   if (bridge === null) {
     return null;
@@ -41,7 +43,12 @@ export function AppUpdateHeaderButton() {
         : `Download update v${snapshot.latestVersion}`;
     const label = blockedReason === null ? versionLabel : blockedReason;
     return (
-      <TooltipWrapper label={label} side="top" sideOffset={6} align={undefined}>
+      <TooltipWrapper
+        label={label}
+        side={placement?.side ?? "top"}
+        sideOffset={6}
+        align={placement?.align}
+      >
         {/* Trigger off the span, not the Button: a disabled Button has
             `pointer-events-none`, so it would never fire the hover that opens
             the (block-reason) tooltip. */}
@@ -75,7 +82,12 @@ export function AppUpdateHeaderButton() {
     const label =
       progress === null ? "Downloading update" : `Downloading ${progress}%`;
     return (
-      <TooltipWrapper label={label} side="top" sideOffset={6} align={undefined}>
+      <TooltipWrapper
+        label={label}
+        side={placement?.side ?? "top"}
+        sideOffset={6}
+        align={placement?.align}
+      >
         {/* Span trigger: the Button is always disabled here, so the tooltip
             (download %) must hang off an element that still receives hover. */}
         <span data-layout-passive className="inline-flex">
@@ -128,6 +140,7 @@ function AppUpdateReadyButton(props: {
   readonly installGuidance: DesktopAppUpdateGuidance | null;
   readonly installInFlight: boolean;
 }) {
+  const placement = useColumnOverlayPlacement("foot");
   const openInstallGuidance = useDesktopDialogStore(
     (state) => state.openInstallGuidance,
   );
@@ -148,7 +161,12 @@ function AppUpdateReadyButton(props: {
     (needsManualInstall ? "Finish update" : restartLabel);
 
   return (
-    <TooltipWrapper label={label} side="top" sideOffset={6} align={undefined}>
+    <TooltipWrapper
+      label={label}
+      side={placement?.side ?? "top"}
+      sideOffset={6}
+      align={placement?.align}
+    >
       {/* Span trigger so the block-reason tooltip still opens when the Button
           is disabled (disabled Buttons have `pointer-events-none`). */}
       <span data-layout-passive className="inline-flex">

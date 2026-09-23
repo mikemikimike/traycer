@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { useEffect, useState, type ReactNode } from "react";
 import { Gauge } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,7 @@ function ScopedRateLimitIconButton({
   readonly scope: HostScope;
   readonly hasExplicitPick: boolean;
 }): ReactNode {
+  const placement = useColumnOverlayPlacement("foot");
   const [open, setOpen] = useState(false);
   const chord = useBindingForAction("app.rate-limits.open");
   useEffect(
@@ -136,9 +138,9 @@ function ScopedRateLimitIconButton({
         // Naming the active host on every hover would train people to ignore
         // the one case the words exist for.
         label={tooltip}
-        side="top"
+        side={placement?.side ?? "top"}
         sideOffset={6}
-        align={undefined}
+        align={placement?.align}
       >
         <PopoverTrigger asChild>
           <Button

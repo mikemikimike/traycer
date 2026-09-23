@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import {
   use,
   useEffect,
@@ -534,6 +535,7 @@ function ScopedResourceMonitorPopover(props: {
   /** The provided stream client is the picked host's, not a fallback. */
   readonly streamBoundToScope: boolean;
 }) {
+  const placement = useColumnOverlayPlacement("foot");
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const chord = useBindingForAction("app.resources.open");
@@ -576,9 +578,9 @@ function ScopedResourceMonitorPopover(props: {
             // Naming the active host on every hover would train people to ignore
             // the one case the words exist for.
             label={tooltip}
-            side="top"
+            side={placement?.side ?? "top"}
             sideOffset={6}
-            align={undefined}
+            align={placement?.align}
           >
             <PopoverTrigger asChild>
               <Button
@@ -817,6 +819,7 @@ function ResourceMonitorContent(props: {
   readonly streamBoundToScope: boolean;
   readonly contentSide: "top" | "bottom";
 }) {
+  const placement = useColumnOverlayPlacement("foot");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const scope = props.scope;
   // The picker earns its row once there is a choice to make. One host means one
@@ -860,8 +863,8 @@ function ResourceMonitorContent(props: {
 
   return (
     <PopoverContent
-      align="end"
-      side={props.contentSide}
+      align={placement?.align ?? "end"}
+      side={placement?.side ?? props.contentSide}
       sideOffset={8}
       collisionPadding={12}
       role="dialog"

@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { SignOutConfirmDialog } from "@/components/auth/sign-out-confirm-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ export interface UserMenuProps {
  * tests. Outside-click + Escape dismissal still come from Radix.
  */
 export function UserMenu(props: UserMenuProps) {
+  const placement = useColumnOverlayPlacement("foot");
   const runnerHost = useRunnerHost();
   const openLink = useOpenLink();
   const [open, setOpen] = useState<boolean>(false);
@@ -61,9 +63,9 @@ export function UserMenu(props: UserMenuProps) {
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <TooltipWrapper
           label={open ? null : props.userName}
-          side="top"
+          side={placement?.side ?? "top"}
           sideOffset={6}
-          align={undefined}
+          align={placement?.align}
         >
           <DropdownMenuTrigger asChild>
             <Button
@@ -88,7 +90,8 @@ export function UserMenu(props: UserMenuProps) {
           </DropdownMenuTrigger>
         </TooltipWrapper>
         <DropdownMenuContent
-          align="end"
+          side={placement?.side}
+          align={placement?.align ?? "end"}
           sideOffset={6}
           className="w-max whitespace-nowrap"
           data-testid="user-menu-content"

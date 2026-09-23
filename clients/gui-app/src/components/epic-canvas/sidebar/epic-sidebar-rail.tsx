@@ -67,7 +67,10 @@ import {
   LEFT_PANEL_RAIL_TILE_CLASS,
 } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import { useEpicArtifact } from "@/lib/epic-selectors";
-import { SidebarSideContext } from "@/components/epic-canvas/sidebar/sidebar-side-context";
+import {
+  ColumnEdgeContext,
+  useColumnOverlayPlacement,
+} from "@/components/layout/column-edge-context";
 import { useSurfaceHostPinWithDefault } from "@/hooks/host/use-surface-host-pin";
 import { tabSurfaceKey } from "@/stores/host/surface-host-selection-store";
 import { useCanvasHostId } from "@/components/epic-canvas/hooks/use-canvas-host-id";
@@ -632,11 +635,8 @@ function RailButton(props: RailButtonProps) {
     onClick,
     onContextMenu,
   } = props;
-  // One context read: the tooltip's popover side is this same value mirrored,
-  // so it is derived here rather than through a second `useSidebarPopoverSide()`
-  // call, which would read `SidebarSideContext` again.
-  const sidebarSide = use(SidebarSideContext);
-  const popoverSide = sidebarSide === "left" ? "right" : "left";
+  const sidebarSide = use(ColumnEdgeContext) ?? "left";
+  const placement = useColumnOverlayPlacement("row");
   const activeClass =
     orientation === "vertical"
       ? "bg-accent text-accent-foreground hover:bg-accent"
@@ -648,9 +648,11 @@ function RailButton(props: RailButtonProps) {
   return (
     <TooltipWrapper
       label={label}
-      side={orientation === "vertical" ? popoverSide : "bottom"}
+      side={
+        orientation === "vertical" ? (placement?.side ?? "right") : "bottom"
+      }
       sideOffset={undefined}
-      align={undefined}
+      align={orientation === "vertical" ? placement?.align : undefined}
     >
       <Button
         ref={buttonRef}

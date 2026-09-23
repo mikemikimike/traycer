@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
-import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 
 interface SidebarRowMenuTestIds {
   readonly dropdown: string;
@@ -63,14 +63,14 @@ function SidebarRowMenuItemTooltip(props: {
   readonly tooltip: string | null;
   readonly children: ReactNode;
 }) {
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row");
   if (props.tooltip === null) return props.children;
   return (
     <TooltipWrapper
       label={props.tooltip}
-      side={popoverSide}
+      side={placement?.side ?? "right"}
       sideOffset={undefined}
-      align={undefined}
+      align={placement?.align}
     >
       {props.children}
     </TooltipWrapper>

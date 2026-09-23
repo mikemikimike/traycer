@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ export function HistoryNavButtons(props: HistoryNavButtonsProps) {
  * built with), so this boundary is stable and costs no remount.
  */
 function HistoryNavArrows(props: HistoryNavButtonsProps) {
+  const placement = useColumnOverlayPlacement("top");
   const router = useRouter();
   const { canGoBack, canGoForward } = useHistoryNavState();
   const backChord = useBindingForAction("nav.back");
@@ -77,9 +79,9 @@ function HistoryNavArrows(props: HistoryNavButtonsProps) {
           needs the label to know what the greyed control does. */}
       <TooltipWrapper
         label={backTooltip}
-        side="top"
+        side={placement?.side ?? "top"}
         sideOffset={6}
-        align={undefined}
+        align={placement?.align}
       >
         <span className="inline-flex">
           <Button
@@ -97,9 +99,9 @@ function HistoryNavArrows(props: HistoryNavButtonsProps) {
       </TooltipWrapper>
       <TooltipWrapper
         label={forwardTooltip}
-        side="top"
+        side={placement?.side ?? "top"}
         sideOffset={6}
-        align={undefined}
+        align={placement?.align}
       >
         <span className="inline-flex">
           <Button

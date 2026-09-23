@@ -142,6 +142,10 @@ describe("AppColumnFrame", () => {
           "min-w-0",
           "flex-1",
           "flex-col",
+          // Ticket 02 (D1/D2): the column paints the ground the header (top
+          // placement) and the side strip go transparent on, so it has to
+          // span every placement, not just the beside ones.
+          "md:bg-shell-ground",
         ]),
       );
       expect([...row.classList]).toEqual(

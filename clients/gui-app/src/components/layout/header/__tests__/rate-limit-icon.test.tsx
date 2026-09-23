@@ -7,6 +7,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { HeaderRateLimitBar } from "@/hooks/rate-limits/use-header-rate-limit-bars";
 import { hostScopeFixture } from "@/components/settings/host-scope/host-scope-fixture";
@@ -484,6 +485,27 @@ describe("<RateLimitIconButton />", () => {
       expect(tooltip.textContent).toBe(
         `Usage limits · Other Machine (${formatChordForDisplay("mod+shift+u")})`,
       );
+    });
+  });
+
+  describe("column overlay placement (D7)", () => {
+    it("opens the tooltip toward the content when hosted in a right column", async () => {
+      render(
+        <ColumnEdgeContext.Provider value="right">
+          {iconTree()}
+        </ColumnEdgeContext.Provider>,
+      );
+      fireEvent.focus(screen.getByRole("button", { name: "Usage limits" }));
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.getAttribute("data-side")).toBe("left");
+      expect(tooltip.getAttribute("data-align")).toBe("end");
+    });
+
+    it("keeps the top-side tooltip outside a column", async () => {
+      renderIcon();
+      fireEvent.focus(screen.getByRole("button", { name: "Usage limits" }));
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.getAttribute("data-side")).toBe("top");
     });
   });
 });

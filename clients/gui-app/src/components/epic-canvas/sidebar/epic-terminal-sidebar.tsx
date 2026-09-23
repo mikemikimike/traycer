@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import { useSidebarCopyIdMenuEntry } from "@/components/epic-canvas/sidebar/use-sidebar-copy-id-menu-entry";
 /**
@@ -283,6 +284,7 @@ interface TerminalRowProps {
 }
 
 function TerminalRow(props: TerminalRowProps) {
+  const placement = useColumnOverlayPlacement("row");
   const {
     authority,
     durable,
@@ -495,7 +497,11 @@ function TerminalRow(props: TerminalRowProps) {
                         <MoreHorizontal className="size-3" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-max">
+                    <DropdownMenuContent
+                      side={placement?.side}
+                      align={placement?.align ?? "end"}
+                      className="w-max"
+                    >
                       <SidebarDropdownMenuItems entries={rowMenuEntries} />
                     </DropdownMenuContent>
                   </DropdownMenu>

@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode, type TransitionEvent } from "react";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { isFramelessDesktop } from "@/components/layout/header/title-bar-drag";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
@@ -52,65 +53,67 @@ export function SideTabStrip(props: {
   const dragClass = useStripDragClass();
   const stripRef = useRef<HTMLElement | null>(null);
   return (
-    <nav
-      ref={stripRef}
-      aria-label="Tabs"
-      data-testid="side-tab-strip"
-      data-edge={edge}
-      data-collapsed={collapsed}
-      onTransitionEnd={widthEasing.settle}
-      onTransitionCancel={widthEasing.settle}
-      className={cn(
-        "relative flex h-full min-h-0 shrink-0 flex-col bg-canvas text-canvas-foreground",
-        collapsed ? undefined : SIDE_STRIP_MAX_WIDTH_CLASS,
-        // The rail never gets narrower than the traffic lights need (S-18),
-        // and the expanded strip never narrower than the lights plus the title
-        // row's controls (S-43).
-        ownsTitleBar &&
-          (collapsed
-            ? "wco:min-w-[var(--window-leading-inset)]"
-            : SIDE_STRIP_TITLE_ROW_MIN_WIDTH_CLASS),
-        // Collapse and expand ease the width once; a handle drag, a nudge and
-        // a window resize change it instantly (L-165).
-        widthEasing.easing &&
-          "transition-[width] duration-(--panel-motion-duration) ease-spring [.traycer-panel-resizing_&]:transition-none",
-        dragClass,
-      )}
-      style={{ width: collapsed ? SIDE_STRIP_RAIL_WIDTH_PX : widthPx }}
-    >
-      <SideStripTopBlock
-        edge={edge}
-        variant={variant}
-        ownsTitleBar={ownsTitleBar}
-        dragClass={dragClass}
-        homeTabDrawn={controller.homeTabDrawn}
-        homeIsActive={controller.homeIsActive}
-        onHomeTab={controller.onHomeTab}
-        onNewTab={controller.onNewTab}
-        onToggleCollapsed={widthEasing.toggle}
-      />
-      <TabStripIndicatorScope indicators={controller.indicators}>
-        {hydrated ? (
-          <SideStripRowList
-            controller={controller}
-            edge={edge}
-            variant={variant}
-          />
-        ) : (
-          <SideStripSkeleton count={persistedStripCount} variant={variant} />
+    <ColumnEdgeContext.Provider value={edge}>
+      <nav
+        ref={stripRef}
+        aria-label="Tabs"
+        data-testid="side-tab-strip"
+        data-edge={edge}
+        data-collapsed={collapsed}
+        onTransitionEnd={widthEasing.settle}
+        onTransitionCancel={widthEasing.settle}
+        className={cn(
+          "relative flex h-full min-h-0 shrink-0 flex-col bg-canvas text-canvas-foreground md:bg-transparent",
+          collapsed ? undefined : SIDE_STRIP_MAX_WIDTH_CLASS,
+          // The rail never gets narrower than the traffic lights need (S-18),
+          // and the expanded strip never narrower than the lights plus the title
+          // row's controls (S-43).
+          ownsTitleBar &&
+            (collapsed
+              ? "wco:min-w-[var(--window-leading-inset)]"
+              : SIDE_STRIP_TITLE_ROW_MIN_WIDTH_CLASS),
+          // Collapse and expand ease the width once; a handle drag, a nudge and
+          // a window resize change it instantly (L-165).
+          widthEasing.easing &&
+            "transition-[width] duration-(--panel-motion-duration) ease-spring [.traycer-panel-resizing_&]:transition-none",
+          dragClass,
         )}
-      </TabStripIndicatorScope>
-      {/* A direct child of the nav: Electron honours a drag region reliably
-          only on the title bar's top-level elements. */}
-      <div
-        aria-hidden
-        data-testid="side-strip-drag-spacer"
-        className={cn("min-h-0 flex-1", dragClass)}
-      />
-      <SideStripFoot variant={variant} />
-      <SideStripResizeHandle edge={edge} stripRef={stripRef} />
-      {controller.dialogs}
-    </nav>
+        style={{ width: collapsed ? SIDE_STRIP_RAIL_WIDTH_PX : widthPx }}
+      >
+        <SideStripTopBlock
+          edge={edge}
+          variant={variant}
+          ownsTitleBar={ownsTitleBar}
+          dragClass={dragClass}
+          homeTabDrawn={controller.homeTabDrawn}
+          homeIsActive={controller.homeIsActive}
+          onHomeTab={controller.onHomeTab}
+          onNewTab={controller.onNewTab}
+          onToggleCollapsed={widthEasing.toggle}
+        />
+        <TabStripIndicatorScope indicators={controller.indicators}>
+          {hydrated ? (
+            <SideStripRowList
+              controller={controller}
+              edge={edge}
+              variant={variant}
+            />
+          ) : (
+            <SideStripSkeleton count={persistedStripCount} variant={variant} />
+          )}
+        </TabStripIndicatorScope>
+        {/* A direct child of the nav: Electron honours a drag region reliably
+            only on the title bar's top-level elements. */}
+        <div
+          aria-hidden
+          data-testid="side-strip-drag-spacer"
+          className={cn("min-h-0 flex-1", dragClass)}
+        />
+        <SideStripFoot variant={variant} />
+        <SideStripResizeHandle edge={edge} stripRef={stripRef} />
+        {controller.dialogs}
+      </nav>
+    </ColumnEdgeContext.Provider>
   );
 }
 

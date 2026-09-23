@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { useState } from "react";
 import type { ComponentPropsWithRef, CSSProperties, ReactNode } from "react";
 import { X } from "lucide-react";
@@ -504,8 +505,7 @@ function TileContent(props: { readonly tile: SideTabTile }) {
 
 /**
  * The collapsed row's full title, on the side facing the content: left of a
- * right-edge strip, right of anything else. The edge is read from the
- * strip's `data-edge` as the pointer or focus arrives. Always
+ * right-edge strip, right of a left-edge strip. Always
  * mounted, so switching variants keeps the row element; closed whenever it is
  * not allowed (expanded, or the row is part of a drag).
  */
@@ -514,26 +514,18 @@ function SideTabRowHoverCard(props: {
   readonly titleText: string;
   readonly children: ReactNode;
 }) {
-  const [side, setSide] = useState<"left" | "right">("right");
+  const placement = useColumnOverlayPlacement("row");
   const [open, setOpen] = useState(false);
-  const readSide = (event: { readonly currentTarget: Element }) => {
-    const edge = event.currentTarget
-      .closest("[data-edge]")
-      ?.getAttribute("data-edge");
-    setSide(edge === "right" ? "left" : "right");
-  };
   return (
     <HoverCard
       open={props.allowed ? open : false}
       onOpenChange={(next) => setOpen(next && props.allowed)}
     >
-      <HoverCardTrigger asChild onPointerEnter={readSide} onFocus={readSide}>
-        {props.children}
-      </HoverCardTrigger>
+      <HoverCardTrigger asChild>{props.children}</HoverCardTrigger>
       <HoverCardContent
         appearance="tooltip"
-        side={side}
-        align="center"
+        side={placement?.side ?? "right"}
+        align={placement?.align ?? "center"}
         data-testid="side-tab-hover-card"
         className="px-3 py-1.5 text-ui-xs"
       >

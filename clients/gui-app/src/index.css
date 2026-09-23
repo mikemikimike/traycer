@@ -779,6 +779,12 @@
     monospace;
 
   --app-background: var(--background);
+  /* Reflect at black so AMOLED also has a distinct ground. */
+  --shell-ground: light-dark(
+    oklch(from var(--canvas) max(calc(l - 0.08), calc(0.08 - l)) c h),
+    oklch(from var(--canvas) max(calc(l - 0.18), calc(0.18 - l)) c h)
+  );
+  --shell-gap: 6px;
 
   --radius: 0.375rem;
 }
@@ -1072,6 +1078,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
   --color-foreground: var(--foreground);
+  --color-shell-ground: var(--shell-ground);
   --color-canvas: var(--canvas);
   --color-canvas-foreground: var(--canvas-foreground);
   --color-canvas-border: var(--canvas-border);
@@ -1127,101 +1134,32 @@
   transition-duration: 0s;
 }
 
+/* The frame owns the inset; each retained route or epic column owns a sheet. */
 @utility task-surface-frame {
-  margin-top: -1px;
-  border-top-left-radius: var(--radius-xl);
-  border-top-right-radius: var(--radius-xl);
+  margin: var(--shell-gap);
 
-  &::before,
-  &::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    z-index: 30;
-    width: var(--radius-xl);
-    height: var(--radius-xl);
-    pointer-events: none;
-    border-style: solid;
-    border-top-width: 1px;
-    border-color: color-mix(in oklab, var(--color-border) 90%, transparent);
+  & [data-shell-sheet] {
+    border: 1px solid var(--canvas-border);
+    border-radius: var(--radius-xl);
   }
 
-  &::before {
-    left: 0;
-    border-left-width: 1px;
-    border-top-left-radius: inherit;
-  }
-
-  &::after {
-    right: 0;
-    border-right-width: 1px;
-    border-top-right-radius: inherit;
+  & [data-shell-sheet="route"] {
+    background-color: var(--canvas);
   }
 }
 
-/*
- * `task-surface-frame` for a surface beside a vertical tab strip, with no
- * header above it, and only the corner facing the strip is rounded and traced
- * with the 1px hairline. Under a title band the surface tucks 1px up so the
- * corner's top border lands on the band's own hairline instead of doubling it.
- * Only while the band is displayed: under a window-controls overlay, or while
- * it carries the desktop menus (`data-title-band-menus="active"`). A hidden
- * band (macOS fullscreen) leaves the surface at the window's top edge, where a
- * tuck would clip the corner.
- */
 @utility task-surface-frame-beside-left {
-  border-top-left-radius: var(--radius-xl);
-
-  :is(
-      .wco [data-app-title-band="band"],
-      [data-app-title-band="band"]:has(> [data-title-band-menus="active"])
-    )
-    & {
-    margin-top: -1px;
-  }
-
-  &::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    z-index: 30;
-    width: var(--radius-xl);
-    height: var(--radius-xl);
-    pointer-events: none;
-    border-style: solid;
-    border-top-width: 1px;
-    border-left-width: 1px;
-    border-color: color-mix(in oklab, var(--color-border) 90%, transparent);
-    border-top-left-radius: inherit;
-  }
+  @apply task-surface-frame;
 }
 
 @utility task-surface-frame-beside-right {
-  border-top-right-radius: var(--radius-xl);
+  @apply task-surface-frame;
+}
 
-  :is(
-      .wco [data-app-title-band="band"],
-      [data-app-title-band="band"]:has(> [data-title-band-menus="active"])
-    )
-    & {
-    margin-top: -1px;
-  }
-
-  &::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 30;
-    width: var(--radius-xl);
-    height: var(--radius-xl);
-    pointer-events: none;
-    border-style: solid;
-    border-top-width: 1px;
-    border-right-width: 1px;
-    border-color: color-mix(in oklab, var(--color-border) 90%, transparent);
-    border-top-right-radius: inherit;
+/* A portalled browser guest needs the same inner clip as its own sheet. */
+[data-browser-guest-sheet] {
+  @variant md {
+    clip-path: inset(1px round calc(var(--radius-xl) - 1px));
   }
 }
 

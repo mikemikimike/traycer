@@ -16,6 +16,7 @@ import { useDroppable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { cn } from "@/lib/utils";
+import { browserGuestCssSheetAnchorName } from "@/lib/browser-view/guest/persistent-browser-guest-host";
 import {
   flattenStripItemRefs,
   tabRefKey,
@@ -368,6 +369,7 @@ function TopLevelSurfaceMount(props: {
         aria-hidden={!mount.activity.visible}
         className={surfaceClassName(mount.placement)}
         data-focused={mount.activity.focused ? "true" : "false"}
+        data-shell-sheet={mount.tab.kind === "epic" ? undefined : "route"}
         data-surface-kind={mount.tab.kind}
         data-surface-ref={tabRefKey(mount.tab)}
         data-testid={`top-level-surface-${mount.tab.kind}-${mount.tab.id}`}
@@ -375,7 +377,13 @@ function TopLevelSurfaceMount(props: {
         onFocusCapture={paneActivation.onFocusCapture}
         onPointerDownCapture={paneActivation.onPointerDownCapture}
         onPointerCancelCapture={paneActivation.onPointerCancelCapture}
-        style={surfaceStyle(mount.placement)}
+        style={{
+          ...surfaceStyle(mount.placement),
+          anchorName:
+            mount.tab.kind === "epic"
+              ? undefined
+              : browserGuestCssSheetAnchorName(mount.tab.id),
+        }}
       >
         <TabSurfaceActivityProvider activity={mount.activity}>
           <SurfacePresentationBoundary

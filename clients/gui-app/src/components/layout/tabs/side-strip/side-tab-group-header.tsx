@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import {
   useContext,
   useId,
@@ -59,6 +60,7 @@ export interface SideTabGroupHeaderProps {
  */
 export function SideTabGroupHeader(props: SideTabGroupHeaderProps): ReactNode {
   const { groupId, group } = props;
+  const placement = useColumnOverlayPlacement("row");
   const [editing, setEditing] = useState(false);
   // The editor can open over the strip's drag spacer (S-44).
   useTitleBarDragSuppression(`group-editor:${useId()}`, editing);
@@ -150,7 +152,11 @@ export function SideTabGroupHeader(props: SideTabGroupHeaderProps): ReactNode {
           ) : null}
         </button>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-fit max-w-xs">
+      <PopoverContent
+        side={placement?.side}
+        align={placement?.align ?? "start"}
+        className="w-fit max-w-xs"
+      >
         <TabGroupEditor
           groupId={groupId}
           group={group}

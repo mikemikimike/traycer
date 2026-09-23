@@ -27,7 +27,7 @@ import {
   EpicLeftPanelStaticRail,
 } from "@/components/epic-canvas/sidebar/epic-sidebar-rail";
 import { SidebarKeybindingBridge } from "@/components/epic-canvas/sidebar/sidebar-keybinding-bridge";
-import { SidebarSideContext } from "@/components/epic-canvas/sidebar/sidebar-side-context";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { SnapshotLoadingProvider } from "@/components/epic-canvas/snapshots/snapshot-loading-context";
 import {
   useEpicSnapshotFetchError,
@@ -57,17 +57,6 @@ import { cn } from "@/lib/utils";
 const MAX_SIDEBAR_DRAG_FRACTION = 0.5;
 const KEYBOARD_RESIZE_STEP_PX = 24;
 
-/**
- * The three `before:` tokens that differ by side; everything else about the
- * handle's hover edge is shared (see `SidebarWidthResizeHandle`'s
- * className). Keyed on the whole two-member `EdgeSide` so a third value
- * would be a compile error here rather than a silent fallthrough.
- */
-const HANDLE_EDGE_CLASS: Record<EdgeSide, string> = {
-  left: "before:left-0 before:rounded-tl-lg before:border-l",
-  right: "before:right-0 before:rounded-tr-lg before:border-r",
-};
-
 export interface EpicSidebarColumnProps {
   readonly epicId: string;
   readonly tabId: string;
@@ -96,16 +85,22 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
   const sidebarWidthPx = useSidebarWidthPx();
 
   const collapsedRail = mainCollapsed ? (
-    <ColumnRail
-      epicId={epicId}
-      tabId={tabId}
-      orientation="vertical"
-      sessionReady={sessionReady}
-    />
+    <div
+      data-shell-sheet="panel"
+      className="shrink-0 overflow-clip bg-background"
+    >
+      <ColumnRail
+        epicId={epicId}
+        tabId={tabId}
+        orientation="vertical"
+        sessionReady={sessionReady}
+      />
+    </div>
   ) : null;
 
   const panel = (
     <div
+      data-shell-sheet="panel"
       data-epic-sidebar-panel
       data-testid="epic-sidebar-column"
       data-epic-id={epicId}
@@ -150,7 +145,7 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
   );
 
   return (
-    <SidebarSideContext.Provider value={side}>
+    <ColumnEdgeContext.Provider value={side}>
       {/* Fragment order is DOM order, never CSS `order`: the collapsed
           vertical rail has to sit at the PANE's outer edge, and the handle
           has to be adjacent to the panel on the side matching `side` so
@@ -168,7 +163,7 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
           {handle}
         </>
       )}
-    </SidebarSideContext.Provider>
+    </ColumnEdgeContext.Provider>
   );
 }
 
@@ -333,10 +328,9 @@ function SidebarWidthResizeHandle(props: {
       aria-label="Resize sidebar"
       data-testid="epic-sidebar-resize-handle"
       className={cn(
-        "relative z-10 shrink-0 bg-background ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
-        "before:pointer-events-none before:absolute before:top-10 before:bottom-0 before:w-2 before:border-transparent before:transition-colors before:content-[''] hover:before:border-border focus-visible:before:border-border",
-        HANDLE_EDGE_CLASS[side],
+        "relative z-10 shrink-0 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
         pointerDragHandleAxisClassName("horizontal"),
+        "md:mx-[calc(var(--shell-gap)/-2)] md:w-0",
         hidden && "hidden",
       )}
     />

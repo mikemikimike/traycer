@@ -7,10 +7,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { HostNotificationsEntityRef } from "@traycer/protocol/host/notifications/contracts";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { NotificationIndicatorsContext } from "@/components/notifications/notification-indicator-context";
 import { SideTabGroupHeader } from "@/components/layout/tabs/side-strip/side-tab-group-header";
 import type { SideTabRowVariant } from "@/components/layout/tabs/side-strip/side-tab-row";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import type { SurfaceNotificationIndicators } from "@/stores/notifications/notification-indicator-state";
 import { __resetAppLocalNotificationsStoreForTests } from "@/stores/notifications/app-local-notifications-store";
 import { tabItemId, tabRefKey } from "@/stores/tabs/layout";
@@ -57,21 +59,34 @@ function renderHeader(input: {
   readonly variant: SideTabRowVariant;
   readonly memberEntities: ReadonlyArray<HostNotificationsEntityRef>;
   readonly indicators: SurfaceNotificationIndicators;
+  /** The nearest vertical column's edge, `null` outside a column (D7). */
+  readonly columnSide: EdgeSide | null;
 }): void {
   render(
-    <TooltipProvider>
-      <NotificationIndicatorsContext.Provider value={input.indicators}>
-        <SideTabGroupHeader
-          groupId={GROUP_ID}
-          group={input.group}
-          variant={input.variant}
-          memberCount={3}
-          memberEntities={input.memberEntities}
-          onClose={() => undefined}
-        />
-      </NotificationIndicatorsContext.Provider>
-    </TooltipProvider>,
+    <ColumnEdgeContext.Provider value={input.columnSide}>
+      <TooltipProvider>
+        <NotificationIndicatorsContext.Provider value={input.indicators}>
+          <SideTabGroupHeader
+            groupId={GROUP_ID}
+            group={input.group}
+            variant={input.variant}
+            memberCount={3}
+            memberEntities={input.memberEntities}
+            onClose={() => undefined}
+          />
+        </NotificationIndicatorsContext.Provider>
+      </TooltipProvider>
+    </ColumnEdgeContext.Provider>,
   );
+}
+
+/** The Radix Popover Content node that owns the `data-side`/`data-align` Popper wrote. */
+function groupEditorPopoverContent(): HTMLElement {
+  const content = document.querySelector<HTMLElement>(
+    '[data-slot="popover-content"]',
+  );
+  if (content === null) throw new Error("group editor popover not found");
+  return content;
 }
 
 function header(): HTMLElement {
@@ -95,6 +110,7 @@ describe("SideTabGroupHeader", () => {
       variant: "expanded",
       memberEntities: [],
       indicators: { epics: {}, chats: {} },
+      columnSide: null,
     });
 
     expect(header().textContent).toContain("Work");
@@ -107,6 +123,7 @@ describe("SideTabGroupHeader", () => {
       variant: "expanded",
       memberEntities: [],
       indicators: { epics: {}, chats: {} },
+      columnSide: null,
     });
 
     fireEvent.click(header());
@@ -120,6 +137,7 @@ describe("SideTabGroupHeader", () => {
       variant: "expanded",
       memberEntities: [],
       indicators: { epics: {}, chats: {} },
+      columnSide: null,
     });
 
     fireEvent.contextMenu(header());
@@ -127,6 +145,28 @@ describe("SideTabGroupHeader", () => {
     expect(screen.getByRole("textbox", { name: "Group name" })).toBeDefined();
     expect(screen.getByText("Ungroup")).toBeDefined();
   });
+
+  it.each([
+    ["left", "right"],
+    ["right", "left"],
+  ] as const)(
+    "opens the group editor popover mirrored off a %s sidebar column (side=%s)",
+    (columnSide, expectedSide) => {
+      renderHeader({
+        group: seedGroup(false),
+        variant: "expanded",
+        memberEntities: [],
+        indicators: { epics: {}, chats: {} },
+        columnSide,
+      });
+
+      fireEvent.contextMenu(header());
+
+      const content = groupEditorPopoverContent();
+      expect(content.getAttribute("data-side")).toBe(expectedSide);
+      expect(content.getAttribute("data-align")).toBe("start");
+    },
+  );
 
   it("badges a collapsed group with its worst member's notification", () => {
     renderHeader({
@@ -141,6 +181,7 @@ describe("SideTabGroupHeader", () => {
         },
         chats: {},
       },
+      columnSide: null,
     });
 
     // Waiting outranks a failure and an unread result in the rail (S-17).
@@ -158,6 +199,7 @@ describe("SideTabGroupHeader", () => {
         epics: { "e-1": { ...QUIET, unreadFailure: true } },
         chats: {},
       },
+      columnSide: null,
     });
 
     expect(screen.queryByTestId("side-tab-group-badge")).toBeNull();
@@ -172,6 +214,7 @@ describe("SideTabGroupHeader", () => {
         epics: { "e-1": { ...QUIET, unreadFailure: true } },
         chats: {},
       },
+      columnSide: null,
     });
 
     expect(header().textContent).toBe("W");

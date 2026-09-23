@@ -1,3 +1,4 @@
+import { appColumnChrome } from "@/components/layout/header/app-title-band-kind";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -12,16 +13,21 @@ import { TabSurfaceActivityProvider } from "@/components/layout/tab-surface-acti
 import { EpicSidebarColumn } from "@/components/epic-canvas/sidebar/epic-sidebar-column";
 import { EpicSurface } from "@/components/epic-tabs/epic-surface";
 import { ChatFilterMenu } from "@/components/epic-canvas/sidebar/epic-sidebar-filter-menu";
+import { browserGuestCssSheetAnchorName } from "@/lib/browser-view/guest/persistent-browser-guest-host";
+import { AppColumnFrame } from "@/components/layout/app-column-frame";
 import {
-  SidebarSideContext,
-  useSidebarPopoverSide,
-} from "@/components/epic-canvas/sidebar/sidebar-side-context";
+  ColumnEdgeContext,
+  useColumnOverlayPlacement,
+} from "@/components/layout/column-edge-context";
 import { pointerEvent } from "@/components/epic-canvas/canvas/__tests__/test-pointer-events";
 import {
   DEFAULT_SIDEBAR_WIDTH_PX,
   useLeftPanelStore,
 } from "@/stores/epics/left-panel-store";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_ARRANGEMENT,
+  type TabStripPlacement,
+} from "@/lib/layout/layout-arrangement";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
 const EPIC_ID = "sidebar-side-epic";
@@ -145,46 +151,74 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
       "epic-sidebar-column",
       "epic-sidebar-resize-handle",
     ]);
+    const panel = screen.getByTestId("epic-sidebar-column");
+    expect(panel.dataset.shellSheet).toBe("panel");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    expect(handle.className).toContain("before:left-0");
-    expect(handle.className).toContain("before:rounded-tl-lg");
-    expect(handle.className).toContain("before:border-l");
-    expect(handle.className).not.toContain("before:right-0");
+    // Sheet shell (ticket 02): the handle's hit target is centred in the
+    // `--shell-gap` ground gap on either side now, not traced with a
+    // side-specific `before:` hairline - the gap itself separates the sheets.
+    expect(handle.className).toContain("md:mx-[calc(var(--shell-gap)/-2)]");
+    expect(handle.className).toContain("md:w-0");
+    expect(handle.className).not.toMatch(/\bbefore:/);
   });
 
-  it("orders the fragment [handle, panel] for a right sidebar and mirrors the handle's edge classes", () => {
+  it("orders the fragment [handle, panel] for a right sidebar with the same centred hit target", () => {
     renderColumn("right");
 
     expect(wrapperChildTestIds()).toEqual([
       "epic-sidebar-resize-handle",
       "epic-sidebar-column",
     ]);
+    const panel = screen.getByTestId("epic-sidebar-column");
+    expect(panel.dataset.shellSheet).toBe("panel");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    expect(handle.className).toContain("before:right-0");
-    expect(handle.className).toContain("before:rounded-tr-lg");
-    expect(handle.className).toContain("before:border-r");
-    expect(handle.className).not.toContain("before:left-0");
+    // No side-specific classes left to mirror: the centred hit target is the
+    // same on both sides now.
+    expect(handle.className).toContain("md:mx-[calc(var(--shell-gap)/-2)]");
+    expect(handle.className).toContain("md:w-0");
+    expect(handle.className).not.toMatch(/\bbefore:/);
   });
 
-  it("puts the collapsed rail at the pane's outer edge on both sides", () => {
+  it("puts the collapsed rail at the pane's outer edge on both sides, itself a sheet", () => {
     act(() => {
       useLeftPanelStore.getState().setMainCollapsed(TAB_ID, true);
     });
 
     renderColumn("left");
-    expect(wrapperChildTestIds()).toEqual([
-      "epic-rail-static-stub",
+    const leftChildren = [
+      ...screen
+        .getByTestId("column-wrapper")
+        .querySelectorAll<HTMLElement>(":scope > *"),
+    ];
+    expect(leftChildren.map((child) => child.dataset.testid)).toEqual([
+      undefined,
       "epic-sidebar-column",
       "epic-sidebar-resize-handle",
     ]);
+    const [leftCollapsedRail, leftPanel] = leftChildren;
+    expect(leftCollapsedRail.dataset.shellSheet).toBe("panel");
+    expect(
+      leftCollapsedRail.querySelector('[data-testid="epic-rail-static-stub"]'),
+    ).not.toBeNull();
+    expect(leftPanel.dataset.shellSheet).toBe("panel");
     cleanup();
 
     renderColumn("right");
-    expect(wrapperChildTestIds()).toEqual([
+    const rightChildren = [
+      ...screen
+        .getByTestId("column-wrapper")
+        .querySelectorAll<HTMLElement>(":scope > *"),
+    ];
+    expect(rightChildren.map((child) => child.dataset.testid)).toEqual([
       "epic-sidebar-resize-handle",
       "epic-sidebar-column",
-      "epic-rail-static-stub",
+      undefined,
     ]);
+    const rightCollapsedRail = rightChildren[2];
+    expect(rightCollapsedRail.dataset.shellSheet).toBe("panel");
+    expect(
+      rightCollapsedRail.querySelector('[data-testid="epic-rail-static-stub"]'),
+    ).not.toBeNull();
   });
 
   function setUpRightDragSurface(): {
@@ -308,6 +342,77 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
     ]);
   });
 
+  it("is the two-sheet epic surface: panel + content, no single-sheet route marker (D1/D2)", () => {
+    renderSurface(TAB_ID, EPIC_ID);
+
+    const container = document.querySelector(`[data-epic-surface="${TAB_ID}"]`);
+    if (container === null) throw new Error("epic surface row not found");
+    const sheets = [
+      ...container.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
+    ];
+    expect(sheets.map((sheet) => sheet.dataset.shellSheet).sort()).toEqual([
+      "content",
+      "panel",
+    ]);
+
+    const content = container.querySelector<HTMLElement>(
+      '[data-shell-sheet="content"]',
+    );
+    if (content === null) throw new Error("content sheet not found");
+    // The browser guest's outer sheet clipper anchors to this element by the
+    // same per-tab name (`browserGuestCssSheetAnchorName`), so a guest
+    // presented on this tab clips to this sheet's own rounded corners.
+    expect(content.style.getPropertyValue("anchor-name")).toBe(
+      browserGuestCssSheetAnchorName(TAB_ID),
+    );
+    expect(container.querySelector('[data-shell-sheet="route"]')).toBeNull();
+  });
+
+  const SURFACE_FRAME_CLASS: Record<TabStripPlacement, string> = {
+    top: "md:task-surface-frame",
+    left: "md:task-surface-frame-beside-left",
+    right: "md:task-surface-frame-beside-right",
+  };
+
+  it.each(["top", "left", "right"] as const)(
+    "holds the two-sheet epic composition inside the placement's own surface frame, placement=%s",
+    (placement) => {
+      render(
+        <AppColumnFrame
+          {...appColumnChrome({ placement, platform: null, frameless: false })}
+          columnRef={() => undefined}
+          header={<header />}
+          strip={<nav />}
+          banners={<div />}
+          surface={
+            <TabSurfaceActivityProvider
+              activity={{ visible: true, focused: true }}
+            >
+              <EpicSurface epicId={EPIC_ID} tabId={TAB_ID} />
+            </TabSurfaceActivityProvider>
+          }
+          mainTail={null}
+          tail={null}
+        />,
+      );
+
+      const frame = document.querySelector<HTMLElement>(
+        "[data-layout-column] main > div",
+      );
+      if (frame === null) throw new Error("surface frame not rendered");
+      expect(frame.classList.contains(SURFACE_FRAME_CLASS[placement])).toBe(
+        true,
+      );
+      const sheets = [
+        ...frame.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
+      ];
+      expect(sheets.map((sheet) => sheet.dataset.shellSheet).sort()).toEqual([
+        "content",
+        "panel",
+      ]);
+    },
+  );
+
   it("agrees across two split panes, since the side is global", () => {
     act(() => {
       useLayoutStore.setState({
@@ -333,33 +438,59 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
   });
 });
 
-describe("useSidebarPopoverSide() (S-06)", () => {
-  function Probe() {
-    const side = useSidebarPopoverSide();
-    return <div data-testid="popover-side-probe" data-side={side} />;
+describe("useColumnOverlayPlacement() (D7)", () => {
+  function Probe(props: { readonly anchor: "top" | "row" | "foot" }) {
+    const placement = useColumnOverlayPlacement(props.anchor);
+    return (
+      <div
+        data-testid="overlay-placement-probe"
+        data-side={placement?.side ?? "null"}
+        data-align={placement?.align ?? "null"}
+      />
+    );
   }
 
-  it("opens right for the default (left) sidebar with no provider", () => {
-    render(<Probe />);
-    expect(screen.getByTestId("popover-side-probe").dataset.side).toBe("right");
-  });
+  it.each(["top", "row", "foot"] as const)(
+    "pins null outside a column, anchor=%s",
+    (anchor) => {
+      render(<Probe anchor={anchor} />);
+      const probe = screen.getByTestId("overlay-placement-probe");
+      expect(probe.dataset.side).toBe("null");
+      expect(probe.dataset.align).toBe("null");
+    },
+  );
 
-  it("opens left for a right-docked sidebar", () => {
-    render(
-      <SidebarSideContext.Provider value="right">
-        <Probe />
-      </SidebarSideContext.Provider>,
-    );
-    expect(screen.getByTestId("popover-side-probe").dataset.side).toBe("left");
-  });
+  it.each([
+    ["top", "start"],
+    ["row", "start"],
+    ["foot", "end"],
+  ] as const)(
+    "opens toward the content for a left column, anchor=%s",
+    (anchor, align) => {
+      render(
+        <ColumnEdgeContext.Provider value="left">
+          <Probe anchor={anchor} />
+        </ColumnEdgeContext.Provider>,
+      );
+      const probe = screen.getByTestId("overlay-placement-probe");
+      expect(probe.dataset.side).toBe("right");
+      expect(probe.dataset.align).toBe(align);
+    },
+  );
 
-  it("opens right for an explicitly left-docked sidebar", () => {
+  it.each([
+    ["top", "start"],
+    ["row", "start"],
+    ["foot", "end"],
+  ] as const)("mirrors for a right column, anchor=%s", (anchor, align) => {
     render(
-      <SidebarSideContext.Provider value="left">
-        <Probe />
-      </SidebarSideContext.Provider>,
+      <ColumnEdgeContext.Provider value="right">
+        <Probe anchor={anchor} />
+      </ColumnEdgeContext.Provider>,
     );
-    expect(screen.getByTestId("popover-side-probe").dataset.side).toBe("right");
+    const probe = screen.getByTestId("overlay-placement-probe");
+    expect(probe.dataset.side).toBe("left");
+    expect(probe.dataset.align).toBe(align);
   });
 });
 
@@ -374,13 +505,13 @@ describe("<EpicLeftPanelStaticRail /> indicator mirror (S-06)", () => {
 
     render(
       <TooltipProvider>
-        <SidebarSideContext.Provider value="right">
+        <ColumnEdgeContext.Provider value="right">
           <EpicLeftPanelStaticRail
             epicId={EPIC_ID}
             tabId={TAB_ID}
             orientation="vertical"
           />
-        </SidebarSideContext.Provider>
+        </ColumnEdgeContext.Provider>
       </TooltipProvider>,
     );
 
@@ -398,16 +529,18 @@ describe("<EpicLeftPanelStaticRail /> indicator mirror (S-06)", () => {
     // hover (which waits on TooltipProvider's delayDuration) - the one open
     // path this suite can trigger synchronously in jsdom.
     fireEvent.focus(activeButton);
-    expect(screen.getByRole("tooltip").getAttribute("data-side")).toBe("left");
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.getAttribute("data-side")).toBe("left");
+    expect(tooltip.getAttribute("data-align")).toBe("start");
   });
 });
 
-describe("a real sidebar popover under a right sidebar (S-06)", () => {
+describe("a real sidebar popover under a right sidebar (D7)", () => {
   it("opens ChatFilterMenu's content on data-side=left, not the hard-coded right", () => {
     render(
-      <SidebarSideContext.Provider value="right">
+      <ColumnEdgeContext.Provider value="right">
         <ChatFilterMenu epicId={EPIC_ID} tabId={TAB_ID} canArchive={false} />
-      </SidebarSideContext.Provider>,
+      </ColumnEdgeContext.Provider>,
     );
 
     // Radix's DropdownMenuTrigger opens on pointerdown, not the click event.
@@ -416,10 +549,8 @@ describe("a real sidebar popover under a right sidebar (S-06)", () => {
       { button: 0 },
     );
 
-    expect(
-      screen
-        .getByTestId("epic-sidebar-agent-view-menu")
-        .getAttribute("data-side"),
-    ).toBe("left");
+    const menu = screen.getByTestId("epic-sidebar-agent-view-menu");
+    expect(menu.getAttribute("data-side")).toBe("left");
+    expect(menu.getAttribute("data-align")).toBe("start");
   });
 });

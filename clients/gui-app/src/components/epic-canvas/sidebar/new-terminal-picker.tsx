@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 /**
  * Picker popover behind the Terminals panel "+" action. Top section picks
  * the host (machine); below it the shared worktree folder list shows
@@ -47,6 +48,7 @@ interface NewTerminalPickerProps {
 }
 
 export function NewTerminalPicker(props: NewTerminalPickerProps) {
+  const placement = useColumnOverlayPlacement("row");
   const { epicId, onLaunched, tabId } = props;
   const surfaceKey = useTabSurfaceKey("new-terminal", tabId);
   const isOpen = usePanelHeaderMenuOpen(tabId, "terminals", "create");
@@ -109,7 +111,8 @@ export function NewTerminalPicker(props: NewTerminalPickerProps) {
       </PopoverTrigger>
       <PopoverContent
         layout="bare"
-        align="start"
+        side={placement?.side}
+        align={placement?.align ?? "start"}
         className="w-[min(90vw,28rem)]"
         data-testid="new-terminal-picker-popover"
         // The host picker's list is a nested Radix popover: it portals OUTSIDE

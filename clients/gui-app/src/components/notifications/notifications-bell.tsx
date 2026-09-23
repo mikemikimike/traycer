@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 import { Bell } from "lucide-react";
 import { AnimatePresence } from "motion/react";
@@ -61,6 +62,7 @@ const BADGE_TRANSITION = { duration: 0.14, ease: "easeOut" } as const;
  * `NotificationsPopover` stays purely presentational.
  */
 export function NotificationsBell() {
+  const placement = useColumnOverlayPlacement("foot");
   const open = useNotificationsPopoverStore((state) => state.open);
   const setOpen = useNotificationsPopoverStore((state) => state.setOpen);
   const bellState = useNotificationBellState();
@@ -219,9 +221,9 @@ export function NotificationsBell() {
     <Popover open={open} onOpenChange={setOpen}>
       <TooltipWrapper
         label={open ? null : bellTooltip(bellState)}
-        side="top"
+        side={placement?.side ?? "top"}
         sideOffset={6}
-        align={undefined}
+        align={placement?.align}
       >
         <PopoverTrigger asChild>
           <Button
@@ -296,7 +298,8 @@ export function NotificationsBell() {
       </TooltipWrapper>
       <PopoverContent
         layout="bare"
-        align="end"
+        side={placement?.side}
+        align={placement?.align ?? "end"}
         className="w-auto overflow-hidden"
         onOpenAutoFocus={lifecycle.onContentOpenAutoFocus}
         onEscapeKeyDown={lifecycle.onContentEscapeKeyDown}

@@ -62,7 +62,7 @@ export function AppColumnFrame(props: AppColumnFrameProps): ReactNode {
       data-tab-strip-placement={placement}
       // Read by styles/window-chrome.css to size `--app-title-band-height`.
       data-app-title-band={titleBand}
-      className="relative flex h-safe-dvh min-w-0 flex-1 flex-col"
+      className="relative flex h-safe-dvh min-w-0 flex-1 flex-col md:bg-shell-ground"
       {...{ [SWIPE_NAV_SCREEN_ATTRIBUTE]: "" }}
     >
       {titleBand === "header" ? props.header : null}
@@ -72,7 +72,7 @@ export function AppColumnFrame(props: AppColumnFrameProps): ReactNode {
         <div className="flex min-w-0 flex-1 flex-col">
           {props.banners}
           <main className="relative flex min-h-0 flex-1 flex-col">
-            {/* The app's edge-to-edge content viewport. Individual surfaces
+            {/* The app's content viewport. Individual surfaces
               own their internal overflow, including the landing terminal.
 
               `overflow-clip`, NOT `overflow-hidden`: a hidden-overflow box is

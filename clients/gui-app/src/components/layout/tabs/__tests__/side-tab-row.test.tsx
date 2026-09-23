@@ -7,6 +7,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { createRef, type ComponentPropsWithRef, type ReactNode } from "react";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import {
   SideTabRow,
   type SideTabRowClose,
@@ -424,20 +425,36 @@ describe("SideTabRow collapsed", () => {
       ["right", "left"],
     ] as const) {
       render(
-        <div data-edge={edge}>
+        <ColumnEdgeContext.Provider value={edge}>
           <SideTabRow
             {...baseProps()}
             variant="collapsed"
             titleText="Fix the login bug on Safari"
           />
-        </div>,
+        </ColumnEdgeContext.Provider>,
       );
       dwell(screen.getByTestId(ROW_TEST_ID));
       const card = hoverCard();
       expect(card?.textContent).toBe("Fix the login bug on Safari");
       expect(card?.dataset.side).toBe(side);
+      expect(card?.dataset.align).toBe("start");
       cleanup();
     }
+  });
+
+  it("falls back to right/center outside a column", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(
+      <SideTabRow
+        {...baseProps()}
+        variant="collapsed"
+        titleText="Fix the login bug on Safari"
+      />,
+    );
+    dwell(screen.getByTestId(ROW_TEST_ID));
+    const card = hoverCard();
+    expect(card?.dataset.side).toBe("right");
+    expect(card?.dataset.align).toBe("center");
   });
 
   it.each([

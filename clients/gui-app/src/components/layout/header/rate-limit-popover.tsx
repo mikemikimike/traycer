@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import {
   useCallback,
   useEffect,
@@ -461,10 +462,11 @@ export function RateLimitPopover({
   readonly side: "top" | "bottom";
   readonly align: "start" | "end";
 }): ReactNode {
+  const placement = useColumnOverlayPlacement("foot");
   return (
     <PopoverContent
-      side={side}
-      align={align}
+      side={placement?.side ?? side}
+      align={placement?.align ?? align}
       sideOffset={8}
       collisionPadding={RATE_LIMIT_POPOVER_COLLISION_PADDING_PX}
       role="dialog"

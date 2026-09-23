@@ -1,6 +1,6 @@
 import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import { useSidebarCopyIdMenuEntry } from "@/components/epic-canvas/sidebar/use-sidebar-copy-id-menu-entry";
-import { useSidebarPopoverSide } from "@/components/epic-canvas/sidebar/sidebar-side-context";
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 /**
  * Chat/terminal-agent tree body for the sidebar. Renders the tree of chat nodes
  * with expansion, rename, delete, and drag-drop behaviors.
@@ -3250,7 +3250,8 @@ function ChatRowButton(props: ChatRowButtonProps) {
   } = props;
   const resourceOwnerKind = resourceOwnerKindForNode(artifactType);
   const roleClaims = useEpicAgentRoleClaims(nodeId);
-  const popoverSide = useSidebarPopoverSide();
+  const placement = useColumnOverlayPlacement("row");
+  const popoverSide = placement?.side ?? "right";
   // Read HERE as well as inside the badge, because the row button's explicit
   // `aria-label` replaces its subtree - a state only the badge knows would be
   // visible and unspoken. The same store read, so the two cannot disagree.
@@ -3499,7 +3500,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
               label={offlineRowLockTooltip(offlineLock)}
               side={popoverSide}
               sideOffset={undefined}
-              align={undefined}
+              align={placement?.align}
             >
               <Lock
                 className="size-3 shrink-0 text-muted-foreground"
@@ -4325,6 +4326,7 @@ function ChatMoreMenu(props: {
   readonly entries: ReadonlyArray<SidebarRowMenuEntry>;
 }) {
   const { nodeId, nodeName, entries } = props;
+  const placement = useColumnOverlayPlacement("row");
   const revealed = useRevealRowControls();
   return (
     <DropdownMenu>
@@ -4348,7 +4350,11 @@ function ChatMoreMenu(props: {
           <MoreHorizontal className="size-3" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-max">
+      <DropdownMenuContent
+        side={placement?.side}
+        align={placement?.align ?? "end"}
+        className="w-max"
+      >
         <SidebarDropdownMenuItems entries={entries} />
       </DropdownMenuContent>
     </DropdownMenu>

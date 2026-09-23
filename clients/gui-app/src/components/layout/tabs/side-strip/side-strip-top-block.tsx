@@ -1,3 +1,4 @@
+import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import type { ReactNode } from "react";
 import {
   PanelLeftClose,
@@ -129,15 +130,16 @@ function SideStripCollapseToggle(props: {
   readonly collapsed: boolean;
   readonly onToggle: () => void;
 }): ReactNode {
+  const placement = useColumnOverlayPlacement("top");
   const label = props.collapsed ? "Expand tabs" : "Collapse tabs";
   const icons = COLLAPSE_ICON[props.edge];
   const Icon = props.collapsed ? icons.expand : icons.collapse;
   return (
     <TooltipWrapper
       label={label}
-      side="bottom"
+      side={placement?.side ?? "bottom"}
       sideOffset={undefined}
-      align={undefined}
+      align={placement?.align}
     >
       <Button
         type="button"
