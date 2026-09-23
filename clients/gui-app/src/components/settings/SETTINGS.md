@@ -1610,7 +1610,8 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     for the host it is watching, with its own limits, mini bars and countdowns.
     Store: `arrangement.shownProfiles[hostId][providerId] = [profileId | null,
 …]` (`null` is the ambient login), keyed by host because a profile id names a
-    credential on ONE machine. A checked id whose profile has since gone is
+    credential on ONE machine. The background poll refreshes every eligible
+    account regardless of this selection. A checked id whose profile has since gone is
     skipped at read time, never pruned. It lives in the arrangement but is not
     a display preference: no density preset carries it, and the layout form
     draws no control for it because the form is app-level and the accounts are
