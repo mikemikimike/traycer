@@ -70,49 +70,57 @@ describe("TooltipWrapper empty-label pass-through", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it("composes with an outer asChild trigger: the ref DropdownMenuTrigger injects and the child's own ref resolve to the same button, and both the trigger's open handler and the child's own click handler fire", () => {
-    // Exercises the contract the component's own docstring names -
-    // `DropdownMenuTrigger asChild` injecting its ref/open-handler onto
-    // whatever TooltipWrapper renders. With an empty label this goes through
-    // useRender's merge, not the Tooltip stack - this is the central
-    // useRender ref contract: an outer-injected ref and the child element's
-    // own ref must merge onto one real DOM node, not two separate clones.
-    const onClick = vi.fn();
-    const outerRef = createRef<HTMLElement>();
-    const childRef = createRef<HTMLButtonElement>();
+  it.each<[string, ReactNode]>([
+    ["an empty label (useRender's own merge, not the Tooltip stack)", null],
+    [
+      "a real label (through the Tooltip stack's TooltipTrigger render merge)",
+      "Hint",
+    ],
+  ])(
+    "composes with an outer asChild trigger for %s: the ref DropdownMenuTrigger injects and the child's own ref resolve to the same button, and both the trigger's open handler and the child's own click handler fire",
+    (_name, label) => {
+      // Exercises the contract the component's own docstring names -
+      // `DropdownMenuTrigger asChild` injecting its ref/open-handler onto
+      // whatever TooltipWrapper renders. Either branch is the same central
+      // ref contract: an outer-injected ref and the child element's own ref
+      // must merge onto one real DOM node, not two separate clones.
+      const onClick = vi.fn();
+      const outerRef = createRef<HTMLElement>();
+      const childRef = createRef<HTMLButtonElement>();
 
-    render(
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <TooltipWrapper
-            ref={outerRef}
-            label={null}
-            side="top"
-            sideOffset={undefined}
-            align={undefined}
-          >
-            <button type="button" ref={childRef} onClick={onClick}>
-              Menu
-            </button>
-          </TooltipWrapper>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem>Item</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>,
-    );
+      render(
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <TooltipWrapper
+              ref={outerRef}
+              label={label}
+              side="top"
+              sideOffset={undefined}
+              align={undefined}
+            >
+              <button type="button" ref={childRef} onClick={onClick}>
+                Menu
+              </button>
+            </TooltipWrapper>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem>Item</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>,
+      );
 
-    const trigger = screen.getByRole("button", { name: "Menu" });
-    expect(outerRef.current).toBe(trigger);
-    expect(childRef.current).toBe(trigger);
+      const trigger = screen.getByRole("button", { name: "Menu" });
+      expect(outerRef.current).toBe(trigger);
+      expect(childRef.current).toBe(trigger);
 
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
-    fireEvent.click(trigger);
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+      fireEvent.click(trigger);
 
-    // Both outcomes from the one composed element: the trigger's injected
-    // open handler fired (the menu opened) and the child's own handler still
-    // fired - composition, not replacement.
-    expect(screen.getByRole("menuitem", { name: "Item" })).toBeTruthy();
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
+      // Both outcomes from the one composed element: the trigger's injected
+      // open handler fired (the menu opened) and the child's own handler still
+      // fired - composition, not replacement.
+      expect(screen.getByRole("menuitem", { name: "Item" })).toBeTruthy();
+      expect(onClick).toHaveBeenCalledTimes(1);
+    },
+  );
 });

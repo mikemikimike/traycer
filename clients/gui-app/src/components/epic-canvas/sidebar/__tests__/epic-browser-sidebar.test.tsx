@@ -253,7 +253,7 @@ const testQueryClient = new QueryClient({
 function wrapper(node: ReactNode): ReactNode {
   return (
     <QueryClientProvider client={testQueryClient}>
-      <TooltipProvider delayDuration={0}>{node}</TooltipProvider>
+      <TooltipProvider delay={0}>{node}</TooltipProvider>
     </QueryClientProvider>
   );
 }

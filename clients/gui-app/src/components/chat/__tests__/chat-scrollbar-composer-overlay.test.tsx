@@ -187,7 +187,7 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
         // The dock's background panel reads the tile's bound host to open a
         // managed command's output window, as it does inside a real tile.
         <TabHostProvider hostId="host-1">
-          <TooltipProvider delayDuration={0}>
+          <TooltipProvider delay={0}>
             <ChatLowerDock
               snapshotLoaded
               epicId="epic-1"
@@ -258,7 +258,7 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
         // The dock's background panel reads the tile's bound host to open a
         // managed command's output window, as it does inside a real tile.
         <TabHostProvider hostId="host-1">
-          <TooltipProvider delayDuration={0}>
+          <TooltipProvider delay={0}>
             <ChatLowerDock
               snapshotLoaded
               epicId="epic-1"
@@ -325,7 +325,7 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
       // bottomSpacing="normal" without the real ChatComposer / host stack.
       render(
         <TabHostProvider hostId="host-1">
-          <TooltipProvider delayDuration={0}>
+          <TooltipProvider delay={0}>
             <ChatLowerInteractionSurfaces {...viewerSurfacesProps()} />
           </TooltipProvider>
         </TabHostProvider>,

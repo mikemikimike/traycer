@@ -345,7 +345,7 @@ export function SetupCardSegment(props: {
         titleLabel
       ) : (
         <Tooltip>
-          <TooltipTrigger asChild>{titleLabel}</TooltipTrigger>
+          <TooltipTrigger render={titleLabel} />
           <TooltipContent side="bottom" className="max-w-80 whitespace-normal">
             {provisionFailureDetail}
           </TooltipContent>
@@ -641,20 +641,22 @@ function OpenTerminalButton(props: {
     // tooltip trigger sits on an enabled wrapper span around it.
     return (
       <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">
-            <Button
-              type="button"
-              variant="muted"
-              size="xs"
-              disabled
-              data-testid="setup-card-open-terminal-ended"
-            >
-              Open terminal
-              <ArrowRight aria-hidden />
-            </Button>
-          </span>
-        </TooltipTrigger>
+        <TooltipTrigger
+          render={
+            <span className="inline-flex">
+              <Button
+                type="button"
+                variant="muted"
+                size="xs"
+                disabled
+                data-testid="setup-card-open-terminal-ended"
+              >
+                Open terminal
+                <ArrowRight aria-hidden />
+              </Button>
+            </span>
+          }
+        />
         <TooltipContent side="bottom">
           Setup terminal session ended
         </TooltipContent>

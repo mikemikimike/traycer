@@ -17,7 +17,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
  */
 function renderRow(working: boolean) {
   return render(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <ChatDockCompactStripProvider
         value={{
           chips: [
@@ -107,7 +107,7 @@ describe("composer workspace row chip placement", () => {
   // and therefore no phantom gap ahead of the picker.
   it("renders no strip node at all with no chips", () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <ChatDockCompactStripProvider
           value={{ chips: [], expanded: new Set(), onToggle: vi.fn() }}
         >

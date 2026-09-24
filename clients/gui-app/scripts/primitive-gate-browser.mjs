@@ -158,10 +158,33 @@ const views = [
 let server,
   chrome,
   client,
+  chromeVersion,
   current = "startup",
   documentSequence = 0;
 const exceptions = [];
 const report = { parameters: {}, images: {}, motion: {}, behavior: [] };
+// Pixel/motion diffs are collected here rather than thrown immediately, so one
+// residual raster difference doesn't abort the run before the rest of the
+// ~990 images (or the 7 motion cases) are even captured. Everything else
+// (behavior assertions, the baseline-manifest guard, `check`/`wait`) keeps
+// failing fast - only this comparison is deferred.
+const diffFailures = [];
+// Shared by `launchBrowserAndTarget` (both the original launch and a
+// restart), so a restart's browser gets exactly the same one-time page
+// bootstrap as the first.
+const BOOTSTRAP_SCRIPT_SOURCE = `Math.random = () => 0.5; (${installPresentationProbes.toString()})(); (${installMotionProbe.toString()})();`;
+// Same reasoning: identical flags for the original launch and every restart.
+const CHROME_LAUNCH_FLAGS = [
+  "--force-device-scale-factor=1",
+  "--force-color-profile=srgb",
+  "--font-render-hinting=none",
+  // Avoid run-dependent edge pixels from partial raster/Skia fast paths.
+  // See GoogleChrome/chrome-launcher docs/chrome-flags-for-tools.md.
+  "--disable-partial-raster",
+  "--disable-skia-runtime-opts",
+  "--hide-scrollbars",
+  "--disable-features=Translate,BackForwardCache",
+];
 let cleaning;
 function cleanup() {
   if (!cleaning)
@@ -245,30 +268,8 @@ try {
       throw new Error("Vite failed: " + serverError);
     await delay(100);
   }
-  chrome = await launchChromeWithDevTools(
-    await findChrome("the primitive gate"),
-    "traycer-primitive-gate-",
-    [
-      "--force-device-scale-factor=1",
-      "--force-color-profile=srgb",
-      "--font-render-hinting=none",
-      // Avoid run-dependent edge pixels from partial raster/Skia fast paths.
-      // See GoogleChrome/chrome-launcher docs/chrome-flags-for-tools.md.
-      "--disable-partial-raster",
-      "--disable-skia-runtime-opts",
-      "--hide-scrollbars",
-      "--disable-features=Translate,BackForwardCache",
-    ],
-  );
-  const response = await fetch(
-    new URL("/json/new?about:blank", chrome.devtoolsHttpUrl),
-    { method: "PUT" },
-  );
-  assert(response.ok);
-  client = await connect((await response.json()).webSocketDebuggerUrl);
-  await client.send("Page.enable", {});
-  await client.send("Runtime.enable", {});
-  const version = await client.send("Browser.getVersion", {});
+  chromeVersion = await launchBrowserAndTarget();
+  const version = chromeVersion;
   report.parameters = {
     chrome: version.product,
     revision: version.revision,
@@ -310,9 +311,6 @@ try {
     cwd: project,
     encoding: "utf8",
   }).trim();
-  await client.send("Page.addScriptToEvaluateOnNewDocument", {
-    source: `Math.random = () => 0.5; (${installPresentationProbes.toString()})(); (${installMotionProbe.toString()})();`,
-  });
   if (out) await mkdir(out, { recursive: true });
   async function load(family, state, mode, view, theme) {
     current = `${mode}/${family}/${state}/${theme}/${view.name}`;
@@ -407,15 +405,22 @@ try {
     }
     if (state.startsWith("submenu")) {
       await settle();
-      await evaluate(
-        "document.querySelector('[data-gate-subtrigger]').scrollIntoView({block:'nearest'})",
-      );
-      if (view.mobile) {
-        const point = await center("[data-gate-subtrigger]");
-        await tapAt(point.x, point.y);
-      } else await hoverSelector("[data-gate-subtrigger]");
-      await wait("submenu", "window.gatePresented('[data-gate-subpopup]')");
+      await openSubmenuTrigger(view);
     }
+  }
+  // Shared by `open()`'s submenu states and `motionChecks()`'s submenu cases -
+  // the latter needs the parent menu already open and settled BEFORE it opens
+  // (and starts recording) just the submenu, so it can't go through `open()`
+  // as one call the way every other motion case does.
+  async function openSubmenuTrigger(view) {
+    await evaluate(
+      "document.querySelector('[data-gate-subtrigger]').scrollIntoView({block:'nearest'})",
+    );
+    if (view.mobile) {
+      const point = await center("[data-gate-subtrigger]");
+      await tapAt(point.x, point.y);
+    } else await hoverSelector("[data-gate-subtrigger]");
+    await wait("submenu", "window.gatePresented('[data-gate-subpopup]')");
   }
   async function visual(family, state, view, theme) {
     await load(family, state, "visual", view, theme);
@@ -471,9 +476,9 @@ try {
           path.join(out, name.replace(".png", ".diff.png")),
           Buffer.from(diff.image.split(",")[1], "base64"),
         );
-        throw new Error(
-          `${name}: ${diff.pixels} changed pixels (max delta ${diff.maxDelta})`,
-        );
+        const message = `${name}: ${diff.pixels} changed pixels (max delta ${diff.maxDelta})`;
+        console.error(`DIFF ${message}`);
+        diffFailures.push(message);
       }
     }
   }
@@ -758,6 +763,29 @@ try {
         const unlocked = await evaluate("window.gateLockStyles()");
         await open(family, state, views[0]);
         await settle();
+        // Guards the CSS promise (#466) with a real hit-test rather than a DOM
+        // structure match: a label-only tooltip must stay transparent to the
+        // pointer, while a hover-card preview - real controls inside it - must
+        // not.
+        if (family === "tooltip" || family === "hover-card") {
+          const popupSelector =
+            family === "tooltip"
+              ? '[data-gate-popup="tooltip"]'
+              : '[data-gate-popup="hover"]';
+          const positionerSlot =
+            family === "tooltip"
+              ? "tooltip-positioner"
+              : "hover-card-positioner";
+          const p = await center(popupSelector);
+          const hitsPositioner = await evaluate(
+            `!!document.elementFromPoint(${p.x},${p.y})?.closest('[data-slot="${positionerSlot}"]')`,
+          );
+          assert.equal(
+            hitsPositioner,
+            family === "hover-card",
+            `${family}: popup center hit-test ${family === "tooltip" ? "must stay transparent to the pointer" : "must remain interactive"}`,
+          );
+        }
         const before = await evaluate(
           "({...document.querySelector('[data-gate-state]').dataset})",
         );
@@ -1245,7 +1273,7 @@ try {
       document.body.append(popup);
       const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
       const run = async replay => {
-        window.gateStartMotion();
+        window.gateStartMotion('[data-gate-popup]');
         const effects = [];
         for (let i=0; i<(replay ? 2 : 1); i++) {
           const a = popup.animate([{transform:'translateX(0px)',opacity:0},{transform:'translateX(10px)',opacity:1}], {duration:100,fill:'both'});
@@ -1284,6 +1312,33 @@ try {
       "PASS presentation and aggregate-motion positive/negative controls",
     );
   }
+  // Shared by both motion loops below: stores the measurement, diffs it
+  // against `previousMotion` the same way every other accumulated diff in
+  // this script is handled (logged and collected, never thrown - one
+  // residual motion difference must not hide the rest), and logs it.
+  function recordMotion(family, state, enter, exit) {
+    assert(enter !== null, `${family} has no enter motion`);
+    report.motion[`${family}/${state}`] = { enter, exit };
+    if (previousMotion) {
+      try {
+        assert.deepEqual(
+          report.motion[`${family}/${state}`],
+          previousMotion.motion[`${family}/${state}`],
+          `${family}/${state}: motion changed`,
+        );
+      } catch {
+        const message = `${family}/${state}: motion changed - ${JSON.stringify({
+          was: previousMotion.motion[`${family}/${state}`],
+          now: report.motion[`${family}/${state}`],
+        })}`;
+        console.error(`DIFF ${message}`);
+        diffFailures.push(message);
+      }
+    }
+    console.log(
+      `motion ${family}/${state}: ${JSON.stringify({ enter, exit })}`,
+    );
+  }
   async function motionChecks() {
     assert(
       !previousMotion ||
@@ -1298,16 +1353,30 @@ try {
       ["sheet", "left"],
       ["drawer", "bottom"],
       ["tooltip", "default"],
+      // Newly measured overlay families - same open()/close() shape as the
+      // seven above, so they run through the identical single-phase loop.
+      // "default" here is each family's behavior-probe state (also used by
+      // concealChecks' `guarded`/hover-card-tooltip conceal list), not
+      // necessarily its pixel-inventory state name in
+      // primitive-gate-cases.json.
+      ["hover-card", "default"],
+      ["popover", "default"],
+      ["dropdown-menu", "default"],
+      ["context-menu", "default"],
+      ["select", "default"],
     ]) {
       await load(family, state, "motion", views[0], "light");
-      await evaluate("window.gateStartMotion()");
+      await evaluate("window.gateStartMotion('[data-gate-popup]')");
       await open(family, state, views[0]);
       await settle();
       const enter = await evaluate(
         "window.gateMotionRunning=false; window.gateMotion",
       );
-      await evaluate("window.gateStartMotion()");
-      if (family === "tooltip")
+      await evaluate("window.gateStartMotion('[data-gate-popup]')");
+      // hover-card, like tooltip, is a hover-only interaction with no Escape
+      // binding - it closes on pointer-away, same as open() opens it via
+      // hoverSelector rather than a click.
+      if (family === "tooltip" || family === "hover-card")
         await client.send("Input.dispatchMouseEvent", {
           type: "mouseMoved",
           x: 1,
@@ -1319,17 +1388,75 @@ try {
       const exit = await evaluate(
         "window.gateMotionRunning=false; window.gateMotion",
       );
-      assert(enter !== null, `${family} has no enter motion`);
-      report.motion[`${family}/${state}`] = { enter, exit };
-      if (previousMotion)
-        assert.deepEqual(
-          report.motion[`${family}/${state}`],
-          previousMotion.motion[`${family}/${state}`],
-          `${family}/${state}: motion changed`,
-        );
-      console.log(
-        `motion ${family}/${state}: ${JSON.stringify({ enter, exit })}`,
+      recordMotion(family, state, enter, exit);
+    }
+    // Submenu motion is measured in its own two-phase pass, not folded into
+    // the loop above: `open()`'s submenu handling opens the PARENT menu and
+    // the submenu in one call, and the loop above starts recording before
+    // calling `open()` - so measuring a submenu state that way would fold
+    // the parent's own (already-proven, unrelated) entrance animation into
+    // the submenu's numbers. Here the parent is opened and settled with the
+    // probe off, then the probe starts and only the submenu itself is
+    // opened/closed. The probe is pointed at `[data-gate-subpopup]`
+    // specifically (gateStartMotion's selector argument) - `[data-gate-popup]`
+    // would keep tracking the PARENT popup the whole time, since that
+    // selector still matches while the submenu is open too.
+    // ArrowLeft, not Escape, closes just the submenu: Escape is the
+    // whole-menu-tree dismiss key in this Menu primitive (same as every
+    // standard ARIA menu pattern), so it would take the parent down with it
+    // and the "independent" measurement would really be the whole tree's
+    // exit. ArrowLeft is the standard collapse-submenu-only key, and the
+    // assertion below hard-fails the case (rather than silently recording
+    // whatever happened) if that assumption doesn't hold for this primitive.
+    // "submenu-panel" is a pixel/content variant of the same submenu
+    // animation, not a distinct one, so it's not measured separately.
+    for (const [family, state] of [
+      ["dropdown-menu", "submenu"],
+      ["context-menu", "submenu"],
+    ]) {
+      await load(family, state, "motion", views[0], "light");
+      await clickSelector(
+        "[data-gate-trigger]",
+        family === "context-menu" ? "right" : "left",
+        true,
       );
+      await wait("opened popup", "window.gatePresented('[data-gate-popup]')");
+      await settle();
+      await evaluate("window.gateStartMotion('[data-gate-subpopup]')");
+      await openSubmenuTrigger(views[0]);
+      await settle();
+      const enter = await evaluate(
+        "window.gateMotionRunning=false; window.gateMotion",
+      );
+      // openSubmenuTrigger opens the submenu by hovering it - hover moves the
+      // menu's roving highlight to the subtrigger item, but never moves real
+      // keyboard focus INTO the submenu itself. Radix/Base's submenu
+      // ArrowLeft handler only reacts when focus is already inside the
+      // submenu, so ArrowLeft alone here would silently no-op. ArrowRight
+      // from the (hover-highlighted) subtrigger is the standard key to move
+      // focus into an already-open submenu's first item; assert it actually
+      // landed there before trusting ArrowLeft to close it.
+      await key("ArrowRight", 0);
+      assert(
+        await evaluate(
+          "!!document.activeElement?.closest('[data-gate-subpopup]')",
+        ),
+        `${family}/${state}: ArrowRight must move focus into the submenu before ArrowLeft can close it`,
+      );
+      await evaluate("window.gateStartMotion('[data-gate-subpopup]')");
+      await key("ArrowLeft", 0);
+      await delay(500);
+      await settle();
+      assert(
+        await evaluate(
+          "!document.querySelector('[data-gate-subpopup]') && !!document.querySelector('[data-gate-popup]')",
+        ),
+        `${family}/${state}: ArrowLeft must close only the submenu, leaving the parent menu open`,
+      );
+      const exit = await evaluate(
+        "window.gateMotionRunning=false; window.gateMotion",
+      );
+      recordMotion(family, state, enter, exit);
     }
   }
   await comparatorCheck();
@@ -1368,15 +1495,29 @@ try {
               if (flag("--theme") && theme !== flag("--theme")) continue;
               if (flag("--viewport") && view.name !== flag("--viewport"))
                 continue;
-              await visual(family, state, view, theme);
+              try {
+                await visual(family, state, view, theme);
+              } catch (error) {
+                // Only a wedged renderer gets a second chance, and only once -
+                // a real pixel/motion diff already returned normally (it's
+                // accumulated in `diffFailures`, not thrown), and every other
+                // failure (a `check`/`wait`/`assert` mismatch, a genuine CDP
+                // socket error) still fails this case immediately.
+                if (!isCdpTimeout(error)) throw error;
+                console.error(
+                  `RETRY ${current}: ${error.message} - restarting the browser and retrying once`,
+                );
+                await restartBrowser();
+                await visual(family, state, view, theme);
+              }
               count++;
               if (count % 30 === 0)
-                console.log(`PASS ${count} images; ${current}`);
+                console.log(`Checked ${count} images; ${current}`);
             }
         }
       assert(count > 0, "No matching cases");
       console.log(
-        `PASS ${count} images${baseline ? ", zero pixel difference" : " captured"}`,
+        `Checked ${count} images${baseline ? `, ${diffFailures.length} pixel difference(s)` : " captured"}`,
       );
     }
     if (!flag("--filter")) await motionChecks();
@@ -1386,6 +1527,20 @@ try {
       path.join(out, "manifest.json"),
       JSON.stringify(report, null, 2) + "\n",
     );
+  // Every accumulated pixel/motion diff, from either a full or a `--filter`
+  // run: reported together and gated here rather than at the point each one
+  // was found, so one residual raster difference never hides the rest.
+  if (diffFailures.length) {
+    console.error(
+      `FAIL ${diffFailures.length} pixel/motion diff(s):\n${diffFailures.join("\n")}`,
+    );
+    if (out)
+      await writeCandidate(
+        path.join(out, "diff-failures.json"),
+        JSON.stringify(diffFailures, null, 2) + "\n",
+      );
+    process.exitCode = 1;
+  }
 } catch (error) {
   console.error(`FAIL ${current}:`, error);
   if (out) {
@@ -1500,7 +1655,15 @@ async function tapAt(x, y) {
   });
 }
 async function key(key, modifiers) {
-  const codes = { Tab: 9, Enter: 13, Escape: 27, ArrowDown: 40, t: 84 };
+  const codes = {
+    Tab: 9,
+    Enter: 13,
+    Escape: 27,
+    ArrowLeft: 37,
+    ArrowRight: 39,
+    ArrowDown: 40,
+    t: 84,
+  };
   await client.send("Input.dispatchKeyEvent", {
     type: "keyDown",
     text: key === "Enter" ? "\r" : "",
@@ -1573,6 +1736,92 @@ function connect(url) {
       });
     });
   });
+}
+
+/**
+ * `Runtime.evaluate` past `connect()`'s own 45s per-call timeout - not just
+ * one slow call, but a wedged renderer (an infinite loop, accumulated memory,
+ * a hung microtask queue in the page under test) that a fresh page in the
+ * SAME process would inherit. Deliberately exact, not any CDP method: a
+ * `Page.navigate` or `Input.dispatchMouseEvent` timing out is a different,
+ * probably-infrastructure problem this retry isn't built for. Distinct from
+ * every other failure mode this script has, too - a pixel/motion diff, a
+ * `check`/`wait`/`assert` mismatch, or an actual CDP socket error all mean
+ * something real to report, and must keep failing immediately.
+ */
+function isCdpTimeout(error) {
+  return (
+    error instanceof Error && error.message === "CDP timeout: Runtime.evaluate"
+  );
+}
+
+/**
+ * Launches Chrome, opens one target and connects a CDP client to it, and
+ * registers the page bootstrap script - the exact sequence the original
+ * startup and `restartBrowser` both need, so a restart can't drift from the
+ * first launch. Assigns the module-level `chrome`/`client` the moment each is
+ * acquired, before any step that can still fail (the target fetch, the
+ * connect, `Page.enable`) - so a failure here always leaves the globals
+ * pointing at whatever process/socket was actually opened, and `cleanup()`
+ * (the top-level `finally`, and the SIGINT handler) tears down the real
+ * thing instead of leaking a spawned Chrome that no reference survived to.
+ */
+async function launchBrowserAndTarget() {
+  chrome = await launchChromeWithDevTools(
+    await findChrome("the primitive gate"),
+    "traycer-primitive-gate-",
+    CHROME_LAUNCH_FLAGS,
+  );
+  const response = await fetch(
+    new URL("/json/new?about:blank", chrome.devtoolsHttpUrl),
+    { method: "PUT" },
+  );
+  assert(response.ok);
+  const target = await response.json();
+  client = await connect(target.webSocketDebuggerUrl);
+  await client.send("Page.enable", {});
+  await client.send("Runtime.enable", {});
+  const version = await client.send("Browser.getVersion", {});
+  await client.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: BOOTSTRAP_SCRIPT_SOURCE,
+  });
+  return version;
+}
+
+/**
+ * Recovers from a wedged renderer with a FULL Chrome restart - terminating
+ * the old process tree and removing its profile before relaunching, so
+ * accumulated renderer memory and any hung process state actually reset
+ * rather than carrying over into a same-process fresh tab. Captures the old
+ * `chrome`/`client` in locals first, because `launchBrowserAndTarget` reuses
+ * those same module-level names for the replacement the instant it acquires
+ * one. Verifies the relaunch is still the identical pinned binary
+ * (`Browser.getVersion` must agree with the original); a mismatch throws
+ * AFTER the globals already point at the new process, so the top-level
+ * cleanup tears down the mismatched new Chrome rather than the one already
+ * terminated above.
+ */
+async function restartBrowser() {
+  const oldChrome = chrome;
+  const oldClient = client;
+  oldClient?.close();
+  await terminateProcessTree(oldChrome.chrome);
+  await rm(oldChrome.profilePath, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+  });
+  const version = await launchBrowserAndTarget();
+  assert.equal(
+    version.product,
+    chromeVersion.product,
+    `Restarted Chrome product differs from the original (${version.product} vs ${chromeVersion.product})`,
+  );
+  assert.equal(
+    version.revision,
+    chromeVersion.revision,
+    `Restarted Chrome revision differs from the original (${version.revision} vs ${chromeVersion.revision})`,
+  );
 }
 
 // Installed in each fresh document; selectors are app-owned, not library markers.
@@ -1744,7 +1993,7 @@ function installMotionProbe() {
       to,
     };
   };
-  window.gateStartMotion = () => {
+  window.gateStartMotion = (selector) => {
     cancelAnimationFrame(window.gateMotionFrame);
     window.gateMotion = null;
     window.gateMotionRunning = true;
@@ -1753,7 +2002,7 @@ function installMotionProbe() {
     const round = (value) => Math.round(value * 100) / 100;
     const tick = () => {
       if (!window.gateMotionRunning) return;
-      const popup = document.querySelector("[data-gate-popup]");
+      const popup = document.querySelector(selector);
       if (popup) {
         const animations = document
           .getAnimations()

@@ -1559,15 +1559,17 @@ function ServerToolsPanel(props: {
              */}
             {capabilities.traycerSessionsOnlyEnforcement ? (
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="cursor-help appearance-none bg-transparent p-0 text-muted-foreground hover:text-foreground"
-                    aria-label="Where tool enable/disable applies"
-                  >
-                    <Info className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="cursor-help appearance-none bg-transparent p-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Where tool enable/disable applies"
+                    >
+                      <Info className="size-3.5" />
+                    </button>
+                  }
+                />
                 <TooltipContent>
                   Tool enable/disable applies to Traycer sessions only for this
                   provider.
@@ -1744,10 +1746,12 @@ function ToolChip(props: {
   );
 
   return (
-    <HoverCard openDelay={200} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <span className="block w-full">{chip}</span>
-      </HoverCardTrigger>
+    <HoverCard>
+      <HoverCardTrigger
+        delay={200}
+        closeDelay={100}
+        render={<span className="block w-full">{chip}</span>}
+      />
       <HoverCardContent
         align="start"
         className="w-[min(90vw,20rem)] max-h-[min(50vh,18rem)] overflow-auto p-3"

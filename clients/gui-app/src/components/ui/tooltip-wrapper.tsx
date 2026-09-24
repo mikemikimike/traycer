@@ -19,7 +19,7 @@ interface TooltipWrapperProps {
    * Element the tooltip must stay inside, normally the surrounding
    * `[data-slot="dialog-content"]`.
    *
-   * Radix defaults to the viewport, which is right for a tooltip on the page
+   * Positioning defaults to the viewport, which is right for a tooltip on the page
    * but wrong inside a modal: the label happily renders past the dialog's edge
    * and reads as a rendering bug. Settings controls already resolve the same
    * boundary for their popovers (`theme-preset-picker`, `font-picker`,
@@ -33,7 +33,7 @@ interface TooltipWrapperProps {
 // any props/ref injected by an outer `asChild` trigger (e.g.
 // `DropdownMenuTrigger asChild`) flow through to the inner child. Otherwise
 // renders the tooltip stack with the same forwarding via
-// `TooltipTrigger asChild`.
+// `TooltipTrigger render`.
 //
 // We deliberately keep `TooltipWrapperProps` narrow at the call-site, but the
 // runtime `props` object also carries whatever `React.cloneElement` injects
@@ -69,12 +69,10 @@ export function TooltipWrapper(props: TooltipWrapperProps) {
     props: emptyLabel ? rest : {},
     enabled: React.isValidElement(children),
   });
-  if (emptyLabel) return child;
+  if (emptyLabel || child === null) return child;
   return (
     <Tooltip open={open} onOpenChange={onOpenChange}>
-      <TooltipTrigger asChild {...rest}>
-        {child}
-      </TooltipTrigger>
+      <TooltipTrigger {...rest} render={child} />
       <TooltipContent
         side={side}
         sideOffset={sideOffset}

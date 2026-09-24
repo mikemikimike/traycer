@@ -259,7 +259,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
   );
 
   return (
-    <TooltipProvider delayDuration={150}>
+    <TooltipProvider delay={150}>
       {/*
         One context menu for the WHOLE rail rather than one per icon. Right-
         clicking an icon opens it, and so does right-clicking the empty rail -

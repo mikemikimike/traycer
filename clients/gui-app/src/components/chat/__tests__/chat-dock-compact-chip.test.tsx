@@ -33,7 +33,7 @@ function baseProps(): ChipProps {
 
 function renderChip(props: ChipProps) {
   return render(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <ChatDockCompactChip {...props} />
     </TooltipProvider>,
   );
@@ -44,7 +44,7 @@ function rerenderChip(
   props: ChipProps,
 ): void {
   rerender(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <ChatDockCompactChip {...props} />
     </TooltipProvider>,
   );

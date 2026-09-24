@@ -1,7 +1,7 @@
 /**
  * Integrated hover-card coverage for terminal-agent identity.
  *
- * Uses the real Radix HoverCard primitives (via HoverPreviewCard). Only host
+ * Uses the real HoverCard primitives (via HoverPreviewCard). Only host
  * data / epic-store boundaries are stubbed - not the hover surface itself.
  */
 import {
@@ -157,8 +157,15 @@ function cardIsOpen(): boolean {
   return document.querySelector('[data-slot="hover-card-content"]') !== null;
 }
 
+/**
+ * Fires both the pointer event (pointer-type tracking) and the native mouse
+ * event the underlying hover hook actually listens on - `fireEvent.pointerEnter`
+ * alone dispatches only a `PointerEvent`, and jsdom does not synthesize the
+ * companion `mouseenter` a real browser would.
+ */
 function hoverIn(trigger: HTMLElement): void {
   fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+  fireEvent.mouseEnter(trigger);
 }
 
 function settleOpenDelay(): void {
@@ -211,7 +218,7 @@ describe("TUI agent hover card identity (real HoverCard)", () => {
   it("shows profile-badged harness a11y label, model, and effort for a managed profile", () => {
     openTuiHoverCard();
 
-    // Real Radix content is in the tree (not a mocked hover surface).
+    // Real HoverCard content is in the tree (not a mocked hover surface).
     expect(
       document.querySelector('[data-slot="hover-card-content"]'),
     ).not.toBeNull();

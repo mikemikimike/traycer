@@ -87,7 +87,7 @@ function ResolvedPrRowOwnerHover(props: {
   const nouns = prOwnerCollectionNouns(owners);
   const label = `${nouns.capitalized} this PR came from`;
   return (
-    // OUTSIDE the card, not around `children`: `HoverCardTrigger asChild`
+    // OUTSIDE the card, not around `children`: `HoverCardTrigger render`
     // clones its immediate child to attach the trigger's handlers and ref, and
     // a context provider is not a slottable element - put one there and the
     // trigger silently stops opening. Context reads by tree position, so the
@@ -103,7 +103,7 @@ function ResolvedPrRowOwnerHover(props: {
         onOpenChange={setOpen}
         // The panel this row lives in is docked left, so the card flies out over
         // the canvas instead of over the sibling rows the reader is scanning.
-        // Radix flips it on collision.
+        // Base flips it on collision.
         side="right"
         align="start"
         sideOffset={8}
@@ -115,7 +115,7 @@ function ResolvedPrRowOwnerHover(props: {
             // whose indent eats the title column should get the room a wide
             // display already has. The var carries a fallback because an
             // unmeasured one invalidates the whole `min()`.
-            className="flex w-max max-w-[min(80vw,var(--radix-hover-card-content-available-width,100vw),28rem)] flex-col"
+            className="flex w-max max-w-[min(80vw,var(--available-width,100vw),28rem)] flex-col"
             data-testid="pr-row-owner-hover"
           >
             {props.title === null ? null : (
@@ -139,10 +139,10 @@ function ResolvedPrRowOwnerHover(props: {
               fallbackHostId={props.fallbackHostId}
               onOpened={close}
               testId="pr-row-owner-hover-list"
-              // Floored against the space Radix measured rather than a rem, so a
+              // Floored against the space Base measured rather than a rem, so a
               // tall display shows more of a long list instead of the same few
               // rows.
-              className="max-h-[min(var(--radix-hover-card-content-available-height,100vh),60vh)]"
+              className="max-h-[min(var(--available-height,100vh),60vh)]"
             />
           </div>
         }

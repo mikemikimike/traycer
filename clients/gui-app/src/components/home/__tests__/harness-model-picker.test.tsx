@@ -1059,7 +1059,7 @@ function pickerHarness(input: RenderPickerInput | undefined): PickerHarness {
     <SurfaceActivityProvider
       active={activityEnabled ?? resolvedInput.activityEnabled ?? true}
     >
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <HarnessModelPicker
           labelDisplay="responsive"
           store={store}

@@ -92,7 +92,7 @@ function queryCompactContextTrigger() {
 
 function render(ui: ReactElement) {
   const result = testingRender(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <LazyMotion features={domAnimation}>{ui}</LazyMotion>
     </TooltipProvider>,
   );
@@ -100,7 +100,7 @@ function render(ui: ReactElement) {
     ...result,
     rerender: (nextUi: ReactElement) =>
       result.rerender(
-        <TooltipProvider delayDuration={0}>
+        <TooltipProvider delay={0}>
           <LazyMotion features={domAnimation}>{nextUi}</LazyMotion>
         </TooltipProvider>,
       ),

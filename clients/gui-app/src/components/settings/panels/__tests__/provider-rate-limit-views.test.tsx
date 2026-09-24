@@ -237,12 +237,14 @@ describe("CodexRateLimitView (extended fields)", () => {
 
   it("drops the warning tint in the tooltip, whose inverted surface can't carry it", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <CodexRateLimitView data={detailedCodex} variant="popover-detail" />
       </TooltipProvider>,
     );
 
-    fireEvent.pointerMove(screen.getByText("3 available"));
+    const count = screen.getByText("3 available");
+    fireEvent.pointerMove(count);
+    fireEvent.mouseEnter(count);
 
     const tooltip = await screen.findByRole("tooltip");
     expect(within(tooltip).getByText(/^Expires in /).className).not.toContain(
@@ -252,7 +254,7 @@ describe("CodexRateLimitView (extended fields)", () => {
 
   it("collapses the popover to a bare count - no expiries, no per-credit rows", () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <CodexRateLimitView data={detailedCodex} variant="popover-detail" />
       </TooltipProvider>,
     );
@@ -264,12 +266,14 @@ describe("CodexRateLimitView (extended fields)", () => {
 
   it("reveals the popover's expiries soonest first, plus the capped remainder, on hovering the count", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <CodexRateLimitView data={detailedCodex} variant="popover-detail" />
       </TooltipProvider>,
     );
 
-    fireEvent.pointerMove(screen.getByText("3 available"));
+    const count = screen.getByText("3 available");
+    fireEvent.pointerMove(count);
+    fireEvent.mouseEnter(count);
 
     const tooltip = await screen.findByRole("tooltip");
     const resetLabels = within(tooltip).getAllByText(/reset$/);
@@ -288,7 +292,7 @@ describe("CodexRateLimitView (extended fields)", () => {
 
   it("reveals the popover's tooltip on keyboard focus, not just hover", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <CodexRateLimitView data={detailedCodex} variant="popover-detail" />
       </TooltipProvider>,
     );

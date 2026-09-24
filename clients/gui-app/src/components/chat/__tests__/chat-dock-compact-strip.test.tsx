@@ -73,7 +73,7 @@ function shimmerGlyph(section: string): HTMLElement | SVGElement | null {
 
 function renderStrip(value: ChatDockCompactStripValue) {
   return render(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <ChatDockCompactStripProvider value={value}>
         <ChatDockCompactStrip />
       </ChatDockCompactStripProvider>
@@ -88,7 +88,7 @@ describe("<ChatDockCompactStrip />", () => {
 
   it("renders nothing outside a provider", () => {
     const { container } = render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <ChatDockCompactStrip />
       </TooltipProvider>,
     );

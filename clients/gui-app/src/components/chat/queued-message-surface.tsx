@@ -867,24 +867,26 @@ function ManagedCommandCancelButton(props: {
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0">
-          <Button
-            type="button"
-            size="icon"
-            variant="muted"
-            className="size-7 shrink-0"
-            aria-label={
-              props.kind === "shell"
-                ? "Cancel queued command output"
-                : "Dismiss port forward notice"
-            }
-            onClick={props.onCancel}
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
-        </span>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              size="icon"
+              variant="muted"
+              className="size-7 shrink-0"
+              aria-label={
+                props.kind === "shell"
+                  ? "Cancel queued command output"
+                  : "Dismiss port forward notice"
+              }
+              onClick={props.onCancel}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </span>
+        }
+      />
       <TooltipContent sideOffset={6}>
         {props.kind === "shell"
           ? "Skip this delivery — later output still arrives"
@@ -1113,8 +1115,7 @@ function QueuedMessageDragHandle({
   }
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        {/* AX7, one surface over. dnd-kit's `attributes` were spread here, and
+      {/* AX7, one surface over. dnd-kit's `attributes` were spread here, and
             they advertise a keyboard gesture this surface does not implement:
             `aria-roledescription="sortable"` plus an `aria-describedby`
             pointing at "press the space bar to lift". `useSensors` registers
@@ -1138,19 +1139,22 @@ function QueuedMessageDragHandle({
             this surface today either, and this stops claiming one. That gap is
             real and is reported separately; it is a product decision, not an
             attribute. */}
-        <span
-          ref={setHandleElement}
-          {...listeners}
-          aria-hidden
-          className={cn(
-            "inline-flex size-7 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors",
-            "hover:bg-muted hover:text-foreground active:cursor-grabbing",
-          )}
-          data-testid="queued-message-drag-handle"
-        >
-          <GripVertical className="size-3.5" />
-        </span>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <span
+            ref={setHandleElement}
+            {...listeners}
+            aria-hidden
+            className={cn(
+              "inline-flex size-7 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors",
+              "hover:bg-muted hover:text-foreground active:cursor-grabbing",
+            )}
+            data-testid="queued-message-drag-handle"
+          >
+            <GripVertical className="size-3.5" />
+          </span>
+        }
+      />
       <TooltipContent sideOffset={6}>Drag to reorder</TooltipContent>
     </Tooltip>
   );
@@ -1190,20 +1194,22 @@ function QueuedMessageAbortSteerButton(props: {
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0">
-          <Button
-            type="button"
-            size="icon"
-            variant="muted"
-            className="size-7 shrink-0"
-            aria-label="Cancel steer"
-            onClick={props.onAbortSteer}
-          >
-            <Undo2 className="size-3.5" />
-          </Button>
-        </span>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              size="icon"
+              variant="muted"
+              className="size-7 shrink-0"
+              aria-label="Cancel steer"
+              onClick={props.onAbortSteer}
+            >
+              <Undo2 className="size-3.5" />
+            </Button>
+          </span>
+        }
+      />
       <TooltipContent sideOffset={6}>
         Cancel steer — return to queue
       </TooltipContent>
@@ -1261,21 +1267,23 @@ function QueuedMessageRowActions(props: {
         </TooltipWrapper>
       </span>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex shrink-0">
-            <Button
-              type="button"
-              size="icon"
-              variant="muted"
-              className="size-7 shrink-0"
-              disabled={props.steerNowDisabled}
-              aria-label="Steer queued message now"
-              onClick={props.onSteerNow}
-            >
-              <SendHorizontal className="size-3.5" />
-            </Button>
-          </span>
-        </TooltipTrigger>
+        <TooltipTrigger
+          render={
+            <span className="inline-flex shrink-0">
+              <Button
+                type="button"
+                size="icon"
+                variant="muted"
+                className="size-7 shrink-0"
+                disabled={props.steerNowDisabled}
+                aria-label="Steer queued message now"
+                onClick={props.onSteerNow}
+              >
+                <SendHorizontal className="size-3.5" />
+              </Button>
+            </span>
+          }
+        />
         <TooltipContent sideOffset={6}>Steer queued message now</TooltipContent>
       </Tooltip>
     </div>

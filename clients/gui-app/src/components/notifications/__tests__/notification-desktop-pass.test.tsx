@@ -288,7 +288,7 @@ function PopoverShell(props: {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <NotificationsPopover
         onNavigate={() => undefined}
         headingRef={headingRef}
@@ -430,7 +430,7 @@ function mountBell(options: {
   render(
     <QueryClientProvider client={createTestQueryClient()}>
       <RunnerHostProvider runnerHost={createRunnerHost()}>
-        <TooltipProvider delayDuration={0}>
+        <TooltipProvider delay={0}>
           <div>
             {options.onUnderlyingClick !== undefined && (
               <button

@@ -1910,17 +1910,19 @@ function ArtifactUnreadMarker(props: {
     props.variant === "self" ? "Unread artifact" : "Contains unread artifacts";
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          aria-label={label}
-          data-testid={`epic-sidebar-unread-${props.nodeId}`}
-          data-unread-marker={props.variant}
-          className={cn(
-            "h-4 w-0.5 shrink-0 rounded-full",
-            props.variant === "self" ? "bg-info" : "bg-info/50",
-          )}
-        />
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={label}
+            data-testid={`epic-sidebar-unread-${props.nodeId}`}
+            data-unread-marker={props.variant}
+            className={cn(
+              "h-4 w-0.5 shrink-0 rounded-full",
+              props.variant === "self" ? "bg-info" : "bg-info/50",
+            )}
+          />
+        }
+      />
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
@@ -1937,16 +1939,18 @@ function ArtifactStatusDot(props: ArtifactStatusDotProps) {
   if (statusValue === null || !showStatusDot) return null;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            STATUS_DOT_CLASSES[statusValue] ?? "bg-muted-foreground",
-          )}
-          data-testid={`epic-sidebar-status-dot-${nodeId}`}
-          aria-hidden
-        />
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              STATUS_DOT_CLASSES[statusValue] ?? "bg-muted-foreground",
+            )}
+            data-testid={`epic-sidebar-status-dot-${nodeId}`}
+            aria-hidden
+          />
+        }
+      />
       <TooltipContent>{STATUS_LABELS[statusValue] ?? "Unknown"}</TooltipContent>
     </Tooltip>
   );

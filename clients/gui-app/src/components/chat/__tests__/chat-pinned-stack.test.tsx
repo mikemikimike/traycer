@@ -134,7 +134,7 @@ function stackUi(
   changes: ReadonlyArray<AccumulatedChangeRow>,
 ) {
   return (
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <ChatPinnedStack
         todo={todo}
         restore={baseRestore(changes)}

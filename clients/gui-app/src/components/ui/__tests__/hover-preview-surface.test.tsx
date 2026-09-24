@@ -19,9 +19,7 @@ describe("hover-preview surface", () => {
   it("renders the HoverCard preview as a popover card, not the inverted label chip", () => {
     render(
       <HoverCard open>
-        <HoverCardTrigger asChild>
-          <button type="button">Trigger</button>
-        </HoverCardTrigger>
+        <HoverCardTrigger render={<button type="button">Trigger</button>} />
         <HoverCardContent side="bottom">
           <span data-testid="hover-body">Body</span>
         </HoverCardContent>
@@ -46,9 +44,7 @@ describe("hover-preview surface", () => {
   it("renders HoverCard content without a visually-hidden accessible clone, so a focusable action is not duplicated", () => {
     render(
       <HoverCard open>
-        <HoverCardTrigger asChild>
-          <button type="button">Trigger</button>
-        </HoverCardTrigger>
+        <HoverCardTrigger render={<button type="button">Trigger</button>} />
         <HoverCardContent side="bottom">
           <button type="button" data-testid="hover-action">
             Copy
@@ -56,18 +52,15 @@ describe("hover-preview surface", () => {
         </HoverCardContent>
       </HoverCard>,
     );
-    // A Radix Tooltip mounts a hidden a11y clone of its children (two copies);
-    // HoverCard does not - the single copy is why a copy-path button lives
-    // safely on this surface but not on a Tooltip.
+    // Base UI's Popup mounts a single copy of its children - a copy-path
+    // button lives safely on this surface with no hidden accessible duplicate.
     expect(screen.getAllByTestId("hover-action")).toHaveLength(1);
   });
 
   it("renders the appearance='tooltip' HoverCard variant on the inverted chip surface, tagged for CSS opt-out, still without a duplicate accessible clone", () => {
     render(
       <HoverCard open>
-        <HoverCardTrigger asChild>
-          <button type="button">Trigger</button>
-        </HoverCardTrigger>
+        <HoverCardTrigger render={<button type="button">Trigger</button>} />
         <HoverCardContent side="bottom" appearance="tooltip">
           <button type="button" data-testid="hover-action">
             Copy
@@ -96,11 +89,9 @@ describe("hover-preview surface", () => {
 
   it("keeps label tooltips on the bounded inverted chip surface", () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <Tooltip open>
-          <TooltipTrigger asChild>
-            <button type="button">Trigger</button>
-          </TooltipTrigger>
+          <TooltipTrigger render={<button type="button">Trigger</button>} />
           <TooltipContent side="bottom">
             <span>Copy</span>
           </TooltipContent>

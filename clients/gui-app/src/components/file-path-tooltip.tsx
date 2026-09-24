@@ -19,7 +19,7 @@ import { useLongPress } from "@/hooks/ui/use-long-press";
 
 interface FilePathTooltipProps {
   /** The trigger element (typically a truncated path span). Must accept a
-   * forwarded ref since `TooltipTrigger asChild` clones the child. */
+   * forwarded ref since `TooltipTrigger render` clones the child. */
   readonly children: ReactElement;
   /** Full text to display in the tooltip - usually the un-truncated path,
    * but any string works (e.g., `"Open <path> in editor"`). */
@@ -30,7 +30,7 @@ interface FilePathTooltipProps {
 
 /**
  * Hover-tooltip for a (potentially truncated) file path. Renders content
- * via Radix's portal so the trigger's `direction: rtl` (used for left-
+ * via the tooltip portal so the trigger's `direction: rtl` (used for left-
  * side ellipsis truncation) doesn't leak into the tooltip's bidi context
  * - Unicode neutrals like `/` would otherwise be reordered into the
  * wrong position.
@@ -44,7 +44,7 @@ interface FilePathTooltipProps {
 export function FilePathTooltip(props: FilePathTooltipProps) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{props.children}</TooltipTrigger>
+      <TooltipTrigger render={props.children} />
       <TooltipContent
         side={props.side}
         align="start"

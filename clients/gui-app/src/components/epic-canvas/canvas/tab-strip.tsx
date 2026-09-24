@@ -408,35 +408,37 @@ function SplitGroupButton(props: SplitGroupButtonProps) {
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onPointerEnter={(event) => {
-            setHovered(true);
-            reportShiftKeyHeld(event.shiftKey);
-          }}
-          onPointerLeave={() => setHovered(false)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onClick={(event) =>
-            props.onSplit(
-              props.groupId,
-              event.shiftKey ? "vertical" : "horizontal",
-            )
-          }
-          aria-label={actionLabel}
-          data-testid="tab-strip-split"
-          data-split-direction={direction}
-        >
-          {splitsDown ? (
-            <SplitSquareVertical className="size-4" />
-          ) : (
-            <SplitSquareHorizontal className="size-4" />
-          )}
-        </Button>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onPointerEnter={(event) => {
+              setHovered(true);
+              reportShiftKeyHeld(event.shiftKey);
+            }}
+            onPointerLeave={() => setHovered(false)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onClick={(event) =>
+              props.onSplit(
+                props.groupId,
+                event.shiftKey ? "vertical" : "horizontal",
+              )
+            }
+            aria-label={actionLabel}
+            data-testid="tab-strip-split"
+            data-split-direction={direction}
+          >
+            {splitsDown ? (
+              <SplitSquareVertical className="size-4" />
+            ) : (
+              <SplitSquareHorizontal className="size-4" />
+            )}
+          </Button>
+        }
+      />
       <TooltipContent
         side="bottom"
         sideOffset={4}
@@ -972,22 +974,24 @@ function TabItemLabelSlot(props: TabItemLabelSlotProps) {
           On release, restore the title and close control together without an exit fade. */}
       <span className="relative min-w-[7ch] max-w-40">
         <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              data-testid={`tab-title-${tabInstanceId}`}
-              className={cn(
-                "inline-flex max-w-full min-w-0 items-center gap-1 pr-1 align-bottom group-focus-within:opacity-0 group-hover:opacity-0",
-                leaderBadge !== null && "opacity-0",
-                isPreview && "italic",
-                isActive ? "font-medium" : "font-normal",
-              )}
-            >
-              <TabDisplayTitle
-                displayTitle={displayTitle}
-                isArchived={isArchived}
-              />
-            </span>
-          </TooltipTrigger>
+          <TooltipTrigger
+            render={
+              <span
+                data-testid={`tab-title-${tabInstanceId}`}
+                className={cn(
+                  "inline-flex max-w-full min-w-0 items-center gap-1 pr-1 align-bottom group-focus-within:opacity-0 group-hover:opacity-0",
+                  leaderBadge !== null && "opacity-0",
+                  isPreview && "italic",
+                  isActive ? "font-medium" : "font-normal",
+                )}
+              >
+                <TabDisplayTitle
+                  displayTitle={displayTitle}
+                  isArchived={isArchived}
+                />
+              </span>
+            }
+          />
           <TooltipContent>{tooltipContent}</TooltipContent>
         </Tooltip>
         <span

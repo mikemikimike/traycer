@@ -1,102 +1,92 @@
 "use client";
 
-import * as React from "react";
-import { HoverCard as HoverCardPrimitive } from "radix-ui";
+import { PreviewCard as PreviewCardPrimitive } from "@base-ui/react/preview-card";
 
 import { HOVER_PREVIEW_SURFACE_CLASS } from "@/components/ui/hover-preview-surface";
 import { cn } from "@/lib/utils";
 import { usePortalConcealed } from "@/components/ui/portal-concealment-context";
 import { useSafeAreaCollisionPadding } from "@/components/ui/safe-area-collision-padding";
 
-// Match the tooltip's 500ms hover-in; give a small grace on the way out so the
-// pointer can travel from the trigger into the card to reach its actions
-// (copy-path, links) without it dismissing mid-move.
-const HOVER_CARD_OPEN_DELAY_MS = 500;
-const HOVER_CARD_CLOSE_DELAY_MS = 150;
+function HoverCard(props: PreviewCardPrimitive.Root.Props) {
+  return <PreviewCardPrimitive.Root {...props} />;
+}
 
-function HoverCard({
-  openDelay = HOVER_CARD_OPEN_DELAY_MS,
-  closeDelay = HOVER_CARD_CLOSE_DELAY_MS,
+// Match label hover-in and leave time to reach the card's actions.
+function HoverCardTrigger({
+  delay = 500,
+  closeDelay = 150,
   ...props
-}: React.ComponentProps<typeof HoverCardPrimitive.Root>) {
+}: PreviewCardPrimitive.Trigger.Props) {
   return (
-    <HoverCardPrimitive.Root
-      data-slot="hover-card"
-      openDelay={openDelay}
+    <PreviewCardPrimitive.Trigger
+      data-slot="hover-card-trigger"
+      delay={delay}
       closeDelay={closeDelay}
       {...props}
     />
   );
 }
 
-function HoverCardTrigger({
-  ...props
-}: React.ComponentProps<typeof HoverCardPrimitive.Trigger>) {
-  return (
-    <HoverCardPrimitive.Trigger data-slot="hover-card-trigger" {...props} />
-  );
-}
+type HoverCardContentProps = PreviewCardPrimitive.Popup.Props &
+  Pick<
+    PreviewCardPrimitive.Positioner.Props,
+    | "align"
+    | "alignOffset"
+    | "side"
+    | "sideOffset"
+    | "collisionBoundary"
+    | "collisionPadding"
+  > & {
+    /** Compact path disclosures share label-tooltip colors but allow actions. */
+    readonly appearance?: "preview" | "tooltip";
+  };
 
-// Rich hover preview surface, shared verbatim with the composer's @mention
-// preview panel (`HOVER_PREVIEW_SURFACE_CLASS`) so every hover preview in the
-// app reads as the same card.
-//
-// Interactive actions here (copy-path button, PR link) are POINTER-operable
-// previews, not keyboard-navigable. Unlike a Tooltip, HoverCard mounts no
-// visually-hidden a11y clone, so an action exists once in the DOM rather than
-// duplicated - but Radix keeps hover-card content out of the sequential tab
-// order (it opens on hover/focus, yet Tab from the trigger moves past it and
-// closes it). So any action placed here must also have a keyboard-reachable
-// home elsewhere: copy-path lives on the click-open folder rows (`FolderRow`),
-// and the PR link is also in the Epic history list.
-type HoverCardContentProps = React.ComponentProps<
-  typeof HoverCardPrimitive.Content
-> & {
-  /** Compact path disclosures share label-tooltip colors but allow actions. */
-  readonly appearance?: "preview" | "tooltip";
-};
-
+// Preview actions remain pointer-operable. Each must also have a keyboard
+// reachable home outside the hover surface (folder rows, Epic history).
 function HoverCardContent({
-  ref,
   className,
   appearance = "preview",
+  side = "bottom",
   align = "start",
+  alignOffset = 0,
   sideOffset = 4,
+  collisionBoundary,
   collisionPadding,
   ...props
 }: HoverCardContentProps) {
-  // Concealed region (see `portal-concealment-context`): un-present with the
-  // region — the anchor is display:none and cannot deliver the close events.
   const concealed = usePortalConcealed();
-  // Read above the early return so hook order does not depend on concealment.
-  // The insets are the DEFAULT collision padding; a caller may replace it (see
-  // `safe-area-collision-padding.ts` and `dropdown-menu.tsx`). The card's width
-  // comes from its callers, so the cap matters here more than on the primitives
-  // that size themselves.
   const safeAreaInsets = useSafeAreaCollisionPadding();
   if (concealed) return null;
   return (
-    <HoverCardPrimitive.Portal>
-      <HoverCardPrimitive.Content
-        ref={ref}
-        data-slot="hover-card-content"
-        data-appearance={appearance}
+    <PreviewCardPrimitive.Portal>
+      <PreviewCardPrimitive.Positioner
+        data-slot="hover-card-positioner"
+        className="isolate z-50"
+        positionMethod="fixed"
+        side={side}
         align={align}
+        alignOffset={alignOffset}
         sideOffset={sideOffset}
+        collisionBoundary={collisionBoundary}
         collisionPadding={collisionPadding ?? safeAreaInsets}
-        className={cn(
-          "z-50 origin-(--radix-hover-card-content-transform-origin) outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          appearance === "tooltip"
-            ? "rounded-md bg-foreground text-background shadow-sm"
-            : HOVER_PREVIEW_SURFACE_CLASS,
-          // Last of the primitive-owned classes, so the shared surface class
-          // can never displace the cap while a caller's `max-w-*` still can.
-          "max-w-safe-dvw",
-          className,
-        )}
-        {...props}
-      />
-    </HoverCardPrimitive.Portal>
+      >
+        <PreviewCardPrimitive.Popup
+          data-slot="hover-card-content"
+          data-appearance={appearance}
+          className={(state) =>
+            cn(
+              "z-50 origin-(--transform-origin) outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+              appearance === "tooltip"
+                ? "rounded-md bg-foreground text-background shadow-sm"
+                : HOVER_PREVIEW_SURFACE_CLASS,
+              "max-w-safe-dvw",
+              typeof className === "function" ? className(state) : className,
+            )
+          }
+          {...props}
+        />
+      </PreviewCardPrimitive.Positioner>
+    </PreviewCardPrimitive.Portal>
   );
 }
 

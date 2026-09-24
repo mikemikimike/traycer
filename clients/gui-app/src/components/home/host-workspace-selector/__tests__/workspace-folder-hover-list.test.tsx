@@ -115,9 +115,9 @@ describe("WorkspaceFolderHoverList", () => {
   it("keeps the scroll root out of sequential focus inside a HoverCard", () => {
     render(
       <HoverCard open>
-        <HoverCardTrigger asChild>
-          <button type="button">Hover-list trigger</button>
-        </HoverCardTrigger>
+        <HoverCardTrigger
+          render={<button type="button">Hover-list trigger</button>}
+        />
         <HoverCardContent side="bottom">
           <WorkspaceFolderHoverList
             items={[

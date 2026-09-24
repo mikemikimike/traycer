@@ -374,7 +374,7 @@ describe("<StatusBarRateLimitCluster /> scrolls its readings", () => {
     // let the mocked segments hook be read again.
     const tree = (hostId: string | null) => (
       <QueryClientProvider client={queryClient}>
-        <TooltipProvider delayDuration={0}>
+        <TooltipProvider delay={0}>
           <Popover>
             <StatusBarRateLimitCluster
               hostId={hostId}

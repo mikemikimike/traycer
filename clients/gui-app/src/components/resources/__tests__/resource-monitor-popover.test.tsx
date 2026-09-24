@@ -2431,7 +2431,7 @@ describe("ResourceMonitorPopover", () => {
   it("swaps tree values for self values without double-counting visible rows", async () => {
     const stub = installStubFactory();
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <ResourcesStreamMount epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
@@ -2480,6 +2480,7 @@ describe("ResourceMonitorPopover", () => {
     if (metrics === null)
       throw new Error("Expected owner metric tooltip trigger");
     fireEvent.pointerMove(metrics);
+    fireEvent.mouseEnter(metrics);
     expect(
       await screen.findAllByText(/Self: 2\.0% CPU · 40\.0 MB memory/),
     ).not.toHaveLength(0);

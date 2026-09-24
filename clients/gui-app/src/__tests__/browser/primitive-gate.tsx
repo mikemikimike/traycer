@@ -163,9 +163,9 @@ function SelectCase(props: {
 function TooltipCase(): ReactNode {
   return (
     <Tooltip.Tooltip>
-      <Tooltip.TooltipTrigger asChild>
-        <Button data-gate-trigger="tooltip">Details</Button>
-      </Tooltip.TooltipTrigger>
+      <Tooltip.TooltipTrigger
+        render={<Button data-gate-trigger="tooltip">Details</Button>}
+      />
       <Tooltip.TooltipContent data-gate-popup="tooltip">
         {label}
       </Tooltip.TooltipContent>
@@ -607,9 +607,9 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   "hover-card": (): ReactNode => {
     return (
       <Hover.HoverCard>
-        <Hover.HoverCardTrigger asChild>
-          <Button data-gate-trigger="hover">Preview</Button>
-        </Hover.HoverCardTrigger>
+        <Hover.HoverCardTrigger
+          render={<Button data-gate-trigger="hover">Preview</Button>}
+        />
         <Hover.HoverCardContent
           data-gate-popup="hover"
           appearance={state === "tooltip" ? "tooltip" : "preview"}

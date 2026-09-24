@@ -5,7 +5,7 @@
  *
  * Every hover preview in the app renders on this surface - the composer's
  * @mention/slash preview panel (`MentionPreviewPanel`, positioned by
- * floating-ui) and the `HoverCard` previews (`HoverCardContent` /
+ * floating-ui) and the Base PreviewCard previews (`HoverCardContent` /
  * `HoverPreviewCard`: the workspace picker's folder list and the chat/owner
  * workspace preview). They are anchored by different machinery, which is why
  * this is a shared class definition rather than a shared component; keeping the

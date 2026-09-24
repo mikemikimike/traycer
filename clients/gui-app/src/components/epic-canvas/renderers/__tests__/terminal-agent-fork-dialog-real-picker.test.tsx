@@ -585,7 +585,7 @@ function renderDialog(input: {
   readonly sourceAgent: ForkableTuiAgent;
 }): void {
   render(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <TerminalAgentForkDialog
         open
         target={{

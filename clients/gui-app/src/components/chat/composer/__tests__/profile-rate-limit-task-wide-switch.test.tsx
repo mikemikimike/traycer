@@ -139,7 +139,7 @@ function renderBanner(input: {
       ? (destinations.find((entry) => entry.selectable) ?? null)
       : input.primaryTarget;
   return render(
-    <TooltipProvider delayDuration={0}>
+    <TooltipProvider delay={0}>
       <ProfileRateLimitSwitchBanner
         harnessId="claude"
         providerId="claude-code"

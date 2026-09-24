@@ -1378,7 +1378,7 @@ describe("WorkspaceSummaryTrigger", () => {
 
   it("hides the read-only hover preview while its inspect popover is open", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <WorkspaceSummaryTrigger
           items={[item({ mode: "local", displayPath: "/repo" })]}
           readOnly
@@ -1421,7 +1421,7 @@ describe("FolderBranchControl — Escape close", () => {
   it("commits the pending autosave draft when Escape closes the popover", async () => {
     const onEmit = vi.fn<(intent: WorktreeFolderIntent) => void>();
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <FolderBranchControl
           item={item({
             mode: "worktree",
@@ -1468,7 +1468,7 @@ describe("FolderBranchControl — Escape close", () => {
 
   it("returns focus to the chip on Escape without opening the chip tooltip from focus restore", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <FolderBranchControl
           item={item({
             mode: "worktree",
@@ -1501,7 +1501,7 @@ describe("FolderBranchControl — Escape close", () => {
     expect(document.activeElement).toBe(chip);
 
     // Drain focusin microtask + 150ms suppress fallback so any delayed open
-    // would surface. With delayDuration={0}, a suppress miss would show a
+    // would surface. With delay={0}, a suppress miss would show a
     // tooltip role for the chip label.
     await act(async () => {
       await Promise.resolve();
@@ -1623,7 +1623,7 @@ describe("WorkspaceFolderSummaryControl", () => {
 
   it("renders the rich hover preview as a single HoverCard card carrying a reachable copy-path action", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <WorkspaceFolderSummaryControl
           recentWorkspaces={null}
           recentWorkspaceCount={0}
@@ -1691,7 +1691,7 @@ describe("WorkspaceFolderSummaryControl", () => {
 
   it("shows full landing-page folder and branch provenance in the hover preview", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <WorkspaceFolderSummaryControl
           recentWorkspaces={null}
           recentWorkspaceCount={0}
@@ -1787,7 +1787,7 @@ describe("WorkspaceFolderSummaryControl", () => {
 
   it("hides the hover preview while the click-open picker is open", async () => {
     render(
-      <TooltipProvider delayDuration={0}>
+      <TooltipProvider delay={0}>
         <WorkspaceFolderSummaryControl
           recentWorkspaces={null}
           recentWorkspaceCount={0}

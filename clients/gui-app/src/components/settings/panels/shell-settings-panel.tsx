@@ -705,21 +705,23 @@ function TerminalShellGroup(props: {
 function WslAgentCaption() {
   return (
     <HoverCard>
-      <HoverCardTrigger asChild>
-        <span className="inline-flex cursor-default items-center gap-1.5 text-ui-xs text-muted-foreground">
-          <span
-            aria-hidden
-            className="size-1.5 rounded-full bg-[var(--term-ansi-yellow)]"
-          />
-          WSL applies to terminal tabs only
-          <WslInstallDocsLink
-            ariaLabel="Install Traycer in WSL"
-            className="rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            <Info className="size-3" />
-          </WslInstallDocsLink>
-        </span>
-      </HoverCardTrigger>
+      <HoverCardTrigger
+        render={
+          <span className="inline-flex cursor-default items-center gap-1.5 text-ui-xs text-muted-foreground">
+            <span
+              aria-hidden
+              className="size-1.5 rounded-full bg-[var(--term-ansi-yellow)]"
+            />
+            WSL applies to terminal tabs only
+            <WslInstallDocsLink
+              ariaLabel="Install Traycer in WSL"
+              className="rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <Info className="size-3" />
+            </WslInstallDocsLink>
+          </span>
+        }
+      />
       <HoverCardContent
         align="end"
         className="w-[min(90vw,20rem)] space-y-2 text-ui-xs"
@@ -798,26 +800,28 @@ function WslUnavailableCaption(props: { readonly health: WslHealthValue }) {
   const notInstalled = props.health === "not-installed";
   return (
     <HoverCard>
-      <HoverCardTrigger asChild>
-        <span
-          data-testid="settings-shell-wsl-unavailable"
-          className="inline-flex cursor-default items-center gap-1.5 text-ui-xs text-muted-foreground"
-        >
+      <HoverCardTrigger
+        render={
           <span
-            aria-hidden
-            className="size-1.5 rounded-full bg-[var(--term-ansi-red)]"
-          />
-          {notInstalled
-            ? "WSL isn't installed — terminals won't start"
-            : "WSL has no Linux distribution — terminals won't start"}
-          <WslInstallDocsLink
-            ariaLabel="Install Traycer in WSL"
-            className="rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            data-testid="settings-shell-wsl-unavailable"
+            className="inline-flex cursor-default items-center gap-1.5 text-ui-xs text-muted-foreground"
           >
-            <Info className="size-3" />
-          </WslInstallDocsLink>
-        </span>
-      </HoverCardTrigger>
+            <span
+              aria-hidden
+              className="size-1.5 rounded-full bg-[var(--term-ansi-red)]"
+            />
+            {notInstalled
+              ? "WSL isn't installed — terminals won't start"
+              : "WSL has no Linux distribution — terminals won't start"}
+            <WslInstallDocsLink
+              ariaLabel="Install Traycer in WSL"
+              className="rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              <Info className="size-3" />
+            </WslInstallDocsLink>
+          </span>
+        }
+      />
       <HoverCardContent
         align="end"
         className="w-[min(90vw,20rem)] space-y-2 text-ui-xs"

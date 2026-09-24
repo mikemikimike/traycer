@@ -59,9 +59,22 @@ function cardIsOpen(): boolean {
   return document.querySelector('[data-slot="hover-card-content"]') !== null;
 }
 
-/** Radix's trigger opens on a TIMER, and skips touch pointers outright. */
+/**
+ * The trigger opens on a TIMER, and skips touch pointers outright.
+ *
+ * Fires both the pointer event (pointer-type tracking) and the native mouse
+ * event the underlying hover hook actually listens on - `fireEvent.pointerEnter`
+ * alone dispatches only a `PointerEvent`, and jsdom does not synthesize the
+ * companion `mouseenter` a real browser would.
+ */
 function hoverIn(trigger: HTMLElement): void {
   fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+  fireEvent.mouseEnter(trigger);
+}
+
+function hoverOut(trigger: HTMLElement): void {
+  fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+  fireEvent.mouseLeave(trigger);
 }
 
 function settleOpenDelay(): void {
@@ -93,7 +106,7 @@ function renderTooltip(onClick: (() => void) | undefined): HTMLElement {
 describe("WorktreeOwnerMetadataTooltip hover gate", () => {
   beforeEach(() => {
     // `shouldAdvanceTime` keeps Testing Library's own async plumbing alive
-    // while the Radix open/close timers stay under our control.
+    // while the hover card's own open/close timers stay under our control.
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
 
@@ -135,9 +148,9 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
   });
 
   it("swallows an open that lands after the press (the reported race)", () => {
-    // THE BUG. Radix dismisses an open card on any outside pointerdown - but
-    // that dismissal lives on the content's `DismissableLayer`, which does not
-    // exist yet during the 500ms open delay. A click inside that window is
+    // THE BUG. The card dismisses on any outside pointerdown - but that
+    // dismissal only wires up once the card's content actually mounts, which
+    // does not exist yet during the 500ms open delay. A click inside that window is
     // therefore seen by nothing, and the card mounts afterwards over the tab
     // the click just opened, anchored to a row that has moved out from under
     // the pointer - so no pointer-leave is coming to close it either.
@@ -150,17 +163,16 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
     expect(cardIsOpen()).toBe(false);
   });
 
-  it("stays shut after click-then-leave, despite Radix's orphaned open timer", () => {
+  it("stays shut after click-then-leave, despite an orphaned open timer", () => {
     // THE REPORTED REGRESSION, and the reason the re-arm hangs off
     // pointer-ENTER rather than pointer-leave.
     //
-    // Radix's `handleOpen` assigns `openTimerRef.current` WITHOUT clearing the
-    // timer already there, and it runs on both `pointerenter` and `focus`. A
-    // real click fires pointerdown and then focuses the row - so two open
-    // timers are pending and only the focus one is tracked. Pointer-leave's
-    // `handleClose` cancels that one; the hover one survives and fires ~500ms
-    // later, with the pointer long gone and no pointer-leave left to close what
-    // it opens.
+    // The hover-open timer is (re)armed on both `pointerenter` and `focus`
+    // without clearing a timer already pending. A real click fires pointerdown
+    // and then focuses the row - so two open timers are pending and only the
+    // focus one is tracked. Pointer-leave cancels that one; the hover one
+    // survives and fires ~500ms later, with the pointer long gone and no
+    // pointer-leave left to close what it opens.
     const trigger = renderTooltip(undefined);
 
     hoverIn(trigger);
@@ -169,7 +181,7 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
     // ONE dispatch: Testing Library already pairs `focusin` with `focus`, and
     // firing both would manufacture extra timers rather than reproduce a click.
     fireEvent.focus(trigger);
-    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    hoverOut(trigger);
     settleOpenDelay();
 
     expect(cardIsOpen()).toBe(false);
@@ -184,7 +196,7 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
     fireEvent.pointerDown(trigger);
     settleOpenDelay();
 
-    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    hoverOut(trigger);
     settleOpenDelay();
 
     expect(cardIsOpen()).toBe(false);
@@ -198,7 +210,7 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
     hoverIn(trigger);
     fireEvent.pointerDown(trigger);
     settleOpenDelay();
-    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    hoverOut(trigger);
 
     hoverIn(trigger);
     settleOpenDelay();
@@ -209,18 +221,26 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
   it("survives the pointer travelling from the row into the card", () => {
     // The one thing this card must not lose: its Refresh button lives inside
     // the content, so the pointer has to be able to cross the 4px gap. This is
-    // why the gate has no `onPointerLeave` that clears `hoverOpen` - Radix's
-    // own `closeDelay` owns the travel window, and a leave handler that closed
+    // why the gate has no `onPointerLeave` that clears `hoverOpen` - the card's
+    // own close delay owns the travel window, and a leave handler that closed
     // eagerly would make the button unreachable.
     const trigger = renderTooltip(undefined);
     hoverIn(trigger);
     settleOpenDelay();
     expect(cardIsOpen()).toBe(true);
 
-    fireEvent.pointerLeave(trigger, { pointerType: "mouse" });
+    hoverOut(trigger);
     const content = document.querySelector('[data-slot="hover-card-content"]');
     if (content === null) throw new Error("expected the card to be mounted");
-    fireEvent.pointerEnter(content, { pointerType: "mouse" });
+    // `mouseenter`/`mouseleave` don't bubble, and the hover hook binds them to
+    // the floating element itself - the positioner, not the popup inside it.
+    const positioner = document.querySelector(
+      '[data-slot="hover-card-positioner"]',
+    );
+    if (positioner === null)
+      throw new Error("expected the positioner to be mounted");
+    fireEvent.pointerEnter(positioner, { pointerType: "mouse" });
+    fireEvent.mouseEnter(positioner);
     settleOpenDelay();
 
     expect(cardIsOpen()).toBe(true);
@@ -248,9 +268,10 @@ describe("WorktreeOwnerMetadataTooltip hover gate", () => {
   });
 
   it("keeps the row's own click handler working", () => {
-    // The gate hangs off a `Slot.Root` nested inside `HoverCardTrigger asChild`,
-    // which COMPOSES with the row's handlers. If it ever replaced them instead,
-    // clicking a sidebar row would silently stop opening the chat.
+    // The gate hangs off `useRender`'s prop merge inside
+    // `WorktreeOwnerMetadataTooltip`, which COMPOSES with the row's handlers.
+    // If it ever replaced them instead, clicking a sidebar row would silently
+    // stop opening the chat.
     const onClick = vi.fn();
     const trigger = renderTooltip(onClick);
 

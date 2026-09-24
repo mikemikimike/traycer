@@ -183,7 +183,7 @@ function renderWithProviders(node: React.ReactNode): void {
   });
   render(
     <QueryClientProvider client={client}>
-      <TooltipProvider delayDuration={0}>{node}</TooltipProvider>
+      <TooltipProvider delay={0}>{node}</TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -552,9 +552,9 @@ describe("worktree PR metadata", () => {
     const entry = worktree({});
     renderWithProviders(
       <HoverCard open>
-        <HoverCardTrigger asChild>
-          <button type="button">Owner trigger</button>
-        </HoverCardTrigger>
+        <HoverCardTrigger
+          render={<button type="button">Owner trigger</button>}
+        />
         <HoverCardContent side="bottom">
           <OwnerWorkspaceMetadataContent
             binding={BINDING}
