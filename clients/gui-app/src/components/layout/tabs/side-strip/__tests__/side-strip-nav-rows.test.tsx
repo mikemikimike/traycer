@@ -1,5 +1,5 @@
 /**
- * `SideStripNavRows` (D6): the Inbox row (needs-you and unread counts,
+ * `SideStripNavRows` (D6): the Inbox row (one unread count, tinted by needs-you,
  * collapsed badge, admission gate) and the All tasks row (shortcut, active
  * state), plus the Tasks label above the rows. Mounted through the real
  * `SideTabStrip` so `ColumnEdgeContext`, the popover store and the real
@@ -266,21 +266,17 @@ describe("SideStripNavRows", () => {
     ).not.toBe(0);
   });
 
-  it("shows the needs-you and unread counts, each hidden at 0", async () => {
+  it("shows one unread count, tinted while an ask needs you, hidden at 0", async () => {
     renderStrip("left");
     await screen.findByTestId("side-tab-strip");
 
-    expect(screen.queryByTestId("side-strip-inbox-needs-you-count")).toBeNull();
-    expect(screen.queryByTestId("side-strip-inbox-unread-count")).toBeNull();
+    expect(screen.queryByTestId("side-strip-inbox-count")).toBeNull();
 
     seedApprovals(2);
 
-    expect(
-      screen.getByTestId("side-strip-inbox-needs-you-count").textContent,
-    ).toBe("2");
-    expect(
-      screen.getByTestId("side-strip-inbox-unread-count").textContent,
-    ).toBe("2");
+    const badge = screen.getByTestId("side-strip-inbox-count");
+    expect(badge.textContent).toBe("2");
+    expect(badge.dataset.needsYou).toBe("true");
   });
 
   it("collapsed: shows one amber corner badge sized by the needs-you count", async () => {
@@ -292,8 +288,7 @@ describe("SideStripNavRows", () => {
     expect(
       screen.getByTestId("side-strip-inbox-needs-you-badge").textContent,
     ).toBe("3");
-    expect(screen.queryByTestId("side-strip-inbox-needs-you-count")).toBeNull();
-    expect(screen.queryByTestId("side-strip-inbox-unread-count")).toBeNull();
+    expect(screen.queryByTestId("side-strip-inbox-count")).toBeNull();
   });
 
   it("collapsed: shows no badge with nothing waiting", async () => {

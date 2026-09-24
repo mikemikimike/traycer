@@ -240,24 +240,20 @@ function InboxNavRow(props: {
                 >
                   Inbox
                 </span>
-                {needsYouCount > 0 ? (
+                {/* One count, the unread total; a pending ask tints it
+                    rather than adding a second number. An ask already read
+                    is still pending, so with nothing unread it shows alone. */}
+                {unreadCount > 0 || needsYouCount > 0 ? (
                   <Badge
-                    variant="warning"
+                    variant={needsYouCount > 0 ? "warning" : "muted"}
                     size="sm"
                     aria-hidden
-                    data-testid="side-strip-inbox-needs-you-count"
+                    data-testid="side-strip-inbox-count"
+                    data-needs-you={needsYouCount > 0}
                   >
-                    <span className="tabular-nums">{needsYouCount}</span>
-                  </Badge>
-                ) : null}
-                {unreadCount > 0 ? (
-                  <Badge
-                    variant="muted"
-                    size="sm"
-                    aria-hidden
-                    data-testid="side-strip-inbox-unread-count"
-                  >
-                    <span className="tabular-nums">{unreadCount}</span>
+                    <span className="tabular-nums">
+                      {unreadCount > 0 ? unreadCount : needsYouCount}
+                    </span>
                   </Badge>
                 ) : null}
                 {unavailable ? (
