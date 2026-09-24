@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Base UI proofs</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: sans-serif;
+      }
+      main {
+        padding: 2%;
+      }
+      button,
+      input {
+        padding: 0.5em;
+      }
+      .palettes {
+        display: flex;
+        gap: 2%;
+      }
+      .palette {
+        width: 48%;
+      }
+      .list {
+        max-height: 25vh;
+        overflow: auto;
+        border: 1px solid;
+      }
+      [role="option"] {
+        padding: 0.5em;
+      }
+      [data-highlighted] {
+        outline: 2px solid;
+      }
+      .backdrop {
+        position: fixed;
+        inset: 0;
+        background: #0003;
+      }
+      .popup {
+        background: white;
+        color: black;
+        border: 1px solid;
+        padding: 1em;
+        max-width: 90vw;
+      }
+      .frame {
+        position: fixed;
+        inset: 20% 20% auto;
+      }
+      .popup[data-ending-style] {
+        animation: exit 100ms linear;
+      }
+      @keyframes exit {
+        to {
+          opacity: 0;
+        }
+      }
+      [data-concealed="true"] {
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+      [data-state-output] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./base-ui-proofs.tsx"></script>
+  </body>
+</html>
