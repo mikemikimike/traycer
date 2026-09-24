@@ -315,9 +315,7 @@ export function ProfileRateLimitSwitchBanner(
               <Checkbox
                 id={checkboxId}
                 checked={includeOtherChats}
-                onCheckedChange={(checked) =>
-                  setIncludeOtherChats(checked === true)
-                }
+                onCheckedChange={(checked) => setIncludeOtherChats(checked)}
               />
               <label
                 htmlFor={checkboxId}

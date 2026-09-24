@@ -1740,7 +1740,7 @@ describe("<RateLimitPopover /> rail", () => {
     const profileSwitch = screen.getByRole("switch", {
       name: "Allow agents to use Work",
     });
-    expect(profileSwitch.dataset.state).toBe("checked");
+    expect(profileSwitch.hasAttribute("data-checked")).toBe(true);
   });
 
   it("keeps an unauthenticated ambient row with cached lastGood data visible without a refresh action", () => {
@@ -1904,9 +1904,10 @@ describe("<RateLimitPopover /> rail", () => {
       }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("switch", { name: "Allow agents to use Work" }).dataset
-        .state,
-    ).toBe("unchecked");
+      screen
+        .getByRole("switch", { name: "Allow agents to use Work" })
+        .hasAttribute("data-checked"),
+    ).toBe(false);
     expect(mocks.fetchProviderRateLimits).not.toHaveBeenCalled();
   });
 

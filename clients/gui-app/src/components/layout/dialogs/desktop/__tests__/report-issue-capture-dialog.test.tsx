@@ -466,8 +466,10 @@ function paramsOfOpenedLink(url: string): URLSearchParams {
   return new URLSearchParams(url.slice(queryStart + 1));
 }
 
-function switchState(name: string): string | null {
-  return screen.getByRole("switch", { name }).getAttribute("data-state");
+function switchState(name: string): "checked" | "unchecked" {
+  return screen.getByRole("switch", { name }).hasAttribute("data-checked")
+    ? "checked"
+    : "unchecked";
 }
 
 async function submitSatisfiedManualBug(intent: string): Promise<void> {

@@ -258,7 +258,7 @@ function FilterOption(props: {
     <label className="flex cursor-pointer items-center gap-2 text-ui-sm">
       <Checkbox
         checked={props.checked}
-        onCheckedChange={(value) => props.onChange(value === true)}
+        onCheckedChange={(value) => props.onChange(value)}
       />
       {props.label}
     </label>

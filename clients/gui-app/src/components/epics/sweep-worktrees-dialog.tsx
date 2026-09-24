@@ -1580,9 +1580,7 @@ function SweepWorktreeRowItem(props: {
         id={checkboxId}
         checked={checked}
         disabled={disabled}
-        onCheckedChange={(value) =>
-          onToggle(entry.worktreePath, value === true)
-        }
+        onCheckedChange={(value) => onToggle(entry.worktreePath, value)}
         className="mt-0.5"
         aria-label={`Sweep worktree ${branch}`}
         data-testid="sweep-worktrees-checkbox"

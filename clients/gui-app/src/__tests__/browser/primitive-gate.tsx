@@ -317,9 +317,8 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
       <Checkbox
         data-gate-control
         aria-label="Show details"
-        defaultChecked={
-          state === "indeterminate" ? "indeterminate" : state === "checked"
-        }
+        defaultChecked={state === "checked"}
+        indeterminate={state === "indeterminate"}
         disabled={state === "disabled"}
       />
     );
@@ -351,7 +350,7 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   },
   slider: (): ReactNode => {
     return (
-      <Slider.Slider defaultValue={[40]} disabled={state === "disabled"}>
+      <Slider.Slider defaultValue={40} disabled={state === "disabled"}>
         <Slider.SliderTrack size={state === "pill" ? "pill" : "default"}>
           <Slider.SliderRange />
         </Slider.SliderTrack>

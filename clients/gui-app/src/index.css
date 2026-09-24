@@ -197,20 +197,20 @@
    a small attraction to catalog stops; the brief follow gives it weight
    without coasting past the chosen level. */
 .reasoning-effort-slider .reasoning-effort-range,
-.reasoning-effort-slider > span:has(> [data-slot="slider-thumb"]) {
+.reasoning-effort-slider [data-slot="slider-thumb-positioner"] {
   transition:
     left 240ms cubic-bezier(0.22, 1, 0.36, 1),
     right 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-inline-end 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    width 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .reasoning-effort-slider[data-dragging="true"] .reasoning-effort-range,
 .reasoning-effort-slider[data-dragging="true"]
-  > span:has(> [data-slot="slider-thumb"]) {
+  [data-slot="slider-thumb-positioner"] {
   transition-duration: 80ms;
 }
 
-/* Scale the disc, not Radix's positioning wrapper: pickup must not change
+/* Scale the disc, not Base's positioning wrapper: pickup must not change
    the measured track geometry or the location of the thumb's centre. */
 .reasoning-effort-slider [data-slot="slider-thumb"] {
   scale: 1;
@@ -311,10 +311,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .reasoning-effort-slider .reasoning-effort-range,
-  .reasoning-effort-slider > span:has(> [data-slot="slider-thumb"]),
+  .reasoning-effort-slider [data-slot="slider-thumb-positioner"],
   .reasoning-effort-slider[data-dragging] .reasoning-effort-range,
-  .reasoning-effort-slider[data-dragging]
-    > span:has(> [data-slot="slider-thumb"]),
+  .reasoning-effort-slider[data-dragging] [data-slot="slider-thumb-positioner"],
   .reasoning-effort-slider [data-slot="slider-thumb"],
   .reasoning-effort-slider[data-pressed] [data-slot="slider-thumb"],
   .reasoning-effort-range::after {

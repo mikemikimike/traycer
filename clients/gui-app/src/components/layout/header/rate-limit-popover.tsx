@@ -2273,7 +2273,9 @@ function RateLimitProviderProfileActions({
               checked={profile.enabled}
               disabled={profileEnablementPending}
               aria-disabled={
-                profileEnablementDisabledReason !== null || undefined
+                profileEnablementPending ||
+                profileEnablementDisabledReason !== null ||
+                undefined
               }
               className="relative before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
               onCheckedChange={(enabled) => {

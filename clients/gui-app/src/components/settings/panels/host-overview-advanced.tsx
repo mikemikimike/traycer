@@ -162,9 +162,7 @@ function VersionPicker(props: VersionPickerProps): ReactNode {
           // `host.update.check` CLI process - against a host that may be
           // restarting, shutting down, or mid-swap while the gate is up.
           disabled={props.checking || props.disabled}
-          onCheckedChange={(value) =>
-            props.onIncludePreReleasesChange(value === true)
-          }
+          onCheckedChange={(value) => props.onIncludePreReleasesChange(value)}
         />
         <label
           htmlFor="host-overview-include-pre-releases"

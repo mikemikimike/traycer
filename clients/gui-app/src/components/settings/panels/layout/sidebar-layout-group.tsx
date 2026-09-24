@@ -765,7 +765,6 @@ function SidebarPanelRow(props: SidebarPanelRowProps): ReactNode {
         disabled={locked}
         aria-label={definition.title}
         onCheckedChange={(next) => {
-          if (next === "indeterminate") return;
           trackLayoutSetting("layout.sidebar.panelVisibility");
           // An unconditional panel drops its override when the box agrees with
           // the panel's own rule, exactly as the rail's checkbox items do, so

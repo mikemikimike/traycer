@@ -4633,8 +4633,8 @@ describe("the tab rail: what splitting one page into four has to keep true", () 
     expect(
       screen
         .getByTestId("settings-fallback-tab-plan")
-        .getAttribute("data-state"),
-    ).toBe("active");
+        .hasAttribute("data-active"),
+    ).toBe(true);
 
     // The master switch makes all three tabs inert, so it cannot live inside
     // one of them. This is the pin on it staying ABOVE the rail: a control

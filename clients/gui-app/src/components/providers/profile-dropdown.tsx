@@ -617,7 +617,9 @@ function ProfileEnablementSwitch(props: {
           aria-label={`Allow agents to use ${props.label}`}
           checked={props.profile.enabled}
           disabled={props.pending}
-          aria-disabled={props.disabledReason !== null || undefined}
+          aria-disabled={
+            props.pending || props.disabledReason !== null || undefined
+          }
           className="relative before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft") return;

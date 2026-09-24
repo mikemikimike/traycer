@@ -632,7 +632,7 @@ function ShareSkillsAndPluginsField({
         aria-label="Use terminal account skills and plugins"
         checked={checked}
         disabled={disabled}
-        onCheckedChange={(value) => onCheckedChange(value === true)}
+        onCheckedChange={(value) => onCheckedChange(value)}
       />
       <label
         htmlFor={id}

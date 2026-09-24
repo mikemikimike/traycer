@@ -433,15 +433,30 @@ try {
     if (state === "hover") await hoverSelector("[data-gate-control]");
     else if (state === "focus") {
       await key(family === "dropdown-menu" ? "ArrowDown" : "Tab", 0);
-      await evaluate(
-        "document.querySelector('[data-gate-control], [data-gate-item]')?.focus()",
-      );
-      assert(
+      // `[data-gate-control]` on the Slider case forwards to the measured
+      // outer positioner div, not the focusable element: the Thumb's real
+      // role/aria/focus live on its nested native `input[type=range]`.
+      if (family === "slider") {
         await evaluate(
-          "document.activeElement.matches('[data-gate-control], [data-gate-item]')",
-        ),
-        "Focus state not exercised",
-      );
+          "document.querySelector('[data-gate-control] input[type=range]')?.focus()",
+        );
+        assert(
+          await evaluate(
+            "document.activeElement === document.querySelector('[data-gate-control] input[type=range]')",
+          ),
+          "Focus state not exercised",
+        );
+      } else {
+        await evaluate(
+          "document.querySelector('[data-gate-control], [data-gate-item]')?.focus()",
+        );
+        assert(
+          await evaluate(
+            "document.activeElement.matches('[data-gate-control], [data-gate-item]')",
+          ),
+          "Focus state not exercised",
+        );
+      }
     }
     if (family === "drawer" && state === "input") {
       await settle();
