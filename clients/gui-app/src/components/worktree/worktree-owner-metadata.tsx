@@ -5,7 +5,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Slot } from "radix-ui";
+import { useRender } from "@base-ui/react/use-render";
 import type { WorktreeBindingOwnerKind } from "@traycer/protocol/host/worktree-schemas";
 import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
 import { Button } from "@/components/ui/button";
@@ -165,6 +165,20 @@ export function WorktreeOwnerMetadataTooltip(props: {
     () => (open && canRefresh ? claimRefreshKey() : undefined),
     [canRefresh, claimRefreshKey, open],
   );
+  // Compose before the hover trigger: a press closes the preview, and only a
+  // fresh pointer entry re-arms it. Leave the hover card's travel delay intact.
+  const hoverTrigger = useRender({
+    render: props.trigger,
+    props: {
+      onPointerEnter: () => {
+        setHoverState((current) =>
+          current.pressed ? { ...current, pressed: false } : current,
+        );
+      },
+      onPointerDown: () => setHoverState({ pressed: true, hoverOpen: false }),
+      onClick: () => setHoverState({ pressed: true, hoverOpen: false }),
+    },
+  });
   return (
     <HoverPreviewCard
       content={
@@ -241,42 +255,7 @@ export function WorktreeOwnerMetadataTooltip(props: {
         });
       }}
     >
-      {/* The gate hangs off the TRIGGER, not `onOpenChange`. Radix only reports
-          a transition its controlled `open` does not already match, so once
-          this holds `open` at false, the close that would otherwise re-arm it
-          is never announced - the trigger's own pointer events are the only
-          signal left.
-
-          `Slot.Root` nested inside `HoverCardTrigger asChild` composes with the
-          row button's own handlers instead of replacing them, the same way the
-          folder picker nests `PopoverTrigger` inside its hover card. */}
-      <Slot.Root
-        // The re-arm, and the ONLY one - see `pressed`. A new pointer-enter is
-        // the one signal that means "a fresh hover is starting", which is
-        // exactly when suppressing the next open would be wrong. Deliberately
-        // leaves `hoverOpen` alone: if the card is already open and the pointer
-        // travels back from the content onto the row, this must not re-trigger
-        // anything.
-        onPointerEnter={() => {
-          setHoverState((current) =>
-            current.pressed ? { ...current, pressed: false } : current,
-          );
-        }}
-        // Covers left, right and middle press alike, so the row's click, its
-        // context menu and a middle-click open all dismiss the card.
-        //
-        // No `onPointerLeave` counterpart: leaving must NOT clear `hoverOpen`
-        // either, or the card would close as the pointer crosses the 4px gap
-        // into it - and that card holds a Refresh button. Radix's own
-        // `closeDelay` already owns the travel window.
-        onPointerDown={() => setHoverState({ pressed: true, hoverOpen: false })}
-        // Keyboard activation (Enter/Space on a focused row) fires no
-        // pointerdown at all, and Radix opens on focus - so without this the
-        // card could settle over the tab the keypress just opened.
-        onClick={() => setHoverState({ pressed: true, hoverOpen: false })}
-      >
-        {props.trigger}
-      </Slot.Root>
+      {hoverTrigger}
     </HoverPreviewCard>
   );
 }

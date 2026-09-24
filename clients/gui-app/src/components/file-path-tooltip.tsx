@@ -3,10 +3,11 @@ import {
   useCallback,
   useContext,
   useState,
+  type MouseEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { Slot } from "radix-ui";
+import { useRender } from "@base-ui/react/use-render";
 
 import {
   Tooltip,
@@ -121,24 +122,21 @@ export function FilePathReveal(props: FilePathTooltipProps): ReactNode {
     },
     disabled: false,
   });
+  const trigger = useRender({
+    render: props.children,
+    props: {
+      ...longPress.handlers,
+      onClick: (event: MouseEvent<HTMLElement>) => {
+        // The click after a consumed hold must not activate the enclosing row.
+        if (!longPress.consumedTap()) return;
+        event.preventDefault();
+        event.stopPropagation();
+      },
+    },
+  });
   return (
     <FilePathTooltip content={props.content} side={props.side}>
-      {/* `Slot.Root` nested inside `TooltipTrigger asChild` composes these
-          handlers with the child's own instead of replacing them. */}
-      <Slot.Root
-        {...longPress.handlers}
-        onClick={(event) => {
-          // The browser still delivers a click after a long press. Here that
-          // click reaches the enclosing menu or command item and picks the
-          // row - moving the user off the path the press just revealed - so
-          // the press that already answered the gesture swallows it.
-          if (!longPress.consumedTap()) return;
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      >
-        {props.children}
-      </Slot.Root>
+      {trigger}
     </FilePathTooltip>
   );
 }

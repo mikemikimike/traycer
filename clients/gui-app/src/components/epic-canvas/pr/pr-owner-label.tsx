@@ -271,20 +271,20 @@ function PrOwnerOverflow(props: {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Badge
-          asChild
+          render={
+            <button
+              type="button"
+              // The row itself opens the PR tile; this chip means "show the rest".
+              onClick={(event) => event.stopPropagation()}
+              aria-label={`Show all ${props.owners.length} ${nouns.plural}`}
+              data-testid="pr-owner-overflow"
+            >
+              {`+${props.hidden}`}
+            </button>
+          }
           variant="muted"
           className="cursor-pointer hover:bg-foreground/8 hover:text-foreground"
-        >
-          <button
-            type="button"
-            // The row itself opens the PR tile; this chip means "show the rest".
-            onClick={(event) => event.stopPropagation()}
-            aria-label={`Show all ${props.owners.length} ${nouns.plural}`}
-            data-testid="pr-owner-overflow"
-          >
-            {`+${props.hidden}`}
-          </button>
-        </Badge>
+        />
       </PopoverTrigger>
       <PopoverContent
         layout="bare"
@@ -443,26 +443,26 @@ function PrOwnerBadge(props: {
 
   return (
     <Badge
-      asChild
+      render={
+        <TooltipWrapper
+          label={label}
+          side="top"
+          sideOffset={undefined}
+          align={undefined}
+        >
+          <button
+            type="button"
+            aria-label={`Open ${label}`}
+            onClick={handleClick}
+            data-testid="pr-owner-badge"
+          >
+            <span className="truncate">{label}</span>
+          </button>
+        </TooltipWrapper>
+      }
       variant="muted"
       className="max-w-[min(60vw,16rem)] cursor-pointer hover:bg-foreground/8 hover:text-foreground"
-    >
-      <TooltipWrapper
-        label={label}
-        side="top"
-        sideOffset={undefined}
-        align={undefined}
-      >
-        <button
-          type="button"
-          aria-label={`Open ${label}`}
-          onClick={handleClick}
-          data-testid="pr-owner-badge"
-        >
-          <span className="truncate">{label}</span>
-        </button>
-      </TooltipWrapper>
-    </Badge>
+    />
   );
 }
 

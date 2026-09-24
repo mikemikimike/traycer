@@ -1,3 +1,4 @@
+import { mergeProps } from "@base-ui/react/merge-props";
 import {
   memo,
   useCallback,
@@ -9,6 +10,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type MouseEvent,
   type ReactNode,
   type RefCallback,
@@ -2939,18 +2941,22 @@ function WorktreePrChip(props: {
 }): ReactNode {
   const style = WORKTREE_PR_PILL_STYLE[props.chip.prState];
   return (
-    <Badge asChild variant="outline" className={cn(style.className)}>
-      <WorktreePrAnchor
-        href={props.chip.prUrl}
-        ariaLabel={props.chip.ariaLabel}
-        className="max-w-[min(60vw,16rem)]"
-        testId="worktree-pr-chip"
-        prState={props.chip.prState}
-      >
-        <span className="truncate">{props.chip.label}</span>
-        <ExternalLink className="size-3" aria-hidden />
-      </WorktreePrAnchor>
-    </Badge>
+    <Badge
+      render={
+        <WorktreePrAnchor
+          href={props.chip.prUrl}
+          ariaLabel={props.chip.ariaLabel}
+          className="max-w-[min(60vw,16rem)]"
+          testId="worktree-pr-chip"
+          prState={props.chip.prState}
+        >
+          <span className="truncate">{props.chip.label}</span>
+          <ExternalLink className="size-3" aria-hidden />
+        </WorktreePrAnchor>
+      }
+      variant="outline"
+      className={cn(style.className)}
+    />
   );
 }
 
@@ -3005,34 +3011,38 @@ function WorktreeMutedPrChip(props: {
   );
 }
 
-function WorktreePrAnchor(props: {
-  readonly href: string;
-  readonly ariaLabel: string;
-  readonly className: string | undefined;
-  readonly testId: string | undefined;
-  readonly prState: WorktreeDisplayedPrState | undefined;
-  readonly children: ReactNode;
-}): ReactNode {
+function WorktreePrAnchor(
+  props: ComponentProps<"a"> & {
+    readonly href: string;
+    readonly ariaLabel: string;
+    readonly testId: string | undefined;
+    readonly prState: WorktreeDisplayedPrState | undefined;
+  },
+): ReactNode {
+  const { href, ariaLabel, testId, prState, ref, children, ...anchorProps } =
+    props;
   const openLink = useOpenLink();
   const openExternal = useCallback(
     (event: MouseEvent<HTMLAnchorElement>): void => {
       event.stopPropagation();
       event.preventDefault();
-      void openLink(props.href, "github", event);
+      void openLink(href, "github", event);
     },
-    [openLink, props.href],
+    [openLink, href],
   );
   return (
     <a
-      href={props.href}
-      aria-label={props.ariaLabel}
-      className={props.className}
-      data-testid={props.testId}
-      data-pr-state={props.prState}
-      onClick={openExternal}
-      onAuxClick={onMiddleClick(openExternal)}
+      ref={ref}
+      {...mergeProps<"a">(anchorProps, {
+        href,
+        "aria-label": ariaLabel,
+        onClick: openExternal,
+        onAuxClick: onMiddleClick(openExternal),
+      })}
+      data-testid={testId}
+      data-pr-state={prState}
     >
-      {props.children}
+      {children}
     </a>
   );
 }
@@ -3073,28 +3083,28 @@ function WorktreeTaskAssociation(props: {
       {named.map((item) => (
         <span key={item.epicId} className="flex items-center gap-1">
           <Badge
-            asChild
+            render={
+              <TooltipWrapper
+                label={item.title}
+                side="top"
+                sideOffset={undefined}
+                align={undefined}
+              >
+                <button
+                  type="button"
+                  aria-label={`Open Task ${item.title}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    props.onOpenTask(item.epicId);
+                  }}
+                >
+                  <span className="truncate">{item.title}</span>
+                </button>
+              </TooltipWrapper>
+            }
             variant="outline"
             className="max-w-[min(60vw,16rem)] cursor-pointer hover:bg-foreground/5 hover:text-muted-foreground"
-          >
-            <TooltipWrapper
-              label={item.title}
-              side="top"
-              sideOffset={undefined}
-              align={undefined}
-            >
-              <button
-                type="button"
-                aria-label={`Open Task ${item.title}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onOpenTask(item.epicId);
-                }}
-              >
-                <span className="truncate">{item.title}</span>
-              </button>
-            </TooltipWrapper>
-          </Badge>
+          />
           <TaskMergeRollupBadge
             rollup={props.taskRollupByEpicId.get(item.epicId) ?? null}
           />

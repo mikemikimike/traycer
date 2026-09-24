@@ -7,7 +7,7 @@ import {
 } from "react";
 import { FolderPlus } from "lucide-react";
 import { FirstTaskWorkspaceSetup } from "@/components/onboarding/first-task-workspace-setup";
-import { Slot } from "radix-ui";
+import { useRender } from "@base-ui/react/use-render";
 import {
   Popover,
   PopoverContent,
@@ -271,31 +271,7 @@ export function WorkspaceFolderSummaryControl(props: {
     });
   };
 
-  if (props.readOnly) {
-    return (
-      <WorkspaceSummaryTrigger
-        items={props.items}
-        readOnly
-        bindingResolved={props.bindingResolved}
-        draftPending={props.draftPending === true}
-        className="max-w-full"
-      />
-    );
-  }
-
   const emptyRecentTrigger = itemCount === 0 && props.bindingResolved;
-  if (emptyRecentTrigger && props.recentWorkspaceCount === 0) {
-    return (
-      <AddFolderButton
-        onAddFolder={handleExternalAddFolder}
-        pending={props.addFolderPending}
-        disabled={props.addFolderDisabled}
-        disabledReason={props.addFolderDisabledReason}
-        iconOnly={iconOnly}
-      />
-    );
-  }
-
   const emptyRecentDisabled = props.addFolderPending || props.addFolderDisabled;
   const trigger = emptyRecentTrigger ? (
     <button
@@ -319,6 +295,34 @@ export function WorkspaceFolderSummaryControl(props: {
       className="justify-start overflow-hidden"
     />
   );
+  const previewTrigger = useRender({
+    render: trigger,
+    props: { ...preview.triggerProps },
+  });
+  if (props.readOnly) {
+    return (
+      <WorkspaceSummaryTrigger
+        items={props.items}
+        readOnly
+        bindingResolved={props.bindingResolved}
+        draftPending={props.draftPending === true}
+        className="max-w-full"
+      />
+    );
+  }
+
+  if (emptyRecentTrigger && props.recentWorkspaceCount === 0) {
+    return (
+      <AddFolderButton
+        onAddFolder={handleExternalAddFolder}
+        pending={props.addFolderPending}
+        disabled={props.addFolderDisabled}
+        disabledReason={props.addFolderDisabledReason}
+        iconOnly={iconOnly}
+      />
+    );
+  }
+
   // Controlled hover, gated on the click-open popover: a HoverCard is purely
   // hover-driven and (unlike a Tooltip) does not dismiss when the trigger is
   // clicked, so the preview must be forced closed while the picker is open.
@@ -345,12 +349,7 @@ export function WorkspaceFolderSummaryControl(props: {
         });
       }}
     >
-      <PopoverTrigger asChild>
-        {/* Innermost, so the press guard runs BEFORE the popover's own open
-            handler and can prevent it - `Slot` composes a child's handler
-            ahead of the slot's. */}
-        <Slot.Root {...preview.triggerProps}>{trigger}</Slot.Root>
-      </PopoverTrigger>
+      <PopoverTrigger asChild>{previewTrigger}</PopoverTrigger>
     </HoverPreviewCard>
   );
 

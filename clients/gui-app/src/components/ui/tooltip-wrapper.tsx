@@ -1,5 +1,5 @@
-import type * as React from "react";
-import { Slot } from "radix-ui";
+import * as React from "react";
+import { useRender } from "@base-ui/react/use-render";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 
 interface TooltipWrapperProps {
   readonly children: React.ReactNode;
+  readonly ref?: React.Ref<HTMLElement>;
   readonly label: React.ReactNode;
   readonly side: "top" | "right" | "bottom" | "left";
   readonly sideOffset: number | undefined;
@@ -28,7 +29,7 @@ interface TooltipWrapperProps {
   readonly collisionPadding?: number;
 }
 
-// Transparent wrapper: when `label` is empty/null, behaves as a Radix Slot so
+// Transparent wrapper: when `label` is empty/null, renders its child directly so
 // any props/ref injected by an outer `asChild` trigger (e.g.
 // `DropdownMenuTrigger asChild`) flow through to the inner child. Otherwise
 // renders the tooltip stack with the same forwarding via
@@ -38,10 +39,11 @@ interface TooltipWrapperProps {
 // runtime `props` object also carries whatever `React.cloneElement` injects
 // when this component is the immediate child of an outer `asChild` slot
 // (`onClick`, `onPointerDown`, `ref`, etc.). The rest-spread forwards those
-// to the inner Slot/TooltipTrigger so they reach the real interactive element.
+// to the rendered child/TooltipTrigger so they reach the real interactive element.
 export function TooltipWrapper(props: TooltipWrapperProps) {
   const {
     children,
+    ref,
     label,
     side,
     sideOffset,
@@ -57,17 +59,21 @@ export function TooltipWrapper(props: TooltipWrapperProps) {
   // shape that produces it (`someReason ?? undefined`, left over from the
   // native `title` attribute this component replaces) is the single most
   // common way to call it.
-  if (
+  const emptyLabel =
     label === null ||
     label === undefined ||
-    (typeof label === "string" && label.length === 0)
-  ) {
-    return <Slot.Root {...rest}>{children}</Slot.Root>;
-  }
+    (typeof label === "string" && label.length === 0);
+  const child = useRender({
+    render: React.isValidElement(children) ? children : undefined,
+    ref,
+    props: emptyLabel ? rest : {},
+    enabled: React.isValidElement(children),
+  });
+  if (emptyLabel) return child;
   return (
     <Tooltip open={open} onOpenChange={onOpenChange}>
       <TooltipTrigger asChild {...rest}>
-        {children}
+        {child}
       </TooltipTrigger>
       <TooltipContent
         side={side}

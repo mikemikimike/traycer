@@ -91,6 +91,13 @@ const importRestrictionDimensions = {
   // exports plain utilities with no portal/overlay behavior of their own
   // (`Slot`, `useComposedRefs`, `toast`, cmdk's item/group sub-components)
   // that are legitimately imported outside `src/components/ui/**` today.
+  basePrimitive: [
+    {
+      regex: "^@base-ui/react(?:$|/(?!use-render$|merge-props$))",
+      message:
+        "Base UI primitives belong in src/components/ui/**. Import the app wrapper; use-render and merge-props composition utilities are allowed everywhere.",
+    },
+  ],
   overlayPortal: [
     {
       group: ["radix-ui"],
@@ -2125,6 +2132,7 @@ export default tseslint.config(
       // wrapper layer itself, and the reasoned pre-registration-seam raw
       // consumers - are narrow and explicit.
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "kernel",
         "overlayPortal",
       ),
@@ -2158,6 +2166,7 @@ export default tseslint.config(
     ignores: analyticsAdapterFiles,
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "kernel",
         "overlayPortal",
@@ -2173,6 +2182,7 @@ export default tseslint.config(
     ignores: [...analyticsAdapterFiles, ...hostSelectionReadAllowlist],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "readPath",
         "kernel",
@@ -2191,6 +2201,7 @@ export default tseslint.config(
     ignores: [...testFileGlobs, ...hooksEpicAppWideByCallerExemptions],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "readPath",
         "kernel",
@@ -2205,6 +2216,7 @@ export default tseslint.config(
     ignores: [...testFileGlobs, ...hookWrapperAppWideReadExemptions],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "readPath",
         "kernel",
@@ -2223,6 +2235,7 @@ export default tseslint.config(
     ],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "kernel",
         "overlayPortal",
@@ -2241,6 +2254,7 @@ export default tseslint.config(
     ],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "kernel",
       ),
@@ -2260,7 +2274,10 @@ export default tseslint.config(
     // full-package lint - scoped runs never visit this file.)
     ignores: analyticsAdapterFiles,
     rules: {
-      "@typescript-eslint/no-restricted-imports": importRestrictions("posthog"),
+      "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
+        "posthog",
+      ),
     },
   },
   {
@@ -2270,6 +2287,7 @@ export default tseslint.config(
     files: selectionKernelOwner,
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "overlayPortal",
       ),
@@ -2325,6 +2343,17 @@ export default tseslint.config(
     },
   },
   {
+    // Temporary T02 proof fixture; T07 promotes its assertions and deletes it.
+    files: ["src/__tests__/browser/base-ui-proofs.tsx"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "posthog",
+        "readPath",
+        "kernel",
+      ),
+    },
+  },
+  {
     // Two more raw-primitive consumers, restated here minus `overlayPortal`
     // rather than folded into the block above so neither file inherits the
     // shadcn-only rule turn-offs by accident.
@@ -2334,6 +2363,7 @@ export default tseslint.config(
     ],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
+        "basePrimitive",
         "posthog",
         "readPath",
         "kernel",

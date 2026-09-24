@@ -1,6 +1,6 @@
 import { useState, type ButtonHTMLAttributes, type Ref } from "react";
 import { ChevronDown, TriangleAlert } from "lucide-react";
-import { Slot } from "radix-ui";
+import { useRender } from "@base-ui/react/use-render";
 import {
   Popover,
   PopoverContent,
@@ -122,7 +122,10 @@ export function WorkspaceSummaryTrigger(
   // controlled hover card (`WorkspaceFolderSummaryControl`), which gates the
   // preview on the click-open picker; the read-only branch below owns its own
   // coordinated hover+popover pair.
-  const trigger = triggerButton;
+  const trigger = useRender({
+    render: triggerButton,
+    props: readOnly ? { ...preview.triggerProps } : {},
+  });
 
   // Read-only (terminal-agent): hover keeps the compact preview; click expands
   // the normal folder rows with every binding control suppressed.
@@ -148,12 +151,7 @@ export function WorkspaceSummaryTrigger(
               setReadOnlyHoverOpen(nextOpen);
             }}
           >
-            <PopoverTrigger asChild>
-              {/* Innermost, so the press guard runs BEFORE the popover's own
-                  open handler and can prevent it - `Slot` composes a child's
-                  handler ahead of the slot's. */}
-              <Slot.Root {...preview.triggerProps}>{trigger}</Slot.Root>
-            </PopoverTrigger>
+            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
           </HoverPreviewCard>
           <PopoverContent
             side="bottom"
