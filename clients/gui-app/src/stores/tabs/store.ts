@@ -16,8 +16,8 @@ import {
 import { basePersistOptions, persistKey, STORE_KEYS } from "@/lib/persist";
 import {
   isRegisteredTabKind,
-  tabSurfaceDescriptor,
-} from "@/stores/tabs/registry";
+  TAB_KIND_SPLIT_ELIGIBILITY,
+} from "@/stores/tabs/tab-kind-policy";
 import { SETTINGS_PATHS } from "@/stores/tabs/settings-paths";
 import {
   withoutSampleWorkspace,
@@ -150,7 +150,7 @@ function canSplitRef(ref: TabRef): boolean {
   return (
     canMutateTabSplits() &&
     !isTabStructurallyLocked(ref) &&
-    tabSurfaceDescriptor(ref.kind).splitEligibility === "eligible"
+    TAB_KIND_SPLIT_ELIGIBILITY[ref.kind] === "eligible"
   );
 }
 

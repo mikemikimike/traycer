@@ -65,20 +65,22 @@ describe("the sample workspace's icon rail", () => {
     render(<SampleWorkspaceRail />);
 
     const nodes = railEntries();
-    // Eight things in the column, because the shipped stack draws its two
-    // icons inside ONE capsule (L-167) - nine icons all the same.
+    // Eight things in the column, because the shipped stack draws as ONE
+    // group icon (G3) - nine panels all the same.
     expect(nodes).toHaveLength(8);
     expect(screen.getAllByTestId("epic-rail-stack")).toHaveLength(1);
+    // Only the top's depiction carries a canvas region (G3): the bottom
+    // member has no node of its own to drag or measure.
     expect(
       screen
         .getByTestId("epic-rail-stack")
         .querySelectorAll("[data-layout-region]"),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       screen
         .getByLabelText("Sample sidebar")
         .querySelectorAll("[data-layout-region]"),
-    ).toHaveLength(9);
+    ).toHaveLength(8);
     expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
     // The rail's own `gap-1` is the whole of the spacing: no icon carries a
     // margin of its own, so the rhythm is uniform down the column.

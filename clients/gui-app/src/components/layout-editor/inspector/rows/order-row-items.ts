@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Gauge, Rows2 } from "lucide-react";
-import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
 import type { SortableListItem } from "@/components/layout-editor/inspector/sortable-list";
 import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
@@ -13,7 +12,10 @@ import {
 } from "@/lib/layout/layout-arrangement";
 import { leftPanelIdForRailRegion, type RailEntry } from "@/lib/layout/rail";
 import { expandJoinedPanelSections } from "@/stores/epics/left-panel-store";
-import type { LayoutValues } from "@/lib/layout/layout-values";
+import {
+  regionValuesHidden,
+  type LayoutValues,
+} from "@/lib/layout/layout-values";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
@@ -118,7 +120,7 @@ export function regionRowItem<Id extends RegionId>(
     id: regionId,
     label: facts.name,
     icon: facts.icon,
-    dimmed: readControlValue(values[regionId], "shown") === "hidden",
+    dimmed: regionValuesHidden(values[regionId]),
   };
 }
 

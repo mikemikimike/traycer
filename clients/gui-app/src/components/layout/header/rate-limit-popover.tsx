@@ -131,11 +131,8 @@ import {
   statusBarShownProfileIds,
   type StatusBarShownProfiles,
 } from "@/lib/layout/layout-arrangement";
-import { useArrangementValue } from "@/lib/layout-overrides";
-import {
-  useLayoutStore,
-  useStatusBarShown,
-} from "@/stores/layout/layout-store";
+import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 import { useRegisteredHostsPollLiveness } from "@/hooks/auth/use-registered-hosts-query";
 import { carryViewedHostIntoSettingsScope } from "@/components/settings/host-scope/carry-viewed-host-into-settings";
 import { useProvidersFocusStore } from "@/stores/settings/providers-focus-store";
@@ -1442,9 +1439,7 @@ function RateLimitRefreshAllButton({
   // Every httpFetch provider resolves to the exact same lane options (the
   // `isHttpFetch` branch in `providerRateLimitQueryOptions` doesn't vary by
   // provider id) - reusing the first one's is safe without the "verify every
-  // request shares one lane" check `useHeaderRateLimitBars` needs (that hook's
-  // provider list isn't pre-filtered to a single lane the way `httpFetchProviders`
-  // is here). Passing this through (rather than `null`) matters:
+  // request shares one lane" check a mixed-lane batch would need. Passing this through (rather than `null`) matters:
   // `RateLimitProviderBlock`'s own query for these same providers sets
   // `retry: false`, and TanStack keys retry/staleTime/refetchOnMount per query
   // key - an unset `options` here would silently inherit the global
@@ -1819,13 +1814,13 @@ function ProfileRateLimitProviderBlock({
   // highlighted as "on the strip" while its eye stays off, since nothing
   // was asked for and flipping the eye is how to ask.
   //
-  // Neither means anything while the strip is not on screen (header
-  // placement, or a mobile viewport with the footer off): there is no segment
+  // Neither means anything while the reading is hidden: there is no segment
   // for the highlight to point at and none for the eye to govern, so both go
-  // until the strip returns. The checks themselves stay in the store and take
-  // effect again when it does.
-  const stripShown = useStatusBarShown();
-  const shownProfileIds = stripShown
+  // until it returns. Wherever it lives - the status bar, the tab strip or the
+  // phone header - it draws through the same selector, so the checks apply to
+  // every placement (G6). The checks stay in the store meanwhile.
+  const readingShown = useRegionShown("usageLimits");
+  const shownProfileIds = readingShown
     ? resolveStatusBarProfileIds(profileSelection, providerId, profiles)
     : NO_PROFILE_IDS;
   const checkedProfileIds = profileSelection.shownProfiles[providerId] ?? [];
@@ -1835,7 +1830,7 @@ function ProfileRateLimitProviderBlock({
   const providerHiddenFromStrip = hiddenProviders.includes(providerId);
   // The host the eye writes for, or `null` when there is no eye to draw.
   const eyeHostId =
-    stripShown && !providerHiddenFromStrip ? displayedHostId : null;
+    readingShown && !providerHiddenFromStrip ? displayedHostId : null;
   const setArrangement = useLayoutStore((state) => state.setArrangement);
   const targets = profiles.map((profile) => ({
     profile,

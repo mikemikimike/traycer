@@ -8,8 +8,7 @@ import {
 
 /**
  * What the activity plane can say about anything whose agents may be on any
- * of the account's machines: a task hover card, a rail meter, the account's
- * running count. The rule is {@link selectKnownHostsActivityCoverage}; this
+ * of the account's machines: a task hover card, a rail meter. The rule is {@link selectKnownHostsActivityCoverage}; this
  * pairs it with the directory's settled host list.
  *
  * The directory is SUBSCRIBED like `useHostDiscoveryConcluded` next door, and

@@ -107,7 +107,7 @@ export interface ChatLowerDockProps {
    * in dock order.
    */
   readonly folded: ReadonlySet<ChatDockSection>;
-  /** The vertical order of the dock's members, Queue and Todo included. */
+  /** The vertical order of the dock's members, Todo included. */
   readonly dockOrder: ReadonlyArray<ChatDockSection>;
   /** This tile's Customize hotspot for each dock member. */
   readonly hotspots: Readonly<Record<ChatDockSection, DockRowHotspot>>;
@@ -204,6 +204,10 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
   );
   const anyRowVisible = rows.some((row) => row.showRow);
   const anyChipVisible = strip !== null && strip.chips.length > 0;
+  // The Message queue is not a dock member (G1-G2): never a pill, never hidden,
+  // never reordered. Whenever it holds anything it is the frame's LAST child,
+  // so it sits directly on the composer under every row and attached panel.
+  const queueVisible = props.queue.items.length > 0;
   // The attached panel is built ONCE, here, and everything that claims a panel
   // is open follows THE NODE rather than the pill that asked for it.
   //
@@ -241,7 +245,7 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
         key="attached"
         section={openSection}
         panelId={strip.panelId}
-        separated={anyRowVisible}
+        separated={anyRowVisible || queueVisible}
         settled={stripSettled}
       >
         {attached}
@@ -255,7 +259,7 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
     [strip, openSection],
   );
 
-  if (!anyRowVisible && !anyChipVisible) {
+  if (!anyRowVisible && !anyChipVisible && !queueVisible) {
     return null;
   }
 
@@ -335,6 +339,13 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
                   separatedBefore: false,
                   dock: props,
                 })}
+                {/* Passive: it is chrome the editor cannot customize, so a
+                    layout session dims it like the transcript. */}
+                {queueVisible ? (
+                  <div data-layout-passive>
+                    {queuePanel(props, anyRowVisible)}
+                  </div>
+                ) : null}
               </div>
             </LayoutClusterContextMenu>
           </div>
@@ -451,28 +462,6 @@ function dockPanelContent(
       />
     );
   }
-  if (section === "queue") {
-    return (
-      <QueuedMessagePanel
-        queue={dock.queue}
-        activeTurnStatus={dock.activeTurnStatus}
-        canAct={dock.canAct}
-        resumeRequested={dock.queueResumeRequested}
-        keepPausedRequested={dock.queueKeepPausedRequested}
-        readOnly={dock.readOnly}
-        editingQueueItemId={dock.editingQueueItemId}
-        scrollRegionMaxHeightClass={dock.scrollRegionMaxHeightClass}
-        separated={separated}
-        onPause={dock.onQueuePause}
-        onResume={dock.onQueueResume}
-        onEdit={dock.onQueueEdit}
-        onCancel={dock.onQueueCancel}
-        onAbortSteer={dock.onQueueAbortSteer}
-        onReorder={dock.onQueueReorder}
-        onSteerNow={dock.onQueueSteerNow}
-      />
-    );
-  }
   // An undefined `backgroundItems` is "the host has not said yet"; the
   // managed-command rows come from a different stream and need not wait on it.
   const items = dock.backgroundItems ?? [];
@@ -494,6 +483,29 @@ function dockPanelContent(
       onStopItem={dock.onBackgroundItemStop}
       onStopAll={dock.onBackgroundItemsStopAll}
       onStopSession={dock.onBackgroundSessionStop}
+    />
+  );
+}
+
+function queuePanel(dock: ChatLowerDockProps, separated: boolean): ReactNode {
+  return (
+    <QueuedMessagePanel
+      queue={dock.queue}
+      activeTurnStatus={dock.activeTurnStatus}
+      canAct={dock.canAct}
+      resumeRequested={dock.queueResumeRequested}
+      keepPausedRequested={dock.queueKeepPausedRequested}
+      readOnly={dock.readOnly}
+      editingQueueItemId={dock.editingQueueItemId}
+      scrollRegionMaxHeightClass={dock.scrollRegionMaxHeightClass}
+      separated={separated}
+      onPause={dock.onQueuePause}
+      onResume={dock.onQueueResume}
+      onEdit={dock.onQueueEdit}
+      onCancel={dock.onQueueCancel}
+      onAbortSteer={dock.onQueueAbortSteer}
+      onReorder={dock.onQueueReorder}
+      onSteerNow={dock.onQueueSteerNow}
     />
   );
 }

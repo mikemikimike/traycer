@@ -1040,6 +1040,94 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     expect(screen.getByTestId("chat-dock-chip-filesChanged")).not.toBeNull();
     expect(screen.queryByTestId("chat-dock-attached-panel")).toBeNull();
   });
+
+  // G1-G2: the Compact preset folds every dock region into a chip - but the
+  // Message queue is not a dock region at all, so it never gets a chip and
+  // never folds. With every real region compacted, the queue still draws its
+  // full collapsible panel, and a real member's pill (Todo) still stands in
+  // the strip beside it: the queue being fixed does not take the strip off
+  // screen or absorb its neighbours.
+  it("keeps the queue drawn as its full panel in the Compact preset, never a chip", () => {
+    useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
+    useLayoutStore
+      .getState()
+      .setRegionValues("runningAgents", { size: "chip" });
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
+    useLayoutStore.getState().setRegionValues("todo", { size: "chip" });
+
+    const props = surfacesProps({
+      restoreContext: EMPTY_RESTORE,
+      queueItems: [queuedItem("queued-1", "Do the thing")],
+      backgroundItems: [],
+    });
+    renderSurfaces({
+      ...props,
+      todo: {
+        id: "todo-1",
+        items: [
+          {
+            id: "t1",
+            status: "pending",
+            text: "One",
+            priority: null,
+            activeForm: null,
+          },
+        ],
+      },
+    });
+
+    expect(screen.queryByTestId("chat-dock-chip-queue")).toBeNull();
+
+    const queueRows = screen.getByTestId("queued-message-rows");
+    expect(within(queueRows).getAllByTestId("queued-message-row")).toHaveLength(
+      1,
+    );
+    expect(within(queueRows).getByTestId("pause-queue-button")).not.toBeNull();
+
+    // A real dock member's pill still renders in the strip beside the queue.
+    expect(screen.getByTestId("chat-dock-chip-todo")).not.toBeNull();
+  });
+
+  // The Default preset draws every dock member as a full row rather than a
+  // chip - no `setRegionValues` call in this test folds anything. The queue
+  // still draws below every one of them, exactly as it does when members are
+  // chips (G1-G2): its fixed position does not depend on how the rows above
+  // it are sized.
+  it("draws the queue below the other rows in the Default preset", () => {
+    const props = surfacesProps({
+      restoreContext: {
+        ...EMPTY_RESTORE,
+        accumulatedFileChanges: [fileChangeRow("/repo/src/a.ts", 5, 0)],
+      },
+      queueItems: [queuedItem("queued-1", "Do the thing")],
+      backgroundItems: [],
+    });
+    renderSurfaces({
+      ...props,
+      todo: {
+        id: "todo-1",
+        items: [
+          {
+            id: "t1",
+            status: "pending",
+            text: "One",
+            priority: null,
+            activeForm: null,
+          },
+        ],
+      },
+    });
+
+    const changes = screen.getByTestId("accumulated-changes-panel");
+    const todo = screen.getByTestId("pinned-todo-panel");
+    const queue = screen.getByTestId("queued-message-rows");
+    expect(changes.compareDocumentPosition(queue)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(todo.compareDocumentPosition(queue)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
 });
 
 /**
@@ -1064,7 +1152,6 @@ describe("each pill's tooltip", () => {
       "changedFiles",
       "runningAgents",
       "background",
-      "queue",
       "todo",
     ] as const) {
       useLayoutStore.getState().setRegionValues(region, { size: "chip" });
@@ -1113,11 +1200,9 @@ describe("each pill's tooltip", () => {
 
     // The pill's own two measurements, with the pill's own signs - not the
     // screen reader's "47 lines added, 9 removed", which stays on the button.
+    // The queue is not a pill (G1-G2), so it carries no tooltip here.
     expect((await tooltipFor("filesChanged")).textContent).toBe(
       `Files changed3 files, +48 ${MINUS}9Click to open`,
-    );
-    expect((await tooltipFor("queue")).textContent).toBe(
-      "Message queue1 message queuedClick to open",
     );
     expect((await tooltipFor("todo")).textContent).toBe(
       "Todo1 of 2 doneClick to open",
@@ -1161,18 +1246,21 @@ describe("each pill's tooltip", () => {
     allPills();
     renderSurfaces(
       surfacesProps({
-        restoreContext: EMPTY_RESTORE,
-        queueItems: [queuedItem("queued-1", "Do the thing")],
+        restoreContext: {
+          ...EMPTY_RESTORE,
+          accumulatedFileChanges: [fileChangeRow("/repo/src/a.ts", 5, 0)],
+        },
+        queueItems: [],
         backgroundItems: [],
       }),
     );
 
-    fireEvent.click(screen.getByTestId("chat-dock-chip-queue"));
+    fireEvent.click(screen.getByTestId("chat-dock-chip-filesChanged"));
 
     // The last line follows `aria-pressed` rather than restating it, so the
     // open pill never offers to do what it has already done.
-    expect((await tooltipFor("queue")).textContent).toBe(
-      "Message queue1 message queuedClick to close",
+    expect((await tooltipFor("filesChanged")).textContent).toBe(
+      "Files changed1 file, +5Click to close",
     );
   });
 });

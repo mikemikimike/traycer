@@ -20,11 +20,11 @@
 //      picture, never picture versus picture - the two picture entry points
 //      became one function in L-77, so comparing them with each other could
 //      not fail for any input (G3-02, L-85). Three live surfaces answer for
-//      sixteen of the twenty-one regions: the sample rail (nine), the
-//      composer toolbar in presentation mode (four, since L-136 retired the
-//      harness label), and the dock's compact strip at Chip size (five, since
-//      L-98 put the sample workspace on the real dock and L-139/L-142 added
-//      the Message Queue and Todo to it).
+//      fifteen of the twenty regions: the sample rail (nine), the composer
+//      toolbar in presentation mode (four, since L-136 retired the harness
+//      label), and the dock's compact strip at Chip size (four, since L-98
+//      put the sample workspace on the real dock and L-139 added Todo to it;
+//      the Message queue is not a region since G1-G2).
 //   2. The coverage is stated rather than counted: every region with no live
 //      node here must be named in the fixture's `NO_LIVE_LEAF` table with the
 //      reason, and every region that HAS one must not be. The driver prints
@@ -185,13 +185,14 @@
 //
 // Set LAYOUT_EDITOR_BROWSER_PHASES to a comma list of parity, canvas, sides,
 // switch, strip, sheets, header, running, flip, moves, join, rail, striptop, stripresize, overlays, activity, placement,
-// readings, hostmenu, accountline to run only
+// readings, hostmenu to run only
 // those while iterating; every selected phase runs even after one fails, and
 // the run fails if any did.
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { createServer as createTcpServer } from "node:net";
 import path from "node:path";
@@ -370,10 +371,10 @@ const STYLESHEET_PROBE = `(() => {
  */
 const DOCK_ROW_METRIC_PROBE = `(() => {
   // The recipe the page itself states, so a row is counted by the box it
-  // claims rather than by a tag or a test id - the six panels agree on
+  // claims rather than by a tag or a test id - the four panels agree on
   // neither. A child count cannot stand in for it: the body's own first child
-  // is the scroll box, and the queue's list sits under dnd-kit's nodes inside
-  // it, so counting children reports the wrapper rather than the rows.
+  // is the scroll box, so counting children reports the wrapper rather than
+  // the rows.
   const recipe = window.__layoutEditorProbe.dockRowRecipe;
   const sections = [...document.querySelectorAll("[data-dock-row-metric]")];
   const rows = sections.map((section) => {
@@ -515,15 +516,12 @@ const FRAME_QUARTER_LIT_FLOOR = 0.1;
  * `drag-model.ts` also floors the travel a claim needs at 12px (L-150(4)), so
  * every plan below has to clear that as well as the claim boundary itself.
  * The two rail plans are the tight ones and both do, on the rail's measured
- * geometry, which L-166 leaves exactly where it was: Agents 0..36, the
- * capsule's 4px seam 36..40, Artifacts 40..76, a 4px gap, the 8px divider at
- * 80..88, a 4px gap, Terminals 92..128. The capsule adds a surface behind the
- * two icons and a seam the width of the rail's own `gap-1`, so a stacked pair
- * occupies the same 76px two loose icons did, and nothing below it moves.
- * "Rail icon across a divider" aims Terminals' top edge at 84 - 18 = 66 and
- * places the pointer half a member behind it, at 84, so the pointer travels
- * 110 - 84 = 26 and the member travels 26 - 6 = 20. "Rail divider itself"
- * aims the 8px divider's centre at 110 + 18 = 128, so the pointer travels 44
+ * geometry: the Agents group 0..36 (a stacked pair draws one icon, G3), a 4px
+ * gap, the 8px divider at 40..48, a 4px gap, Terminals 52..88.
+ * "Rail icon across a divider" aims Terminals' top edge at 44 - 18 = 26 and
+ * places the pointer half a member behind it, at 44, so the pointer travels
+ * 70 - 44 = 26 and the member travels 26 - 6 = 20. "Rail divider itself"
+ * aims the 8px divider's centre at 70 + 18 = 88, so the pointer travels 44
  * and the member 38. Every other plan passes an ordinary neighbour, whose own
  * boundary is already above the floor.
  */
@@ -542,7 +540,7 @@ const DROP_OVERSHOOT = 18;
  */
 const CANVAS_REGIONS = [
   "railAgents",
-  "railArtifacts",
+  // railArtifacts: drawn inside Agents' group icon (G3); the fixture excuses it.
   "railTerminals",
   "railBrowsers",
   "railGitDiff",
@@ -555,7 +553,6 @@ const CANVAS_REGIONS = [
   "changedFiles",
   "runningAgents",
   "background",
-  "queue",
   "todo",
   "attachImage",
   "access",
@@ -700,9 +697,7 @@ const APP_ACTED_PROBE = `(() => {
  *
  * `stack:railAgents+railArtifacts` is the shipped rail's one stack LINK
  * (L-166), named after the PAIR it joins. It is a member of the order like any
- * other entry, so it is named here, and the capsule draws its two icons 4px
- * apart - the rail's own `gap-1` - which is why the geometry below is the same
- * as it was before stacks existed.
+ * other entry, so it is named here; the rail draws the pair as one icon (G3).
  */
 const TERMINALS_ABOVE_THE_DIVIDER = [
   "railAgents",
@@ -1053,6 +1048,12 @@ async function compareWithLiveFrame(
 /** The strip's own numbers (side-strip-tokens.ts, D4, S-20), restated so a drift is a failure. */
 const SIDE_STRIP_RAIL_WIDTH = 60;
 const SIDE_STRIP_DEFAULT_WIDTH = 240;
+/**
+ * The collapsed panel's rail sheet: the vertical `EpicLeftPanelRail`'s `w-12`
+ * (48px, not the strip's 60px rail) inside the sheet's 1px border
+ * (`task-surface-frame`).
+ */
+const PANEL_RAIL_SHEET_WIDTH = 48 + 2;
 /** `env(titlebar-area-x, 82px)`: the fallback the fixture's `.wco` stands on (6.4). */
 const WCO_LEADING_INSET_FALLBACK = 82;
 /** `min(env(titlebar-area-x, 82px), 0.75rem)` while the inspector docks left (S-33). */
@@ -3809,16 +3810,16 @@ function panelCollapsedTo(collapsed, before, after) {
   if (
     collapsed &&
     (after.rail === null ||
-      Math.abs(after.rail.width - SIDE_STRIP_RAIL_WIDTH) > 0.5)
+      Math.abs(after.rail.width - PANEL_RAIL_SHEET_WIDTH) > 0.5)
   )
     problems.push(
-      `no ${String(SIDE_STRIP_RAIL_WIDTH)}px rail sheet (${after.rail === null ? "none" : boxText(after.rail)})`,
+      `no ${String(PANEL_RAIL_SHEET_WIDTH)}px rail sheet (${after.rail === null ? "none" : boxText(after.rail)})`,
     );
   if (collapsed && after.panelWidth !== 0)
     problems.push(`the panel is still ${String(after.panelWidth)}px wide`);
   if (!collapsed && after.rail !== null)
     problems.push(`the rail sheet is still drawn at ${boxText(after.rail)}`);
-  if (!collapsed && (after.panelWidth ?? 0) <= SIDE_STRIP_RAIL_WIDTH)
+  if (!collapsed && (after.panelWidth ?? 0) <= PANEL_RAIL_SHEET_WIDTH)
     problems.push(
       `the panel is ${String(after.panelWidth)}px wide, not expanded`,
     );
@@ -5384,11 +5385,15 @@ const HOVER_CARD_READING = `(() => {
   const card = document.querySelector('[data-testid="side-tab-hover-card"]');
   if (card === null) return null;
   const state = card.querySelector('[data-testid="side-tab-hover-card-state"]');
+  const title = card.querySelector('[data-testid="side-tab-hover-card-body"] > div')?.textContent ?? null;
   return {
     state: state === null ? null : state.textContent,
+    title,
     unknownGlyph: card.querySelector('[data-testid="side-tab-hover-card-unknown"]') !== null,
     partial: card.querySelector('[data-testid="side-tab-hover-card-partial"]')?.textContent ?? null,
     counts: card.querySelector('[data-testid="side-tab-hover-card-counts"]')?.textContent ?? null,
+    stateGlyphs: state === null ? [] : [...state.querySelectorAll("[data-status-glyph]")].map((node) => node.getAttribute("data-status-glyph")),
+    rowGlyphs: [...card.querySelectorAll('[data-testid="side-tab-hover-card-agents"] li')].map((row) => row.querySelector("[data-status-glyph]")?.getAttribute("data-status-glyph") ?? null),
   };
 })()`;
 
@@ -5420,6 +5425,13 @@ const alphaMeter = (collapsed) => `(() => {
   };
 })()`;
 
+/** The hover card titles of the rows the coverage phase reads. */
+const HOVER_CARD_TITLES = {
+  "fixture-alpha": "Alpha rollout",
+  "fixture-beta": "Beta review",
+  "fixture-epsilon": "Epsilon cleanup",
+};
+
 /** The fixture's own computer, which the `hosts=1` and `solo=1` directories list. */
 const FIXTURE_STUDIO_HOST = "fixture-host-studio";
 /** Where `setActivity` writes the union's rows; no directory lists it. */
@@ -5445,6 +5457,23 @@ async function runCoveragePhase(client, pageUrl, pageLoads) {
         studio: "partial",
         covered: true,
       },
+      // A task waiting on approval, with one agent running.
+      {
+        label: "attention",
+        fleet: {},
+        studio: "fleet",
+        covered: true,
+        attention: true,
+      },
+      // The same under a host directory, whose indicator query is keyed by
+      // the notification host.
+      {
+        label: "attention-hosts",
+        fleet: { hosts: 1 },
+        studio: "fleet",
+        covered: true,
+        attention: true,
+      },
     ],
     async (variant, violations, notes) => {
       const label = `coverage ${variant.label}`;
@@ -5459,6 +5488,7 @@ async function runCoveragePhase(client, pageUrl, pageLoads) {
           dock: "right",
           surface: "epic",
           account: 1,
+          warm: 1,
           ...variant.fleet,
         },
         label,
@@ -5481,16 +5511,64 @@ async function runCoveragePhase(client, pageUrl, pageLoads) {
       );
       await settle(client, 300);
       const frame = await rectOf(client, SURFACE_FRAME);
-      const hover = async (epicId) => {
+      // Polled, not slept: the card opens on the row's own delay, and the
+      // previous row's card must be gone before the next one is read.
+      const hover = async (epicId, shot) => {
         const row = await rowRect(client, `epic:${epicId}`);
         await moveTo(client, row.cx, row.cy);
-        await settle(client, 1200);
-        const reading = await evaluate(client, HOVER_CARD_READING);
-        await saveShot(client, `coverage-${variant.label}-${epicId}`);
+        let reading = null;
+        for (const deadline = Date.now() + 4000; Date.now() < deadline;) {
+          reading = await evaluate(client, HOVER_CARD_READING);
+          if (reading?.title === HOVER_CARD_TITLES[epicId]) break;
+          await delay(50);
+        }
+        if (reading?.title !== HOVER_CARD_TITLES[epicId]) reading = null;
+        // The open animation, then the frame the reading describes.
+        await settle(client, 400);
+        if (reading !== null)
+          reading = await evaluate(client, HOVER_CARD_READING);
+        await saveShot(client, `coverage-${variant.label}-${shot ?? epicId}`);
         await moveTo(client, frame.cx, frame.cy);
-        await settle(client, 500);
+        for (const deadline = Date.now() + 4000; Date.now() < deadline;) {
+          if ((await evaluate(client, HOVER_CARD_READING)) === null) break;
+          await delay(50);
+        }
         return reading;
       };
+
+      // An attention state keeps its glyph and words: no agent row shows it.
+      // Its own variant, with no host directory: the badge rides the host's
+      // indicator answer, which `setIndicators` writes.
+      if (variant.attention) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setIndicators(${JSON.stringify(RAIL_INDICATORS)}, {})`,
+        );
+        await settle(client, 300);
+        const alphaWaiting = await hover(
+          "fixture-alpha",
+          "fixture-alpha-waiting",
+        );
+        if (alphaWaiting === null)
+          fail("alpha's hover card did not open while it waits");
+        else if (
+          alphaWaiting.stateGlyphs.join() !== "approval" ||
+          !alphaWaiting.state?.startsWith("Needs approval") ||
+          alphaWaiting.counts !== "1 running"
+        )
+          fail(
+            `alpha, waiting on approval, reads "${String(alphaWaiting.state)}" with glyphs [${alphaWaiting.stateGlyphs.join(", ")}], not the approval glyph, "Needs approval" and "1 running"`,
+          );
+        say(`alpha waiting ${JSON.stringify(alphaWaiting)}`);
+        await closeShellVariant(
+          client,
+          pageLoads,
+          loadsAtStart,
+          label,
+          violations,
+        );
+        return;
+      }
 
       // Beta has no agent in the union and no badge: its silence is the claim.
       const beta = await hover("fixture-beta");
@@ -5513,16 +5591,42 @@ async function runCoveragePhase(client, pageUrl, pageLoads) {
           `beta's meter draws ${String(betaPips)} agent pips with nothing known running`,
         );
 
-      // Alpha has one running agent: a count that is a floor when unserved.
+      // Alpha has one running agent: a count that is a floor when unserved,
+      // and plain text - only an agent row draws a running glyph (G5).
       const alpha = await hover("fixture-alpha");
       if (alpha === null) fail("alpha's hover card did not open");
       else {
         if (alpha.counts !== "1 running")
           fail(`alpha's counts read "${alpha.counts}", not "1 running"`);
+        if (alpha.state !== "1 running" || alpha.stateGlyphs.length > 0)
+          fail(
+            `alpha's summary line reads "${alpha.state}" with glyphs [${alpha.stateGlyphs.join(", ")}], not the plain "1 running"`,
+          );
         const wantsNotice = !variant.covered;
         if ((alpha.partial !== null) !== wantsNotice)
           fail(
             `alpha ${wantsNotice ? "lacks" : "carries"} the partial notice (${String(alpha.partial)})`,
+          );
+      }
+
+      // Epsilon's session is open, so its card names its agents: the rows
+      // carry the glyphs, the summary line none (G5).
+      const epsilon = await hover("fixture-epsilon");
+      if (epsilon === null) fail("epsilon's hover card did not open");
+      else {
+        if (epsilon.rowGlyphs.length === 0)
+          fail("epsilon's card names no agent rows, so G5 is not exercised");
+        else if (epsilon.rowGlyphs.some((glyph) => glyph === null))
+          fail(
+            `an epsilon agent row draws no status glyph (${JSON.stringify(epsilon.rowGlyphs)})`,
+          );
+        if (epsilon.stateGlyphs.length > 0)
+          fail(
+            `epsilon's summary line draws [${epsilon.stateGlyphs.join(", ")}] beside rows that already do`,
+          );
+        if (epsilon.counts !== "2 running · 1 background")
+          fail(
+            `epsilon's counts read "${String(epsilon.counts)}", not "2 running · 1 background"`,
           );
       }
 
@@ -5571,24 +5675,8 @@ async function runCoveragePhase(client, pageUrl, pageLoads) {
       await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
       await settle(client, 400);
 
-      // The account's running count: a total only when every host is in view.
-      const footLine = await evaluate(
-        client,
-        `document.querySelector('[data-testid="side-strip-host-line"]')?.textContent ?? null`,
-      );
-      // The visible line is the short form ("9+ running"); the full
-      // "9+ agents running" is the row's accessible name.
-      const running = /(\d+)(\+?) (?:agents? )?running/.exec(footLine ?? "");
-      if (running === null)
-        fail(
-          `the account row reads "${String(footLine)}", with no running count`,
-        );
-      else if ((running[2] === "+") === variant.covered)
-        fail(
-          `the account row reads "${footLine}", ${variant.covered ? "a floor where it is a total" : "a total where it is a floor"}`,
-        );
       say(
-        `beta ${JSON.stringify(beta)}; beta meter agent pips ${String(betaPips)}; alpha ${JSON.stringify(alpha)}; alpha row meter ${JSON.stringify(rowMeter)}; alpha rail meter ${JSON.stringify(railMeter)}; account row "${String(footLine)}"`,
+        `beta ${JSON.stringify(beta)}; beta meter agent pips ${String(betaPips)}; alpha ${JSON.stringify(alpha)}; alpha row meter ${JSON.stringify(rowMeter)}; alpha rail meter ${JSON.stringify(railMeter)}; epsilon ${JSON.stringify(epsilon)}`,
       );
       await closeShellVariant(
         client,
@@ -5598,7 +5686,7 @@ async function runCoveragePhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "with a known host out of the plane's reach, a task with no known agent hovers as unknown (never Idle) with no meter pips, a running task carries the partial notice and the account count is a floor; under a fleet union, and for a one-host account on a local plane, Idle, plain counts and a total",
+    "with a known host out of the plane's reach, a task with no known agent hovers as unknown (never Idle) with no meter pips and a running task carries the partial notice; under a fleet union, and for a one-host account on a local plane, Idle and plain counts. The summary line never draws a running glyph (only agent rows do), and an approval keeps its glyph and words",
   );
 }
 
@@ -5615,8 +5703,16 @@ const READINGS_PROBE = `(() => {
     const r = node.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
   };
+  // A box drawn narrower than its content: the reading or any laid-out
+  // descendant (an inline box has no clientWidth to compare). The reading's
+  // own rectangle is not enough - a shrinkable wrapper can sit inside the
+  // line while the text it holds runs past it (G6 review A).
+  const overflows = (node) => [node, ...node.querySelectorAll('*')].some(
+    (part) => part.clientWidth > 0 && getComputedStyle(part).display !== 'inline' && part.scrollWidth > part.clientWidth + 0.5,
+  );
   // Each tile's readings: shown whole inside its one-row line, hidden on the
-  // clipped wrap row, or cut by the line's edge (the mush this row must avoid).
+  // clipped wrap row or behind the tile's fallback, or cut (the mush this row
+  // must avoid).
   const readings = (button, itemSelector) => {
     const tile = document.querySelector('[data-testid="side-strip-readings"] ' + button);
     if (tile === null) return null;
@@ -5625,16 +5721,23 @@ const READINGS_PROBE = `(() => {
       const r = item.getBoundingClientRect();
       const inside = r.left >= line.left - 0.5 && r.right <= line.right + 0.5 && r.top >= line.top - 0.5 && r.bottom <= line.bottom + 0.5;
       const outside = r.top >= line.bottom - 0.5 || r.right <= line.left + 0.5 || r.left >= line.right - 0.5;
-      const truncated = [...item.querySelectorAll(".truncate")].some((node) => node.scrollWidth > node.clientWidth);
-      return { text: item.textContent.trim(), state: inside ? (truncated ? "truncated" : "shown") : outside ? "hidden" : "cut" };
+      const state = getComputedStyle(item).visibility === 'hidden' || outside ? "hidden" : inside && !overflows(item) ? "shown" : "cut";
+      return { text: item.textContent.trim(), state };
     });
+  };
+  // A tile whose first reading cannot fit whole draws its fallback instead.
+  const fallback = (button) => {
+    const node = document.querySelector('[data-testid="side-strip-readings"] ' + button + ' [data-readings-fallback]');
+    return node !== null && node.getClientRects().length > 0;
   };
   return {
     row: box('[data-testid="side-strip-readings"]'),
     usage: box('[data-testid="side-strip-readings"] [data-testid="rate-limit-header-button"]'),
     resource: box('[data-testid="side-strip-readings"] [data-testid="resource-monitor-header-button"]'),
-    usageReadings: readings('[data-testid="rate-limit-header-button"]', '[data-testid="rate-limit-strip-reading"]'),
+    usageReadings: readings('[data-testid="rate-limit-header-button"]', '[data-testid^="status-bar-provider-segment-"]'),
     resourceReadings: readings('[data-testid="resource-monitor-header-button"]', '[data-testid^="status-bar-resource-metric-"]'),
+    usageFallback: fallback('[data-testid="rate-limit-header-button"]'),
+    resourceFallback: fallback('[data-testid="resource-monitor-header-button"]'),
     account: box('[data-testid="user-menu-trigger"]'),
     strip: box('[data-testid="side-tab-strip"]'),
   };
@@ -5765,9 +5868,9 @@ async function runReadingsPhase(client, pageUrl, pageLoads) {
       // What each tile draws: whole readings only, the first always, and at
       // full width more than one - never a reading cut by the tile's edge,
       // never an icon alone in an empty box. Collapsed, the glyph alone.
-      for (const [key, items, total] of [
-        ["usage", m.usageReadings, 2],
-        ["resource", m.resourceReadings, 3],
+      for (const [key, items, total, fellBack] of [
+        ["usage", m.usageReadings, 2, m.usageFallback],
+        ["resource", m.resourceReadings, 3, m.resourceFallback],
       ]) {
         if (!expected[key] || items === null) continue;
         if (variant.collapsed === 1) {
@@ -5781,23 +5884,52 @@ async function runReadingsPhase(client, pageUrl, pageLoads) {
           fail(
             `the ${key} tile holds ${items.length} readings, expected ${total}`,
           );
-        const bad = items.filter(
-          (item) => item.state === "cut" || item.state === "truncated",
-        );
+        const bad = items.filter((item) => item.state === "cut");
         if (bad.length > 0) fail(`the ${key} tile cuts ${JSON.stringify(bad)}`);
         const shown = items.filter((item) => item.state === "shown");
         const full = variant.readings !== "both";
-        if (shown.length === 0 || items[0].state !== "shown")
+        // The first reading whole, or - when not even that fits - the tile's
+        // fallback with every reading in the popover. Never a cut one.
+        const firstWhole = items.length > 0 && items[0].state === "shown";
+        const fallbackOnly = fellBack && shown.length === 0;
+        if (!firstWhole && !fallbackOnly)
           fail(
-            `the ${key} tile does not show its first reading: ${JSON.stringify(items)}`,
-          );
-        if (full && shown.length < 2)
-          fail(
-            `the full-width ${key} tile shows only ${shown.length} reading(s)`,
+            `the ${key} tile shows neither its first reading nor its fallback: ${JSON.stringify(items)}`,
           );
         say(
-          `${key} ${full ? "full" : "half"} shows ${shown.map((item) => JSON.stringify(item.text)).join(" ")}${shown.length < items.length ? ` (${items.length - shown.length} in the popover)` : ""}`,
+          `${key} ${full ? "full" : "half"} shows ${fallbackOnly ? "its fallback" : shown.map((item) => JSON.stringify(item.text)).join(" ")}${shown.length < items.length ? ` (${items.length - shown.length} in the popover)` : ""}`,
         );
+        // Usage draws the status bar's own readings, so how many fit is its
+        // Style's to say (G6): the shipped Style spells the reset time out.
+        // Under a compact one, half width shows the first reading (bar only)
+        // and full width more than one (bar and percent).
+        let fullShown = shown;
+        if (key === "usage") {
+          const compact = full ? "barPercent" : "barOnly";
+          await evaluate(
+            client,
+            `window.__layoutCanvasProbe.applyUsageStyle(${JSON.stringify(compact)})`,
+          );
+          await settle(client, 300);
+          const restyled = (await evaluate(client, READINGS_PROBE))
+            .usageReadings;
+          fullShown = restyled.filter((item) => item.state === "shown");
+          if (restyled.some((item) => item.state === "cut"))
+            fail(`the restyled usage tile cuts ${JSON.stringify(restyled)}`);
+          if (restyled[0]?.state !== "shown")
+            fail(
+              `the restyled usage tile does not show its first reading: ${JSON.stringify(restyled)}`,
+            );
+          say(
+            `usage ${full ? "full" : "half"}, ${compact}, shows ${fullShown.map((item) => JSON.stringify(item.text)).join(" ")}`,
+          );
+          await evaluate(client, "window.__layoutCanvasProbe.reset()");
+          await settle(client, 300);
+        }
+        if (full && fullShown.length < 2)
+          fail(
+            `the full-width ${key} tile shows only ${fullShown.length} reading(s)`,
+          );
       }
       // At rest, before any click leaves focus (and its tooltip) on a reading.
       for (const theme of ["light", "dark"]) {
@@ -5869,6 +6001,10 @@ async function runReadingsPhase(client, pageUrl, pageLoads) {
 
 // --- the account menu's Host section (staging round 1, F5) ---
 
+/** The fixture's offline host label, long enough to truncate (G4). */
+const FIXTURE_OFFLINE_HOST_NAME =
+  "gpu-runner-02.us-central1-a.c.example-project.internal (nightly)";
+
 const HOST_MENU_PROBE = `(() => {
   const section = document.querySelector('[data-testid="user-menu-host-section"]');
   if (section === null) return null;
@@ -5876,8 +6012,9 @@ const HOST_MENU_PROBE = `(() => {
     hostId: row.getAttribute("data-testid").slice("user-menu-host-option-".length),
     text: row.textContent,
     checked: row.getAttribute("aria-checked") === "true",
-    disabled: row.hasAttribute("data-disabled"),
+    disabled: row.getAttribute("aria-disabled") === "true" || row.hasAttribute("data-disabled"),
     pending: row.querySelector('[data-testid^="user-menu-host-activating-"]') !== null,
+    truncated: (() => { const name = row.querySelector(".truncate"); return name !== null && name.scrollWidth > name.clientWidth + 0.5; })(),
     box: (() => { const r = row.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }; })(),
   }));
 })()`;
@@ -5950,6 +6087,208 @@ async function runHostMenuPhase(client, pageUrl, pageLoads) {
           await saveShot(client, `hostmenu-${variant.label}-${theme}`);
         }
         await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+        // G4: a menu's width whatever a host is called, inside the window and
+        // opening toward the content; the long name truncates and reads in
+        // full from its tooltip, and a name that fits has none.
+        const geo = await evaluate(
+          client,
+          `(() => {
+          const r = (s) => { const n = document.querySelector(s); if (n === null) return null; const b = n.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; };
+          return { menu: r('[data-testid="user-menu-content"]'), trigger: r('[data-testid="user-menu-trigger"]'), vw: innerWidth, vh: innerHeight };
+        })()`,
+        );
+        if (geo.menu.width > 256.5)
+          fail(`the menu is ${geo.menu.width}px wide, over the 256px cap`);
+        if (
+          geo.menu.left < 0 ||
+          geo.menu.top < 0 ||
+          geo.menu.right > geo.vw ||
+          geo.menu.bottom > geo.vh
+        )
+          fail(`the menu ${JSON.stringify(geo.menu)} leaves the window`);
+        const toward =
+          variant.label === "left"
+            ? geo.menu.left >= geo.trigger.right - 0.5
+            : variant.label === "right"
+              ? geo.menu.right <= geo.trigger.left + 0.5
+              : geo.menu.top >= geo.trigger.bottom - 0.5;
+        if (!toward)
+          fail(
+            `the menu ${JSON.stringify(geo.menu)} does not open toward the content from ${JSON.stringify(geo.trigger)}`,
+          );
+        const long = rows.find((row) => row.hostId === "fixture-host-builder");
+        const short = rows.find((row) => row.hostId === "fixture-host-studio");
+        if (long === undefined || !long.truncated)
+          fail("the long host name is not truncated");
+        if (short === undefined || short.truncated)
+          fail("the short host name is truncated");
+        const tooltipText = async (row) => {
+          await moveTo(client, row.box.x + 40, row.box.cy);
+          await settle(client, 1200);
+          return await evaluate(
+            client,
+            `document.querySelector('[role="tooltip"]')?.textContent ?? null`,
+          );
+        };
+        if (long !== undefined) {
+          const text = await tooltipText(long);
+          if (
+            text === null ||
+            !text.includes(
+              "build-vm-01.asia-south2-b.c.example-project.internal (staging)",
+            )
+          )
+            fail(
+              `hovering the long name shows ${JSON.stringify(text)}, not its full name`,
+            );
+          else
+            say(
+              `${geo.menu.width.toFixed(0)}px menu; the long name truncates and its tooltip reads ${JSON.stringify(text)}`,
+            );
+          for (const theme of ["light", "dark"]) {
+            await evaluate(
+              client,
+              `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+            );
+            await settle(client, 250);
+            await saveShot(
+              client,
+              `hostmenu-${variant.label}-long-tooltip-${theme}`,
+            );
+          }
+          await evaluate(
+            client,
+            'window.__layoutCanvasProbe.setTheme("system")',
+          );
+        }
+        if (short !== undefined) {
+          const text = await tooltipText(short);
+          if (text !== null)
+            fail(
+              `hovering the short name shows a tooltip ${JSON.stringify(text)}`,
+            );
+        }
+        // An offline host with a long name still reads in full, and picking
+        // it does nothing: the menu stays open, nothing is sent, the check
+        // stays put.
+        const offlineRow = rows.find(
+          (row) => row.hostId === "fixture-host-mini",
+        );
+        if (offlineRow !== undefined) {
+          if (!offlineRow.truncated)
+            fail("the long offline host name is not truncated");
+          const text = await tooltipText(offlineRow);
+          if (text === null || !text.includes(FIXTURE_OFFLINE_HOST_NAME))
+            fail(
+              `hovering the offline name shows ${JSON.stringify(text)}, not its full name`,
+            );
+          for (const theme of ["light", "dark"]) {
+            await evaluate(
+              client,
+              `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+            );
+            await settle(client, 250);
+            await saveShot(
+              client,
+              `hostmenu-${variant.label}-offline-tooltip-${theme}`,
+            );
+          }
+          await evaluate(
+            client,
+            'window.__layoutCanvasProbe.setTheme("system")',
+          );
+          const sentBefore = await evaluate(
+            client,
+            "window.__layoutCanvasProbe.activationCount()",
+          );
+          await pressAndRelease(
+            client,
+            offlineRow.box.cx,
+            offlineRow.box.cy,
+            "left",
+          );
+          await settle(client, 600);
+          const sentAfter = await evaluate(
+            client,
+            "window.__layoutCanvasProbe.activationCount()",
+          );
+          const after = await evaluate(client, HOST_MENU_PROBE);
+          if (after === null) fail("picking the offline host closed the menu");
+          else if (
+            after.find((row) => row.checked)?.hostId !== "fixture-host-studio"
+          )
+            fail("picking the offline host moved the check");
+          if (sentAfter !== sentBefore)
+            fail(
+              `picking the offline host sent ${sentAfter - sentBefore} activations`,
+            );
+          // The keyboard reaches it too: an inert row keeps its focus stop,
+          // and focus alone opens the same tooltip.
+          await moveTo(client, geo.menu.left + 10, geo.menu.top + 10);
+          await settle(client, 400);
+          let focused = null;
+          for (
+            let step = 0;
+            step < 8 && focused !== "fixture-host-mini";
+            step += 1
+          ) {
+            await pressKey(client, "ArrowDown");
+            await settle(client, 150);
+            focused = await evaluate(
+              client,
+              `document.activeElement?.getAttribute("data-testid")?.replace("user-menu-host-option-", "") ?? null`,
+            );
+          }
+          if (focused !== "fixture-host-mini")
+            fail("ArrowDown never reaches the offline host");
+          await settle(client, 1200);
+          const keyText = await evaluate(
+            client,
+            `document.querySelector('[role="tooltip"]')?.textContent ?? null`,
+          );
+          if (
+            focused === "fixture-host-mini" &&
+            (keyText === null || !keyText.includes(FIXTURE_OFFLINE_HOST_NAME))
+          )
+            fail(
+              `focusing the offline host shows ${JSON.stringify(keyText)}, not its full name`,
+            );
+          await saveShot(client, `hostmenu-${variant.label}-offline-keyboard`);
+          const keySentBefore = await evaluate(
+            client,
+            "window.__layoutCanvasProbe.activationCount()",
+          );
+          await pressKey(client, "Enter");
+          await settle(client, 600);
+          const keySent =
+            (await evaluate(
+              client,
+              "window.__layoutCanvasProbe.activationCount()",
+            )) - keySentBefore;
+          const afterKey = await evaluate(client, HOST_MENU_PROBE);
+          if (afterKey === null)
+            fail("Enter on the offline host closed the menu");
+          else if (
+            afterKey.find((row) => row.checked)?.hostId !==
+            "fixture-host-studio"
+          )
+            fail("Enter on the offline host moved the check");
+          if (keySent !== 0)
+            fail(`Enter on the offline host sent ${keySent} activations`);
+          if (
+            after !== null &&
+            sentAfter === sentBefore &&
+            text !== null &&
+            afterKey !== null &&
+            keySent === 0 &&
+            focused === "fixture-host-mini"
+          )
+            say(
+              `the offline host truncates, its tooltip reads ${JSON.stringify(text)} on hover and on keyboard focus, and a click or Enter on it does nothing`,
+            );
+        }
+        await moveTo(client, geo.menu.left + 10, geo.menu.top + 10);
+        await settle(client, 300);
         const target = rows.find((row) => !row.checked && !row.disabled);
         if (target === undefined) {
           fail("no online host to switch to");
@@ -6045,119 +6384,6 @@ async function runHostMenuPhase(client, pageUrl, pageLoads) {
       );
     },
     "the strip's and the header's account menu list every host, the unreachable one inert, a switch in flight holds every row across a close and reopen with one activation sent, and once it settles the check is on the picked host",
-  );
-}
-
-// --- the account row's second line: the count stays whole, the host name gives way ---
-
-const ACCOUNT_LINE_PROBE = `(() => {
-  const row = document.querySelector('[data-testid="user-menu-trigger"]');
-  const line = row?.querySelector('[data-testid="side-strip-host-line"]') ?? null;
-  if (line === null) return null;
-  const box = (node) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width }; };
-  const [name, count] = line.children;
-  const column = line.parentElement;
-  return {
-    text: line.textContent,
-    full: [...row.querySelectorAll(".sr-only")].map((node) => node.textContent).join(" | "),
-    column: box(column),
-    name: name === undefined ? null : { ...box(name), clipped: name.scrollWidth > name.clientWidth + 0.5 },
-    count: count === undefined ? null : { ...box(count), text: count.textContent, clipped: count.scrollWidth > count.clientWidth + 0.5 },
-  };
-})()`;
-
-async function runAccountLinePhase(client, pageUrl, pageLoads) {
-  const variants = [];
-  for (const edge of ["left", "right"])
-    for (const width of [240, 192])
-      variants.push({ label: `${edge} ${width}`, edge, width });
-  await runShellPhase(
-    "accountline",
-    variants,
-    async (variant, violations, notes) => {
-      const label = `accountline ${variant.label}`;
-      const loadsAtStart = await openShellVariant(
-        client,
-        pageUrl,
-        pageLoads,
-        {
-          tabs: variant.edge,
-          sidebar: variant.edge,
-          collapsed: 0,
-          wco: "none",
-          dock: "right",
-          surface: "epic",
-          account: 1,
-          hosts: 1,
-        },
-        label,
-      );
-      const fail = (line) => violations.push(`${label}: ${line}`);
-      const say = (line) => notes.push(`${label}: ${line}`);
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setStripWidth(${variant.width})`,
-      );
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
-      );
-      // The rows' slice answers as a local plane, as in the coverage phase.
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivityCoverage(${JSON.stringify(FIXTURE_ACTIVITY_HOST)}, "partial")`,
-      );
-      // A lower bound first (the local plane reaches this host only), then a
-      // fleet union's exact count.
-      for (const [coverage, short, full] of [
-        ["partial", "9+ running", "9+ agents running"],
-        ["fleet", "9 running", "9 agents running"],
-      ]) {
-        await evaluate(
-          client,
-          `window.__layoutCanvasProbe.setActivityCoverage("fixture-host-studio", ${JSON.stringify(coverage)})`,
-        );
-        await settle(client, 400);
-        const m = await evaluate(client, ACCOUNT_LINE_PROBE);
-        if (m === null) {
-          fail(`${coverage}: no host line`);
-          continue;
-        }
-        if (m.count === null || !m.count.text.endsWith(short))
-          fail(
-            `${coverage}: the line reads "${m.text}", expected "... ${short}"`,
-          );
-        else if (m.count.clipped || m.count.right > m.column.right + 0.5)
-          fail(
-            `${coverage}: the count "${m.count.text}" is cut: ends at ${m.count.right}, the row's text at ${m.column.right}`,
-          );
-        if (!m.full.includes(full))
-          fail(`${coverage}: the accessible text "${m.full}" lacks "${full}"`);
-        say(
-          `${coverage}: "${m.text}"${m.name?.clipped ? " (host name truncated)" : ""}, name "${m.full}"`,
-        );
-        for (const theme of ["light", "dark"]) {
-          await evaluate(
-            client,
-            `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-          );
-          await settle(client, 200);
-          await saveShot(
-            client,
-            `accountline-${variant.edge}-${variant.width}-${coverage}-${theme}`,
-          );
-        }
-        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
-      }
-      await closeShellVariant(
-        client,
-        pageLoads,
-        loadsAtStart,
-        label,
-        violations,
-      );
-    },
-    "at 240px and the 192px minimum on both edges the account line reads '<host> · N running' with the count whole (the host name gives way), and the full 'N agents running' stays in the row's accessible text",
   );
 }
 
@@ -6487,6 +6713,7 @@ async function runPlacementPhase(client, pageUrl, pageLoads) {
 
 const KEY_CODES = {
   Escape: 27,
+  Enter: 13,
   Tab: 9,
   Home: 36,
   End: 35,
@@ -6500,7 +6727,13 @@ const KEY_CODES = {
  * a zero-length press would test a keyboard no one has.
  */
 async function pressKey(client, key) {
-  const event = { key, code: key, windowsVirtualKeyCode: KEY_CODES[key] };
+  // Enter activates a focused button only when the key event carries its text.
+  const event = {
+    key,
+    code: key,
+    windowsVirtualKeyCode: KEY_CODES[key],
+    ...(key === "Enter" ? { text: "\r" } : {}),
+  };
   await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...event });
   await new Promise((resolve) => setTimeout(resolve, 60));
   await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...event });
@@ -6741,6 +6974,461 @@ async function dragSurfaceTo(client, from, edge) {
   return mid;
 }
 
+// --- groups: a stacked pair is one view group on the panel rail (G3) -------
+
+/**
+ * The panel's REAL rail, horizontal across the panel or vertical in the
+ * collapsed rail sheet, read as the user meets it: its buttons with their
+ * accessible names and lit state, each group with its buttons and count, and
+ * the editor's two readings of the same rail (the Position list's order in
+ * the inspector index, and the preset card's miniature rail).
+ */
+const RAIL_GROUP_PROBE = `(() => {
+  const rail = document.querySelector('[data-testid="epic-sidebar-rail"]');
+  const box = (node) => {
+    if (node === null) return null;
+    const r = node.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  };
+  if (rail === null) return null;
+  const miniature = document.querySelector('[data-testid="preset-miniature-rail"]');
+  return {
+    orientation: rail.getAttribute("data-orientation"),
+    buttons: [...rail.querySelectorAll("button")].map((node) => ({
+      testId: node.getAttribute("data-testid"),
+      label: node.getAttribute("aria-label"),
+      current: node.getAttribute("aria-current") === "true",
+      rect: box(node),
+    })),
+    groups: [...rail.querySelectorAll("[data-rail-stack]")].map((node) => {
+      const count = node.querySelector('[data-testid="epic-rail-stack-count"]');
+      return {
+        id: node.getAttribute("data-rail-stack"),
+        buttons: node.querySelectorAll("button").length,
+        fill: getComputedStyle(node).backgroundColor,
+        count: count === null ? null : { text: count.textContent, rect: box(count) },
+        button: box(node.querySelector("button")),
+      };
+    }),
+    seams: rail.querySelectorAll('[data-testid="epic-rail-stack-seam"]').length,
+    index: [...document.querySelectorAll("[data-region-id^=rail], [data-rail-stack-link]")].map((node) => node.getAttribute("data-region-id") ?? "link:" + node.getAttribute("data-rail-stack-link")).slice(0, 4),
+    miniatureGroups: miniature === null ? null : [...miniature.querySelectorAll("[data-rail-stack]")].map((node) => ({
+      icons: node.querySelectorAll("svg").length,
+      count: node.querySelector('[data-testid="epic-rail-stack-count"]') !== null,
+    })),
+    // The rail's labels are the hover card's label chip (G8).
+    tooltip: [...document.querySelectorAll('[data-slot="hover-card-content"][data-appearance="tooltip"]')].map((node) => node.textContent),
+    focused: document.activeElement?.getAttribute("data-testid") ?? null,
+  };
+})()`;
+
+const GROUP_VARIANTS = [
+  { label: "left light", sidebar: "left", theme: "light" },
+  { label: "left dark", sidebar: "left", theme: "dark" },
+  { label: "right dark", sidebar: "right", theme: "dark" },
+];
+
+/**
+ * What one group looks like on the rail: exactly one button, the top panel's,
+ * named for both members in order, no card behind it and no seam, and a count
+ * only while the editor is customizing the rail.
+ */
+function checkRailGroup(read, expected, fail) {
+  if (read === null) {
+    fail(`${expected.where}: no panel rail`);
+    return;
+  }
+  if (read.orientation !== expected.orientation)
+    fail(
+      `${expected.where}: the rail is ${String(read.orientation)}, expected ${expected.orientation}`,
+    );
+  if (read.groups.length !== 1) {
+    fail(
+      `${expected.where}: ${String(read.groups.length)} groups on the rail, expected 1`,
+    );
+    return;
+  }
+  const group = read.groups[0];
+  if (group.id !== expected.id)
+    fail(
+      `${expected.where}: the group is ${group.id}, expected ${expected.id}`,
+    );
+  if (group.buttons !== 1)
+    fail(
+      `${expected.where}: the group draws ${String(group.buttons)} buttons, expected one icon for the pair`,
+    );
+  if (read.seams !== 0)
+    fail(
+      `${expected.where}: ${String(read.seams)} separators between grouped icons`,
+    );
+  if (group.fill !== "rgba(0, 0, 0, 0)")
+    fail(`${expected.where}: the group sits on a card (${group.fill})`);
+  const top = read.buttons.find(
+    (button) => button.testId === expected.topTestId,
+  );
+  if (top === undefined)
+    fail(`${expected.where}: no ${expected.topTestId} icon on the rail`);
+  else if (top.label !== expected.label)
+    fail(
+      `${expected.where}: the group icon is named "${String(top.label)}", expected "${expected.label}"`,
+    );
+  if (read.buttons.some((button) => button.testId === expected.hiddenTestId))
+    fail(
+      `${expected.where}: ${expected.hiddenTestId} has its own icon although it is grouped under ${expected.topTestId}`,
+    );
+  if (expected.count === null) {
+    if (group.count !== null)
+      fail(
+        `${expected.where}: a count "${String(group.count.text)}" on the group at rest`,
+      );
+  } else if (group.count === null || group.count.text !== expected.count) {
+    fail(
+      `${expected.where}: the group's count is ${group.count === null ? "missing" : `"${String(group.count.text)}"`}, expected "${expected.count}"`,
+    );
+  } else if (group.button !== null) {
+    const c = group.count.rect;
+    const b = group.button;
+    if (
+      c.width === 0 ||
+      c.x < b.x - 0.5 ||
+      c.x + c.width > b.x + b.width + 0.5 ||
+      c.y < b.y - 0.5 ||
+      c.y + c.height > b.y + b.height + 0.5
+    )
+      fail(
+        `${expected.where}: the count ${boxText(c)} is not on its icon ${boxText(b)}`,
+      );
+  }
+}
+
+async function runGroupsPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "groups",
+    GROUP_VARIANTS,
+    async (variant, violations, notes) => {
+      const label = `groups ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: "left",
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "epic",
+          sidebar: variant.sidebar,
+          account: 1,
+        },
+        label,
+      );
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const say = (line) => notes.push(`${label}: ${line}`);
+      const read = () => evaluate(client, RAIL_GROUP_PROBE);
+      const shotName = (step) =>
+        `groups-${variant.sidebar}-${variant.theme}-${step}`;
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setTheme(${JSON.stringify(variant.theme)})`,
+      );
+      // The panel's collapse is persisted, so every variant starts expanded.
+      await evaluate(
+        client,
+        "window.__layoutCanvasProbe.setPanelCollapsed(false)",
+      );
+      await settle(client, 400);
+      const agentsOnTop = {
+        id: "stack:railAgents+railArtifacts",
+        topTestId: "epic-rail-chats",
+        hiddenTestId: "epic-rail-artifacts",
+        label: "Agents · Artifacts",
+      };
+      try {
+        // At rest: one icon for the pair, lit, named for both.
+        let rail = await read();
+        checkRailGroup(
+          rail,
+          {
+            ...agentsOnTop,
+            where: "at rest",
+            orientation: "horizontal",
+            count: null,
+          },
+          fail,
+        );
+        if (
+          rail !== null &&
+          rail.buttons.find((button) => button.testId === "epic-rail-chats")
+            ?.current !== true
+        )
+          fail(
+            "at rest: the group icon is not lit although Agents is the panel showing",
+          );
+        await saveShot(client, shotName("rest"));
+
+        // The tooltip names every member, on a real hover.
+        const top = rail?.buttons.find(
+          (button) => button.testId === "epic-rail-chats",
+        );
+        if (top !== undefined) {
+          await moveTo(client, top.rect.cx, top.rect.cy);
+          // The rail's first label waits for intent (G8): wait on the label
+          // itself being open, not on a guess at the delay.
+          await waitFor(
+            client,
+            "the group icon's label",
+            `document.querySelector('[data-slot="hover-card-content"][data-appearance="tooltip"][data-state="open"]') !== null`,
+          );
+          rail = await read();
+          if (!rail.tooltip.includes("Agents · Artifacts"))
+            fail(
+              `hovering the group shows the tooltip ${JSON.stringify(rail.tooltip)}, expected "Agents · Artifacts"`,
+            );
+          await saveShot(client, shotName("tooltip"));
+          await moveTo(client, 1, 1);
+          await settle(client, 300);
+        }
+
+        // Lit follows the group: another panel's click unlights it, and a
+        // real click on the group lights it again.
+        rail = await read();
+        const terminals = rail?.buttons.find(
+          (button) => button.testId === "epic-rail-terminals",
+        );
+        if (terminals !== undefined && top !== undefined) {
+          await pressAndRelease(
+            client,
+            terminals.rect.cx,
+            terminals.rect.cy,
+            "left",
+          );
+          await settle(client, 300);
+          rail = await read();
+          if (
+            rail.buttons.find((button) => button.testId === "epic-rail-chats")
+              ?.current === true
+          )
+            fail("the group icon stays lit after Terminals was opened");
+          await pressAndRelease(client, top.rect.cx, top.rect.cy, "left");
+          await settle(client, 300);
+          rail = await read();
+          if (
+            rail.buttons.find((button) => button.testId === "epic-rail-chats")
+              ?.current !== true
+          )
+            fail("a click on the group icon did not open the group");
+        }
+
+        // Keyboard: Enter on the focused group icon collapses the panel (it is
+        // the lit icon), and the collapsed rail draws the same group vertically.
+        await evaluate(
+          client,
+          `document.querySelector('[data-testid="epic-rail-chats"]').focus()`,
+        );
+        rail = await read();
+        if (rail.focused !== "epic-rail-chats")
+          fail(
+            `the group icon does not take focus (focus on ${String(rail.focused)})`,
+          );
+        await pressKey(client, "Enter");
+        await settle(client, 400);
+        rail = await read();
+        checkRailGroup(
+          rail,
+          {
+            ...agentsOnTop,
+            where: "collapsed",
+            orientation: "vertical",
+            count: null,
+          },
+          fail,
+        );
+        await saveShot(client, shotName("vertical"));
+        const vertical = rail?.buttons.find(
+          (button) => button.testId === "epic-rail-chats",
+        );
+        if (vertical !== undefined) {
+          await pressAndRelease(
+            client,
+            vertical.rect.cx,
+            vertical.rect.cy,
+            "left",
+          );
+          await settle(client, 400);
+        }
+        rail = await read();
+        if (rail?.orientation !== "horizontal")
+          fail(
+            "a click on the collapsed rail's group icon did not expand the panel",
+          );
+
+        // The editor: the icon counts its members, the index lists them in
+        // order, and the preset miniature draws the group at rest.
+        await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
+        await settle(client, 600);
+        rail = await read();
+        checkRailGroup(
+          rail,
+          {
+            ...agentsOnTop,
+            where: "editing",
+            orientation: "horizontal",
+            count: "2",
+          },
+          fail,
+        );
+        const order = [
+          "railAgents",
+          "link:stack:railAgents+railArtifacts",
+          "railArtifacts",
+          "railTerminals",
+        ];
+        if (rail !== null && rail.index.join(",") !== order.join(","))
+          fail(
+            `the inspector lists ${rail.index.join(", ")}, expected ${order.join(", ")}`,
+          );
+        if (
+          rail !== null &&
+          JSON.stringify(rail.miniatureGroups) !==
+            JSON.stringify([{ icons: 1, count: false }])
+        )
+          fail(
+            `the preset miniature draws the group as ${JSON.stringify(rail.miniatureGroups)}, expected one icon and no count`,
+          );
+        await saveShot(client, shotName("editing"));
+
+        // Selecting the group's bottom member in the inspector rings the
+        // group's icon, the node that stands for it: never an invisible
+        // selection. A real click on the index row.
+        const artifactsRow =
+          '[data-layout-inspector] [data-region-id="railArtifacts"]';
+        await evaluate(
+          client,
+          `document.querySelector(${JSON.stringify(artifactsRow)})?.scrollIntoView({ block: "center" })`,
+        );
+        await flush(client);
+        const row = await rectOf(client, artifactsRow);
+        if (row === null) fail("editing: the inspector has no Artifacts row");
+        else {
+          await pressAndRelease(client, row.cx, row.cy, "left");
+          await delay(900);
+          await flush(client);
+          const ring = await evaluate(client, ringProbe("railAgents"));
+          if (ring.error !== null) fail(`Artifacts selected: ${ring.error}`);
+          else {
+            const expected = {
+              x: ring.region.x - RING_PADDING,
+              y: ring.region.y - RING_PADDING,
+              width: ring.region.width + RING_PADDING * 2,
+              height: ring.region.height + RING_PADDING * 2,
+            };
+            if (!sameBoxWithin(ring.ring, expected, 1.5))
+              fail(
+                `Artifacts selected: the ring is at ${boxText(ring.ring)}, expected on the group icon ${boxText(expected)}`,
+              );
+          }
+          await saveShot(client, shotName("bottom-selected"));
+          // Back to the index, which the reorder below reads.
+          await evaluate(client, "window.__layoutCanvasProbe.clearSelection()");
+          await settle(client, 400);
+        }
+
+        // Reorder within the group through the Position list's writer: the
+        // group stays, and its icon and name follow the new top.
+        const depth = await evaluate(
+          client,
+          "window.__layoutCanvasProbe.historyDepth()",
+        );
+        await evaluate(
+          client,
+          'window.__layoutCanvasProbe.moveRailEntry("railArtifacts", 0)',
+        );
+        await settle(client, 400);
+        rail = await read();
+        checkRailGroup(
+          rail,
+          {
+            id: "stack:railArtifacts+railAgents",
+            topTestId: "epic-rail-artifacts",
+            hiddenTestId: "epic-rail-chats",
+            label: "Artifacts · Agents",
+            where: "reordered",
+            orientation: "horizontal",
+            count: "2",
+          },
+          fail,
+        );
+        const swapped = [
+          "railArtifacts",
+          "link:stack:railArtifacts+railAgents",
+          "railAgents",
+          "railTerminals",
+        ];
+        if (rail !== null && rail.index.join(",") !== swapped.join(","))
+          fail(
+            `reordered, the inspector lists ${rail.index.join(", ")}, expected ${swapped.join(", ")}`,
+          );
+        const depthAfter = await evaluate(
+          client,
+          "window.__layoutCanvasProbe.historyDepth()",
+        );
+        if (depthAfter !== depth + 1)
+          fail(
+            `the reorder cost ${String(depthAfter - depth)} history steps, expected 1`,
+          );
+        await saveShot(client, shotName("reordered"));
+
+        // Ungrouped: both panels draw their own icon and nothing groups them.
+        await evaluate(
+          client,
+          'window.__layoutCanvasProbe.unstackRail("stack:railArtifacts+railAgents")',
+        );
+        await settle(client, 400);
+        rail = await read();
+        if (rail !== null) {
+          if (rail.groups.length !== 0)
+            fail(
+              `ungrouped, the rail still draws ${String(rail.groups.length)} groups`,
+            );
+          for (const [testId, name] of [
+            ["epic-rail-artifacts", "Artifacts"],
+            ["epic-rail-chats", "Agents"],
+          ]) {
+            const button = rail.buttons.find(
+              (candidate) => candidate.testId === testId,
+            );
+            if (button === undefined) fail(`ungrouped, ${testId} has no icon`);
+            else if (button.label !== name)
+              fail(
+                `ungrouped, ${testId} is named "${String(button.label)}", expected "${name}"`,
+              );
+          }
+        }
+        await saveShot(client, shotName("ungrouped"));
+        say(
+          `rest, tooltip, lit, keyboard, vertical, editing count and index, reorder (${String(depthAfter - depth)} step) and ungroup checked`,
+        );
+        await evaluate(client, "window.__layoutCanvasProbe.endSession()");
+        await settle(client, 300);
+      } finally {
+        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+        await evaluate(
+          client,
+          "window.__layoutCanvasProbe.setPanelCollapsed(false)",
+        );
+      }
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator, named and tooltipped for both members; it lights with the group, works by keyboard, draws the same in the collapsed vertical rail, counts its members only while the editor customizes the rail, which lists them in order; reordering the members swaps the icon and name in one history step, and ungrouping gives each its own icon",
+  );
+}
+
 // --- side placements: shared helpers ---------------------------------------
 
 function selectedPhases() {
@@ -6765,7 +7453,7 @@ function selectedPhases() {
     "placement",
     "readings",
     "hostmenu",
-    "accountline",
+    "groups",
   ];
   const raw = process.env.LAYOUT_EDITOR_BROWSER_PHASES;
   if (raw === undefined || raw.trim() === "") return new Set(all);
@@ -6981,7 +7669,7 @@ let viteProcess;
 
 try {
   const pageUrl = `http://127.0.0.1:${vitePort}${fixturePath}`;
-  viteProcess = spawnVite(vitePort);
+  viteProcess = await spawnVite(vitePort);
   let viteError = "";
   viteProcess.stderr.setEncoding("utf8");
   viteProcess.stderr.on("data", (chunk) => {
@@ -7070,7 +7758,7 @@ try {
     ["placement", () => runPlacementPhase(client, canvasUrl, pageLoads)],
     ["readings", () => runReadingsPhase(client, canvasUrl, pageLoads)],
     ["hostmenu", () => runHostMenuPhase(client, canvasUrl, pageLoads)],
-    ["accountline", () => runAccountLinePhase(client, canvasUrl, pageLoads)],
+    ["groups", () => runGroupsPhase(client, canvasUrl, pageLoads)],
   ];
   const failures = [];
   for (const [phase, run] of runs) {
@@ -7079,9 +7767,14 @@ try {
       await run();
     } catch (error) {
       failures.push({ phase, error });
-      console.error(
-        `\n[${phase}] FAILED:\n${error instanceof Error ? error.message : String(error)}`,
-      );
+      // A crash prints its stack; an assertion's message is its whole report.
+      const report =
+        error instanceof Error
+          ? error.name === "AssertionError"
+            ? error.message
+            : (error.stack ?? error.message)
+          : String(error);
+      console.error(`\n[${phase}] FAILED:\n${report}`);
     }
   }
   console.log(
@@ -7214,15 +7907,14 @@ async function runParityPhase(client, pageUrl, pageLoads) {
   }
 
   // The attached dock panels, one one-line row each, are the same height to
-  // the pixel (L-171, L-172): the five members, plus the queue again with a
-  // provenance chip on its row. Waited for rather than read straight off: two
+  // the pixel (L-171): the four members. Waited for rather than read straight off: two
   // of them boot a host runtime before they draw a row, so an unwaited read
   // would measure the runtime's fallback and call the nulls equal. The count
   // is read off the page rather than written down here, because a member is
   // exactly the thing this file should not be the register of.
   await waitFor(
     client,
-    "the five attached dock panels to draw their one row each",
+    "the four attached dock panels to draw their one row each",
     `document.querySelectorAll("[data-dock-row-metric] [data-testid='chat-dock-attached-panel']").length === document.querySelectorAll("[data-dock-row-metric]").length && document.querySelectorAll("[data-dock-row-metric]").length > 0`,
   );
   const dockRows = await evaluate(client, DOCK_ROW_METRIC_PROBE);
@@ -7328,7 +8020,27 @@ async function runParityPhase(client, pageUrl, pageLoads) {
 
 // --- process plumbing -------------------------------------------------------
 
-function spawnVite(port) {
+/**
+ * This run's own Vite, serving the tree as it is when the run starts.
+ *
+ * File watching is off, through a wrapper config around the shared one: every
+ * run starts its own server, so it never needs to follow an edit, and in a
+ * tree several agents write at once a watcher reloads the fixture mid-phase on
+ * a peer's save, which fails the phase at whatever step it was on with the
+ * probe gone. HMR itself stays on: it is the channel the cold dependency
+ * optimizer (`--force`) reloads the first boot through.
+ */
+async function spawnVite(port) {
+  const configDir = await mkdtemp(path.join(tmpdir(), "layout-editor-vite-"));
+  const configPath = path.join(configDir, "vite.no-watch.config.mjs");
+  await writeFile(
+    configPath,
+    [
+      `import base from ${JSON.stringify(path.join(projectRoot, "vitest.config.ts"))};`,
+      "export default { ...base, server: { ...base.server, watch: null } };",
+      "",
+    ].join("\n"),
+  );
   const requireFromHere = createRequire(import.meta.url);
   const viteManifestPath = requireFromHere.resolve("vite/package.json");
   const viteManifest = requireFromHere(viteManifestPath);
@@ -7336,12 +8048,12 @@ function spawnVite(port) {
     path.dirname(viteManifestPath),
     viteManifest.bin.vite,
   );
-  return spawn(
+  const child = spawn(
     "node",
     [
       viteEntry,
       "--config",
-      path.join(projectRoot, "vitest.config.ts"),
+      configPath,
       "--host",
       "127.0.0.1",
       "--force",
@@ -7351,6 +8063,10 @@ function spawnVite(port) {
     ],
     { cwd: projectRoot, stdio: ["ignore", "ignore", "pipe"] },
   );
+  child.once("exit", () => {
+    void rm(configDir, { recursive: true, force: true });
+  });
+  return child;
 }
 
 async function freePort() {
@@ -8555,8 +9271,8 @@ function buildDragPlans(toolbarLeft, dock) {
       // resolves a SLOT, so a combine is the dnd-kit rail's gesture and the
       // jsdom rail suite is where the pointer half is pinned. What this plan
       // holds is the rest of it: the entry the writer adds, the one history
-      // step it costs, and the capsule the rail draws for a pair.
-      id: "stacking two rail icons draws one capsule",
+      // step it costs, and the one group icon the rail draws for a pair (G3).
+      id: "stacking two rail icons draws one group icon",
       setup: [
         "window.__layoutCanvasProbe.reset()",
         "window.__layoutCanvasProbe.stackTerminalsWithBrowsers()",
@@ -8566,19 +9282,20 @@ function buildDragPlans(toolbarLeft, dock) {
       historyDelta: 1,
       // Scoped to the app column, which is the rail the gesture acted on: the
       // editor beside it draws a preset miniature per preset, each a real rail
-      // with real capsules and no registered icons, so a document-wide query
-      // reports four rails' worth of capsules for one gesture.
+      // with real groups and no registered icons, so a document-wide query
+      // reports four rails' worth of groups for one gesture.
       probe: `(() => {
         const column = document.querySelector("[data-layout-column]");
-        const capsules = [...column.querySelectorAll("[data-rail-stack]")];
-        return capsules.map((node) => ({
+        const groups = [...column.querySelectorAll("[data-rail-stack]")];
+        return groups.map((node) => ({
           id: node.getAttribute("data-rail-stack"),
           icons: node.querySelectorAll("[data-layout-region]").length,
+          count: node.querySelector('[data-testid="epic-rail-stack-count"]')?.textContent ?? null,
         }));
       })()`,
       expectProbe: [
-        { id: "stack:railAgents+railArtifacts", icons: 2 },
-        { id: "stack:railTerminals+railBrowsers", icons: 2 },
+        { id: "stack:railAgents+railArtifacts", icons: 1, count: "2" },
+        { id: "stack:railTerminals+railBrowsers", icons: 1, count: "2" },
       ],
     },
     {
@@ -8635,7 +9352,7 @@ async function runDrag(client, plan) {
       );
     }
     notes.push(
-      `state "${plan.id}": ${JSON.stringify(railIds)}, capsules ${JSON.stringify(drawn)}, history +${String(depth - depthAtSetup)}`,
+      `state "${plan.id}": ${JSON.stringify(railIds)}, groups ${JSON.stringify(drawn)}, history +${String(depth - depthAtSetup)}`,
     );
     return { violations, notes };
   }
@@ -8775,7 +9492,7 @@ async function runDrag(client, plan) {
  *
  * The expected order is computed from the order the app is actually holding
  * rather than written out, so a cluster that gains a member - the dock is
- * about to gain Todo and Queue - changes what the drop should produce without
+ * gained Todo - changes what the drop should produce without
  * changing this driver. The arithmetic is the product's own: take the member
  * out, put it back beside the anchor.
  */

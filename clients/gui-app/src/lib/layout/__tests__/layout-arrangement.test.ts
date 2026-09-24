@@ -178,8 +178,12 @@ describe("a panel moved within the rail", () => {
   it("lands on the side of the anchor it was dropped", () => {
     expect(
       idsOf(
-        moveRailPanelBeside(withRail(FLAT_RAIL), "comments", "chats", false)
-          .rail,
+        moveRailPanelBeside(withRail(FLAT_RAIL), {
+          sourcePanelId: "comments",
+          targetPanelId: "chats",
+          placeAfter: false,
+          asGroups: false,
+        }).rail,
       ),
     ).toEqual([
       "railComments",
@@ -194,8 +198,12 @@ describe("a panel moved within the rail", () => {
     ]);
     expect(
       idsOf(
-        moveRailPanelBeside(withRail(FLAT_RAIL), "chats", "terminals", true)
-          .rail,
+        moveRailPanelBeside(withRail(FLAT_RAIL), {
+          sourcePanelId: "chats",
+          targetPanelId: "terminals",
+          placeAfter: true,
+          asGroups: false,
+        }).rail,
       ),
     ).toEqual([
       "railArtifacts",
@@ -221,14 +229,21 @@ describe("a panel moved within the rail", () => {
 
     expect(
       idsOf(
-        moveRailPanelBeside(withRail(rail), "terminals", "chats", false).rail,
+        moveRailPanelBeside(withRail(rail), {
+          sourcePanelId: "terminals",
+          targetPanelId: "chats",
+          placeAfter: false,
+          asGroups: false,
+        }).rail,
       ).slice(0, 4),
     ).toEqual(["railTerminals", "railAgents", "railArtifacts", "divider:1"]);
   });
 
   it("puts a panel at the rail's end", () => {
     expect(
-      idsOf(moveRailPanelToEnd(withRail(DEFAULT_RAIL), "chats").rail).at(-1),
+      idsOf(moveRailPanelToEnd(withRail(DEFAULT_RAIL), "chats", false).rail).at(
+        -1,
+      ),
     ).toBe("railAgents");
   });
 
@@ -236,15 +251,32 @@ describe("a panel moved within the rail", () => {
     const arrangement = withRail(DEFAULT_RAIL.slice(0, 2));
 
     expect(
-      moveRailPanelBeside(arrangement, "comments", "chats", false).rail,
+      moveRailPanelBeside(arrangement, {
+        sourcePanelId: "comments",
+        targetPanelId: "chats",
+        placeAfter: false,
+        asGroups: false,
+      }).rail,
     ).toBe(arrangement.rail);
     expect(
-      moveRailPanelBeside(arrangement, "chats", "comments", false).rail,
+      moveRailPanelBeside(arrangement, {
+        sourcePanelId: "chats",
+        targetPanelId: "comments",
+        placeAfter: false,
+        asGroups: false,
+      }).rail,
     ).toBe(arrangement.rail);
-    expect(moveRailPanelBeside(arrangement, "chats", "chats", true).rail).toBe(
-      arrangement.rail,
+    expect(
+      moveRailPanelBeside(arrangement, {
+        sourcePanelId: "chats",
+        targetPanelId: "chats",
+        placeAfter: true,
+        asGroups: false,
+      }).rail,
+    ).toBe(arrangement.rail);
+    expect(moveRailPanelToEnd(arrangement, "comments", false)).toBe(
+      arrangement,
     );
-    expect(moveRailPanelToEnd(arrangement, "comments")).toBe(arrangement);
   });
 });
 
@@ -293,8 +325,12 @@ describe("areRailsEqual", () => {
     expect(
       areRailsEqual(
         DEFAULT_RAIL,
-        moveRailPanelBeside(withRail(FLAT_RAIL), "comments", "chats", false)
-          .rail,
+        moveRailPanelBeside(withRail(FLAT_RAIL), {
+          sourcePanelId: "comments",
+          targetPanelId: "chats",
+          placeAfter: false,
+          asGroups: false,
+        }).rail,
       ),
     ).toBe(false);
   });
@@ -572,7 +608,6 @@ describe("a canvas drop written back into the full order (4.7)", () => {
     });
 
     expect(next.dock).toEqual([
-      "queue",
       "todo",
       "runningAgents",
       "changedFiles",
@@ -654,7 +689,6 @@ describe("normalizeArrangement", () => {
     });
 
     expect(arrangement.dock).toEqual([
-      "queue",
       "todo",
       "changedFiles",
       "runningAgents",
@@ -818,14 +852,16 @@ describe("resolvePersistedArrangement", () => {
 
   /**
    * The other half of the same rule, in the direction L-142 opened: a dock
-   * order written before Todo and Message queue were members has three
-   * entries and this build has five. No migration exists and none is wanted
-   * (P5) - `mergeOrder` against `DEFAULT_DOCK_ORDER` is the whole of it.
+   * order written before Todo was a member has three entries and this build
+   * has four. No migration exists and none is wanted (P5) - `mergeOrder`
+   * against `DEFAULT_DOCK_ORDER` is the whole of it.
    *
-   * The two lead, because that is where `ChatLowerDock` already draws them
-   * and a stored order says nothing about members it never had: the person
-   * whose record this is has been looking at Queue above Todo above the rest,
-   * and nothing about opening a newer build should move them.
+   * Todo leads, because that is where `ChatLowerDock` already draws it and a
+   * stored order says nothing about a member it never had: the person whose
+   * record this is has been looking at Todo above the rest, and nothing
+   * about opening a newer build should move it. Message queue is never one
+   * of these entries at all (G1-G2) - it is not a dock region, so no stored
+   * order ever names it and `mergeOrder` never has to reason about it.
    */
   it("materialises the dock members a stored order predates", () => {
     const arrangement = resolvePersistedArrangement({
@@ -833,7 +869,6 @@ describe("resolvePersistedArrangement", () => {
     });
 
     expect(arrangement.dock).toEqual([
-      "queue",
       "todo",
       "changedFiles",
       "runningAgents",
@@ -845,10 +880,9 @@ describe("resolvePersistedArrangement", () => {
    * And it is NEIGHBOUR placement rather than an append, which is the rule
    * `mergeOrder` states for every order field this app stores: a member the
    * stored list never had lands after the canonical id ahead of it that is
-   * actually present. Neither of these two HAS one - they open the canonical
-   * list - so both land at the front whatever the user did with the other
-   * three, and `queue` anchors `todo` in turn so the pair keeps its own order.
-   * A rearranged dock is what tells that apart from a plain append: the three
+   * actually present. Todo has none - it opens the canonical list - so it
+   * lands at the front whatever the user did with the other three. A
+   * rearranged dock is what tells that apart from a plain append: the three
    * rows below keep the order they were given.
    */
   it("lands them at the front of a rearranged dock, rows undisturbed", () => {
@@ -857,7 +891,6 @@ describe("resolvePersistedArrangement", () => {
     });
 
     expect(arrangement.dock).toEqual([
-      "queue",
       "todo",
       "background",
       "changedFiles",
@@ -1160,12 +1193,12 @@ describe("a stack link, normalised (L-166)", () => {
   });
 
   it("is dropped when one of its panels moves away", () => {
-    const moved = moveRailPanelBeside(
-      withRail(DEFAULT_RAIL),
-      "artifacts",
-      "comments",
-      true,
-    ).rail;
+    const moved = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
+      sourcePanelId: "artifacts",
+      targetPanelId: "comments",
+      placeAfter: true,
+      asGroups: false,
+    }).rail;
 
     expect(idsOf(normalizeRail(moved))).toEqual([
       "railAgents",
@@ -1180,14 +1213,25 @@ describe("a stack link, normalised (L-166)", () => {
     ]);
   });
 
-  it("is dropped when the pair it names is no longer adjacent", () => {
-    // Comments is last and Sharing is above it, so the pair this link names -
-    // Comments THEN Sharing - does not exist in that order anywhere.
-    expect(
-      idsOf(
-        normalizeRail([...FLAT_RAIL, stack("stack:railComments+railSharing")]),
-      ),
-    ).toEqual(idsOf(FLAT_RAIL));
+  it("survives its two panels trading places, re-minted for the current order (G3)", () => {
+    // Artifacts and Agents have swapped physical places, but the link still
+    // names them in their SHIPPED order. The pair is a view group (G3), and
+    // reordering its members is how the user picks which icon the rail shows
+    // - so the join is not read as "broken", it is re-minted for the order
+    // the two panels now stand in.
+    const traded = [
+      panel("railArtifacts"),
+      panel("railAgents"),
+      stack("stack:railAgents+railArtifacts"),
+      ...FLAT_RAIL.slice(2),
+    ];
+
+    expect(idsOf(normalizeRail(traded))).toEqual([
+      "railArtifacts",
+      "stack:railArtifacts+railAgents",
+      "railAgents",
+      ...idsOf(FLAT_RAIL).slice(2),
+    ]);
   });
 
   it("is put back between its pair when the record left it somewhere else", () => {
@@ -1228,14 +1272,20 @@ describe("a stack link, normalised (L-166)", () => {
     expect(idsOf(normalizeRail(three))).toEqual(idsOf(DEFAULT_RAIL));
   });
 
-  it("is dropped when its pair is adjacent only the other way round", () => {
-    // Sharing IS immediately above Comments, so the two are adjacent - but a
-    // link names its top and its bottom, and this one has them reversed. A
-    // reading that only asked "are these two next to each other" would keep
-    // it and draw Comments above Sharing in one capsule.
+  it("reads adjacency in either order and re-mints the link for the pair it finds (G3)", () => {
+    // Sharing IS immediately above Comments, but this link names them in the
+    // opposite order. Under G3 that still counts as adjacent - the pair is a
+    // view group, so trading places inside it does not break the join - and
+    // normalizing re-mints the link's id for the order the panels now stand
+    // in rather than reading the two names as fixed top/bottom roles.
     const reversed = [...FLAT_RAIL, stack("stack:railComments+railSharing")];
 
-    expect(idsOf(normalizeRail(reversed))).toEqual(idsOf(FLAT_RAIL));
+    expect(idsOf(normalizeRail(reversed))).toEqual([
+      ...idsOf(FLAT_RAIL.slice(0, -2)),
+      "railSharing",
+      "stack:railSharing+railComments",
+      "railComments",
+    ]);
   });
 
   it("is dropped when its id is not a pair this build can read", () => {
@@ -1337,12 +1387,12 @@ describe("stacking and unstacking (L-168)", () => {
   });
 
   it("is not what a before or after drop does", () => {
-    const before = moveRailPanelBeside(
-      withRail(DEFAULT_RAIL),
-      "terminals",
-      "browsers",
-      false,
-    ).rail;
+    const before = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
+      sourcePanelId: "terminals",
+      targetPanelId: "browsers",
+      placeAfter: false,
+      asGroups: false,
+    }).rail;
 
     expect(idsOf(normalizeRail(before))).toEqual(idsOf(DEFAULT_RAIL));
     expect(

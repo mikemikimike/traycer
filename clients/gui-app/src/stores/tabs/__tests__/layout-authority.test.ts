@@ -35,12 +35,12 @@ import {
   type SystemTabs,
 } from "@/stores/tabs/layout";
 import {
-  isRegisteredTabKind,
   TAB_KINDS,
   TAB_KINDS_SURFACE_CONTRACT,
   tabSurfaceDescriptor,
   type HeaderTabKind,
 } from "@/stores/tabs/registry";
+import { isRegisteredTabKind } from "@/stores/tabs/tab-kind-policy";
 import { epicTabModule } from "@/stores/tabs/kinds/epic";
 import { draftTabModule } from "@/stores/tabs/kinds/draft";
 import { historyTabModule } from "@/stores/tabs/kinds/history";

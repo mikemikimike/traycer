@@ -431,6 +431,14 @@ describe("structural parity: LayoutValues cannot drift from the declared propert
     }
   });
 
+  it("drops the Access/Model Shown properties and gains the agent-rows one (G6, G7)", () => {
+    expect(LAYOUT_SETTING_PROPERTY_KEYS).not.toContain("layout_access_shown");
+    expect(LAYOUT_SETTING_PROPERTY_KEYS).not.toContain("layout_model_shown");
+    expect(LAYOUT_SETTING_PROPERTY_KEYS).toContain(
+      "layout_resource_monitor_agent_rows",
+    );
+  });
+
   it("keeps the event's built-in properties out of the per-setting key list", () => {
     const reserved = [
       "base_preset",

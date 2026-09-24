@@ -32,9 +32,9 @@ import { cn } from "@/lib/utils";
 /**
  * The node in the pill row that an OPEN pill's actions are portalled into.
  *
- * L-142 puts "Review all / Undo all", "Stop all" and the queue's Pause/Resume
- * at the right end of the pill row rather than inside the panel, so the panel
- * below the pills is pure content. A portal rather than a prop because the
+ * L-142 puts "Review all / Undo all" and "Stop all" at the right end of the
+ * pill row rather than inside the panel, so the panel below the pills is pure
+ * content. A portal rather than a prop because the
  * actions are made of the panel's own state - pending mutations, gates,
  * confirm dialogs - and lifting them into the strip would mean lifting all of
  * that with them, or duplicating it.
@@ -191,8 +191,7 @@ const PANEL_EXIT = {
  * position every time `useMotionEnabled` flipped, and it flips on pane
  * VISIBILITY: `TopLevelTabHost` keeps inactive panes mounted under
  * `display: none`, so switching tabs and back would destroy the open panel
- * and everything it held - its scroll position, its expanded rows, the
- * queue's in-place edit.
+ * and everything it held - its scroll position and its expanded rows.
  */
 const PANEL_EXIT_INSTANT = {
   ...PANEL_COLLAPSED,
@@ -500,7 +499,7 @@ export function ChatDockAttachedPanelSlot(props: {
    *
    * `AnimatePresence initial={false}` covers a panel present at the presence
    * root's own first render; this covers the one that is not. A chat whose
-   * queue pill puts the dock on screen before the snapshot arrives mounts its
+   * background pill puts the dock on screen before the snapshot arrives mounts its
    * remembered panel one commit later, and a panel that was merely RESTORED
    * must not grow - the same fact, and the same reason, as the five rings
    * L-148 removed from the pill strip.

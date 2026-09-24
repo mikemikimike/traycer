@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  isRegisteredTabKind,
   tabDuplicate,
   tabEpicId,
   tabMatchesPath,
-  tabRequestClose,
   tabRequiresCloseConfirm,
   tabResolveIntent,
   tabRouteOptions,
   tabSurfaceDescriptor,
 } from "@/stores/tabs/registry";
+import { isRegisteredTabKind } from "@/stores/tabs/tab-kind-policy";
+import { requestTabClose } from "@/components/layout/tabs/use-tab-close-command";
 import { sampleWorkspaceTabModule } from "@/stores/tabs/kinds/sample-workspace";
 import {
   emptySystemTabs,
@@ -180,11 +180,11 @@ describe("sample-workspace kind - registration and descriptor", () => {
     expect(tabMatchesPath(tab, "/")).toBe(false);
   });
 
-  it("tabRequestClose is a plain close of the strip item", () => {
+  it("requestTabClose is a plain close of the strip item", () => {
     useTabsStore.getState().ensurePresent(SAMPLE_REF);
     expect(sampleItems(useTabsStore.getState())).toHaveLength(1);
 
-    tabRequestClose(sampleWorkspaceTabModule.build(null));
+    requestTabClose(sampleWorkspaceTabModule.build(null));
 
     expect(sampleItems(useTabsStore.getState())).toHaveLength(0);
   });

@@ -33,7 +33,11 @@ import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { useRegionValues } from "@/lib/layout-overrides";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
 import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store";
-import type { LayoutValues, RegionValueKey } from "@/lib/layout/layout-values";
+import {
+  regionValuesHidden,
+  type LayoutValues,
+  type RegionValueKey,
+} from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 
 /**
@@ -202,7 +206,7 @@ export function LayoutRegionVerbItems(props: {
   const values = useRegionValues(regionId);
   const navigate = useNavigate();
 
-  const hidden = readControlValue(values, "shown") === "hidden";
+  const hidden = regionValuesHidden(values);
   // Asked only of a region whose registry entry says it has a size; a region
   // without one has no `size` leaf to read.
   const sizeable = facts.quickVerbs.includes("chip");

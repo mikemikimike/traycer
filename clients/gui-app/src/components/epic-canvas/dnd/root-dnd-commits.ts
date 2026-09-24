@@ -58,9 +58,11 @@ import { isLeftPanelId } from "@/lib/left-panel-ids";
 import {
   areRailsEqual,
   normalizeRail,
+  railRegionForLeftPanelId,
   type RailEntry,
 } from "@/lib/layout/rail";
 import {
+  isStackedRailPanel,
   moveRailPanelBeside,
   moveRailPanelToEnd,
   stackRailPanels,
@@ -373,7 +375,21 @@ export function resolveRailForDrop(
   preview: NonNullable<EpicCanvasDropPreview>,
   arrangement: LayoutArrangement,
 ): ReadonlyArray<RailEntry> | null {
+  // A rail icon is a whole view group (G3), so it moves whole; a section
+  // header is one panel, and moving it alone is how a panel leaves a group.
+  const asGroups = source.origin === "rail";
   if (preview.kind === "left-panel-rail" && preview.position === "combine") {
+    // A group carried onto another icon joins nothing: a stack is exactly two
+    // panels (L-166), so answering the rail as it is refuses the drop, and the
+    // no-op guard keeps the band from lighting.
+    if (
+      asGroups &&
+      isStackedRailPanel(
+        arrangement.rail,
+        railRegionForLeftPanelId(source.panelId),
+      )
+    )
+      return normalizedRail(arrangement);
     // The middle band joins the two into a stack (L-168). `stackRailPanels`
     // returns the arrangement it was given when the join is refused - either
     // panel already half of a pair - so a refused drop reaches the "did
@@ -387,16 +403,18 @@ export function resolveRailForDrop(
     preview.kind === "left-panel-section"
   ) {
     return normalizedRail(
-      moveRailPanelBeside(
-        arrangement,
-        source.panelId,
-        preview.panelId,
-        preview.position === "after",
-      ),
+      moveRailPanelBeside(arrangement, {
+        sourcePanelId: source.panelId,
+        targetPanelId: preview.panelId,
+        placeAfter: preview.position === "after",
+        asGroups,
+      }),
     );
   }
   if (preview.kind === "left-panel-rail-list") {
-    return normalizedRail(moveRailPanelToEnd(arrangement, source.panelId));
+    return normalizedRail(
+      moveRailPanelToEnd(arrangement, source.panelId, asGroups),
+    );
   }
   return null;
 }

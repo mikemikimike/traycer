@@ -164,7 +164,7 @@ export const SIDE_TAB_METER_MORE_CLASS = {
   row: "text-micro",
 } as const;
 /**
- * A split pair: two member rows joined in the rail capsule's fill, with a
+ * A split pair: two member rows joined in one shared fill, with a
  * 10px radius (`rounded-xl`) so the 8px rows inside its 2px padding sit
  * concentric.
  */
@@ -227,12 +227,10 @@ export const SIDE_STRIP_ACCOUNT_ROW_CLASS = "h-11 rounded-lg px-2 gap-2";
  */
 export type ReadingButtonForm = "glyph" | "tile" | "readout";
 /**
- * A reading tile's content line (F6): one row tall, readings wrapped onto a
- * clipped second row when they do not fit, so the tile shows only whole
- * readings - the first one at half width, more as the row widens.
+ * A bar reading's forms: the ones every bar shares, plus `inline`, the desktop
+ * header's readings, in a bounded share of the header (G6).
  */
-export const STRIP_READOUT_LINE_CLASS =
-  "flex h-4 min-w-0 flex-1 flex-wrap items-center justify-center gap-x-2 overflow-hidden text-ui-xs";
+export type BarReadingForm = ReadingButtonForm | "inline";
 /** The host-health dot on the avatar's bottom-right, cut out of the strip's ground. */
 export const SIDE_STRIP_HOST_DOT_CLASS =
   "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-canvas md:ring-shell-ground";

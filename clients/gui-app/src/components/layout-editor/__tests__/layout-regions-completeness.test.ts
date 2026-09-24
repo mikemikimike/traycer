@@ -79,11 +79,9 @@ const EVERY_REGION_HIDDEN: LayoutOverrides = {
   runningAgents: { shown: "hidden" },
   changedFiles: { shown: "hidden" },
   background: { shown: "hidden" },
-  queue: { shown: "hidden" },
   todo: { shown: "hidden" },
   attachImage: { shown: "hidden" },
-  access: { shown: "hidden" },
-  model: { shown: "hidden" },
+  // Access and Model have no Shown (G6) - the floor is never hidden.
   mic: { shown: "hidden" },
   railAgents: { shown: "hidden" },
   railTerminals: { shown: "hidden" },
@@ -132,9 +130,9 @@ function keysReachableFromRows(region: RegionId): ReadonlyArray<string> {
 }
 
 describe("the region registry covers every region", () => {
-  it("lists all twenty-three regions, grouped by surface", () => {
-    expect(LAYOUT_REGION_IDS).toHaveLength(23);
-    expect(new Set(LAYOUT_REGION_IDS).size).toBe(23);
+  it("lists all twenty-two regions, grouped by surface", () => {
+    expect(LAYOUT_REGION_IDS).toHaveLength(22);
+    expect(new Set(LAYOUT_REGION_IDS).size).toBe(22);
     const surfaceOrder = LAYOUT_REGION_IDS.map(
       (id) => regionFacts(id).surface,
     ).map((surface) =>
@@ -159,9 +157,11 @@ describe("the region registry covers every region", () => {
 
   /**
    * The dock's membership, asked of the registry rather than of the model
-   * (L-139, L-142). Todo and Message queue became members with exactly the
-   * semantics the other three have, so the claim is that nothing about their
-   * grammar reads differently - not that two more ids exist somewhere.
+   * (L-139, L-142). Todo became a member with exactly the semantics the
+   * other three have, so the claim is that nothing about their grammar reads
+   * differently - not that one more id exists somewhere. Message queue is
+   * deliberately NOT one of these (G1-G2): it is a fixed slot, never a dock
+   * region.
    */
   it("gives every dock member the same size-and-order grammar", () => {
     const dockMembers = LAYOUT_REGION_IDS.filter((id) =>
@@ -172,7 +172,6 @@ describe("the region registry covers every region", () => {
     expect([...dockMembers].sort()).toEqual([
       "background",
       "changedFiles",
-      "queue",
       "runningAgents",
       "todo",
     ]);
@@ -225,8 +224,13 @@ describe("every value leaf is reachable from a row", () => {
       (row) => row.kind === "fine-tune",
     );
     expect(fineTune?.kind).toBe("fine-tune");
-    const control =
-      fineTune?.kind === "fine-tune" ? fineTune.rows[0].control : null;
+    // "metrics" by id, not by position: `agentRows` (G7) now sits ahead of
+    // it in the same fine-tune section.
+    const metricsRow =
+      fineTune?.kind === "fine-tune"
+        ? fineTune.rows.find((row) => row.id === "metrics")
+        : undefined;
+    const control = metricsRow?.control ?? null;
     expect(control?.kind).toBe("checks");
     if (control?.kind !== "checks") return;
     expect(control.options.map((option) => option.value)).toEqual([
@@ -256,6 +260,8 @@ describe("state words", () => {
   it("says Hidden wherever the region is switched off", () => {
     const hidden = effectiveLayoutValues("default", EVERY_REGION_HIDDEN);
     for (const id of LAYOUT_REGION_IDS) {
+      // Access and Model have no Shown (G6) - never reads Hidden.
+      if (!("shown" in SHIPPED_DEFAULT_VALUES[id])) continue;
       expect(regionStateWord(id, hidden, DEFAULT_ARRANGEMENT), id).toBe(
         "Hidden",
       );

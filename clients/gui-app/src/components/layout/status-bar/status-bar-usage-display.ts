@@ -5,6 +5,7 @@ import type {
 import { providerDisplayName } from "@/lib/provider-ordering";
 import { formatUnavailableReason } from "@/lib/provider-rate-limit-content";
 import { useRegionValues } from "@/lib/layout-overrides";
+import { windowPercentText } from "@/lib/rate-limits/status-bar-window-text";
 import type { AmountMode } from "@/lib/layout/layout-values";
 
 /**
@@ -164,4 +165,36 @@ export function statusBarSegmentTooltip(
   }
   if (segment.state === "cold") return `${providerName} · no reading yet`;
   return providerName;
+}
+
+/**
+ * What a screen reader hears on a usage trigger - the status bar's, or the
+ * tab strip's when the reading lives there: the headline, then the
+ * tightest reading for each segment it is showing - named by provider, and by
+ * account too where the provider has more than one.
+ *
+ * One reading per segment rather than every window, because this is a control
+ * name and a name is read in full before anything else can happen. The tightest
+ * window is the one the segment model selects by default for the same reason -
+ * it is the number that decides whether the panel is worth opening. Every
+ * segment is in the name whether or not it is currently scrolled into view:
+ * what a screen reader hears cannot depend on where the strip is scrolled to.
+ */
+export function statusBarUsageTriggerName(
+  cluster: StatusBarRateLimitCluster,
+  percentMode: AmountMode,
+): string {
+  if (cluster.kind !== "segments") return "Usage limits";
+  const readings = cluster.segments.flatMap((segment) =>
+    segment.tightest === null
+      ? []
+      : [
+          `${statusBarSegmentName(segment)} ${windowPercentText(
+            segment.tightest.usedPercent,
+            percentMode,
+          )}`,
+        ],
+  );
+  if (readings.length === 0) return "Usage limits";
+  return `Usage limits: ${readings.join(", ")}`;
 }

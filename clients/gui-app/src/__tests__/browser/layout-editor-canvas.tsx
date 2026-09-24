@@ -25,6 +25,7 @@ import {
   PanelTaskHeader,
   SidebarWidthResizeHandle,
 } from "@/components/epic-canvas/sidebar/epic-sidebar-column";
+import { EpicLeftPanelRail } from "@/components/epic-canvas/sidebar/epic-sidebar-rail";
 import { StripLiveAgentsPortal } from "@/components/epic-canvas/sidebar/strip-live-agents";
 import { StableTileSurfaceHost } from "@/components/epic-canvas/surface-host/stable-tile-surface-host";
 import { TileSurfaceSlot } from "@/components/epic-canvas/surface-host/tile-surface-slot";
@@ -60,13 +61,18 @@ import { cn } from "@/lib/utils";
 import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import {
   insertRailDivider,
+  moveRailEntry,
   sideTabStripEdge,
   stackRailPanels,
+  unstackRail,
   type EdgeSide,
   type SideStripView,
   type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
-import { EpicSessionContext } from "@/lib/registries/epic-session-registry";
+import {
+  EpicSessionContext,
+  getOpenEpicRegistry,
+} from "@/lib/registries/epic-session-registry";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
 import { createPersistentMemoryHistory } from "@/lib/persistent-history";
@@ -85,7 +91,7 @@ import type { EpicCanvasTileRef } from "@/stores/epics/canvas/types";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import type { EpicStreamClientFactory } from "@/stores/epics/open-epic/store";
 import { openStoreForTest } from "@/stores/epics/open-epic/test-support/open-store-for-test";
-import type { TreeNode } from "@/stores/epics/open-epic/types";
+import type { ChatProjection, TreeNode } from "@/stores/epics/open-epic/types";
 import {
   useSettingsStore,
   type ThemeMode,
@@ -105,6 +111,13 @@ import { tabItemId } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { tabAppearance } from "@/stores/tabs/types";
 import { seedSideStripTabs } from "./side-tab-strip-seed";
+import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
+import { useSettingsAnchorReveal } from "@/components/settings/use-settings-anchor-reveal";
+import { SettingsDensityContext } from "@/providers/settings-density-context";
+import { AppStatusBar } from "@/components/layout/status-bar/app-status-bar";
+import { USAGE_LIMITS_REGION } from "@/components/layout-editor/regions/status-bar-regions";
+import { NavigatorResourceHotspotChip } from "@/components/resources/resource-usage-chip";
+import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import "@/lib/theme-applier";
 import "@/index.css";
 import "@/components/layout-editor/layout-editor.css";
@@ -221,6 +234,8 @@ const NO_CANVAS_NODE: Readonly<Partial<Record<RegionId, string>>> = {
     "the status bar's usage cluster resolves the watched host's rate-limit subscription, which needs a live host",
   resourceMonitor:
     "StatusBarResourceSegment resolves its readings through the desktop sampler and the resource registry, neither of which exists off Electron",
+  railArtifacts:
+    "the shipped rail stacks Artifacts under Agents, and a stack draws as one group icon, the top panel's (G3); Artifacts is reached through the inspector, where the group lists both",
 };
 
 /** The fixture's desktop stand-in: which window chrome `wco` simulates. */
@@ -253,6 +268,11 @@ interface CanvasVariant {
    * a one-host account, the case a local activity plane must still read idle.
    */
   readonly solo: boolean;
+  /**
+   * Epsilon's session is REGISTERED, with its agents as chats, so a hover
+   * card names them as it does for any epic this window holds live (G5).
+   */
+  readonly warm: boolean;
   /** Which readings the header (the strip foot, beside a side strip) holds (F6). */
   readonly readings: "none" | "usage" | "resource" | "both";
   /**
@@ -261,6 +281,12 @@ interface CanvasVariant {
    * it ships; `specimen` is the session-tab specimen the canvas phases use.
    */
   readonly header: "specimen" | "app";
+  /**
+   * `1` mounts the REAL Settings ▸ Layout panel where the editor would be
+   * (G6), beside the live app column with its status bar, so a driver can
+   * operate every setting there and read its effect on the product.
+   */
+  readonly settings: boolean;
 }
 
 interface LayoutCanvasProbe {
@@ -280,6 +306,11 @@ interface LayoutCanvasProbe {
   readonly foldDockPills: () => void;
   readonly unfoldDockPills: () => void;
   readonly setMicShown: (shown: boolean) => void;
+  /**
+   * One of Usage limits' own Style examples, written as its Style row writes
+   * it - so the driver can show the strip's reading follows Style (G6).
+   */
+  readonly applyUsageStyle: (exampleId: string) => void;
   /** Hidden AND Chip, the shape whose only picture used to be the row it never takes. */
   readonly hideChangedFilesAsChip: () => void;
   /**
@@ -299,6 +330,13 @@ interface LayoutCanvasProbe {
    * join costs (L-166, L-168).
    */
   readonly stackTerminalsWithBrowsers: () => void;
+  /**
+   * One rail entry moved to an index through the Position list's own writer,
+   * inside a recorded gesture: how a group's members trade places (G3).
+   */
+  readonly moveRailEntry: (entryId: string, toIndex: number) => void;
+  /** One stack link taken out, as the Position list's Unstack does (L-168). */
+  readonly unstackRail: (entryId: string) => void;
   readonly clearSelection: () => void;
   readonly snapshot: () => LayoutSnapshot;
   readonly historyDepth: () => number;
@@ -336,8 +374,6 @@ interface LayoutCanvasProbe {
     coverage: "fleet" | "partial" | "none",
   ) => void;
   readonly setCollapsed: (collapsed: boolean) => void;
-  /** The strip's width, through the writer its resize handle uses. */
-  readonly setStripWidth: (widthPx: number) => void;
   readonly setStripView: (view: SideStripView) => void;
   /** The panel's side, through the writer the dock rows and the placement bar use. */
   readonly setSidebarSide: (side: EdgeSide) => void;
@@ -390,8 +426,10 @@ function readVariant(): CanvasVariant {
     account: params.get("account") === "1",
     hosts: params.get("hosts") === "1",
     solo: params.get("solo") === "1",
+    warm: params.get("warm") === "1",
     readings: readReadings(params.get("readings")),
     header: params.get("header") === "app" ? "app" : "specimen",
+    settings: params.get("settings") === "1",
   };
 }
 
@@ -423,7 +461,9 @@ const FIXTURE_LOCAL_HOST: LocalHostSnapshot = {
 const FIXTURE_REMOTE_HOSTS: readonly HostDirectoryEntry[] = [
   {
     hostId: "fixture-host-builder",
-    label: "linux-builder",
+    // Long enough to overrun the account menu's width (G4): it truncates in
+    // its row and reads in full from the row's tooltip.
+    label: "build-vm-01.asia-south2-b.c.example-project.internal (staging)",
     kind: "remote",
     websocketUrl: "ws://127.0.0.1:9/builder",
     version: "1.2.3",
@@ -431,7 +471,8 @@ const FIXTURE_REMOTE_HOSTS: readonly HostDirectoryEntry[] = [
   },
   {
     hostId: "fixture-host-mini",
-    label: "mac-mini",
+    // Offline and long (G4): an inert row still reveals a truncated name.
+    label: "gpu-runner-02.us-central1-a.c.example-project.internal (nightly)",
     kind: "remote",
     websocketUrl: null,
     version: "1.2.3",
@@ -484,7 +525,7 @@ const queryClient = new QueryClient({
 });
 
 /**
- * What the account's host registry says under `hosts=1`: mac-mini last
+ * What the account's host registry says under `hosts=1`: the gpu runner last
  * checked in a day ago and is offline, which is what gives its row the word.
  * The fixture has no authn, whose fetch answers a signed-out `null`, so the
  * registry query is answered with this whenever it holds anything else.
@@ -540,7 +581,10 @@ function applyFixtureIndicators(): void {
   applyingFixtureIndicators = true;
   try {
     for (const query of queryClient.getQueryCache().findAll()) {
-      if (query.queryKey[1] !== "host.notifications.indicatorState") continue;
+      // Every host's entry: the method follows the host scope, which is
+      // `["host"]` alone with no host directory and `["host", hostId]` with one.
+      if (!query.queryKey.includes("host.notifications.indicatorState"))
+        continue;
       if (JSON.stringify(query.state.data) === answer) continue;
       queryClient.setQueryData(query.queryKey, fixtureIndicators);
     }
@@ -795,6 +839,14 @@ function buildProbe(): LayoutCanvasProbe {
         .getState()
         .setRegionValues("mic", { shown: shown ? "shown" : "hidden" });
     },
+    applyUsageStyle: (exampleId) => {
+      for (const row of USAGE_LIMITS_REGION.rows) {
+        if (row.kind !== "style") continue;
+        const example = row.examples.find((entry) => entry.id === exampleId);
+        if (example === undefined) throw new Error(`no Style ${exampleId}`);
+        useLayoutStore.getState().setRegionValues("usageLimits", example.patch);
+      }
+    },
     hideChangedFilesAsChip: () => {
       useLayoutStore
         .getState()
@@ -816,6 +868,22 @@ function buildProbe(): LayoutCanvasProbe {
           .setArrangement(
             stackRailPanels(arrangement, "browsers", "terminals"),
           );
+      });
+    },
+    moveRailEntry: (entryId, toIndex) => {
+      useLayoutEditorStore.getState().recordGesture(() => {
+        const { arrangement } = useLayoutStore.getState();
+        useLayoutStore
+          .getState()
+          .setArrangement(moveRailEntry(arrangement, entryId, toIndex));
+      });
+    },
+    unstackRail: (entryId) => {
+      useLayoutEditorStore.getState().recordGesture(() => {
+        const { arrangement } = useLayoutStore.getState();
+        useLayoutStore
+          .getState()
+          .setArrangement(unstackRail(arrangement, entryId));
       });
     },
     clearSelection: () => {
@@ -842,9 +910,6 @@ function buildProbe(): LayoutCanvasProbe {
     },
     setActivity: (byEpic) => {
       __setAgentActivityStateForTests(byEpic, "local", null);
-    },
-    setStripWidth: (widthPx) => {
-      useSideTabStripStore.getState().setWidthPx(widthPx);
     },
     setActivityCoverage: (hostId, coverage) => {
       __setHostAgentActivityHealthForTests(hostId, {
@@ -988,11 +1053,86 @@ function openEpicSurfaceSession() {
     else (childrenByParent[node.parentId] ??= []).push(node.id);
   }
   handle.store.setState({ tree: { rootIds, childrenByParent, nodeById } });
+  if (VARIANT.warm) {
+    const byId: Record<string, ChatProjection> = {};
+    for (const node of EPIC_SURFACE_AGENTS) {
+      byId[node.id] = {
+        id: node.id,
+        title: node.title,
+        parentId: node.parentId,
+        createdAt: 1,
+        updatedAt: 1,
+        userId: null,
+        hostId: "test-local-host",
+        isTitleEditedByUser: false,
+        docResident: false,
+        archivedAt: null,
+        settings: null,
+      };
+    }
+    handle.store.setState({
+      chats: { allIds: Object.keys(byId), byId },
+    });
+    getOpenEpicRegistry().acquire(EPIC_SURFACE_ID, () => handle);
+  }
   return handle;
 }
 
 const EPIC_SURFACE_SESSION =
   VARIANT.surface === "epic" ? openEpicSurfaceSession() : null;
+
+/** The agent Epsilon's resource stream tracks (G7): "Plan the migration". */
+const FIXTURE_TRACKED_AGENT_ID = "fixture-agent-plan";
+
+/**
+ * Epsilon's resource stream under `settings=1` (G7): one tracked agent, so the
+ * agent row specimen has a reading for its chip - the real chip, through the
+ * real registry, reading the real `agentRows` switch.
+ */
+if (VARIANT.settings && VARIANT.surface === "epic") {
+  const sampledAt = Date.now();
+  resourcesRegistry.acquire(EPIC_SURFACE_ID, "fixture", "fixture-host", () =>
+    createResourcesStore({
+      scope: { kind: "epic", epicId: EPIC_SURFACE_ID },
+      streamClientFactory: (_scope, callbacks) => {
+        queueMicrotask(() => {
+          callbacks.onSnapshot({
+            epicId: EPIC_SURFACE_ID,
+            sampledAt,
+            app: null,
+            owners: [
+              {
+                owner: {
+                  kind: "chat",
+                  hostId: "fixture-host",
+                  epicId: EPIC_SURFACE_ID,
+                  ownerId: FIXTURE_TRACKED_AGENT_ID,
+                },
+                sampledAt,
+                rootPids: [20],
+                activeProcessName: "claude",
+                processCount: 3,
+                cpuPercent: 0.5,
+                rssBytes: 472 * 1024 ** 2,
+                pssBytes: null,
+                privateBytes: null,
+                harnessId: "claude",
+                managedCommand: null,
+                processes: [],
+              },
+            ],
+            epic: null,
+            epics: [],
+            hostTree: null,
+            other: null,
+            restricted: null,
+          });
+        });
+        return { close: () => undefined, setDemand: () => undefined };
+      },
+    }),
+  );
+}
 
 /**
  * Epsilon's one chat tile, in a one-pane canvas: its body is a HOSTED
@@ -1046,8 +1186,9 @@ function renderFixtureHostedBody(): ReactNode {
 /**
  * A task's surface as `EpicSurface` lays it out, through the REAL
  * `EpicSurfaceSheets`: the panel sheet on the stored sidebar side, the REAL
- * width handle in the gap, and the content sheet beside it. What the panel
- * holds below its REAL task header is a stand-in (the real panel needs a live
+ * width handle in the gap, and the content sheet beside it. The panel draws
+ * the REAL rail across its top (vertical in the collapsed rail sheet) and the
+ * REAL task header; the body below is left out (the real panel needs a live
  * host). The content sheet holds a REAL `TileSurfaceSlot`, and the REAL
  * `StableTileSurfaceHost` plane sits over the surface as `TopLevelTabHost`
  * mounts it, so the hosted chat body is positioned by the shipped geometry
@@ -1072,17 +1213,34 @@ function EpicSurfaceStandIn(): ReactNode {
       )}
       style={{ width: sidebarWidthPx }}
     >
-      <PanelTaskHeader epicId={EPIC_SURFACE_ID} tabId={EPIC_SURFACE_ID} />
+      {mainCollapsed ? null : (
+        <>
+          <EpicLeftPanelRail
+            epicId={EPIC_SURFACE_ID}
+            tabId={EPIC_SURFACE_ID}
+            orientation="horizontal"
+          />
+          <PanelTaskHeader epicId={EPIC_SURFACE_ID} tabId={EPIC_SURFACE_ID} />
+          {VARIANT.settings ? <AgentRowReadingsSpecimen /> : null}
+        </>
+      )}
     </div>
   );
-  // `EpicSidebarColumn`'s collapsed rail sheet, at the rail's 60px (D4): the
-  // panel stays mounted and hidden beside it, as in the app.
+  // `EpicSidebarColumn`'s collapsed rail sheet, with its classes: no width of
+  // its own, so it is as wide as the real vertical rail inside it (`w-12`,
+  // 48px). The panel stays mounted and hidden beside it, as in the app.
   const collapsedRail = mainCollapsed ? (
     <div
       data-shell-sheet="panel"
       data-fixture-collapsed-rail
-      className="w-15 shrink-0 overflow-clip bg-background"
-    />
+      className="shrink-0 overflow-clip bg-background"
+    >
+      <EpicLeftPanelRail
+        epicId={EPIC_SURFACE_ID}
+        tabId={EPIC_SURFACE_ID}
+        orientation="vertical"
+      />
+    </div>
   ) : null;
   if (EPIC_SURFACE_SESSION === null) return null;
   return (
@@ -1174,10 +1332,62 @@ export function CanvasFixture(): ReactNode {
             )
           }
           mainTail={null}
-          tail={null}
+          tail={VARIANT.settings ? <AppStatusBar /> : null}
         />
       </RootDndProvider>
-      <LayoutEditor column={column} />
+      {VARIANT.settings ? (
+        <SettingsFixturePane />
+      ) : (
+        <LayoutEditor column={column} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Settings ▸ Layout as the modal draws it (G6): compact density, inside the
+ * pane the reveal watcher scrolls, with that watcher mounted so a search
+ * result's landing is the shipped one. A fixed width because it stands in for
+ * the modal's pane, a SIMULATED surface, as the preset miniature is.
+ */
+function SettingsFixturePane(): ReactNode {
+  useSettingsAnchorReveal("layout");
+  return (
+    <SettingsDensityContext.Provider value="compact">
+      <div
+        data-settings-panel-pane
+        data-fixture-settings-pane
+        className="h-safe-dvh w-[36rem] max-w-[50vw] shrink-0 overflow-x-hidden overflow-y-auto border-l bg-background"
+      >
+        <LayoutSettingsPanel />
+      </div>
+    </SettingsDensityContext.Provider>
+  );
+}
+
+/**
+ * One agent row's readings (G7): the REAL chip every agent and terminal row
+ * draws, with the metrics the REAL hook resolves from `agentRows`. The row
+ * around it is a stand-in, because the real Agents tree needs a live host.
+ */
+function AgentRowReadingsSpecimen(): ReactNode {
+  const metrics = useNavigatorResourceMetrics();
+  return (
+    <div
+      data-fixture-agent-row
+      className="flex items-center justify-between gap-2 px-3 py-1.5 text-ui-sm"
+    >
+      <span className="truncate">Plan the migration</span>
+      <NavigatorResourceHotspotChip
+        owner={{
+          epicId: EPIC_SURFACE_ID,
+          kind: "chat",
+          ownerId: FIXTURE_TRACKED_AGENT_ID,
+          hostId: "fixture-host",
+        }}
+        metrics={metrics}
+        className={undefined}
+      />
     </div>
   );
 }

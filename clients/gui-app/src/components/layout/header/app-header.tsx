@@ -90,11 +90,12 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
           one this mirrors. It sits left of the tab strip and right of the
           window's own controls, so a reading moved here lands beside the
           navigation rather than inside the tabs. Empty for the shipped
-          arrangement, where both readings are in the strip, and an empty
-          `shrink-0` box takes no room. */}
+          arrangement, where both readings are in the strip, and an empty box
+          takes no room. Shrinkable: its readings give way before the tabs and
+          the header's own controls do (G6 review A). */}
       {navDisabled ? null : (
         <div
-          className="relative z-10 flex shrink-0 items-center gap-2"
+          className="relative z-10 flex min-w-0 items-center gap-2"
           style={framelessDesktop ? NO_DRAG_STYLE : undefined}
         >
           <HeaderBarCluster side="left" />
@@ -119,12 +120,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
           style={spacerDragStyle}
         />
       ) : null}
-      <div
-        className={cn(
-          "relative z-10 flex min-w-0 flex-1 items-center",
-          draggable && "[-webkit-app-region:drag]",
-        )}
-      >
+      <div className={tabStripBoxClass(showTabStrip, draggable)}>
         {showTabStrip ? <TabStrip /> : null}
       </div>
       <div
@@ -137,16 +133,32 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
         )}
         style={spacerDragStyle}
       />
+      {/* Shrinkable for the readings in it alone: the controls after them
+          never give way (G6 review A). */}
       <div
-        className="relative z-10 flex shrink-0 items-center gap-2"
+        className="relative z-10 flex min-w-0 items-center gap-2"
         style={framelessDesktop ? NO_DRAG_STYLE : undefined}
       >
         {!navDisabled ? <AppUpdateHeaderButton layout="icon" /> : null}
         {!navDisabled ? <HeaderBarCluster side="right" /> : null}
-        {!navDisabled ? <HistoryButton /> : null}
-        {showBell ? <HeaderNotificationsBell /> : null}
-        <HeaderIdentity showAppSettings={!navDisabled} />
+        <div className="flex shrink-0 items-center gap-2">
+          {!navDisabled ? <HistoryButton /> : null}
+          {showBell ? <HeaderNotificationsBell /> : null}
+          <HeaderIdentity showAppSettings={!navDisabled} />
+        </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * The tab strip's box. The tabs keep a floor of the header, so readings moved
+ * up here shrink before they do (G6 review A).
+ */
+function tabStripBoxClass(showTabStrip: boolean, draggable: boolean): string {
+  return cn(
+    "relative z-10 flex flex-1 items-center",
+    showTabStrip ? "min-w-[30%]" : "min-w-0",
+    draggable && "[-webkit-app-region:drag]",
   );
 }

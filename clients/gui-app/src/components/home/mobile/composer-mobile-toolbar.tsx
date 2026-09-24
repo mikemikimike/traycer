@@ -13,8 +13,7 @@ import { useHostMethodSchemaVersion } from "@/hooks/host/use-host-supports-metho
 import { useAutoJudgeBilling } from "@/hooks/auto-mode/use-auto-judge-billing";
 import { HarnessModelPicker } from "@/components/home/pickers/harness-model-picker";
 import {
-  ComposerMicButton,
-  ComposerMicPreparing,
+  ComposerMicSlot,
   type ComposerDictationControl,
 } from "@/components/home/toolbar/composer-mic-button";
 import { DictationRecordingBar } from "@/components/home/toolbar/dictation-recording-bar";
@@ -207,10 +206,12 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
           // suffix the desktop pill adds reads as clutter at this width.
           labelDisplay="model-only"
         />
-        {dictation !== null ? <ComposerMicButton control={dictation} /> : null}
-        {dictation === null && dictationPreparing !== null ? (
-          <ComposerMicPreparing status={dictationPreparing} />
-        ) : null}
+        {/* The slot, not the bare button: it is what honours Layout's
+          Microphone switch, which this row used to ignore (G6). */}
+        <ComposerMicSlot
+          dictation={dictation}
+          dictationPreparing={dictationPreparing}
+        />
         <ComposerSendButton
           canSubmit={canSubmitResolved}
           attachmentPending={attachmentPending}

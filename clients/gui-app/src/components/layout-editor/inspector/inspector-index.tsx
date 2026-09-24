@@ -1,8 +1,8 @@
+import { regionValuesHidden } from "@/lib/layout/layout-values";
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Rows2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
-import { readControlValue } from "@/components/layout-editor/inspector/region-control-io";
 import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import { SurfacePlacementRow } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
 import { surfacePlacementRowMatchesFilter } from "@/components/layout-editor/inspector/rows/surface-placement-filter";
@@ -325,8 +325,7 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
                 regionPositionMoved(snapshot, region.id);
               // "Auto" is not off: only a region a person turned off reads
               // muted, which is the prototype's `.idx-row.off` (I-09).
-              const hidden =
-                readControlValue(values[region.id], "shown") === "hidden";
+              const hidden = regionValuesHidden(values[region.id]);
               return (
                 <button
                   key={region.id}

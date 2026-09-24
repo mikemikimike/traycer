@@ -12,7 +12,10 @@ import {
   regionRowItems,
   type SortableRowDecoration,
 } from "@/components/layout-editor/inspector/rows/order-row-items";
-import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
+import {
+  SortableList,
+  type SortableListItem,
+} from "@/components/layout-editor/inspector/sortable-list";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
@@ -644,6 +647,125 @@ describe("the rail's dividers as items (L-25)", () => {
 
     const after = railIds();
     expect(after.indexOf(dividerId)).toBe(before.indexOf(dividerId) - 1);
+    expect(historyDepth()).toBe(1);
+  });
+});
+
+/**
+ * A hand-built row, bypassing every row builder: what is under test here is
+ * the LIST's own keyboard step, not any of the rows the app decorates (those
+ * are the rail's real Position list, covered by the last test below).
+ */
+function testItem(id: string, movable: boolean): SortableListItem<string> {
+  return {
+    id,
+    label: id,
+    icon: null,
+    glyph: null,
+    divider: false,
+    movable,
+    dimmed: false,
+    changed: false,
+    hint: null,
+    control: null,
+    revert: null,
+    detail: null,
+    open: false,
+    onToggleOpen: null,
+    onRemove: null,
+    removeLabel: null,
+    onStack: null,
+    onActivate: null,
+  };
+}
+
+function bareList(
+  items: ReadonlyArray<SortableListItem<string>>,
+  onMove: (id: string, toIndex: number) => void,
+): ReactNode {
+  return (
+    <SortableList
+      label="Test list"
+      selectedId={null}
+      items={items}
+      onMove={onMove}
+    />
+  );
+}
+
+describe("a keyboard step goes past a row that cannot move (G6)", () => {
+  const WITH_LINK: ReadonlyArray<SortableListItem<string>> = [
+    testItem("A", true),
+    testItem("L", false),
+    testItem("B", true),
+    testItem("C", true),
+  ];
+
+  it("nudges past the link on Alt+ArrowDown, landing on the next movable row", () => {
+    const onMove = vi.fn();
+    render(bareList(WITH_LINK, onMove));
+
+    fireEvent.keyDown(row("A"), { key: "ArrowDown", altKey: true });
+
+    expect(onMove.mock.calls).toEqual([["A", 2]]);
+    expect(announcement()).toBe("Moved A, position 3 of 4.");
+  });
+
+  it("nudges past the link the other way on Alt+ArrowUp", () => {
+    const onMove = vi.fn();
+    render(bareList(WITH_LINK, onMove));
+
+    fireEvent.keyDown(row("B"), { key: "ArrowUp", altKey: true });
+
+    expect(onMove.mock.calls).toEqual([["B", 0]]);
+    expect(announcement()).toBe("Moved B, position 1 of 4.");
+  });
+
+  it("skips the link in grab mode too, dropping where the nudge would land", () => {
+    const onMove = vi.fn();
+    render(bareList(WITH_LINK, onMove));
+    const grabbed = row("A");
+
+    fireEvent.keyDown(grabbed, { key: " " });
+    fireEvent.keyDown(grabbed, { key: "ArrowDown" });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(announcement()).toBe("Moved A, position 3 of 4.");
+
+    fireEvent.keyDown(grabbed, { key: " " });
+
+    expect(onMove.mock.calls).toEqual([["A", 2]]);
+  });
+
+  it("moves nothing and announces nothing when no slot exists past the link", () => {
+    const onMove = vi.fn();
+    render(bareList([testItem("A", true), testItem("L", false)], onMove));
+
+    fireEvent.keyDown(row("A"), { key: "ArrowDown", altKey: true });
+
+    expect(onMove).not.toHaveBeenCalled();
+    expect(announcement()).toBe("");
+  });
+
+  it("swaps Agents and Artifacts through the real rail list, keeping the group", () => {
+    render(section("railAgents", vi.fn()));
+
+    fireEvent.keyDown(row("railAgents"), { key: "ArrowDown", altKey: true });
+
+    expect(
+      useLayoutStore.getState().arrangement.rail.map((entry) => entry.id),
+    ).toEqual([
+      "railArtifacts",
+      "stack:railArtifacts+railAgents",
+      "railAgents",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
     expect(historyDepth()).toBe(1);
   });
 });

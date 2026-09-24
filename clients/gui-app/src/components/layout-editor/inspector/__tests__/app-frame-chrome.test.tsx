@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AppFrameComposerStack,
+  AppFrameRailEntries,
   AppFrameSideStrip,
   AppFrameStatusBarRow,
   AppFrameTopBar,
@@ -74,6 +75,33 @@ describe("the composer stack (L-97, L-99)", () => {
     expect(dock.nextElementSibling?.getAttribute("data-testid")).toBe(
       "app-frame-composer",
     );
+  });
+});
+
+/**
+ * The preset miniature's own picture of the rail (G3): a stacked pair draws
+ * through the same `LeftPanelRailStack` the real rail and the sample scene
+ * use, so a card at rest cannot show two icons for a group that draws one.
+ */
+describe("the rail's stacked pair in the preset miniature (G3)", () => {
+  it("draws only the top's icon, with no member count", () => {
+    render(
+      <AppFrameRailEntries
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+
+    const stack = screen.getByTestId("epic-rail-stack");
+    expect(stack.getAttribute("data-rail-stack")).toBe(
+      "stack:railAgents+railArtifacts",
+    );
+    // One depiction inside it - the top's - never two.
+    expect(stack.querySelectorAll("svg")).toHaveLength(1);
+    // A card is a picture of the app at rest, never a layout session, so the
+    // member-count badge the real rail shows while customizing never draws
+    // here.
+    expect(screen.queryByTestId("epic-rail-stack-count")).toBeNull();
   });
 });
 
@@ -339,7 +367,7 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     expect(foot.querySelector("svg.lucide-history")).toBeNull();
     expect(foot.querySelector("svg.lucide-bell")).toBeNull();
     expect(within(foot).getByText("Ada Lovelace")).not.toBeNull();
-    expect(within(foot).getByText("This Mac · 2 running")).not.toBeNull();
+    expect(within(foot).getByText("This Mac")).not.toBeNull();
   });
 
   it("puts a header-hosted reading in the foot, and nowhere else", () => {

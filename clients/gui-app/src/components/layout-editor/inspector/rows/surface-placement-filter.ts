@@ -17,7 +17,7 @@ function surfacePlacementRowDefinitions(
 }
 
 /** Whether a Settings row's label or keywords match a layout filter. */
-export function settingsRowMatchesFilter(
+function settingsRowMatchesFilter(
   row: SettingsRowDefinition,
   query: string,
 ): boolean {

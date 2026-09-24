@@ -17,3 +17,11 @@ export const LEFT_PANEL_RAIL_TILE_CLASS =
 /** The underline a horizontal rail draws under the panel it is showing. */
 export const LEFT_PANEL_RAIL_TAB_UNDERLINE_CLASS =
   "absolute inset-x-2 bottom-0 rounded-b-none rounded-t";
+
+/**
+ * A rail view group's name (G3): every member's title, in order, the way the
+ * group icon's tooltip and accessible name read it.
+ */
+export function railGroupLabel(titles: ReadonlyArray<string>): string {
+  return titles.join(" · ");
+}

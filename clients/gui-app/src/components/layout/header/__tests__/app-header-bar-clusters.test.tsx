@@ -54,20 +54,30 @@ vi.mock("@/components/layout/header/desktop-menu-bar", () => ({
  * Both reach for the host runtime, the query client and the rate-limit
  * subscription the moment they mount, which is a provider stack this suite
  * has no business standing up to answer a question about WHERE the header
- * draws them. What the stubs keep is the one prop the header decides:
- * `claimsOpenAction`, which is the header's claim on `app.resources.open`.
+ * draws them. What the stubs keep is the two props the header decides:
+ * `claimsOpenAction` (the header's claim on `app.resources.open`) and `form`
+ * (readings at their own width in the header, `"inline"`, since G6 - not the
+ * glyph either trigger drew here before).
  */
 vi.mock("@/components/layout/header/rate-limit-icon", () => ({
-  RateLimitIconButton: () => (
-    <button type="button" data-testid="header-usage-trigger" />
+  RateLimitIconButton: (props: { readonly form: string }) => (
+    <button
+      type="button"
+      data-testid="header-usage-trigger"
+      data-form={props.form}
+    />
   ),
 }));
 vi.mock("@/components/resources/resource-monitor-popover", () => ({
-  ResourceMonitorPopover: (props: { readonly claimsOpenAction: boolean }) => (
+  ResourceMonitorPopover: (props: {
+    readonly claimsOpenAction: boolean;
+    readonly form: string;
+  }) => (
     <button
       type="button"
       data-testid="header-resource-trigger"
       data-claims-open-action={props.claimsOpenAction ? "true" : "false"}
+      data-form={props.form}
     />
   ),
 }));
@@ -122,6 +132,18 @@ describe("the header's bar clusters (L-156)", () => {
     render(<AppHeader variant="app" />);
 
     expect(beforeTabs(screen.getByTestId("header-usage-trigger"))).toBe(false);
+  });
+
+  it("hands both readings the header's own form, not the strip's glyph (G6)", () => {
+    place({ usageHost: "header", resourceHost: "header" });
+    render(<AppHeader variant="app" />);
+
+    expect(screen.getByTestId("header-usage-trigger").dataset.form).toBe(
+      "inline",
+    );
+    expect(screen.getByTestId("header-resource-trigger").dataset.form).toBe(
+      "inline",
+    );
   });
 
   it("moves the resource monitor up on its own, leaving usage in the strip", () => {

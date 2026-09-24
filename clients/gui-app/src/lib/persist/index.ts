@@ -41,4 +41,3 @@ export {
   clearAndResetPersistedStore,
   retargetPersistedStore,
 } from "@/lib/persist/zustand-persist-lifecycle";
-export { clearAllPersistedStores } from "@/lib/persist/wipe";

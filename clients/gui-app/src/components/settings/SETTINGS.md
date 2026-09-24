@@ -1666,8 +1666,8 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     `opacity-70` is dropped at the destructive threshold, so the chip is
     loudest when the window is nearly gone.
   - **Two option sets, and they are not interchangeable.** `Row / Chip` for
-    anything that carries a verb with no other home - the five dock rows own
-    Stop all / Review all / Undo all / Pause, and the Access pill reports the
+    anything that carries a verb with no other home - the four dock rows own
+    Stop all / Review all / Undo all, and the Access pill reports the
     permission the next send runs under. `Chip` is their floor: a row folds to
     a pill in the row that sits above the composer, on its LEFT edge, as the
     first child of the stack that holds the pills, the joined frame and the
@@ -1679,15 +1679,14 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     In a mixed dock the members set to `Row` stay at the bottom of the joined
     frame with their normal headers, and the pill-opened panel is the topmost,
     replaceable one.
-    That panel's own actions (Review all / Undo all, Stop all, Pause) sit at
+    That panel's own actions (Review all / Undo all, Stop all) sit at
     the RIGHT end of the pill row while it is open, so the panel below is pure
     content (L-142(1), `chat/chat-dock-attached-panel.tsx`).
     It is user-resizable from a handle on its top edge, starts at about a third
     of the CHAT PANE's height and is clamped to that pane (L-142(3), L-145).
     The pill folds to its icon with the name on hover. A
     chip always draws its own icon (`FileDiff`, `Bot`, for Background the
-    section's own `MessageSquareClock`, `ListOrdered` for the Message queue and
-    `ListChecks` for Todo), and activity shows ON that icon rather
+    section's own `MessageSquareClock`, and `ListChecks` for Todo), and activity shows ON that icon rather
     than replacing it: the glyph and the count turn `primary`, and the glyph
     shimmers on the shared status clock. A chip is `[icon] N` at every width;
     the sentence lives in the tooltip and the accessible name. **Nothing is
@@ -1714,6 +1713,13 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     The pill stays on screen while its panel is showing (`aria-pressed`)
     because it is the only way back, and a pill rings once when the thing it
     stands for arrives, never when it drains (L-150(6)).
+  - **The Message queue is never a pill, and is not a region** (G1-G2).
+    Queued messages are the user's own pending sends, so hiding them behind a
+    pill hides a primary action. While the queue holds anything it is the
+    joined frame's last member, directly on the composer, with its rows, their
+    actions and Pause, under the pill row and every other row. It has no
+    Size, no Shown and no dock position; stale stored values for it are
+    dropped on rehydrate. It empties to nothing, leaving no gap.
   - **Received A2A queue rows follow the Running agents mode**, and fold into
     the same chip with their own count. That is also why the chip exists
     whenever those rows do, even with no sub-agent running: without it, folding
@@ -1757,15 +1763,21 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
       The shipped rail carries none.
     - A STACK LINK is a join between the two ADJACENT panels it sits between:
       those two share the sidebar body, top and bottom, with a resize handle
-      and a per-section collapse, and the rail draws their icons inside one
-      joined capsule (L-167, `left-panel-rail-stack.tsx`).
-      Clicking either icon opens the stack with that panel focused.
+      and a per-section collapse, and the rail draws the pair as ONE view group
+      the way VS Code draws a view container (G3, `left-panel-rail-stack.tsx`):
+      the top panel's icon, named and tooltipped for both ("Agents ·
+      Artifacts"), lit while either is showing, with no card or separator.
+      While the editor customizes the rail the icon carries a member count.
+      Clicking it opens the group on its top panel (or puts back a collapsed
+      member section), and clicking it while the group shows collapses the
+      column.
       The shipped rail carries exactly one, Agents with Artifacts.
       A stack joins exactly two panels: `normalizeRail` re-derives every link
-      from the pair it ends up between, so a panel dragged away from its
-      partner drops the join, a divider moved between them drops it, and a run
-      of three cannot exist because a panel already claimed by one link cannot
-      be claimed by a second.
+      from the pair it ends up between, in either order, so the two trading
+      places keeps the group and changes which icon the rail shows, a panel
+      dragged away from its partner drops the join, a divider moved between
+      them drops it, and a run of three cannot exist because a panel already
+      claimed by one link cannot be claimed by a second.
       A HIDDEN panel drops out of its stack for display only - the visible
       partner stands alone on the rail and in the body, and showing the panel
       again restores the pair.
@@ -1777,7 +1789,7 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
       one.
       `railDisplayEntries` (`lib/layout/rail.ts`) is what every rail SURFACE
       walks - the icon column, the sample scene's copy and the preset card's
-      miniature - so the capsule rule and the hidden-partner rule are written
+      miniature - so the group rule and the hidden-partner rule are written
       once; `visibleRailPanelIds` beside it is the one visibility filter for the
       body's choice of panel and the PR retention.
       Writes go through `applyRail` (`lib/layout/rail-view.ts`) for the app's own
@@ -1786,16 +1798,20 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
       (`lib/layout/layout-arrangement.ts`) for the editor's list, with
       `moveRailPanelBeside` / `moveRailPanelToEnd` the one mover both drags place
       a panel by.
+      A rail icon is a whole group, so dragging it carries the pair, and any
+      drop beside a pair lands before or after the whole pair (G3); a SECTION
+      header is one panel, so dragging it moves that panel alone - beside its
+      partner it swaps the two, anywhere else it leaves the group.
       On the rail a drop has three bands (L-168): the outer 30% at each end
       reorders, and the middle 40% stacks.
-      A source that is already half of a pair LEAVES that pair and joins the new
-      one (L-170) - the join it had is dropped by the same normalisation that
-      drops it when either panel moves away, so nothing extra is needed for it.
+      A group carried onto another icon's middle band makes nothing (a stack is
+      two panels). A single panel dragged by its section header that is
+      already half of a pair LEAVES that pair and joins the new one (L-170).
       A TARGET that is already half of a pair is refused, with no preview at all,
       because a stack joins exactly two panels.
       "Already half of a pair" is read off the model rather than off what the
       rail drew, so a panel whose partner is hidden refuses a drop on its middle
-      band the way its capsule would.
+      band the way its group would.
       A drop on the sidebar BODY is resolved against the section under the
       pointer, not the panel the body is focused on: a stacked pair draws two,
       and the active one is not always the one being aimed at.
@@ -4205,7 +4221,7 @@ unavailable`, `account policy could not be read`, all of which the first
     glyph - with the shell/host boundary and an "Install Traycer in WSL" WSLg
     remedy link (docs.traycer.ai/install#windows-via-wsl) in a
     `HoverCard`; the glyph is itself a focusable anchor to that docs page so
-    keyboard users reach the remedy without the pointer-only hover card. Only
+    keyboard users reach the remedy the hover card keeps out of tab order. Only
     WSL earns a caption: PowerShell / Git Bash profile loading and cmd's plain
     Windows environment are expected behavior, so those selections (and all
     non-Windows hosts) render nothing, and the picker row top-aligns only

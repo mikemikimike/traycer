@@ -83,6 +83,14 @@ export interface SizedValues extends ShownValues {
   readonly size: RegionSize;
 }
 
+/**
+ * The permission picker: a size and no Shown. It reports the permission the
+ * next send runs under, so the chip is its floor and it is never hidden (G6).
+ */
+export interface AccessValues {
+  readonly size: RegionSize;
+}
+
 export interface RailValues {
   readonly shown: RailVisibility;
 }
@@ -95,12 +103,19 @@ export interface UsageLimitsValues extends ShownValues {
   readonly amount: AmountMode;
 }
 
-/** Shipped default is cpu + processes on, memory and ramShare off. */
+/**
+ * Shipped default is cpu + processes on, memory and ramShare off.
+ *
+ * `shown` is the monitor itself, in whichever bar it lives. `agentRows` is the
+ * readings on each agent and terminal row in the sidebar, which used to ride
+ * `shown` and could not be turned off without losing the monitor too (G7).
+ */
 export interface ResourceMonitorValues extends ShownValues {
   readonly cpu: boolean;
   readonly memory: boolean;
   readonly processes: boolean;
   readonly ramShare: boolean;
+  readonly agentRows: boolean;
 }
 
 /** The four readings the monitor can print, in the order it prints them. */
@@ -130,7 +145,12 @@ export interface ContextUsageValues extends ShownValues {
   readonly compactButton: Visibility;
 }
 
-export interface ModelValues extends ShownValues {
+/**
+ * The model picker: a style and no Shown. It always draws - it also owns the
+ * picker shortcut and the palette's Pick model - so a Shown switch here had no
+ * reader (G6).
+ */
+export interface ModelValues {
   readonly style: ModelStyle;
 }
 
@@ -143,10 +163,9 @@ export interface LayoutValues {
   readonly runningAgents: SizedValues;
   readonly changedFiles: SizedValues;
   readonly background: SizedValues;
-  readonly queue: SizedValues;
   readonly todo: SizedValues;
   readonly attachImage: ShownValues;
-  readonly access: SizedValues;
+  readonly access: AccessValues;
   readonly model: ModelValues;
   readonly mic: ShownValues;
   readonly railAgents: RailValues;
@@ -158,6 +177,21 @@ export interface LayoutValues {
   readonly railFileTree: RailValues;
   readonly railSharing: RailValues;
   readonly railComments: RailValues;
+}
+
+/**
+ * The regions that can be hidden: every one with a `shown` leaf. Access and
+ * Model are the two without - each is a floor the composer always draws (G6).
+ */
+export type HideableRegionId = {
+  [K in RegionId]: LayoutValues[K] extends { readonly shown: unknown }
+    ? K
+    : never;
+}[RegionId];
+
+/** Whether a region's values say Hidden; a region with no Shown never is. */
+export function regionValuesHidden(values: LayoutValues[RegionId]): boolean {
+  return "shown" in values && values.shown === "hidden";
 }
 
 /**

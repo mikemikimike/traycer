@@ -124,6 +124,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
           label: "Show the word used/left",
           description: null,
           pinsTransient: false,
+          whileHidden: false,
           control: { kind: "switch", key: "word" },
         },
         {
@@ -131,6 +132,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
           label: "Time until reset",
           description: null,
           pinsTransient: false,
+          whileHidden: false,
           control: { kind: "switch", key: "reset" },
         },
         {
@@ -138,6 +140,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
           label: "Progress bar",
           description: null,
           pinsTransient: false,
+          whileHidden: false,
           control: { kind: "switch", key: "bar" },
         },
         {
@@ -145,6 +148,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
           label: "Percentage",
           description: null,
           pinsTransient: false,
+          whileHidden: false,
           control: { kind: "switch", key: "percent" },
         },
         {
@@ -152,6 +156,7 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
           label: "Used or remaining",
           description: null,
           pinsTransient: false,
+          whileHidden: false,
           control: {
             kind: "segment",
             key: "amount",
@@ -186,6 +191,8 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
     "ram",
     "resource",
     "monitor",
+    "agent rows",
+    "sidebar",
     // The same four as the usage cluster's: since L-156 this reading picks
     // its own bar, so "header" and "move" have to find it too.
     "header",
@@ -202,11 +209,23 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
     {
       kind: "fine-tune",
       rows: [
+        // First, beside the monitor's own Shown: the two are the two places
+        // resource readings appear, and each is on or off by itself (G7).
+        {
+          id: "agentRows",
+          label: "Readings on agent rows",
+          description:
+            "CPU, memory and processes beside each agent and terminal in the sidebar. Independent of the monitor.",
+          pinsTransient: false,
+          whileHidden: true,
+          control: { kind: "switch", key: "agentRows" },
+        },
         {
           id: "metrics",
           label: "Metrics",
           description: "What the monitor reports.",
           pinsTransient: false,
+          whileHidden: false,
           control: {
             kind: "checks",
             keys: ["cpu", "memory", "processes", "ramShare"],

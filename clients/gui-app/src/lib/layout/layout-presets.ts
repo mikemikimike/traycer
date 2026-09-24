@@ -48,6 +48,7 @@ export const SHIPPED_DEFAULT_VALUES: LayoutValues = {
     memory: false,
     processes: true,
     ramShare: false,
+    agentRows: true,
   },
   minimap: { shown: "shown" },
   contextUsage: {
@@ -60,11 +61,10 @@ export const SHIPPED_DEFAULT_VALUES: LayoutValues = {
   runningAgents: { shown: "shown", size: "full" },
   changedFiles: { shown: "shown", size: "full" },
   background: { shown: "shown", size: "full" },
-  queue: { shown: "shown", size: "full" },
   todo: { shown: "shown", size: "full" },
   attachImage: { shown: "shown" },
-  access: { shown: "shown", size: "full" },
-  model: { shown: "shown", style: "text" },
+  access: { size: "full" },
+  model: { style: "text" },
   mic: { shown: "shown" },
   railAgents: { shown: "auto" },
   railTerminals: { shown: "auto" },
@@ -108,6 +108,7 @@ const COMPACT_VALUES: LayoutValues = {
     memory: false,
     processes: false,
     ramShare: false,
+    agentRows: true,
   },
   contextUsage: {
     shown: "shown",
@@ -122,10 +123,9 @@ const COMPACT_VALUES: LayoutValues = {
   runningAgents: { shown: "shown", size: "chip" },
   changedFiles: { shown: "shown", size: "chip" },
   background: { shown: "shown", size: "chip" },
-  queue: { shown: "shown", size: "chip" },
   todo: { shown: "shown", size: "chip" },
-  access: { shown: "shown", size: "chip" },
-  model: { shown: "shown", style: "bars" },
+  access: { size: "chip" },
+  model: { style: "bars" },
   mic: { shown: "hidden" },
 };
 
@@ -149,6 +149,7 @@ const DETAILED_VALUES: LayoutValues = {
     memory: true,
     processes: true,
     ramShare: true,
+    agentRows: true,
   },
   contextUsage: {
     shown: "shown",
@@ -157,7 +158,7 @@ const DETAILED_VALUES: LayoutValues = {
     pinnedFields: CONTEXT_USAGE_ROW_KEYS,
     compactButton: "shown",
   },
-  model: { shown: "shown", style: "bars-text" },
+  model: { style: "bars-text" },
 };
 
 export const PRESET_VALUES: Readonly<Record<LayoutPresetId, LayoutValues>> = {
@@ -181,7 +182,6 @@ export function effectiveLayoutValues(
     runningAgents: { ...base.runningAgents, ...overrides.runningAgents },
     changedFiles: { ...base.changedFiles, ...overrides.changedFiles },
     background: { ...base.background, ...overrides.background },
-    queue: { ...base.queue, ...overrides.queue },
     todo: { ...base.todo, ...overrides.todo },
     attachImage: { ...base.attachImage, ...overrides.attachImage },
     access: { ...base.access, ...overrides.access },

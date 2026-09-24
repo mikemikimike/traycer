@@ -7,7 +7,7 @@ import { PopoverTrigger } from "@/components/ui/popover";
 import { RefreshIconButton } from "@/components/refresh-icon-button";
 import {
   STATUS_BAR_USAGE_CONTENT_CLASS,
-  statusBarSegmentName,
+  statusBarUsageTriggerName,
   useStatusBarUsageDisplay,
   type StatusBarUsageDisplay,
 } from "@/components/layout/status-bar/status-bar-usage-display";
@@ -31,8 +31,6 @@ import {
   type RateLimitPopoverRevealTarget,
 } from "@/stores/rate-limits/rate-limit-popover-store";
 import { fetchProviderRateLimits } from "@/lib/rate-limits/provider-rate-limit-fetch";
-import { windowPercentText } from "@/lib/rate-limits/status-bar-window-text";
-import type { AmountMode } from "@/lib/layout/layout-values";
 
 /**
  * The strip's left cluster: every visible provider's usage, the one control
@@ -162,7 +160,7 @@ export function StatusBarUsageTrigger(props: {
         aria-label={
           props.sampleLabel && cluster.kind === "no-providers"
             ? `Sample usage · ${SAMPLE_USAGE_USED_PERCENT}% used, ${100 - SAMPLE_USAGE_USED_PERCENT}% remaining`
-            : `${props.sampleLabel ? "Sample readings · " : ""}${triggerAccessibleName(cluster, display.percentMode)}`
+            : `${props.sampleLabel ? "Sample readings · " : ""}${statusBarUsageTriggerName(cluster, display.percentMode)}`
         }
         data-testid="status-bar-rate-limit-trigger"
         // The bar's own right-click menu stands down over a control that is
@@ -230,37 +228,6 @@ function statusBarSegmentAtClick(
 }
 
 /**
- * What a screen reader hears on the trigger: the strip's headline, then the
- * tightest reading for each segment it is showing - named by provider, and by
- * account too where the provider has more than one.
- *
- * One reading per segment rather than every window, because this is a control
- * name and a name is read in full before anything else can happen. The tightest
- * window is the one the segment model selects by default for the same reason -
- * it is the number that decides whether the panel is worth opening. Every
- * segment is in the name whether or not it is currently scrolled into view:
- * what a screen reader hears cannot depend on where the strip is scrolled to.
- */
-function triggerAccessibleName(
-  cluster: StatusBarRateLimitClusterModel,
-  percentMode: AmountMode,
-): string {
-  if (cluster.kind !== "segments") return "Usage limits";
-  const readings = cluster.segments.flatMap((segment) =>
-    segment.tightest === null
-      ? []
-      : [
-          `${statusBarSegmentName(segment)} ${windowPercentText(
-            segment.tightest.usedPercent,
-            percentMode,
-          )}`,
-        ],
-  );
-  if (readings.length === 0) return "Usage limits";
-  return `Usage limits: ${readings.join(", ")}`;
-}
-
-/**
  * The cluster's `↻`, fanning out over every provider it is showing.
  *
  * The ephemeral lane goes out as one forced fetch per target, all at once: how
@@ -312,6 +279,9 @@ function StatusBarRateLimitRefresh(props: {
 /**
  * One target's cold-start pull, through `fetchProviderRateLimits`.
  *
+ * Exported for the tab strip's usage reading, which owns the fetching the
+ * same way whenever the reading lives there instead (G6).
+ *
  * Its own component so the hook count stays fixed while the provider list
  * changes. This is the only automatic fetch the cluster initiates for the
  * ephemeral lane, and it is deliberate: those observers are disabled by lane,
@@ -320,7 +290,7 @@ function StatusBarRateLimitRefresh(props: {
  * direct refetch would send no `force`, which the wire reads as forced, and
  * spawn a probe the host could have answered from its gauge.
  */
-function StatusBarProviderMountRefresh(props: {
+export function StatusBarProviderMountRefresh(props: {
   readonly target: StatusBarRateLimitMountTarget;
 }): ReactNode {
   useRefreshProviderRateLimitsOnMount({

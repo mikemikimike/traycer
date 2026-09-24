@@ -137,6 +137,16 @@ const PLAN_4_2: ReadonlyArray<PlanLeafSet> = [
     files: { "components/epic-canvas/sidebar/epic-sidebar.tsx": 2 },
     deviation: null,
   },
+  // Staging round 2 (G1-G2): the message queue moved out of the dock's
+  // member set entirely - it is never a pill and never hidden, and it sits
+  // as the frame's own last child rather than as one of `dockOrder`'s rows.
+  // It carries no Customize hotspot of its own, so it needs a leaf marker
+  // that no existing dock-row item covers.
+  {
+    item: "chat-lower-dock.tsx: the message queue, attached above the composer, never a pill",
+    files: { "components/chat/chat-lower-dock.tsx": 1 },
+    deviation: null,
+  },
   // The two items L-87 adds: the sample workspace IS the canvas now, so its
   // own non-region chrome owes the same dim the real shell's does (C-03).
   {

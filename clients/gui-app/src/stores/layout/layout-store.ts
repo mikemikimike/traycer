@@ -113,9 +113,10 @@ const LAYOUT_PERSIST_KEY = persistKey(STORE_KEYS.layout);
  * exist between L-155 and L-166, so a v3 record names none, and left as it is
  * a dogfooder would be the one user in the world whose sidebar never draws
  * Agents and Artifacts together. The five values that DID ship are carried
- * separately, below.
+ * separately, below. Version 5 splits the agent rows' resource readings off
+ * the monitor's Shown (G7, `withSplitResourceReadings`).
  */
-const LAYOUT_PERSIST_VERSION = 4;
+const LAYOUT_PERSIST_VERSION = 5;
 
 const SHIPPED_CARRY = carryShippedLayoutValues();
 
@@ -356,8 +357,9 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
       ? { minimap: { shown: "hidden" } }
       : {}),
     ...carriedContextUsage(settings),
+    // Both halves: that one switch hid the agent rows' readings too (G7).
     ...(settings.showGlobalResourceMonitor === false
-      ? { resourceMonitor: { shown: "hidden" } }
+      ? { resourceMonitor: { shown: "hidden", agentRows: false } }
       : {}),
     ...carriedRailVisibility(leftPanel.panelVisibilityOverrideById),
   };
@@ -519,8 +521,40 @@ function migrateLayoutPersistedState(
   persistedState: unknown,
   version: number,
 ): unknown {
-  if (version >= LAYOUT_PERSIST_VERSION) return persistedState;
   if (!isRecord(persistedState)) return persistedState;
+  const railed =
+    version >= 4 ? persistedState : migrateRail(persistedState, version);
+  return version >= 5 ? railed : withSplitResourceReadings(railed);
+}
+
+/**
+ * Version 5 (G7): the agent rows' readings used to ride the monitor's Shown,
+ * and now have their own `agentRows`. A record that hid the monitor hid the
+ * rows too, so it keeps them hidden; every other record takes the shipped
+ * `true`. Done here, once, rather than in the value resolver, which also runs
+ * on every write - there it would re-couple the two on each later Hide.
+ */
+function withSplitResourceReadings(
+  persistedState: Record<string, unknown>,
+): Record<string, unknown> {
+  const overrides = persistedState.overrides;
+  if (!isRecord(overrides)) return persistedState;
+  const monitor = overrides.resourceMonitor;
+  if (!isRecord(monitor) || monitor.shown !== "hidden") return persistedState;
+  if (typeof monitor.agentRows === "boolean") return persistedState;
+  return {
+    ...persistedState,
+    overrides: {
+      ...overrides,
+      resourceMonitor: { ...monitor, agentRows: false },
+    },
+  };
+}
+
+function migrateRail(
+  persistedState: Record<string, unknown>,
+  version: number,
+): Record<string, unknown> {
   const arrangement = persistedState.arrangement;
   if (!isRecord(arrangement) || !Array.isArray(arrangement.rail)) {
     return persistedState;

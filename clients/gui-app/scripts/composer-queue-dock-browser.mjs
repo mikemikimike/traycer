@@ -1,0 +1,537 @@
+// Browser regression: the message queue is never a pill (staging round 2,
+// G1-G2). While it holds anything it sits attached directly above the
+// composer - its rows, their actions and Pause - with no click, in every
+// preset; the pill row, when there is one, stands above it; and when it empties
+// it leaves no gap behind.
+//
+// Drives `src/__tests__/browser/composer-queue-dock.tsx` - the real tile's dock
+// derivation and the real `ChatLowerDock` over the real composer shell - with
+// real key input, in the Compact and Default presets, light and dark. Every
+// one-line queue row, a badged agent reply included, is also held to the dock's
+// one row metric (L-171, L-172). Todo is
+// the fixture's other dock member, so the queue is always read beside a
+// surface that folds into a pill in Compact.
+//
+// Usage: node scripts/composer-queue-dock-browser.mjs [--out DIR]
+//   --out DIR   also write a screenshot of the lower surface per step into DIR.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { createServer as createTcpServer } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+import {
+  findChrome,
+  launchChromeWithDevTools,
+  terminateProcessTree,
+} from "./chrome-launcher.mjs";
+
+const PRESETS = ["compact", "default"];
+const THEMES = ["light", "dark"];
+// Sub-pixel layout, compared at a pixel.
+const EPSILON = 1;
+// Row heights are stated, not emergent (L-171), so they are compared tighter.
+const ROW_EPSILON = 0.5;
+
+/**
+ * The one-line row every dock panel is held to (L-171): the fixture's own
+ * recipe string on a throwaway row with one line of text, measured by the same
+ * engine. A queue row that measures anything else - a floated toolbar that
+ * outgrew its budget, a provenance badge that wrapped (L-172) - moves the
+ * composer's upper edge whenever the queue changes.
+ */
+const ROW_REFERENCE = `(() => {
+  const row = document.createElement("div");
+  row.className = window.__probeRowRecipe;
+  row.style.width = "420px";
+  row.textContent = "x";
+  document.body.append(row);
+  const height = row.getBoundingClientRect().height;
+  row.remove();
+  return height;
+})()`;
+
+const args = process.argv.slice(2);
+const outIndex = args.indexOf("--out");
+const outDir =
+  outIndex === -1 ? null : path.resolve(args[outIndex + 1] ?? "queue-shots");
+
+const projectRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
+const fixtureUrlPath = "/src/__tests__/browser/composer-queue-dock.html";
+const chromePath = await findChrome("the composer queue dock regression");
+const vitePort = await freePort();
+let chrome;
+let chromeProfilePath;
+let client;
+let viteProcess;
+let viteConfigDir;
+
+/**
+ * One reading of the lower surface: the pill row, the queue, the composer, the
+ * queue pill if any, and where focus is.
+ */
+const READ = `(() => {
+  const box = (element) => {
+    if (element === null) return null;
+    const rect = element.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, height: rect.height };
+  };
+  const composer = document.querySelector("[data-probe-composer]");
+  const frame = composer.closest("[data-composer-editor-frame]") ?? composer;
+  return {
+    strip: box(document.querySelector('[data-testid="chat-dock-compact-strip"]')),
+    queuePill: document.querySelector('[data-testid="chat-dock-chip-queue"]') !== null,
+    queue: box(document.querySelector('[data-testid="queued-message-rows"]')),
+    rows: document.querySelectorAll('[data-testid="queued-message-row"]').length,
+    pause: document.querySelector('[data-testid="pause-queue-button"]') !== null,
+    composer: box(frame.closest("[data-composer-shell]") ?? frame),
+    rowHeights: [...document.querySelectorAll('[data-testid="queued-message-row"]')].map(
+      (row) => row.getBoundingClientRect().height,
+    ),
+    provenance: document.querySelector('[data-testid="queued-message-provenance-chip"]') !== null,
+    focused: document.activeElement === composer,
+  };
+})()`;
+
+try {
+  if (outDir !== null) await mkdir(outDir, { recursive: true });
+  const baseUrl = `http://127.0.0.1:${vitePort}${fixtureUrlPath}`;
+  const requireFromHere = createRequire(import.meta.url);
+  const viteManifestPath = requireFromHere.resolve("vite/package.json");
+  const viteManifest = requireFromHere(viteManifestPath);
+  const viteEntry = path.resolve(
+    path.dirname(viteManifestPath),
+    viteManifest.bin.vite,
+  );
+  // File watching off, through a wrapper around the shared config: the run
+  // never needs to follow an edit, and in a tree several agents write at once
+  // a watcher invalidates the fixture mid-load on a peer's save (the pattern
+  // `layout-editor-browser.mjs` records in its `spawnVite`).
+  viteConfigDir = await mkdtemp(path.join(tmpdir(), "composer-queue-vite-"));
+  const viteConfigPath = path.join(viteConfigDir, "vite.no-watch.config.mjs");
+  await writeFile(
+    viteConfigPath,
+    [
+      `import base from ${JSON.stringify(path.join(projectRoot, "vitest.config.ts"))};`,
+      "export default { ...base, server: { ...base.server, watch: null } };",
+      "",
+    ].join("\n"),
+  );
+  viteProcess = spawn(
+    "node",
+    [
+      viteEntry,
+      "--config",
+      viteConfigPath,
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(vitePort),
+      "--strictPort",
+    ],
+    { cwd: projectRoot, stdio: ["ignore", "ignore", "pipe"] },
+  );
+  let viteError = "";
+  viteProcess.stderr.setEncoding("utf8");
+  viteProcess.stderr.on("data", (chunk) => {
+    viteError += chunk;
+  });
+  await waitForHttp(baseUrl, viteProcess, () => viteError, "Vite");
+
+  const launched = await launchChromeWithDevTools(
+    chromePath,
+    "traycer-composer-queue-dock-",
+    [],
+  );
+  chrome = launched.chrome;
+  chromeProfilePath = launched.profilePath;
+  const devtoolsUrl = launched.devtoolsHttpUrl;
+  await waitForHttp(
+    new URL("/json/version", devtoolsUrl).href,
+    chrome,
+    launched.readError,
+    "Chrome DevTools",
+  );
+  const targetResponse = await fetch(
+    new URL(`/json/new?about:blank`, devtoolsUrl),
+    { method: "PUT" },
+  );
+  if (!targetResponse.ok) {
+    throw new Error(`Chrome could not open a page: ${targetResponse.status}`);
+  }
+  const target = await targetResponse.json();
+  client = await connectCdp(target.webSocketDebuggerUrl);
+  await client.send("Runtime.enable");
+  await client.send("Page.enable");
+  // A module that fails to load renders nothing and says why only here.
+  await client.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__probeErrors = [];
+      addEventListener("error", (event) => window.__probeErrors.push(String(event.message ?? event.target?.src ?? event.target?.href ?? event)), true);
+      addEventListener("unhandledrejection", (event) => window.__probeErrors.push(String(event.reason)));`,
+  });
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: 900,
+    height: 700,
+    deviceScaleFactor: 2,
+    mobile: false,
+  });
+
+  const failures = [];
+  for (const preset of PRESETS) {
+    for (const theme of THEMES) {
+      const where = `${preset}/${theme}`;
+      // The layout store persists its preset; each case starts from nothing.
+      // `about:blank` (the first case) has no storage and nothing to clear.
+      await evaluate(client, "try { localStorage.clear() } catch {}");
+      await navigate(client, baseUrl);
+      await waitFor(client, "the fixture", "window.__probeReady === true");
+      await evaluate(
+        client,
+        `window.__probePreset(${JSON.stringify(preset)}); window.__probeTheme(${JSON.stringify(theme)})`,
+      );
+      await settle(client);
+      const empty = await evaluate(client, READ);
+      const rowReference = await evaluate(client, ROW_REFERENCE);
+      await shoot(client, `${where}.0-empty`);
+
+      await evaluate(
+        client,
+        `document.querySelector("[data-probe-composer]").focus()`,
+      );
+      for (const [count, text] of [
+        [1, "hi"],
+        [2, "and then the tests"],
+      ]) {
+        await client.send("Input.insertText", { text });
+        await pressEnter(client);
+        await settle(client);
+        const reading = await evaluate(client, READ);
+        await shoot(client, `${where}.${count}-queued`);
+        const step = `${where} after queueing ${count}`;
+        if (reading.queuePill) failures.push(`${step}: the queue is a pill`);
+        if (reading.queue === null) {
+          failures.push(
+            `${step}: the queue is not attached above the composer`,
+          );
+        } else {
+          if (reading.rows !== count) {
+            failures.push(`${step}: ${reading.rows} rows drawn, not ${count}`);
+          }
+          if (!reading.pause) failures.push(`${step}: no Pause`);
+          for (const height of reading.rowHeights) {
+            if (Math.abs(height - rowReference) > ROW_EPSILON) {
+              failures.push(
+                `${step}: a one-line row measures ${height}px, not the ${rowReference}px row metric`,
+              );
+            }
+          }
+          // Directly above the composer: the frame tucks into it with `-mb-px`.
+          if (
+            Math.abs(reading.queue.bottom - reading.composer.top) >
+            EPSILON + 1
+          ) {
+            failures.push(
+              `${step}: queue ends at ${reading.queue.bottom}, composer starts at ${reading.composer.top}`,
+            );
+          }
+          if (
+            reading.strip !== null &&
+            reading.strip.bottom > reading.queue.top + EPSILON
+          ) {
+            failures.push(`${step}: the pill row is not above the queue`);
+          }
+        }
+        if (preset === "compact" && reading.strip === null) {
+          failures.push(`${step}: the Todo pill row is gone`);
+        }
+        if (!reading.focused) failures.push(`${step}: focus left the composer`);
+      }
+
+      for (const remaining of [1, 0]) {
+        const step = `${where} after deleting down to ${remaining}`;
+        const deleted = await evaluate(
+          client,
+          `(() => {
+             const button = document.querySelector('[aria-label="Delete queued message"]');
+             button?.click();
+             return button !== null;
+           })()`,
+        );
+        if (!deleted) {
+          failures.push(
+            `${step}: no row's Delete is reachable without a click`,
+          );
+          break;
+        }
+        await settle(client);
+        const reading = await evaluate(client, READ);
+        await shoot(
+          client,
+          `${where}.${3 - remaining}-deleted-to-${remaining}`,
+        );
+        if (remaining > 0 && reading.rows !== remaining) {
+          failures.push(`${step}: ${reading.rows} rows drawn`);
+        }
+        if (remaining === 0) {
+          if (reading.queue !== null)
+            failures.push(`${step}: queue still drawn`);
+          // No leftover gap: everything sits exactly where it did before the
+          // first message was queued.
+          if (Math.abs(reading.composer.top - empty.composer.top) > EPSILON) {
+            failures.push(
+              `${step}: composer at ${reading.composer.top}, was ${empty.composer.top} before queueing`,
+            );
+          }
+          if (
+            (reading.strip === null) !== (empty.strip === null) ||
+            (reading.strip !== null &&
+              Math.abs(reading.strip.bottom - empty.strip.bottom) > EPSILON)
+          ) {
+            failures.push(`${step}: the pill row moved`);
+          }
+        }
+      }
+      // An agent's reply carries the provenance badge (L-172). Default only:
+      // in Compact the Active agents pill stands for received replies, so the
+      // queue is not handed them unless that pill is open.
+      if (preset === "default") {
+        await evaluate(client, `window.__probeQueueAgentReply("ok")`);
+        await settle(client);
+        const reading = await evaluate(client, READ);
+        await shoot(client, `${where}.4-agent-reply`);
+        const step = `${where} with an agent's reply queued`;
+        if (!reading.provenance) failures.push(`${step}: no provenance badge`);
+        if (reading.rowHeights.length !== 1) {
+          failures.push(`${step}: ${reading.rowHeights.length} rows drawn`);
+        } else if (
+          Math.abs(reading.rowHeights[0] - rowReference) > ROW_EPSILON
+        ) {
+          failures.push(
+            `${step}: the badged row measures ${reading.rowHeights[0]}px, not the ${rowReference}px row metric`,
+          );
+        }
+      }
+      console.log(`${where}: done (row metric ${rowReference}px)`);
+    }
+  }
+
+  for (const failure of failures) console.log(`FAIL ${failure}`);
+  assert.equal(failures.length, 0, "the queue measured wrong - see above");
+  console.log("composer queue dock regression passed");
+} catch (error) {
+  console.error("MEASUREMENT FAILED:", error);
+  process.exitCode = 1;
+} finally {
+  client?.close();
+  viteProcess?.kill("SIGTERM");
+  if (viteConfigDir !== undefined) {
+    await rm(viteConfigDir, { recursive: true, force: true });
+  }
+  if (chrome !== undefined) {
+    try {
+      await terminateProcessTree(chrome);
+    } catch (error) {
+      console.error("Chrome termination failed:", error);
+      process.exitCode = 1;
+    }
+  }
+  if (chromeProfilePath !== undefined) {
+    await rm(chromeProfilePath, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+    });
+  }
+}
+
+async function pressEnter(client) {
+  for (const type of ["keyDown", "keyUp"]) {
+    await client.send("Input.dispatchKeyEvent", {
+      type,
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      text: type === "keyDown" ? "\r" : undefined,
+    });
+  }
+}
+
+/** The lower surface alone: the pill row down to the composer's bottom. */
+async function shoot(client, name) {
+  if (outDir === null) return;
+  const clip = await evaluate(
+    client,
+    `(() => {
+       const bottom = document.querySelector("[data-probe-composer]").closest(".shrink-0").getBoundingClientRect();
+       const top = Math.max(0, bottom.top - 360);
+       return { x: 0, y: top, width: window.innerWidth, height: bottom.bottom - top };
+     })()`,
+  );
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    clip: { ...clip, scale: 1 },
+  });
+  await writeFile(
+    path.join(outDir, `${name.replace("/", "-")}.png`),
+    Buffer.from(shot.data, "base64"),
+  );
+}
+
+async function navigate(client, url) {
+  try {
+    await evaluate(client, "window.__probeStaleDocument = true");
+  } catch (error) {
+    if (!isNavigationContextError(error)) throw error;
+  }
+  await client.send("Page.navigate", { url });
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const ready = await evaluate(
+        client,
+        `window.__probeStaleDocument !== true && document.readyState === "complete"`,
+      );
+      if (ready) return;
+    } catch (error) {
+      if (!isNavigationContextError(error)) throw error;
+    }
+    await delay(50);
+  }
+  throw new Error(`Timed out waiting for the navigation to ${url}`);
+}
+
+function isNavigationContextError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /context was destroyed|Cannot find context|Inspected target navigated/i.test(
+    message,
+  );
+}
+
+function settle(client) {
+  return evaluate(
+    client,
+    `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))`,
+  );
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = createTcpServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port =
+        typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function waitForHttp(url, child, readError, label) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`${label} exited early: ${readError()}`);
+    }
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      // not up yet
+    }
+    await delay(150);
+  }
+  throw new Error(`${label} did not become reachable: ${readError()}`);
+}
+
+function connectCdp(url) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    const pending = new Map();
+    let nextId = 0;
+    const connectTimer = setTimeout(
+      () => reject(new Error("CDP connect timed out")),
+      15_000,
+    );
+    const failAll = (reason) => {
+      for (const [id, request] of pending) {
+        pending.delete(id);
+        request.reject(reason);
+      }
+    };
+    socket.addEventListener("error", (event) => {
+      const error = new Error(`CDP socket error: ${String(event)}`);
+      reject(error);
+      failAll(error);
+    });
+    socket.addEventListener("close", (event) => {
+      failAll(new Error(`CDP socket closed (${event.code})`));
+    });
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (typeof message.id !== "number") return;
+      const request = pending.get(message.id);
+      if (request === undefined) return;
+      pending.delete(message.id);
+      if (message.error === undefined) request.resolve(message.result);
+      else request.reject(new Error(message.error.message));
+    });
+    socket.addEventListener("open", () => {
+      clearTimeout(connectTimer);
+      resolve({
+        send(method, params = {}) {
+          if (socket.readyState !== WebSocket.OPEN) {
+            return Promise.reject(
+              new Error(`CDP socket not open for ${method}`),
+            );
+          }
+          return new Promise((requestResolve, requestReject) => {
+            const id = ++nextId;
+            pending.set(id, { resolve: requestResolve, reject: requestReject });
+            socket.send(JSON.stringify({ id, method, params }));
+          });
+        },
+        close() {
+          socket.close();
+        },
+      });
+    });
+  });
+}
+
+async function evaluate(client, expression) {
+  const response = await client.send("Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (response.exceptionDetails !== undefined) {
+    throw new Error(
+      response.exceptionDetails.exception?.description ??
+        response.exceptionDetails.text ??
+        "Browser evaluation failed",
+    );
+  }
+  return response.result.value;
+}
+
+async function waitFor(client, label, expression) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (await evaluate(client, expression)) return;
+    await delay(50);
+  }
+  const pageState = await evaluate(
+    client,
+    `({ errors: window.__probeErrors, text: document.body.innerText, html: document.body.innerHTML.slice(0, 3000) })`,
+  );
+  throw new Error(
+    `Timed out waiting for ${label}:\n${JSON.stringify(pageState, null, 2)}`,
+  );
+}

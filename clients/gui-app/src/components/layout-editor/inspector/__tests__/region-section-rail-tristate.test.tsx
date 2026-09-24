@@ -57,35 +57,48 @@ describe("rail region tri-state header (L-47)", () => {
     }
   });
 
-  it("gives a rail region with no written rule the same tri-state, and no hint line", () => {
+  it("gives a rail region with no written rule a plain switch instead (G6)", () => {
+    // Seven of the nine panels have no presence rule of their own, so Auto
+    // and Shown drew the same rail and the third option was a choice with no
+    // effect (`offersAuto` is false). They get `RegionShownControl`'s plain
+    // switch, same as any other region - not the tri-state.
     const facts = regionFacts("railAgents");
     expect(facts.hint).toBeNull();
 
     render(<RegionSection regionId="railAgents" onOpenProvider={noop} />);
 
-    // The value is three-state for all nine panels (L-47, I-10), so the
-    // control is too: a two-position switch could not reach "pinned open".
     expect(
-      screen.getByRole("radiogroup", { name: `${facts.name} visibility` }),
-    ).not.toBeNull();
-    expect(
-      screen.queryByRole("switch", { name: `Show ${facts.name}` }),
+      screen.queryByRole("radiogroup", { name: `${facts.name} visibility` }),
     ).toBeNull();
     expect(
-      screen.getAllByRole("radio").map((option) => option.textContent),
-    ).toEqual(["Auto", "Shown", "Hidden"]);
+      screen.getByRole("switch", { name: `Show ${facts.name}` }),
+    ).not.toBeNull();
     // Auto still means "follow the app"; only a rule that is written down
     // gets a line spelling it out.
     expect(screen.queryByText(/^Auto - /)).toBeNull();
   });
 
-  it("keeps Hidden reachable from the tri-state on a panel with no rule", () => {
+  it("still writes the rail's three-state value from the plain switch on a panel with no rule (G6)", () => {
     render(<RegionSection regionId="railFileTree" onOpenProvider={noop} />);
+    const toggle = screen.getByRole("switch", {
+      name: `Show ${regionFacts("railFileTree").name}`,
+    });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
 
-    fireEvent.click(screen.getByRole("radio", { name: "Hidden" }));
+    fireEvent.click(toggle);
 
+    // The switch is binary, but what it writes is still `hidden` on the way
+    // off - Hidden stays reachable even though the third option is gone.
     expect(useLayoutStore.getState().overrides.railFileTree?.shown).toBe(
       "hidden",
+    );
+
+    fireEvent.click(toggle);
+
+    // And back on writes the rail's own "on" value, `auto` - not the
+    // literal `shown` a plain region's switch would write.
+    expect(useLayoutStore.getState().overrides.railFileTree?.shown).toBe(
+      "auto",
     );
   });
 

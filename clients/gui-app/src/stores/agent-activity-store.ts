@@ -425,32 +425,6 @@ export function getEpicAgentActivity(epicId: string): EpicAgentActivity {
   );
 }
 
-/**
- * How many agents are working (turn or background) across every epic and
- * host, for the account row. An agent two hosts both report counts once.
- *
- * Only slices whose stream attested its union THIS epoch count: a reconnecting
- * slice keeps its last union on purpose (see
- * {@link noteAgentActivityConnectionStatus}), and printing that as a live
- * total would state a stale number as fact. So this is a lower bound, and a
- * complete one only when {@link selectKnownHostsActivityCoverage} says
- * `covered`.
- */
-export function useAccountRunningAgentCount(): number {
-  return useAgentActivityStore((state) => {
-    const working = new Set<string>();
-    for (const host of state.byHost.values()) {
-      if (host.connectionStatus !== "open" || !host.stateFrameSeenThisEpoch) {
-        continue;
-      }
-      for (const activity of host.byEpic.values()) {
-        for (const agentId of activity.working) working.add(agentId);
-      }
-    }
-    return working.size;
-  });
-}
-
 export function subscribeAgentActivity(listener: () => void): () => void {
   let previous = useAgentActivityStore.getState().byHost;
   return useAgentActivityStore.subscribe((state) => {

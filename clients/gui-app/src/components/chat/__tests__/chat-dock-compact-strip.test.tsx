@@ -471,11 +471,10 @@ describe("<ChatDockCompactStrip />", () => {
       "filesChanged",
       "activeAgents",
       "background",
-      "queue",
       "todo",
     ];
 
-    it("rings no pill when a chat opens with five of them", () => {
+    it("rings no pill when a chat opens with four of them", () => {
       renderStrip(
         stripValue(
           ALL_SECTIONS.map((section) => ({
@@ -532,14 +531,15 @@ describe("<ChatDockCompactStrip />", () => {
     // dock renders at all, so a chat whose members are a full Todo row and
     // three pill-sized ones mounts an EMPTY strip. "Has committed once" was
     // true one commit later, over no pills at all, and the first burst a turn
-    // brought - files changed, an agent started, a message queued - rang three
-    // rings at once. Mutation check: drop the `hasChips` term from the effect
+    // brought - files changed, an agent started, background activity began -
+    // rang three rings at once. Mutation check: drop the `hasChips` term from
+    // the effect
     // in `chat-dock-compact-strip.tsx` and this goes red.
     it("rings no pill in the first burst after an empty mount", () => {
       const BURST: ReadonlyArray<ChatDockSection> = [
         "filesChanged",
         "activeAgents",
-        "queue",
+        "background",
       ];
       const burst = BURST.map((section) => ({
         ...unitChip(section),
@@ -571,16 +571,16 @@ describe("<ChatDockCompactStrip />", () => {
       ).toBe("true");
     });
 
-    // The other half of the same condition. The pills are built from five
+    // The other half of the same condition. The pills are built from four
     // independently arriving sources, and two of them (Changed files, Todo)
-    // are gated on the chat's snapshot while the queue and the background rows
-    // are not - so a strip can hold a pill before the snapshot lands, and
-    // would then be armed for the burst the snapshot itself brings. Mutation
-    // check: drop the `snapshotLoaded` term from the effect and this goes red.
+    // are gated on the chat's snapshot while the background row is not - so a
+    // strip can hold a pill before the snapshot lands, and would then be armed
+    // for the burst the snapshot itself brings. Mutation check: drop the
+    // `snapshotLoaded` term from the effect and this goes red.
     it("rings no pill in the burst the snapshot brings", () => {
       const { rerender } = render(
         stripUi(
-          stripValue([{ ...unitChip("queue"), pulseToken: "queued-1" }]),
+          stripValue([{ ...unitChip("background"), pulseToken: "held-1" }]),
           false,
         ),
       );
@@ -588,7 +588,7 @@ describe("<ChatDockCompactStrip />", () => {
       rerender(
         stripUi(
           stripValue([
-            { ...unitChip("queue"), pulseToken: "queued-1" },
+            { ...unitChip("background"), pulseToken: "held-1" },
             { ...unitChip("filesChanged"), pulseToken: "changed" },
             { ...unitChip("todo"), pulseToken: "todo" },
           ]),
@@ -596,7 +596,7 @@ describe("<ChatDockCompactStrip />", () => {
         ),
       );
 
-      for (const section of ["queue", "filesChanged", "todo"]) {
+      for (const section of ["background", "filesChanged", "todo"]) {
         expect(
           screen
             .getByTestId(`chat-dock-chip-${section}`)

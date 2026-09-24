@@ -368,20 +368,16 @@ function toggleStatusBarProvider(providerId: RateLimitProviderId): void {
 
 /**
  * Both readings, because the strip stays on screen for either one of them
- * (L-156) and the eye's own gate is whether the STRIP is drawn at all.
+ * (L-156). The eye's own gate is no longer whether this physical STRIP is
+ * drawn - see `setUsageLimitsShown` below - but moving a reading off the
+ * strip entirely (`"header"`) is still exercised by the placement tests, so
+ * this stays.
  */
 function setStatusBarPlacement(usageHost: "status-bar" | "header"): void {
   useLayoutStore.getState().setArrangement({
     ...useLayoutStore.getState().arrangement,
     usageHost,
     resourceHost: usageHost,
-  });
-}
-
-function setStatusBarMobileFooter(mobileFooter: boolean): void {
-  useLayoutStore.getState().setArrangement({
-    ...useLayoutStore.getState().arrangement,
-    mobileFooter,
   });
 }
 
@@ -1598,12 +1594,16 @@ describe("<RateLimitPopover /> rail", () => {
     ).toBeTruthy();
   });
 
-  // The eye governs a segment on the strip, so it is drawn only while the
-  // strip is: `placement` decides that on a desktop viewport, `mobileFooter`
-  // on a mobile one (`selectStatusBarShown`, the read `AppShell` mounts the
-  // strip on). The "drawn" highlight goes with it - with no strip there is
-  // nothing for an accented card to be drawn ON.
-  describe("while the strip is not on screen", () => {
+  // The eye governs a segment wherever the reading currently draws - the
+  // status bar, the tab strip, or the phone header - since G6 every
+  // placement reads through the same selector. What used to gate the eye on
+  // "is the physical status-bar strip on screen" (`useStatusBarShown`) now
+  // gates it on the usageLimits region's own Shown
+  // (`useRegionShown("usageLimits")`, `ProfileRateLimitProviderBlock`'s
+  // `readingShown`): with no reading anywhere there is no segment for the
+  // highlight to point at and none for the eye to govern, so both go until it
+  // returns - and neither cares which placement it returns to.
+  describe("while the reading is hidden", () => {
     function expectNoEyeAndNoHighlight(): void {
       expect(
         screen.queryByTestId("rate-limit-profile-status-bar-eye"),
@@ -1611,6 +1611,13 @@ describe("<RateLimitPopover /> rail", () => {
       expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(
         0,
       );
+    }
+
+    /** The one field `readingShown` actually reads (`overrides.usageLimits.shown`). */
+    function setUsageLimitsShown(shown: boolean): void {
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { shown: shown ? "shown" : "hidden" });
     }
 
     it("offers the eye on every card under the status-bar placement", () => {
@@ -1621,7 +1628,7 @@ describe("<RateLimitPopover /> rail", () => {
       expect(statusBarEyes()).toHaveLength(4);
     });
 
-    it("draws neither the eye nor the highlight under the header placement, and keeps the checks for the strip's return", () => {
+    it("draws neither the eye nor the highlight while usageLimits is hidden, and keeps the checks for its return", () => {
       configureTwoAccountProviders();
       // A real check in the store for the viewed host, and the selection the
       // caller would resolve from it.
@@ -1634,7 +1641,7 @@ describe("<RateLimitPopover /> rail", () => {
         shownProfiles: { codex: ["work-profile"] },
         lastProfileByHarness: { claude: "personal-profile" },
       };
-      setStatusBarPlacement("header");
+      setUsageLimitsShown(false);
       renderPopover();
 
       // The cards themselves are unchanged; only the strip controls go.
@@ -1646,9 +1653,9 @@ describe("<RateLimitPopover /> rail", () => {
         checked,
       );
 
-      // ...and takes effect again the moment the strip returns.
+      // ...and takes effect again the moment the reading returns.
       cleanup();
-      setStatusBarPlacement("status-bar");
+      setUsageLimitsShown(true);
       renderPopover();
 
       expect(
@@ -1666,21 +1673,43 @@ describe("<RateLimitPopover /> rail", () => {
       );
     });
 
-    it("ignores the placement on a mobile viewport and follows the footer switch", () => {
+    // The placement the reading currently lives at is no longer the gate.
+    // Moving it off the physical status bar and into the header (the tab
+    // strip) used to blank the eye, because that specific surface stopped
+    // rendering - now the reading itself moved with the placement and is
+    // still on screen, so the eye and the highlight stay with it.
+    it("keeps the eye and the highlight under the header placement, since the reading still draws there", () => {
+      configureTwoAccountProviders();
+      setStatusBarProfileShown("host-a", "codex", "work-profile", true);
+      mocks.profileSelection = {
+        shownProfiles: { codex: ["work-profile"] },
+        lastProfileByHarness: { claude: "personal-profile" },
+      };
+      setStatusBarPlacement("header");
+      renderPopover();
+
+      expect(statusBarEyes()).toHaveLength(4);
+      expect(
+        screen
+          .getByTestId("rate-limit-profile-card-codex-work-profile")
+          .getAttribute("aria-current"),
+      ).toBe("true");
+    });
+
+    it("keeps following usageLimits Shown on a mobile viewport too, regardless of the mobile footer switch", () => {
       configureTwoAccountProviders();
       mocks.profileSelection = {
         shownProfiles: { codex: ["work-profile"] },
         lastProfileByHarness: {},
       };
       setViewportWidth(MOBILE_VIEWPORT_WIDTH);
-      // The placement a desktop would mount the strip on says nothing here.
-      setStatusBarPlacement("status-bar");
+      setUsageLimitsShown(false);
       renderPopover();
 
       expectNoEyeAndNoHighlight();
 
       cleanup();
-      setStatusBarMobileFooter(true);
+      setUsageLimitsShown(true);
       renderPopover();
 
       expect(statusBarEyes()).toHaveLength(4);
@@ -1690,7 +1719,7 @@ describe("<RateLimitPopover /> rail", () => {
           .getAttribute("aria-current"),
       ).toBe("true");
       // The provider rule still applies on top: a hidden provider has no
-      // segment on a strip that IS there.
+      // segment on a reading that IS shown.
       cleanup();
       toggleStatusBarProvider("codex");
       renderPopover();

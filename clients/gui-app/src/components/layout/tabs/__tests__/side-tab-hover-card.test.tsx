@@ -219,6 +219,20 @@ describe("SideTabHoverCardBody", () => {
       "turn",
       "background",
     ]);
+    // G5: only the agent rows draw a running/background status glyph - the
+    // state line's own counts stay plain text.
+    expect(
+      screen
+        .getByTestId("side-tab-hover-card-state")
+        .querySelectorAll("[data-status-glyph]"),
+    ).toHaveLength(0);
+    expect(
+      items.map((item) =>
+        item
+          .querySelector("[data-status-glyph]")
+          ?.getAttribute("data-status-glyph"),
+      ),
+    ).toEqual(["running", "background"]);
   });
 
   it("names an untitled warm agent rather than leaving it blank", () => {
@@ -301,7 +315,7 @@ describe("SideTabHoverCardBody", () => {
     },
   );
 
-  it("falls back to Running or Background work with no badge", () => {
+  it("shows the state line as plain counts text with no status glyph, with no badge (G5)", () => {
     render(
       <SideTabHoverCardBody
         title="Fix login"
@@ -310,9 +324,9 @@ describe("SideTabHoverCardBody", () => {
         agents={agents(1, 0, "covered")}
       />,
     );
-    expect(
-      screen.getByTestId("side-tab-hover-card-state").textContent,
-    ).toContain("Running");
+    const running = screen.getByTestId("side-tab-hover-card-state");
+    expect(running.textContent).toBe("1 running");
+    expect(running.querySelectorAll("[data-status-glyph]")).toHaveLength(0);
     cleanup();
 
     render(
@@ -320,12 +334,46 @@ describe("SideTabHoverCardBody", () => {
         title="Fix login"
         epicId={null}
         badge={null}
-        agents={agents(0, 1, "covered")}
+        agents={agents(2, 1, "covered")}
+      />,
+    );
+    const both = screen.getByTestId("side-tab-hover-card-state");
+    expect(both.textContent).toBe("2 running · 1 background");
+    expect(both.querySelectorAll("[data-status-glyph]")).toHaveLength(0);
+  });
+
+  it("marks the badge glyph and right-aligns the counts only when a badge is present (G5)", () => {
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge="approval"
+        agents={agents(2, 0, "covered")}
+      />,
+    );
+    const state = screen.getByTestId("side-tab-hover-card-state");
+    const glyph = state.querySelector("[data-status-glyph]");
+    expect(glyph?.getAttribute("data-status-glyph")).toBe("approval");
+    expect(
+      screen
+        .getByTestId("side-tab-hover-card-counts")
+        .classList.contains("ms-auto"),
+    ).toBe(true);
+    cleanup();
+
+    render(
+      <SideTabHoverCardBody
+        title="Fix login"
+        epicId={null}
+        badge={null}
+        agents={agents(2, 0, "covered")}
       />,
     );
     expect(
-      screen.getByTestId("side-tab-hover-card-state").textContent,
-    ).toContain("Background work");
+      screen
+        .getByTestId("side-tab-hover-card-counts")
+        .classList.contains("ms-auto"),
+    ).toBe(false);
   });
 });
 
@@ -346,7 +394,7 @@ describe("SideTabHoverCardBody under unserved/indeterminate coverage (F8 round 2
     expect(screen.queryByTestId("side-tab-hover-card-partial")).toBeNull();
   });
 
-  it("keeps the running state and adds the partial notice when unserved coverage still has agents", () => {
+  it("shows the plain counts and adds the partial notice when unserved coverage still has agents (G5)", () => {
     render(
       <SideTabHoverCardBody
         title="Fix login"
@@ -356,7 +404,8 @@ describe("SideTabHoverCardBody under unserved/indeterminate coverage (F8 round 2
       />,
     );
     const state = screen.getByTestId("side-tab-hover-card-state");
-    expect(state.textContent).toContain("Running");
+    expect(state.textContent).toBe("1 running");
+    expect(state.querySelectorAll("[data-status-glyph]")).toHaveLength(0);
     expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
     expect(screen.getByTestId("side-tab-hover-card-partial").textContent).toBe(
       PARTIAL_ACTIVITY_NOTICE,

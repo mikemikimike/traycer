@@ -29,7 +29,10 @@ import type { RailRegionId } from "@/lib/layout/region-id";
  * free, and so `moveCanvasOrderMember` keeps placing one member by id whatever
  * kind it is. Its ID names the pair, which is what makes the join drop the
  * moment either panel moves away: {@link normalizeRail} keeps a link only
- * while the two panels it names are still adjacent in that order.
+ * while the two panels it names are still adjacent, in either order (G3).
+ *
+ * The rail DRAWS a stack as one view group (G3, as VS Code does): the top
+ * panel's icon stands for both, and its name lists both.
  */
 export type RailEntry =
   | { readonly kind: "panel"; readonly id: RailRegionId }
@@ -212,8 +215,8 @@ export function visibleRailPanelIds(
 }
 
 /**
- * One thing a rail SURFACE draws, which is not one entry: a stack is two icons
- * inside one capsule (L-167), so the three surfaces that draw the rail - the
+ * One thing a rail SURFACE draws, which is not one entry: a stack is one
+ * group icon standing for two panels (G3), so the three surfaces that draw the rail - the
  * epic sidebar's column, the sample scene's copy of it and the preset card's
  * miniature - walk this rather than `arrangement.rail` directly.
  *
@@ -270,7 +273,7 @@ export function railDisplayEntries(
       above.kind === "panel" &&
       rail[index - 1].kind === "stack" &&
       isVisible(above.id);
-    // Already drawn as the bottom of the capsule above; a panel whose partner
+    // Already drawn as the bottom of the group above; a panel whose partner
     // is hidden falls through to here and stands alone.
     if (drawnAbove) continue;
     entries.push({ kind: "panel", id: entry.id });
@@ -284,7 +287,7 @@ export function railDisplayEntries(
  *
  * Read off {@link railDisplayEntries} rather than off the rail directly, so
  * the body and the rail cannot disagree about what a stack is right now: the
- * same hidden panel that leaves the capsule leaves the split.
+ * same hidden panel that leaves the group leaves the split.
  */
 export function railStackMembersFor(
   rail: ReadonlyArray<RailEntry>,
@@ -319,7 +322,7 @@ export function railDividerInsertIndex(rail: ReadonlyArray<RailEntry>): number {
   // Never between a stack's two panels: a divider there would break the join
   // the user made rather than space two icons apart, so when the last panel is
   // the BOTTOM of a pair the insert steps back over the link AND over the
-  // panel above it, landing before the whole capsule (L-166).
+  // panel above it, landing before the whole group (L-166).
   const link = lastPanelIndex >= 1 ? rail[lastPanelIndex - 1] : null;
   return link?.kind === "stack" ? lastPanelIndex - 2 : lastPanelIndex;
 }
@@ -375,7 +378,7 @@ function railRegionForPanelId(panelId: string): RailRegionId | null {
  * Stack links are re-placed rather than carried (L-166). What a link IS is the
  * pair its id names, so the joins are read off the input first, the panels and
  * dividers are normalised without them, and a link is put back only where its
- * two panels are still adjacent IN THAT ORDER. That is what makes every rule
+ * two panels are still adjacent, in either order. That is what makes every rule
  * about a stack a consequence of one pass rather than four separate guards: a
  * panel dragged away from its partner drops the link, a divider moved between
  * them drops it, a link naming a pair this build cannot read drops, a
@@ -448,22 +451,31 @@ function normalizedPanelsAndDividers(
   return entries;
 }
 
-/** The surviving joins put back as links, at most one per panel. */
+/**
+ * The surviving joins put back as links, at most one per panel.
+ *
+ * A join survives its two panels trading places (G3): the pair is a view
+ * group, and reordering the members within it is how the user picks which
+ * panel's icon the rail shows. So adjacency is read in EITHER order, and the
+ * link is re-minted for the order the panels now stand in.
+ */
 function withRailStacks(
   entries: ReadonlyArray<RailEntry>,
   joins: ReadonlyArray<readonly [RailRegionId, RailRegionId]>,
 ): ReadonlyArray<RailEntry> {
   const claimed = new Set<RailRegionId>();
   const linked = new Map<RailRegionId, RailRegionId>();
-  for (const [top, bottom] of joins) {
-    if (claimed.has(top) || claimed.has(bottom)) continue;
-    const topIndex = entries.findIndex(
-      (entry) => entry.kind === "panel" && entry.id === top,
+  const panelIndex = (regionId: RailRegionId): number =>
+    entries.findIndex(
+      (entry) => entry.kind === "panel" && entry.id === regionId,
     );
-    if (topIndex < 0) continue;
-    const below = entries.at(topIndex + 1);
-    if (below === undefined || below.kind !== "panel" || below.id !== bottom)
-      continue;
+  for (const [first, second] of joins) {
+    if (claimed.has(first) || claimed.has(second)) continue;
+    const firstIndex = panelIndex(first);
+    const secondIndex = panelIndex(second);
+    if (firstIndex < 0 || Math.abs(firstIndex - secondIndex) !== 1) continue;
+    const [top, bottom] =
+      firstIndex < secondIndex ? [first, second] : [second, first];
     claimed.add(top);
     claimed.add(bottom);
     linked.set(top, bottom);

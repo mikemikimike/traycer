@@ -14,7 +14,10 @@ import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-pane
 import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
 import { useRailDividersEditing } from "@/components/epic-canvas/sidebar/use-rail-dividers-editing";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
-import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
+import {
+  LEFT_PANEL_RAIL_TILE_CLASS,
+  railGroupLabel,
+} from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import {
   getLeftPanelDefinition,
   isLeftPanelVisible,
@@ -37,9 +40,10 @@ import { cn } from "@/lib/utils";
  * be pulled past its neighbours and no further.
  *
  * A divider is drawn at rest as the space it is and in a session as the handle
- * it becomes, and a stacked pair is drawn inside the same joined capsule the
- * real rail draws (L-140, L-167) - both through the components the real
- * sidebar uses, so the two rails cannot drift on either.
+ * it becomes, and a stacked pair is drawn as the same one group icon the real
+ * rail draws, with its count while the rail is being customized (L-140, G3) -
+ * both through the components the real sidebar uses, so the two rails cannot
+ * drift on either.
  *
  * It answers a right-click with the REAL rail's menu (L-144), rendered from the
  * one module both rails share: the editor always opens here (L-87), so this is
@@ -84,16 +88,29 @@ export function SampleWorkspaceRail() {
         >
           {railDisplayEntries(rail, () => true).map((entry) => {
             if (entry.kind === "panel")
-              return <SampleRailTile key={entry.id} regionId={entry.id} />;
+              return (
+                <SampleRailTile
+                  key={entry.id}
+                  regionId={entry.id}
+                  label={panelTitle(entry.id)}
+                />
+              );
             if (entry.kind === "stack") {
               return (
                 <LeftPanelRailStack
                   key={entry.id}
                   stackId={entry.id}
-                  orientation="vertical"
-                  first={<SampleRailTile regionId={entry.top} />}
-                  second={<SampleRailTile regionId={entry.bottom} />}
-                />
+                  memberCount={2}
+                  showCount={dividersEditing}
+                >
+                  <SampleRailTile
+                    regionId={entry.top}
+                    label={railGroupLabel([
+                      panelTitle(entry.top),
+                      panelTitle(entry.bottom),
+                    ])}
+                  />
+                </LeftPanelRailStack>
               );
             }
             return (
@@ -125,7 +142,17 @@ function pointedPanelId(target: EventTarget): LeftPanelId | null {
   return regionId === null ? null : leftPanelIdForRailRegion(regionId);
 }
 
-function SampleRailTile({ regionId }: { readonly regionId: RailRegionId }) {
+function panelTitle(regionId: RailRegionId): string {
+  return getLeftPanelDefinition(leftPanelIdForRailRegion(regionId)).title;
+}
+
+function SampleRailTile({
+  regionId,
+  label,
+}: {
+  readonly regionId: RailRegionId;
+  readonly label: string;
+}) {
   const visibilityOverrideById = usePanelVisibilityOverrides();
   const panelId = leftPanelIdForRailRegion(regionId);
   const definition = getLeftPanelDefinition(panelId);
@@ -137,7 +164,7 @@ function SampleRailTile({ regionId }: { readonly regionId: RailRegionId }) {
   return (
     <div
       ref={ref}
-      aria-label={definition.title}
+      aria-label={label}
       className={cn(
         LEFT_PANEL_RAIL_TILE_CLASS,
         "flex items-center justify-center",

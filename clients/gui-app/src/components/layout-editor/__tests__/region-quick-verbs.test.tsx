@@ -157,16 +157,18 @@ describe("<LayoutRegionContextMenu />", () => {
   });
 
   // A second verb replaces the first's toast rather than stacking beside it, so
-  // the only Undo on screen is always the last verb's.
+  // the only Undo on screen is always the last verb's. Needs a region with
+  // BOTH a size and a hide verb - Access is size-only since G6, so this uses
+  // Todo (SIZED_VERBS) instead.
   it("shows one toast at a time, whichever verb fired", () => {
-    render(<Harness regionId="access" />);
+    render(<Harness regionId="todo" />);
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-access-chip"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-chip"));
     const sizeToast = toasts.at(-1);
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-access-hide"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
 
     expect(sizeToast?.id).toBeTypeOf("string");
     expect(toasts.at(-1)?.id).toBe(sizeToast?.id);
@@ -174,22 +176,23 @@ describe("<LayoutRegionContextMenu />", () => {
 
   // The case a snapshot-based Undo gets wrong: something ELSE changes the same
   // region while the toast is up. Undo must put back the one leaf the verb
-  // wrote and leave the rest where it now stands.
+  // wrote and leave the rest where it now stands. Needs Hide, so Todo
+  // (SIZED_VERBS) stands in for Access here too.
   it("puts back only the leaf the verb wrote, not the region as it was", () => {
-    render(<Harness regionId="access" />);
+    render(<Harness regionId="todo" />);
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-access-hide"));
-    expect(regionValue("access", "shown")).toBe("hidden");
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
+    expect(regionValue("todo", "shown")).toBe("hidden");
     const hideToast = toasts.at(-1);
 
     // Written from outside this menu - the Layout settings page, another
     // window - while the toast is still on screen.
-    useLayoutStore.getState().setRegionValues("access", { size: "chip" });
+    useLayoutStore.getState().setRegionValues("todo", { size: "chip" });
 
     hideToast?.action.onClick();
 
-    expect(regionValue("access", "shown")).toBe("shown");
-    expect(regionValue("access", "size")).toBe("chip");
+    expect(regionValue("todo", "shown")).toBe("shown");
+    expect(regionValue("todo", "size")).toBe("chip");
   });
 
   it("brings a rail panel back to auto, not pinned open (L-47)", () => {
@@ -277,29 +280,31 @@ describe("layout_quick_verb analytics (L-19, L-46)", () => {
     );
   });
 
+  // Needs a region with both a size and a hide verb - Todo (SIZED_VERBS)
+  // stands in for Access, which G6 made size-only.
   it("sends undone: false for a verb whose toast a second verb replaces", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    render(<Harness regionId="access" />);
+    render(<Harness regionId="todo" />);
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-access-chip"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-chip"));
     expect(trackSpy).not.toHaveBeenCalled();
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-access-hide"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
 
     // The first verb's toast was replaced before it ever resolved, so it is
     // reported here - as "stood", never undone - rather than lost.
     expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
       AnalyticsEvent.LayoutQuickVerb,
-      { region: "access", verb: "chip", undone: false },
+      { region: "todo", verb: "chip", undone: false },
     );
 
     toasts.at(-1)?.onAutoClose?.();
 
     expect(trackSpy).toHaveBeenCalledTimes(2);
     expect(trackSpy).toHaveBeenLastCalledWith(AnalyticsEvent.LayoutQuickVerb, {
-      region: "access",
+      region: "todo",
       verb: "hide",
       undone: false,
     });

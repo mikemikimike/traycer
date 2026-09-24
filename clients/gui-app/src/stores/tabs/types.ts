@@ -242,8 +242,17 @@ export interface TabKindDescriptor<K extends HeaderTabKind> {
   readonly activate: (
     intent: Extract<TabNavigationIntent, { kind: K }>,
   ) => void;
-  /** Kind-specific close. */
-  readonly requestClose: (tab: Extract<HeaderTab, { kind: K }>) => void;
+  /**
+   * Kind-specific close: calls `close` to close the tab, or refuses by not
+   * calling it. The close operation is a PARAMETER, supplied by the caller
+   * (`useTabCloseCommand`), because the coordinator that performs it imports
+   * this registry; a kind that imported the coordinator itself closed an
+   * import cycle through the registry (G1-G2 follow-up).
+   */
+  readonly requestClose: (
+    tab: Extract<HeaderTab, { kind: K }>,
+    close: (ref: TabRef) => void,
+  ) => void;
   /**
    * Returns `true` when closing this tab should prompt the user first
    * (e.g., an epic tab with unsynced edits). Returns `false` when the

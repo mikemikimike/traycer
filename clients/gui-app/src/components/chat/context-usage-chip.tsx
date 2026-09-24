@@ -29,7 +29,11 @@ import {
   type ContextUsageRow,
   type EffectiveContextUsage,
 } from "@/components/chat/context-usage";
-import { useArrangementValue, useRegionValue } from "@/lib/layout-overrides";
+import {
+  useArrangementValue,
+  useRegionShown,
+  useRegionValue,
+} from "@/lib/layout-overrides";
 import type { ContextStyle } from "@/lib/layout/layout-values";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout/layout-store";
@@ -90,10 +94,15 @@ function contextUsageChipDraws(
 
 export function ContextUsageChip(props: ContextUsageChipProps) {
   const tileId = useComposerTileId();
-  const { ref, editing } = useLayoutRegion({
+  const { ref, editing, ghost } = useLayoutRegion({
     regionId: "contextUsage",
     instanceId: tileId,
   });
+  // Layout ▸ Chat ▸ Context usage can hide the chip (G6: the switch had no
+  // reader). A hidden chip still materialises while the editor points at it
+  // (L-14), the same rule every hideable control follows.
+  const shown = useRegionShown("contextUsage") || ghost;
+  if (!shown) return null;
   const chip = (
     <ContextUsageChipView {...props} ref={ref} contextEditing={editing} />
   );

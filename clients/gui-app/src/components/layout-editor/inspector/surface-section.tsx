@@ -126,10 +126,15 @@ export function SurfaceSection(props: {
       return providerRowDecoration(id, arrangement, openRows, onToggleRow);
     }
     const changed = regionRowChanged(snapshot, regionId);
+    const hint = regionFacts(regionId).hint;
+    // A disclosure only where opening it shows something: the region's own
+    // detail rows, or its presence rule. Most regions have neither, and a
+    // chevron that opened an empty box was the no-op the owner found (G6).
+    const discloses = hint !== null || regionDetailRows(regionId).length > 0;
     return {
       ...BARE_ROW,
       changed,
-      hint: regionFacts(regionId).hint,
+      hint,
       // The Sidebar's rows ARE the picture the card used to draw above them
       // (L-120): the rail's own button, at 1:1, through the one entry point
       // every depiction goes through (L-77). No other list gets one - their
@@ -147,18 +152,20 @@ export function SurfaceSection(props: {
           }}
         />
       ) : null,
-      detail: (
+      detail: discloses ? (
         <RegionRowDetail
           regionId={regionId}
           snapshot={snapshot}
           values={values}
           filter={filter}
         />
-      ),
-      open: openRows.includes(id),
-      onToggleOpen: () => {
-        onToggleRow(id);
-      },
+      ) : null,
+      open: discloses && openRows.includes(id),
+      onToggleOpen: discloses
+        ? () => {
+            onToggleRow(id);
+          }
+        : null,
     };
   }
 
@@ -491,12 +498,7 @@ function RegionRowDetail(props: {
   readonly filter: string;
 }): ReactNode {
   const { regionId, snapshot, values, filter } = props;
-  // Annotated rather than inferred: indexing the registry with a UNION of ids
-  // gives a union of arrays, and a `filter` on one of those has no single
-  // callable signature. `AnyGrammarRow` is the registry's own name for the
-  // union of their elements.
-  const declared: ReadonlyArray<AnyGrammarRow> = LAYOUT_REGIONS[regionId].rows;
-  const rows = declared.filter((row) => DETAIL_ROW_KINDS.includes(row.kind));
+  const rows = regionDetailRows(regionId);
   if (rows.length === 0) return null;
   return (
     <div>
@@ -510,6 +512,9 @@ function RegionRowDetail(props: {
           snapshot={snapshot}
           filter={filter}
           onOpenProvider={null}
+          // The page has never greyed a hidden region's disclosure: the row's
+          // own Shown control, one line up, already says it is off.
+          regionHidden={false}
         />
       ))}
     </div>
@@ -534,6 +539,15 @@ const DETAIL_ROW_KINDS: ReadonlyArray<string> = [
   "style",
   "fine-tune",
 ];
+
+function regionDetailRows(regionId: RegionId): ReadonlyArray<AnyGrammarRow> {
+  // Annotated rather than inferred: indexing the registry with a UNION of ids
+  // gives a union of arrays, and a `filter` on one of those has no single
+  // callable signature. `AnyGrammarRow` is the registry's own name for the
+  // union of their elements.
+  const declared: ReadonlyArray<AnyGrammarRow> = LAYOUT_REGIONS[regionId].rows;
+  return declared.filter((row) => DETAIL_ROW_KINDS.includes(row.kind));
+}
 
 /**
  * Whether this region differs from what shipped, in any of the three ways it

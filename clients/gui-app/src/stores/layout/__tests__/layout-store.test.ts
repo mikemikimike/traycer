@@ -139,7 +139,7 @@ function seedLegacyRecords(): void {
 function expectCarried(snapshot: LayoutSnapshot, label: string): void {
   expect(snapshot.overrides, label).toEqual({
     contextUsage: { pinBreakdown: true, pinnedFields: ["used", "output"] },
-    resourceMonitor: { shown: "hidden" },
+    resourceMonitor: { shown: "hidden", agentRows: false },
     railComments: { shown: "hidden" },
     railSharing: { shown: "shown" },
   });
@@ -210,7 +210,7 @@ describe("useLayoutStore", () => {
       });
       expect(
         effectiveLayoutValues("default", getLayoutSnapshot().overrides).model,
-      ).toEqual({ shown: "shown", style: "bars" });
+      ).toEqual({ style: "bars" });
     });
 
     it("keeps a key set back to the base's own value, and stops counting it", () => {
@@ -439,11 +439,11 @@ describe("useLayoutStore", () => {
 
     /**
      * The whole of L-142's durability story, end to end through the real
-     * persist path: a record written before Todo and Message queue were dock
-     * members carries a three-entry dock and no value bag for either, and
-     * this build has to reach five members with the two leading the frame -
-     * where `ChatLowerDock` already draws them - on their preset's own
-     * defaults. No migration, no version bump, nothing to revert (P5).
+     * persist path: a record written before Todo was a dock member carries a
+     * three-entry dock and no value bag for it, and this build has to reach
+     * four members with Todo leading the frame - where `ChatLowerDock`
+     * already draws it - on its preset's own defaults. No migration, no
+     * version bump, nothing to revert (P5).
      *
      * The Hidden-with-a-size half is the part a `shown`-only read would lose:
      * a member switched off keeps the size it would come back at, so turning
@@ -463,7 +463,6 @@ describe("useLayoutStore", () => {
 
       const snapshot = getLayoutSnapshot();
       expect(snapshot.arrangement.dock).toEqual([
-        "queue",
         "todo",
         "changedFiles",
         "runningAgents",
@@ -473,8 +472,43 @@ describe("useLayoutStore", () => {
         snapshot.basePreset,
         snapshot.overrides,
       );
-      expect(values.queue).toEqual({ shown: "shown", size: "full" });
       expect(values.todo).toEqual({ shown: "hidden", size: "chip" });
+    });
+
+    /**
+     * G1-G2: the Message queue was a dock region for a while and stopped
+     * being one. A record written during that window carries a `queue` value
+     * bag and a `queue` entry in the stored dock order, and this build reads
+     * neither back - `resolvePersistedOverrides` no longer has a `queue` key
+     * to fill, and `mergeOrder` drops an id the canonical dock order does not
+     * name. No migration, nothing to revert (P5): the stale bytes are simply
+     * never read again.
+     */
+    it("drops a stale queue value bag and dock entry on rehydrate", async () => {
+      await rehydrateFrom({
+        basePreset: "default",
+        overrides: { queue: { shown: "hidden", size: "chip" } },
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          dock: [
+            "queue",
+            "todo",
+            "changedFiles",
+            "runningAgents",
+            "background",
+          ],
+        },
+        layoutCarryDone: true,
+      });
+
+      const snapshot = getLayoutSnapshot();
+      expect(snapshot.overrides).not.toHaveProperty("queue");
+      expect(snapshot.arrangement.dock).toEqual([
+        "todo",
+        "changedFiles",
+        "runningAgents",
+        "background",
+      ]);
     });
 
     it("falls back to the defaults on a record it cannot read", async () => {
@@ -899,5 +933,161 @@ describe("the version-4 migration back onto the default stack (L-166)", () => {
     expect(rail.filter((entry) => entry.kind === "divider")).toEqual([
       { kind: "divider", id: "divider:1" },
     ]);
+  });
+});
+
+describe("the version-5 migration splitting the agent rows off Shown (G7)", () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it("gives a hidden-monitor v4 record agentRows: false", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: { resourceMonitor: { shown: "hidden" } },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      4,
+    );
+
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
+      shown: "hidden",
+      agentRows: false,
+    });
+  });
+
+  it("forces nothing when the monitor is shown - agentRows stays the shipped default", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: { resourceMonitor: { shown: "shown", memory: true } },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      4,
+    );
+
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
+      shown: "shown",
+      memory: true,
+    });
+    expect(
+      effectiveLayoutValues("default", getLayoutSnapshot().overrides)
+        .resourceMonitor.agentRows,
+    ).toBe(true);
+  });
+
+  it("forces nothing when there is no resourceMonitor override at all", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: {},
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      4,
+    );
+
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toBeUndefined();
+    expect(
+      effectiveLayoutValues("default", getLayoutSnapshot().overrides)
+        .resourceMonitor.agentRows,
+    ).toBe(true);
+  });
+
+  it("leaves a version-5 record completely untouched, even a hidden monitor with no agentRows", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: { resourceMonitor: { shown: "hidden" } },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      5,
+    );
+
+    // A version-5 record shaped like this cannot occur from a real write
+    // (this build always writes both halves together) - the point is that
+    // the migration is gated on VERSION, not re-derived from shape, so it
+    // does not reach in and force agentRows here the way it would at v4.
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
+      shown: "hidden",
+    });
+  });
+
+  it("does not clobber a v4 record whose agentRows already differs from what the migration would force", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: {
+          resourceMonitor: { shown: "hidden", agentRows: true },
+        },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      4,
+    );
+
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
+      shown: "hidden",
+      agentRows: true,
+    });
+  });
+
+  it("is idempotent: migrating an already-migrated record twice gives the same result", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: { resourceMonitor: { shown: "hidden" } },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      4,
+    );
+    const once = getLayoutSnapshot().overrides.resourceMonitor;
+
+    // Rehydrating the now-migrated shape again, tagged as this build's own
+    // version, must not move it any further.
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: { resourceMonitor: once },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      5,
+    );
+    const twice = getLayoutSnapshot().overrides.resourceMonitor;
+
+    expect(twice).toEqual(once);
+  });
+
+  it("migrates once, rather than re-deriving agentRows from Shown on every later write", async () => {
+    await rehydrateFromVersion(
+      {
+        basePreset: "default",
+        overrides: { resourceMonitor: { shown: "hidden" } },
+        arrangement: DEFAULT_ARRANGEMENT,
+        layoutCarryDone: true,
+      },
+      4,
+    );
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
+      shown: "hidden",
+      agentRows: false,
+    });
+
+    // Un-hiding the monitor alone, after the migration already ran, must not
+    // also flip the rows' own switch back on - a re-coupling would make it
+    // impossible to un-hide the monitor without also un-hiding the rows.
+    useLayoutStore
+      .getState()
+      .setRegionValues("resourceMonitor", { shown: "shown" });
+
+    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
+      shown: "shown",
+      agentRows: false,
+    });
   });
 });

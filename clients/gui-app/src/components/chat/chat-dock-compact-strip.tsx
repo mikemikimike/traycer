@@ -9,13 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, useIsPresent } from "motion/react";
 import * as m from "motion/react-m";
-import {
-  Bot,
-  FileDiff,
-  ListChecks,
-  ListOrdered,
-  type LucideIcon,
-} from "lucide-react";
+import { Bot, FileDiff, ListChecks, type LucideIcon } from "lucide-react";
 import { MessageSquareClock } from "@/components/notifications/message-square-clock";
 import {
   ChatDockChipArrival,
@@ -64,10 +58,9 @@ const GLYPH_ICONS: Readonly<Record<ChatDockCompactChipGlyph, LucideIcon>> = {
   // are is the panel's to draw, and whether a shell is held is stated in this
   // chip's sentence.
   background: MessageSquareClock,
-  // The queue's own mark, the one its full row's header already prints beside
-  // the count, and the todo's likewise: a pill and the row it folds have to be
-  // recognisable as the same member.
-  queue: ListOrdered,
+  // The todo's own mark, the one its full row's header already prints beside
+  // the count: a pill and the row it folds have to be recognisable as the same
+  // member.
   todo: ListChecks,
 };
 
@@ -324,9 +317,10 @@ export function ChatDockCompactStrip(props: {
   // no pills, so an empty first commit would arm it and the next burst - every
   // pill a turn brings at once - would ring together, which is L-148's failure
   // through the other door. And "the snapshot has LOADED" is not enough
-  // either, because the pills are built from five independently arriving
-  // sources in `chat-tile-lower-surfaces.tsx`: the queue comes from the
-  // session store and the background rows from the host's own stream, neither
+  // either, because the pills are built from independently arriving sources in
+  // `chat-tile-lower-surfaces.tsx`: the received agent responses the Active
+  // agents pill counts come from the session store's queue and the background
+  // rows from the host's own stream, neither
   // of which waits for the snapshot, so a strip can hold a pill before the
   // snapshot lands and would then be armed for the burst the snapshot brings
   // with it (`changesPresent` and `todoHasContent` are both gated on it).

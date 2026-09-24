@@ -436,17 +436,18 @@ describe("dragging a region on the canvas", () => {
 });
 
 /**
- * The sidebar rail, which L-115 restored to the canvas: every panel and
- * divider in one flat cluster (L-155 - no groups, so a drop places one entry
- * beside another and nothing more), and a drop placed by the entry's id.
+ * The sidebar rail, which L-115 restored to the canvas: one cluster, and a
+ * drop placed by an entry's id. A stacked pair draws as ONE icon (G3) - the
+ * top's - so the members a press reorders against are the panels that stand
+ * alone, whatever dividers the user placed, and one member per pair.
  */
 /**
  * The nine panels with no link and no divider.
  *
- * What these cases are about is the drag ENGINE's geometry, and the shipped
- * rail's stack (L-166) contributes no member of its own - the capsule's seam
- * is drawn, not grabbed - so the members a press reorders against are exactly
- * the panels and whatever dividers the user placed.
+ * What most of these cases are about is the drag ENGINE's geometry, so they
+ * use this flat list rather than the shipped rail's own stack - the "carries
+ * a pair whole" claim gets its own cases below instead of complicating every
+ * one of these with a member that has no node of its own.
  */
 const FLAT_RAIL: ReadonlyArray<RailEntry> = DEFAULT_RAIL.filter(
   (entry) => entry.kind === "panel",
@@ -480,19 +481,77 @@ describe("dragging in the sidebar rail", () => {
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
 
-  it("breaks the join when a stacked panel is dragged away (L-166)", () => {
-    // Artifacts is the bottom of the shipped pair. The stored rail still holds
-    // the link while the drag is in flight; what drops it is the write, which
-    // is the rail's own normalisation rather than anything this module knows.
-    const nodes = mountRail(FLAT_RAIL);
+  it("carries the pair whole when its top icon is dragged, keeping the join (G3)", () => {
+    // Artifacts is the bottom of the shipped pair and draws no canvas node of
+    // its own (G3): the group's icon is Agents', so that is what a press
+    // grabs, and the whole pair - Agents, its link, and Artifacts - travels
+    // together rather than Agents moving alone and dropping the join.
+    const displayEntries: ReadonlyArray<RailEntry> = FLAT_RAIL.filter(
+      (entry) => entry.id !== "railArtifacts",
+    );
+    const nodes = mountRail(displayEntries);
 
-    dragBy(nodes[1], { clientY: 40 });
+    dragBy(nodes[0], { clientY: 40 });
 
     expect(
-      useLayoutStore
-        .getState()
-        .arrangement.rail.filter((entry) => entry.kind === "stack"),
-    ).toEqual([]);
+      useLayoutStore.getState().arrangement.rail.map((entry) => entry.id),
+    ).toEqual([
+      "railTerminals",
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
+  });
+
+  it("carries a stacked pair whole and lands it beside a target's whole pair, never between (G3)", () => {
+    // Two joined pairs: the shipped Agents+Artifacts, and a second one made up
+    // for this case - Terminals+Browsers - so the DROP TARGET is a pair too.
+    // Neither bottom member (Artifacts, Browsers) draws a canvas node, so the
+    // press only ever sees the two tops.
+    const rail: ReadonlyArray<RailEntry> = [
+      { kind: "panel", id: "railAgents" },
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "stack", id: "stack:railTerminals+railBrowsers" },
+      { kind: "panel", id: "railBrowsers" },
+      ...FLAT_RAIL.slice(4),
+    ];
+    setRail(rail);
+    const nodes = mountRail([
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railTerminals" },
+      ...FLAT_RAIL.slice(4),
+    ]);
+
+    dragBy(nodes[0], { clientY: 40 });
+
+    // The Agents pair lands AFTER the whole Terminals+Browsers pair - not
+    // wedged between Terminals and Browsers, even though the press only ever
+    // targeted Terminals' own icon.
+    expect(
+      useLayoutStore.getState().arrangement.rail.map((entry) => entry.id),
+    ).toEqual([
+      "railTerminals",
+      "stack:railTerminals+railBrowsers",
+      "railBrowsers",
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
 
   it("moves a DIVIDER, placed the same way a panel is", () => {
@@ -573,13 +632,12 @@ describe("a dock whose members are not all the same size", () => {
     dragBy(nodes[2], { clientY: -60 });
 
     // `background` moved; `runningAgents`, drawn in the other container and no
-    // part of this gesture, keeps its place after `changedFiles`. `queue` and
-    // `todo` keep the front of the stored order although this scene draws
-    // nothing for either (L-142), which is the same claim one step further: a
-    // drop writes back the WHOLE stored order, and a member the canvas never
-    // showed cannot be moved by one.
+    // part of this gesture, keeps its place after `changedFiles`. `todo` keeps
+    // the front of the stored order although this scene draws nothing for it
+    // (L-142), which is the same claim one step further: a drop writes back
+    // the WHOLE stored order, and a member the canvas never showed cannot be
+    // moved by one.
     expect(useLayoutStore.getState().arrangement.dock).toEqual([
-      "queue",
       "todo",
       "background",
       "changedFiles",
@@ -600,7 +658,6 @@ describe("a dock whose members are not all the same size", () => {
     dragBy(nodes[2], { clientX: -40 });
 
     expect(useLayoutStore.getState().arrangement.dock).toEqual([
-      "queue",
       "todo",
       "background",
       "changedFiles",

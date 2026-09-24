@@ -5,9 +5,9 @@ import type {
   LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import {
+  type HideableRegionId,
   type LayoutOverrides,
   type LayoutValues,
-  type RailVisibility,
 } from "@/lib/layout/layout-values";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
@@ -177,18 +177,13 @@ export function useRegionValue<
 /**
  * Whether a region draws at all, which is the question every mount decision
  * asks. The rail regions are excluded because their `shown` is three-state:
- * `auto` needs the panel's own presence rule to answer (L-47), which is
- * {@link useRailVisibility}'s caller's job.
+ * `auto` needs the panel's own presence rule to answer (L-47), which
+ * `lib/layout/rail-view.ts` resolves.
  */
 export function useRegionShown(
-  regionId: Exclude<RegionId, RailRegionId>,
+  regionId: Exclude<HideableRegionId, RailRegionId>,
 ): boolean {
   return useRegionValue(regionId, "shown") === "shown";
-}
-
-/** One rail panel's three-state visibility (L-47), resolved by its caller. */
-export function useRailVisibility(regionId: RailRegionId): RailVisibility {
-  return useRegionValue(regionId, "shown");
 }
 
 /**

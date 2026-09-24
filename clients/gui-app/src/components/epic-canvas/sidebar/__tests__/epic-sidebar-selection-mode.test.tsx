@@ -18,6 +18,7 @@ import type {
   AgentSessionLastExit,
   AgentSessionState,
 } from "@traycer/protocol/host/agent-session-state";
+import type { HoverCardProps } from "@/components/ui/hover-card";
 import {
   createChatSessionStore,
   type ChatSessionStoreHandle,
@@ -451,6 +452,32 @@ vi.mock("@/components/ui/tooltip", () => ({
     <div role="tooltip">{props.children}</div>
   ),
 }));
+
+vi.mock("@/components/ui/hover-card", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/components/ui/hover-card")>();
+  return {
+    ...actual,
+    // The label-chip appearance (`AgentHoverTooltip`'s fallback, the rail's
+    // tile labels) is the plain-tooltip case this suite's rows exercise
+    // without hovering, same as the `ui/tooltip` mock above and for the same
+    // reason: mounted eagerly here so a query can find it, where the real
+    // primitive mounts content only while open. The preview-card appearance
+    // (worktree owner metadata) keeps the real component - this file already
+    // short-circuits that path via its own `worktree-owner-metadata` mock, so
+    // nothing here depends on it, and other suites in this tree do rely on its
+    // real hover/floating behaviour.
+    HoverCard: (props: HoverCardProps) =>
+      props.appearance === "tooltip" ? (
+        <>
+          {props.trigger}
+          <div role="tooltip">{props.content}</div>
+        </>
+      ) : (
+        <actual.HoverCard {...props} />
+      ),
+  };
+});
 
 vi.mock("@/components/ui/sidebar", () => ({
   Sidebar: (props: {

@@ -22,7 +22,10 @@ import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
-import type { LayoutValues } from "@/lib/layout/layout-values";
+import {
+  regionValuesHidden,
+  type LayoutValues,
+} from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -59,7 +62,7 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
   const arrangement = snapshot.arrangement;
   const region = LAYOUT_REGIONS[regionId];
   const facts = regionFacts(regionId);
-  const shown = values[regionId].shown !== "hidden";
+  const shown = !regionValuesHidden(values[regionId]);
   // Composed rather than indexed by one region's host: the two bar readings
   // each answer for themselves now (L-156), so the line under a name is the
   // registry's sentence for the bar THIS region is in, plus its own side.
@@ -100,10 +103,12 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
         hidden region - and `pointer-events-none` did not stop that either.
         `inert` removes focus, hit testing and the a11y tree in one, and
         subsumes the pointer rule (G1-06). */}
-      <div inert={!shown} className={cn(!shown && "opacity-40")}>
-        {region.rows.map((row) => (
-          // Each grammar row kind appears at most once per region (L-08), so
-          // `row.kind` is a stable key without an index.
+      {/* Per row, because Fine-tune greys its own rows: one of them can be
+        about another surface and outlive the region's Hidden (G7). Each
+        grammar row kind appears at most once per region (L-08), so
+        `row.kind` is a stable key without an index. */}
+      {region.rows.map((row) => {
+        const view = (
           <GrammarRowView
             key={row.kind}
             row={row}
@@ -113,9 +118,20 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
             snapshot={snapshot}
             filter={filter}
             onOpenProvider={onOpenProvider}
+            regionHidden={!shown}
           />
-        ))}
-      </div>
+        );
+        if (row.kind === "fine-tune") return view;
+        return (
+          <div
+            key={row.kind}
+            inert={!shown}
+            className={cn(!shown && "opacity-40")}
+          >
+            {view}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -137,6 +153,8 @@ export function GrammarRowView(props: {
   readonly snapshot: LayoutSnapshot;
   readonly filter: string;
   readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
+  /** Read by Fine-tune alone, which greys its rows per row (G7). */
+  readonly regionHidden: boolean;
 }): ReactNode {
   const {
     row,
@@ -146,6 +164,7 @@ export function GrammarRowView(props: {
     snapshot,
     filter,
     onOpenProvider,
+    regionHidden,
   } = props;
   const regionValues = values[regionId];
 
@@ -204,6 +223,7 @@ export function GrammarRowView(props: {
           regionId={regionId}
           regionValues={regionValues}
           filter={filter}
+          regionHidden={regionHidden}
         />
       );
     case "children":

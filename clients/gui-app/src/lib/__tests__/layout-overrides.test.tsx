@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   useArrangementValue,
-  useRailVisibility,
   useRegionShown,
   useRegionValue,
   useRegionValues,
@@ -105,27 +104,29 @@ describe("layout override seam", () => {
 
   it("leaves every unstated leaf on the stored value", () => {
     act(() => {
-      useLayoutStore.getState().setRegionValues("model", { style: "bars" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("changedFiles", { size: "chip" });
     });
 
-    const model = readUnder(
-      () => useRegionValues("model"),
-      under({ values: { model: { shown: "hidden" } } }),
+    const changedFiles = readUnder(
+      () => useRegionValues("changedFiles"),
+      under({ values: { changedFiles: { shown: "hidden" } } }),
     );
 
-    expect(model.shown).toBe("hidden");
-    expect(model.style).toBe("bars");
+    expect(changedFiles.shown).toBe("hidden");
+    expect(changedFiles.size).toBe("chip");
   });
 
   it("keeps the outer override when an inner one names a different leaf", () => {
-    const model = readUnder(
-      () => useRegionValues("model"),
+    const changedFiles = readUnder(
+      () => useRegionValues("changedFiles"),
       (children) => (
         <LayoutOverrideProvider
-          value={{ values: { model: { style: "bars" } } }}
+          value={{ values: { changedFiles: { size: "chip" } } }}
         >
           <LayoutOverrideProvider
-            value={{ values: { model: { shown: "hidden" } } }}
+            value={{ values: { changedFiles: { shown: "hidden" } } }}
           >
             {children}
           </LayoutOverrideProvider>
@@ -133,15 +134,15 @@ describe("layout override seam", () => {
       ),
     );
 
-    expect(model.style).toBe("bars");
-    expect(model.shown).toBe("hidden");
+    expect(changedFiles.size).toBe("chip");
+    expect(changedFiles.shown).toBe("hidden");
   });
 
   it("keeps the outer override when an inner one names a different region", () => {
     const wrap = (children: ReactNode): ReactNode => (
       <LayoutOverrideProvider value={{ values: { mic: { shown: "hidden" } } }}>
         <LayoutOverrideProvider
-          value={{ values: { model: { shown: "hidden" } } }}
+          value={{ values: { minimap: { shown: "hidden" } } }}
         >
           {children}
         </LayoutOverrideProvider>
@@ -149,7 +150,7 @@ describe("layout override seam", () => {
     );
 
     expect(readUnder(() => useRegionShown("mic"), wrap)).toBe(false);
-    expect(readUnder(() => useRegionShown("model"), wrap)).toBe(false);
+    expect(readUnder(() => useRegionShown("minimap"), wrap)).toBe(false);
   });
 
   it("lets the inner override win on the leaf both name", () => {
@@ -195,16 +196,6 @@ describe("layout override seam", () => {
     expect(readUnder(() => useArrangementValue("dock"), nested)).toBe(
       useLayoutStore.getState().arrangement.dock,
     );
-  });
-
-  it("hands a rail panel its three-state visibility rather than a boolean", () => {
-    expect(readUnder(() => useRailVisibility("railAgents"), bare)).toBe("auto");
-    expect(
-      readUnder(
-        () => useRailVisibility("railAgents"),
-        under({ values: { railAgents: { shown: "hidden" } } }),
-      ),
-    ).toBe("hidden");
   });
 
   describe("leaf hooks subscribe to one field", () => {

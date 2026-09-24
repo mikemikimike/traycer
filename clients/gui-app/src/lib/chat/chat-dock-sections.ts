@@ -1,7 +1,7 @@
 import type { DockRegionId } from "@/lib/layout/region-id";
 
 /**
- * The dock's own model of its five members, in `lib` rather than beside the
+ * The dock's own model of its four members, in `lib` rather than beside the
  * React context that used to own it.
  *
  * This is a MODEL type - which rows the dock has, what the arrangement's
@@ -16,7 +16,6 @@ export type ChatDockSection =
   | "filesChanged"
   | "activeAgents"
   | "background"
-  | "queue"
   | "todo";
 
 /**
@@ -27,14 +26,14 @@ export type ChatDockSection =
  * after the panels they mount. This is the one place they meet, so the order
  * the arrangement holds can be read as a list of sections.
  *
- * Five members since L-139/L-142: the Message queue and Todo are dock members
- * with the same Full row / Chip / Hidden semantics as the other three.
+ * Todo is a dock member with the same Full row / Chip / Hidden semantics as the
+ * other three (L-139/L-142). The Message queue is not a member at all (G1-G2):
+ * it is never a pill, so it has no section and no region.
  */
 const SECTION_BY_REGION: Readonly<Record<DockRegionId, ChatDockSection>> = {
   changedFiles: "filesChanged",
   runningAgents: "activeAgents",
   background: "background",
-  queue: "queue",
   todo: "todo",
 };
 
@@ -55,6 +54,5 @@ export const CHAT_DOCK_SECTION_NAME: Readonly<Record<ChatDockSection, string>> =
     filesChanged: "Files changed",
     activeAgents: "Active agents",
     background: "Background",
-    queue: "Message queue",
     todo: "Todo",
   };

@@ -97,6 +97,13 @@ export interface FineTuneRow<K extends RegionId> {
    * owns the pinning; this is what tells it which row asks for one.
    */
   readonly pinsTransient: boolean;
+  /**
+   * Whether the row stays operable while its region is Hidden. A fine-tune row
+   * normally tunes the region itself, so a hidden region greys it; the one
+   * exception is a setting about ANOTHER surface that only lives here beside
+   * its sibling (the agent rows' resource readings, G7).
+   */
+  readonly whileHidden: boolean;
   readonly control: ControlSpec<K>;
 }
 
@@ -236,3 +243,5 @@ export const SIZED_VERBS: ReadonlyArray<QuickVerbId> = [
   "chip",
   "full",
 ];
+/** A region that resizes but never hides: the Access pill (G6). */
+export const SIZE_ONLY_VERBS: ReadonlyArray<QuickVerbId> = ["chip", "full"];

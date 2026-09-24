@@ -4,6 +4,7 @@ import type {
   AnimationEvent,
   ComponentPropsWithRef,
   CSSProperties,
+  ReactElement,
   ReactNode,
 } from "react";
 import { X } from "lucide-react";
@@ -12,11 +13,7 @@ import type { MergeSide } from "@/components/epic-canvas/dnd/strip-drag-model";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropLine } from "@/components/ui/drop-line";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+import { HoverCard } from "@/components/ui/hover-card";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
 import { cn } from "@/lib/utils";
 import { SESSION_TAB_LABEL_CLASS } from "../header-tab-visual";
@@ -588,30 +585,30 @@ function trailingStatus(props: {
 /**
  * The row's or tile's hover card, on the side facing the content: left of a
  * right-edge strip, right of a left-edge strip. Always mounted, so switching
- * variants keeps the row element; closed whenever it is not allowed (a rename,
- * or the row is part of a drag). Its body mounts only while it is open.
+ * variants keeps the row element; shut whenever it is not allowed (a rename,
+ * or the row is part of a drag). Its body mounts only while it is open. The
+ * row list is its `HoverCardGroup`.
  */
 function SideTabRowHoverCard(props: {
   readonly allowed: boolean;
   readonly body: ReactNode;
-  readonly children: ReactNode;
+  readonly children: ReactElement;
 }) {
   const placement = useColumnOverlayPlacement("row");
-  const [open, setOpen] = useState(false);
   return (
     <HoverCard
-      open={props.allowed ? open : false}
-      onOpenChange={(next) => setOpen(next && props.allowed)}
-    >
-      <HoverCardTrigger asChild>{props.children}</HoverCardTrigger>
-      <HoverCardContent
-        side={placement?.side ?? "right"}
-        align={placement?.align ?? "center"}
-        data-testid="side-tab-hover-card"
-        className="w-[min(90vw,18rem)] p-3 text-ui-xs"
-      >
-        {props.body}
-      </HoverCardContent>
-    </HoverCard>
+      trigger={props.children}
+      content={props.body}
+      appearance="preview"
+      semantics={{ role: "tooltip" }}
+      side={placement?.side ?? "right"}
+      align={placement?.align ?? "center"}
+      sideOffset={4}
+      enabled={props.allowed}
+      open={null}
+      onOpenChange={null}
+      testId="side-tab-hover-card"
+      className="w-[min(90vw,18rem)] p-3 text-ui-xs"
+    />
   );
 }

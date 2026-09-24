@@ -4,35 +4,35 @@ import {
   History,
   ImagePlus,
   ListChecks,
-  ListOrdered,
   Mic,
   Shield,
   SlidersHorizontal,
 } from "lucide-react";
 import {
   SHOW_HIDE_VERBS,
+  SIZE_ONLY_VERBS,
   SIZED_VERBS,
   type LayoutRegion,
   type StyleExample,
 } from "@/components/layout-editor/regions/region-grammar";
 import {
+  accessStateWord,
   modelStateWord,
   shownStateWord,
   sizedStateWord,
 } from "@/components/layout-editor/regions/region-state-words";
 
 /**
- * The composer's nine regions: the five dock rows above the message box, and
+ * The composer's eight regions: the four dock rows above the message box, and
  * the four toolbar elements below it.
  *
  * They share three row shapes, which is why they share a file: a dock row's
  * order, a toolbar cluster's order, and the full-row/chip size that only the
  * elements which shrink rather than disappear have.
  *
- * Todo and Message queue are dock rows like the other three (L-139, L-142) and
- * so their entries are copies of `BACKGROUND_REGION` down to the row list: one
- * rule for everything above the message box means there is nothing here that
- * reads differently for them.
+ * Todo is a dock row like the other three (L-139, L-142) and so its entry is a
+ * copy of `BACKGROUND_REGION` down to the row list. The Message queue is not a
+ * region at all (G1-G2): it is never a pill, never hidden and never reordered.
  */
 
 const DOCK_ORDER_ROW = { kind: "position-order", group: "dock" } as const;
@@ -100,26 +100,7 @@ export const BACKGROUND_REGION: LayoutRegion<"background"> = {
   stateWord: sizedStateWord,
 };
 
-/**
- * `ListOrdered` is the glyph the real panel's own header prints beside
- * "Message queue", so the index row, the quick-verb menu and the compact pill
- * all name the row with the mark a reader already associates with it.
- */
-export const QUEUE_REGION: LayoutRegion<"queue"> = {
-  id: "queue",
-  name: "Message queue",
-  surface: "composer",
-  icon: ListOrdered,
-  where: "Composer - above the message box",
-  whereByHost: null,
-  hint: null,
-  keywords: ["queue", "queued", "messages", "pending", "next", "steer"],
-  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
-  quickVerbs: SIZED_VERBS,
-  stateWord: sizedStateWord,
-};
-
-/** `ListChecks` for the same reason: the Todo header's own resting glyph. */
+/** `ListChecks`: the glyph the Todo header prints beside its own name. */
 export const TODO_REGION: LayoutRegion<"todo"> = {
   id: "todo",
   name: "Todo",
@@ -164,8 +145,9 @@ export const ACCESS_REGION: LayoutRegion<"access"> = {
     },
     TOOLBAR_LEFT_ORDER_ROW,
   ],
-  quickVerbs: SIZED_VERBS,
-  stateWord: sizedStateWord,
+  // No Hide: the pill is a floor, never hidden (G6).
+  quickVerbs: SIZE_ONLY_VERBS,
+  stateWord: accessStateWord,
 };
 
 export const MODEL_REGION: LayoutRegion<"model"> = {
@@ -186,7 +168,8 @@ export const MODEL_REGION: LayoutRegion<"model"> = {
     },
     TOOLBAR_RIGHT_ORDER_ROW,
   ],
-  quickVerbs: SHOW_HIDE_VERBS,
+  // No Hide: the picker always draws (G6), so there is no verb to offer.
+  quickVerbs: [],
   stateWord: modelStateWord,
 };
 

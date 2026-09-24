@@ -183,26 +183,24 @@ describe("index changed-dots and the header count (L-57)", () => {
   });
 
   it("dots a region whose Position row moved even though no value changed", () => {
+    // Swapping the first two dock members moves exactly those two; every
+    // member after them keeps its index, so it carries no dot, which is the
+    // narrowing (I-17) - the group is reordered, those rows are not.
+    const [first, second, ...rest] = DEFAULT_ARRANGEMENT.dock;
     render(<InspectorIndex onPreviewPreset={() => {}} />);
     act(() => {
-      const arrangement = useLayoutStore.getState().arrangement;
       useLayoutStore.getState().setArrangement({
-        ...arrangement,
-        dock: [...arrangement.dock].reverse(),
+        ...useLayoutStore.getState().arrangement,
+        dock: [second, first, ...rest],
       });
     });
 
     const snapshot = getLayoutSnapshot();
-    const dots = screen.getAllByTestId("changed-dot");
-    // Reversing an odd-length list leaves the MIDDLE member at its own index:
-    // it has not moved, so it carries no dot, which is exactly the narrowing
-    // (I-17) - the group is reordered, that row is not. The dock has five
-    // members since L-142, so the middle one is `background`.
-    const dock = DEFAULT_ARRANGEMENT.dock;
-    const middle = dock[(dock.length - 1) / 2];
-    const dotted = dots.map((dot) => rowRegionId(dot));
-    expect(dotted.length).toBe(dock.length - 1);
-    expect(dotted).not.toContain(middle);
+    const dotted = screen
+      .getAllByTestId("changed-dot")
+      .map((dot) => rowRegionId(dot));
+    expect(new Set(dotted)).toEqual(new Set([first, second]));
+    expect(rest.length).toBeGreaterThan(0);
     for (const regionId of dotted) {
       expect(regionChanged(snapshot, regionId)).toBe(false);
     }

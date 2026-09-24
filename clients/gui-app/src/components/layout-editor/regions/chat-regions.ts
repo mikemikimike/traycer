@@ -69,6 +69,7 @@ export const CONTEXT_USAGE_REGION: LayoutRegion<"contextUsage"> = {
           label: "Pin the breakdown",
           description: "Keeps the per-source card open above the chip.",
           pinsTransient: true,
+          whileHidden: false,
           control: { kind: "switch", key: "pinBreakdown" },
         },
         {
@@ -76,6 +77,7 @@ export const CONTEXT_USAGE_REGION: LayoutRegion<"contextUsage"> = {
           label: "Rows in the pinned card",
           description: null,
           pinsTransient: true,
+          whileHidden: false,
           control: {
             kind: "field-checks",
             key: "pinnedFields",
@@ -90,6 +92,7 @@ export const CONTEXT_USAGE_REGION: LayoutRegion<"contextUsage"> = {
           label: "Compact button",
           description: null,
           pinsTransient: false,
+          whileHidden: false,
           control: { kind: "switch", key: "compactButton" },
         },
       ],

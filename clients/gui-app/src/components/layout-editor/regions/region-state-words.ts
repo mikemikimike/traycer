@@ -6,6 +6,7 @@ import {
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import type {
+  AccessValues,
   ContextUsageValues,
   ModelValues,
   RailValues,
@@ -17,9 +18,9 @@ import type {
  * The one word each region's row reads out beside its name (L-33, L-47).
  *
  * One per value SHAPE rather than one per region: of the twenty-three regions
- * nine are the rail's three-state and six are the Full row / Chip pair (the
- * five dock members and the Access pill), so the tables beside this file point
- * several regions at the same function.
+ * nine are the rail's three-state and five are the Full row / Chip pair (the
+ * dock members), so the tables beside this file point several regions at the
+ * same function.
  */
 
 export function shownStateWord(values: ShownValues): string {
@@ -28,6 +29,11 @@ export function shownStateWord(values: ShownValues): string {
 
 export function sizedStateWord(values: SizedValues): string {
   if (values.shown === "hidden") return "Hidden";
+  return values.size === "chip" ? "Chip" : "Full row";
+}
+
+/** The Access pill's size; it has no Hidden (G6). */
+export function accessStateWord(values: AccessValues): string {
   return values.size === "chip" ? "Chip" : "Full row";
 }
 
@@ -74,7 +80,6 @@ export function contextUsageStateWord(values: ContextUsageValues): string {
 }
 
 export function modelStateWord(values: ModelValues): string {
-  if (values.shown === "hidden") return "Hidden";
   if (values.style === "text") return "Text";
   return values.style === "bars" ? "Bars" : "Bars + text";
 }

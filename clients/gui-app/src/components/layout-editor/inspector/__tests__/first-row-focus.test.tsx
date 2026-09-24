@@ -1,9 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  focusFirstSortableRow,
-  focusSortableRowGrab,
-} from "@/components/layout-editor/inspector/first-row-focus";
+import { focusSortableRowGrab } from "@/components/layout-editor/inspector/first-row-focus";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import {
   SortableList,
@@ -79,18 +76,6 @@ afterEach(() => {
 });
 
 describe("focusing a list row from outside the list", () => {
-  it("lands on the first row's grab, not on its control", () => {
-    const pane = renderPane();
-
-    focusFirstSortableRow(pane);
-
-    const active = document.activeElement;
-    if (active === null) throw new Error("nothing took focus");
-    expect(active.getAttribute("role")).toBe("button");
-    expect(card("minimap").contains(active)).toBe(true);
-    expect(active.tagName).not.toBe("BUTTON");
-  });
-
   it("lands on the row a caller already has in hand", () => {
     renderPane();
 
@@ -102,13 +87,11 @@ describe("focusing a list row from outside the list", () => {
     expect(active.getAttribute("role")).toBe("button");
   });
 
-  it("does nothing when there is no pane and no row", () => {
+  it("does nothing when there is no row", () => {
     renderPane();
     const before = document.activeElement;
 
-    focusFirstSortableRow(null);
     focusSortableRowGrab(null);
-    focusFirstSortableRow(document.createElement("div"));
 
     expect(document.activeElement).toBe(before);
   });

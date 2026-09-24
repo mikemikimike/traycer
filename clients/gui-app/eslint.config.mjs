@@ -112,6 +112,12 @@ const importRestrictionDimensions = {
         "Overlay portal primitives are built only by the shadcn wrappers in src/components/ui/**. Use the wrapper - Dialog/Popover/Select/DropdownMenu/Tooltip/ContextMenu/HoverCard from @/components/ui/* - instead of importing the Radix primitive directly.",
     },
     {
+      group: ["@floating-ui/react"],
+      importNames: ["FloatingPortal"],
+      message:
+        "Floating UI's portal is built only by the wrappers in src/components/ui/** (the hover card). Use HoverCard from @/components/ui/hover-card instead of portalling a Floating UI surface directly.",
+    },
+    {
       group: ["radix-ui/internal"],
       importNames: [
         "DismissableLayer",
@@ -994,7 +1000,7 @@ const tailContracts = [
     // The card is a SURFACE: it owns its fill, its border and its elevation,
     // and nothing else. A caller that does not use `HOVER_PREVIEW_SCROLL_CLASS`
     // supplies the inset and the type itself, because the card never had them.
-    pattern: "^HoverCardContent$",
+    pattern: "^HoverCard$",
     allow: ["layout", "spacing", "typography", ...fontSizeTokens],
   },
   {
@@ -3068,7 +3074,8 @@ export default tseslint.config(
   {
     // Geometry a SHARED HELPER builds: `frameStyle(paintedSize, origin)`,
     // `containBox(frameSize)`, `gitTreeStyle(...)`, `pipRootBox(geometry)`,
-    // `surfaceStyle(placement)`, dnd-kit's `sortable.style`, a measured
+    // `surfaceStyle(placement)`, dnd-kit's `sortable.style`, Floating UI's
+    // `floatingStyles` and `useTransitionStyles` styles, a measured
     // `rect`, `useEpicNodeIconTone(type).style`. Every property inside is one
     // the allow list above already permits - `useEpicNodeIconTone` builds the
     // `--swatch` custom property and nothing else - and the rule simply cannot
@@ -3103,6 +3110,7 @@ export default tseslint.config(
       "src/components/notifications/notifications-popover.tsx",
       "src/components/resources/resource-monitor-popover.tsx",
       "src/components/settings/panels/appearance-settings-panel.tsx",
+      "src/components/ui/hover-card.tsx",
       "src/components/ui/shimmer.tsx",
       "src/components/ui/start-truncated-text.tsx",
     ],

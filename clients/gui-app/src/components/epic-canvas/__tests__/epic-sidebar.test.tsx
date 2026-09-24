@@ -320,10 +320,11 @@ describe("<EpicLeftPanelRail />", () => {
       />,
     );
 
-    // Every default panel draws its own rail icon (L-155): there is no group
-    // concept left to combine Agents and Artifacts under one button.
+    // The shipped pair (Agents + Artifacts) draws as ONE group icon (G3): the
+    // top panel's own button stands for both, and there is no separate
+    // "epic-rail-artifacts" button while it is grouped.
     expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
-    expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
+    expect(screen.queryByTestId("epic-rail-artifacts")).toBeNull();
     expect(screen.getByTestId("epic-rail-terminals")).not.toBeNull();
     expect(screen.getByTestId("epic-rail-browsers")).not.toBeNull();
     expect(screen.getByTestId("epic-rail-git-diff")).not.toBeNull();
@@ -405,14 +406,14 @@ describe("<EpicLeftPanelRail />", () => {
     for (const child of Array.from(rail.children)) {
       expect(child.className).not.toMatch(/\bm[xytrbl]?-\d/);
     }
-    // A button's accessible name is now its own panel's title - never a
-    // "X + Y" label for a group that no longer exists.
+    // The group's button carries every member's name (G3), not just the top
+    // panel's own title.
     expect(
       screen.getByTestId("epic-rail-chats").getAttribute("aria-label"),
-    ).toBe("Agents");
+    ).toBe("Agents · Artifacts");
   });
 
-  it("draws nine icons, with the shipped pair inside one capsule", () => {
+  it("draws eight icons for nine panels, with the shipped pair inside one group", () => {
     testState.activeArtifactId = "artifact-1";
     testState.activeArtifact = { kind: "spec" };
     useLeftPanelStore.getState().revealCommentsPanel(TAB_ID);
@@ -427,7 +428,6 @@ describe("<EpicLeftPanelRail />", () => {
 
     for (const testId of [
       "epic-rail-chats",
-      "epic-rail-artifacts",
       "epic-rail-terminals",
       "epic-rail-browsers",
       "epic-rail-git-diff",
@@ -438,22 +438,45 @@ describe("<EpicLeftPanelRail />", () => {
     ]) {
       expect(screen.getByTestId(testId)).not.toBeNull();
     }
+    // Artifacts is the bottom of the shipped pair (G3): its icon does not draw
+    // its own button, the top's stands in for it.
+    expect(screen.queryByTestId("epic-rail-artifacts")).toBeNull();
 
-    // Exactly one capsule on the rail, and it holds exactly the two members
+    // Exactly one group on the rail, and it holds exactly the two members
     // of the shipped pair - not a third icon, and not either of them loose.
     expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(1);
     const stack = screen.getByTestId("epic-rail-stack");
     expect(stack.getAttribute("data-rail-stack")).toBe(
       "stack:railAgents+railArtifacts",
     );
+    // ONE button inside it - the top's, never the bottom's too.
     expect(
       Array.from(stack.querySelectorAll("button")).map((button) =>
         button.getAttribute("data-testid"),
       ),
-    ).toEqual(["epic-rail-chats", "epic-rail-artifacts"]);
+    ).toEqual(["epic-rail-chats"]);
   });
 
-  it("clicking either member of the capsule focuses that panel", () => {
+  // handleGroupClick's three branches (G3): the group's one button answers a
+  // click the same way a lone panel's icon would, reading `displayedPanelId`
+  // and each member's own collapsed state rather than "which half was
+  // clicked" - there is no separate button for the bottom member any more.
+  it("opens the group on its top panel when neither member is showing", () => {
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("epic-rail-chats"));
+
+    expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
+  });
+
+  it("collapses the main panel on a click of the group icon while it is showing", () => {
     render(
       <EpicLeftPanelRail
         epicId={EPIC_ID}
@@ -463,22 +486,29 @@ describe("<EpicLeftPanelRail />", () => {
     );
 
     expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
+    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(false);
 
-    fireEvent.click(screen.getByTestId("epic-rail-artifacts"));
+    fireEvent.click(screen.getByTestId("epic-rail-chats"));
+
+    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(true);
+  });
+
+  it("reopens a member whose own section is collapsed, instead of collapsing the column", () => {
+    useLeftPanelStore.getState().togglePanelSectionCollapsed("artifacts");
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("epic-rail-chats"));
 
     expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe(
       "artifacts",
     );
-    // The pair does not collapse to one icon when the other becomes active -
-    // both stay drawn inside the capsule (L-167).
-    expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
-    expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
-
-    fireEvent.click(screen.getByTestId("epic-rail-chats"));
-
-    expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
-    expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
-    expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
+    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(false);
   });
 
   it("namespaces duplicate Epic rail registrations by view tab", () => {
@@ -1480,15 +1510,15 @@ describe("Browsers panel registration", () => {
     expect(screen.getByTestId("epic-browsers-panel-empty")).toBeTruthy();
 
     // Dragging Browsers before Terminals reorders the flat rail directly -
-    // there is no group to merge into any more (L-155).
+    // both are lone panels, so there is no group for either to leave or join.
     act(() => {
       applyRail(
-        moveRailPanelBeside(
-          currentLayoutArrangement(),
-          "browsers",
-          "terminals",
-          false,
-        ).rail,
+        moveRailPanelBeside(currentLayoutArrangement(), {
+          sourcePanelId: "browsers",
+          targetPanelId: "terminals",
+          placeAfter: false,
+          asGroups: false,
+        }).rail,
       );
     });
     const reorderedRailIds = Array.from(

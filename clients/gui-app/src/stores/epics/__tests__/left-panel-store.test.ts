@@ -96,14 +96,15 @@ function movePanelBeside(
   sourcePanelId: LeftPanelId,
   targetPanelId: LeftPanelId,
   placeAfter: boolean,
+  asGroups: boolean,
 ): void {
   applyRail(
-    moveRailPanelBeside(
-      currentLayoutArrangement(),
+    moveRailPanelBeside(currentLayoutArrangement(), {
       sourcePanelId,
       targetPanelId,
       placeAfter,
-    ).rail,
+      asGroups,
+    }).rail,
   );
 }
 
@@ -494,7 +495,7 @@ describe("useLeftPanelStore", () => {
   });
 
   it("reorders panels before or after another panel", () => {
-    movePanelBeside("artifacts", "chats", false);
+    movePanelBeside("artifacts", "chats", false, false);
     expect(railPanelIds(currentRail())).toEqual([
       "artifacts",
       "chats",
@@ -507,7 +508,7 @@ describe("useLeftPanelStore", () => {
       "comments",
     ]);
 
-    movePanelBeside("comments", "chats", true);
+    movePanelBeside("comments", "chats", true, false);
     expect(railPanelIds(currentRail())).toEqual([
       "artifacts",
       "chats",
@@ -522,7 +523,7 @@ describe("useLeftPanelStore", () => {
   });
 
   it("keeps rail order global instead of scoping layout by tab", () => {
-    movePanelBeside("artifacts", "chats", false);
+    movePanelBeside("artifacts", "chats", false, false);
     useLeftPanelStore.getState().setActivePanelId("tab-a", "artifacts");
     useLeftPanelStore.getState().setActivePanelId("tab-b", "file-tree");
 
@@ -582,7 +583,9 @@ describe("useLeftPanelStore", () => {
   });
 
   it("moves a panel to the rail end", () => {
-    applyRail(moveRailPanelToEnd(currentLayoutArrangement(), "chats").rail);
+    applyRail(
+      moveRailPanelToEnd(currentLayoutArrangement(), "chats", false).rail,
+    );
 
     expect(railPanelIds(currentRail())).toEqual([
       "artifacts",
@@ -598,14 +601,14 @@ describe("useLeftPanelStore", () => {
   });
 
   it("writes nothing on a no-op rail move", () => {
-    movePanelBeside("artifacts", "chats", false);
+    movePanelBeside("artifacts", "chats", false, false);
     const before = useLayoutStore.getState().arrangement.rail;
-    movePanelBeside("artifacts", "chats", false);
+    movePanelBeside("artifacts", "chats", false, false);
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
   });
 
   it("keeps the rail hook snapshot stable across unrelated writes", () => {
-    movePanelBeside("artifacts", "chats", false);
+    movePanelBeside("artifacts", "chats", false, false);
     const hook = renderHook(() => useLayoutRail());
     const before = hook.result.current;
 

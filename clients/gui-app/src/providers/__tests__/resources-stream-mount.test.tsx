@@ -13,26 +13,31 @@ function installStubFactory(): void {
 }
 
 /**
- * One switch owns the readings now (L-48): the resource monitor's `shown` is
- * what the stream follows, and the sidebar's chips read the same projection.
+ * Two switches own the readings now (G7): the resource monitor's own `shown`
+ * and the sidebar rows' independent `agentRows`. The stream connects while
+ * EITHER wants it, so a test isolating one leaf's effect must pin the other.
  */
-function setResourceMonitorShown(shown: boolean): void {
-  useLayoutStore
-    .getState()
-    .setRegionValues("resourceMonitor", { shown: shown ? "shown" : "hidden" });
+function setResourceMonitor(values: {
+  readonly shown: boolean;
+  readonly agentRows: boolean;
+}): void {
+  useLayoutStore.getState().setRegionValues("resourceMonitor", {
+    shown: values.shown ? "shown" : "hidden",
+    agentRows: values.agentRows,
+  });
 }
 
 afterEach(() => {
   cleanup();
   __setResourcesStreamClientFactoryForTests(null);
   resourcesRegistry.disposeAll();
-  setResourceMonitorShown(true);
+  setResourceMonitor({ shown: true, agentRows: true });
 });
 
 describe("<ResourcesStreamMount />", () => {
-  it("acquires nothing while the resource monitor is hidden", () => {
+  it("acquires nothing while both the monitor and agent rows are off", () => {
     installStubFactory();
-    setResourceMonitorShown(false);
+    setResourceMonitor({ shown: false, agentRows: false });
 
     render(<ResourcesStreamMount epicId="epic-1" />);
 
@@ -41,7 +46,7 @@ describe("<ResourcesStreamMount />", () => {
 
   it("acquires the registry entry while the resource monitor is shown", () => {
     installStubFactory();
-    setResourceMonitorShown(true);
+    setResourceMonitor({ shown: true, agentRows: false });
 
     render(<ResourcesStreamMount epicId="epic-1" />);
 
@@ -50,13 +55,13 @@ describe("<ResourcesStreamMount />", () => {
 
   it("acquires live when the monitor is shown mid-session, without remounting", () => {
     installStubFactory();
-    setResourceMonitorShown(false);
+    setResourceMonitor({ shown: false, agentRows: false });
 
     render(<ResourcesStreamMount epicId="epic-1" />);
     expect(resourcesRegistry.get("epic-1")).toBeNull();
 
     act(() => {
-      setResourceMonitorShown(true);
+      setResourceMonitor({ shown: true, agentRows: false });
     });
 
     expect(resourcesRegistry.get("epic-1")).not.toBeNull();
@@ -64,13 +69,13 @@ describe("<ResourcesStreamMount />", () => {
 
   it("releases live when the monitor is hidden mid-session", () => {
     installStubFactory();
-    setResourceMonitorShown(true);
+    setResourceMonitor({ shown: true, agentRows: false });
 
     render(<ResourcesStreamMount epicId="epic-1" />);
     expect(resourcesRegistry.get("epic-1")).not.toBeNull();
 
     act(() => {
-      setResourceMonitorShown(false);
+      setResourceMonitor({ shown: false, agentRows: false });
     });
 
     expect(resourcesRegistry.get("epic-1")).toBeNull();
@@ -78,7 +83,7 @@ describe("<ResourcesStreamMount />", () => {
 
   it("releases the entry on unmount", () => {
     installStubFactory();
-    setResourceMonitorShown(true);
+    setResourceMonitor({ shown: true, agentRows: false });
 
     const { unmount } = render(<ResourcesStreamMount epicId="epic-1" />);
     expect(resourcesRegistry.get("epic-1")).not.toBeNull();
@@ -86,5 +91,43 @@ describe("<ResourcesStreamMount />", () => {
     unmount();
 
     expect(resourcesRegistry.get("epic-1")).toBeNull();
+  });
+
+  describe("agentRows and shown independently want the stream (G7)", () => {
+    it("connects when shown is on and agentRows is off", () => {
+      installStubFactory();
+      setResourceMonitor({ shown: true, agentRows: false });
+
+      render(<ResourcesStreamMount epicId="epic-1" />);
+
+      expect(resourcesRegistry.get("epic-1")).not.toBeNull();
+    });
+
+    it("connects when shown is off and agentRows is on", () => {
+      installStubFactory();
+      setResourceMonitor({ shown: false, agentRows: true });
+
+      render(<ResourcesStreamMount epicId="epic-1" />);
+
+      expect(resourcesRegistry.get("epic-1")).not.toBeNull();
+    });
+
+    it("does not connect when both shown and agentRows are off", () => {
+      installStubFactory();
+      setResourceMonitor({ shown: false, agentRows: false });
+
+      render(<ResourcesStreamMount epicId="epic-1" />);
+
+      expect(resourcesRegistry.get("epic-1")).toBeNull();
+    });
+
+    it("connects when both shown and agentRows are on", () => {
+      installStubFactory();
+      setResourceMonitor({ shown: true, agentRows: true });
+
+      render(<ResourcesStreamMount epicId="epic-1" />);
+
+      expect(resourcesRegistry.get("epic-1")).not.toBeNull();
+    });
   });
 });

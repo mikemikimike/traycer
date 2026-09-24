@@ -284,7 +284,12 @@ function hoverCard(): HTMLElement | null {
 }
 
 function dwell(row: HTMLElement): void {
+  // `useHover`'s open-delay timer lives on a native `mouseenter` listener
+  // Floating UI attaches directly to the DOM node, gated on the pointer type
+  // `onPointerEnter` (a React prop) just recorded - both have to fire, like a
+  // real browser's compat mouse events would.
   fireEvent.pointerEnter(row, { pointerType: "mouse" });
+  fireEvent.mouseEnter(row);
   act(() => {
     vi.advanceTimersByTime(1000);
   });

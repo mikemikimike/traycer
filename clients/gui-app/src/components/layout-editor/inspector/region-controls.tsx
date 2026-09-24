@@ -26,7 +26,11 @@ import {
   type BarRegionId,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
-import type { LayoutValues } from "@/lib/layout/layout-values";
+import { PRESET_VALUES } from "@/lib/layout/layout-presets";
+import {
+  regionValuesHidden,
+  type LayoutValues,
+} from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
@@ -59,9 +63,9 @@ export function RegionShownControl(props: {
 }): ReactNode {
   const { regionId, values } = props;
   const facts = regionFacts(regionId);
+  if (!regionHides(regionId)) return null;
   const shownValue = String(readControlValue(values[regionId], "shown"));
-
-  if (!isRailRegionId(regionId)) {
+  if (!offersAuto(regionId)) {
     return (
       <Switch
         aria-label={`Show ${facts.name}`}
@@ -118,12 +122,12 @@ export function RegionDisplayControl(props: {
   const { regionId, values } = props;
   const facts = regionFacts(regionId);
   const regionValues = values[regionId];
-  const hidden = readControlValue(regionValues, "shown") === "hidden";
+  const hidden = regionValuesHidden(regionValues);
   // One wording for all three option sets, so every row on the page has the
   // same accessible-name pattern whatever its options are.
   const ariaLabel = `${facts.name} display`;
 
-  if (isRailRegionId(regionId)) {
+  if (offersAuto(regionId)) {
     return (
       <SegmentedControl
         ariaLabel={ariaLabel}
@@ -142,7 +146,9 @@ export function RegionDisplayControl(props: {
         value={
           hidden ? "hidden" : String(readControlValue(regionValues, "size"))
         }
-        options={SIZEABLE_DISPLAY_OPTIONS}
+        options={
+          regionHides(regionId) ? SIZEABLE_DISPLAY_OPTIONS : SIZE_OPTIONS
+        }
         onChange={(next) => {
           if (next === "hidden") {
             setRegionShown(regionId, false);
@@ -153,6 +159,7 @@ export function RegionDisplayControl(props: {
       />
     );
   }
+  if (!regionHides(regionId)) return null;
   return (
     <SegmentedControl
       ariaLabel={ariaLabel}
@@ -163,6 +170,26 @@ export function RegionDisplayControl(props: {
       }}
     />
   );
+}
+
+/**
+ * Whether a region can be hidden at all: it has a `shown` leaf. Access and
+ * Model do not - each is a floor the composer always draws (G6) - so they get
+ * no Shown control and no Hidden option.
+ */
+function regionHides(regionId: RegionId): boolean {
+  return "shown" in PRESET_VALUES.default[regionId];
+}
+
+/**
+ * Whether a region's Shown has an `Auto` worth offering: a rail panel with a
+ * presence rule of its own (L-47). Seven of the nine panels have none - their
+ * rule is "always" - so `Auto` and `Shown` drew the same rail and the third
+ * option was a choice with no effect (G6). Those get the plain Shown control,
+ * whose "on" is still `auto` (`regionShownOnValue`), so nothing stored moves.
+ */
+function offersAuto(regionId: RegionId): boolean {
+  return isRailRegionId(regionId) && regionFacts(regionId).hint !== null;
 }
 
 /** The rail's three-state write, from either host's control. */
@@ -188,7 +215,9 @@ function writeSizeShown(regionId: RegionId, size: string): void {
   useLayoutEditorStore.getState().recordGesture(() => {
     const patch: Partial<LayoutValues[RegionId]> = {};
     Reflect.set(patch, "size", size);
-    Reflect.set(patch, "shown", regionShownOnValue(regionId));
+    if (regionHides(regionId)) {
+      Reflect.set(patch, "shown", regionShownOnValue(regionId));
+    }
     useLayoutStore.getState().setRegionValues(regionId, patch);
   });
 }

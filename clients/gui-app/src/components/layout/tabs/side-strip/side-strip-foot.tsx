@@ -15,8 +15,6 @@ import { useEffectiveHostId } from "@/hooks/host/use-effective-host-id";
 import { useHostDirectoryEntry } from "@/hooks/host/use-host-directory-entry";
 import { useHostLease } from "@/hooks/host/use-host-lease";
 import { cn } from "@/lib/utils";
-import { useAccountActivityCoverage } from "@/hooks/agent/use-account-activity-coverage";
-import { useAccountRunningAgentCount } from "@/stores/agent-activity-store";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import type { SideTabRowVariant } from "./side-tab-row";
 import {
@@ -110,7 +108,6 @@ function SideStripAccount(props: {
 }): ReactNode {
   const profile = useAuthStore((state) => state.profile);
   const isSignedIn = useAuthStore((state) => state.status === "signed-in");
-  const host = useAccountHostReading();
   if (!isSignedIn || profile === null) {
     return <SignInButton layout="compact" />;
   }
@@ -121,19 +118,12 @@ function SideStripAccount(props: {
       email={profile.email}
       avatarUrl={avatarUrl}
       showAppSettings
-      // The row's second line is shortened to fit; the tooltip says it whole.
-      triggerTooltip={
-        host.fullLine === null
-          ? profile.userName
-          : `${profile.userName} · ${host.fullLine}`
-      }
       trigger={
         <AccountRowButton
           variant={props.variant}
           userName={profile.userName}
           email={profile.email}
           avatarUrl={avatarUrl}
-          host={host}
         />
       }
     />
@@ -141,8 +131,8 @@ function SideStripAccount(props: {
 }
 
 /**
- * The account row: the avatar with the host's health dot, the name, and
- * "<host> · N agents running". Collapsed, the avatar tile alone. It is the
+ * The account row: the avatar with the host's health dot, the name, and the
+ * host's name. Collapsed, the avatar tile alone. It is the
  * user menu's trigger, so it takes the trigger's props and ref.
  */
 function AccountRowButton(
@@ -151,19 +141,12 @@ function AccountRowButton(
     readonly userName: string;
     readonly email: string;
     readonly avatarUrl: string | null;
-    readonly host: AccountHostReading;
   },
 ): ReactNode {
-  const {
-    variant,
-    userName,
-    email,
-    avatarUrl,
-    host,
-    className,
-    ...buttonProps
-  } = props;
+  const { variant, userName, email, avatarUrl, className, ...buttonProps } =
+    props;
   const collapsed = variant === "collapsed";
+  const host = useAccountHostReading();
   const avatar = (
     <span className="relative flex shrink-0">
       <UserMenuAvatar userName={userName} email={email} avatarUrl={avatarUrl} />
@@ -199,28 +182,13 @@ function AccountRowButton(
             <span className="truncate text-ui-sm font-medium text-foreground">
               {userName}
             </span>
-            {host.fullLine === null ? null : (
-              <>
-                {/* The row's name says the count in full; the line is short. */}
-                <span className="sr-only">{host.fullLine}</span>
-                <span
-                  aria-hidden
-                  data-testid="side-strip-host-line"
-                  className="flex min-w-0 text-ui-xs text-muted-foreground"
-                >
-                  {host.hostName === null ? null : (
-                    <span className="truncate">{host.hostName}</span>
-                  )}
-                  {host.running === null ? null : (
-                    // The count never truncates: the host name gives way first.
-                    <span className="shrink-0 whitespace-pre">
-                      {host.hostName === null
-                        ? host.running.short
-                        : ` · ${host.running.short}`}
-                    </span>
-                  )}
-                </span>
-              </>
+            {host.hostName === null ? null : (
+              <span
+                data-testid="side-strip-host-line"
+                className="truncate text-ui-xs text-muted-foreground"
+              >
+                {host.hostName}
+              </span>
             )}
           </span>
           <ChevronsUpDown
@@ -264,43 +232,16 @@ function hostHealthOf(status: HostLeaseStatus | null): HostHealth {
   }
 }
 
-interface AccountHostReading {
+/** The app-wide host's health and name, for the account row. */
+function useAccountHostReading(): {
   readonly health: HostHealth;
   readonly hostName: string | null;
-  /** `9 running` for the row, `9 agents running` for its name and tooltip. */
-  readonly running: { readonly short: string; readonly full: string } | null;
-  /** The second line in full: `Mac Studio · 9 agents running`. */
-  readonly fullLine: string | null;
-}
-
-/**
- * The app-wide host's health and the account row's second line: the host's
- * name, then how many agents are running across the account, when any are.
- * The row shows the count as `N running` so it fits the strip whole; the
- * words `agents running` stay in the row's accessible name and tooltip.
- */
-function useAccountHostReading(): AccountHostReading {
+} {
   const hostId = useEffectiveHostId();
   const entry = useHostDirectoryEntry(hostId);
   const lease = useHostLease(hostId);
-  const running = useAccountRunningAgentCount();
-  // A union that does not reach every host is a lower bound, never a total.
-  const bound = useAccountActivityCoverage() === "covered" ? "" : "+";
-  const runningText =
-    running === 0
-      ? null
-      : {
-          short: `${running}${bound} running`,
-          full: `${running}${bound} ${running === 1 && bound === "" ? "agent" : "agents"} running`,
-        };
-  const hostName = entry?.label ?? null;
-  const parts = [hostName, runningText?.full ?? null].filter(
-    (part): part is string => part !== null,
-  );
   return {
     health: hostHealthOf(lease?.status ?? null),
-    hostName,
-    running: runningText,
-    fullLine: parts.length === 0 ? null : parts.join(" · "),
+    hostName: entry?.label ?? null,
   };
 }

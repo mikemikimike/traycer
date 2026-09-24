@@ -6,7 +6,13 @@
  * rendering and click behaviour, not about how the host list is built.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -34,6 +40,7 @@ import {
   hostScopeOptionFixture,
 } from "@/components/settings/host-scope/host-scope-fixture";
 import type { HostOptions } from "@/components/settings/host-scope/use-host-options";
+import { ACTIVATE_HOST_HINT } from "@/components/settings/host-scope/host-option-model";
 
 const hostOptionsRef = vi.hoisted((): { value: HostOptions } => ({
   value: {
@@ -155,6 +162,53 @@ function mountMenu(host: MockRunnerHost, children: ReactNode): void {
   render(<RouterProvider router={router} />);
 }
 
+/**
+ * Overrides `scrollWidth`/`clientWidth` for whichever element's ENTIRE text
+ * content equals `hostName` - the name span `HostOptionRow` attaches its
+ * `nameRef` to, and nothing else in the row (G4).
+ */
+function stubHostNameOverflow(
+  hostName: string,
+  metrics: { readonly scrollWidth: number; readonly clientWidth: number },
+): () => void {
+  const originalScrollWidth = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollWidth",
+  );
+  const originalClientWidth = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientWidth",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.textContent === hostName ? metrics.scrollWidth : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.textContent === hostName ? metrics.clientWidth : 0;
+    },
+  });
+  return () => {
+    if (originalScrollWidth !== undefined) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollWidth",
+        originalScrollWidth,
+      );
+    }
+    if (originalClientWidth !== undefined) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "clientWidth",
+        originalClientWidth,
+      );
+    }
+  };
+}
+
 async function openMenu(): Promise<void> {
   const host = buildHost();
   mountMenu(
@@ -164,7 +218,6 @@ async function openMenu(): Promise<void> {
       email="ada@example.com"
       avatarUrl={null}
       showAppSettings={false}
-      triggerTooltip={null}
       trigger={null}
     />,
   );
@@ -392,5 +445,192 @@ describe("<UserMenu /> host section", () => {
     fireEvent.click(screen.getByTestId("user-menu-host-option-host-other"));
 
     expect(makeActive).not.toHaveBeenCalled();
+  });
+
+  describe("host row tooltip (G4)", () => {
+    it("shows the full name and the activate hint when the row's name is truncated", async () => {
+      const active = hostScopeOptionFixture({
+        hostId: "host-active",
+        isActive: true,
+        connectable: true,
+      });
+      const other = hostScopeOptionFixture({
+        hostId: "host-other",
+        name: "Office Linux Workstation",
+        isActive: false,
+        connectable: true,
+      });
+      hostOptionsRef.value = hostOptionsFixture({
+        hosts: [active, other],
+        activeHostId: active.hostId,
+      });
+      const restore = stubHostNameOverflow("Office Linux Workstation", {
+        scrollWidth: 240,
+        clientWidth: 100,
+      });
+
+      await openMenu();
+      fireEvent.focus(screen.getByTestId("user-menu-host-option-host-other"));
+      const tooltip = await screen.findByRole("tooltip");
+
+      expect(tooltip.textContent).toContain("Office Linux Workstation");
+      expect(tooltip.textContent).toContain(ACTIVATE_HOST_HINT);
+      restore();
+    });
+
+    it("shows only the activate hint - no host name - when the row's name fits", async () => {
+      const active = hostScopeOptionFixture({
+        hostId: "host-active",
+        isActive: true,
+        connectable: true,
+      });
+      const other = hostScopeOptionFixture({
+        hostId: "host-other",
+        name: "Short",
+        isActive: false,
+        connectable: true,
+      });
+      hostOptionsRef.value = hostOptionsFixture({
+        hosts: [active, other],
+        activeHostId: active.hostId,
+      });
+      const restore = stubHostNameOverflow("Short", {
+        scrollWidth: 40,
+        clientWidth: 100,
+      });
+
+      await openMenu();
+      fireEvent.focus(screen.getByTestId("user-menu-host-option-host-other"));
+      const tooltip = await screen.findByRole("tooltip");
+
+      expect(tooltip.textContent).toBe(ACTIVATE_HOST_HINT);
+      restore();
+    });
+
+    it("shows no tooltip at all on the active row when its name fits", async () => {
+      const active = hostScopeOptionFixture({
+        hostId: "host-active",
+        name: "Ada's Mac",
+        isActive: true,
+        connectable: true,
+      });
+      hostOptionsRef.value = hostOptionsFixture({
+        hosts: [active],
+        activeHostId: active.hostId,
+      });
+      const restore = stubHostNameOverflow("Ada's Mac", {
+        scrollWidth: 40,
+        clientWidth: 100,
+      });
+
+      await openMenu();
+      fireEvent.focus(screen.getByTestId("user-menu-host-option-host-active"));
+
+      expect(screen.queryByRole("tooltip")).toBeNull();
+      restore();
+    });
+
+    // A row is `aria-disabled`, never Radix's own `disabled` prop - `disabled`
+    // would drop it from `RovingFocusGroupItem`'s `focusable` set, so ArrowDown
+    // roving navigation would skip straight past it (Radix's own roving-focus
+    // mechanism, not a raw `fireEvent.focus`, which reaches an item's `onFocus`
+    // the same way regardless of `disabled` and so cannot tell the two apart).
+    // `aria-disabled` keeps the row a real arrow-key stop, which is the only
+    // way a keyboard user reaches a truncated, unpickable host's full name.
+    it("reaches an offline (unpickable) host via ArrowDown roving focus and shows its full name in the tooltip", async () => {
+      const active = hostScopeOptionFixture({
+        hostId: "host-active",
+        isActive: true,
+        connectable: true,
+      });
+      const offline = hostScopeOptionFixture({
+        hostId: "host-offline",
+        name: "Very Long Offline Workstation Name",
+        isActive: false,
+        connectable: false,
+        health: {
+          state: "offline",
+          label: "Offline",
+          detail: null,
+          tone: "idle",
+          live: false,
+        },
+      });
+      hostOptionsRef.value = hostOptionsFixture({
+        hosts: [active, offline],
+        activeHostId: active.hostId,
+      });
+      const restore = stubHostNameOverflow(
+        "Very Long Offline Workstation Name",
+        {
+          scrollWidth: 240,
+          clientWidth: 100,
+        },
+      );
+
+      await openMenu();
+      const activeRow = screen.getByTestId("user-menu-host-option-host-active");
+      const offlineRow = screen.getByTestId(
+        "user-menu-host-option-host-offline",
+      );
+      fireEvent.keyDown(activeRow, { key: "ArrowDown" });
+
+      await waitFor(() => {
+        expect(document.activeElement).toBe(offlineRow);
+      });
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toBe("Very Long Offline Workstation Name");
+      restore();
+    });
+  });
+
+  describe("offline (unpickable) host row selection (G4 follow-up)", () => {
+    it("does nothing when clicking or pressing Enter on an offline host - the check stays and the menu stays open", async () => {
+      const active = hostScopeOptionFixture({
+        hostId: "host-active",
+        isActive: true,
+        connectable: true,
+      });
+      const offline = hostScopeOptionFixture({
+        hostId: "host-offline",
+        isActive: false,
+        connectable: false,
+        health: {
+          state: "offline",
+          label: "Offline",
+          detail: null,
+          tone: "idle",
+          live: false,
+        },
+      });
+      hostOptionsRef.value = hostOptionsFixture({
+        hosts: [active, offline],
+        activeHostId: active.hostId,
+      });
+      const makeActive = vi.fn();
+      makeActiveRef.fn = makeActive;
+
+      await openMenu();
+      const offlineRow = screen.getByTestId(
+        "user-menu-host-option-host-offline",
+      );
+
+      fireEvent.click(offlineRow);
+      fireEvent.keyDown(offlineRow, { key: "Enter" });
+
+      expect(makeActive).not.toHaveBeenCalled();
+      expect(
+        screen
+          .getByTestId("user-menu-host-option-host-active")
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+      expect(offlineRow.getAttribute("aria-checked")).toBe("false");
+      expect(screen.getByTestId("user-menu-content")).toBeTruthy();
+    });
+
+    // The mid-switch "holds every row" case (R1-A2, above) already covers
+    // pin 3: clicking another row while `activatingHostId` is set calls
+    // `makeActive` zero times and every row (the pending one included)
+    // carries `aria-disabled`.
   });
 });

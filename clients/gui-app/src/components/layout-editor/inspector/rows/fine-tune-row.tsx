@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
+import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import {
   SegmentedControl,
   type SegmentedControlOption,
@@ -21,6 +22,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import type { LayoutValues, RegionValueKey } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
+import { cn } from "@/lib/utils";
 
 /**
  * The collapsed disclosure at the foot of a section, and the four control
@@ -42,6 +44,7 @@ export interface FineTuneRowFacts {
   readonly id: string;
   readonly label: string;
   readonly description: string | null;
+  readonly whileHidden: boolean;
   readonly control:
     | { readonly kind: "switch"; readonly key: RegionValueKey }
     | {
@@ -66,8 +69,14 @@ export function FineTuneDisclosure(props: {
   readonly regionId: RegionId;
   readonly regionValues: LayoutValues[RegionId];
   readonly filter: string;
+  /**
+   * Whether the region is Hidden, which greys every row that tunes it and
+   * leaves operable the rows that say they outlive it (`whileHidden`).
+   */
+  readonly regionHidden: boolean;
 }): ReactNode {
-  const { rows, regionId, regionValues, filter } = props;
+  const { rows, regionId, regionValues, filter, regionHidden } = props;
+  const page = useLayoutFormHost() === "page";
   const [manuallyOpen, setManuallyOpen] = useState<boolean | null>(null);
   // The manual answer is scoped to the filter that was in force when it was
   // given: without this, opening Fine-tune once and closing it again silenced
@@ -76,6 +85,26 @@ export function FineTuneDisclosure(props: {
   const [openedUnder, setOpenedUnder] = useState(filter);
   const manual = openedUnder === filter ? manuallyOpen : null;
   const open = manual ?? fineTuneMatchesFilter(regionId, filter);
+
+  const body = rows.map((row) => {
+    const greyed = regionHidden && !row.whileHidden;
+    return (
+      // `inert`, not `aria-hidden`, for the reason `RegionSection` gives
+      // (G1-06): it removes focus, hit testing and the a11y tree in one.
+      <div key={row.id} inert={greyed} className={cn(greyed && "opacity-40")}>
+        <FineTuneRowView
+          row={row}
+          regionId={regionId}
+          regionValues={regionValues}
+        />
+      </div>
+    );
+  });
+
+  // On the page these rows are already behind the region row's own
+  // disclosure, so a second one inside it hid a single row behind two clicks
+  // (G6). The dock has no row disclosure, and keeps its collapsed Fine-tune.
+  if (page) return <div className="border-t border-border">{body}</div>;
 
   return (
     <Collapsible
@@ -93,16 +122,7 @@ export function FineTuneDisclosure(props: {
         <ChevronRight className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
         <span>Fine-tune ({rows.length})</span>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        {rows.map((row) => (
-          <FineTuneRowView
-            key={row.id}
-            row={row}
-            regionId={regionId}
-            regionValues={regionValues}
-          />
-        ))}
-      </CollapsibleContent>
+      <CollapsibleContent>{body}</CollapsibleContent>
     </Collapsible>
   );
 }

@@ -223,20 +223,19 @@ export const USAGE_PROVIDER_IDS: ReadonlyArray<RateLimitProviderId> =
 /**
  * Today's dock order, top to bottom.
  *
- * Message queue and Todo OPEN the list because that is where `ChatLowerDock`
- * already draws them - the joined frame is Queue, then Todo, then the three
- * rows that were reorderable before L-142 made all five so. A default is what
- * a user who never opens the editor sees, so it has to be today's frame rather
- * than the order the two happened to be added in.
+ * Todo OPENS the list because that is where `ChatLowerDock` already draws it -
+ * the joined frame is Todo, then the three rows that were reorderable before
+ * L-142 made all of them so. A default is what a user who never opens the
+ * editor sees, so it has to be today's frame rather than the order the rows
+ * happened to be added in. The Message queue is not in it: it is not a dock
+ * member, and always sits below every row, directly on the composer (G1-G2).
  *
- * `mergeOrder` reads this as the canonical sequence. Neither of them has a
- * canonical predecessor, so a dock order written before they existed
- * rehydrates with the two at the FRONT, ahead of whatever arrangement the user
- * had already made of the other three - which is both today's frame and the
- * same neighbour rule every stored order in this app is read by.
+ * `mergeOrder` reads this as the canonical sequence. Todo has no canonical
+ * predecessor, so a dock order written before it existed rehydrates with it
+ * at the FRONT, and a stored `queue` from before G1-G2 is an id this build
+ * does not know and is dropped.
  */
 export const DEFAULT_DOCK_ORDER: ReadonlyArray<DockRegionId> = [
-  "queue",
   "todo",
   "changedFiles",
   "runningAgents",
@@ -653,22 +652,25 @@ export function moveCanvasOrderMember(input: {
     case "dock":
       return {
         ...arrangement,
-        dock: placedBeside(arrangement.dock, sameId, input),
+        dock: placedBeside(arrangement.dock, input),
       };
     case "toolbarLeft":
       return {
         ...arrangement,
-        toolbarLeft: placedBeside(arrangement.toolbarLeft, sameId, input),
+        toolbarLeft: placedBeside(arrangement.toolbarLeft, input),
       };
     case "toolbarRight":
       return {
         ...arrangement,
-        toolbarRight: placedBeside(arrangement.toolbarRight, sameId, input),
+        toolbarRight: placedBeside(arrangement.toolbarRight, input),
       };
     case "rail":
+      // The canvas drags what the rail draws, and a stack draws as one group
+      // icon (G3): the group moves whole and lands beside a group, never
+      // between its two panels.
       return {
         ...arrangement,
-        rail: placedBeside(arrangement.rail, entryId, input),
+        rail: railPlacedBeside(arrangement.rail, input, true),
       };
   }
 }
@@ -680,38 +682,95 @@ interface CanvasOrderDrop {
   readonly placeAfter: boolean;
 }
 
-/** A list of ids is its own identity; the rail's entries carry theirs. */
-function sameId(id: string): string {
-  return id;
-}
-
-function entryId(entry: RailEntry): string {
-  return entry.id;
-}
-
 /**
- * One member taken out of the stored list and put back beside another.
+ * One member taken out of the stored list and put back beside another. The
+ * rail, whose members are entries and whose stacks move whole, has its own
+ * ({@link railPlacedBeside}).
  *
  * The ids arrive as strings off the DOM and are only ever used to SELECT from
  * the stored list, never to build one, so an id this build does not know moves
- * nothing rather than narrowing something away (G1-23). The member itself is
- * whatever the list holds - a region id in three of the four groups, a rail
- * entry in the fourth - which is why the id is read through a function rather
- * than being the item.
+ * nothing rather than narrowing something away (G1-23).
  */
-function placedBeside<T>(
-  full: ReadonlyArray<T>,
-  idOf: (item: T) => string,
+function placedBeside<Id extends string>(
+  full: ReadonlyArray<Id>,
   drop: CanvasOrderDrop,
-): ReadonlyArray<T> {
+): ReadonlyArray<Id> {
   const { fromId, toId, placeAfter } = drop;
-  const moved = full.find((item) => idOf(item) === fromId);
+  const moved = full.find((item) => item === fromId);
   if (moved === undefined || fromId === toId) return full;
   const remaining = full.filter((item) => item !== moved);
-  const anchor = remaining.findIndex((item) => idOf(item) === toId);
+  const anchor = remaining.findIndex((item) => item === toId);
   if (anchor < 0) return full;
   const insertAt = placeAfter ? anchor + 1 : anchor;
   return [...remaining.slice(0, insertAt), moved, ...remaining.slice(insertAt)];
+}
+
+/**
+ * The rail entries that move and stand together: a stacked panel's whole pair
+ * with its link, or the one entry. Indexes into `rail`, first and last.
+ */
+function railBlockAt(
+  rail: ReadonlyArray<RailEntry>,
+  index: number,
+): readonly [number, number] {
+  if (rail[index].kind !== "panel") return [index, index];
+  if (rail.at(index + 1)?.kind === "stack") return [index, index + 2];
+  if (index >= 2 && rail[index - 1].kind === "stack") return [index - 2, index];
+  return [index, index];
+}
+
+/**
+ * One rail entry put beside another, where a stacked pair is one unit (G3):
+ * a drop beside either panel of a pair lands before or after the whole pair,
+ * never between its two panels.
+ *
+ * `carrySource` says what was grabbed. The rail's own icon is a whole group,
+ * so the pair travels together. A panel's section header is one panel: moved
+ * beside its own partner it swaps places with it, which `normalizeRail` keeps
+ * as the same group with the other icon on top, and moved anywhere else it
+ * leaves its group, link and all.
+ */
+function railPlacedBeside(
+  rail: ReadonlyArray<RailEntry>,
+  drop: CanvasOrderDrop,
+  carrySource: boolean,
+): ReadonlyArray<RailEntry> {
+  const fromIndex = rail.findIndex((entry) => entry.id === drop.fromId);
+  const toIndex = rail.findIndex((entry) => entry.id === drop.toId);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return rail;
+  const [groupStart, groupEnd] = railBlockAt(rail, fromIndex);
+  if (toIndex >= groupStart && toIndex <= groupEnd) {
+    // A group onto itself, or a panel dropped on the side of its partner it
+    // already stands on, moves nothing.
+    if (carrySource || drop.placeAfter === fromIndex > toIndex) return rail;
+    const remaining = rail.filter((_, index) => index !== fromIndex);
+    const anchor = remaining.indexOf(rail[toIndex]);
+    const insertAt = drop.placeAfter ? anchor + 1 : anchor;
+    return [
+      ...remaining.slice(0, insertAt),
+      rail[fromIndex],
+      ...remaining.slice(insertAt),
+    ];
+  }
+  const taken = (index: number): boolean =>
+    carrySource
+      ? index >= groupStart && index <= groupEnd
+      : index === fromIndex ||
+        (groupStart !== groupEnd && index === groupStart + 1);
+  const carried = carrySource
+    ? rail.slice(groupStart, groupEnd + 1)
+    : [rail[fromIndex]];
+  const remaining = rail.filter((_, index) => !taken(index));
+  const [anchorStart, anchorEnd] = railBlockAt(
+    remaining,
+    remaining.indexOf(rail[toIndex]),
+  );
+  const insertAt = drop.placeAfter ? anchorEnd + 1 : anchorStart;
+  return [
+    ...remaining.slice(0, insertAt),
+    ...carried,
+    ...remaining.slice(insertAt),
+  ];
 }
 
 // ── The rail's writers ──────────────────────────────────────────────────────
@@ -770,22 +829,30 @@ export function removeRailDivider(
  * (R5R-06): the drag at rest and the drag in a session differ in what the
  * user grabs, not in what a drop means, and two copies of "take it out and
  * put it back beside that one" would drift the first time either is fixed.
- * The sidebar speaks panel ids, so the only thing added here is the
- * bijection onto the rail's region ids.
+ * The sidebar speaks panel ids, so what is added here is the bijection onto
+ * the rail's region ids, and the one fact only the sidebar knows: whether the
+ * user grabbed the rail's group icon or one panel's section header (G3).
  */
 export function moveRailPanelBeside(
   arrangement: LayoutArrangement,
-  sourcePanelId: LeftPanelId,
-  targetPanelId: LeftPanelId,
-  placeAfter: boolean,
+  drop: {
+    readonly sourcePanelId: LeftPanelId;
+    readonly targetPanelId: LeftPanelId;
+    readonly placeAfter: boolean;
+    /** Off the rail's icon, which is a whole group; off a section header, one panel. */
+    readonly asGroups: boolean;
+  },
 ): LayoutArrangement {
-  return moveCanvasOrderMember({
-    arrangement,
-    group: "rail",
-    fromId: railRegionForLeftPanelId(sourcePanelId),
-    toId: railRegionForLeftPanelId(targetPanelId),
-    placeAfter,
-  });
+  const rail = railPlacedBeside(
+    arrangement.rail,
+    {
+      fromId: railRegionForLeftPanelId(drop.sourcePanelId),
+      toId: railRegionForLeftPanelId(drop.targetPanelId),
+      placeAfter: drop.placeAfter,
+    },
+    drop.asGroups,
+  );
+  return rail === arrangement.rail ? arrangement : { ...arrangement, rail };
 }
 
 /**
@@ -870,14 +937,23 @@ export function isStackedRailPanel(
 export function moveRailPanelToEnd(
   arrangement: LayoutArrangement,
   sourcePanelId: LeftPanelId,
+  /** As in {@link moveRailPanelBeside}: a rail icon carries its whole group. */
+  asGroups: boolean,
 ): LayoutArrangement {
   const regionId = railRegionForLeftPanelId(sourcePanelId);
   const fromIndex = arrangement.rail.findIndex(
     (entry) => entry.kind === "panel" && entry.id === regionId,
   );
   if (fromIndex < 0) return arrangement;
+  const [start, end] = asGroups
+    ? railBlockAt(arrangement.rail, fromIndex)
+    : [fromIndex, fromIndex];
   return {
     ...arrangement,
-    rail: movedWithin(arrangement.rail, fromIndex, arrangement.rail.length),
+    rail: [
+      ...arrangement.rail.slice(0, start),
+      ...arrangement.rail.slice(end + 1),
+      ...arrangement.rail.slice(start, end + 1),
+    ],
   };
 }

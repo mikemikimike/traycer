@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HostOptionRow } from "@/components/settings/host-scope/host-option-row";
+import type { HostScopeOption } from "@/components/settings/host-scope/host-scope-model";
 import {
   ACTIVATE_HOST_HINT,
   AVAILABLE_HOST_ROW_SURFACE_STATE,
@@ -26,6 +27,7 @@ import { useRefreshHostDirectoryOnOpen } from "@/hooks/host/use-refresh-host-dir
 import { useHostBinding } from "@/lib/host";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
+import { useIsTextTruncated } from "@/hooks/ui/use-is-text-truncated";
 import { computeInitials } from "@/lib/auth/compute-initials";
 import { resolvePlatformBaseUrl } from "@/lib/auth/platform-base-url";
 import { useRunnerHost } from "@/providers/use-runner-host";
@@ -52,8 +54,6 @@ export interface UserMenuProps {
    * takes a ref; the menu toggles it open through Radix's own trigger.
    */
   readonly trigger: ReactElement | null;
-  /** What the trigger's tooltip says, or `null` for the person's name. */
-  readonly triggerTooltip: string | null;
 }
 
 /** The signed-in person's avatar: their picture, or their initials. */
@@ -102,7 +102,7 @@ export function UserMenu(props: UserMenuProps) {
       />
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <TooltipWrapper
-          label={open ? null : (props.triggerTooltip ?? props.userName)}
+          label={open ? null : props.userName}
           side={placement?.side ?? "top"}
           sideOffset={6}
           align={placement?.align}
@@ -134,17 +134,19 @@ export function UserMenu(props: UserMenuProps) {
           side={placement?.side}
           align={placement?.align ?? "end"}
           sideOffset={6}
-          className="w-max whitespace-nowrap"
+          // A menu's width, whatever a host is called: long names truncate
+          // in their rows and read in full from a tooltip (G4).
+          className="w-max max-w-64 whitespace-nowrap"
           data-testid="user-menu-content"
         >
           <div
             className="flex flex-col gap-0.5 px-1.5 py-1"
             data-testid="user-menu-identity"
           >
-            <span className="text-ui-sm font-medium text-foreground">
+            <span className="truncate text-ui-sm font-medium text-foreground">
               {props.userName}
             </span>
-            <span className="text-ui-xs text-muted-foreground">
+            <span className="truncate text-ui-xs text-muted-foreground">
               {props.email}
             </span>
           </div>
@@ -231,6 +233,85 @@ export function UserMenu(props: UserMenuProps) {
 }
 
 /**
+ * One host in the account menu. Its tooltip says what a click does (the
+ * activate hint, on a row that can take one) and, only when the menu's width
+ * has truncated it, the host's full name (G4).
+ */
+/** Whether the account menu may switch to this host now: the shared bind rule,
+ * and no switch already in flight. */
+function isUserMenuHostPickable(
+  host: HostScopeOption,
+  activatingHostId: string | null,
+): boolean {
+  return (
+    activatingHostId === null &&
+    isHostOptionSelectable(host, "bind", AVAILABLE_HOST_ROW_SURFACE_STATE)
+  );
+}
+
+function UserMenuHostRow(props: {
+  readonly host: HostScopeOption;
+  readonly active: boolean;
+  readonly activatingHostId: string | null;
+  readonly tooltipSide: "top" | "right" | "bottom" | "left";
+}): ReactNode {
+  const { host, active, activatingHostId } = props;
+  const { ref: nameRef, isTruncated } = useIsTextTruncated<HTMLSpanElement>(
+    host.name,
+  );
+  const selectable = isUserMenuHostPickable(host, activatingHostId);
+  const hint = active || !selectable ? null : ACTIVATE_HOST_HINT;
+  return (
+    <TooltipWrapper
+      label={
+        isTruncated ? (
+          <span className="flex flex-col gap-0.5">
+            <span className="break-all">{host.name}</span>
+            {hint}
+          </span>
+        ) : (
+          hint
+        )
+      }
+      side={props.tooltipSide}
+      sideOffset={6}
+      align={undefined}
+    >
+      {/* Inert rather than `disabled`: a disabled Radix item takes no
+          pointer events, so an unpickable host's truncated name could never
+          reveal itself. `aria-disabled` keeps the disabled look and the
+          focus stop; the cancelled select keeps the row from being picked. */}
+      <DropdownMenuRadioItem
+        value={host.hostId}
+        aria-disabled={selectable ? undefined : true}
+        onSelect={(event) => {
+          if (!selectable) event.preventDefault();
+        }}
+        data-testid={`user-menu-host-option-${host.hostId}`}
+      >
+        <HostOptionRow
+          host={host}
+          picked={active}
+          active={active}
+          intent="bind"
+          surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
+          updateView={null}
+          nameRef={nameRef}
+        />
+        {host.hostId === activatingHostId ? (
+          <AgentSpinningDots
+            className="ml-auto"
+            testId={`user-menu-host-activating-${host.hostId}`}
+            variant={undefined}
+            tone="muted"
+          />
+        ) : null}
+      </DropdownMenuRadioItem>
+    </TooltipWrapper>
+  );
+}
+
+/**
  * The account menu's Host section (F5): every host, the check on the one this
  * window uses, and a click that switches to it. It is Settings' Activate in
  * another place - the same write through `useMakeActiveHost` - drawn with the
@@ -255,52 +336,28 @@ function UserMenuHostSection(props: {
       <DropdownMenuRadioGroup
         value={activeHostId ?? ""}
         onValueChange={(hostId) => {
-          if (hostId !== activeHostId) makeActive(hostId);
+          // Radix still reports the value of a row whose select was
+          // cancelled, so an inert row is refused here too.
+          const host = hosts.find((option) => option.hostId === hostId);
+          if (
+            hostId !== activeHostId &&
+            host !== undefined &&
+            isUserMenuHostPickable(host, activatingHostId)
+          ) {
+            makeActive(hostId);
+          }
         }}
         data-testid="user-menu-host-section"
       >
-        {hosts.map((host) => {
-          const active = host.hostId === activeHostId;
-          const selectable =
-            activatingHostId === null &&
-            isHostOptionSelectable(
-              host,
-              "bind",
-              AVAILABLE_HOST_ROW_SURFACE_STATE,
-            );
-          return (
-            <TooltipWrapper
-              key={host.hostId}
-              label={active || !selectable ? null : ACTIVATE_HOST_HINT}
-              side={props.tooltipSide}
-              sideOffset={6}
-              align={undefined}
-            >
-              <DropdownMenuRadioItem
-                value={host.hostId}
-                disabled={!selectable}
-                data-testid={`user-menu-host-option-${host.hostId}`}
-              >
-                <HostOptionRow
-                  host={host}
-                  picked={active}
-                  active={active}
-                  intent="bind"
-                  surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
-                  updateView={null}
-                />
-                {host.hostId === activatingHostId ? (
-                  <AgentSpinningDots
-                    className="ml-auto"
-                    testId={`user-menu-host-activating-${host.hostId}`}
-                    variant={undefined}
-                    tone="muted"
-                  />
-                ) : null}
-              </DropdownMenuRadioItem>
-            </TooltipWrapper>
-          );
-        })}
+        {hosts.map((host) => (
+          <UserMenuHostRow
+            key={host.hostId}
+            host={host}
+            active={host.hostId === activeHostId}
+            activatingHostId={activatingHostId}
+            tooltipSide={props.tooltipSide}
+          />
+        ))}
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
     </>

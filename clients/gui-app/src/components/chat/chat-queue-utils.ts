@@ -42,37 +42,6 @@ export function isManagedCommandQueueItem(
 }
 
 /**
- * What the Message queue pill is standing in for right now, as one comparable
- * token: the id of the most recently QUEUED row, or `null` for an empty queue.
- *
- * The pill rings whenever this value changes, so the value has to change on an
- * arrival and on nothing else. The count cannot do that job: it moves in both
- * directions, so a queue of five draining as the turn ends walks 5, 4, 3, 2, 1
- * and throws four more rings beside the input, one for each message the user
- * is no longer waiting on - and cancelling a row does the same. That is the
- * per-item tick L-148 bans and the failure the Changed files pill next door
- * already records.
- *
- * Keyed on the newest row by `createdAt` rather than on the tail of the array,
- * because the queue is reorderable: the last element changes when the user
- * drags a row to the end, which is not an arrival. Strict maximum with
- * first-wins on a tie, the same shape `failedManagedCommandPulseToken` uses
- * for the Background pill, so a dispatch off the head leaves the token alone
- * and an append is the only thing that replaces it.
- */
-export function queueArrivalPulseToken(
-  items: ReadonlyArray<ChatQueuedItem>,
-): string | null {
-  let newest: ChatQueuedItem | null = null;
-  for (const item of items) {
-    if (newest === null || item.createdAt > newest.createdAt) {
-      newest = item;
-    }
-  }
-  return newest === null ? null : newest.queueItemId;
-}
-
-/**
  * Prompt ids the host still holds in the queue.
  *
  * While one of these ids is queued, that queue row is the prompt's only

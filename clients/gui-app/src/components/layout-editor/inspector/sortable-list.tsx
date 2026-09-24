@@ -260,15 +260,14 @@ export function SortableList<Id extends string>(
       index: number,
       delta: number,
     ): void {
-      const last = items.length - 1;
       if (grab !== null) {
-        const to = Math.min(Math.max(grab.to + delta, 0), last);
+        const to = stepPastFixed(items, grab.to, delta);
         if (to === grab.to) return;
         setGrab({ ...grab, to });
         announce("Moved", item.label, to);
         return;
       }
-      const to = Math.min(Math.max(index + delta, 0), last);
+      const to = stepPastFixed(items, index, delta);
       if (to === index) return;
       announce("Moved", item.label, to);
       onMove?.(item.id, to);
@@ -786,6 +785,24 @@ function arrowDelta(key: string): number | null {
   if (key === "ArrowUp") return -1;
   if (key === "ArrowDown") return 1;
   return null;
+}
+
+/**
+ * One keyboard step from `from`: the next index a moving row can land on.
+ *
+ * A row that cannot move (the rail's stack link) is not a slot of its own: it
+ * stands between the two panels it joins, so landing on it would put the
+ * moving panel back beside its partner, where it already was, while the list
+ * announced a move. The step goes past it instead. No slot that way: `from`.
+ */
+function stepPastFixed<Id extends string>(
+  items: ReadonlyArray<SortableListItem<Id>>,
+  from: number,
+  delta: number,
+): number {
+  let to = from + delta;
+  while (to >= 0 && to < items.length && !items[to].movable) to += delta;
+  return to >= 0 && to < items.length ? to : from;
 }
 
 function positionMessage(

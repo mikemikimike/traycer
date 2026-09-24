@@ -115,7 +115,6 @@ const DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
   "filesChanged",
   "activeAgents",
   "background",
-  "queue",
   "todo",
 ];
 
@@ -388,7 +387,6 @@ function renderAttached(section: ChatDockSection) {
                 filesChanged: hotspot(),
                 activeAgents: hotspot(),
                 background: hotspot(),
-                queue: hotspot(),
                 todo: hotspot(),
               }}
               backgroundItems={ONE_BACKGROUND_ITEM}
@@ -466,14 +464,14 @@ function rowsIn(body: Element): ReadonlyArray<Element> {
  * Three of the Background panel's four and the changed-files panel's artifact
  * branch were changed by this ticket and rendered by neither gate, so a later
  * edit could have reinstated a `py-1` on any of them and stayed green
- * (R6H-03, R6H-10). The queue's two are the user-sent row and the
- * agent-sent one, which is the pair L-172 is about.
+ * (R6H-03, R6H-10). The queue is no longer one of these attached members
+ * (G1-G2: it is a fixed slot, never a pill) - its two row shapes are pinned
+ * separately below.
  */
 const ROWS_PER_SECTION: Readonly<Record<ChatDockSection, number>> = {
   filesChanged: 2,
   activeAgents: 1,
   background: 4,
-  queue: 2,
   todo: 1,
 };
 
@@ -531,7 +529,6 @@ describe("the five attached dock panels share one row metric", () => {
     filesChanged: ["text-code-sm", "text-code-xs", CHAT_DOCK_PANEL_ROW_TEXT],
     activeAgents: [CHAT_DOCK_PANEL_ROW_TEXT],
     background: [CHAT_DOCK_PANEL_ROW_TEXT],
-    queue: [CHAT_DOCK_PANEL_ROW_TEXT],
     todo: [CHAT_DOCK_PANEL_ROW_TEXT],
   };
 
@@ -560,7 +557,7 @@ describe("the five attached dock panels share one row metric", () => {
     });
   }
 
-  it("gives all five the same list class and the same row class", () => {
+  it("gives all four the same list class and the same row class", () => {
     const lists = new Set<string>();
     const rows = new Set<string>();
     for (const section of DOCK_ORDER) {
@@ -652,7 +649,10 @@ describe("the five attached dock panels share one row metric", () => {
    * box stays at 24.5px inside the 26.25px budget (R6H-05).
    */
   it("keeps the queue's row boundary, grip and toolbar spacing", () => {
-    renderAttached("queue");
+    // The queue is a fixed slot now (G1-G2), not one of the attached members,
+    // so it renders alongside whichever pill is open - "todo" here, chosen
+    // arbitrarily.
+    renderAttached("todo");
     const rows = [
       ...document.querySelectorAll("[data-testid='queued-message-row']"),
     ];
@@ -714,7 +714,7 @@ describe("the five attached dock panels share one row metric", () => {
    * other five.
    */
   it("floats a queued row's provenance badge inside the message box", () => {
-    renderAttached("queue");
+    renderAttached("todo");
     const chip = document.querySelector(
       "[data-testid='queued-message-provenance-chip']",
     );

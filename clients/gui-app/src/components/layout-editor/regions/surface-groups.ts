@@ -1,5 +1,4 @@
 import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-facts";
-import { regionMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
 import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import type { OrderGroupId } from "@/lib/layout/layout-arrangement";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -138,22 +137,6 @@ export function looseSurfaceRegions(
       region.surface === surface &&
       !region.rows.some((row) => row.kind === "position-order"),
   ).map((region) => region.id);
-}
-
-/**
- * Whether a surface has anything left to draw under the page's filter.
- *
- * Asked by the page so a card with no match disappears whole rather than
- * leaving an empty box behind (I-11).
- */
-export function surfaceMatchesFilter(
-  surface: SurfaceGroupId,
-  filter: string,
-): boolean {
-  return LAYOUT_REGION_LIST.some(
-    (region) =>
-      region.surface === surface && regionMatchesFilter(region.id, filter),
-  );
 }
 
 /**

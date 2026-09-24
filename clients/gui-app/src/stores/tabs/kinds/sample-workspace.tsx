@@ -1,7 +1,7 @@
 import { createElement, lazy } from "react";
 import { PanelsTopLeft } from "lucide-react";
 import type { HeaderTab, TabKindModule } from "@/stores/tabs/types";
-import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
+import { TAB_KIND_SPLIT_ELIGIBILITY } from "@/stores/tabs/tab-kind-policy";
 
 const sampleWorkspaceSurface = lazy(() =>
   import("@/components/sample-workspace/sample-workspace-surface").then(
@@ -55,7 +55,7 @@ export const sampleWorkspaceTabModule: TabKindModule<"sample-workspace", null> =
         render: (tab) =>
           createElement(sampleWorkspaceSurface, { tabId: tab.id }),
         canonicalRoute: (tab) => tab.route,
-        splitEligibility: "ineligible",
+        splitEligibility: TAB_KIND_SPLIT_ELIGIBILITY["sample-workspace"],
         duplication: "forbidden",
         singleton: "per-window",
         newWindow: "none",
@@ -66,11 +66,8 @@ export const sampleWorkspaceTabModule: TabKindModule<"sample-workspace", null> =
       resolveIntent: () => ({ kind: "sample-workspace" }),
       routeOptions: () => ({ to: "/sample-workspace" }),
       activate: () => undefined,
-      requestClose: (tab) => {
-        tabCommandCoordinator.closeRefAfterConfirmed({
-          kind: tab.kind,
-          id: tab.id,
-        });
+      requestClose: (tab, close) => {
+        close({ kind: tab.kind, id: tab.id });
       },
       requiresCloseConfirm: () => false,
       openInNewWindow: () => undefined,

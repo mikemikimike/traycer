@@ -33,6 +33,7 @@
     "@dnd-kit/sortable": "catalog:",
     "@dnd-kit/utilities": "catalog:",
     "@floating-ui/dom": "catalog:",
+    "@floating-ui/react": "catalog:",
     "@fontsource-variable/figtree": "catalog:",
     "@legendapp/list": "catalog:",
     "@lobehub/icons": "catalog:",

@@ -240,7 +240,6 @@ function renderDock(): void {
             filesChanged: NO_HOTSPOT,
             activeAgents: NO_HOTSPOT,
             background: NO_HOTSPOT,
-            queue: NO_HOTSPOT,
             todo: NO_HOTSPOT,
           }}
           backgroundItems={[]}

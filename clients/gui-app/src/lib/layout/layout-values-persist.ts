@@ -1,6 +1,7 @@
 import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import {
   isStringList,
+  type AccessValues,
   type ContextUsageValues,
   type LayoutOverrides,
   type LayoutValues,
@@ -49,10 +50,9 @@ export function resolvePersistedOverrides(value: unknown): LayoutOverrides {
     runningAgents: sizedPatch(stored.runningAgents),
     changedFiles: sizedPatch(stored.changedFiles),
     background: sizedPatch(stored.background),
-    queue: sizedPatch(stored.queue),
     todo: sizedPatch(stored.todo),
     attachImage: shownPatch(stored.attachImage),
-    access: sizedPatch(stored.access),
+    access: accessPatch(stored.access),
     model: modelPatch(stored.model),
     mic: shownPatch(stored.mic),
     railAgents: railPatch(stored.railAgents),
@@ -138,6 +138,9 @@ function resourceMonitorPatch(value: unknown): Partial<ResourceMonitorValues> {
     ...(typeof stored.ramShare === "boolean"
       ? { ramShare: stored.ramShare }
       : {}),
+    ...(typeof stored.agentRows === "boolean"
+      ? { agentRows: stored.agentRows }
+      : {}),
   };
 }
 
@@ -168,10 +171,20 @@ function contextUsagePatch(value: unknown): Partial<ContextUsageValues> {
   };
 }
 
+/**
+ * Access and Model have no Shown (G6), so a `shown` an earlier build stored is
+ * not read - the pickers always drew, whatever it said.
+ */
+function accessPatch(value: unknown): Partial<AccessValues> {
+  const stored: Record<string, unknown> = isRecord(value) ? value : {};
+  return stored.size === "full" || stored.size === "chip"
+    ? { size: stored.size }
+    : {};
+}
+
 function modelPatch(value: unknown): Partial<ModelValues> {
   const stored: Record<string, unknown> = isRecord(value) ? value : {};
   return {
-    ...shownPatch(value),
     ...(stored.style === "text" ||
     stored.style === "bars" ||
     stored.style === "bars-text"

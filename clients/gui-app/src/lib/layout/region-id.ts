@@ -16,18 +16,18 @@
 export type ToolbarRegionId = "attachImage" | "access" | "model" | "mic";
 
 /**
- * The five rows above the message box, which share one order.
+ * The four rows above the message box, which share one order.
  *
- * Todo and Message queue joined the other three under L-139/L-142: everything
- * above the composer obeys ONE rule - Full row, Chip or Hidden, reorderable in
- * the dock, a pill in the compact strip - so there is no second kind of thing
- * living up there for a reader to learn.
+ * Each obeys ONE rule - Full row, Chip or Hidden, reorderable in the dock, a
+ * pill in the compact strip. The Message queue is deliberately NOT one of them
+ * (staging round 2, G1-G2): queued messages are the user's own pending sends,
+ * so the queue is never a pill, never hidden and never reordered - it sits in
+ * a fixed slot directly above the composer whenever it holds anything.
  */
 export type DockRegionId =
   | "runningAgents"
   | "changedFiles"
   | "background"
-  | "queue"
   | "todo";
 
 /**

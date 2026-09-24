@@ -28,10 +28,8 @@ import {
 } from "@/stores/home/landing-draft-store";
 import { isMobileApp } from "@/lib/mobile-app";
 import { landingDraftIsRetired } from "@/lib/drafts/landing-draft-retirement";
-import {
-  isRegisteredTabKind,
-  tabSurfaceDescriptor,
-} from "@/stores/tabs/registry";
+import { tabSurfaceDescriptor } from "@/stores/tabs/registry";
+import { isRegisteredTabKind } from "@/stores/tabs/tab-kind-policy";
 import {
   consumeLegacyTabsSourceActiveSelection,
   layoutHomeIsActive,

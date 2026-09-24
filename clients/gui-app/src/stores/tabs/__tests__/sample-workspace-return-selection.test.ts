@@ -5,7 +5,7 @@ import {
   withoutSampleWorkspace,
   type PersistedTabStripLayout,
 } from "@/stores/tabs/layout";
-import { isRegisteredTabKind } from "@/stores/tabs/registry";
+import { isRegisteredTabKind } from "@/stores/tabs/tab-kind-policy";
 import type { TabRef } from "@/stores/tabs/types";
 
 /**

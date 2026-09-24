@@ -1,5 +1,5 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
 import { setMobileApp } from "@/lib/mobile-app";
@@ -10,7 +10,7 @@ import {
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
-import type { RegionId } from "@/lib/layout/region-id";
+import type { HideableRegionId } from "@/lib/layout/layout-values";
 import { navigateToLayoutRegion } from "@/lib/settings-navigation";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
@@ -18,7 +18,8 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
+import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
 import { searchSettings } from "@/lib/settings-search/settings-search";
 
 // The provider list is read through the watched host's scope; this page needs
@@ -47,7 +48,6 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 
 function resetLayout(): void {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
-  useLayoutEditorStore.getState().setFilter("");
 }
 
 beforeEach(() => {
@@ -59,10 +59,15 @@ afterEach(() => {
   setMobileApp(false);
   resetLayout();
   setSystemTabModalApi(null);
+  useSettingsSearchStore.setState({
+    query: "",
+    pendingReveal: null,
+    handoffPending: false,
+  });
 });
 
 /** One region's effective value, which is what a row draws and writes. */
-function shownValue(regionId: RegionId): string {
+function shownValue(regionId: HideableRegionId): string {
   const snapshot = useLayoutStore.getState();
   return effectiveLayoutValues(snapshot.basePreset, snapshot.overrides)[
     regionId
@@ -87,45 +92,81 @@ function surface(id: string): HTMLElement {
   return screen.getByTestId(`layout-surface-${id}`);
 }
 
+/**
+ * Whether a `forceMount`ed tab's own `TabsContent` carries `hidden` - every
+ * tab stays mounted now (L-166's Presence-timing fix), so absence from the
+ * DOM no longer means inactive; the `hidden` attribute Radix toggles on the
+ * inactive `role="tabpanel"` does.
+ */
+function tabPanelHiddenFor(testId: string): boolean {
+  const panel = screen.getByTestId(testId).closest('[role="tabpanel"]');
+  if (!(panel instanceof HTMLElement)) {
+    throw new Error(`no tabpanel ancestor for ${testId}`);
+  }
+  return panel.hasAttribute("hidden");
+}
+
+/** The one `role="tabpanel"` Radix has NOT marked `hidden` right now. */
+function activeTabPanel(): HTMLElement {
+  const panel = document.querySelector('[role="tabpanel"]:not([hidden])');
+  if (!(panel instanceof HTMLElement)) throw new Error("no active tabpanel");
+  return panel;
+}
+
 function renderPanel(): void {
   render(<LayoutSettingsPanel />);
 }
 
 /**
- * The full-width host of the one layout form (L-03), after L-92.
+ * Switches the page to one surface's own tab, the way a click on its
+ * `TabsTrigger` would. Every tab stays mounted (`forceMount`), so this is
+ * about which one is VISIBLE, not which one exists - `surface()` finds a
+ * hidden tab's rows too, so a test that means "the active tab's rows" reads
+ * this first.
+ */
+async function goToSurfaceTab(user: UserEvent, id: string): Promise<void> {
+  const label = SURFACE_GROUPS.find((group) => group.id === id)?.label ?? id;
+  await user.click(screen.getByRole("tab", { name: label }));
+}
+
+/**
+ * The full-width host of the one layout form (L-03), after G6.
  *
- * What is pinned here is the SHAPE the owner asked for: one section per
- * surface, the region as a row, and each shared group control drawn exactly
+ * What is pinned here is the SHAPE the owner asked for: one tab per surface,
+ * the region as a row inside it, and each shared group control drawn exactly
  * once. The rows' own behaviour is covered where the components live
- * (`components/layout-editor/inspector`); what this page owns is which of them
- * appear and how many times.
+ * (`components/layout-editor/inspector`); what this page owns is which of
+ * them appear, on which tab, and how many times.
  */
 describe("Settings - Layout", () => {
-  it("renders one card per surface, with every region as a row inside its own", () => {
+  it("shows every region as a row inside its own surface's tab", async () => {
+    const user = userEvent.setup();
     renderPanel();
 
     for (const group of SURFACE_GROUPS) {
+      await goToSurfaceTab(user, group.id);
       expect(surface(group.id)).toBeTruthy();
-    }
-    for (const region of LAYOUT_REGION_LIST) {
-      expect(surface(region.surface).textContent).toContain(region.name);
+      for (const region of LAYOUT_REGION_LIST.filter(
+        (entry) => entry.surface === group.id,
+      )) {
+        expect(surface(group.id).textContent).toContain(region.name);
+      }
     }
   });
 
-  it("puts the presets block first", () => {
+  it("puts the Presets tab first, then every surface in reading order", () => {
     renderPanel();
 
-    const presets = screen.getByTestId("layout-presets-group");
-    const firstSurface = surface(SURFACE_GROUPS[0].id);
-    expect(
-      presets.compareDocumentPosition(firstSurface) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    const labels = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(labels[0]).toBe(LAYOUT.definitions.presets.label);
+    expect(labels.slice(1)).toEqual(SURFACE_GROUPS.map((group) => group.label));
   });
 
   describe("de-duplication (L-92, L-95)", () => {
-    it("gives the Sidebar ONE list holding all nine panels plus its dividers", () => {
+    it("gives the Sidebar ONE list holding all nine panels plus its dividers", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "sidebar");
 
       const sidebar = surface("sidebar");
       const panelRows = [...sidebar.querySelectorAll("[data-sortable-id]")].map(
@@ -147,14 +188,16 @@ describe("Settings - Layout", () => {
     });
 
     /**
-     * The Composer card's dock list, after L-142 put Todo and Message queue
-     * in it. The claim is the one the ticket is about: five reorderable rows
-     * in the stored dock's order, with no row of a different kind mixed in -
-     * the page reads the arrangement, so a member that had to be spelled out
-     * per region somewhere would show up here as a missing or a stray row.
+     * The Composer card's dock list. The claim is the one the ticket is
+     * about: every member in `DEFAULT_ARRANGEMENT.dock`, reorderable, in the
+     * stored order, with no row of a different kind mixed in - the page reads
+     * the arrangement, so a member that had to be spelled out per region
+     * somewhere would show up here as a missing or a stray row.
      */
-    it("gives the Composer's dock list all five members, in the stored order", () => {
+    it("gives the Composer's dock list every stored member, in the stored order", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "composer");
 
       const composerRows = [
         ...surface("composer").querySelectorAll("[data-sortable-id]"),
@@ -164,7 +207,7 @@ describe("Settings - Layout", () => {
       );
 
       expect(dockRows).toEqual([...DEFAULT_ARRANGEMENT.dock]);
-      expect(dockRows).toHaveLength(5);
+      expect(dockRows).toHaveLength(DEFAULT_ARRANGEMENT.dock.length);
       for (const id of DEFAULT_ARRANGEMENT.dock) {
         expect(
           screen.queryAllByRole("radiogroup", {
@@ -175,62 +218,105 @@ describe("Settings - Layout", () => {
       }
     });
 
-    it("draws no region's row twice anywhere on the page", () => {
+    it("draws no region's row twice within its own surface's tab", async () => {
+      const user = userEvent.setup();
       renderPanel();
 
-      const ids = rowIds();
-      for (const region of LAYOUT_REGION_LIST) {
-        expect(
-          ids.filter((id) => id === region.id),
-          region.name,
-        ).toHaveLength(1);
+      for (const group of SURFACE_GROUPS) {
+        await goToSurfaceTab(user, group.id);
+        const ids = rowIds();
+        for (const region of LAYOUT_REGION_LIST.filter(
+          (entry) => entry.surface === group.id,
+        )) {
+          expect(
+            ids.filter((id) => id === region.id),
+            region.name,
+          ).toHaveLength(1);
+        }
       }
     });
 
-    it("gives every region exactly one state control, in one vocabulary", () => {
+    it("gives every region with a state control exactly one, in one vocabulary", async () => {
+      const user = userEvent.setup();
       renderPanel();
 
-      for (const region of LAYOUT_REGION_LIST) {
-        // One wording for all three option sets (L-121): the page used to
-        // carry two visibility vocabularies, a `Switch` and a tri-state, and
-        // a dock row carried a size control AND a switch for one value.
-        expect(
-          screen.queryAllByRole("radiogroup", {
-            name: `${region.name} display`,
-          }),
-          region.name,
-        ).toHaveLength(1);
-        expect(
-          screen.queryAllByRole("switch", { name: `Show ${region.name}` }),
-          region.name,
-        ).toEqual([]);
+      for (const group of SURFACE_GROUPS) {
+        await goToSurfaceTab(user, group.id);
+        for (const region of LAYOUT_REGION_LIST.filter(
+          (entry) => entry.surface === group.id,
+          // Model has no Hide at all (G6): the picker always draws, so it has
+          // no state control to be duplicated. Covered on its own below.
+        ).filter((entry) => entry.id !== "model")) {
+          // One wording for all three option sets (L-121): the page used to
+          // carry two visibility vocabularies, a `Switch` and a tri-state, and
+          // a dock row carried a size control AND a switch for one value.
+          expect(
+            screen.queryAllByRole("radiogroup", {
+              name: `${region.name} display`,
+            }),
+            region.name,
+          ).toHaveLength(1);
+          expect(
+            screen.queryAllByRole("switch", { name: `Show ${region.name}` }),
+            region.name,
+          ).toEqual([]);
+        }
       }
     });
 
-    it("says each list's instruction once, with its rule joined to it", () => {
+    it("draws no display control for Model, whose picker always shows (G6)", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "composer");
 
       expect(
-        screen.getAllByText(
+        screen.queryByRole("radiogroup", { name: "Model display" }),
+      ).toBeNull();
+    });
+
+    it("says each list's instruction once, with its rule joined to it", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      let long = 0;
+      let short = 0;
+      let pinnedCount = 0;
+      let pinnedInComposer = false;
+
+      for (const group of SURFACE_GROUPS) {
+        await goToSurfaceTab(user, group.id);
+        // Scoped to the ACTIVE tabpanel: every tab stays mounted now
+        // (`forceMount`), so an unscoped query would also match the same
+        // text sitting inert in a tab visited on an earlier pass.
+        const panel = within(activeTabPanel());
+        long += panel.queryAllByText(
           "Drag to reorder, here or on the canvas. Drop one icon onto the middle of another to stack them in one panel. Add a divider to space icons apart.",
-        ),
-      ).toHaveLength(1);
-      expect(
-        screen.getAllByText("Drag to reorder, here or on the canvas."),
-      ).toHaveLength(2);
-      // The pinned-right note belongs to the Toolbar-right LIST, so it is part
-      // of that list header's one line rather than a footnote under the card
-      // (redesign 4.8). It is said once, and only there.
-      const pinned = screen.getAllByText(
-        "Drag to reorder, here or on the canvas. The model chip stays on the right.",
-      );
-      expect(pinned).toHaveLength(1);
-      expect(surface("composer").contains(pinned[0])).toBe(true);
+        ).length;
+        short += panel.queryAllByText(
+          "Drag to reorder, here or on the canvas.",
+        ).length;
+        // The pinned-right note belongs to the Toolbar-right LIST, so it is
+        // part of that list header's one line rather than a footnote under
+        // the card (redesign 4.8).
+        const pinnedHere = panel.queryAllByText(
+          "Drag to reorder, here or on the canvas. The model chip stays on the right.",
+        );
+        pinnedCount += pinnedHere.length;
+        if (pinnedHere.length > 0) {
+          pinnedInComposer = surface(group.id).contains(pinnedHere[0]);
+        }
+      }
+
+      expect(long).toBe(1);
+      expect(short).toBe(2);
+      expect(pinnedCount).toBe(1);
+      expect(pinnedInComposer).toBe(true);
     });
 
     it("gives each strip reading its own bar and side, and shares neither (L-156)", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "statusBar");
 
       // The row that moved both at once is gone: where a reading lives is the
       // region's own pick now, behind its own disclosure.
@@ -263,23 +349,30 @@ describe("Settings - Layout", () => {
     it("writes auto, shown and hidden from the row's one control", async () => {
       const user = userEvent.setup();
       renderPanel();
-      const agents = within(row("railAgents"));
+      await goToSurfaceTab(user, "sidebar");
+      // `railComments` still carries a presence hint ("Auto - appears when an
+      // artifact is open"), which is what earns it the three-way control
+      // (G6): most rail panels have no rule of their own any more and only
+      // offer Shown/Hidden, whose "on" writes `auto` (see the other test in
+      // this block, which exercises exactly that two-option row).
+      const comments = within(row("railComments"));
 
-      await user.click(agents.getByRole("radio", { name: "Shown" }));
-      expect(shownValue("railAgents")).toBe("shown");
+      await user.click(comments.getByRole("radio", { name: "Shown" }));
+      expect(shownValue("railComments")).toBe("shown");
 
-      await user.click(agents.getByRole("radio", { name: "Hidden" }));
-      expect(shownValue("railAgents")).toBe("hidden");
+      await user.click(comments.getByRole("radio", { name: "Hidden" }));
+      expect(shownValue("railComments")).toBe("hidden");
 
       // Back to `auto` reads as no override at all, because `auto` IS the
       // shipped value - so the effective value is what this asserts on.
-      await user.click(agents.getByRole("radio", { name: "Auto" }));
-      expect(shownValue("railAgents")).toBe("auto");
+      await user.click(comments.getByRole("radio", { name: "Auto" }));
+      expect(shownValue("railComments")).toBe("auto");
     });
 
     it("keeps a pinned Shown pinned through any other interaction on the page", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "sidebar");
 
       await user.click(
         within(row("railPullRequests")).getByRole("radio", { name: "Shown" }),
@@ -307,6 +400,7 @@ describe("Settings - Layout", () => {
   it("writes the region's own value from its row's state control", async () => {
     const user = userEvent.setup();
     renderPanel();
+    await goToSurfaceTab(user, "chat");
 
     await user.click(
       within(row("minimap")).getByRole("radio", { name: "Hidden" }),
@@ -316,10 +410,12 @@ describe("Settings - Layout", () => {
   });
 
   describe("the pictures (L-120, redesign 3.2)", () => {
-    it("draws a band on Composer and Status bar, and nowhere else", () => {
+    it("draws a band on Composer and Status bar, and nowhere else", async () => {
+      const user = userEvent.setup();
       renderPanel();
 
       for (const group of SURFACE_GROUPS) {
+        await goToSurfaceTab(user, group.id);
         const bands = within(surface(group.id)).queryAllByTestId(
           "surface-band",
         );
@@ -329,8 +425,10 @@ describe("Settings - Layout", () => {
       }
     });
 
-    it("opens the Sidebar card with its first row, not with a plinth", () => {
+    it("opens the Sidebar card with its first row, not with a plinth", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "sidebar");
 
       const sidebar = surface("sidebar");
       // The word the deleted plinth printed. Its absence is the complaint
@@ -343,8 +441,10 @@ describe("Settings - Layout", () => {
       expect(firstRow?.contains(focusable ?? null)).toBe(true);
     });
 
-    it("carries the real rail button on each Sidebar row, and only there", () => {
+    it("carries the real rail button on each Sidebar row, and only there", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "sidebar");
 
       for (const railId of RAIL_REGION_IDS) {
         expect(
@@ -352,8 +452,10 @@ describe("Settings - Layout", () => {
           railId,
         ).toHaveLength(1);
       }
+
       // Every other list keeps the registry's icon: their depictions are
       // either too wide to be a glyph or already inside the surface's band.
+      await goToSurfaceTab(user, "composer");
       expect(
         surface("composer").querySelectorAll("[data-row-glyph]"),
       ).toHaveLength(0);
@@ -364,6 +466,7 @@ describe("Settings - Layout", () => {
     it("draws a row per provider, opening its Limits pick in place", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "statusBar");
 
       const statusBar = within(surface("statusBar"));
       for (const providerId of DEFAULT_ARRANGEMENT.usageProviders) {
@@ -386,6 +489,7 @@ describe("Settings - Layout", () => {
     it("is absent while Usage limits is hidden", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "statusBar");
 
       await user.click(
         within(row("usageLimits")).getByRole("radio", { name: "Hidden" }),
@@ -405,6 +509,7 @@ describe("Settings - Layout", () => {
       renderPanel();
 
       // `mic` is hidden under Compact, so the pick is a change and says so.
+      // The Presets tab is the page's default, so it needs no switch.
       expect(screen.getByTestId("preset-status-line").textContent).toBe(
         "Compact + 1 change",
       );
@@ -449,6 +554,8 @@ describe("Settings - Layout", () => {
           dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
         });
       });
+      // The reset button lives on the Presets tab, the page's default, so no
+      // tab switch is needed to reach it.
       renderPanel();
 
       await user.click(
@@ -469,13 +576,16 @@ describe("Settings - Layout", () => {
       expect(state.arrangement.dock).toEqual(DEFAULT_ARRANGEMENT.dock);
     });
 
-    it("is the last card, toned danger, and inoperable on an untouched layout", () => {
+    it("sits after the presets block on its own tab, toned danger, and inoperable on an untouched layout", () => {
       renderPanel();
 
+      // Reset Everything merged into the Presets tab (G6): the floor is no
+      // longer the last card on a single scrolling page, it is the last thing
+      // in the tab that opens by default.
+      const presets = screen.getByTestId("layout-presets-group");
       const card = screen.getByTestId("layout-reset-group");
-      const lastSurface = surface(SURFACE_GROUPS[SURFACE_GROUPS.length - 1].id);
       expect(
-        lastSurface.compareDocumentPosition(card) &
+        presets.compareDocumentPosition(card) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
       // Showing the floor and saying you are standing on it, rather than a
@@ -497,6 +607,7 @@ describe("Settings - Layout", () => {
         });
       });
       renderPanel();
+      await goToSurfaceTab(user, "chat");
 
       expect(within(row("minimap")).getByTestId("changed-dot")).toBeTruthy();
 
@@ -510,7 +621,7 @@ describe("Settings - Layout", () => {
     });
   });
 
-  it("lands a deep link on its region's row with the disclosure open", async () => {
+  it("lands a deep link on its region's row, switching to its tab and opening the disclosure", async () => {
     // The door's width-gate redirect goes through the modal bridge, so a
     // landing needs a published Settings surface to be redirected to.
     setSystemTabModalApi({
@@ -523,17 +634,22 @@ describe("Settings - Layout", () => {
       isOverlayActive: () => true,
     });
     renderPanel();
+    // The page opens on Presets, and `contextUsage` lives on Chat - the
+    // landing has to switch tabs itself (G6), not just open a disclosure.
     expect(
-      within(row("contextUsage")).queryByRole("radiogroup", {
-        name: "Style",
-      }),
-    ).toBeNull();
+      screen
+        .getByRole("tab", { name: "Presets" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
 
     await act(async () => {
       navigateToLayoutRegion("contextUsage");
       await Promise.resolve();
     });
 
+    expect(
+      screen.getByRole("tab", { name: "Chat" }).getAttribute("aria-selected"),
+    ).toBe("true");
     expect(
       within(row("contextUsage")).getByRole("radiogroup", { name: "Style" }),
     ).toBeTruthy();
@@ -543,55 +659,7 @@ describe("Settings - Layout", () => {
     );
   });
 
-  it("clears an active filter so the landing has a row to land on", async () => {
-    setSystemTabModalApi({
-      active: null,
-      openSettings: vi.fn(),
-      openHistory: vi.fn(),
-      close: vi.fn(),
-      setSection: vi.fn(),
-      promoteToTab: vi.fn(),
-      isOverlayActive: () => true,
-    });
-    renderPanel();
-    act(() => {
-      // A word from a previous visit that hides the Chat card whole (L-103),
-      // which is what used to drop the request silently.
-      useLayoutEditorStore.getState().setFilter("terminals");
-    });
-    expect(rowIds()).not.toContain("minimap");
-
-    await act(async () => {
-      navigateToLayoutRegion("minimap");
-      await Promise.resolve();
-    });
-
-    expect(useLayoutEditorStore.getState().filter).toBe("");
-    expect(row("minimap").querySelector('[role="button"]')).toBe(
-      document.activeElement,
-    );
-  });
-
-  it("moves focus from the filter to the first row on ArrowDown", async () => {
-    const user = userEvent.setup();
-    renderPanel();
-
-    const field = screen.getByRole("textbox", {
-      name: "Filter these settings",
-    });
-    await user.click(field);
-    await user.keyboard("{ArrowDown}");
-
-    const firstRow = document.querySelector("[data-sortable-id]");
-    expect(firstRow?.querySelector('[role="button"]')).toBe(
-      document.activeElement,
-    );
-    // `keyboardNav` is a fact about an editor SESSION, and this host has none
-    // (R2-04). The page must never write it.
-    expect(useLayoutEditorStore.getState().keyboardNav).toBe(false);
-  });
-
-  describe("the sticky filter band (L-154)", () => {
+  describe("the sticky tab band (L-154)", () => {
     /**
      * The band's observer, driven by hand.
      *
@@ -671,7 +739,7 @@ describe("Settings - Layout", () => {
     }
 
     function band(): HTMLElement {
-      return screen.getByTestId("layout-page-filter");
+      return screen.getByTestId("layout-tab-band");
     }
 
     it("stays within the content width, with no box drawn around it", () => {
@@ -725,8 +793,10 @@ describe("Settings - Layout", () => {
   });
 
   describe("the small-screen status bar row (L-51)", () => {
-    it("is absent outside the installed mobile app", () => {
+    it("is absent outside the installed mobile app", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "statusBar");
 
       expect(
         screen.queryByRole("switch", {
@@ -739,6 +809,7 @@ describe("Settings - Layout", () => {
       setMobileApp(true);
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "statusBar");
 
       await user.click(
         screen.getByRole("switch", {
@@ -751,11 +822,12 @@ describe("Settings - Layout", () => {
   });
 
   describe("the surface placement rows", () => {
-    it("labels the tabs card Tabs, and opens it with Position then Task tab layout", () => {
+    it("labels the Tabs tab, and opens it with Position then Task tab layout", async () => {
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "topBar");
 
       const tabs = surface("topBar");
-      expect(tabs.querySelector("h2")?.textContent).toBe("Tabs");
       const position = tabs.querySelector(
         "[data-settings-anchor='layout-tab-strip-placement']",
       );
@@ -778,6 +850,7 @@ describe("Settings - Layout", () => {
     it("disables Task tab layout with its reason while the tabs are vertical, keeping its value", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "topBar");
       const taskTabLayout = within(surface("topBar")).getByRole("group", {
         name: "Task tab layout",
       });
@@ -807,9 +880,10 @@ describe("Settings - Layout", () => {
       ).toBe("true");
     });
 
-    it("opens the Tabs card with View, disabled at the top and writable once vertical (D8)", async () => {
+    it("opens the Tabs tab with View, disabled at the top and writable once vertical (D8)", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "topBar");
 
       const tabs = surface("topBar");
       const view = tabs.querySelector(
@@ -848,9 +922,10 @@ describe("Settings - Layout", () => {
       );
     });
 
-    it("opens the Sidebar card with Side, which writes the sidebar's side", async () => {
+    it("opens the Sidebar tab with Side, which writes the sidebar's side", async () => {
       const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "sidebar");
 
       const sidebar = surface("sidebar");
       const side = sidebar.querySelector(
@@ -866,30 +941,7 @@ describe("Settings - Layout", () => {
       expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
     });
 
-    it("finds Position and Side with the page's own filter", () => {
-      act(() => {
-        useLayoutEditorStore.getState().setFilter("vertical tabs");
-      });
-      renderPanel();
-
-      expect(
-        within(surface("topBar")).getByRole("radiogroup", {
-          name: "Tabs position",
-        }),
-      ).toBeTruthy();
-      expect(screen.queryByTestId("layout-surface-statusBar")).toBeNull();
-
-      act(() => {
-        useLayoutEditorStore.getState().setFilter("sidebar");
-      });
-      expect(
-        within(surface("sidebar")).getByRole("radiogroup", {
-          name: "Sidebar side",
-        }),
-      ).toBeTruthy();
-    });
-
-    it("withholds Position, View and Side in the installed mobile app, and never disables Task tab layout there", () => {
+    it("withholds Position, View and Side in the installed mobile app, and never disables Task tab layout there", async () => {
       setMobileApp(true);
       useLayoutStore.setState({
         ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -898,16 +950,15 @@ describe("Settings - Layout", () => {
           tabStripPlacement: "left",
         },
       });
+      const user = userEvent.setup();
       renderPanel();
+      await goToSurfaceTab(user, "topBar");
 
       expect(
         screen.queryByRole("radiogroup", { name: "Tabs position" }),
       ).toBeNull();
       expect(
         screen.queryByRole("radiogroup", { name: "Tabs view" }),
-      ).toBeNull();
-      expect(
-        screen.queryByRole("radiogroup", { name: "Sidebar side" }),
       ).toBeNull();
       const taskTabLayout = within(surface("topBar")).getByRole("group", {
         name: "Task tab layout",
@@ -920,6 +971,14 @@ describe("Settings - Layout", () => {
       expect(surface("topBar").textContent).not.toContain(
         "Applies when tabs are at the top.",
       );
+
+      // "Sidebar side" lives on a different tab, so it has to be checked on
+      // ITS tab - on topBar's it would read as absent whether or not the
+      // mobile-app guard withheld it.
+      await goToSurfaceTab(user, "sidebar");
+      expect(
+        screen.queryByRole("radiogroup", { name: "Sidebar side" }),
+      ).toBeNull();
     });
 
     it.each(["vertical tabs", "side tabs"])(
@@ -947,5 +1006,55 @@ describe("Settings - Layout", () => {
         expect(anchors).toContain("layout-side-strip-view");
       },
     );
+  });
+
+  describe("tab navigation (G6)", () => {
+    it("shows only the active surface's rows, hiding every other tab's", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      for (const group of SURFACE_GROUPS) {
+        await goToSurfaceTab(user, group.id);
+        expect(tabPanelHiddenFor(`layout-surface-${group.id}`)).toBe(false);
+        expect(tabPanelHiddenFor("layout-presets-group")).toBe(true);
+        for (const other of SURFACE_GROUPS) {
+          if (other.id === group.id) continue;
+          expect(
+            tabPanelHiddenFor(`layout-surface-${other.id}`),
+            other.id,
+          ).toBe(true);
+        }
+      }
+
+      // Back on Presets, no surface's content is visible.
+      await user.click(
+        screen.getByRole("tab", { name: LAYOUT.definitions.presets.label }),
+      );
+      expect(tabPanelHiddenFor("layout-presets-group")).toBe(false);
+      for (const group of SURFACE_GROUPS) {
+        expect(tabPanelHiddenFor(`layout-surface-${group.id}`)).toBe(true);
+      }
+    });
+  });
+
+  describe("settings-search anchor landing (G6)", () => {
+    it("switches to a row's own tab when a search result asks to land on it", () => {
+      // Seeded before the panel mounts, the way a search-result click's
+      // request outlives the navigation that made it (5.9).
+      useSettingsSearchStore
+        .getState()
+        .requestReveal("layout", LAYOUT.definitions.sidebarSide.anchor);
+
+      renderPanel();
+
+      expect(
+        screen
+          .getByRole("tab", { name: "Sidebar" })
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+      expect(tabPanelHiddenFor("layout-surface-sidebar")).toBe(false);
+      // Presets, the page's own default, is not what's showing.
+      expect(tabPanelHiddenFor("layout-presets-group")).toBe(true);
+    });
   });
 });

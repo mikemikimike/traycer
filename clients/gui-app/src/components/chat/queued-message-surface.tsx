@@ -74,16 +74,11 @@ import { useManagedCommandDoor } from "@/lib/managed-commands/use-managed-comman
 import { isOptimisticQueuedItem } from "@/stores/chats/optimistic-queue";
 import { mergeRefs } from "@/lib/merge-refs";
 import { cn } from "@/lib/utils";
-import { useChatDockSectionAttached } from "@/components/chat/chat-dock-compact-context";
 import {
   CHAT_DOCK_PANEL_LIST,
   CHAT_DOCK_PANEL_ROW,
   CHAT_DOCK_PANEL_ROW_TEXT,
 } from "@/components/chat/chat-dock-panel-row";
-import {
-  ChatDockAttachedPanelBody,
-  ChatDockPillActions,
-} from "@/components/chat/chat-dock-attached-panel";
 
 interface QueuedMessageRowActionState {
   readonly canReorder: boolean;
@@ -159,8 +154,6 @@ function queueItemAllowsReorder(item: ChatQueuedItem): boolean {
 }
 
 export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
-  // Attached above the composer because its pill is the open one (L-142).
-  const attached = useChatDockSectionAttached("queue");
   const [open, setOpen] = useState(true);
   // Render the queue in its true order, user-typed and received A2A items
   // alike. Received items render read-only (see QueuedMessageRow) - the user
@@ -210,12 +203,6 @@ export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
 
   if (items.length === 0) return null;
 
-  // The same two booleans the header derives, needed here because the pill
-  // row's copy of these controls has no header to ask.
-  const showResumeQueueButton = hasPausedItems && !props.readOnly;
-  const showPauseQueueButton =
-    !showResumeQueueButton && hasPausableHumanItems && !props.readOnly;
-
   const list = (
     <DndContext
       sensors={sensors}
@@ -261,28 +248,6 @@ export function QueuedMessagePanel(props: QueuedMessagePanelProps) {
       </SortableContext>
     </DndContext>
   );
-
-  if (attached) {
-    return (
-      <>
-        <ChatDockPillActions>
-          <QueuedMessageQueueControls
-            canAct={props.canAct}
-            readOnly={props.readOnly}
-            resumeRequested={props.resumeRequested}
-            keepPausedRequested={props.keepPausedRequested}
-            showResumeQueueButton={showResumeQueueButton}
-            showPauseQueueButton={showPauseQueueButton}
-            onPause={props.onPause}
-            onResume={props.onResume}
-          />
-        </ChatDockPillActions>
-        <ChatDockAttachedPanelBody section="queue" testId="queued-message-list">
-          {list}
-        </ChatDockAttachedPanelBody>
-      </>
-    );
-  }
 
   return (
     <Collapsible
@@ -813,7 +778,13 @@ function QueuedMessageRowContent(props: {
     <div className="min-w-0 flex-1">
       <div
         className={cn(
-          "max-h-[3lh] overflow-y-auto pr-1 wrap-break-word",
+          // `-my-0.5 py-0.5`: the floated toolbar's frame overhangs its own
+          // margin box by `p-0.5` a side (see `QueuedMessageFloatingChrome`),
+          // and `overflow-y-auto` clips at the PADDING edge, so without room
+          // there the frame's bottom border was cut off. The padding is that
+          // room and the negative margin hands it back, so the row measures
+          // what it did.
+          "-my-0.5 max-h-[calc(3lh+--spacing(1))] overflow-y-auto py-0.5 pr-1 wrap-break-word",
           CHAT_DOCK_PANEL_ROW_TEXT,
         )}
         data-testid="queued-message-content-scroll"

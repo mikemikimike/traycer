@@ -33,6 +33,9 @@ export function MobileAppHeader(): ReactNode {
   // something surfaces write here.
   const rightActions = useMobileHeaderRightActions();
   const showGlobalResourceMonitor = useRegionShown("resourceMonitor");
+  // The same switch the desktop header and the strip follow; the phone header
+  // drew the glyph whatever it said (G6).
+  const showUsageLimits = useRegionShown("usageLimits");
   const surface = useMobileHeaderSurface();
   const epicTabId = surface.kind === "epic" ? surface.tabId : null;
   const epicId = useMobileHeaderEpicId(epicTabId);
@@ -81,7 +84,7 @@ export function MobileAppHeader(): ReactNode {
           "app" variant). They come before the surface-provided actions so a
           surface's own controls (e.g. the epic overflow) land outermost. */}
       <div className="flex shrink-0 items-center gap-1">
-        <RateLimitIconButton form="glyph" />
+        {showUsageLimits ? <RateLimitIconButton form="glyph" /> : null}
         {showGlobalResourceMonitor ? (
           // The owner of `app.resources.open` on this viewport. The footer
           // strip can be on screen at the same time (it is opt-in here rather

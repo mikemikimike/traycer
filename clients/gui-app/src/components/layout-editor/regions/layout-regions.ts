@@ -9,7 +9,6 @@ import {
   CHANGED_FILES_REGION,
   MIC_REGION,
   MODEL_REGION,
-  QUEUE_REGION,
   RUNNING_AGENTS_REGION,
   TODO_REGION,
 } from "@/components/layout-editor/regions/composer-regions";
@@ -59,7 +58,6 @@ export const LAYOUT_REGIONS: {
   runningAgents: RUNNING_AGENTS_REGION,
   changedFiles: CHANGED_FILES_REGION,
   background: BACKGROUND_REGION,
-  queue: QUEUE_REGION,
   todo: TODO_REGION,
   attachImage: ATTACH_IMAGE_REGION,
   access: ACCESS_REGION,

@@ -529,13 +529,18 @@ describe("<EpicLeftPanelStaticRail /> indicator mirror (S-06)", () => {
     expect(indicator.className).toContain("rounded-r-none");
     expect(indicator.className).not.toContain("left-0");
 
-    // Radix opens a Tooltip on focus with no hover delay, unlike a pointer
-    // hover (which waits on TooltipProvider's delayDuration) - the one open
-    // path this suite can trigger synchronously in jsdom.
+    // The rail's tiles are `HoverCard appearance="tooltip"` (ui/hover-card.tsx,
+    // on Floating UI): `useFocus` opens with no hover delay, the one open path
+    // this suite can trigger synchronously in jsdom (see hover-card.test.tsx's
+    // note on `visibleOnly` and jsdom's `:focus-visible`). `role="tooltip"`
+    // lands on the outer floating wrapper `useRole` attaches to; the `data-*`
+    // attributes this test reads are on the inner content node.
     fireEvent.focus(activeButton);
     const tooltip = screen.getByRole("tooltip");
-    expect(tooltip.getAttribute("data-side")).toBe("left");
-    expect(tooltip.getAttribute("data-align")).toBe("start");
+    const content = tooltip.querySelector('[data-slot="hover-card-content"]');
+    if (content === null) throw new Error("expected hover card content");
+    expect(content.getAttribute("data-side")).toBe("left");
+    expect(content.getAttribute("data-align")).toBe("start");
   });
 });
 

@@ -6,7 +6,10 @@ import {
   SETTINGS_SEARCH_FIXTURES,
   type SettingsSearchFixtureSection,
 } from "@/components/settings/__tests__/settings-search-fixture-registry";
-import { assertSettingsSearchTargets } from "@/components/settings/__tests__/settings-search-targets";
+import {
+  assertSettingsSearchTargets,
+  assertSettingsSearchTargetsByNavigation,
+} from "@/components/settings/__tests__/settings-search-targets";
 import { hostScopeFixture } from "@/components/settings/host-scope/host-scope-fixture";
 import { AppDiagnosticsSettingsPanel } from "@/components/settings/panels/app-diagnostics-settings-panel";
 import { AppNotificationsSettingsPanel } from "@/components/settings/panels/app-notifications-settings-panel";
@@ -24,6 +27,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
 
 // Layout's provider list is read through the WATCHED host's scope. It carries
 // no anchors - the set exists only for providers a host has reported - so the
@@ -80,6 +84,11 @@ afterEach(() => {
   setMobileApp(false);
   setFeatureSettingsBridge(null);
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
+  useSettingsSearchStore.setState({
+    query: "",
+    pendingReveal: null,
+    handoffPending: false,
+  });
 });
 
 describe("settings search fixtures", () => {
@@ -98,7 +107,14 @@ describe("settings search fixtures", () => {
         // The context the contract is judged by must be the shell the panel
         // actually resolved, or the zero-target half proves nothing.
         expect(mounted).toEqual(shell.context);
-        assertSettingsSearchTargets(fixture.section, shell.context, container);
+        // Layout (G6) shows only one tab's rows at a time, so its anchors
+        // cannot all be judged visible from this one static mount - each is
+        // checked after navigating to it, the way a real search result would.
+        const assert =
+          fixture.section === "layout"
+            ? assertSettingsSearchTargetsByNavigation
+            : assertSettingsSearchTargets;
+        assert(fixture.section, shell.context, container);
         executed.add(`${fixture.section} / ${shell.name}`);
       });
     }

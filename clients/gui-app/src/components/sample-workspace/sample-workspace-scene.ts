@@ -176,7 +176,10 @@ export const SAMPLE_TODO: PinnedTodoSnapshot = {
   ],
 };
 
-/** One queued prompt, so the Queue row has a specimen in every preset. */
+/**
+ * One queued prompt, so the canvas shows the queue where it always sits:
+ * directly on the composer, in every preset (it is not a region, G1-G2).
+ */
 export const SAMPLE_QUEUE: ChatQueueState = {
   status: "running",
   items: [
@@ -352,16 +355,6 @@ export const SAMPLE_DOCK: ReadonlyArray<
     lineDeltas: null,
     label: "Sample: two background shells",
     detail: "2 running",
-    pulseToken: null,
-  },
-  {
-    section: "queue",
-    glyph: "queue",
-    working: false,
-    text: `${SAMPLE_QUEUE.items.length}`,
-    lineDeltas: null,
-    label: "Sample: one queued message",
-    detail: "1 message queued",
     pulseToken: null,
   },
   {

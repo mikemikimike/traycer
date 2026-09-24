@@ -5,7 +5,6 @@ import {
   FileDiff,
   History,
   ListChecks,
-  ListOrdered,
   Mic,
   Shield,
 } from "lucide-react";
@@ -19,10 +18,8 @@ import {
 } from "@/components/chat/chat-diff-target";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
 import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
-import { QueuedMessageHeader } from "@/components/chat/queued-message-surface";
 import { contextUsageTone } from "@/components/chat/context-usage";
 import {
-  SAMPLE_QUEUE,
   SAMPLE_RESTORE,
   SAMPLE_TODO,
 } from "@/components/sample-workspace/sample-workspace-scene";
@@ -78,7 +75,7 @@ import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-ba
  * chrome is already split into an interactive mount and a drawing view -
  * `StatusBarUsageReadings`, `HarnessModelTrigger`, `PermissionsTrigger`,
  * `TabStripHomeItemView`, `MinimapRailTick`, `LeftPanelRailIcon`, the dock's
- * two headers, its changed-files, queue and todo panels and its compact chip
+ * two headers, its changed-files and todo panels and its compact chip
  * all take what they draw from props - and
  * for those a depiction IS the shipping component under specimen data. The
  * four that read a preference through a hook of their own rather than from a
@@ -161,7 +158,6 @@ const HOST_BY_REGION: Readonly<Record<RegionId, HostContextId>> = {
   runningAgents: "dock",
   changedFiles: "dock",
   background: "dock",
-  queue: "dock",
   todo: "dock",
   attachImage: "toolbar",
   access: "toolbar",
@@ -365,14 +361,6 @@ function specimenWindow(
 }
 
 function noop(): void {}
-
-/**
- * The same, for the queue's Pause and Resume, which report the id of the frame
- * they dispatched. A picture dispatches none, which is what `null` says there.
- */
-function noAction(): string | null {
-  return null;
-}
 
 /**
  * The scroll cap a dock panel takes from its tile. A picture never opens, so
@@ -716,68 +704,6 @@ function depictBackground(values: SizedValues): ReactNode {
 }
 
 /**
- * The real Message queue HEADER, fed the sample workspace's own queue.
- *
- * The same reading L-98 forced on the changed-files row - the queue's
- * full-size shape is a collapsible panel with its count, its state word and
- * its Pause/Resume actions, and a header look-alike would be a picture of
- * something the app does not draw - but taken from `QueuedMessageHeader`
- * rather than from the whole panel. Every other collapsed row here is drawn
- * that way too, and the panel would bring a `DndContext` and the queue's rows
- * into a specimen that can never be dragged, once per miniature (three per
- * preset card).
- *
- * The header's own `aria-live` span does come along, and deliberately stays:
- * a live region has to be in the DOM BEFORE its text changes to be announced,
- * so gating it on a non-empty announcement would silence the real one. Empty
- * and polite, it announces nothing here.
- *
- * Its callbacks go nowhere, exactly as the changed-files opener does: the
- * picture stays complete and still acts on nothing (the passivity contract in
- * this module's header, and the specimen stage is `inert` besides).
- */
-function depictQueue(values: SizedValues): ReactNode {
-  if (values.size === "chip") {
-    return (
-      <ChatDockCompactChip
-        icon={<ListOrdered className="size-3.5" />}
-        text="1"
-        working={false}
-        lineDeltas={null}
-        label="Message queue"
-        tooltipLines={null}
-        pulseToken={null}
-        expanded={false}
-        controls={null}
-        testId="layout-depiction-queue"
-        onClick={noop}
-      />
-    );
-  }
-  return (
-    <Collapsible open={false} variant="panel">
-      <QueuedMessageHeader
-        open={false}
-        // The sample scene's own queue, so the picture and the canvas cannot
-        // disagree about how many items the Queue row is standing for.
-        count={SAMPLE_QUEUE.items.length}
-        queueStatus={SAMPLE_QUEUE.status}
-        // What a running queue of one human prompt offers: Pause, and no
-        // Resume beside it - the same two the panel derives from those items.
-        canPauseQueue
-        canResumeQueue={false}
-        canAct
-        resumeRequested={false}
-        keepPausedRequested={false}
-        readOnly={false}
-        onPause={noAction}
-        onResume={noAction}
-      />
-    </Collapsible>
-  );
-}
-
-/**
  * The real Todo panel, fed the sample workspace's own todo list. It reads
  * nothing of its own beyond the snapshot it is handed, so there is no inert
  * wiring to do.
@@ -860,7 +786,6 @@ const REGION_DEPICTIONS: {
   runningAgents: depictRunningAgents,
   changedFiles: depictChangedFiles,
   background: depictBackground,
-  queue: depictQueue,
   todo: depictTodo,
   attachImage: () => <ComposerAttachImageTrigger />,
   access: (values) => (

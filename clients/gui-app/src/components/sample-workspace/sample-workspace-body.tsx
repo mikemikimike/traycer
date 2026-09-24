@@ -8,10 +8,7 @@ import {
   ChatLowerDock,
   type DockRowHotspot,
 } from "@/components/chat/chat-lower-dock";
-import {
-  dockMemberFolded,
-  dockMemberMaterialised,
-} from "@/components/chat/chat-dock-fold";
+import { dockMemberFolded } from "@/components/chat/chat-dock-fold";
 import { ChatDockCompactStripProvider } from "@/components/chat/chat-dock-compact-strip";
 import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
@@ -107,15 +104,9 @@ export function SampleWorkspaceBody() {
     regionId: "background",
     instanceId: SAMPLE_TILE_ID,
   });
-  // Five members since L-139: the Message queue and Todo are dock regions with
-  // the same Full row / Chip / Hidden semantics as the other three, so the
-  // canvas has to draw them the same way.
-  const queueValues = useRegionValues("queue");
+  // Todo is a dock region with the same Full row / Chip / Hidden semantics as
+  // the other three (L-139), so the canvas has to draw it the same way.
   const todoValues = useRegionValues("todo");
-  const queue = useLayoutRegion({
-    regionId: "queue",
-    instanceId: SAMPLE_TILE_ID,
-  });
   const todo = useLayoutRegion({
     regionId: "todo",
     instanceId: SAMPLE_TILE_ID,
@@ -146,13 +137,6 @@ export function SampleWorkspaceBody() {
       hasContent: true,
       ghost: background.ghost,
     },
-    queue: {
-      hotspotRef: queue.ref,
-      editing: queue.editing,
-      shown: queueValues.shown === "shown",
-      hasContent: true,
-      ghost: queue.ghost,
-    },
     todo: {
       hotspotRef: todo.ref,
       editing: todo.editing,
@@ -180,11 +164,6 @@ export function SampleWorkspaceBody() {
       ghost: background.ghost,
       hasContent: true,
     }),
-    queue: dockMemberFolded({
-      values: queueValues,
-      ghost: queue.ghost,
-      hasContent: true,
-    }),
     todo: dockMemberFolded({
       values: todoValues,
       ghost: todo.ghost,
@@ -200,22 +179,6 @@ export function SampleWorkspaceBody() {
       ? [{ ...sample, hotspotRef: hotspots[section].hotspotRef }]
       : [];
   });
-  // The same question the real tile asks before it spaces its composer
-  // (`chat-tile-lower-surfaces.tsx`'s `lowerSurfaceTopSpacing`): is there a
-  // FULL dock row above the input, whose frame tucks into it with `-mb-px`?
-  // If there is, the two are one joined surface and the composer adds no top
-  // padding; if the dock is pills only, the composer's own `pt-4` is what
-  // holds the pill row a clear step off the input (L-153). The sample used to
-  // add nothing in either case, which is why the editor - and only the editor
-  // - showed the pills stuck to the composer's border.
-  const anyFullRow = dockOrder.some(
-    (section) =>
-      !folded.has(section) &&
-      dockMemberMaterialised({
-        shown: hotspots[section].shown,
-        ghost: hotspots[section].ghost,
-      }),
-  );
   const sidebarSide = useArrangementValue("sidebarSide");
   return (
     <ComposerTileIdProvider tileId={SAMPLE_TILE_ID}>
@@ -303,14 +266,13 @@ export function SampleWorkspaceBody() {
                     lower surfaces are an absolutely positioned overlay, while
                     here they are a flex child under a scrolling transcript.
 
-                    `connected` is the same question the real tile asks - a
-                    FULL dock row above means the frame tucks into the input
-                    with `-mb-px` and the two are one surface, so the composer
-                    adds no top padding; a pills-only dock means its `pt-4` is
-                    what holds the pill row a clear step off the input. */}
+                    Always `connected`, the answer the real tile gives
+                    whenever its frame has anything in it: the sample queue
+                    is never empty, and the queue always sits in the frame,
+                    tucked into the input with `-mb-px` (G1-G2). */}
                 <div className="shrink-0">
                   <ComposerSlotShell
-                    topSpacing={anyFullRow ? "connected" : "normal"}
+                    topSpacing="connected"
                     bottomSpacing="normal"
                   >
                     <div className="relative flex flex-col gap-3">

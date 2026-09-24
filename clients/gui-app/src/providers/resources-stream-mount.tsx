@@ -12,7 +12,7 @@ import {
   type ResourcesStreamClientFactory,
 } from "@/stores/resources/resources-store";
 import { getResourcesStreamClientFactoryOverride } from "@/providers/resources-stream-factory-override";
-import { useRegionShown } from "@/lib/layout-overrides";
+import { useRegionShown, useRegionValue } from "@/lib/layout-overrides";
 
 export interface ResourcesStreamMountProps {
   readonly epicId: string;
@@ -50,11 +50,12 @@ export function ResourcesStreamMount(
   const hostId = useStreamHostId();
   const resourcesSupport = useStreamMethodSupport("resources.subscribe");
   const resourcesUnsupported = resourcesSupport === "unsupported";
-  // One switch owns the readings (L-48): with the resource monitor hidden
-  // there is no strip segment and no header button, and the stream that feeds
-  // them - and the sidebar's own chips, which read the same projection - does
-  // not connect at all.
-  const streamWanted = useRegionShown("resourceMonitor");
+  // Two switches read this projection (G7): the monitor itself (its strip
+  // segment or header button) and the agent rows' own readings. With both
+  // off, nothing would read it, so the stream does not connect at all.
+  const monitorShown = useRegionShown("resourceMonitor");
+  const agentRows = useRegionValue("resourceMonitor", "agentRows");
+  const streamWanted = monitorShown || agentRows;
 
   useEffect(() => {
     if (resourcesUnsupported || !streamWanted) return;

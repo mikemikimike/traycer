@@ -4,8 +4,7 @@ import {
   useDroppable,
   type DraggableSyntheticListeners,
 } from "@dnd-kit/core";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { HoverCard, HoverCardGroup } from "@/components/ui/hover-card";
 import { Button } from "@/components/ui/button";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/canvas-attributes";
@@ -65,6 +64,7 @@ import {
 import {
   LEFT_PANEL_RAIL_TAB_UNDERLINE_CLASS,
   LEFT_PANEL_RAIL_TILE_CLASS,
+  railGroupLabel,
 } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import { useEpicArtifact } from "@/lib/epic-selectors";
 import {
@@ -102,8 +102,8 @@ interface EpicLeftPanelRailContentProps {
 }
 
 /**
- * One thing the rail draws: a panel's icon, a stacked PAIR of them in one
- * capsule (L-167), or a divider (L-155).
+ * One thing the rail draws: a panel's icon, a stacked pair's ONE group icon
+ * (G3), or a divider (L-155).
  *
  * Every divider the rail holds is drawn, at rest as well as in a session: at
  * rest it is extra space and in a session a handle (L-140), and both of those
@@ -325,8 +325,36 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
     ],
   );
 
+  // A group's icon (G3) is lit while either member is the displayed panel, and
+  // clicking it is the same three answers a panel's icon gives: collapse the
+  // column when the group is showing, put back a member section the user
+  // collapsed, and otherwise open the group on its top panel.
+  const handleGroupClick = useCallback(
+    (members: ReadonlyArray<LeftPanelId>) => {
+      const showing = members.some((member) => member === displayedPanelId);
+      const collapsedMember = members.find(sectionCollapsed);
+      if (showing && collapsedMember === undefined) {
+        toggleMainCollapsed(tabId);
+        return;
+      }
+      setActivePanelIdAndExpand(
+        tabId,
+        collapsedMember ?? (showing ? displayedPanelId : null) ?? members[0],
+      );
+    },
+    [
+      displayedPanelId,
+      sectionCollapsed,
+      setActivePanelIdAndExpand,
+      tabId,
+      toggleMainCollapsed,
+    ],
+  );
+
   return (
-    <TooltipProvider delayDuration={150}>
+    // One clock for the rail's labels: the first waits, the neighbour's
+    // replaces it at once.
+    <HoverCardGroup>
       {/*
         One context menu for the WHOLE rail rather than one per icon. Right-
         clicking an icon opens it, and so does right-clicking the empty rail -
@@ -370,42 +398,49 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                 );
               }
               if (item.kind === "stack") {
+                // One icon for the pair (G3): the top panel's, named for both,
+                // and the group moves whole when it is dragged. Before/after
+                // previews read off the top, which is the drop target.
+                const members = [item.top.id, item.bottom.id];
+                const previewPosition = previewPositionFor(item.top.id);
                 return (
-                  <LeftPanelRailStack
-                    key={item.id}
-                    stackId={item.id}
-                    orientation={orientation}
-                    first={
+                  <Fragment key={item.id}>
+                    {previewPosition === "before" ? (
+                      <RailBoundaryPreview
+                        definition={panelSectionDropDefinition}
+                        orientation={orientation}
+                      />
+                    ) : null}
+                    <LeftPanelRailStack
+                      stackId={item.id}
+                      memberCount={members.length}
+                      showCount={dividersEditing}
+                    >
                       <RailPanelButton
                         tabId={tabId}
                         panel={item.top}
-                        orientation={orientation}
-                        active={item.top.id === displayedPanelId && !collapsed}
-                        combining={
-                          previewPositionFor(item.top.id) === "combine"
-                        }
-                        stacked
-                        onClick={() => handleClick(item.top.id)}
-                        onContextMenu={setContextPanelId}
-                      />
-                    }
-                    second={
-                      <RailPanelButton
-                        tabId={tabId}
-                        panel={item.bottom}
+                        label={railGroupLabel([
+                          item.top.title,
+                          item.bottom.title,
+                        ])}
                         orientation={orientation}
                         active={
-                          item.bottom.id === displayedPanelId && !collapsed
+                          members.some((id) => id === displayedPanelId) &&
+                          !collapsed
                         }
-                        combining={
-                          previewPositionFor(item.bottom.id) === "combine"
-                        }
+                        combining={false}
                         stacked
-                        onClick={() => handleClick(item.bottom.id)}
+                        onClick={() => handleGroupClick(members)}
                         onContextMenu={setContextPanelId}
                       />
-                    }
-                  />
+                    </LeftPanelRailStack>
+                    {previewPosition === "after" ? (
+                      <RailBoundaryPreview
+                        definition={panelSectionDropDefinition}
+                        orientation={orientation}
+                      />
+                    ) : null}
+                  </Fragment>
                 );
               }
               const panelId = item.panel.id;
@@ -421,6 +456,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                   <RailPanelButton
                     tabId={tabId}
                     panel={item.panel}
+                    label={item.panel.title}
                     orientation={orientation}
                     active={panelId === displayedPanelId && !collapsed}
                     combining={previewPosition === "combine"}
@@ -457,7 +493,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
           contextPanelId={contextPanelId}
         />
       </ContextMenu>
-    </TooltipProvider>
+    </HoverCardGroup>
   );
 }
 
@@ -516,6 +552,8 @@ function RailPanelDropLine(props: { readonly orientation: RailOrientation }) {
 interface RailPanelButtonProps {
   readonly tabId: string;
   readonly panel: LeftPanelMetadataDefinition;
+  /** The tooltip and accessible name: the panel's title, or a group's (G3). */
+  readonly label: string;
   readonly orientation: RailOrientation;
   readonly active: boolean;
   /** The drop is aimed at this icon's MIDDLE band, which stacks the two. */
@@ -535,6 +573,7 @@ function RailPanelButton(props: RailPanelButtonProps) {
   const {
     tabId,
     panel,
+    label,
     orientation,
     active,
     combining,
@@ -592,7 +631,7 @@ function RailPanelButton(props: RailPanelButtonProps) {
       buttonRef={setButtonRef}
       handleListeners={listeners}
       icon={panel.icon}
-      label={panel.title}
+      label={label}
       orientation={orientation}
       active={active}
       isDragSource={isDragging}
@@ -649,47 +688,57 @@ function RailButton(props: RailButtonProps) {
       ? RAIL_ACTIVE_INDICATOR_CLASS[sidebarSide]
       : LEFT_PANEL_RAIL_TAB_UNDERLINE_CLASS;
   return (
-    <TooltipWrapper
-      label={label}
+    <HoverCard
+      content={label}
+      appearance="tooltip"
+      semantics={{ role: "tooltip" }}
       side={
         orientation === "vertical" ? (placement?.side ?? "right") : "bottom"
       }
-      sideOffset={undefined}
-      align={orientation === "vertical" ? placement?.align : undefined}
-    >
-      <Button
-        ref={buttonRef}
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={label}
-        aria-current={active}
-        data-testid={testId}
-        onClick={onClick}
-        // Bubbles on to the rail's own trigger, which opens the shared menu.
-        onContextMenu={onContextMenu}
-        className={cn(
-          LEFT_PANEL_RAIL_TILE_CLASS,
-          active && activeClass,
-          isDragSource && "cursor-grabbing opacity-50",
-          isDropTarget && "bg-accent/70",
-        )}
-      >
-        <span
-          {...handleListeners}
-          className="flex size-full items-center justify-center"
+      align={
+        orientation === "vertical" ? (placement?.align ?? "center") : "center"
+      }
+      sideOffset={4}
+      enabled={!isDragSource}
+      open={null}
+      onOpenChange={null}
+      testId={null}
+      className="px-3 py-1.5 text-ui-xs"
+      trigger={
+        <Button
+          ref={buttonRef}
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          aria-current={active}
+          data-testid={testId}
+          onClick={onClick}
+          // Bubbles on to the rail's own trigger, which opens the shared menu.
+          onContextMenu={onContextMenu}
+          className={cn(
+            LEFT_PANEL_RAIL_TILE_CLASS,
+            active && activeClass,
+            isDragSource && "cursor-grabbing opacity-50",
+            isDropTarget && "bg-accent/70",
+          )}
         >
-          <Icon className="size-4" />
-          {active ? (
-            <DropLine
-              orientation={orientation}
-              glow={false}
-              className={activeIndicatorClass}
-              testId={undefined}
-            />
-          ) : null}
-        </span>
-      </Button>
-    </TooltipWrapper>
+          <span
+            {...handleListeners}
+            className="flex size-full items-center justify-center"
+          >
+            <Icon className="size-4" />
+            {active ? (
+              <DropLine
+                orientation={orientation}
+                glow={false}
+                className={activeIndicatorClass}
+                testId={undefined}
+              />
+            ) : null}
+          </span>
+        </Button>
+      }
+    />
   );
 }

@@ -75,7 +75,6 @@ describe("the host context a depiction is drawn in", () => {
       ["minimap", "chat"],
       ["contextUsage", "composer-foot"],
       ["background", "dock"],
-      ["queue", "dock"],
       ["todo", "dock"],
       ["access", "toolbar"],
       ["railComments", "rail"],
@@ -113,35 +112,9 @@ describe("the host context a depiction is drawn in", () => {
 });
 
 describe("what a depiction draws", () => {
-  it("draws the Message queue's full row as the collapsed header alone", () => {
-    const { container } = render(
-      depictRegion(
-        "queue",
-        { shown: "shown", size: "full" },
-        DEFAULT_ARRANGEMENT,
-      ),
-    );
-
-    // The real header, with the count and the state word it prints live.
-    const header = container.querySelector(
-      '[data-testid="queued-message-header"]',
-    );
-    expect(header).not.toBeNull();
-    expect(header?.textContent).toContain("1");
-
-    // And nothing under it: the whole panel brought a `DndContext` and a
-    // sortable list into a picture that can never be dragged - three of them
-    // per preset card. What is left of its live region announces nothing.
-    expect(
-      container.querySelector('[data-testid="queued-message-list"]'),
-    ).toBeNull();
-    expect(
-      [...container.querySelectorAll("[aria-live]")].every(
-        (node) => node.textContent === "",
-      ),
-    ).toBe(true);
-  });
-
+  // The Message queue no longer has a picture here at all (G1-G2): it is not
+  // a `RegionId`, so it is not one of the layout editor's depictable regions
+  // and carries no preset-card specimen.
   it("reports only the metrics the values switched on", () => {
     const { container } = render(
       depictRegion(
@@ -152,6 +125,7 @@ describe("what a depiction draws", () => {
           memory: false,
           processes: true,
           ramShare: false,
+          agentRows: true,
         },
         DEFAULT_ARRANGEMENT,
       ),
@@ -200,20 +174,12 @@ describe("what a depiction draws", () => {
 
   it("collapses the access pill to its icon as a chip", () => {
     const full = render(
-      depictRegion(
-        "access",
-        { shown: "shown", size: "full" },
-        DEFAULT_ARRANGEMENT,
-      ),
+      depictRegion("access", { size: "full" }, DEFAULT_ARRANGEMENT),
     );
     expect(full.container.textContent).toContain("Full access");
 
     const chip = render(
-      depictRegion(
-        "access",
-        { shown: "shown", size: "chip" },
-        DEFAULT_ARRANGEMENT,
-      ),
+      depictRegion("access", { size: "chip" }, DEFAULT_ARRANGEMENT),
     );
     // The label is still in the tree for the accessible name, but the chip
     // hides it - which is the real component's own behaviour under `compact`.
@@ -223,11 +189,7 @@ describe("what a depiction draws", () => {
 
   it("draws a region that is switched off, because the stage dims instead", () => {
     const { container } = render(
-      depictRegion(
-        "access",
-        { shown: "hidden", size: "full" },
-        DEFAULT_ARRANGEMENT,
-      ),
+      depictRegion("access", { size: "full" }, DEFAULT_ARRANGEMENT),
     );
     expect(container.textContent).toContain("Full access");
   });

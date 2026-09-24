@@ -33,7 +33,10 @@ import {
   type EdgeSide,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
-import type { LayoutValues } from "@/lib/layout/layout-values";
+import {
+  regionValuesHidden,
+  type LayoutValues,
+} from "@/lib/layout/layout-values";
 import { railDisplayEntries } from "@/lib/layout/rail";
 import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
 import {
@@ -580,7 +583,7 @@ function AppFrameAccount(props: { readonly collapsed: boolean }): ReactNode {
           Ada Lovelace
         </span>
         <span className="truncate text-ui-xs text-muted-foreground">
-          This Mac · 2 running
+          This Mac
         </span>
       </span>
       <ChevronsUpDown
@@ -784,12 +787,12 @@ function AppFrameBarCluster(props: {
  * the panel sheet as the expanded panel draws it. Each panel brings its own
  * rail frame, so this adds no spacing of its own.
  *
- * A stacked pair is drawn inside the same capsule the real rail draws, through
- * the same component (L-11, L-167): the card is a picture of the app at rest,
- * and at rest two joined icons are one object.
+ * A stacked pair is drawn as the same one group icon the real rail draws,
+ * through the same component (L-11, G3): the card is a picture of the app at
+ * rest, where a group shows its top panel's icon and no count.
  *
  * A panel the user hid leaves a gap exactly as it leaves one in the rail;
- * `auto` is not off, so only `hidden` does. It leaves its capsule too, which
+ * `auto` is not off, so only `hidden` does. It leaves its group too, which
  * is what `railDisplayEntries` answers for every rail at once.
  */
 export function AppFrameRailEntries({
@@ -812,10 +815,11 @@ export function AppFrameRailEntries({
         <LeftPanelRailStack
           key={entry.id}
           stackId={entry.id}
-          orientation="horizontal"
-          first={depictRailRegion(entry.top, values, arrangement)}
-          second={depictRailRegion(entry.bottom, values, arrangement)}
-        />
+          memberCount={2}
+          showCount={false}
+        >
+          {depictRailRegion(entry.top, values, arrangement)}
+        </LeftPanelRailStack>
       );
     }
     return (
@@ -857,6 +861,6 @@ export function AppFrameRegion<
 }): ReactNode {
   const { regionId, values, arrangement } = props;
   const regionValues = values[regionId];
-  if (regionValues.shown !== "shown") return null;
+  if (regionValuesHidden(regionValues)) return null;
   return depictRegion(regionId, regionValues, arrangement);
 }

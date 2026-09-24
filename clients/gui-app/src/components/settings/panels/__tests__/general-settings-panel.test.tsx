@@ -28,7 +28,7 @@ import {
   type SettingsAvailabilityContext,
 } from "@/lib/settings/settings-availability";
 import { modLabel } from "@/lib/keybindings/platform";
-import { clearAllPersistedStores } from "@/lib/persist";
+import { clearAllPersistedStores } from "@/lib/persist/wipe";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import { useLocalSnapshotClearStore } from "@/stores/settings/local-snapshot-clear-store";
@@ -186,8 +186,8 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("@/lib/persist", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/persist")>();
+vi.mock("@/lib/persist/wipe", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/persist/wipe")>();
   return {
     ...actual,
     clearAllPersistedStores: vi.fn(() => Promise.resolve()),

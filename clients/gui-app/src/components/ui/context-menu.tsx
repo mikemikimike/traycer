@@ -6,6 +6,7 @@ import { usePaneAwareContentGuard } from "@/components/epic-tabs/pane-visibility
 import { useDialogOverlayBoundaryEl } from "@/providers/dialog-overlay-boundary-context";
 import { usePortalConcealed } from "@/components/ui/portal-concealment-context";
 import { useSafeAreaCollisionPadding } from "@/components/ui/safe-area-collision-padding";
+import { MenuOpenMarker } from "@/components/ui/open-menus";
 
 function ContextMenu({
   ...props
@@ -26,6 +27,7 @@ function ContextMenuContent({
   className,
   collisionPadding,
   onCloseAutoFocus,
+  children,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
   // A modal context menu drives `hideOthers` + scroll-lock while open, so a
@@ -56,7 +58,11 @@ function ContextMenuContent({
         )}
         onCloseAutoFocus={handleCloseAutoFocus}
         {...props}
-      />
+      >
+        {/* Mounted with the open menu: no hover card opens meanwhile. */}
+        <MenuOpenMarker />
+        {children}
+      </ContextMenuPrimitive.Content>
     </ContextMenuPrimitive.Portal>
   );
 }

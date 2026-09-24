@@ -22,7 +22,7 @@ import {
   flattenLayoutRefs,
   type PersistedTabStripLayout,
 } from "@/stores/tabs/layout";
-import { isRegisteredTabKind } from "@/stores/tabs/registry";
+import { isRegisteredTabKind } from "@/stores/tabs/tab-kind-policy";
 import {
   layoutHomeIsActive,
   migrateTabsPersistedState,

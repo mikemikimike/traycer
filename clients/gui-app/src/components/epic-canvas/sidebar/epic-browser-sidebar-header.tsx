@@ -240,6 +240,7 @@ export function BrowserHostFilterChoices(props: {
               intent="pin"
               surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
               updateView={null}
+              nameRef={null}
             />
           </DropdownMenuRadioItem>
         ))}

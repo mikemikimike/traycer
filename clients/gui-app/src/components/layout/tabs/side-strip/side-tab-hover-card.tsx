@@ -7,6 +7,7 @@ import {
   useRegisteredEpicLiveAgentIds,
   useRegisteredEpicLiveAgents,
 } from "@/lib/epic-selectors";
+import { cn } from "@/lib/utils";
 import { useEpicAgentActivity } from "@/stores/agent-activity-store";
 import type { SideTabLiveAgents } from "./agent-meter";
 import { sideTabAgentCounts } from "./side-tab-live-agents";
@@ -17,10 +18,7 @@ import {
 } from "@/components/notifications/notification-indicator-icon";
 import { StatusGlyph } from "@/components/notifications/status-glyph";
 import { UnknownActivityGlyph } from "@/components/notifications/unknown-activity-glyph";
-import {
-  STATUS_GLYPH_LABEL,
-  type StatusGlyphKind,
-} from "@/components/notifications/status-glyph-kind";
+import { STATUS_GLYPH_LABEL } from "@/components/notifications/status-glyph-kind";
 
 /** The most agents the card names; the rest are counted. */
 const HOVER_CARD_MAX_AGENTS = 6;
@@ -29,23 +27,16 @@ function tierOrder(tier: AgentActivityTier): number {
   return tier === "turn" ? 0 : 1;
 }
 
-/** The glyph for a task's state line: what needs the user, else what runs. */
-function stateGlyphOf(
-  badge: RailBadgeKind | null,
-  agents: SideTabLiveAgents,
-): StatusGlyphKind | null {
-  if (badge !== null) return badge;
-  if (agents.turn > 0) return "running";
-  if (agents.background > 0) return "background";
-  return null;
-}
-
 /**
  * A strip row's or rail tile's hover card: the title, a state line (the
  * waiting reason first), the live-agent counts and, for an epic this window
  * holds a live session for, the working agents by name. A cold epic shows the
  * counts only, never invented rows. Mounted only while the card is open, so a
  * closed row subscribes to nothing here.
+ *
+ * Only the agent rows draw a running or background glyph (G5): the counts are
+ * plain text, so one running agent never reads as two spinners. An attention
+ * state keeps its glyph and words, since no agent row shows it.
  *
  * Under `unserved` coverage (a known machine the plane does not reach) an
  * empty count is not idleness: the state line says the status is unknown, and
@@ -59,10 +50,9 @@ export function SideTabHoverCardBody(props: {
   readonly badge: RailBadgeKind | null;
   readonly agents: SideTabLiveAgents;
 }): ReactNode {
-  const glyph = stateGlyphOf(props.badge, props.agents);
   const counts = sideTabAgentCounts(props.agents);
   const unserved = props.agents.coverage === "unserved";
-  const unknown = unserved && glyph === null;
+  const unknown = unserved && props.badge === null && counts === null;
   return (
     <div data-testid="side-tab-hover-card-body" className="flex flex-col gap-2">
       <div className="text-ui-sm font-medium break-words text-foreground">
@@ -72,11 +62,15 @@ export function SideTabHoverCardBody(props: {
         data-testid="side-tab-hover-card-state"
         className="flex items-center gap-1.5 text-muted-foreground"
       >
-        <HoverCardState glyph={glyph} unknown={unknown} />
+        <HoverCardState
+          badge={props.badge}
+          unknown={unknown}
+          idle={counts === null}
+        />
         {counts === null ? null : (
           <span
             data-testid="side-tab-hover-card-counts"
-            className="ms-auto tabular-nums"
+            className={cn("tabular-nums", props.badge !== null && "ms-auto")}
           >
             {counts}
           </span>
@@ -97,31 +91,36 @@ export function SideTabHoverCardBody(props: {
   );
 }
 
-/** The state line's glyph and words: the state, else unknown, else "Idle". */
+/**
+ * The state line's lead: what needs the user, else unknown, else "Idle" - and
+ * nothing when agents are working, whose plain counts follow.
+ */
 function HoverCardState(props: {
-  readonly glyph: StatusGlyphKind | null;
+  readonly badge: RailBadgeKind | null;
   readonly unknown: boolean;
+  readonly idle: boolean;
 }): ReactNode {
-  if (props.glyph !== null) {
+  if (props.badge !== null) {
     return (
       <>
-        <StatusGlyph kind={props.glyph} className="size-3.5" label={null} />
-        <span>{STATUS_GLYPH_LABEL[props.glyph]}</span>
+        <StatusGlyph kind={props.badge} className="size-3.5" label={null} />
+        <span>{STATUS_GLYPH_LABEL[props.badge]}</span>
       </>
     );
   }
   if (props.unknown) {
     return (
       <>
-        {/* The sentence wraps; the glyph must not shrink beside it. */}
-        <span className="flex shrink-0">
+        {/* The sentence wraps: the glyph keeps its size and sits on the
+            first line, one line box tall, not centred on the whole block. */}
+        <span className="flex h-lh shrink-0 items-center self-start">
           <UnknownActivityGlyph testId="side-tab-hover-card-unknown" />
         </span>
         <span>{UNKNOWN_ACTIVITY_TITLE}</span>
       </>
     );
   }
-  return <span>Idle</span>;
+  return props.idle ? <span>Idle</span> : null;
 }
 
 /**

@@ -9,7 +9,15 @@ import {
 } from "@testing-library/react";
 import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { HeaderRateLimitBar } from "@/hooks/rate-limits/use-header-rate-limit-bars";
+import type {
+  StatusBarProviderSegmentModel,
+  StatusBarProviderSegmentState,
+  StatusBarRateLimitCluster,
+  StatusBarRateLimitMode,
+  StatusBarRateLimitWindow,
+} from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
+import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+import type { RateLimitWindowSeverity } from "@/lib/rate-limits/window-severity";
 import { hostScopeFixture } from "@/components/settings/host-scope/host-scope-fixture";
 import type { HostScope } from "@/components/settings/host-scope/use-host-scope";
 import { useTitleBarDragStore } from "@/stores/layout/title-bar-drag-store";
@@ -23,6 +31,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import type { BarReadingForm } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 
 const DYNAMIC_ACTION_ROUTER: KeybindingRouter = {
   getPathname: () => "/",
@@ -40,7 +49,12 @@ const DYNAMIC_ACTION_ROUTER: KeybindingRouter = {
   canGoForward: () => false,
 };
 
-let bars: ReadonlyArray<HeaderRateLimitBar> = [];
+/**
+ * The cluster the mocked selector hands back. Default: nothing configured -
+ * the same starting point `useStatusBarRateLimitSegments` reports before any
+ * provider is connected.
+ */
+let cluster: StatusBarRateLimitCluster = { kind: "no-providers" };
 /** Default: one host, followed — the glyph's pre-picker world. */
 let scope: HostScope = hostScopeFixture({});
 /** Default: following the active host, not an explicit pick. */
@@ -60,18 +74,26 @@ let scopeClient: typeof SCOPE_CLIENT_STUB | null = null;
 /** The ambient binding `useScopedHostBinding` spreads. Same reasoning. */
 const AMBIENT_BINDING_STUB = { stub: "ambient-binding" };
 /**
- * Whether `useHeaderRateLimitBars` was mounted this render. A plain counter
- * rather than `vi.fn()` because the return value already flows through the
- * mutable `bars` above — this only needs to answer "did the icon mount the
- * hook at all", which is the fetch-against-the-wrong-host guarantee the
- * placeholder-glyph tests below exist to prove.
+ * Whether `useStatusBarRateLimitSegments` was mounted this render. A plain
+ * counter rather than `vi.fn()` because the return value already flows
+ * through the mutable `cluster` above — this only needs to answer "did the
+ * icon mount the selector at all", which is the fetch-against-the-wrong-host
+ * guarantee the placeholder-glyph tests below exist to prove.
  */
-let useHeaderRateLimitBarsCalled = false;
+let useStatusBarRateLimitSegmentsCalled = false;
+/**
+ * The `mode` the icon last asked the selector for - `live` for every form,
+ * the phone header's glyph included: each one owns its own fetching the way
+ * the status bar's cluster does (G6 review A). See `LiveRateLimitGlyph`.
+ */
+let lastMode: StatusBarRateLimitMode | null = null;
 
-vi.mock("@/hooks/rate-limits/use-header-rate-limit-bars", () => ({
-  useHeaderRateLimitBars: () => {
-    useHeaderRateLimitBarsCalled = true;
-    return bars;
+vi.mock("@/hooks/rate-limits/use-status-bar-rate-limit-segments", () => ({
+  useStatusBarWindowedProviders: () => [],
+  useStatusBarRateLimitSegments: (input: { mode: StatusBarRateLimitMode }) => {
+    useStatusBarRateLimitSegmentsCalled = true;
+    lastMode = input.mode;
+    return { cluster, mountTargets: [] };
   },
 }));
 // Mocked at the SCOPE, not at the six hooks behind it — the same boundary
@@ -120,12 +142,16 @@ vi.mock("@/components/layout/header/rate-limit-popover", async () => {
 
 import { RateLimitIconButton } from "@/components/layout/header/rate-limit-icon";
 
-function iconTree() {
+function tree(form: BarReadingForm) {
   return (
     <TooltipProvider>
-      <RateLimitIconButton form="glyph" />
+      <RateLimitIconButton form={form} />
     </TooltipProvider>
   );
+}
+
+function iconTree() {
+  return tree("glyph");
 }
 
 function renderIcon() {
@@ -133,15 +159,15 @@ function renderIcon() {
 }
 
 function readoutTree() {
-  return (
-    <TooltipProvider>
-      <RateLimitIconButton form="readout" />
-    </TooltipProvider>
-  );
+  return tree("readout");
 }
 
 function renderReadout() {
   return render(readoutTree());
+}
+
+function renderInline() {
+  return render(tree("inline"));
 }
 
 // Exact class-token membership, not substring containment - the button's base
@@ -151,13 +177,56 @@ function hasClass(element: Element, className: string): boolean {
   return (element.getAttribute("class") ?? "").split(/\s+/).includes(className);
 }
 
+function windowFixture(overrides: {
+  readonly windowKey: string;
+  readonly usedPercent: number;
+  readonly severity: RateLimitWindowSeverity;
+  readonly label?: string;
+}): StatusBarRateLimitWindow {
+  return {
+    windowKey: overrides.windowKey,
+    label: overrides.label ?? "5h",
+    labelIsDuration: true,
+    kind: "session",
+    usedPercent: overrides.usedPercent,
+    resetsAt: null,
+    severity: overrides.severity,
+  };
+}
+
+function segmentFixture(overrides: {
+  readonly providerId: RateLimitProviderId;
+  readonly windows: ReadonlyArray<StatusBarRateLimitWindow>;
+  readonly state?: StatusBarProviderSegmentState;
+}): StatusBarProviderSegmentModel {
+  const windows = overrides.windows;
+  return {
+    providerId: overrides.providerId,
+    profileId: null,
+    account: null,
+    hidden: false,
+    state: overrides.state ?? "live",
+    reason: null,
+    windows,
+    shown: windows,
+    tightest: windows.at(0) ?? null,
+  };
+}
+
+function segmentsCluster(
+  segments: ReadonlyArray<StatusBarProviderSegmentModel>,
+): StatusBarRateLimitCluster {
+  return { kind: "segments", segments };
+}
+
 afterEach(() => {
   cleanup();
-  bars = [];
+  cluster = { kind: "no-providers" };
   scope = hostScopeFixture({});
   scopeClient = null;
   hasExplicitPick = false;
-  useHeaderRateLimitBarsCalled = false;
+  useStatusBarRateLimitSegmentsCalled = false;
+  lastMode = null;
   useTitleBarDragStore.setState({ suppressors: new Set() });
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
@@ -200,7 +269,7 @@ describe("<RateLimitIconButton />", () => {
   });
 
   it("renders zero providers as visible empty tracks without fabricated usage", () => {
-    bars = [];
+    cluster = { kind: "no-providers" };
     renderIcon();
     const button = screen.getByTestId("rate-limit-header-button");
     const tracks = within(button).getAllByTestId("rate-limit-bar-track");
@@ -214,22 +283,24 @@ describe("<RateLimitIconButton />", () => {
   });
 
   it("keeps valid 0% readings empty while preserving visible tracks", () => {
-    bars = [
-      {
+    cluster = segmentsCluster([
+      segmentFixture({
         providerId: "codex",
-        windowLabel: "5h",
-        usedPercent: 0,
-        severity: "healthy",
-        degraded: false,
-      },
-      {
-        providerId: "codex",
-        windowLabel: "Weekly",
-        usedPercent: 0,
-        severity: "healthy",
-        degraded: false,
-      },
-    ];
+        windows: [
+          windowFixture({
+            windowKey: "codex:5h",
+            usedPercent: 0,
+            severity: "healthy",
+          }),
+          windowFixture({
+            windowKey: "codex:weekly",
+            usedPercent: 0,
+            severity: "healthy",
+            label: "Weekly",
+          }),
+        ],
+      }),
+    ]);
     renderIcon();
     const button = screen.getByTestId("rate-limit-header-button");
     const tracks = within(button).getAllByTestId("rate-limit-bar-track");
@@ -244,22 +315,28 @@ describe("<RateLimitIconButton />", () => {
   });
 
   it("renders one bar per configured provider (Codex + Claude Code)", () => {
-    bars = [
-      {
+    cluster = segmentsCluster([
+      segmentFixture({
         providerId: "codex",
-        windowLabel: "5h",
-        usedPercent: 70,
-        severity: "healthy",
-        degraded: false,
-      },
-      {
+        windows: [
+          windowFixture({
+            windowKey: "codex:5h",
+            usedPercent: 70,
+            severity: "healthy",
+          }),
+        ],
+      }),
+      segmentFixture({
         providerId: "claude-code",
-        windowLabel: "5h",
-        usedPercent: 40,
-        severity: "healthy",
-        degraded: false,
-      },
-    ];
+        windows: [
+          windowFixture({
+            windowKey: "claude-code:5h",
+            usedPercent: 40,
+            severity: "healthy",
+          }),
+        ],
+      }),
+    ]);
     renderIcon();
     const button = screen.getByTestId("rate-limit-header-button");
     const fills = within(button).getAllByTestId("rate-limit-bar-fill");
@@ -272,23 +349,25 @@ describe("<RateLimitIconButton />", () => {
 
   it("renders both of a single provider's windows without a key collision", () => {
     // Single-provider case: both bars share a providerId and are disambiguated
-    // by windowLabel in the React key - both must still render.
-    bars = [
-      {
+    // by their window key - both must still render.
+    cluster = segmentsCluster([
+      segmentFixture({
         providerId: "codex",
-        windowLabel: "5h",
-        usedPercent: 92,
-        severity: "running_low",
-        degraded: false,
-      },
-      {
-        providerId: "codex",
-        windowLabel: "Weekly",
-        usedPercent: 20,
-        severity: "healthy",
-        degraded: false,
-      },
-    ];
+        windows: [
+          windowFixture({
+            windowKey: "codex:5h",
+            usedPercent: 92,
+            severity: "running_low",
+          }),
+          windowFixture({
+            windowKey: "codex:weekly",
+            usedPercent: 20,
+            severity: "healthy",
+            label: "Weekly",
+          }),
+        ],
+      }),
+    ]);
     renderIcon();
     const button = screen.getByTestId("rate-limit-header-button");
     const fills = within(button).getAllByTestId("rate-limit-bar-fill");
@@ -300,22 +379,24 @@ describe("<RateLimitIconButton />", () => {
   });
 
   it("renders Running low and Limited as distinct amber and red tones", () => {
-    bars = [
-      {
+    cluster = segmentsCluster([
+      segmentFixture({
         providerId: "codex",
-        windowLabel: "5h",
-        usedPercent: 80,
-        severity: "running_low",
-        degraded: false,
-      },
-      {
-        providerId: "codex",
-        windowLabel: "Weekly",
-        usedPercent: 100,
-        severity: "limited",
-        degraded: false,
-      },
-    ];
+        windows: [
+          windowFixture({
+            windowKey: "codex:5h",
+            usedPercent: 80,
+            severity: "running_low",
+          }),
+          windowFixture({
+            windowKey: "codex:weekly",
+            usedPercent: 100,
+            severity: "limited",
+            label: "Weekly",
+          }),
+        ],
+      }),
+    ]);
     renderIcon();
     const fills = within(
       screen.getByTestId("rate-limit-header-button"),
@@ -325,22 +406,29 @@ describe("<RateLimitIconButton />", () => {
   });
 
   it("marks the gauge without dimming the whole button when data is degraded", () => {
-    bars = [
-      {
+    cluster = segmentsCluster([
+      segmentFixture({
         providerId: "claude-code",
-        windowLabel: "5h",
-        usedPercent: 65,
-        severity: "healthy",
-        degraded: true,
-      },
-      {
+        state: "degraded",
+        windows: [
+          windowFixture({
+            windowKey: "claude-code:5h",
+            usedPercent: 65,
+            severity: "healthy",
+          }),
+        ],
+      }),
+      segmentFixture({
         providerId: "codex",
-        windowLabel: "5h",
-        usedPercent: 30,
-        severity: "healthy",
-        degraded: false,
-      },
-    ];
+        windows: [
+          windowFixture({
+            windowKey: "codex:5h",
+            usedPercent: 30,
+            severity: "healthy",
+          }),
+        ],
+      }),
+    ]);
     renderIcon();
     const button = screen.getByTestId("rate-limit-header-button");
     expect(hasClass(button, "opacity-[0.55]")).toBe(false);
@@ -358,37 +446,43 @@ describe("<RateLimitIconButton />", () => {
   });
 
   describe("host scope", () => {
-    function twoBars(): ReadonlyArray<HeaderRateLimitBar> {
-      return [
-        {
+    function twoSegmentCluster(): StatusBarRateLimitCluster {
+      return segmentsCluster([
+        segmentFixture({
           providerId: "codex",
-          windowLabel: "5h",
-          usedPercent: 45,
-          severity: "healthy",
-          degraded: false,
-        },
-        {
+          windows: [
+            windowFixture({
+              windowKey: "codex:5h",
+              usedPercent: 45,
+              severity: "healthy",
+            }),
+          ],
+        }),
+        segmentFixture({
           providerId: "claude-code",
-          windowLabel: "5h",
-          usedPercent: 10,
-          severity: "healthy",
-          degraded: false,
-        },
-      ];
+          windows: [
+            windowFixture({
+              windowKey: "claude-code:5h",
+              usedPercent: 10,
+              severity: "healthy",
+            }),
+          ],
+        }),
+      ]);
     }
 
-    it("mounts the live-bars hook for a usable explicit pick", () => {
+    it("mounts the live selector for a usable explicit pick", () => {
       hasExplicitPick = true;
       scope = hostScopeFixture({
         status: "ready",
         isViewingActive: false,
         hostLabel: "Other Machine",
       });
-      bars = twoBars();
+      cluster = twoSegmentCluster();
 
       renderIcon();
 
-      expect(useHeaderRateLimitBarsCalled).toBe(true);
+      expect(useStatusBarRateLimitSegmentsCalled).toBe(true);
       const fills = within(
         screen.getByTestId("rate-limit-header-button"),
       ).getAllByTestId("rate-limit-bar-fill");
@@ -406,11 +500,11 @@ describe("<RateLimitIconButton />", () => {
         status: "unreachable",
         isViewingActive: true,
       });
-      bars = twoBars();
+      cluster = twoSegmentCluster();
 
       renderIcon();
 
-      expect(useHeaderRateLimitBarsCalled).toBe(true);
+      expect(useStatusBarRateLimitSegmentsCalled).toBe(true);
       const button = screen.getByTestId("rate-limit-header-button");
       expect(within(button).getAllByTestId("rate-limit-bar-fill")).toHaveLength(
         2,
@@ -421,10 +515,10 @@ describe("<RateLimitIconButton />", () => {
     });
 
     // The fetch-against-the-wrong-host guarantee: an explicit pick that has
-    // not resolved to its own client must not mount the live hook at all, not
-    // just hide its output - a mounted-but-hidden hook still fires against the
-    // ambient host and caches the answer under its key.
-    it("falls back to the neutral placeholder and never mounts the live-bars hook when an explicit pick is unusable", () => {
+    // not resolved to its own client must not mount the live selector at
+    // all, not just hide its output - a mounted-but-hidden selector still
+    // fires against the ambient host and caches the answer under its key.
+    it("falls back to the neutral placeholder and never mounts the live selector when an explicit pick is unusable", () => {
       hasExplicitPick = true;
       scope = hostScopeFixture({
         host: null,
@@ -434,11 +528,11 @@ describe("<RateLimitIconButton />", () => {
         status: "vanished",
         isViewingActive: false,
       });
-      bars = twoBars();
+      cluster = twoSegmentCluster();
 
       renderIcon();
 
-      expect(useHeaderRateLimitBarsCalled).toBe(false);
+      expect(useStatusBarRateLimitSegmentsCalled).toBe(false);
       const button = screen.getByTestId("rate-limit-header-button");
       const tracks = within(button).getAllByTestId("rate-limit-bar-track");
       expect(tracks).toHaveLength(2);
@@ -506,38 +600,44 @@ describe("<RateLimitIconButton />", () => {
   });
 
   describe("accessible name (R1-A3)", () => {
-    function twoProviderBars(): ReadonlyArray<HeaderRateLimitBar> {
-      return [
-        {
+    function twoProviderCluster(): StatusBarRateLimitCluster {
+      return segmentsCluster([
+        segmentFixture({
           providerId: "codex",
-          windowLabel: "5h",
-          usedPercent: 19,
-          severity: "healthy",
-          degraded: false,
-        },
-        {
+          windows: [
+            windowFixture({
+              windowKey: "codex:5h",
+              usedPercent: 19,
+              severity: "healthy",
+            }),
+          ],
+        }),
+        segmentFixture({
           providerId: "claude-code",
-          windowLabel: "5h",
-          usedPercent: 62,
-          severity: "healthy",
-          degraded: false,
-        },
-      ];
+          windows: [
+            windowFixture({
+              windowKey: "claude-code:5h",
+              usedPercent: 62,
+              severity: "healthy",
+            }),
+          ],
+        }),
+      ]);
     }
 
     it("names a populated readout from its provider, window and used percentage", () => {
-      bars = twoProviderBars();
+      cluster = twoProviderCluster();
       renderReadout();
 
       expect(
         screen.getByRole("button", {
-          name: "Usage limits: Codex 5h 19% used, Claude Code 5h 62% used",
+          name: "Usage limits: Codex 19% used, Claude Code 62% used",
         }),
       ).toBeTruthy();
     });
 
     it("switches to remaining phrasing under the remaining amount preference", () => {
-      bars = twoProviderBars();
+      cluster = twoProviderCluster();
       useLayoutStore
         .getState()
         .setRegionValues("usageLimits", { amount: "remaining" });
@@ -545,23 +645,34 @@ describe("<RateLimitIconButton />", () => {
 
       expect(
         screen.getByRole("button", {
-          name: "Usage limits: Codex 5h 81% remaining, Claude Code 5h 38% remaining",
+          name: "Usage limits: Codex 81% remaining, Claude Code 38% remaining",
         }),
       ).toBeTruthy();
     });
 
     it("names an empty readout plainly", () => {
-      bars = [];
+      cluster = { kind: "no-providers" };
       renderReadout();
 
       expect(screen.getByRole("button", { name: "Usage limits" })).toBeTruthy();
     });
 
     it("keeps the plain 'Usage limits' name for the glyph form", () => {
-      bars = twoProviderBars();
+      cluster = twoProviderCluster();
       renderIcon();
 
       expect(screen.getByRole("button", { name: "Usage limits" })).toBeTruthy();
+    });
+
+    it("names the desktop header's inline readings the same way as the readout", () => {
+      cluster = twoProviderCluster();
+      renderInline();
+
+      expect(
+        screen.getByRole("button", {
+          name: "Usage limits: Codex 19% used, Claude Code 62% used",
+        }),
+      ).toBeTruthy();
     });
   });
 
@@ -583,6 +694,95 @@ describe("<RateLimitIconButton />", () => {
       fireEvent.focus(screen.getByRole("button", { name: "Usage limits" }));
       const tooltip = await screen.findByRole("tooltip");
       expect(tooltip.getAttribute("data-side")).toBe("top");
+    });
+  });
+
+  // Item 9 of the audit: the tab strip used to read a fixed pair of its own
+  // (`useHeaderRateLimitBars`), so Style, Fine-tune, hidden providers, order
+  // and limits all did nothing while the reading lived there. `inline` and
+  // `readout` now draw through the exact selector and display value the
+  // status bar's own cluster does, so what changes one changes both.
+  describe("inline form draws the shared readings (G6)", () => {
+    function twoSegmentCluster(): StatusBarRateLimitCluster {
+      return segmentsCluster([
+        segmentFixture({
+          providerId: "codex",
+          windows: [
+            windowFixture({
+              windowKey: "codex:5h",
+              usedPercent: 70,
+              severity: "healthy",
+            }),
+          ],
+        }),
+        segmentFixture({
+          providerId: "claude-code",
+          windows: [
+            windowFixture({
+              windowKey: "claude-code:5h",
+              usedPercent: 40,
+              severity: "healthy",
+            }),
+          ],
+        }),
+      ]);
+    }
+
+    it("renders full readings text, not a bare glyph, and honors the account's Style/Fine-tune settings", () => {
+      cluster = twoSegmentCluster();
+      renderInline();
+
+      // Readings, not the compact icon form: no bar tracks at all here.
+      expect(screen.queryByTestId("rate-limit-bar-track")).toBeNull();
+      const readings = screen.getByTestId("rate-limit-header-button");
+      expect(readings.textContent).toContain("70% used 5h");
+      expect(readings.textContent).toContain("40% used 5h");
+      expect(
+        screen.getAllByTestId("status-bar-provider-mini-bar"),
+      ).toHaveLength(2);
+
+      cleanup();
+      // The same layout-store switches the status bar's cluster reads
+      // (`useStatusBarUsageDisplay`) - the tab strip used to ignore every one
+      // of them.
+      useLayoutStore.getState().setRegionValues("usageLimits", {
+        word: false,
+        bar: false,
+        amount: "remaining",
+      });
+      renderInline();
+
+      const restyled = screen.getByTestId("rate-limit-header-button");
+      expect(restyled.textContent).toContain("30% 5h");
+      expect(restyled.textContent).toContain("60% 5h");
+      expect(screen.queryByTestId("status-bar-provider-mini-bar")).toBeNull();
+    });
+  });
+
+  // Every form, the phone header's glyph included, owns its own fetching the
+  // way the status bar's cluster does: HTTP providers are not in the
+  // background poll, and the phone footer is opt-in and off by default, so a
+  // glyph that left fetching to the footer read a cold cache (G6 review A).
+  describe("fetch mode by form", () => {
+    it("asks the selector for live mode in the glyph form (phone header)", () => {
+      renderIcon();
+      expect(useStatusBarRateLimitSegmentsCalled).toBe(true);
+      expect(lastMode).toBe("live");
+    });
+
+    it("asks the selector for live mode in the tile form", () => {
+      render(tree("tile"));
+      expect(lastMode).toBe("live");
+    });
+
+    it("asks the selector for live mode in the readout form", () => {
+      renderReadout();
+      expect(lastMode).toBe("live");
+    });
+
+    it("asks the selector for live mode in the inline form", () => {
+      renderInline();
+      expect(lastMode).toBe("live");
     });
   });
 });

@@ -512,7 +512,7 @@ describe("<QueuedMessagePanel />", () => {
     const content = within(
       screen.getByTestId("queued-message-row"),
     ).getByTestId("queued-message-content-scroll");
-    expect(content.className).toContain("max-h-[3lh]");
+    expect(content.className).toContain("max-h-[calc(3lh+--spacing(1))]");
     expect(content.className).toContain("overflow-y-auto");
   });
 

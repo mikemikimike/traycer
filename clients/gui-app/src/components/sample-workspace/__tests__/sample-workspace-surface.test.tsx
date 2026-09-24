@@ -371,9 +371,9 @@ describe("SampleWorkspaceBody - quick verbs on every pointable region", () => {
   it("offers the row beside it its own verbs, from the same one root", () => {
     renderBody();
 
-    rightClickRegion("queue");
+    rightClickRegion("todo");
 
-    expect(menuNames()).toEqual(["queue"]);
+    expect(menuNames()).toEqual(["todo"]);
   });
 
   it("offers a dock row's verbs inside a session too", () => {

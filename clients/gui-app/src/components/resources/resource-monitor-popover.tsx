@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type {
+  ComponentProps,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent,
   PointerEvent,
@@ -170,10 +171,8 @@ import { isMobileApp } from "@/lib/mobile-app";
 import { cn } from "@/lib/utils";
 import { StatusBarMetric } from "@/components/layout/status-bar/status-bar-resource-segment";
 import { useStatusBarResourceMetricViews } from "@/components/layout/status-bar/use-status-bar-resource-views";
-import {
-  STRIP_READOUT_LINE_CLASS,
-  type ReadingButtonForm,
-} from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import type { BarReadingForm } from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import { ReadingsLine } from "@/components/layout/readings-line";
 import {
   statusBarResourceSegmentLabel,
   type StatusBarResourceMetricView,
@@ -251,11 +250,11 @@ export type ResourceMonitorPopoverTrigger =
   | {
       readonly trigger: "header-button";
       /**
-       * The header's glyph, or a strip tile (F6): an outlined box the width it
-       * is given, beside the usage button as its equal and so in that button's
-       * own treatment, holding the readings where it has room for them.
+       * The glyph, or an outlined box beside the usage button as its equal and
+       * so in that button's own treatment: the strip's tile and readout (F6),
+       * the width they are given, or the header's readings at their own (G6).
        */
-      readonly form: ReadingButtonForm;
+      readonly form: BarReadingForm;
     }
   | {
       readonly trigger: "custom";
@@ -569,9 +568,9 @@ function ScopedResourceMonitorPopover(props: {
   // click on the (otherwise event-swallowing) drag area dismisses the popover.
   useTitleBarDragSuppression("resource-monitor", open);
   const scope = props.scope;
-  // The status bar segment's own readings, for the strip's readings tile.
-  // Every source under it is a store or context read, so the header's icon
-  // button pays nothing for asking.
+  // The status bar segment's own readings, for the forms that draw them.
+  // Every source under it is a store or context read, so the icon button pays
+  // nothing for asking.
   const views = useStatusBarResourceMetricViews({
     hostId: scope.hostId,
     hostLabel: scope.hostLabel,
@@ -584,7 +583,6 @@ function ScopedResourceMonitorPopover(props: {
     chord === null
       ? tooltipLabel
       : `${tooltipLabel} (${formatChordForDisplay(chord)})`;
-
   return (
     <>
       {/* Held out of the tree entirely under an unresolved pick, rather than
@@ -608,24 +606,9 @@ function ScopedResourceMonitorPopover(props: {
             <PopoverTrigger asChild>
               <Button
                 type="button"
-                variant={props.trigger.form === "glyph" ? "muted" : "outline"}
-                size={props.trigger.form === "glyph" ? "icon-sm" : "sm"}
-                aria-label={
-                  props.trigger.form === "readout"
-                    ? statusBarResourceSegmentLabel(views)
-                    : "Resources"
-                }
                 data-testid="resource-monitor-header-button"
-                className={cn(
-                  props.trigger.form !== "glyph" && "w-full shadow-xs",
-                )}
-              >
-                {props.trigger.form === "readout" ? (
-                  <StripResourceReadout views={views} />
-                ) : (
-                  <Cpu className="size-3.5" />
-                )}
-              </Button>
+                {...readingButtonLook(props.trigger.form, views)}
+              />
             </PopoverTrigger>
           </TooltipWrapper>
         ) : (
@@ -5240,30 +5223,71 @@ function countLabel(count: number, singular: string, plural: string): string {
 }
 
 /**
- * The resource readings inside the strip's readings tile (F6): the status
- * bar segment's metrics, drawn the same way, on the strip's one-row line that
- * shows only whole readings - the first at half width, more as it widens.
- * The chip rides on the line, so it centres with the readings it heads the
- * way the usage tile's provider icons do. With every metric switched off it
- * says what it is rather than leaving the chip alone in a wide box.
+ * How the header button draws in each form: the glyph alone, or the readings
+ * in the usage button's own outlined treatment - the strip's filling the
+ * width it is given, the header's a bounded share of the header that gives
+ * way before the tabs and the header's own controls do (G6 review A).
  */
-function StripResourceReadout(props: {
-  readonly views: ReadonlyArray<StatusBarResourceMetricView>;
-}): ReactNode {
-  if (props.views.length === 0) {
-    return (
-      <>
-        <Cpu className="size-3.5" />
-        <span className="text-ui-xs text-muted-foreground">Resources</span>
-      </>
-    );
+function readingButtonLook(
+  form: BarReadingForm,
+  views: ReadonlyArray<StatusBarResourceMetricView>,
+): Pick<
+  ComponentProps<typeof Button>,
+  "variant" | "size" | "aria-label" | "className" | "children"
+> {
+  if (form === "glyph") {
+    return {
+      variant: "muted",
+      size: "icon-sm",
+      "aria-label": "Resources",
+      className: undefined,
+      children: <Cpu className="size-3.5" />,
+    };
   }
+  const readsOut = form === "readout" || form === "inline";
+  return {
+    variant: "outline",
+    size: "sm",
+    "aria-label": readsOut ? statusBarResourceSegmentLabel(views) : "Resources",
+    className: cn("shadow-xs", form === "inline" ? "min-w-0 shrink" : "w-full"),
+    children: readsOut ? (
+      <ResourceReadout
+        views={views}
+        align={form === "readout" ? "center" : "start"}
+      />
+    ) : (
+      <Cpu className="size-3.5" />
+    ),
+  };
+}
+
+/**
+ * The resource readings on a reading button: the status bar segment's
+ * metrics, drawn the same way, on the one line every bar reading uses
+ * (`ReadingsLine`) - whole readings only. The chip rides at the head of the
+ * line, so it centres with the readings it heads the way the usage tile's
+ * provider icons do. With every metric switched off it says what it is,
+ * and with not even that fitting it draws the chip alone - never a cut
+ * label; the button's accessible name and tooltip still say "Resources".
+ */
+function ResourceReadout(props: {
+  readonly views: ReadonlyArray<StatusBarResourceMetricView>;
+  readonly align: "start" | "center";
+}): ReactNode {
   return (
-    <span className={cn(STRIP_READOUT_LINE_CLASS, "text-muted-foreground")}>
-      <Cpu className="size-3.5 shrink-0 text-foreground" />
-      {props.views.map((view) => (
-        <StatusBarMetric key={view.metric} view={view} />
-      ))}
-    </span>
+    <ReadingsLine
+      align={props.align}
+      tone="muted"
+      lead={<Cpu className="size-3.5" />}
+      fallback={<Cpu className="size-3.5 shrink-0" />}
+    >
+      {props.views.length === 0 ? (
+        <span>Resources</span>
+      ) : (
+        props.views.map((view) => (
+          <StatusBarMetric key={view.metric} view={view} />
+        ))
+      )}
+    </ReadingsLine>
   );
 }

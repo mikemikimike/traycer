@@ -162,7 +162,11 @@ describe("the per-row revert (L-20, I-04)", () => {
 
 describe("one list, two hosts (L-03, L-95)", () => {
   it("filters by SELECTION rather than by drawing a list of its own", () => {
-    render(<RegionSection regionId="railAgents" onOpenProvider={noop} />);
+    // railPullRequests rather than railAgents: it still carries a presence
+    // rule, so its header keeps the tri-state radiogroup (G6) and this test's
+    // "one control, the header's" assertion still names a radiogroup rather
+    // than needing to fork on which control kind the selected panel gets.
+    render(<RegionSection regionId="railPullRequests" onOpenProvider={noop} />);
 
     const rows = [...document.querySelectorAll("[data-sortable-id]")];
     const ids = rows.map((node) => node.getAttribute("data-sortable-id") ?? "");
@@ -184,7 +188,7 @@ describe("one list, two hosts (L-03, L-95)", () => {
     );
     expect(
       selected.map((node) => node.getAttribute("data-sortable-id")),
-    ).toEqual(["railAgents"]);
+    ).toEqual(["railPullRequests"]);
 
     // The one visibility control is the header's, not a row's.
     expect(

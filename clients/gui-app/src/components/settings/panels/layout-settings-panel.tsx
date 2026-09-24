@@ -7,22 +7,17 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  focusFirstSortableRow,
-  focusSortableRowGrab,
-} from "@/components/layout-editor/inspector/first-row-focus";
+import { focusSortableRowGrab } from "@/components/layout-editor/inspector/first-row-focus";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import {
   PresetsBlock,
   ResetEverythingButton,
 } from "@/components/layout-editor/inspector/presets-block";
-import { RegionFilter } from "@/components/layout-editor/inspector/region-filter";
 import {
   SidebarSideRow,
   SideStripViewRow,
   TabStripPositionRow,
 } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
-import { settingsRowMatchesFilter } from "@/components/layout-editor/inspector/rows/surface-placement-filter";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { layoutRegionRowSelector } from "@/components/layout-editor/layout-search.definitions";
 import { writeArrangement } from "@/lib/layout/arrangement-gestures";
@@ -30,7 +25,7 @@ import {
   SURFACE_GROUPS,
   type SurfaceGroupId,
 } from "@/components/layout-editor/regions/region-grammar";
-import { surfaceMatchesFilter } from "@/components/layout-editor/regions/surface-groups";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
 import { SettingsRow } from "@/components/settings/settings-row";
@@ -41,6 +36,7 @@ import {
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { TaskTabLayoutRow } from "@/components/settings/panels/layout/tabs-layout-group";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { useLayoutEditorFitsWindow } from "@/lib/layout/editor-width";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
@@ -48,14 +44,13 @@ import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-av
 import { mobileFooterChanged } from "@/lib/layout/layout-diff";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
-import type { SettingsAvailabilityContext } from "@/lib/settings/settings-availability";
 import {
   readPendingLayoutRegion,
   subscribePendingLayoutRegion,
   takePendingLayoutRegion,
 } from "@/lib/settings-navigation";
 import { cn } from "@/lib/utils";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
 import {
   useLayoutSnapshot,
   useLayoutStore,
@@ -63,34 +58,33 @@ import {
 import { useSettingsDensity } from "@/providers/settings-density-context";
 
 /**
- * The full-width host for the layout form (L-03), grouped by SURFACE (L-92,
- * L-95).
+ * The full-width host for the layout form (L-03), one setting group at a time
+ * (G6).
  *
  * Not a second form: every list, control and write below belongs to
  * `components/layout-editor/inspector/`, and the inspector draws the same ones.
- * What differs is COMPOSITION, which is the only thing that can differ. The
- * dock filters by selection - one region's section, its group's list
- * highlighted on its row. This page cannot, because nothing is selected, so it
- * groups instead: one card per surface, the region as a row inside it, and one
- * list per order group the surface owns.
+ * What differs is COMPOSITION. The dock filters by selection; this page shows
+ * one group per tab - Presets, then one tab per SURFACE - behind a tab bar
+ * pinned to the top of the pane, the provider settings' pattern. Inside a
+ * surface's tab the region is a ROW, and each order group the surface owns is
+ * one list (L-92, L-95).
  *
- * That is what removed the repeats the owner found (L-92). The sidebar's nine
- * identical Position lists are ONE list of nine rows; the composer's eight are
- * three lists; Position is no longer a row anywhere here, because a region's
- * position IS its place in its list; and each region has exactly one Shown
- * control, which killed the eye button that silently turned a pinned "Shown"
- * back into "Auto" (D5).
- *
- * The index still belongs to the dock: an index exists to pick ONE section to
- * open, and here they are all open. What this page takes from it is the filter
- * (I-11), which is the part that still has work to do on a page of five cards.
+ * It replaced a column of six cards and a sticky finder between them: with one
+ * group on screen the finder had nothing left to narrow, and a filter that hid
+ * rows in tabs the reader cannot see would be the opposite of the tab bar's
+ * promise. Settings search still lands on every row here, and switches to its
+ * tab first (`useLayoutAnchorTab`, `useLayoutRegionLanding`).
  */
 export function LayoutSettingsPanel(): ReactNode {
   const compact = useSettingsDensity() === "compact";
   const snapshot = useLayoutSnapshot();
-  const filter = useLayoutEditorStore((state) => state.filter);
+  const [tab, setTab] = useState<LayoutTabId>("presets");
   const [openRows, setOpenRows] = useState<ReadonlyArray<string>>([]);
   const paneRef = useRef<HTMLDivElement | null>(null);
+  const bandRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const tabsRef = useRef<HTMLDivElement | null>(null);
+  useStickyScrollEdge(sentinelRef, bandRef);
 
   const toggleRow = useCallback((rowId: string): void => {
     setOpenRows((current) =>
@@ -100,24 +94,10 @@ export function LayoutSettingsPanel(): ReactNode {
     );
   }, []);
 
-  // A filter typed here is the editor store's, which is what makes it the same
-  // field in both hosts - and what makes it outlive this page. Cleared on the
-  // way out so the next visit, and the next editor session, open on everything.
-  useEffect(
-    () => () => {
-      useLayoutEditorStore.getState().setFilter("");
-    },
-    [],
-  );
+  useLayoutAnchorTab(setTab);
+  useLayoutRegionLanding({ paneRef, tab, setTab, openRows, setOpenRows });
 
-  useLayoutRegionLanding({ paneRef, filter, openRows, setOpenRows });
-
-  const availability = useSettingsAvailabilityContext();
-  const surfaces = SURFACE_GROUPS.filter(
-    (group) =>
-      surfaceMatchesFilter(group.id, filter) ||
-      surfaceRowsMatchFilter(group.id, filter, availability),
-  );
+  const gap = compact ? "gap-3.5" : "gap-5";
 
   return (
     <SettingsPanelShell
@@ -129,10 +109,7 @@ export function LayoutSettingsPanel(): ReactNode {
         open" from here, once, rather than from a prop threaded through each
         list (P-4, L-89). */}
       <LayoutFormHostContext value="page">
-        <div
-          ref={paneRef}
-          className={cn("flex flex-col", compact ? "gap-3.5" : "gap-5")}
-        >
+        <div ref={paneRef} className={cn("flex flex-col", gap)}>
           <SettingsGroup
             group={LAYOUT.definitions.customize}
             showTitle={false}
@@ -142,43 +119,86 @@ export function LayoutSettingsPanel(): ReactNode {
           >
             <CustomizeLayoutRow />
           </SettingsGroup>
-          <SettingsGroup
-            group={LAYOUT.definitions.presets}
-            showTitle
-            tone="default"
-            dataTestId="layout-presets-group"
-            fill={false}
+          <Tabs
+            ref={tabsRef}
+            value={tab}
+            onValueChange={(value) => {
+              const next = LAYOUT_TABS.find((entry) => entry.id === value);
+              if (next === undefined) return;
+              // A new tab starts at its top, as a provider's does: if the bar
+              // is pinned, bring the pane back to where the tab's body begins.
+              revealTabTop(tabsRef.current);
+              setTab(next.id);
+            }}
+            className="gap-0"
           >
-            {/* No canvas here, so a preset hover previews nothing (L-43). */}
-            <PresetsBlock onPreviewPreset={noop} />
-          </SettingsGroup>
-          <PageFilter paneRef={paneRef} />
-          {surfaces.length === 0 ? (
-            <div className="flex flex-wrap items-center gap-2 px-1 text-ui-sm text-muted-foreground">
-              <p>No part of the app matches "{filter}".</p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  useLayoutEditorStore.getState().setFilter("");
-                }}
+            {/* Sticky to the top of the settings pane, in the pane's own
+              colour (L-154): a band of it is invisible at rest, and its scroll
+              edge lights only while rows are running under it. */}
+            <div
+              ref={bandRef}
+              data-testid="layout-tab-band"
+              className="sticky top-0 z-20 bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-background after:to-background/0 after:opacity-0 after:transition-opacity after:duration-150 after:ease-out data-stuck:after:opacity-100"
+            >
+              {/* The pin detector: a CHILD of the band, absolutely placed on
+                its top edge, so it takes no slot in the column (L-154). */}
+              <div
+                ref={sentinelRef}
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 bottom-full h-px"
+              />
+              <TabsList
+                variant="line"
+                aria-label="Layout settings"
+                className="h-auto w-full max-w-full shrink-0 flex-wrap justify-start"
               >
-                Clear filter
-              </Button>
+                {LAYOUT_TABS.map((entry) => (
+                  <TabsTrigger
+                    key={entry.id}
+                    value={entry.id}
+                    className="flex-none"
+                  >
+                    {entry.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </div>
-          ) : (
-            surfaces.map((group) => {
-              let surfaceRows: ReactNode = null;
-              if (group.id === "statusBar")
-                surfaceRows = <StatusBarSurfaceRows />;
-              if (group.id === "topBar") surfaceRows = <TabsSurfaceRows />;
-              if (group.id === "sidebar") surfaceRows = <SidebarSurfaceRows />;
-              return (
+            {/* Every tab stays mounted, hidden while inactive (`forceMount`
+              makes Radix drop its own `hidden`, so it is passed here). Radix mounts an
+              active tab's children a commit AFTER the tab changes (Presence
+              flips in a layout effect), so a region landing or a search
+              reveal that switches tab would look for its row in an empty
+              panel and have nothing to re-run it. Mounted, the row exists in
+              the same commit that shows it - as it did on the one long page. */}
+            <TabsContent
+              value="presets"
+              forceMount
+              hidden={tab !== "presets"}
+              className={cn("mt-0 flex flex-col pt-4", gap)}
+            >
+              <SettingsGroup
+                group={LAYOUT.definitions.presets}
+                showTitle={false}
+                tone="default"
+                dataTestId="layout-presets-group"
+                fill={false}
+              >
+                {/* No canvas here, so a preset hover previews nothing (L-43). */}
+                <PresetsBlock onPreviewPreset={noop} />
+              </SettingsGroup>
+              <ResetEverythingCard snapshot={snapshot} />
+            </TabsContent>
+            {SURFACE_GROUPS.map((group) => (
+              <TabsContent
+                key={group.id}
+                value={group.id}
+                forceMount
+                hidden={tab !== group.id}
+                className="mt-0 pt-4"
+              >
                 <SettingsGroup
-                  key={group.id}
                   group={LAYOUT.definitions[group.id]}
-                  showTitle
+                  showTitle={false}
                   tone="default"
                   dataTestId={`layout-surface-${group.id}`}
                   fill={false}
@@ -186,99 +206,94 @@ export function LayoutSettingsPanel(): ReactNode {
                   <SurfaceSection
                     surface={group.id}
                     snapshot={snapshot}
-                    filter={filter}
+                    filter=""
                     openRows={openRows}
                     onToggleRow={toggleRow}
-                    surfaceRows={surfaceRows}
+                    surfaceRows={surfaceRowsFor(group.id)}
                   />
                 </SettingsGroup>
-              );
-            })
-          )}
-          <ResetEverythingCard snapshot={snapshot} />
+              </TabsContent>
+            ))}
+          </Tabs>
         </div>
       </LayoutFormHostContext>
     </SettingsPanelShell>
   );
 }
 
-/**
- * The finder (L-07, I-11, L-125), which this page needed as soon as it stopped
- * being twenty-three sections: six cards of rows is still a page a person
- * arrives at knowing the word for what they want.
- *
- * **Sticky to the top of the settings pane**, so it is reachable from anywhere
- * on a page five cards long.
- *
- * It is the pane's OWN fill, at the content width, and nothing else (L-154).
- * The page is a column of `bg-card/40` cards on `bg-background`, and in every
- * dark palette the card is the lighter of the two and carries a border - so a
- * band of raw `bg-background` any wider than the cards is the darkest and only
- * unbordered thing in the column, and reads as a stripe cutting the page
- * rather than a field sitting in it. Matching the page's own colour and its
- * width is what makes it disappear at rest.
- *
- * That is also the only honest way a sticky child can sit on this pane: the
- * providers tab retired ITS sticky header because that pane is a translucent
- * `bg-card/40` a pinned child cannot reproduce, and this page's panel body is
- * `bg-transparent`, so the opaque `bg-background` directly behind it is a
- * colour the band can simply repeat.
- *
- * The separation is a SCROLL EDGE instead of a box: a short fade below the
- * band, lit only while the band is pinned and rows are running under it
- * (`data-stuck`, written by `useStickyScrollEdge`).
- *
- * It stays BETWEEN the presets and the surface cards rather than moving to the
- * page top, because the finder belongs immediately above the thing it filters
- * and the Settings modal's own search already occupies the top of the pane - a
- * second field up there is the duplication this whole epic is about.
- */
-function PageFilter(props: {
-  readonly paneRef: { current: HTMLDivElement | null };
-}): ReactNode {
-  const ref = useRef<HTMLInputElement | null>(null);
-  const bandRef = useRef<HTMLDivElement | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useStickyScrollEdge(sentinelRef, bandRef);
-  return (
-    <div
-      ref={bandRef}
-      data-testid="layout-page-filter"
-      className="sticky top-0 z-20 bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-background after:to-background/0 after:opacity-0 after:transition-opacity after:duration-150 after:ease-out data-stuck:after:opacity-100"
-    >
-      {/* The pin detector, and the reason it is a CHILD of the band rather
-        than the sibling above it: a sibling takes a slot in the page's flex
-        column and a `gap` with it, which moves the field to make room for a
-        thing that is not supposed to exist. Absolutely positioned against the
-        band - `sticky` is a containing block - it has no layout at all, and
-        `bottom-full` keeps it welded to the band's top edge, which is the
-        edge the question is about. */}
-      <div
-        ref={sentinelRef}
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 bottom-full h-px"
-      />
-      {/* ArrowDown lands on the first row on the page, which is the walk L-31
-        asks for and the thing this key was being taken and dropped for
-        (R2-04). `setKeyboardNav` is deliberately NOT written: that flag is a
-        fact about an editor SESSION, and this host has none.
+type LayoutTabId = "presets" | SurfaceGroupId;
 
-        `onEnter` is `null`, not a no-op: the page has no "first match" to
-        open, so Enter is left to the browser and to whatever is around this
-        field (a form, the Settings modal). */}
-      <RegionFilter
-        ref={ref}
-        onArrowDown={() => {
-          focusFirstSortableRow(props.paneRef.current);
-        }}
-        onEnter={null}
-      />
-    </div>
+/** Presets first - the coarsest control here - then the surfaces in reading order. */
+const LAYOUT_TABS: ReadonlyArray<{
+  readonly id: LayoutTabId;
+  readonly label: string;
+}> = [
+  { id: "presets", label: LAYOUT.definitions.presets.label },
+  ...SURFACE_GROUPS,
+];
+
+/** Which tab holds each settings-definition group; anything else is above the bar. */
+const TAB_FOR_GROUP: Readonly<Record<string, LayoutTabId>> = {
+  presets: "presets",
+  resetEverything: "presets",
+  ...Object.fromEntries(SURFACE_GROUPS.map((group) => [group.id, group.id])),
+};
+
+/**
+ * The tab a settings-search anchor lives in, or `null` for one that is not
+ * behind the tab bar (the Customize card) or not this page's.
+ */
+function layoutTabForAnchor(anchor: string): LayoutTabId | null {
+  const definition = Object.values(LAYOUT.definitions).find(
+    (entry) => entry.anchor === anchor,
   );
+  if (definition === undefined) return null;
+  const groupKey =
+    definition.kind === "row" ? definition.group : definition.key;
+  return groupKey === null ? null : (TAB_FOR_GROUP[groupKey] ?? null);
 }
 
 /**
- * Lights the filter band's scroll edge only while page content is actually
+ * A Settings search result for a row on this page, taken to its tab.
+ *
+ * The reveal watcher (`useSettingsAnchorReveal`) finds the anchor and flashes
+ * it, and polls until it can - but only the active tab's body is mounted, so
+ * the row does not exist until this has switched to it.
+ */
+function useLayoutAnchorTab(setTab: (tab: LayoutTabId) => void): void {
+  const pendingReveal = useSettingsSearchStore((state) => state.pendingReveal);
+  useEffect(() => {
+    if (pendingReveal === null || pendingReveal.section !== "layout") return;
+    if (pendingReveal.anchor === null) return;
+    const target = layoutTabForAnchor(pendingReveal.anchor);
+    if (target !== null) setTab(target);
+  }, [pendingReveal, setTab]);
+}
+
+/**
+ * Scrolls the pane back to where the tab bar sits unpinned, so the next tab's
+ * body begins right under it. Measured on the tabs' own box, which stays in
+ * the flow: anything inside the sticky bar moves with the bar and reads "at
+ * the top" however far the pane has scrolled (G6 review A).
+ */
+function revealTabTop(tabs: HTMLDivElement | null): void {
+  const pane = tabs?.closest(PANEL_PANE_SELECTOR);
+  if (tabs === null || pane === null || pane === undefined) return;
+  const delta =
+    tabs.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+  if (delta < 0) pane.scrollTop += delta;
+}
+
+/** A surface tab's own rows, which belong to no region (D7, L-51). */
+function surfaceRowsFor(surface: SurfaceGroupId): ReactNode | null {
+  if (surface === "statusBar") return <StatusBarSurfaceRows />;
+  if (surface === "topBar") return <TabsSurfaceRows />;
+  if (surface === "sidebar") return <SidebarSurfaceRows />;
+  return null;
+}
+
+/**
+ * Lights the tab band's scroll edge only while page content is actually
  * running underneath it (L-154).
  *
  * A band painted in the page's own colour is invisible at rest, which is what
@@ -445,25 +460,6 @@ function SidebarSurfaceRows(): ReactNode {
 }
 
 /**
- * Whether a surface card has a surface-level row of its own that this build
- * draws and whose label or keywords match the filter, so the filter finds
- * "vertical tabs" as readily as Settings search does.
- */
-function surfaceRowsMatchFilter(
-  surface: SurfaceGroupId,
-  filter: string,
-  availability: SettingsAvailabilityContext,
-): boolean {
-  return Object.values(LAYOUT.definitions).some(
-    (definition) =>
-      definition.kind === "row" &&
-      definition.group === surface &&
-      definition.availableWhen(availability) &&
-      settingsRowMatchesFilter(definition, filter),
-  );
-}
-
-/**
  * The named slot for the Status bar's SURFACE tier, holding the one row that
  * belongs to the surface rather than to a region on it.
  *
@@ -543,12 +539,10 @@ function RevertMobileFooter(): ReactNode {
  * the navigation commits - so it is read from the door's own slot rather than
  * passed in, and taking it is what ends it.
  *
- * **The request survives the renders that make the row exist** (5.9). A target
- * inside a card the filter had taken off the page was silently dropped, so a
- * result for "Minimap" landed on nothing whenever the field still held a word
- * from a previous visit. Two writes can be what puts the row on the page -
- * clearing that filter, and opening the row's own disclosure - and both of
- * them re-render, so the row does not exist until React has committed them.
+ * **The request survives the renders that make the row exist** (5.9). Two
+ * writes can be what puts the row on the page - switching to its surface's
+ * tab (G6), and opening the row's own disclosure - and both of them re-render,
+ * so the row does not exist until React has committed them.
  * The effect therefore makes those writes and RETURNS, leaving the request in
  * its slot; it runs again in the commit they produce, where the page is in the
  * state the row needs and the DOM is laid out. Nothing is deferred to a timer:
@@ -560,13 +554,14 @@ function RevertMobileFooter(): ReactNode {
  */
 function useLayoutRegionLanding(input: {
   readonly paneRef: { current: HTMLDivElement | null };
-  readonly filter: string;
+  readonly tab: LayoutTabId;
+  readonly setTab: (tab: LayoutTabId) => void;
   readonly openRows: ReadonlyArray<string>;
   readonly setOpenRows: (
     update: (current: ReadonlyArray<string>) => string[],
   ) => void;
 }): void {
-  const { paneRef, filter, openRows, setOpenRows } = input;
+  const { paneRef, tab, setTab, openRows, setOpenRows } = input;
   const pending = useSyncExternalStore(
     subscribePendingLayoutRegion,
     readPendingLayoutRegion,
@@ -576,11 +571,12 @@ function useLayoutRegionLanding(input: {
   useEffect(() => {
     if (pending === null) return;
     const regionId = pending.regionId;
-    const hidden = filter !== "";
+    const surface = LAYOUT_REGIONS[regionId].surface;
+    const elsewhere = tab !== surface;
     const closed = !openRows.includes(regionId);
-    if (hidden) useLayoutEditorStore.getState().setFilter("");
+    if (elsewhere) setTab(surface);
     if (closed) setOpenRows((current) => [...current, regionId]);
-    if (hidden || closed) return;
+    if (elsewhere || closed) return;
     takePendingLayoutRegion();
     const row = paneRef.current?.querySelector(
       layoutRegionRowSelector(regionId),
@@ -595,7 +591,7 @@ function useLayoutRegionLanding(input: {
     window.setTimeout(() => {
       row.removeAttribute(LANDING_FLASH_ATTRIBUTE);
     }, LANDING_FLASH_MS);
-  }, [pending, filter, openRows, paneRef, setOpenRows]);
+  }, [pending, tab, setTab, openRows, paneRef, setOpenRows]);
 }
 
 /** The same mark every settings-search result leaves (`settings-search.css`). */

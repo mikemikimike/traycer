@@ -83,7 +83,6 @@ const DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
   "filesChanged",
   "activeAgents",
   "background",
-  "queue",
   "todo",
 ];
 
@@ -200,7 +199,6 @@ function DockHarness(props: { readonly chatId: string }) {
               filesChanged: hotspot(true),
               activeAgents: hotspot(true),
               background: hotspot(true),
-              queue: hotspot(false),
               todo: hotspot(false),
             }}
             backgroundItems={BACKGROUND_ITEMS}

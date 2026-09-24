@@ -31,6 +31,7 @@ import type { LeftPanelSlotProps } from "@/components/epic-canvas/sidebar/left-p
 import { SidebarPanelEmptyState } from "@/components/epic-canvas/sidebar/sidebar-panel-empty-state";
 import { PrRow, type PrRowEntry } from "@/components/epic-canvas/pr/pr-row";
 import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
+import { HoverCardGroup } from "@/components/ui/hover-card";
 import { usePrListSubscription } from "@/hooks/pr/use-pr-list-subscription";
 import { useRecordPrPresence } from "@/hooks/pr/use-pr-presence-probe";
 import { useEpicTileNavigation } from "@/hooks/epic/use-epic-tile-navigation";
@@ -320,21 +321,24 @@ function PrPanelBodyContent(props: {
           testId="pr-panel-error-notice"
         />
       ) : null}
-      {groups.map((group) => (
-        <PrRepoGroupSection
-          key={formatRepoGroupLabel(group.repoIdentifier)}
-          epicId={props.epicId}
-          tabId={props.tabId}
-          hostId={props.hostId}
-          group={group}
-          collapsed={
-            collapsedRepos.has(formatRepoGroupLabel(group.repoIdentifier)) &&
-            revealedRepoLabel !== formatRepoGroupLabel(group.repoIdentifier)
-          }
-          onToggle={toggleRepo}
-          buildEntry={buildEntry}
-        />
-      ))}
+      {/* One clock for every row's owners card, across repos. */}
+      <HoverCardGroup>
+        {groups.map((group) => (
+          <PrRepoGroupSection
+            key={formatRepoGroupLabel(group.repoIdentifier)}
+            epicId={props.epicId}
+            tabId={props.tabId}
+            hostId={props.hostId}
+            group={group}
+            collapsed={
+              collapsedRepos.has(formatRepoGroupLabel(group.repoIdentifier)) &&
+              revealedRepoLabel !== formatRepoGroupLabel(group.repoIdentifier)
+            }
+            onToggle={toggleRepo}
+            buildEntry={buildEntry}
+          />
+        ))}
+      </HoverCardGroup>
     </div>
   );
 }

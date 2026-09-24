@@ -28,7 +28,7 @@ import {
   setTabsLocalPersistenceEnabled,
   useTabsStore,
 } from "@/stores/tabs/store";
-import { isRegisteredTabKind } from "@/stores/tabs/registry";
+import { isRegisteredTabKind } from "@/stores/tabs/tab-kind-policy";
 import { homeRoutePath, isHomePath } from "@/stores/tabs/kinds/home";
 import { SETTINGS_PATHS } from "@/stores/tabs/settings-paths";
 import { setTabSplitCompatibility } from "@/stores/tabs/tab-split-compatibility";

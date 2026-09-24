@@ -193,6 +193,7 @@ import {
 } from "@/lib/chats/chat-sharing-ux";
 import { AgentRoleBadges } from "./agent-role-badges";
 import { AgentHoverTooltip } from "@/components/epic-canvas/sidebar/agent-hover-tooltip";
+import { HoverCardGroup } from "@/components/ui/hover-card";
 import { isEditableRole } from "@/lib/epic-permissions";
 import {
   Archive,
@@ -1431,18 +1432,22 @@ export function ChatTreePanelBody(props: ChatTreePanelBodyProps) {
                     resultCount={searchResultCount}
                   />
                 ) : null}
-                <SidebarContent>
-                  <SidebarGroup className="min-h-0 flex-1">
-                    <SidebarGroupContent
-                      ref={treeRegionRef}
-                      className="flex min-h-0 flex-1 flex-col"
-                      data-testid="epic-chat-tree-region"
-                    >
-                      {panelContent}
-                      {messageHits.node}
-                    </SidebarGroupContent>
-                  </SidebarGroup>
-                </SidebarContent>
+                {/* One clock for the tree's rows, owner cards and name labels
+                    alike: the first waits, the next row's opens at once. */}
+                <HoverCardGroup>
+                  <SidebarContent>
+                    <SidebarGroup className="min-h-0 flex-1">
+                      <SidebarGroupContent
+                        ref={treeRegionRef}
+                        className="flex min-h-0 flex-1 flex-col"
+                        data-testid="epic-chat-tree-region"
+                      >
+                        {panelContent}
+                        {messageHits.node}
+                      </SidebarGroupContent>
+                    </SidebarGroup>
+                  </SidebarContent>
+                </HoverCardGroup>
               </SidebarFilterVisibilityContext.Provider>
             </SidebarSortClockContext.Provider>
           </SidebarSortContext.Provider>

@@ -8,7 +8,6 @@ import { ChatAccumulatedChangesPanel } from "@/components/chat/chat-accumulated-
 import { ActiveAgentsPanel } from "@/components/chat/chat-active-agents-panel";
 import { BackgroundItemsPanel } from "@/components/chat/chat-background-items-panel";
 import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
-import { QueuedMessagePanel } from "@/components/chat/queued-message-surface";
 import { TabHostContext } from "@/components/epic-canvas/hooks/use-tab-host-id";
 import {
   ChatDockCompactStrip,
@@ -16,7 +15,6 @@ import {
 } from "@/components/chat/chat-dock-compact-strip";
 import { CHAT_DOCK_PANEL_ROW } from "@/components/chat/chat-dock-panel-row";
 import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
-import type { ChatQueueState } from "@traycer/protocol/host/agent/gui/subscribe";
 import { createHoverChip } from "@/components/layout-editor/canvas/hover-chip";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
@@ -39,7 +37,6 @@ import {
   SAMPLE_EPIC_ID,
   SAMPLE_HOST_ID,
   SAMPLE_NO_PENDING_STOPS,
-  SAMPLE_QUEUE,
   SAMPLE_RESTORE,
   SAMPLE_SELF_AGENT,
   SAMPLE_TILE_ID,
@@ -119,6 +116,8 @@ const NO_LIVE_LEAF: Readonly<Partial<Record<RegionId, string>>> = {
     "ChatTurnMinimapView is driven by the transcript's measured viewport and its scroll position",
   contextUsage:
     "ContextUsageChip draws through `motion/react-m`, which needs the app's LazyMotion feature provider",
+  railArtifacts:
+    "the shipped rail stacks Artifacts under Agents, and a stack draws only its top panel's icon (G3), so Artifacts has no live leaf of its own; the driver's groups phase covers the pair on the real rail",
 };
 
 declare global {
@@ -223,8 +222,8 @@ function LiveToolbar(): ReactNode {
  * `ChatDockCompactChip` fed a model, which is the same leaf the picture draws.
  * The full ROW still has none - `ActiveAgentsPanel` mounts `AgentStopButton`,
  * which resolves a host client and a mutation - so this fixture draws all three
- * at Chip size on both sides (see the store seed below), all five of them
- * since L-139/L-142 added the Message Queue and Todo.
+ * at Chip size on both sides (see the store seed below), all four of them
+ * since L-139 added Todo.
  *
  * `working: false` on every chip, against the sample scene's own two: a working
  * glyph is `text-primary` under a per-frame opacity sweep, and the driver
@@ -244,15 +243,10 @@ function LiveDockChips(): ReactNode {
     regionId: "background",
     instanceId: SAMPLE_TILE_ID,
   });
-  // Five since L-139/L-142, and the count is load-bearing rather than
-  // incidental: `SAMPLE_DOCK` grew the Message Queue and Todo chips, and a
-  // `refs` table that still named three handed those two an `undefined`
-  // hotspot - so they drew a chip that registered no region, and the coverage
-  // claim below reported them as regions with no live leaf anywhere.
-  const queue = useLayoutRegion({
-    regionId: "queue",
-    instanceId: SAMPLE_TILE_ID,
-  });
+  // Four since L-139 added Todo, and the count is load-bearing rather than
+  // incidental: a `refs` table that misses a `SAMPLE_DOCK` chip hands it an
+  // `undefined` hotspot - so it draws a chip that registers no region, and the
+  // coverage claim below reports it as a region with no live leaf anywhere.
   const todo = useLayoutRegion({
     regionId: "todo",
     instanceId: SAMPLE_TILE_ID,
@@ -263,7 +257,6 @@ function LiveDockChips(): ReactNode {
     filesChanged: files.ref,
     activeAgents: agents.ref,
     background: background.ref,
-    queue: queue.ref,
     todo: todo.ref,
   };
   const chips = SAMPLE_DOCK.map((chip) => ({
@@ -332,20 +325,20 @@ function ClipFadeCase(): ReactNode {
  *
  * The compact pills are a switcher: clicking another one replaces the panel
  * attached above the composer. So a panel showing ONE one-line row has to
- * measure the same whichever of the five members it belongs to, or every
+ * measure the same whichever of the four members it belongs to, or every
  * switch between two one-line panels moves the composer's whole upper edge -
  * which is what the owner saw going from one changed file to one background
  * shell. `chat-dock-panel-row.ts` states that height instead of letting the
  * tallest thing inside a row decide it.
  *
- * jsdom can check that the five rows carry the same class recipe and nothing
+ * jsdom can check that the four rows carry the same class recipe and nothing
  * more; only a browser resolves `min-h-8`, `py-0.5`, a `size-6` control and a
- * floated toolbar into a number. So the five panels are mounted here for
+ * floated toolbar into a number. So the four panels are mounted here for
  * REAL, each fed exactly one one-line row of the sample scene's own data, and
- * the driver compares their five `getBoundingClientRect().height` values to
+ * the driver compares their four `getBoundingClientRect().height` values to
  * the pixel.
  *
- * Their own runtime island rather than the fixture's root: two of the five
+ * Their own runtime island rather than the fixture's root: two of the four
  * (Active agents, Background) resolve a host client and a mutation, so they
  * need the app-wide runtime the parity sections above deliberately do without
  * - the whole fixture inside a `LazyMotion` would also hand `contextUsage` a
@@ -403,34 +396,6 @@ const ONE_BACKGROUND_ITEM = SAMPLE_BACKGROUND_ITEMS.slice(0, 1);
 const ONE_TODO = { ...SAMPLE_TODO, items: SAMPLE_TODO.items.slice(0, 1) };
 /** The Active agents panel's one row is the chat itself, with no children. */
 const NO_AGENT_DESCENDANTS = SAMPLE_AGENT_DESCENDANTS.slice(0, 0);
-
-/**
- * The queue's one row again, sent by an AGENT rather than by the user, which
- * is the row that carries a provenance badge (L-172).
- *
- * A sixth case rather than a swap, because the claim is that the badge costs
- * nothing: the same panel with and without one has to measure the same as the
- * other five. Built here rather than in `sample-workspace-scene.ts`, which
- * the sample canvas reads and which no fixture should reshape.
- */
-const PROVENANCE_QUEUE: ChatQueueState = {
-  ...SAMPLE_QUEUE,
-  items: SAMPLE_QUEUE.items.map((item) =>
-    item.kind === "prompt"
-      ? {
-          ...item,
-          sender: {
-            type: "agent",
-            harnessId: "claude",
-            agentId: "sample-sender-agent",
-            displayName: "Sample reviewer",
-            reply: { expectsReply: false },
-            inReplyTo: null,
-          },
-        }
-      : item,
-  ),
-};
 
 /**
  * A panel drawn as the attached one, which is what `openSection` decides: the
@@ -515,49 +480,6 @@ function DockRowMetrics(): ReactNode {
                   onStopItem={sampleNoopAction}
                   onStopAll={sampleNoopAction}
                   onStopSession={sampleNoopAction}
-                />
-              </OneRowPanel>
-              <OneRowPanel section="queue" name={null}>
-                <QueuedMessagePanel
-                  queue={SAMPLE_QUEUE}
-                  activeTurnStatus={null}
-                  canAct
-                  resumeRequested={false}
-                  keepPausedRequested={false}
-                  readOnly={false}
-                  editingQueueItemId={null}
-                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
-                  separated={false}
-                  onPause={sampleNoopAction}
-                  onResume={sampleNoopAction}
-                  onEdit={sampleNoop}
-                  onCancel={sampleNoop}
-                  onAbortSteer={sampleNoop}
-                  onReorder={sampleNoop}
-                  onSteerNow={sampleNoop}
-                />
-              </OneRowPanel>
-              {/* The queue again, with a provenance chip on its one row: the
-                  badge is a float the message wraps around since L-172, so
-                  this has to measure what the five above measure. */}
-              <OneRowPanel section="queue" name="queue-provenance">
-                <QueuedMessagePanel
-                  queue={PROVENANCE_QUEUE}
-                  activeTurnStatus={null}
-                  canAct
-                  resumeRequested={false}
-                  keepPausedRequested={false}
-                  readOnly={false}
-                  editingQueueItemId={null}
-                  scrollRegionMaxHeightClass={SPECIMEN_SCROLL_REGION_CLASS}
-                  separated={false}
-                  onPause={sampleNoopAction}
-                  onResume={sampleNoopAction}
-                  onEdit={sampleNoop}
-                  onCancel={sampleNoop}
-                  onAbortSteer={sampleNoop}
-                  onReorder={sampleNoop}
-                  onSteerNow={sampleNoop}
                 />
               </OneRowPanel>
               <OneRowPanel section="todo" name={null}>

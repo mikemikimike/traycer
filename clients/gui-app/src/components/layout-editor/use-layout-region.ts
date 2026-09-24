@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { useEpicViewTabId } from "@/components/epic-canvas/view-tab-context";
 import { usePaneVisible } from "@/components/epic-tabs/pane-visibility-context";
-import { useRegionValue } from "@/lib/layout-overrides";
+import { useRegionValues } from "@/lib/layout-overrides";
+import { regionValuesHidden } from "@/lib/layout/layout-values";
 import { canvasOrderGroupForRegion } from "@/lib/layout/layout-arrangement";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
@@ -195,7 +196,7 @@ export function useLayoutRegion(input: {
  * state word instead (4.9): a preview may not start work.
  */
 export function useRegionGhost(regionId: RegionId): boolean {
-  const hidden = useRegionValue(regionId, "shown") === "hidden";
+  const hidden = regionValuesHidden(useRegionValues(regionId));
   const requested = useLayoutEditorStore((state) =>
     regionGhostRequested(state, regionId),
   );

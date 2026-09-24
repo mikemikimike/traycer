@@ -526,12 +526,15 @@ describe("root dnd commits - left panel", () => {
 
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
+    // The drag came off the rail (asGroups), so the drop anchors to the whole
+    // target group - Chats is the top of the shipped pair, so File Tree lands
+    // after the WHOLE pair rather than wedging between Chats and Artifacts.
     expect(
       visibleRailPanelIds(currentLayoutArrangement().rail, () => true),
     ).toEqual([
       "chats",
-      "file-tree",
       "artifacts",
+      "file-tree",
       "terminals",
       "browsers",
       "git-diff",
@@ -585,23 +588,16 @@ describe("root dnd commits - left panel drop resolver", () => {
   afterEach(resetStores);
 
   it("moves a panel before another panel", () => {
+    // Artifacts is a rail-origin drag (asGroups), so it carries its whole
+    // group - and Chats, the target, is that very group's own top: a group
+    // dropped beside its own member is a no-op (G3).
     expect(
       resolveRailForDrop(
         railSource("artifacts", "rail"),
         { kind: "left-panel-rail", panelId: "chats", position: "before" },
         DEFAULT_ARRANGEMENT,
       ),
-    ).toEqual([
-      { kind: "panel", id: "railArtifacts" },
-      { kind: "panel", id: "railAgents" },
-      { kind: "panel", id: "railTerminals" },
-      { kind: "panel", id: "railBrowsers" },
-      { kind: "panel", id: "railGitDiff" },
-      { kind: "panel", id: "railPullRequests" },
-      { kind: "panel", id: "railFileTree" },
-      { kind: "panel", id: "railSharing" },
-      { kind: "panel", id: "railComments" },
-    ]);
+    ).toEqual(DEFAULT_RAIL);
   });
 
   it("moves a section-origin drop beside another panel", () => {
@@ -635,6 +631,8 @@ describe("root dnd commits - left panel drop resolver", () => {
   });
 
   it("moves a panel and a section to the rail end", () => {
+    // Rail-origin (asGroups): Artifacts carries its whole group to the end,
+    // Agents included.
     expect(
       resolveRailForDrop(
         railSource("artifacts", "rail"),
@@ -642,7 +640,6 @@ describe("root dnd commits - left panel drop resolver", () => {
         DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { kind: "panel", id: "railAgents" },
       { kind: "panel", id: "railTerminals" },
       { kind: "panel", id: "railBrowsers" },
       { kind: "panel", id: "railGitDiff" },
@@ -650,8 +647,11 @@ describe("root dnd commits - left panel drop resolver", () => {
       { kind: "panel", id: "railFileTree" },
       { kind: "panel", id: "railSharing" },
       { kind: "panel", id: "railComments" },
+      { kind: "panel", id: "railAgents" },
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
       { kind: "panel", id: "railArtifacts" },
     ]);
+    // Section-origin: Artifacts alone leaves its group, Agents stays put.
     expect(
       resolveRailForDrop(
         railSource("artifacts", "panel-section"),
@@ -672,6 +672,9 @@ describe("root dnd commits - left panel drop resolver", () => {
   });
 
   it("inserts at a section boundary", () => {
+    // Git Diff is a lone panel dragged off the rail (asGroups), and Artifacts
+    // is the bottom of the shipped pair - so the drop anchors before the
+    // WHOLE pair, never between Agents and Artifacts.
     expect(
       resolveRailForDrop(
         railSource("git-diff", "rail"),
@@ -683,8 +686,9 @@ describe("root dnd commits - left panel drop resolver", () => {
         DEFAULT_ARRANGEMENT,
       ),
     ).toEqual([
-      { kind: "panel", id: "railAgents" },
       { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railAgents" },
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
       { kind: "panel", id: "railArtifacts" },
       { kind: "panel", id: "railTerminals" },
       { kind: "panel", id: "railBrowsers" },
@@ -738,12 +742,37 @@ describe("root dnd commits - left panel drop resolver", () => {
     ]);
   });
 
-  it("lets a stacked SOURCE leave its old pair and join a new one (L-170)", () => {
-    // Agents ships joined to Artifacts, so this is the first stacking gesture
-    // most users will try. The middle band lights for it, so it has to mean
-    // something: the old join goes and Artifacts stands alone.
+  it("refuses a rail-origin combine off an already-stacked source (G3)", () => {
+    // Agents ships joined to Artifacts. Dragged off the rail's own icon, the
+    // icon IS the group - and a group carried onto another icon joins
+    // nothing (a stack is exactly two panels), so the drop commits nothing
+    // rather than replacing a member.
     const next = resolveRailForDrop(
       railSource("chats", "rail"),
+      { kind: "left-panel-rail", panelId: "terminals", position: "combine" },
+      DEFAULT_ARRANGEMENT,
+    );
+
+    expect(next?.map((entry) => entry.id)).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+  });
+
+  it("lets a stacked SOURCE dragged by its section leave its old pair and join a new one (L-170)", () => {
+    // Grabbed by the panel's own section header rather than the rail's group
+    // icon (asGroups is false), so the refusal above does not apply: the
+    // panel alone leaves its old pair and Artifacts stands alone.
+    const next = resolveRailForDrop(
+      railSource("chats", "panel-section"),
       { kind: "left-panel-rail", panelId: "terminals", position: "combine" },
       DEFAULT_ARRANGEMENT,
     );

@@ -57,6 +57,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           intent="view"
           surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
           updateView={viewA}
+          nameRef={null}
         />
         <HostOptionRow
           host={hostB}
@@ -65,6 +66,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           intent="view"
           surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
           updateView={viewB}
+          nameRef={null}
         />
       </>,
     );
@@ -90,6 +92,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           intent="view"
           surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
           updateView={fleetView({ kind: "idle" })}
+          nameRef={null}
         />
         <HostOptionRow
           host={hostB}
@@ -98,6 +101,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           intent="view"
           surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
           updateView={fleetView({ kind: "failed" })}
+          nameRef={null}
         />
       </>,
     );
@@ -115,6 +119,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           intent="view"
           surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
           updateView={fleetView({ kind: "failed" })}
+          nameRef={null}
         />
         <HostOptionRow
           host={hostB}
@@ -123,6 +128,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           intent="view"
           surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
           updateView={fleetView({ kind: "idle" })}
+          nameRef={null}
         />
       </>,
     );
@@ -142,9 +148,30 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
         intent="view"
         surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
         updateView={null}
+        nameRef={null}
       />,
     );
     expect(queryByTestId("host-option-update-badge-host-a")).toBeNull();
+  });
+
+  it("attaches nameRef to the name span - the element the account menu's tooltip measures (G4)", () => {
+    const host = hostScopeOptionFixture({ hostId: "host-a", name: "Host A" });
+    let captured: HTMLSpanElement | null = null;
+    render(
+      <HostOptionRow
+        host={host}
+        picked={false}
+        active={false}
+        intent="view"
+        surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
+        updateView={null}
+        nameRef={(el) => {
+          captured = el;
+        }}
+      />,
+    );
+    expect(captured).not.toBeNull();
+    expect((captured as HTMLSpanElement | null)?.textContent).toBe("Host A");
   });
 
   it("an active update state renders no interactive or disable-able element — the row itself cannot gate selection", () => {
@@ -160,6 +187,7 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
           kind: "waiting-for-work",
           blockingSessionCount: 3,
         })}
+        nameRef={null}
       />,
     );
     // Structural, not a checklist of specific attributes: NOTHING this row

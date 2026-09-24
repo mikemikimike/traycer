@@ -11,7 +11,6 @@ import { ActiveAgentsHeader } from "@/components/chat/chat-active-agents-panel";
 import { BackgroundItemsHeader } from "@/components/chat/chat-background-items-panel";
 import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
 import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
-import { QueuedMessageHeader } from "@/components/chat/queued-message-surface";
 import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { ComposerAttachImageTrigger } from "@/components/home/toolbar/composer-attach-image-button";
 import { HarnessModelTrigger } from "@/components/home/pickers/harness-model-trigger";
@@ -64,7 +63,7 @@ const DEPICTION_FILE = path.join(EDITOR_DIR, "region-depiction.tsx");
 /**
  * How a region is drawn, and against which values.
  *
- * `values` is `null` for the shipped defaults; the five dock rows name both
+ * `values` is `null` for the shipped defaults; the four dock rows name both
  * of their sizes, because a chip and a full row are two different real
  * components and a table naming one would leave the other unguarded.
  */
@@ -156,14 +155,6 @@ const REGION_PARITY: Readonly<Record<RegionId, ReadonlyArray<ParityCase>>> = {
     realLeaf(
       BackgroundItemsHeader,
       "@/components/chat/chat-background-items-panel",
-      AS_FULL,
-    ),
-  ],
-  queue: [
-    realLeaf(ChatDockCompactChip, CHIP_MODULE, AS_CHIP),
-    realLeaf(
-      QueuedMessageHeader,
-      "@/components/chat/queued-message-surface",
       AS_FULL,
     ),
   ],

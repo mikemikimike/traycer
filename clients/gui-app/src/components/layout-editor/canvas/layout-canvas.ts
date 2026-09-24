@@ -21,6 +21,7 @@ import { decoratedHoverRegion } from "@/components/layout-editor/use-layout-regi
 import { layoutTransitionRunning } from "@/lib/layout/editor-motion";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import { RAIL_REGION_IDS, railStackMembersFor } from "@/lib/layout/rail";
 import type { RegionId } from "@/lib/layout/region-id";
 import {
   preferredRegionInstance,
@@ -265,8 +266,23 @@ function selectedNode(
     "instances" | "selected" | "selectedSurface" | "surfaceNodes"
   >,
 ): HTMLElement | null {
-  if (state.selected !== null)
-    return preferredRegionInstance(state, state.selected)?.node ?? null;
+  if (state.selected !== null) {
+    const own = preferredRegionInstance(state, state.selected);
+    if (own !== null) return own.node;
+    // A group's bottom member has no node of its own: the group's one icon
+    // stands for it on the rail (G3), so that icon is what gets the ring.
+    const selected = state.selected;
+    const railRegion = RAIL_REGION_IDS.find((id) => id === selected);
+    if (railRegion === undefined) return null;
+    const [top] = railStackMembersFor(
+      getLayoutSnapshot().arrangement.rail,
+      railRegion,
+      () => true,
+    );
+    return top === railRegion
+      ? null
+      : (preferredRegionInstance(state, top)?.node ?? null);
+  }
   if (state.selectedSurface !== null)
     return state.surfaceNodes.get(state.selectedSurface) ?? null;
   return null;

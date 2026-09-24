@@ -150,9 +150,8 @@ export function inactiveCursorStyleFor(
 export type NavigatorResourceMetric = "cpu" | "memory" | "processes";
 /**
  * The fixed set the chips draw, with nothing selecting a subset any more
- * (L-28). WHETHER they draw is the Resource monitor region's Shown switch,
- * which the chips and the stream both follow (L-60) - see
- * `useNavigatorResourceMetrics`.
+ * (L-28). WHETHER they draw is the Resource monitor's own "Agent rows"
+ * switch (G7) - see `useNavigatorResourceMetrics`.
  */
 export const NAVIGATOR_RESOURCE_METRICS: ReadonlyArray<NavigatorResourceMetric> =
   ["cpu", "memory", "processes"];

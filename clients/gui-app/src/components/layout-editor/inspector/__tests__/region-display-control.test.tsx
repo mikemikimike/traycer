@@ -148,16 +148,37 @@ describe("a sizeable region's Full row / Chip / Hidden", () => {
 });
 
 describe("the option set a region's own value asks for", () => {
-  it("gives a rail panel all three of its states (L-47, L-93)", () => {
-    render(<LiveControl regionId="railAgents" />);
+  it("gives a rail panel with a presence rule all three of its states (L-47, L-93)", () => {
+    render(<LiveControl regionId="railPullRequests" />);
 
     expect(optionLabels()).toEqual(["Auto", "Shown", "Hidden"]);
 
     pick("Shown");
 
     // The state a two-position switch could not reach at all.
-    expect(railAgents().shown).toBe("shown");
+    expect(useLayoutStore.getState().overrides.railPullRequests?.shown).toBe(
+      "shown",
+    );
     expect(historyDepth()).toBe(1);
+  });
+
+  it("gives a rail panel with no presence rule two, not three (G6)", () => {
+    // railAgents has no hint (offersAuto is false), so Auto and Shown drew
+    // the same rail and the third option was a choice with no effect - the
+    // page's merged control collapses to Shown/Hidden like any other region.
+    expect(regionFacts("railAgents").hint).toBeNull();
+
+    render(<LiveControl regionId="railAgents" />);
+
+    expect(optionLabels()).toEqual(["Shown", "Hidden"]);
+
+    pick("Hidden");
+
+    expect(railAgents().shown).toBe("hidden");
+    pick("Shown");
+    // Still writes the rail's own "on" value, `auto` - not the literal
+    // `shown` a plain region's switch would write.
+    expect(railAgents().shown).toBe("auto");
   });
 
   it("gives a plain region two, and no switch anywhere", () => {

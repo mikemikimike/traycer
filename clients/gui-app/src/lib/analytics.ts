@@ -1244,7 +1244,6 @@ const ANALYTICS_LAYOUT_REGIONS = new Set<string>(
     runningAgents: true,
     changedFiles: true,
     background: true,
-    queue: true,
     todo: true,
     attachImage: true,
     access: true,

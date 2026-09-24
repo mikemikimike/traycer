@@ -211,6 +211,24 @@ if (runsFirstShard) {
       exitCode,
       runBrowserRegression("scripts/layout-editor-browser.mjs"),
     );
+    // Same gate: the message queue is never a pill (G1-G2) - it sits directly
+    // on the composer with no gap, the pill row above it, and every one-line
+    // row holds the dock's one row metric (L-171, L-172). All of that is laid
+    // out geometry plus real key input, none of which jsdom has. Ablated
+    // before wiring: HEAD's Compact queue pill fails 14 checks, and an
+    // unbudgeted row toolbar or an unfloated provenance badge fails the metric.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/composer-queue-dock-browser.mjs"),
+    );
+    // Same gate: hover-card timing (G8) is pointer events, focus modality,
+    // portals and frames, none of which jsdom has. Ablated before wiring:
+    // the Radix cards fail 22 of 26 scenarios (hand-off ~510ms, a card that
+    // opens after a click-and-leave, a blink on click, a card under the menu).
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/hover-card-browser.mjs"),
+    );
     // NOT here, deliberately, and each for its own reason:
     // - `scripts/window-host-modal-alignment-browser.mjs` measures the
     //   local-bootstrap body against ONE LEFT EDGE (A1/A2/A5/PC4) - the design

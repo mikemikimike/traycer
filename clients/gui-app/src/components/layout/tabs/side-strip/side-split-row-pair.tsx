@@ -23,8 +23,7 @@ export interface SideSplitRowPairProps {
 
 /**
  * A split pair in the vertical strip: its two member rows (or, collapsed, two
- * tiles) joined in one container with the rail capsule's language
- * (`LeftPanelRailStack`): the same fill and a seam holding a hairline
+ * tiles) joined in one container: a shared fill and a seam holding a hairline
  * between the members, with a radius that stays concentric around the rows.
  */
 export function SideSplitRowPair(props: SideSplitRowPairProps) {

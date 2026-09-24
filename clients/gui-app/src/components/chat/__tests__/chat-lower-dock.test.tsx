@@ -113,9 +113,11 @@ describe("<ChatLowerDock />", () => {
     vi.clearAllMocks();
   });
 
-  // Every member is a dock REGION now (L-139), so the frame's vertical order
-  // is the arrangement's, not a hardcoded queue-then-todo-then-rows.
-  it("renders the frame's rows in dock order", () => {
+  // Every remaining member is a dock REGION (L-139), so the frame's vertical
+  // order among them is the arrangement's. The queue is not a region at all
+  // (G1-G2): it is a fixed slot that always draws as the frame's LAST child,
+  // below every row, regardless of what `dockOrder` says.
+  it("renders the frame's rows in dock order, with the queue fixed last", () => {
     renderDock({
       folded: undefined,
       queue: queueState([queuedItem("queue-1", "Queued prompt")]),
@@ -138,11 +140,12 @@ describe("<ChatLowerDock />", () => {
     expect(dock.contains(queue)).toBe(true);
     expect(dock.contains(todo)).toBe(true);
     expect(dock.contains(changes)).toBe(true);
-    // `DEFAULT_DOCK_ORDER`: queue, then todo, then the three rows.
-    expect(queue.compareDocumentPosition(todo)).toBe(
+    // `DEFAULT_DOCK_ORDER`: todo, then the three reorderable rows.
+    expect(todo.compareDocumentPosition(changes)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(todo.compareDocumentPosition(changes)).toBe(
+    // The queue sits after every row, whatever `dockOrder` says.
+    expect(changes.compareDocumentPosition(queue)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
@@ -244,11 +247,53 @@ describe("<ChatLowerDock />", () => {
     expect(screen.getByTestId("chat-lower-dock")).not.toBeNull();
     expect(screen.getByTestId("chat-dock-compact-strip")).not.toBeNull();
     expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+    // The queue is empty (`emptyDock()`), so it draws no node either.
+    expect(screen.queryByTestId("queued-message-rows")).toBeNull();
     // And the frame collapses rather than drawing an empty bordered box.
     const frame = screen
       .getByTestId("chat-lower-dock")
       .querySelector(".rounded-t-lg");
     expect(frame?.childElementCount).toBe(0);
+  });
+
+  // G1-G2: the queue is a fixed slot, not a dock region, so it draws
+  // whenever it holds anything regardless of what the rest of the dock is
+  // doing. With every real member folded to a chip, the frame holds nothing
+  // BUT the queue.
+  it("holds only the queue in the frame when every other member is a chip", () => {
+    renderDock({
+      ...emptyDock(),
+      queue: queueState([queuedItem("queue-1", "Queued prompt")]),
+      folded: new Set(["filesChanged", "activeAgents", "background", "todo"]),
+      chips: [compactChip("filesChanged")],
+    });
+
+    const frame = screen
+      .getByTestId("chat-lower-dock")
+      .querySelector(".rounded-t-lg");
+    expect(frame).not.toBeNull();
+    expect(frame?.childElementCount).toBe(1);
+    const queue = screen.getByTestId("queued-message-rows");
+    expect(frame?.contains(queue)).toBe(true);
+  });
+
+  // The attached panel is the frame's topmost, replaceable slot (L-142); the
+  // queue is fixed below every row and every panel, including an open one.
+  it("draws an open pill's attached panel before the queue", () => {
+    renderDock({
+      ...emptyDock(),
+      queue: queueState([queuedItem("queue-1", "Queued prompt")]),
+      folded: new Set(["filesChanged"]),
+      chips: [compactChip("filesChanged")],
+      openSection: "filesChanged",
+      changes: [fileChange()],
+    });
+
+    const attached = screen.getByTestId("chat-dock-attached-panel");
+    const queue = screen.getByTestId("queued-message-rows");
+    expect(attached.compareDocumentPosition(queue)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   // A pill exists on a WIDER predicate than its panel does: Active agents
@@ -552,10 +597,10 @@ interface DockInput {
 }
 
 /** `DEFAULT_DOCK_ORDER` as the registry holds it: today's top-to-bottom frame
- *  (Queue, Todo, then the three reorderable rows), so a user who never opens
- *  the editor sees exactly the dock they see now. */
+ *  (Todo, then the three reorderable rows), so a user who never opens the
+ *  editor sees exactly the dock they see now. The queue is not a dock region
+ *  (G1-G2) and is never part of this order - it always draws fixed, last. */
 const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
-  "queue",
   "todo",
   "filesChanged",
   "activeAgents",
@@ -589,7 +634,6 @@ function dockHotspotsFor(
       (input.backgroundItems?.length ?? 0) > 0 ||
         input.heldManagedCommandCount > 0,
     ),
-    queue: dockHotspot(input.queue.items.length > 0),
     todo: dockHotspot(input.todo !== null),
   };
 }

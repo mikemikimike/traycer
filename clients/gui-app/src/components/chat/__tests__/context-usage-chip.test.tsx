@@ -27,6 +27,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useThemeLibraryStore } from "@/stores/settings/theme-library-store";
 import type { TokenUsage } from "@traycer/protocol/persistence/epic/foundation";
 
@@ -143,8 +144,22 @@ function resetContextUsageSettings(): void {
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   useThemeLibraryStore.setState({ panelAnimations: true });
+  useLayoutEditorStore.getState().endSession();
   restoreDefaultMatchMedia();
   resetMotionReducedMotionPreference();
+}
+
+/**
+ * Materialises the editor's ghost for `contextUsage` (L-14): a live session
+ * hovering the region, exactly what `regionGhostRequested` checks.
+ */
+function requestContextUsageGhost(): void {
+  useLayoutEditorStore.getState().beginSession({
+    entry: "pointer",
+    source: "direct_ui",
+    startedAt: 0,
+  });
+  useLayoutEditorStore.getState().setHovered("contextUsage");
 }
 
 /** The effective `contextUsage` value bag, base preset plus the override delta. */
@@ -350,6 +365,34 @@ describe("ContextUsageChip", () => {
         .getByTestId("context-usage-meter")
         .style.getPropertyValue("--context-usage-percent"),
     ).toBe("25%");
+  });
+
+  // G6: the chip mounted unconditionally, so Layout â¸ Chat â¸ Context usage's
+  // Shown switch had no reader. `useRegionShown` now gates it, with the same
+  // L-14 ghost exception every hideable region gets: the editor can still
+  // materialise it as a preview while pointing at the region.
+  it("renders nothing when contextUsage is hidden and no editor ghost is active", () => {
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { shown: "hidden" });
+    const { container } = render(
+      <ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />,
+    );
+    expect(container.firstChild).toBe(null);
+    expect(screen.queryByTestId("context-usage-chip")).toBeNull();
+  });
+
+  it("still renders a hidden contextUsage region while the editor ghost points at it", () => {
+    useLayoutStore
+      .getState()
+      .setRegionValues("contextUsage", { shown: "hidden" });
+    requestContextUsageGhost();
+    render(<ContextUsageChip usage={RELIABLE_USAGE} onCompact={null} />);
+
+    expect(screen.getByTestId("context-usage-chip")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /Context window 75% left/ }),
+    ).toBeTruthy();
   });
 
   it("hides when contextWindow is absent (Cursor)", () => {

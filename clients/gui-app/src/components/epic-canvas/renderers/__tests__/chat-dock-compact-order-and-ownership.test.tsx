@@ -347,13 +347,12 @@ afterEach(() => {
   });
 });
 
-/** Every dock region folded to its compact pill - Queue and Todo included
- *  since they became members too (L-139). */
+/** Every dock region folded to its compact pill - Todo included since it
+ *  became a member too (L-139). The message queue is not a region (G1-G2). */
 function foldAllDockRegionsToChips(): void {
   useLayoutStore.getState().setRegionValues("changedFiles", { size: "chip" });
   useLayoutStore.getState().setRegionValues("runningAgents", { size: "chip" });
   useLayoutStore.getState().setRegionValues("background", { size: "chip" });
-  useLayoutStore.getState().setRegionValues("queue", { size: "chip" });
   useLayoutStore.getState().setRegionValues("todo", { size: "chip" });
 }
 
@@ -364,7 +363,7 @@ describe("compact dock chip order follows arrangement.dock (S5)", () => {
     // Deliberately NOT the fixed default order.
     useLayoutStore.getState().setArrangement({
       ...arrangement,
-      dock: ["background", "runningAgents", "changedFiles", "queue", "todo"],
+      dock: ["background", "runningAgents", "changedFiles", "todo"],
     });
 
     renderSurfaces(
@@ -430,7 +429,7 @@ describe("compact dock chip order follows arrangement.dock (S5)", () => {
       const { arrangement } = useLayoutStore.getState();
       useLayoutStore.getState().setArrangement({
         ...arrangement,
-        dock: ["background", "changedFiles", "runningAgents", "queue", "todo"],
+        dock: ["background", "changedFiles", "runningAgents", "todo"],
       });
     });
 

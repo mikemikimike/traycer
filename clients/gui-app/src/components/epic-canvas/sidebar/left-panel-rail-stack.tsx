@@ -1,30 +1,17 @@
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
 
 /**
- * A stacked pair on the rail: two icons inside one capsule (L-167).
+ * A stacked pair on the rail, drawn as ONE view group (G3), the way VS Code
+ * draws a view container: the icon of the group's top panel stands for the
+ * pair, its name lists both ("Agents · Artifacts"), and clicking it opens the
+ * body the two share. Which icon shows is the user's choice of order: the
+ * panel on top of the group is the one the rail draws.
  *
- * Both icons stay, so the rail always shows nine, and clicking either opens
- * the stack with that panel focused. What the capsule adds is the fact that
- * they belong together: one rounded surface behind both, so the pair reads as
- * ONE object at rest rather than as two buttons that happen to be adjacent.
- *
- * The seam between them is the rail's own `gap-1` again, drawn INSIDE the
- * capsule rather than as a gap between two of them. That is deliberate: the
- * rail is a `gap-1` column, so two icons a capsule joins sit exactly as far
- * apart as two icons it does not, the capsule does not push the icons below it
- * out of the rail's rhythm, and the only thing that changes is the surface
- * behind them and the hairline in the seam.
- *
- * Unlike a divider, the capsule carries no canvas MEMBER and answers no drag,
- * in a session or out of it. A divider is a member because a divider is placed
- * - the user decides where the gap goes. A link is not placed: it IS the pair
- * its id names (`rail.ts`), so dragging it out from between its two panels
- * leaves them adjacent and `normalizeRail` puts it straight back. Offering a
- * grab for a gesture that can only ever write the same rail would be an
- * affordance that does nothing. The gestures a stack really has are elsewhere:
- * dragging either ICON away breaks the join, the Position list's row removes
- * it, and the middle band of an icon makes one (L-168).
+ * At rest that is all there is. While the layout editor is customizing this
+ * rail the grouping has to stay visible, since the inspector's Position list
+ * edits it, so the icon carries a small count of the panels it stands for. It
+ * sits at the tile's top corner, clear of both rails' active marks: the
+ * horizontal rail's underline and the vertical rail's edge bar.
  *
  * One component for all three rails - the epic sidebar's, the sample
  * workspace's and the preset card's miniature - because it draws the same fact
@@ -32,35 +19,28 @@ import { cn } from "@/lib/utils";
  */
 export function LeftPanelRailStack(props: {
   readonly stackId: string;
-  readonly orientation: "vertical" | "horizontal";
-  readonly first: ReactNode;
-  readonly second: ReactNode;
+  /** How many panels the icon stands for, drawn only while `showCount`. */
+  readonly memberCount: number;
+  readonly showCount: boolean;
+  /** The top panel's icon. */
+  readonly children: ReactNode;
 }) {
-  const { stackId, orientation, first, second } = props;
-  const vertical = orientation === "vertical";
   return (
     <div
-      data-rail-stack={stackId}
+      data-rail-stack={props.stackId}
       data-testid="epic-rail-stack"
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded-lg bg-foreground/6",
-        vertical ? "flex-col" : "flex-row",
-      )}
+      className="relative flex shrink-0"
     >
-      {first}
-      <span
-        aria-hidden
-        data-testid="epic-rail-stack-seam"
-        className={cn(
-          "pointer-events-none flex shrink-0 items-center justify-center",
-          vertical ? "h-1 w-full" : "h-full w-1",
-        )}
-      >
+      {props.children}
+      {props.showCount ? (
         <span
-          className={cn("bg-border/60", vertical ? "h-px w-5" : "h-5 w-px")}
-        />
-      </span>
-      {second}
+          aria-hidden
+          data-testid="epic-rail-stack-count"
+          className="pointer-events-none absolute top-0.5 right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-foreground/80 px-0.5 text-[0.5625rem] leading-none font-semibold text-background tabular-nums ring-2 ring-background"
+        >
+          {props.memberCount}
+        </span>
+      ) : null}
     </div>
   );
 }

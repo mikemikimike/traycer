@@ -515,7 +515,6 @@ function emptyQueue(): ChatSessionState["queue"] {
 }
 
 const DEFAULT_DOCK_ORDER: ReadonlyArray<ChatDockSection> = [
-  "queue",
   "todo",
   "filesChanged",
   "activeAgents",
@@ -540,7 +539,6 @@ function dockHotspot(hasContent: boolean): DockRowHotspot {
 const ONE_BACKGROUND_ITEM_DOCK_HOTSPOTS: Readonly<
   Record<ChatDockSection, DockRowHotspot>
 > = {
-  queue: dockHotspot(false),
   todo: dockHotspot(false),
   filesChanged: dockHotspot(false),
   activeAgents: dockHotspot(false),

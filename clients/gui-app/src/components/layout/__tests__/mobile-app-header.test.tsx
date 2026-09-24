@@ -355,6 +355,27 @@ describe("MobileAppHeader", () => {
     ).toBeNull();
   });
 
+  // G6: the phone header drew the usage glyph whatever the switch said, the
+  // same bug class the resource-monitor gate above never had. Mirrors "shows
+  // the resource monitor only when the global toggle is on".
+  it("shows the rate-limit glyph only when the usageLimits toggle is on", async () => {
+    useLayoutStore
+      .getState()
+      .setRegionValues("usageLimits", { shown: "shown" });
+    renderAt("/");
+    expect(
+      await screen.findByRole("button", { name: "Usage limits" }),
+    ).not.toBeNull();
+
+    cleanup();
+    useLayoutStore
+      .getState()
+      .setRegionValues("usageLimits", { shown: "hidden" });
+    renderAt("/");
+    await screen.findByRole("button", { name: "Open menu" });
+    expect(screen.queryByRole("button", { name: "Usage limits" })).toBeNull();
+  });
+
   it("renders the presented epic tab's registered right actions", async () => {
     useMobileHeaderStore
       .getState()

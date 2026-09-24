@@ -13,7 +13,7 @@ import {
   type EdgeSide,
 } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
-import type { ReadingButtonForm } from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import type { BarReadingForm } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import { admitsLocalPlane, useAuthStore } from "@/stores/auth/auth-store";
 
 /**
@@ -35,11 +35,13 @@ export function HeaderBarCluster(props: {
   readonly side: EdgeSide;
 }): ReactNode {
   const placements = useBarPlacements();
+  // Both draw their readings, not a glyph: the header has the room, and a
+  // glyph could follow none of a reading's own settings (G6).
   return barClusterRegionsAt(placements, "header", props.side).map((region) =>
     region === "usageLimits" ? (
-      <HeaderUsageRegion key={region} form="glyph" />
+      <HeaderUsageRegion key={region} form="inline" />
     ) : (
-      <HeaderResourceRegion key={region} form="glyph" />
+      <HeaderResourceRegion key={region} form="inline" />
     ),
   );
 }
@@ -61,8 +63,8 @@ export function HeaderBarCluster(props: {
  * is the un-registering one (two elements on one key displace each other).
  */
 export function HeaderUsageRegion(props: {
-  /** How the button draws: the header's glyph, or a strip tile (F6). */
-  readonly form: ReadingButtonForm;
+  /** How the button draws: the header's readings, or the strip's (F6). */
+  readonly form: BarReadingForm;
 }): ReactNode {
   const shown = useRegionShown("usageLimits");
   const { ref, editing } = useLayoutRegion({
@@ -102,8 +104,8 @@ export function HeaderUsageRegion(props: {
  * be mounted on a desktop viewport.
  */
 export function HeaderResourceRegion(props: {
-  /** How the button draws: the header's glyph, or a strip tile (F6). */
-  readonly form: ReadingButtonForm;
+  /** How the button draws: the header's readings, or the strip's (F6). */
+  readonly form: BarReadingForm;
 }): ReactNode {
   const shown = useRegionShown("resourceMonitor");
   const { ref, editing } = useLayoutRegion({
@@ -166,7 +168,6 @@ export function HeaderIdentity(props: HeaderIdentityProps): ReactNode {
         avatarUrl={profile.avatarUrl ?? null}
         showAppSettings={props.showAppSettings}
         trigger={null}
-        triggerTooltip={null}
       />
     );
   }
