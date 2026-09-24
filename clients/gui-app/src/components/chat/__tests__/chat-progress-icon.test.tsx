@@ -188,7 +188,7 @@ describe("<ChatProgressIcon />", () => {
     expect(
       screen
         .getByTestId(BACKGROUND_TEST_ID)
-        .querySelector("[data-status-glyph]")
+        .closest("[data-status-glyph]")
         ?.getAttribute("data-status-glyph"),
     ).toBe("background");
     expect(

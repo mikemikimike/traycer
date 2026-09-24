@@ -1,8 +1,21 @@
 import type { ReactNode } from "react";
 import { StatusGlyph } from "@/components/notifications/status-glyph";
+import {
+  APPROVAL_TONE,
+  INTERVIEW_TONE,
+  type IndicatorTone,
+} from "@/components/notifications/notification-indicator-tones";
 import { useRelativeTimestamp } from "@/lib/relative-time";
 import type { MergedNotificationRow } from "@/stores/notifications/merged-notifications";
-import type { NeedsYouItem as NeedsYouItemData } from "@/stores/notifications/needs-you-items";
+import type {
+  NeedsYouItem as NeedsYouItemData,
+  NeedsYouReason,
+} from "@/stores/notifications/needs-you-items";
+
+const REASON_TONE: Readonly<Record<NeedsYouReason, IndicatorTone>> = {
+  approval: APPROVAL_TONE,
+  reply: INTERVIEW_TONE,
+};
 
 /**
  * One prompt waiting on the person (D13): the ask, "task · agent" and the
@@ -30,8 +43,9 @@ export function NeedsYouItem(props: {
       className="flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:ring-inset active:press-scrim"
     >
       <StatusGlyph
-        kind={item.reason}
-        className="mt-0.5 size-4 shrink-0"
+        status={REASON_TONE[item.reason]}
+        className="mt-0.5 size-4"
+        testId={undefined}
         label={null}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">

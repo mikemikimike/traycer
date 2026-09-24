@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
@@ -20,6 +27,7 @@ import {
 } from "@/stores/layout/layout-store";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import { searchSettings } from "@/lib/settings-search/settings-search";
 
 // The provider list is read through the watched host's scope; this page needs
@@ -58,6 +66,7 @@ afterEach(() => {
   cleanup();
   setMobileApp(false);
   resetLayout();
+  useSettingsStore.getState().setTaskTabLayout("scroll");
   setSystemTabModalApi(null);
   useSettingsSearchStore.setState({
     query: "",
@@ -126,7 +135,9 @@ function renderPanel(): void {
  */
 async function goToSurfaceTab(user: UserEvent, id: string): Promise<void> {
   const label = SURFACE_GROUPS.find((group) => group.id === id)?.label ?? id;
-  await user.click(screen.getByRole("tab", { name: label }));
+  // Anchored prefix, not exact: a changed area's tab carries a sr-only ",
+  // changed" suffix in its accessible name (H2).
+  await user.click(screen.getByRole("tab", { name: new RegExp(`^${label}`) }));
 }
 
 /**
@@ -659,139 +670,6 @@ describe("Settings - Layout", () => {
     );
   });
 
-  describe("the sticky tab band (L-154)", () => {
-    /**
-     * The band's observer, driven by hand.
-     *
-     * `observe()` delivers the target's current state straight away, which is
-     * what the real API does a frame after it is called - that first delivery
-     * IS the mount-time answer, and it is the path a panel takes when it
-     * mounts into an already-scrolled pane.
-     */
-    interface ObservedEntry {
-      readonly isIntersecting: boolean;
-    }
-    type ObserverCallback = (entries: ReadonlyArray<ObservedEntry>) => void;
-    interface BandObserver {
-      readonly callback: ObserverCallback;
-      readonly root: Element | Document | null;
-      readonly targets: Array<Element>;
-    }
-    let bandObservers: Array<BandObserver> = [];
-    /** Whether the hairline above the band is inside the pane when observed. */
-    let sentinelStartsInPane = true;
-
-    class ControllableIntersectionObserver {
-      private readonly record: BandObserver;
-      constructor(
-        callback: ObserverCallback,
-        options: IntersectionObserverInit,
-      ) {
-        this.record = {
-          callback,
-          root: options.root ?? null,
-          targets: [],
-        };
-        bandObservers.push(this.record);
-      }
-      observe(target: Element): void {
-        this.record.targets.push(target);
-        this.record.callback([{ isIntersecting: sentinelStartsInPane }]);
-      }
-      unobserve(): void {}
-      disconnect(): void {
-        bandObservers = bandObservers.filter((entry) => entry !== this.record);
-      }
-      takeRecords(): ReadonlyArray<ObservedEntry> {
-        return [];
-      }
-    }
-
-    beforeEach(() => {
-      bandObservers = [];
-      sentinelStartsInPane = true;
-      vi.stubGlobal("IntersectionObserver", ControllableIntersectionObserver);
-    });
-
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
-    /**
-     * The panel inside a real scrollport, because the band's whole contract is
-     * about what the pane behind it is doing.
-     */
-    function renderInPane(): HTMLElement {
-      const pane = document.createElement("div");
-      pane.setAttribute("data-settings-panel-pane", "");
-      document.body.append(pane);
-      render(<LayoutSettingsPanel />, { container: pane });
-      return pane;
-    }
-
-    /** The band's hairline crossing the pane's top edge, either way. */
-    function sentinelInPane(inside: boolean): void {
-      act(() => {
-        for (const observer of bandObservers) {
-          observer.callback([{ isIntersecting: inside }]);
-        }
-      });
-    }
-
-    function band(): HTMLElement {
-      return screen.getByTestId("layout-tab-band");
-    }
-
-    it("stays within the content width, with no box drawn around it", () => {
-      renderInPane();
-
-      // The ruling itself: no bleed past the cards, and no border or shadow
-      // standing in for the fade.
-      expect(band().className).not.toMatch(/-mx-|border|shadow/);
-    });
-
-    it("watches the band's own top edge, inside the settings pane", () => {
-      const pane = renderInPane();
-
-      // Rooted on the scrollport `sticky top-0` pins to - not the document,
-      // and not the panel's own column, either of which would answer a
-      // different question entirely.
-      expect(bandObservers).toHaveLength(1);
-      expect(bandObservers[0].root).toBe(pane);
-      // And it watches a node welded to the band, not the band itself: the
-      // band never leaves the pane, so observing it would answer nothing.
-      const watched = bandObservers[0].targets[0];
-      expect(watched.parentElement).toBe(band());
-    });
-
-    it("arrives lit when the panel mounts into a pane already scrolled past it", () => {
-      // A search landing or a promotion from the modal into a tab mounts this
-      // panel with the pane already scrolled, so the band is pinned before
-      // anyone touches a wheel.
-      sentinelStartsInPane = false;
-
-      renderInPane();
-
-      expect(band().hasAttribute("data-stuck")).toBe(true);
-    });
-
-    it("lights its scroll edge only while rows are running under it", () => {
-      renderInPane();
-
-      // At rest the band sits below the pane's top edge: nothing is under it,
-      // so nothing separates it from the page.
-      expect(band().hasAttribute("data-stuck")).toBe(false);
-
-      sentinelInPane(false);
-      expect(band().hasAttribute("data-stuck")).toBe(true);
-
-      // And it goes out again on the way back up - an edge that latches is a
-      // box with extra steps.
-      sentinelInPane(true);
-      expect(band().hasAttribute("data-stuck")).toBe(false);
-    });
-  });
-
   describe("the small-screen status bar row (L-51)", () => {
     it("is absent outside the installed mobile app", async () => {
       const user = userEvent.setup();
@@ -1055,6 +933,248 @@ describe("Settings - Layout", () => {
       expect(tabPanelHiddenFor("layout-surface-sidebar")).toBe(false);
       // Presets, the page's own default, is not what's showing.
       expect(tabPanelHiddenFor("layout-presets-group")).toBe(true);
+    });
+  });
+
+  describe("the area rail (H2)", () => {
+    it("shows exactly one area's panel at a time", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+
+      expect(
+        document.querySelectorAll('[role="tabpanel"]:not([hidden])'),
+      ).toHaveLength(1);
+      expect(activeTabPanel()).toBe(
+        screen.getByTestId("layout-presets-group").closest('[role="tabpanel"]'),
+      );
+
+      await goToSurfaceTab(user, "chat");
+
+      expect(
+        document.querySelectorAll('[role="tabpanel"]:not([hidden])'),
+      ).toHaveLength(1);
+      expect(activeTabPanel()).toBe(
+        surface("chat").closest('[role="tabpanel"]'),
+      );
+    });
+
+    it("walks the rail with arrow keys, Home and End (Radix roving focus)", async () => {
+      renderPanel();
+      const tabs = screen.getAllByRole("tab");
+      expect(tabs.map((tab) => tab.textContent)).toEqual([
+        "Presets",
+        "Tabs",
+        "Sidebar",
+        "Chat",
+        "Composer",
+        "Status bar",
+      ]);
+
+      // Radix moves the roving tab stop on a `setTimeout(0)` rather than
+      // synchronously in the keydown handler, so every press needs a
+      // macrotask flush before the new `document.activeElement` is read.
+      async function press(key: string): Promise<void> {
+        fireEvent.keyDown(document.activeElement ?? tabs[0], { key });
+        await act(async () => {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 0);
+          });
+        });
+      }
+
+      act(() => {
+        tabs[0].focus();
+      });
+
+      await press("ArrowDown");
+      expect(document.activeElement).toBe(tabs[1]);
+      expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+
+      await press("End");
+      expect(document.activeElement).toBe(tabs[tabs.length - 1]);
+      expect(tabs[tabs.length - 1].getAttribute("aria-selected")).toBe("true");
+
+      await press("Home");
+      expect(document.activeElement).toBe(tabs[0]);
+      expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+
+      await press("ArrowDown");
+      await press("ArrowUp");
+      expect(document.activeElement).toBe(tabs[0]);
+      expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    });
+
+    it("puts the editor door in the page header, with its search anchor, and draws no Customize card", () => {
+      renderPanel();
+
+      const anchor = document.querySelector(
+        `[data-settings-anchor="${LAYOUT.definitions.customizeEntry.anchor}"]`,
+      );
+      expect(anchor).not.toBeNull();
+      expect(anchor?.textContent).toMatch(
+        /Open the editor|needs a wider window/,
+      );
+      expect(screen.queryByText("Customize layout")).toBeNull();
+    });
+
+    it("shows no Reset on Presets even once its preset changed, and none on an untouched surface", async () => {
+      const user = userEvent.setup();
+      act(() => {
+        useLayoutStore.getState().setBasePreset("compact");
+      });
+      renderPanel();
+
+      // Presets is the page's default tab.
+      expect(
+        screen.queryByRole("button", { name: "Reset Presets" }),
+      ).toBeNull();
+
+      await goToSurfaceTab(user, "composer");
+      expect(
+        screen.queryByRole("button", { name: "Reset Composer" }),
+      ).toBeNull();
+    });
+
+    it("lights an area's dot after an edit, and Reset plus confirm clears only that area's dot", async () => {
+      const user = userEvent.setup();
+      act(() => {
+        useLayoutStore.getState().setArrangement({
+          ...DEFAULT_ARRANGEMENT,
+          minimapSide: "left", // chat
+          sidebarSide: "right", // sidebar
+        });
+      });
+      renderPanel();
+
+      const chatTab = () => screen.getByRole("tab", { name: /^Chat/ });
+      const sidebarTab = () => screen.getByRole("tab", { name: /^Sidebar/ });
+      expect(within(chatTab()).getByTestId("area-changed-dot")).toBeTruthy();
+      expect(within(sidebarTab()).getByTestId("area-changed-dot")).toBeTruthy();
+
+      await goToSurfaceTab(user, "chat");
+      await user.click(screen.getByRole("button", { name: "Reset Chat" }));
+      await user.click(screen.getByTestId("confirm-action"));
+
+      expect(within(chatTab()).queryByTestId("area-changed-dot")).toBeNull();
+      // Sidebar's dot, and its own change, are untouched by Chat's reset.
+      expect(within(sidebarTab()).getByTestId("area-changed-dot")).toBeTruthy();
+      expect(useLayoutStore.getState().arrangement.minimapSide).toBe(
+        DEFAULT_ARRANGEMENT.minimapSide,
+      );
+      expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+    });
+
+    it("scrolls a newly picked area back to its top", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await goToSurfaceTab(user, "chat");
+
+      const chatBody = surface("chat").closest("[data-layout-area-body]");
+      if (!(chatBody instanceof HTMLElement)) {
+        throw new Error("no scroll body for chat");
+      }
+      chatBody.scrollTop = 100;
+
+      await goToSurfaceTab(user, "composer");
+      await goToSurfaceTab(user, "chat");
+
+      expect(chatBody.scrollTop).toBe(0);
+    });
+
+    it("resetting Tabs also restores Task tab layout", async () => {
+      const user = userEvent.setup();
+      act(() => {
+        useLayoutStore.getState().setArrangement({
+          ...DEFAULT_ARRANGEMENT,
+          tabStripPlacement: "left",
+        });
+        useSettingsStore.getState().setTaskTabLayout("shrink");
+      });
+      renderPanel();
+      await goToSurfaceTab(user, "topBar");
+
+      await user.click(screen.getByRole("button", { name: "Reset Tabs" }));
+      await user.click(screen.getByTestId("confirm-action"));
+
+      expect(useSettingsStore.getState().taskTabLayout).toBe("scroll");
+      expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
+        DEFAULT_ARRANGEMENT.tabStripPlacement,
+      );
+    });
+  });
+
+  describe("Reset button focus return (review H2)", () => {
+    it("returns focus to the area's panel after a keyboard-confirmed reset", async () => {
+      const user = userEvent.setup();
+      act(() => {
+        useLayoutStore.getState().setArrangement({
+          ...DEFAULT_ARRANGEMENT,
+          minimapSide: "left",
+        });
+      });
+      renderPanel();
+      await goToSurfaceTab(user, "chat");
+
+      const resetButton = screen.getByRole("button", { name: "Reset Chat" });
+      act(() => {
+        resetButton.focus();
+      });
+      await user.keyboard("{Enter}");
+
+      const confirmButton = screen.getByTestId("confirm-action");
+      act(() => {
+        confirmButton.focus();
+      });
+      await user.keyboard("{Enter}");
+
+      // The reset unmounts the button that opened the dialog, and
+      // `onCloseAutoFocus` redirects the browser's own focus-restore rather
+      // than running it synchronously with the close.
+      await act(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      });
+
+      expect(document.activeElement).toBe(
+        screen.getByRole("tabpanel", { name: "Chat" }),
+      );
+      expect(screen.queryByRole("button", { name: "Reset Chat" })).toBeNull();
+    });
+
+    it("returns focus to the Reset button on Cancel", async () => {
+      const user = userEvent.setup();
+      act(() => {
+        useLayoutStore.getState().setArrangement({
+          ...DEFAULT_ARRANGEMENT,
+          minimapSide: "left",
+        });
+      });
+      renderPanel();
+      await goToSurfaceTab(user, "chat");
+
+      const resetButton = screen.getByRole("button", { name: "Reset Chat" });
+      act(() => {
+        resetButton.focus();
+      });
+      await user.keyboard("{Enter}");
+
+      const cancelButton = screen.getByRole("button", { name: "Cancel" });
+      act(() => {
+        cancelButton.focus();
+      });
+      await user.keyboard("{Enter}");
+
+      await act(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      });
+
+      // Cancel leaves the area changed, so the opener is still there for
+      // Radix's own default focus-restore to land on.
+      expect(document.activeElement).toBe(resetButton);
+      expect(screen.getByRole("button", { name: "Reset Chat" })).toBeTruthy();
     });
   });
 });

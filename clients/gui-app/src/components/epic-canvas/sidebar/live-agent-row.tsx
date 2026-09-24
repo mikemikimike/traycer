@@ -9,7 +9,16 @@ import {
   SIDE_TAB_HOVER_CLASS,
   SIDE_TAB_TITLE_CLASS,
 } from "@/components/layout/tabs/side-strip/side-strip-tokens";
-import { UNKNOWN_ACTIVITY_TITLE } from "@/components/notifications/notification-indicator-icon";
+import {
+  BACKGROUND_ACTIVITY_TITLE,
+  UNKNOWN_ACTIVITY_TITLE,
+} from "@/components/notifications/notification-indicator-icon";
+import {
+  APPROVAL_TONE,
+  FAILURE_TONE,
+  FORK_TONE,
+  INTERVIEW_TONE,
+} from "@/components/notifications/notification-indicator-tones";
 import { UnknownActivityGlyph } from "@/components/notifications/unknown-activity-glyph";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -24,13 +33,14 @@ export type LiveAgentKind = Exclude<
   "done" | "terminal-failure"
 >;
 
+/** Each state's name, the tooltip the same glyph carries in the Agents tree. */
 const LIVE_KIND_LABEL: Readonly<Record<LiveAgentKind, string>> = {
-  failure: "Failed",
-  fork: "Waiting for fork resolution",
-  interview: "Needs a reply",
-  approval: "Needs approval",
-  running: "Running",
-  background: "Background work",
+  failure: FAILURE_TONE.title,
+  fork: FORK_TONE.title,
+  interview: INTERVIEW_TONE.title,
+  approval: APPROVAL_TONE.title,
+  running: "Agent in progress",
+  background: BACKGROUND_ACTIVITY_TITLE,
   unknown: UNKNOWN_ACTIVITY_TITLE,
 };
 

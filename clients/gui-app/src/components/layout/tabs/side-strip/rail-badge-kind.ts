@@ -1,16 +1,31 @@
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 import { tabWaitingReason } from "../tab-waiting";
-import type { StatusGlyphKind } from "@/components/notifications/status-glyph-kind";
+import {
+  APPROVAL_TONE,
+  DONE_TONE,
+  FAILURE_TONE,
+  INTERVIEW_TONE,
+  type IndicatorTone,
+} from "@/components/notifications/notification-indicator-tones";
 
 /**
  * The one state on a task that needs the user (D5), drawn as the tile's
  * corner badge and as the meter's attention pip. Running is not here: the
  * meter carries it.
  */
-export type RailBadgeKind = Extract<
-  StatusGlyphKind,
-  "approval" | "reply" | "failed" | "unread"
->;
+export type RailBadgeKind = "approval" | "reply" | "failed" | "unread";
+
+/**
+ * The tone each badge draws, the notification feed's own. A task spans GUI
+ * and TUI agents, so its failure takes the surface-neutral chat failure, as
+ * the Agents tree's collapsed rollup does.
+ */
+export const RAIL_BADGE_TONE: Readonly<Record<RailBadgeKind, IndicatorTone>> = {
+  approval: APPROVAL_TONE,
+  reply: INTERVIEW_TONE,
+  failed: FAILURE_TONE,
+  unread: DONE_TONE,
+};
 
 /**
  * Approval and reply are one tier (both are waiting on the user); reply breaks

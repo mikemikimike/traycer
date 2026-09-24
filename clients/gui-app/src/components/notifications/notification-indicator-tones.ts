@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { GlobeAlert } from "@/components/notifications/globe-alert";
 import { MessageSquareQuestionMark } from "@/components/notifications/message-square-question-mark";
-import type { StatusGlyphKind } from "@/components/notifications/status-glyph-kind";
 import type { NotificationIndicatorState } from "@/stores/notifications/notification-indicator-state";
 import type {
   HostNotificationKind,
@@ -146,16 +145,12 @@ export function attentionTone(
   return null;
 }
 
-/**
- * The latest terminal outcome, when it is an unread failure. Every agent
- * surface draws it as the one failed glyph (F3), so it takes no surface; the
- * notification feed keeps the TUI icon through `notificationFeedTone`.
- */
 export function terminalFailureTone(
   state: NotificationIndicatorState,
+  surface: AgentNotificationSurface,
 ): IndicatorTone | null {
   if (!state.unreadFailure || state.unreadTerminalFailure !== true) return null;
-  return FAILURE_TONE;
+  return surface === "tui" ? TERMINAL_FAILURE_TONE : FAILURE_TONE;
 }
 
 export type AgentNotificationSurface = "gui" | "tui";
@@ -191,27 +186,4 @@ export function notificationFeedTone(
     return input.resolvedAt === null ? APPROVAL_TONE : RESOLVED_APPROVAL_TONE;
   }
   return null;
-}
-
-/**
- * The shared glyph a tone draws as (D12): failures (terminal or not) as
- * failed, a question as reply, an approval as approval, an unread completion
- * as unread. `null` for a tone the set has no shape for (a fork, a browser
- * hand-off, a resolved prompt), which keeps its own icon.
- */
-export function statusGlyphKindOfTone(
-  tone: IndicatorTone,
-): StatusGlyphKind | null {
-  switch (tone.testId) {
-    case "failure":
-      return "failed";
-    case "interview":
-      return "reply";
-    case "approval":
-      return "approval";
-    case "done":
-      return "unread";
-    default:
-      return null;
-  }
 }

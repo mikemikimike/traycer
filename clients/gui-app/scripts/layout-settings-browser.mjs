@@ -8,10 +8,19 @@
 // which mounts the REAL Settings ▸ Layout panel beside the live app column
 // (the real header with its tab strip and readings, the sample workspace's
 // rail, transcript, dock and composer, and the real status bar), and checks
-// four things jsdom cannot decide:
+// things jsdom cannot decide:
 //
-//   1. Tabs: the bar is pinned to the top of the pane while the pane scrolls,
-//      and each tab shows its own group and no other.
+//   1. Areas (H2): the page is Settings ▸ Providers' master-detail - a rail
+//      of areas beside the picked one. Each area shows its own group and no
+//      other; the rail and the area's header stay put while its body scrolls;
+//      a newly picked area starts at its top; the arrow keys walk the rail; a
+//      changed area carries a dot its own Reset clears; a search result and
+//      the editor door's deep link each pick their row's area and land on the
+//      row; and nothing overflows the header or the card at either width.
+//      Below `md` the area select - and Providers' provider select, the same
+//      component - is operated for real; a short desktop pane scrolls its
+//      rail; a confirmed area Reset leaves focus in the area; and a setup
+//      guide's focus return lands on the area control the width draws.
 //   2. Disclosures: every row that draws a chevron opens something with
 //      content, and every row that opens nothing draws no chevron.
 //   3. Every setting does something: each option of each segmented control,
@@ -22,10 +31,11 @@
 //   4. G7: the resource monitor and the agent rows' readings are two
 //      switches, and each changes only its own surface.
 //
-// `--out DIR` writes a screenshot per tab and per G7 step into DIR.
+// `--out DIR` writes a screenshot per area and per G7 step into DIR.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { createServer as createTcpServer } from "node:net";
 import path from "node:path";
@@ -152,6 +162,49 @@ const CONTROLS = `(() => {
 
 const STORED = "JSON.stringify(window.__layoutCanvasProbe.snapshot())";
 
+/** An area's scroll box and its place against the rail and its own header. */
+const AREA_GEOMETRY = `(() => {
+  const pane = document.querySelector('[data-fixture-settings-pane]');
+  const panel = pane.querySelector('[role="tabpanel"]:not([hidden])');
+  const body = panel.querySelector('[data-layout-area-body]');
+  const rail = pane.querySelector('[aria-label="Layout areas"]');
+  return {
+    pane: pane.scrollTop,
+    body: body.scrollTop,
+    overflows: body.scrollHeight > body.clientHeight + 1,
+    railTop: rail.getBoundingClientRect().top,
+    headerTop: panel.getBoundingClientRect().top,
+    bodyTop: body.getBoundingClientRect().top,
+  };
+})()`;
+
+/** The page's area list (H2): a vertical tab list in the pane's rail. */
+const AREA_TAB =
+  '[data-fixture-settings-pane] [aria-label="Layout areas"] [role="tab"]';
+/** An area's name as the rail draws it, without the changed dot's words. */
+const AREA_NAME =
+  "((node) => node.querySelector('.truncate').textContent.trim())";
+
+/** The page alone in the pane, as `checkPanelFit` and the H2 fixes load it. */
+const PAGE_QUERY = "settings=1&pane=full&account=1&hosts=1&readings=both";
+
+/**
+ * No select list open or still animating out: until its exit animation ends
+ * the list's layer stays mounted, holding the page's pointer events and the
+ * top of the Escape stack.
+ */
+const SELECT_CLOSED = `document.querySelector('[role="listbox"]') === null && document.querySelector('[data-radix-popper-content-wrapper]') === null`;
+
+/** A select's trigger, by the name the page gives it. */
+const SELECT_TRIGGER = (label) =>
+  `document.querySelector('[data-fixture-settings-pane] [role="combobox"][aria-label="${label}"]')`;
+
+/** The comparison widths (H2): a desktop pane, and one below `md`. */
+const SHOT_SIZES = [
+  ["normal", { width: 900, height: 760 }],
+  ["narrow", { width: 600, height: 760 }],
+];
+
 /**
  * The header's geometry: every visible control outside it, the tab strip's
  * width, and each reading shown whole or cut - cut meaning outside its line,
@@ -198,11 +251,12 @@ const HEADER_FIT_PROBE = `(() => {
 })()`;
 
 /**
- * `LAYOUT_SETTINGS_ONLY=header,tabswitch,choose,sweep,g7` runs only the named
+ * `LAYOUT_SETTINGS_ONLY=tabs,fit,short,narrow,header,tabswitch,choose,sweep,g7,shots` runs only the named
  * checks - for a mutation run, where the full sweep is minutes of waiting on a
  * check that is not the one being proved.
  */
 const ONLY = process.env.LAYOUT_SETTINGS_ONLY?.split(",") ?? null;
+// `shots` is evidence, not a check: only when asked for by name.
 const runs = (check) => ONLY === null || ONLY.includes(check);
 
 const args = process.argv.slice(2);
@@ -226,7 +280,7 @@ const pageExceptions = [];
 try {
   if (outDir !== null) await mkdir(outDir, { recursive: true });
   const origin = `http://127.0.0.1:${vitePort}`;
-  viteProcess = spawnVite(vitePort);
+  viteProcess = await spawnVite(vitePort);
   let viteError = "";
   viteProcess.stderr.setEncoding("utf8");
   viteProcess.stderr.on("data", (chunk) => {
@@ -264,12 +318,9 @@ try {
   await client.send("Runtime.enable");
   await client.send("Page.enable");
   await client.send("Log.enable");
-  // No HMR: the tree is shared with other agents, and their edits would
-  // reload the page under the sweep. The page keeps what it loaded.
-  await client.send("Network.enable");
-  await client.send("Network.setBlockedURLs", {
-    urls: [`ws://127.0.0.1:${vitePort}/*`],
-  });
+  // The HMR socket stays open: with file watching off (`spawnVite`) it carries
+  // only the dependency optimizer's own reloads, which the warm-up boot below
+  // waits out.
   await client.send("Emulation.setDeviceMetricsOverride", {
     ...VIEWPORT,
     deviceScaleFactor: 1,
@@ -279,14 +330,37 @@ try {
   // Which operations changed the app, across both windows: a sidebar-side
   // pick changes the task window and not the sample one, and a setting passes
   // when it changes the product ANYWHERE.
+  // A cold dependency cache: the first boot discovers the page's deps, and
+  // the optimizer may reload it once while it settles. Boot it, wait that out,
+  // and only then start the checks.
+  await loadFixture(
+    client,
+    `${origin}${FIXTURE_PATH}?${VARIANTS[0].query}`,
+    "[data-fixture-settings-pane] [role=tablist]",
+  );
+  await delay(3_000);
+  if (ONLY?.includes("shots")) await captureComparison(client, origin);
+  if (runs("fit")) await checkPanelFit(client, origin);
+  if (runs("short")) await checkShortPane(client, origin);
+  if (runs("narrow")) await checkNarrowSelectors(client, origin);
   const effects = new Map();
+  const PAGE_ONLY = ["shots", "fit", "short", "narrow"];
   for (const variant of VARIANTS) {
-    await loadFixture(client, `${origin}${FIXTURE_PATH}?${variant.query}`);
+    if (ONLY !== null && ONLY.every((check) => PAGE_ONLY.includes(check)))
+      break;
+    await loadFixture(
+      client,
+      `${origin}${FIXTURE_PATH}?${variant.query}`,
+      "[data-fixture-settings-pane] [role=tablist]",
+    );
     await settle(client);
     await checkErrors(client, variant.key);
     if (variant.key === "sample") {
       if (runs("tabs")) {
-        await checkTabs(client);
+        await checkAreas(client);
+        await checkKeyboard(client);
+        await checkChangedDot(client);
+        await checkLanding(client);
         await checkDisclosures(client);
       }
       if (runs("choose")) await checkChooseSeedsSelection(client);
@@ -362,7 +436,7 @@ try {
  * the load (a 504 "Outdated Optimize Dep"): another driver's `--force` server
  * rewrites the shared cache, and the page it half-loaded never recovers.
  */
-async function loadFixture(client, url) {
+async function loadFixture(client, url, readySelector) {
   for (let attempt = 1; ; attempt += 1) {
     pageExceptions.length = 0;
     await navigate(client, url);
@@ -370,7 +444,7 @@ async function loadFixture(client, url) {
       await waitFor(
         client,
         "the fixture probe",
-        "window.__layoutCanvasProbe?.ready === true && document.querySelector('[data-fixture-settings-pane] [role=tablist]') !== null",
+        `window.__layoutCanvasProbe?.ready === true && document.querySelector(${JSON.stringify(readySelector)}) !== null`,
       );
       return;
     } catch (error) {
@@ -387,8 +461,12 @@ async function loadFixture(client, url) {
 
 // --- checks -----------------------------------------------------------------
 
-/** Each tab shows its own group and no other, under a bar pinned to the pane. */
-async function checkTabs(client) {
+/**
+ * Each area shows its own group and no other; the rail and the picked area's
+ * header stay put while its body scrolls; and a newly picked area starts at
+ * its top.
+ */
+async function checkAreas(client) {
   const allIds = TABS.flatMap((tab) => tab.testIds);
   for (const tab of TABS) {
     await clickTab(client, tab.label);
@@ -402,48 +480,517 @@ async function checkTabs(client) {
     const expected = [...tab.testIds].sort();
     if (JSON.stringify([...shown].sort()) !== JSON.stringify(expected)) {
       failures.push(
-        `tab ${tab.label} shows ${JSON.stringify(shown)}, expected ${JSON.stringify(expected)}`,
+        `area ${tab.label} shows ${JSON.stringify(shown)}, expected ${JSON.stringify(expected)}`,
       );
     }
-    await screenshotPane(client, `tab-${slug(tab.label)}`);
+    await screenshotPane(client, `area-${slug(tab.label)}`);
   }
-  // Pinned: scrolled to the bottom of the longest tab, the bar's top is the
-  // pane's top.
+  // Pinned: the longest area scrolled to its end moves its body and nothing
+  // else - not the rail, not its header, not the settings pane.
   await clickTab(client, "Status bar");
   await openAllDisclosures(client);
-  const pinned = await evaluate(
-    client,
-    `(() => {
-       const pane = document.querySelector('[data-fixture-settings-pane]');
-       pane.scrollTop = pane.scrollHeight;
-       const band = pane.querySelector('[data-testid="layout-tab-band"]');
-       return {
-         scrolled: pane.scrollTop,
-         delta: Math.abs(band.getBoundingClientRect().top - pane.getBoundingClientRect().top),
-       };
-     })()`,
-  );
-  await settle(client);
-  if (pinned.scrolled === 0 || pinned.delta > 1) {
-    failures.push(`tab bar not pinned: ${JSON.stringify(pinned)}`);
-  }
-  await screenshotPane(client, "tab-bar-pinned");
-  // A tab switch from a scrolled pane starts the new tab at its top.
-  await clickTab(client, "Chat");
-  const top = await evaluate(
-    client,
-    `(() => {
-       const pane = document.querySelector('[data-fixture-settings-pane]');
-       const band = pane.querySelector('[data-testid="layout-tab-band"]');
-       const panel = pane.querySelector('[role="tabpanel"]:not([hidden])');
-       return panel.getBoundingClientRect().top - band.getBoundingClientRect().bottom;
-     })()`,
-  );
-  if (top < 0) failures.push(`Chat opened scrolled into its body (${top}px)`);
+  const rest = await evaluate(client, AREA_GEOMETRY);
   await evaluate(
     client,
-    `document.querySelector('[data-fixture-settings-pane]').scrollTop = 0`,
+    `(() => { const body = ${PANEL}.querySelector('[data-layout-area-body]'); body.scrollTop = body.scrollHeight; })()`,
   );
+  await settle(client);
+  const scrolled = await evaluate(client, AREA_GEOMETRY);
+  if (!rest.overflows)
+    failures.push(
+      "Status bar's body does not overflow, so pinning proves nothing",
+    );
+  if (
+    scrolled.body === 0 ||
+    scrolled.pane !== 0 ||
+    Math.abs(scrolled.railTop - rest.railTop) > 1 ||
+    Math.abs(scrolled.headerTop - rest.headerTop) > 1
+  ) {
+    failures.push(
+      `area body scroll moved more than the body: ${JSON.stringify({ rest, scrolled })}`,
+    );
+  }
+  await screenshotPane(client, "area-body-scrolled");
+  // A newly picked area starts at its top, and so does the one left scrolled
+  // when it is picked again.
+  for (const label of ["Chat", "Status bar"]) {
+    await clickTab(client, label);
+    const top = await evaluate(client, AREA_GEOMETRY);
+    if (top.body !== 0)
+      failures.push(`${label} opened scrolled into its body (${top.body}px)`);
+  }
+}
+
+/**
+ * The rail is a vertical tab list: ArrowDown and ArrowUp walk it, End and Home
+ * jump to its ends, and each step picks the area it lands on.
+ */
+async function checkKeyboard(client) {
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  await clickTab(client, "Presets");
+  await evaluate(
+    client,
+    `document.querySelector(${JSON.stringify(AREA_TAB)} + '[aria-selected="true"]').focus()`,
+  );
+  const expectations = [
+    ["ArrowDown", "Tabs"],
+    ["ArrowDown", "Sidebar"],
+    ["End", "Status bar"],
+    ["ArrowUp", "Composer"],
+    ["Home", "Presets"],
+  ];
+  for (const [name, label] of expectations) {
+    await press(client, name);
+    await settle(client);
+    const state = await evaluate(
+      client,
+      `(() => {
+         const focused = document.activeElement;
+         const panel = ${PANEL};
+         return {
+           focused: focused?.matches(${JSON.stringify(AREA_TAB)}) ? ${AREA_NAME}(focused) : null,
+           selected: [...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].filter((tab) => tab.getAttribute('aria-selected') === 'true').map(${AREA_NAME}),
+           panel: panel?.getAttribute('aria-label') ?? null,
+         };
+       })()`,
+    );
+    if (
+      state.focused !== label ||
+      JSON.stringify(state.selected) !== JSON.stringify([label]) ||
+      state.panel !== label
+    ) {
+      failures.push(
+        `keyboard: ${name} should pick ${label}, got ${JSON.stringify(state)}`,
+      );
+    }
+  }
+}
+
+/**
+ * A changed area carries the dot from the edit that changed it, and its own
+ * Reset - confirmed, as "Reset everything" is - clears it and nothing else.
+ */
+async function checkChangedDot(client) {
+  const dots = () =>
+    evaluate(
+      client,
+      `[...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].filter((tab) => tab.querySelector('[data-testid="area-changed-dot"]') !== null).map(${AREA_NAME})`,
+    );
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  await settle(client);
+  const before = await dots();
+  if (before.includes("Chat"))
+    failures.push(`changed dot: Chat is marked before any edit`);
+  await resetTo(client, "Chat", []);
+  if (
+    (await operateAndWait(client, "minimap Minimap display: Hidden")) !== true
+  )
+    failures.push("changed dot: hiding the minimap stored nothing");
+  const after = await dots();
+  if (!after.includes("Chat"))
+    failures.push(
+      `changed dot: Chat is not marked after an edit (${JSON.stringify(after)})`,
+    );
+  await screenshotPane(client, "changed-dot-chat");
+  await resetAreaByKeyboard(client, "Chat", "changed-dot-chat-confirm");
+  const cleared = await dots();
+  if (cleared.includes("Chat"))
+    failures.push("changed dot: Chat is still marked after its Reset");
+  if (JSON.stringify(cleared) !== JSON.stringify(before))
+    failures.push(
+      `changed dot: Chat's Reset changed other areas: ${JSON.stringify(before)} -> ${JSON.stringify(cleared)}`,
+    );
+  const minimap = await evaluate(
+    client,
+    "window.__layoutCanvasProbe.snapshot().overrides.minimap ?? null",
+  );
+  if (minimap !== null)
+    failures.push(`changed dot: Chat's Reset left ${JSON.stringify(minimap)}`);
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+}
+
+/**
+ * A Settings search result and the editor door's deep link each pick the
+ * area their row lives in, from another one, and land on the row: visible in
+ * the area's body and marked.
+ */
+async function checkLanding(client) {
+  const cases = [
+    [
+      "search",
+      "revealSetting",
+      "layout-sidebar-side",
+      "Sidebar",
+      '[data-settings-anchor="layout-sidebar-side"]',
+    ],
+    ["search", "revealSetting", "layout-mobile-footer", null, null],
+    [
+      "deep link",
+      "landOnRegion",
+      "contextUsage",
+      "Chat",
+      '[data-sortable-id="contextUsage"]',
+    ],
+    [
+      "deep link",
+      "landOnRegion",
+      "resourceMonitor",
+      "Status bar",
+      '[data-sortable-id="resourceMonitor"]',
+    ],
+  ];
+  for (const [kind, method, target, area, selector] of cases) {
+    // The mobile footer row only exists in the installed mobile app.
+    if (area === null) continue;
+    await evaluate(client, "window.__layoutCanvasProbe.reset()");
+    await clickTab(client, "Presets");
+    await evaluate(
+      client,
+      `window.__layoutCanvasProbe.${method}(${JSON.stringify(target)})`,
+    );
+    const deadline = Date.now() + 3_000;
+    let state = null;
+    while (Date.now() < deadline) {
+      await settle(client);
+      state = await evaluate(
+        client,
+        `(() => {
+           const panel = ${PANEL};
+           const row = panel?.querySelector(${JSON.stringify(selector)});
+           const body = panel?.querySelector('[data-layout-area-body]');
+           if (!row || !body) return { area: panel?.getAttribute('aria-label') ?? null, found: false };
+           const r = row.getBoundingClientRect();
+           const b = body.getBoundingClientRect();
+           return {
+             area: panel.getAttribute('aria-label'),
+             found: true,
+             inView: r.top >= b.top - 1 && r.top < b.bottom,
+             flashed: row.hasAttribute('data-settings-anchor-flash') || row.querySelector('[data-settings-anchor-flash]') !== null || row.closest('[data-settings-anchor-flash]') !== null,
+           };
+         })()`,
+      );
+      if (state.area === area && state.found && state.inView && state.flashed)
+        break;
+    }
+    if (
+      !(state.area === area && state.found && state.inView && state.flashed)
+    ) {
+      failures.push(
+        `${kind} to ${target}: expected ${area} with the row in view and marked, got ${JSON.stringify(state)}`,
+      );
+    }
+    await screenshotPane(client, `landing-${slug(kind)}-${slug(target)}`);
+  }
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+}
+
+/**
+ * The page alone at a desktop width and a phone width: nothing in the header
+ * or the card is wider than its box, the header's action stays in the header,
+ * and the rail or the select - whichever the width draws - is the one shown.
+ */
+async function checkPanelFit(client, origin) {
+  for (const [size, viewport] of SHOT_SIZES) {
+    await setViewport(client, viewport);
+    await loadFixture(
+      client,
+      `${origin}${FIXTURE_PATH}?settings=1&pane=full&panel=layout&account=1&hosts=1&readings=both`,
+      "[data-settings-panel-shell]",
+    );
+    for (const area of ["Presets", "Status bar"]) {
+      if (size === "normal") await clickTab(client, area);
+      const m = await evaluate(
+        client,
+        `(() => {
+           const shell = document.querySelector('[data-settings-panel-shell]');
+           const header = shell.querySelector('header');
+           const card = shell.querySelector('[data-settings-panel-body]');
+           const h = header.getBoundingClientRect();
+           const c = card.getBoundingClientRect();
+           const visible = (node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== 'hidden';
+           const wide = (root) => [root, ...root.querySelectorAll('*')].filter(visible).filter((node) => {
+             const r = node.getBoundingClientRect();
+             return r.width > 0 && (r.right > c.right + 0.5 && root === card || r.right > h.right + 0.5 && root === header);
+           }).map((node) => (node.getAttribute('aria-label') ?? node.textContent).trim().slice(0, 50));
+           // A preset's miniature is a picture of the app, scaled down: its
+           // text is drawn to be seen as texture, not read.
+           const ellipsized = [...shell.querySelectorAll('*')].filter((node) => node.closest('[data-layout-depiction]') === null).filter(visible).filter((node) => getComputedStyle(node).textOverflow === 'ellipsis' && node.scrollWidth > node.clientWidth + 0.5).map((node) => node.textContent.trim().slice(0, 50));
+           return {
+             pageOverflow: document.scrollingElement.scrollWidth > window.innerWidth,
+             header: wide(header),
+             card: wide(card),
+             ellipsized,
+             rail: visible(shell.querySelector('nav[aria-label="Layout areas"]')),
+             select: [...shell.querySelectorAll('[aria-label="Layout area"]')].some(visible),
+           };
+         })()`,
+      );
+      const label = `panel fit (${size}, ${area})`;
+      if (m.pageOverflow) failures.push(`${label}: the page scrolls sideways`);
+      for (const node of m.header)
+        failures.push(`${label}: ${node} overflows the header`);
+      for (const node of m.card)
+        failures.push(`${label}: ${node} overflows the card`);
+      for (const text of m.ellipsized)
+        failures.push(`${label}: ${text} is ellipsized`);
+      const railExpected = size === "normal";
+      if (m.rail !== railExpected || m.select === railExpected)
+        failures.push(`${label}: rail ${m.rail}, select ${m.select}`);
+      if (size === "narrow") break;
+    }
+    await checkGuideFocus(client, size);
+  }
+  await setViewport(client, VIEWPORT);
+}
+
+/**
+ * A setup guide hands focus back to its step's target on Escape and on its
+ * dismiss button, through `focusGuideTarget`. The Layout page's target holds
+ * both the phone select and the desktop rail, so the control it lands on must
+ * be the one this width draws, and on a desktop the PICKED area's tab.
+ */
+async function checkGuideFocus(client, size) {
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  if (size === "narrow") {
+    await pickFromSelect(client, "Layout area", "Chat");
+  } else {
+    // Pressed twice: the second press moves no focus, which leaves Radix's
+    // tab list treating its next focus as a click's and keeping it itself.
+    const point = await evaluate(
+      client,
+      `(() => { const r = [...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].find((node) => ${AREA_NAME}(node) === 'Chat').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
+    );
+    await clickPoint(client, point);
+    await clickPoint(client, point);
+  }
+  await evaluate(client, "document.activeElement?.blur()");
+  const moved = await evaluate(
+    client,
+    `window.__layoutCanvasProbe.focusGuideTarget('[data-layout-areas]')`,
+  );
+  const focused = await evaluate(
+    client,
+    `(() => {
+       const node = document.activeElement;
+       if (node?.matches(${JSON.stringify(AREA_TAB)})) return 'tab ' + ${AREA_NAME}(node) + ' ' + node.getAttribute('aria-selected');
+       if (node?.matches('[role="combobox"]')) return 'select ' + node.getAttribute('aria-label');
+       return node?.tagName + ' role=' + node?.getAttribute('role') + ' label=' + node?.getAttribute('aria-label');
+     })()`,
+  );
+  const expected = size === "narrow" ? "select Layout area" : "tab Chat true";
+  if (!moved || focused !== expected)
+    failures.push(
+      `guide focus (${size}): expected ${expected}, got ${focused} (reported ${moved})`,
+    );
+}
+
+/**
+ * The desktop Settings modal in a wide, short window (review H2 #2): the rail
+ * is taller than the card leaves it, so it scrolls, and every area can be
+ * wheeled or scrolled into view and picked with the pointer. Its rows keep
+ * their height rather than squeezing to fit.
+ */
+async function checkShortPane(client, origin) {
+  await setViewport(client, { width: 1440, height: 450 });
+  await loadFixture(
+    client,
+    `${origin}${FIXTURE_PATH}?${PAGE_QUERY}&panel=layout`,
+    "[data-settings-panel-shell]",
+  );
+  // The modal's pane is 80vh less the frame's title bar (about 45px); the
+  // fixture's pane fills the window, so it is cut to that.
+  await evaluate(
+    client,
+    "document.querySelector('[data-fixture-settings-pane]').style.height = 'calc(80vh - 45px)'",
+  );
+  await settle(client);
+  const RAIL = `document.querySelector('[data-fixture-settings-pane] [role="tablist"][aria-label="Layout areas"]')`;
+  const shape = await evaluate(
+    client,
+    `(() => {
+       const rail = ${RAIL};
+       const heights = [...rail.querySelectorAll('[role="tab"]')].map((tab) => Math.round(tab.getBoundingClientRect().height));
+       return { room: rail.parentElement.clientHeight, content: rail.scrollHeight, heights };
+     })()`,
+  );
+  if (shape.content <= shape.room)
+    failures.push(
+      `short pane: the rail fits (${shape.content} in ${shape.room}), so this case proves nothing`,
+    );
+  if (new Set(shape.heights).size !== 1 || shape.heights[0] < 28)
+    failures.push(
+      `short pane: the rows are squeezed: ${JSON.stringify(shape.heights)}`,
+    );
+
+  // A wheel over the rail brings the last area into view.
+  const center = await evaluate(
+    client,
+    `(() => { const r = ${RAIL}.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
+  );
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...center,
+    deltaX: 0,
+    deltaY: 600,
+  });
+  await settle(client);
+  const INSIDE = `((tab) => {
+    const card = document.querySelector('[data-settings-panel-body]').getBoundingClientRect();
+    const rail = ${RAIL}.getBoundingClientRect();
+    const r = tab.getBoundingClientRect();
+    const within = (box) => r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[role="tab"]');
+    return within(card) && within(rail) && hit === tab;
+  })`;
+  const lastShown = await evaluate(
+    client,
+    `${INSIDE}([...${RAIL}.querySelectorAll('[role="tab"]')].at(-1))`,
+  );
+  if (!lastShown)
+    failures.push(
+      "short pane: a wheel over the rail does not bring Status bar into view",
+    );
+
+  for (const { label } of TABS) {
+    const point = await evaluate(
+      client,
+      `(() => {
+         const tab = [...${RAIL}.querySelectorAll('[role="tab"]')].find((node) => ${AREA_NAME}(node) === ${JSON.stringify(label)});
+         tab.scrollIntoView({ block: 'nearest' });
+         if (!${INSIDE}(tab)) return null;
+         const r = tab.getBoundingClientRect();
+         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+       })()`,
+    );
+    if (point === null) {
+      failures.push(`short pane: ${label} cannot be scrolled into view`);
+      continue;
+    }
+    await clickPoint(client, point);
+    const panel = await evaluate(
+      client,
+      `${PANEL}?.getAttribute('aria-label') ?? null`,
+    );
+    if (panel !== label)
+      failures.push(`short pane: clicking ${label} shows ${panel}`);
+  }
+  await screenshotPage(client, "short-pane-status-bar");
+  await setViewport(client, VIEWPORT);
+}
+
+/**
+ * Below `md` the rail is a select (review H2 #4), operated as a person
+ * would: opened, an item picked. On Layout the pick shows its area, and a
+ * changed area says so in the trigger and in its option, before its Reset and
+ * not after. On Providers the same component picks the provider it names.
+ */
+async function checkNarrowSelectors(client, origin) {
+  const [, narrow] = SHOT_SIZES.find(([size]) => size === "narrow");
+  await setViewport(client, narrow);
+  await loadFixture(
+    client,
+    `${origin}${FIXTURE_PATH}?${PAGE_QUERY}&panel=layout`,
+    "[data-settings-panel-shell]",
+  );
+  await evaluate(client, "window.__layoutCanvasProbe.reset()");
+  const changedOptions = async () => {
+    await openSelect(client, "Layout area");
+    const names = await evaluate(
+      client,
+      `[...document.querySelectorAll('[role="listbox"] [role="option"]')].filter((node) => node.textContent.includes(', changed') && node.querySelector('[data-testid="area-changed-dot"]') !== null).map((node) => node.querySelector('.truncate').textContent.trim())`,
+    );
+    await screenshotPage(client, `narrow-select-open-${names.length}`);
+    await closeSelect(client);
+    return names;
+  };
+  const baseline = await changedOptions();
+  if (baseline.includes("Chat"))
+    failures.push("narrow select: Chat is marked before any edit");
+  const read = () =>
+    evaluate(
+      client,
+      `(() => {
+         const trigger = ${SELECT_TRIGGER("Layout area")};
+         return {
+           label: trigger?.querySelector('.truncate')?.textContent.trim() ?? null,
+           dot: trigger?.querySelector('[data-testid="area-changed-dot"]') !== null,
+           said: trigger?.textContent.includes(', changed') ?? false,
+           panel: ${PANEL}?.getAttribute('aria-label') ?? null,
+         };
+       })()`,
+    );
+  const expect = (label, want, got) => {
+    if (JSON.stringify(got) !== JSON.stringify(want))
+      failures.push(
+        `narrow select, ${label}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`,
+      );
+  };
+  await pickFromSelect(client, "Layout area", "Chat");
+  expect(
+    "picked Chat",
+    { label: "Chat", dot: false, said: false, panel: "Chat" },
+    await read(),
+  );
+  if (
+    (await operateAndWait(client, "minimap Minimap display: Hidden")) !== true
+  )
+    failures.push("narrow select: hiding the minimap stored nothing");
+  expect(
+    "Chat changed",
+    { label: "Chat", dot: true, said: true, panel: "Chat" },
+    await read(),
+  );
+  // The open list says which areas changed, in words as well as the dot.
+  expect(
+    "changed options",
+    [...baseline, "Chat"].sort(),
+    (await changedOptions()).sort(),
+  );
+  await resetAreaByKeyboard(client, "Chat", "narrow-reset-chat-confirm");
+  expect(
+    "after Reset Chat",
+    { label: "Chat", dot: false, said: false, panel: "Chat" },
+    await read(),
+  );
+  expect("options after Reset Chat", baseline, await changedOptions());
+
+  await loadFixture(
+    client,
+    `${origin}${FIXTURE_PATH}?${PAGE_QUERY}&panel=providers`,
+    "[data-settings-panel-shell]",
+  );
+  await waitFor(
+    client,
+    "the provider select",
+    `${SELECT_TRIGGER("Provider")} !== null`,
+  );
+  const current = await evaluate(
+    client,
+    `${SELECT_TRIGGER("Provider")}.querySelector('.truncate').textContent.trim()`,
+  );
+  await openSelect(client, "Provider");
+  const next = await evaluate(
+    client,
+    `[...document.querySelectorAll('[role="listbox"] [role="option"] .truncate')].map((node) => node.textContent.trim()).find((name) => name !== ${JSON.stringify(current)}) ?? null`,
+  );
+  await closeSelect(client);
+  if (next === null) {
+    failures.push("narrow select, Providers: only one provider to pick");
+  } else {
+    await pickFromSelect(client, "Provider", next);
+    const shown = await evaluate(
+      client,
+      `(() => {
+         const visible = (node) => node.getClientRects().length > 0;
+         return {
+           label: ${SELECT_TRIGGER("Provider")}.querySelector('.truncate').textContent.trim(),
+           title: [...document.querySelectorAll('[data-settings-panel-body] div.font-medium.text-foreground')].filter(visible).map((node) => node.textContent.trim())[0] ?? null,
+         };
+       })()`,
+    );
+    expect(`Providers picked ${next}`, { label: next, title: next }, shown);
+  }
+  await setViewport(client, VIEWPORT);
 }
 
 /**
@@ -603,42 +1150,31 @@ async function checkChooseSeedsSelection(client) {
 }
 
 /**
- * A new tab starts at its top even when the one left was scrolled far down:
- * at a short window, Status bar scrolled to its end, then Sidebar, whose
- * body must begin right under the pinned tab bar.
+ * A newly picked area starts at its top even when the one left was scrolled
+ * far down: at a short window, Status bar scrolled to its end, then Sidebar,
+ * whose body must begin at its top, right under its header.
  */
 async function checkTabSwitchScroll(client) {
   await setViewport(client, { width: 1200, height: 700 });
   await resetTo(client, "Status bar", []);
   await evaluate(
     client,
-    `(() => { const pane = document.querySelector('[data-fixture-settings-pane]'); pane.scrollTop = pane.scrollHeight; })()`,
+    `(() => { const body = ${PANEL}.querySelector('[data-layout-area-body]'); body.scrollTop = body.scrollHeight; })()`,
   );
   await settle(client);
+  const left = await evaluate(client, AREA_GEOMETRY);
   await clickTab(client, "Sidebar");
   await settle(client);
-  const m = await evaluate(
-    client,
-    `(() => {
-       const pane = document.querySelector('[data-fixture-settings-pane]');
-       const band = pane.querySelector('[data-testid="layout-tab-band"]');
-       const panel = pane.querySelector('[role="tabpanel"]:not([hidden])');
-       return {
-         overflows: pane.scrollHeight > pane.clientHeight + 1,
-         scrollTop: pane.scrollTop,
-         gap: panel.getBoundingClientRect().top - band.getBoundingClientRect().bottom,
-       };
-     })()`,
-  );
-  if (!m.overflows)
+  const m = await evaluate(client, AREA_GEOMETRY);
+  if (!left.overflows || left.body === 0)
     failures.push(
-      `tab switch: Sidebar does not overflow at 1200x700, so the case proves nothing`,
+      `area switch: Status bar does not scroll at 1200x700, so the case proves nothing`,
     );
-  if (Math.abs(m.gap) > 1)
+  if (m.body !== 0 || m.pane !== 0)
     failures.push(
-      `tab switch: Sidebar's body starts ${m.gap.toFixed(1)}px from the tab bar (scrollTop ${m.scrollTop})`,
+      `area switch: Sidebar opened scrolled (body ${m.body}, pane ${m.pane})`,
     );
-  await screenshotPane(client, "tab-switch-short-window");
+  await screenshotPane(client, "area-switch-short-window");
   await setViewport(client, VIEWPORT);
   await evaluate(client, "window.__layoutCanvasProbe.reset()");
 }
@@ -805,8 +1341,8 @@ async function clickTab(client, label) {
   const found = await evaluate(
     client,
     `(() => {
-       const tab = [...document.querySelectorAll('[data-fixture-settings-pane] [role="tab"]')]
-         .find((node) => node.textContent.trim() === ${JSON.stringify(label)});
+       const tab = [...document.querySelectorAll(${JSON.stringify(AREA_TAB)})]
+         .find((node) => ${AREA_NAME}(node) === ${JSON.stringify(label)});
        if (tab === undefined) return false;
        tab.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
        tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
@@ -817,10 +1353,136 @@ async function clickTab(client, label) {
   await settle(client);
   const selected = await evaluate(
     client,
-    `[...document.querySelectorAll('[data-fixture-settings-pane] [role="tab"]')].find((node) => node.textContent.trim() === ${JSON.stringify(label)})?.getAttribute('aria-selected')`,
+    `[...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].find((node) => ${AREA_NAME}(node) === ${JSON.stringify(label)})?.getAttribute('aria-selected')`,
   );
   if (found === false || selected !== "true")
     failures.push(`tab ${label} could not be selected`);
+}
+
+/**
+ * An area's Reset by keyboard (review H2 #1). Escape first, which must hand
+ * focus back to Reset; then the confirm's Reset, after which the button is
+ * gone with the dot and focus must sit in the area's panel, not the page.
+ */
+async function resetAreaByKeyboard(client, label, shot) {
+  const RESET = `${PANEL}?.querySelector('button[aria-label="Reset ${label}"]')`;
+  const openConfirm = async () => {
+    const focused = await evaluate(
+      client,
+      `(() => { const reset = ${RESET}; reset?.focus(); return reset != null && document.activeElement === reset; })()`,
+    );
+    if (!focused) return false;
+    await press(client, "Enter");
+    return poll(client, `document.querySelector('[role="dialog"]') !== null`);
+  };
+  if (!(await openConfirm())) {
+    failures.push(`reset ${label}: Enter on its Reset opens no confirm`);
+    return;
+  }
+  await press(client, "Escape");
+  if (!(await poll(client, `document.activeElement === ${RESET}`)))
+    failures.push(
+      `reset ${label}: cancelling does not return focus to Reset (${await describeFocus(client)})`,
+    );
+  if (!(await openConfirm())) {
+    failures.push(`reset ${label}: Reset does not open its confirm again`);
+    return;
+  }
+  await screenshotPage(client, shot);
+  await evaluate(
+    client,
+    `[...document.querySelectorAll('[role="dialog"] button')].find((node) => node.textContent.trim() === 'Reset')?.focus()`,
+  );
+  await press(client, "Enter");
+  const landed = await poll(
+    client,
+    `document.querySelector('[role="dialog"]') === null && ${RESET} == null && document.activeElement === ${PANEL} && ${PANEL}.getAttribute('aria-label') === ${JSON.stringify(label)}`,
+  );
+  if (!landed)
+    failures.push(
+      `reset ${label}: after confirming, not in the ${label} panel (${await describeFocus(client)})`,
+    );
+}
+
+/** Where focus is, and whether a dialog or a list is open, for a failure. */
+function describeFocus(client) {
+  return evaluate(
+    client,
+    `(() => {
+       const node = document.activeElement;
+       const name = node?.getAttribute('aria-label') ?? node?.textContent.trim().slice(0, 30) ?? 'none';
+       return 'focus ' + node?.tagName + ' "' + name + '" role=' + node?.getAttribute('role') + ', dialog ' + (document.querySelector('[role="dialog"]') !== null) + ', listbox ' + (document.querySelector('[role="listbox"]') !== null);
+     })()`,
+  );
+}
+
+/** Opens the select named `label` with the pointer, as a person would. */
+async function openSelect(client, label) {
+  const point = await evaluate(
+    client,
+    `(() => { const r = ${SELECT_TRIGGER(label)}.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
+  );
+  await clickPoint(client, point);
+  if (
+    !(await poll(client, `document.querySelector('[role="listbox"]') !== null`))
+  )
+    failures.push(`select ${label} does not open`);
+}
+
+/** Opens the select named `label` and picks its option `option`, by pointer. */
+async function pickFromSelect(client, label, option) {
+  await openSelect(client, label);
+  const point = await evaluate(
+    client,
+    `(() => {
+       const node = [...document.querySelectorAll('[role="listbox"] [role="option"]')].find((candidate) => candidate.querySelector('.truncate')?.textContent.trim() === ${JSON.stringify(option)});
+       if (node === undefined) return null;
+       const r = node.getBoundingClientRect();
+       return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+     })()`,
+  );
+  if (point === null) {
+    failures.push(`select ${label} has no option ${option}`);
+    return;
+  }
+  await clickPoint(client, point);
+  if (!(await poll(client, SELECT_CLOSED)))
+    failures.push(`select ${label}: picking ${option} leaves it open`);
+  await settle(client);
+}
+
+/** Closes the open select list with Escape. */
+async function closeSelect(client) {
+  await press(client, "Escape");
+  if (!(await poll(client, SELECT_CLOSED)))
+    failures.push("Escape leaves a select list open");
+}
+
+/** A real left click at a point: move, press, release. */
+async function clickPoint(client, point) {
+  await client.send("Input.dispatchMouseEvent", {
+    type: "mouseMoved",
+    ...point,
+  });
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await client.send("Input.dispatchMouseEvent", {
+      type,
+      ...point,
+      button: "left",
+      clickCount: 1,
+    });
+  }
+  await settle(client);
+}
+
+/** Polls `expression` for up to three seconds; whether it came true. */
+async function poll(client, expression) {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    if (await evaluate(client, expression)) return true;
+    await delay(50);
+  }
+  return false;
 }
 
 async function openAllDisclosures(client) {
@@ -857,6 +1519,30 @@ async function operate(client, name) {
   );
   if (kind === "ArrowDown" || kind === "ArrowUp") await key(client, kind, 1);
   return kind !== null;
+}
+
+/** One key, unmodified, to whatever holds focus. */
+async function press(client, name) {
+  const codes = {
+    ArrowDown: 40,
+    ArrowUp: 38,
+    Home: 36,
+    End: 35,
+    Enter: 13,
+    Escape: 27,
+  };
+  // Enter activates a button through its character, which only `keyDown`
+  // with text carries.
+  const down =
+    name === "Enter" ? { type: "keyDown", text: "\r" } : { type: "rawKeyDown" };
+  for (const event of [down, { type: "keyUp" }]) {
+    await client.send("Input.dispatchKeyEvent", {
+      ...event,
+      key: name,
+      code: name,
+      windowsVirtualKeyCode: codes[name],
+    });
+  }
 }
 
 /** Alt+<key>: the sortable list's nudge, which commits at once (L-31). */
@@ -912,6 +1598,44 @@ async function stableSignature(client) {
 
 // --- evidence ---------------------------------------------------------------
 
+/**
+ * `LAYOUT_SETTINGS_ONLY=shots`: Settings ▸ Layout and Settings ▸ Providers,
+ * each alone in the pane at the same width, in both themes (H2).
+ */
+async function captureComparison(client, origin) {
+  for (const [size, viewport] of SHOT_SIZES) {
+    await setViewport(client, viewport);
+    for (const panel of ["layout", "providers"]) {
+      await loadFixture(
+        client,
+        `${origin}${FIXTURE_PATH}?settings=1&pane=full&panel=${panel}&account=1&hosts=1&readings=both`,
+        "[data-settings-panel-shell]",
+      );
+      for (const theme of ["light", "dark"]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+        );
+        await delay(600);
+        await screenshotPage(client, `${panel}-${size}-${theme}`);
+        // Every area once, at the width a desktop draws the rail.
+        if (panel !== "layout" || size !== "normal") continue;
+        const areas = await evaluate(
+          client,
+          `[...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].map(${AREA_NAME})`,
+        );
+        for (const area of areas.slice(1)) {
+          await clickTab(client, area);
+          await delay(200);
+          await screenshotPage(client, `layout-area-${slug(area)}-${theme}`);
+        }
+        await clickTab(client, areas[0]);
+      }
+    }
+  }
+  await setViewport(client, VIEWPORT);
+}
+
 async function screenshotPane(client, name) {
   if (outDir === null) return;
   const clip = await evaluate(
@@ -946,7 +1670,24 @@ function slug(label) {
 
 // --- plumbing ---------------------------------------------------------------
 
-function spawnVite(port) {
+/**
+ * This run's own Vite: file watching off and its own dependency cache, through
+ * a wrapper config around the shared one. The tree is shared with other agents,
+ * so a watcher reloads the page on a peer's save, and a shared `.vite` cache is
+ * rewritten under the run by a peer driver's `--force`, after which the page's
+ * next lazy import answers 504 and Vite reloads it mid-check.
+ */
+async function spawnVite(port) {
+  const configDir = await mkdtemp(path.join(tmpdir(), "layout-settings-vite-"));
+  const configPath = path.join(configDir, "vite.isolated.config.mjs");
+  await writeFile(
+    configPath,
+    [
+      `import base from ${JSON.stringify(path.join(projectRoot, "vitest.config.ts"))};`,
+      `export default { ...base, cacheDir: ${JSON.stringify(path.join(configDir, "cache"))}, server: { ...base.server, watch: null } };`,
+      "",
+    ].join("\n"),
+  );
   const requireFromHere = createRequire(import.meta.url);
   const viteManifestPath = requireFromHere.resolve("vite/package.json");
   const viteManifest = requireFromHere(viteManifestPath);
@@ -954,12 +1695,12 @@ function spawnVite(port) {
     path.dirname(viteManifestPath),
     viteManifest.bin.vite,
   );
-  return spawn(
+  const child = spawn(
     "node",
     [
       viteEntry,
       "--config",
-      path.join(projectRoot, "vitest.config.ts"),
+      configPath,
       "--host",
       "127.0.0.1",
       "--port",
@@ -968,6 +1709,10 @@ function spawnVite(port) {
     ],
     { cwd: projectRoot, stdio: ["ignore", "ignore", "pipe"] },
   );
+  child.once("exit", () => {
+    void rm(configDir, { recursive: true, force: true });
+  });
+  return child;
 }
 
 async function navigate(client, url) {

@@ -303,7 +303,6 @@ import { useNewConversationModalOpenStore } from "@/stores/epics/new-conversatio
 import { useExistingChatSessionHandle } from "@/lib/registries/chat-session-registry";
 import { chatActivityIndicator } from "@/components/epic-canvas/renderers/chat-tile-session-state";
 import type { IndicatorRunningKind } from "@/components/notifications/notification-indicator-icon";
-import { statusGlyphKindOfTone } from "@/components/notifications/notification-indicator-tones";
 import { useEpicStore } from "@/hooks/use-epic-store";
 import type { OpenEpicState } from "@/stores/epics/open-epic/store";
 import { useHostClientForHostId } from "@/hooks/host/use-host-client-for-host-id";
@@ -3593,7 +3592,7 @@ function chatSelfStatusRank(
   if (selfTier === "turn") return CHAT_STATUS_RANKS.running;
   if (selfTier === "background") return CHAT_STATUS_RANKS.background;
   if (state.unreadDone) return CHAT_STATUS_RANKS.done;
-  if (terminalFailureTone(state) !== null) {
+  if (terminalFailureTone(state, "gui") !== null) {
     return CHAT_STATUS_RANKS["terminal-failure"];
   }
   return 0;
@@ -3660,23 +3659,25 @@ function NestedChatStatusIcon(props: {
 }
 
 /**
- * A status kind's glyph, from the shared glyph set (D12) like the row's own:
- * the collapsed parent's rollup here, and each row of the strip's live agents
+ * A status kind's glyph, the shared `StatusGlyph` like the row's own: the
+ * collapsed parent's rollup here, and each row of the strip's live agents
  * list (D9).
  */
 export function NestedChatStatusGlyph(props: {
   readonly kind: ChatDescendantStatusKind;
 }): ReactNode {
-  if (props.kind === "running" || props.kind === "background") {
-    return <StatusGlyph kind={props.kind} className="size-3.5" label={null} />;
-  }
-  const tone = CHAT_DESCENDANT_STATUS_TONES[props.kind];
-  const glyph = statusGlyphKindOfTone(tone);
-  if (glyph !== null) {
-    return <StatusGlyph kind={glyph} className="size-3.5" label={null} />;
-  }
-  const Icon = tone.Icon;
-  return <Icon aria-hidden className={cn("size-3.5", tone.className)} />;
+  return (
+    <StatusGlyph
+      status={
+        props.kind === "running" || props.kind === "background"
+          ? props.kind
+          : CHAT_DESCENDANT_STATUS_TONES[props.kind]
+      }
+      className="size-3.5"
+      testId={undefined}
+      label={null}
+    />
+  );
 }
 
 /**
@@ -3722,7 +3723,7 @@ function chatOwnStatusKind(
   if (running === "turn") return "working";
   if (running === "background") return "background";
   if (state.unreadDone) return "done";
-  if (terminalFailureTone(state) !== null) return "terminal-failure";
+  if (terminalFailureTone(state, "gui") !== null) return "terminal-failure";
   if (isReadOnly) return "read-only";
   return "idle";
 }

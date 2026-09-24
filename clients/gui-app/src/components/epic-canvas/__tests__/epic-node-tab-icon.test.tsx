@@ -67,11 +67,11 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
     const indicator = screen.getByRole("status", {
       name: "Task needs attention",
     });
-    // A terminal failure draws the same shared "failed" glyph as any other
-    // failure now (D12) - there is no more surface-specific lucide icon to
-    // tell a TUI failure apart from a chat one.
-    const glyph = indicator.querySelector('[data-status-glyph="failed"]');
+    // A terminal failure on the TUI surface draws its own TerminalSquare
+    // glyph, distinct from a chat failure's message-square-x.
+    const glyph = indicator.querySelector('[data-status-glyph="failure"]');
     expect(glyph?.getAttribute("class")).toContain("text-destructive");
+    expect(glyph?.getAttribute("class")).toContain("lucide-square-terminal");
 
     act(() => {
       useAppLocalNotificationsStore
@@ -118,10 +118,10 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
       name: "Task completed",
     });
     const glyph = completedIndicator.querySelector(
-      '[data-status-glyph="unread"]',
+      '[data-status-glyph="done"]',
     );
     expect(glyph).not.toBeNull();
-    expect(glyph?.getAttribute("class")).toContain("text-info");
+    expect(glyph?.getAttribute("class")).toContain("text-success-foreground");
   });
 
   it("shows the shared failed glyph for a failed TUI agent", () => {
@@ -153,8 +153,11 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
     const failure = screen.getByRole("status", {
       name: "Task needs attention",
     });
+    // A non-terminal failure stays the shared chat glyph regardless of
+    // surface - only `terminalFailureTone` (a resolved terminal outcome)
+    // swaps in the TUI-specific icon.
     expect(
-      failure.querySelector('[data-status-glyph="failed"]'),
+      failure.querySelector('[data-status-glyph="failure"]'),
     ).not.toBeNull();
   });
 });

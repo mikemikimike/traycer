@@ -2589,7 +2589,7 @@ function statusGlyphKind(testId: string): string | null {
   return (
     screen
       .getByTestId(testId)
-      .querySelector("[data-status-glyph]")
+      .closest("[data-status-glyph]")
       ?.getAttribute("data-status-glyph") ?? null
   );
 }
@@ -3056,7 +3056,7 @@ describe("chat row leading status icon", () => {
     // The tree draws every state through the shared D12 glyph vocabulary,
     // not a surface-specific tone icon.
     expect(statusGlyphKind("chat-sidebar-spinner-done-chat-child")).toBe(
-      "unread",
+      "done",
     );
 
     // Background activity outranks unread-done.
@@ -3096,7 +3096,7 @@ describe("chat row leading status icon", () => {
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["interview"]);
     expect(statusGlyphKind("chat-sidebar-spinner-interview-chat-child")).toBe(
-      "reply",
+      "interview",
     );
 
     // A failure outranks everything, including a pending interview.
@@ -3111,7 +3111,7 @@ describe("chat row leading status icon", () => {
     view.rerender(<EpicLeftPanelHost epicId={EPIC_ID} tabId={TAB_ID} />);
     expect(leadingStatusKinds("chat-child")).toEqual(["failure"]);
     expect(statusGlyphKind("chat-sidebar-spinner-failure-chat-child")).toBe(
-      "failed",
+      "failure",
     );
 
     // Through all of it the trailing slot keeps the relative time: the icon

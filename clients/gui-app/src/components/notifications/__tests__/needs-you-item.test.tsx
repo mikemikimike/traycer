@@ -51,6 +51,32 @@ describe("<NeedsYouItem />", () => {
     expect(button.textContent).toContain("Question waiting");
   });
 
+  it("gives approval and reply distinct icons, not colour alone", () => {
+    const { rerender } = render(
+      <NeedsYouItem
+        item={buildItem({ reason: "approval" })}
+        onActivate={() => undefined}
+      />,
+    );
+    expect(
+      screen
+        .getByTestId("needs-you-item")
+        .querySelector('[data-status-glyph="approval"]'),
+    ).not.toBeNull();
+
+    rerender(
+      <NeedsYouItem
+        item={buildItem({ reason: "reply" })}
+        onActivate={() => undefined}
+      />,
+    );
+    expect(
+      screen
+        .getByTestId("needs-you-item")
+        .querySelector('[data-status-glyph="interview"]'),
+    ).not.toBeNull();
+  });
+
   it("falls back to the task title alone when there is no agent title", () => {
     render(
       <NeedsYouItem

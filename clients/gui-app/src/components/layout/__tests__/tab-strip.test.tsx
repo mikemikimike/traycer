@@ -1673,13 +1673,11 @@ describe("<TabStrip />", () => {
     const indicator = await screen.findByTestId(
       `header-tab-failure-${EPIC_A.id}`,
     );
-    // Same shared glyph vocabulary the side strip and Agents tree draw (F3,
-    // D12), not a surface-specific lucide tone icon.
     expect(
       indicator
-        .querySelector("[data-status-glyph]")
+        .closest("[data-status-glyph]")
         ?.getAttribute("data-status-glyph"),
-    ).toBe("failed");
+    ).toBe("failure");
     expect(screen.queryByTestId(`header-tab-done-${EPIC_A.id}`)).toBeNull();
   });
 
@@ -1725,11 +1723,9 @@ describe("<TabStrip />", () => {
     const backgroundIcon = await screen.findByTestId(
       `header-tab-background-activity-${EPIC_A.id}`,
     );
-    // Same shared glyph vocabulary the side strip and Agents tree draw (F3,
-    // D12), not a surface-specific lucide tone icon.
     expect(
       backgroundIcon
-        .querySelector("[data-status-glyph]")
+        .closest("[data-status-glyph]")
         ?.getAttribute("data-status-glyph"),
     ).toBe("background");
     expect(screen.queryByTestId(`header-tab-activity-${EPIC_A.id}`)).toBeNull();

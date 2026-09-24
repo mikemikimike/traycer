@@ -1,12 +1,23 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import {
+  LayoutTemplate,
+  MessageSquare,
+  PanelBottom,
+  PanelLeft,
+  PanelTop,
+  SquarePen,
+  type LucideIcon,
+} from "lucide-react";
+import { Tabs as TabsPrimitive } from "radix-ui";
 import { focusSortableRowGrab } from "@/components/layout-editor/inspector/first-row-focus";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import {
@@ -20,24 +31,32 @@ import {
 } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { layoutRegionRowSelector } from "@/components/layout-editor/layout-search.definitions";
-import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   SURFACE_GROUPS,
   type SurfaceGroupId,
 } from "@/components/layout-editor/regions/region-grammar";
+import {
+  resetSurface,
+  surfaceChanged,
+} from "@/components/layout-editor/regions/surface-diff";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
+import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import { SettingsGroup } from "@/components/settings/settings-group";
+import {
+  SettingsDetailHeader,
+  SettingsMasterDetail,
+  SettingsMasterSelect,
+} from "@/components/settings/settings-master-detail";
+import { settingsRailRowClassName } from "@/components/settings/settings-rail-row";
 import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
 import { SettingsRow } from "@/components/settings/settings-row";
-import {
-  PANEL_PANE_SELECTOR,
-  scrollPaneToCenter,
-} from "@/components/settings/use-settings-anchor-reveal";
+import { scrollPaneToCenter } from "@/components/settings/use-settings-anchor-reveal";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { TaskTabLayoutRow } from "@/components/settings/panels/layout/tabs-layout-group";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
 import { Switch } from "@/components/ui/switch";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useLayoutEditorFitsWindow } from "@/lib/layout/editor-width";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
@@ -49,42 +68,42 @@ import {
   subscribePendingLayoutRegion,
   takePendingLayoutRegion,
 } from "@/lib/settings-navigation";
-import { cn } from "@/lib/utils";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
+  getLayoutSnapshot,
   useLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
-import { useSettingsDensity } from "@/providers/settings-density-context";
 
 /**
- * The full-width host for the layout form (L-03), one setting group at a time
- * (G6).
+ * The full-width host for the layout form (L-03): one area at a time, in
+ * Settings ▸ Providers' master-detail layout (H2).
  *
  * Not a second form: every list, control and write below belongs to
  * `components/layout-editor/inspector/`, and the inspector draws the same ones.
- * What differs is COMPOSITION. The dock filters by selection; this page shows
- * one group per tab - Presets, then one tab per SURFACE - behind a tab bar
- * pinned to the top of the pane, the provider settings' pattern. Inside a
- * surface's tab the region is a ROW, and each order group the surface owns is
- * one list (L-92, L-95).
+ * What differs is COMPOSITION. The dock filters by selection; this page lists
+ * the areas - Presets, then one per SURFACE - in a rail, and draws the one
+ * picked beside it. Inside a surface's area the region is a ROW, and each order
+ * group the surface owns is one list (L-92, L-95).
  *
- * It replaced a column of six cards and a sticky finder between them: with one
- * group on screen the finder had nothing left to narrow, and a filter that hid
- * rows in tabs the reader cannot see would be the opposite of the tab bar's
- * promise. Settings search still lands on every row here, and switches to its
- * tab first (`useLayoutAnchorTab`, `useLayoutRegionLanding`).
+ * The areas are a vertical tab list, so the arrow keys walk them. Every area
+ * stays mounted, hidden while another is picked (`forceMount` makes Radix drop
+ * its own `hidden`, so it is passed here): Radix mounts a picked area's
+ * children a commit AFTER the pick (Presence flips in a layout effect), so a
+ * region landing or a search reveal that switches area would look for its row
+ * in an empty pane and have nothing to re-run it. Settings search lands on
+ * every row here, and picks its area first (`useLayoutAnchorArea`,
+ * `useLayoutRegionLanding`).
  */
 export function LayoutSettingsPanel(): ReactNode {
-  const compact = useSettingsDensity() === "compact";
+  const isMobile = useIsMobileViewport();
   const snapshot = useLayoutSnapshot();
-  const [tab, setTab] = useState<LayoutTabId>("presets");
+  const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
+  const [area, setArea] = useState<LayoutAreaId>("presets");
   const [openRows, setOpenRows] = useState<ReadonlyArray<string>>([]);
-  const paneRef = useRef<HTMLDivElement | null>(null);
-  const bandRef = useRef<HTMLDivElement | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const tabsRef = useRef<HTMLDivElement | null>(null);
-  useStickyScrollEdge(sentinelRef, bandRef);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const toggleRow = useCallback((rowId: string): void => {
     setOpenRows((current) =>
@@ -94,263 +113,382 @@ export function LayoutSettingsPanel(): ReactNode {
     );
   }, []);
 
-  useLayoutAnchorTab(setTab);
-  useLayoutRegionLanding({ paneRef, tab, setTab, openRows, setOpenRows });
+  useLayoutAnchorArea(setArea);
+  useLayoutRegionLanding({
+    paneRef: rootRef,
+    tab: area,
+    setTab: setArea,
+    openRows,
+    setOpenRows,
+  });
+  useAreaStartsAtTop(rootRef, area);
 
-  const gap = compact ? "gap-3.5" : "gap-5";
+  const changed = (id: LayoutAreaId): boolean =>
+    id === "presets"
+      ? snapshot.basePreset !== "default"
+      : surfaceChanged(snapshot, id) ||
+        (id === "topBar" && taskTabLayout !== DEFAULT_TASK_TAB_LAYOUT);
 
   return (
     <SettingsPanelShell
       title="Layout"
-      description={LAYOUT.page.description}
-      bodyClassName="overflow-visible rounded-none border-none bg-transparent"
+      // Desktop only, as on Providers: on a phone the description's own width
+      // wraps the action onto a row of its own (see the Providers panel).
+      description={isMobile ? undefined : LAYOUT.page.description}
+      headerAction={<OpenEditorAction />}
+      // Desktop only, as on Providers: the card fills the settings pane and the
+      // picked area's body owns the scroll. A phone has one scroll container
+      // already, so there the card is sized by its contents.
+      fillHeight={!isMobile}
     >
       {/* Every row below reads its density and its "where does a deeper level
         open" from here, once, rather than from a prop threaded through each
         list (P-4, L-89). */}
       <LayoutFormHostContext value="page">
-        <div ref={paneRef} className={cn("flex flex-col", gap)}>
-          <SettingsGroup
-            group={LAYOUT.definitions.customize}
-            showTitle={false}
-            tone="default"
-            dataTestId="layout-customize-group"
-            fill={false}
-          >
-            <CustomizeLayoutRow />
-          </SettingsGroup>
-          <Tabs
-            ref={tabsRef}
-            value={tab}
-            onValueChange={(value) => {
-              const next = LAYOUT_TABS.find((entry) => entry.id === value);
-              if (next === undefined) return;
-              // A new tab starts at its top, as a provider's does: if the bar
-              // is pinned, bring the pane back to where the tab's body begins.
-              revealTabTop(tabsRef.current);
-              setTab(next.id);
-            }}
-            className="gap-0"
-          >
-            {/* Sticky to the top of the settings pane, in the pane's own
-              colour (L-154): a band of it is invisible at rest, and its scroll
-              edge lights only while rows are running under it. */}
-            <div
-              ref={bandRef}
-              data-testid="layout-tab-band"
-              className="sticky top-0 z-20 bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-background after:to-background/0 after:opacity-0 after:transition-opacity after:duration-150 after:ease-out data-stuck:after:opacity-100"
-            >
-              {/* The pin detector: a CHILD of the band, absolutely placed on
-                its top edge, so it takes no slot in the column (L-154). */}
-              <div
-                ref={sentinelRef}
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 bottom-full h-px"
+        <TabsPrimitive.Root
+          ref={rootRef}
+          value={area}
+          onValueChange={(value) => {
+            const next = LAYOUT_AREAS.find((entry) => entry.id === value);
+            if (next !== undefined) setArea(next.id);
+          }}
+          orientation="vertical"
+          // The setup guide's "Every piece has a row" target: the areas and
+          // the picked one together, on a phone as on a desktop.
+          data-layout-areas
+          className="flex flex-col md:h-full md:min-h-0"
+        >
+          <SettingsMasterDetail
+            railLabel="Layout areas"
+            mobileSelect={
+              <SettingsMasterSelect
+                label="Layout area"
+                value={area}
+                options={LAYOUT_AREAS.map((entry) => ({
+                  value: entry.id,
+                  label: entry.label,
+                  icon: <entry.icon className="size-4 shrink-0" />,
+                  trailing: changed(entry.id) ? <ChangedDot /> : null,
+                }))}
+                onSelect={setArea}
               />
-              <TabsList
-                variant="line"
-                aria-label="Layout settings"
-                className="h-auto w-full max-w-full shrink-0 flex-wrap justify-start"
+            }
+            rail={
+              <TabsPrimitive.List
+                aria-label="Layout areas"
+                // Shrinks and scrolls in a short pane, as Providers' list does,
+                // so the last areas are never clipped by the card.
+                className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
               >
-                {LAYOUT_TABS.map((entry) => (
-                  <TabsTrigger
+                {LAYOUT_AREAS.map((entry) => (
+                  <TabsPrimitive.Trigger
                     key={entry.id}
                     value={entry.id}
-                    className="flex-none"
+                    className={settingsRailRowClassName(area === entry.id)}
                   >
-                    {entry.label}
-                  </TabsTrigger>
+                    <entry.icon className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {entry.label}
+                    </span>
+                    {changed(entry.id) ? <ChangedDot /> : null}
+                  </TabsPrimitive.Trigger>
                 ))}
-              </TabsList>
-            </div>
-            {/* Every tab stays mounted, hidden while inactive (`forceMount`
-              makes Radix drop its own `hidden`, so it is passed here). Radix mounts an
-              active tab's children a commit AFTER the tab changes (Presence
-              flips in a layout effect), so a region landing or a search
-              reveal that switches tab would look for its row in an empty
-              panel and have nothing to re-run it. Mounted, the row exists in
-              the same commit that shows it - as it did on the one long page. */}
-            <TabsContent
-              value="presets"
-              forceMount
-              hidden={tab !== "presets"}
-              className={cn("mt-0 flex flex-col pt-4", gap)}
-            >
-              <SettingsGroup
-                group={LAYOUT.definitions.presets}
-                showTitle={false}
-                tone="default"
-                dataTestId="layout-presets-group"
-                fill={false}
-              >
-                {/* No canvas here, so a preset hover previews nothing (L-43). */}
-                <PresetsBlock onPreviewPreset={noop} />
-              </SettingsGroup>
-              <ResetEverythingCard snapshot={snapshot} />
-            </TabsContent>
-            {SURFACE_GROUPS.map((group) => (
-              <TabsContent
-                key={group.id}
-                value={group.id}
+              </TabsPrimitive.List>
+            }
+          >
+            {LAYOUT_AREAS.map((entry) => (
+              <TabsPrimitive.Content
+                key={entry.id}
+                value={entry.id}
                 forceMount
-                hidden={tab !== group.id}
-                className="mt-0 pt-4"
+                hidden={area !== entry.id}
+                // Named by its area rather than by the rail's trigger, which a
+                // phone does not draw.
+                aria-labelledby={undefined}
+                aria-label={entry.label}
+                className="flex flex-1 flex-col outline-none md:min-h-0"
               >
-                <SettingsGroup
-                  group={LAYOUT.definitions[group.id]}
-                  showTitle={false}
-                  tone="default"
-                  dataTestId={`layout-surface-${group.id}`}
-                  fill={false}
+                <div className="border-b border-border/60 pb-4">
+                  <SettingsDetailHeader
+                    title={entry.label}
+                    badge={null}
+                    description={entry.description}
+                    footer={null}
+                    action={
+                      // Presets carries its own two resets in its body, "Reset
+                      // to <preset>" and "Reset everything"; a third here
+                      // would be a choice with no answer.
+                      entry.id !== "presets" && changed(entry.id) ? (
+                        <ResetAreaButton
+                          surface={entry.id}
+                          label={entry.label}
+                        />
+                      ) : null
+                    }
+                  />
+                </div>
+                {/* From `md` up the scroll owner, so the rail and the area's
+                  header stay put: nothing passes UNDER them, so neither needs
+                  an opaque fill over the card's translucent surface. */}
+                <div
+                  data-layout-area-body
+                  className="-mx-5 flex flex-col gap-4 px-5 pt-4 pb-5 md:min-h-0 md:flex-1 md:overflow-y-auto"
                 >
-                  <SurfaceSection
-                    surface={group.id}
+                  <LayoutAreaBody
+                    area={entry.id}
                     snapshot={snapshot}
-                    filter=""
                     openRows={openRows}
                     onToggleRow={toggleRow}
-                    surfaceRows={surfaceRowsFor(group.id)}
                   />
-                </SettingsGroup>
-              </TabsContent>
+                </div>
+              </TabsPrimitive.Content>
             ))}
-          </Tabs>
-        </div>
+          </SettingsMasterDetail>
+        </TabsPrimitive.Root>
       </LayoutFormHostContext>
     </SettingsPanelShell>
   );
 }
 
-type LayoutTabId = "presets" | SurfaceGroupId;
+/** One area's rows: the presets and the floor, or one surface's card. */
+function LayoutAreaBody(props: {
+  readonly area: LayoutAreaId;
+  readonly snapshot: LayoutSnapshot;
+  readonly openRows: ReadonlyArray<string>;
+  readonly onToggleRow: (rowId: string) => void;
+}): ReactNode {
+  const { area, snapshot } = props;
+  if (area === "presets") {
+    return (
+      <>
+        <SettingsGroup
+          group={LAYOUT.definitions.presets}
+          showTitle={false}
+          tone="default"
+          dataTestId="layout-presets-group"
+          fill={false}
+        >
+          {/* No canvas here, so a preset hover previews nothing (L-43). */}
+          <PresetsBlock onPreviewPreset={noop} />
+        </SettingsGroup>
+        <ResetEverythingCard snapshot={snapshot} />
+      </>
+    );
+  }
+  return (
+    <SettingsGroup
+      group={LAYOUT.definitions[area]}
+      showTitle={false}
+      tone="default"
+      dataTestId={`layout-surface-${area}`}
+      fill={false}
+    >
+      <SurfaceSection
+        surface={area}
+        snapshot={snapshot}
+        filter=""
+        openRows={props.openRows}
+        onToggleRow={props.onToggleRow}
+        surfaceRows={surfaceRowsFor(area)}
+      />
+    </SettingsGroup>
+  );
+}
+
+type LayoutAreaId = "presets" | SurfaceGroupId;
 
 /** Presets first - the coarsest control here - then the surfaces in reading order. */
-const LAYOUT_TABS: ReadonlyArray<{
-  readonly id: LayoutTabId;
+const LAYOUT_AREAS: ReadonlyArray<{
+  readonly id: LayoutAreaId;
   readonly label: string;
+  readonly icon: LucideIcon;
+  readonly description: string;
 }> = [
-  { id: "presets", label: LAYOUT.definitions.presets.label },
-  ...SURFACE_GROUPS,
+  {
+    id: "presets",
+    label: LAYOUT.definitions.presets.label,
+    icon: LayoutTemplate,
+    description: "How much the app shows at once, in one pick.",
+  },
+  {
+    id: "topBar",
+    label: LAYOUT.definitions.topBar.label,
+    icon: PanelTop,
+    description: "Where task tabs sit, how they fit, and the Home tab.",
+  },
+  {
+    id: "sidebar",
+    label: LAYOUT.definitions.sidebar.label,
+    icon: PanelLeft,
+    description: "Which side the sidebar takes, and the panels on its rail.",
+  },
+  {
+    id: "chat",
+    label: LAYOUT.definitions.chat.label,
+    icon: MessageSquare,
+    description: "What sits beside a conversation as you read it.",
+  },
+  {
+    id: "composer",
+    label: LAYOUT.definitions.composer.label,
+    icon: SquarePen,
+    description: "What sits above the message box, and on its toolbar.",
+  },
+  {
+    id: "statusBar",
+    label: LAYOUT.definitions.statusBar.label,
+    icon: PanelBottom,
+    description: "Usage limits and resources, and which bar draws each.",
+  },
 ];
 
-/** Which tab holds each settings-definition group; anything else is above the bar. */
-const TAB_FOR_GROUP: Readonly<Record<string, LayoutTabId>> = {
+/** The shipped task tab layout, which a changed Tabs area is measured against. */
+const DEFAULT_TASK_TAB_LAYOUT = "scroll";
+
+/** Which area holds each settings-definition group; anything else is on no area. */
+const AREA_FOR_GROUP: Readonly<Record<string, LayoutAreaId>> = {
   presets: "presets",
   resetEverything: "presets",
   ...Object.fromEntries(SURFACE_GROUPS.map((group) => [group.id, group.id])),
 };
 
 /**
- * The tab a settings-search anchor lives in, or `null` for one that is not
- * behind the tab bar (the Customize card) or not this page's.
+ * The area a settings-search anchor lives in, or `null` for one that is on no
+ * area (the header's editor button) or not this page's.
  */
-function layoutTabForAnchor(anchor: string): LayoutTabId | null {
+function layoutAreaForAnchor(anchor: string): LayoutAreaId | null {
   const definition = Object.values(LAYOUT.definitions).find(
     (entry) => entry.anchor === anchor,
   );
   if (definition === undefined) return null;
   const groupKey =
     definition.kind === "row" ? definition.group : definition.key;
-  return groupKey === null ? null : (TAB_FOR_GROUP[groupKey] ?? null);
+  return groupKey === null ? null : (AREA_FOR_GROUP[groupKey] ?? null);
 }
 
 /**
- * A Settings search result for a row on this page, taken to its tab.
+ * A Settings search result for a row on this page, taken to its area.
  *
  * The reveal watcher (`useSettingsAnchorReveal`) finds the anchor and flashes
- * it, and polls until it can - but only the active tab's body is mounted, so
- * the row does not exist until this has switched to it.
+ * it, and polls until it can - but only the picked area is visible, so the row
+ * cannot be seen until this has picked its area.
  */
-function useLayoutAnchorTab(setTab: (tab: LayoutTabId) => void): void {
+function useLayoutAnchorArea(setArea: (area: LayoutAreaId) => void): void {
   const pendingReveal = useSettingsSearchStore((state) => state.pendingReveal);
   useEffect(() => {
     if (pendingReveal === null || pendingReveal.section !== "layout") return;
     if (pendingReveal.anchor === null) return;
-    const target = layoutTabForAnchor(pendingReveal.anchor);
-    if (target !== null) setTab(target);
-  }, [pendingReveal, setTab]);
+    const target = layoutAreaForAnchor(pendingReveal.anchor);
+    if (target !== null) setArea(target);
+  }, [pendingReveal, setArea]);
 }
 
 /**
- * Scrolls the pane back to where the tab bar sits unpinned, so the next tab's
- * body begins right under it. Measured on the tabs' own box, which stays in
- * the flow: anything inside the sticky bar moves with the bar and reads "at
- * the top" however far the pane has scrolled (G6 review A).
+ * A newly picked area starts at its top, as a newly picked provider does.
+ *
+ * Each area keeps its own scroll box while hidden, so without this one left
+ * scrolled far down would come back there. A layout effect, so it runs before
+ * a region landing or a search reveal scrolls the same box to a row.
  */
-function revealTabTop(tabs: HTMLDivElement | null): void {
-  const pane = tabs?.closest(PANEL_PANE_SELECTOR);
-  if (tabs === null || pane === null || pane === undefined) return;
-  const delta =
-    tabs.getBoundingClientRect().top - pane.getBoundingClientRect().top;
-  if (delta < 0) pane.scrollTop += delta;
+function useAreaStartsAtTop(
+  root: { current: HTMLDivElement | null },
+  area: LayoutAreaId,
+): void {
+  useLayoutEffect(() => {
+    const body = root.current?.querySelector(
+      '[role="tabpanel"]:not([hidden]) [data-layout-area-body]',
+    );
+    if (body !== null && body !== undefined) body.scrollTop = 0;
+  }, [root, area]);
 }
 
-/** A surface tab's own rows, which belong to no region (D7, L-51). */
+/** The same dot a changed region row draws, said in words for a screen reader. */
+function ChangedDot(): ReactNode {
+  return (
+    <>
+      <span
+        aria-hidden
+        data-testid="area-changed-dot"
+        className="size-1.5 shrink-0 rounded-full bg-info"
+      />
+      <span className="sr-only">, changed</span>
+    </>
+  );
+}
+
+/**
+ * One area back to what shipped, confirmed first: like "Reset everything",
+ * this host has no Undo (L-108).
+ */
+function ResetAreaButton(props: {
+  readonly surface: SurfaceGroupId;
+  readonly label: string;
+}): ReactNode {
+  const { surface, label } = props;
+  const [confirming, setConfirming] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  // Set on confirm: the reset clears the area's changed flag, which unmounts
+  // this button - the dialog's opener - so its focus return has nowhere to go.
+  // The area's panel stays mounted and takes it instead. Cancel leaves it
+  // `null` and the opener, still there, gets focus back as usual.
+  const resetPanelRef = useRef<HTMLElement | null>(null);
+  return (
+    <>
+      <Button
+        ref={buttonRef}
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={`Reset ${label}`}
+        onClick={() => {
+          setConfirming(true);
+        }}
+      >
+        Reset
+      </Button>
+      <ConfirmDestructiveDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Reset ${label}?`}
+        description={`Every ${label} setting, and where each of its pieces sits, goes back to how the app shipped. The rest of the layout is left alone. This cannot be undone here.`}
+        cascadeSummary={null}
+        actionLabel="Reset"
+        isPending={false}
+        blockedReason={null}
+        onCloseAutoFocus={(event) => {
+          const panel = resetPanelRef.current;
+          if (panel === null) return;
+          resetPanelRef.current = null;
+          event.preventDefault();
+          panel.focus({ preventScroll: true });
+        }}
+        onConfirm={() => {
+          resetPanelRef.current =
+            buttonRef.current?.closest<HTMLElement>('[role="tabpanel"]') ??
+            null;
+          setConfirming(false);
+          if (surface === "topBar") {
+            useSettingsStore
+              .getState()
+              .setTaskTabLayout(DEFAULT_TASK_TAB_LAYOUT);
+          }
+          useLayoutEditorStore.getState().recordGesture(() => {
+            useLayoutStore
+              .getState()
+              .replaceAll(resetSurface(getLayoutSnapshot(), surface));
+          });
+        }}
+      />
+    </>
+  );
+}
+
+/** A surface area's own rows, which belong to no region (D7, L-51). */
 function surfaceRowsFor(surface: SurfaceGroupId): ReactNode | null {
   if (surface === "statusBar") return <StatusBarSurfaceRows />;
   if (surface === "topBar") return <TabsSurfaceRows />;
   if (surface === "sidebar") return <SidebarSurfaceRows />;
   return null;
-}
-
-/**
- * Lights the tab band's scroll edge only while page content is actually
- * running underneath it (L-154).
- *
- * A band painted in the page's own colour is invisible at rest, which is what
- * makes it stop reading as a stripe - and also why it has to say something the
- * moment it starts covering rows. A border or a shadow would say it always;
- * the fade says it exactly when it is true.
- *
- * Pinning is observed, not calculated. The band is pinned exactly when the
- * hairline welded to its top edge has left the pane, so one
- * `IntersectionObserver` rooted on the pane answers it - and answers it on
- * REFLOW as well as on scroll, which a scroll listener cannot. That case is
- * real here: the settings modal is sized off the window, so resizing the app
- * resizes the pane and rewraps the column above the band without moving
- * `scrollTop` at all. A listener would leave a lit fade hanging under an
- * unpinned field, or a pinned field bare, until the next wheel tick.
- *
- * It also reads no boxes, which is the second thing that used to be fragile
- * here: a hand-rolled comparison had to pick between the pane's border box and
- * the padding box that `sticky` actually pins to, and picking wrong meant an
- * edge that never lit at all with nothing red to say so. A pane inset can now
- * only move the crossover by that inset; it cannot invert the answer.
- *
- * The answer is written straight onto the node rather than through state,
- * because re-rendering a five-card page to set one attribute is a price an
- * edge treatment does not get to charge.
- */
-function useStickyScrollEdge(
-  sentinel: { current: HTMLDivElement | null },
-  band: { current: HTMLDivElement | null },
-): void {
-  useEffect(() => {
-    const mark = sentinel.current;
-    const node = band.current;
-    if (mark === null || node === null) return;
-    const pane = node.closest(PANEL_PANE_SELECTOR);
-    if (pane === null) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        // The newest record wins: a batch can carry several frames of a fast
-        // scroll, and only the last one describes where the band is now.
-        const latest = entries.at(-1);
-        if (latest === undefined) return;
-        node.toggleAttribute("data-stuck", !latest.isIntersecting);
-      },
-      { root: pane },
-    );
-    // The first delivery is the mount-time answer, so a panel that mounts into
-    // an already-scrolled pane - a search landing, or a promotion from the
-    // modal into a tab - arrives with its edge lit. The browser delivers it a
-    // frame after `observe`, so an already-pinned band paints one bare frame
-    // and then fades the edge in over 150ms, which reads as the transition
-    // doing its job rather than as a miss.
-    observer.observe(mark);
-    return () => {
-      observer.disconnect();
-    };
-  }, [sentinel, band]);
 }
 
 /**
@@ -383,50 +521,43 @@ function ResetEverythingCard(props: {
 
 /**
  * The way from this page into the canvas editor (5.1), and the only entry in
- * Settings.
+ * Settings: the page header's action, where Providers keeps its refresh (H2).
  *
  * It lives HERE rather than on Appearance because this page is the editor's own
  * other half: the same components, drawn full width, and the place the door
  * itself lands when the window is too narrow for a canvas (L-03, L-64).
  * Below that threshold the button is withheld rather than disabled - pressing
- * it would navigate to the page the user is already reading - and the row stays,
- * because it is still the thing these settings are, and it is the guide's final
- * coachmark target (L-50).
- *
- * The button says what pressing it DOES. The card used to say "Customize
- * layout" three times over - as the group, as the row and as the button - so
- * the one word that had room to be useful was spent repeating the two above it
- * (P-1).
+ * it would navigate to the page the user is already reading - and says so in
+ * its place, because it is still the guide's final coachmark target (L-50)
+ * and the search result "Customize layout" lands on it.
  */
-function CustomizeLayoutRow(): ReactNode {
+function OpenEditorAction(): ReactNode {
   const navigate = useNavigate();
   const fits = useLayoutEditorFitsWindow();
   return (
-    <SettingsRow
-      row={LAYOUT.definitions.customizeEntry}
-      control={
-        fits ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              openLayoutEditor({
-                source: "direct_ui",
-                entry: "pointer",
-                target: null,
-                navigate,
-              });
-            }}
-          >
-            Open the editor
-          </Button>
-        ) : (
-          <p className="text-ui-sm text-muted-foreground">
-            Needs a wider window
-          </p>
-        )
-      }
-    />
+    <div data-settings-anchor={LAYOUT.definitions.customizeEntry.anchor}>
+      {fits ? (
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            openLayoutEditor({
+              source: "direct_ui",
+              entry: "pointer",
+              target: null,
+              navigate,
+            });
+          }}
+        >
+          Open the editor
+        </Button>
+      ) : (
+        // The button's own height, so the line sits where the button would.
+        <p className="flex h-7 items-center text-ui-sm text-muted-foreground">
+          The editor needs a wider window
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -540,8 +671,8 @@ function RevertMobileFooter(): ReactNode {
  * passed in, and taking it is what ends it.
  *
  * **The request survives the renders that make the row exist** (5.9). Two
- * writes can be what puts the row on the page - switching to its surface's
- * tab (G6), and opening the row's own disclosure - and both of them re-render,
+ * writes can be what puts the row on the page - picking its surface's area
+ * (H2), and opening the row's own disclosure - and both of them re-render,
  * so the row does not exist until React has committed them.
  * The effect therefore makes those writes and RETURNS, leaving the request in
  * its slot; it runs again in the commit they produce, where the page is in the
@@ -554,8 +685,8 @@ function RevertMobileFooter(): ReactNode {
  */
 function useLayoutRegionLanding(input: {
   readonly paneRef: { current: HTMLDivElement | null };
-  readonly tab: LayoutTabId;
-  readonly setTab: (tab: LayoutTabId) => void;
+  readonly tab: LayoutAreaId;
+  readonly setTab: (tab: LayoutAreaId) => void;
   readonly openRows: ReadonlyArray<string>;
   readonly setOpenRows: (
     update: (current: ReadonlyArray<string>) => string[],

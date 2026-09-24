@@ -1396,14 +1396,25 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
 - `Layout` (`panels/layout-settings-panel.tsx`, `/settings/layout`, seventh and
   last in the Application group, leader digit 7) Where the app's own chrome
   SITS and how much of it shows.
-  - **The way into the editor (5.1)** is the card at the top of this page, and
-    it is the only entry in Settings: this page is the editor's other half, and
-    the place the door itself lands when the window is too narrow for a canvas
-    (L-64). Below that threshold the button is withheld rather than disabled -
-    pressing it would navigate to the page already on screen - and the row
-    stays, because it is the guide's final coachmark target (L-50). Everywhere
-    else the entries are the palette's "Customize layout", the five chrome
-    context menus and a Settings-search launch result.
+  - **The way into the editor (5.1)** is the page header's action, where
+    Providers keeps its refresh (H2), and it is the only entry in Settings:
+    this page is the editor's other half, and the place the door itself lands
+    when the window is too narrow for a canvas (L-64). Below that threshold the
+    button is withheld rather than disabled - pressing it would navigate to the
+    page already on screen - and a line says why in its place, because it is
+    the guide's final coachmark target (L-50). Everywhere else the entries are
+    the palette's "Customize layout", the five chrome context menus and a
+    Settings-search launch result.
+  - **Master-detail, the Providers pattern (H2).** The page draws its areas -
+    Presets, then one per SURFACE - in the same `SettingsMasterDetail` card
+    Providers uses (`settings-master-detail.tsx`): a rail of areas beside the
+    picked one from `md` up, a select above it below `md`. The rail is a
+    vertical Radix tab list, so the arrow keys walk it. Each area has a pinned
+    header (title, one line, and its own confirmed Reset while it differs from
+    what shipped, `regions/surface-diff.ts`) over a body that owns the scroll,
+    and a changed area carries the same blue dot a changed row does. Every
+    area stays mounted, hidden while another is picked, so a search result or
+    a region landing that picks an area finds its row in the same commit.
   - **One form, two hosts (L-03), and the page GROUPS (L-92, L-95).** The
     layout form is a set of components under
     `components/layout-editor/inspector/`, and the two hosts differ by
@@ -1411,7 +1422,7 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     SELECTION: one `RegionSection` for the selected region, with its order
     group's list drawn `selectedId={regionId}`. This page cannot filter,
     because nothing is selected, so it groups: one `SettingsGroup` per SURFACE
-    (Tabs · Sidebar · Chat · Composer · Status bar) whose body is a
+    area (Tabs · Sidebar · Chat · Composer · Status bar) whose body is a
     `SurfaceSection` - at most one picture BAND, the surface's own rows, and
     one `OrderGroupList` per order group it owns, drawn `selectedId={null}`.
     **A surface gets a picture only where the picture carries something the

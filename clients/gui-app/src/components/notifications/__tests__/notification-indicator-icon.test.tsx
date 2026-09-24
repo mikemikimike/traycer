@@ -24,12 +24,17 @@ const DEFAULT_STATE = {
 
 afterEach(cleanup);
 
-/** The glyph kind an indicator testid's shared `StatusGlyph` draws (D12). */
+/**
+ * The tone/status a testid's `StatusGlyph` draws. The testId sits on the
+ * glyph itself for a tone icon, and on the spinner nested inside the
+ * `data-status-glyph="running"` span for the running case - `closest` covers
+ * both, since it matches the element itself before climbing.
+ */
 function glyphKind(testId: string): string | null {
   return (
     screen
       .getByTestId(testId)
-      .querySelector("[data-status-glyph]")
+      .closest("[data-status-glyph]")
       ?.getAttribute("data-status-glyph") ?? null
   );
 }
@@ -47,12 +52,9 @@ describe("<NotificationIndicatorIcon />", () => {
       "turn",
     );
 
-    expect(glyphKind("indicator-failure-subject-1")).toBe("failed");
+    expect(glyphKind("indicator-failure-subject-1")).toBe("failure");
     expect(
-      screen
-        .getByTestId("indicator-failure-subject-1")
-        .querySelector("[data-status-glyph]")
-        ?.getAttribute("class"),
+      screen.getByTestId("indicator-failure-subject-1").getAttribute("class"),
     ).toContain("text-destructive");
     expect(anyTooltipHasText("Task needs attention")).toBe(true);
     expect(screen.queryByTestId("indicator-activity-subject-1")).toBeNull();
@@ -87,7 +89,7 @@ describe("<NotificationIndicatorIcon />", () => {
         "turn",
       ),
     );
-    expect(glyphKind("indicator-interview-subject-1")).toBe("reply");
+    expect(glyphKind("indicator-interview-subject-1")).toBe("interview");
 
     rerender(
       renderIconContent(
@@ -103,11 +105,8 @@ describe("<NotificationIndicatorIcon />", () => {
     );
     expect(glyphKind("indicator-approval-subject-1")).toBe("approval");
     expect(
-      screen
-        .getByTestId("indicator-approval-subject-1")
-        .querySelector("[data-status-glyph]")
-        ?.getAttribute("class"),
-    ).toContain("text-warning");
+      screen.getByTestId("indicator-approval-subject-1").getAttribute("class"),
+    ).toContain("text-warning-foreground");
 
     rerender(
       renderIconContent(
@@ -136,13 +135,10 @@ describe("<NotificationIndicatorIcon />", () => {
         false,
       ),
     );
-    expect(glyphKind("indicator-done-subject-1")).toBe("unread");
+    expect(glyphKind("indicator-done-subject-1")).toBe("done");
     expect(
-      screen
-        .getByTestId("indicator-done-subject-1")
-        .querySelector("[data-status-glyph]")
-        ?.getAttribute("class"),
-    ).toContain("text-info");
+      screen.getByTestId("indicator-done-subject-1").getAttribute("class"),
+    ).toContain("text-success-foreground");
 
     rerender(renderIconContent(DEFAULT_STATE, "turn"));
     expect(screen.getByTestId("indicator-activity-subject-1")).toBeDefined();
@@ -158,6 +154,7 @@ describe("<NotificationIndicatorIcon />", () => {
         style={undefined}
         runningTitle="Task activity in progress"
         defaultIcon={<span data-testid="default-icon" />}
+        agentSurface="gui"
       />,
     );
     expect(screen.getByTestId("default-icon")).toBeDefined();
@@ -192,7 +189,7 @@ describe("<NotificationIndicatorIcon />", () => {
       false,
     );
 
-    expect(glyphKind("indicator-done-subject-1")).toBe("unread");
+    expect(glyphKind("indicator-done-subject-1")).toBe("done");
     expect(screen.queryByTestId("indicator-failure-subject-1")).toBeNull();
   });
 
@@ -227,14 +224,13 @@ describe("<NotificationIndicatorIcon />", () => {
       false,
     );
 
-    expect(glyphKind("indicator-failure-subject-1")).toBe("failed");
+    expect(glyphKind("indicator-failure-subject-1")).toBe("failure");
     expect(screen.queryByTestId("indicator-done-subject-1")).toBeNull();
   });
 
-  // The GUI-vs-TUI split (a terminal-specific lucide icon on a TUI surface)
-  // was the "message" presentation's own distinction; the shared glyph set
-  // draws every failure as the same "failed" glyph regardless of surface
-  // (D12, see notification-indicator-icon-glyph.test.tsx).
+  // The GUI-vs-TUI split (a terminal-specific lucide icon on the TUI surface)
+  // is `terminalFailureTone`'s own distinction, exercised through the
+  // `agentSurface` prop - see notification-indicator-icon-glyph.test.tsx.
 
   it("renders the background tier as a muted waiting chat distinct from the turn spinner", () => {
     renderIcon(DEFAULT_STATE, "background");
@@ -247,21 +243,12 @@ describe("<NotificationIndicatorIcon />", () => {
     expect(
       screen.queryByRole("status", { name: "Task activity in progress" }),
     ).toBeNull();
-    const wrapper = screen.getByTestId(
-      "indicator-background-activity-subject-1",
-    );
-    const glyph = wrapper.querySelector("[data-status-glyph]");
-    if (glyph === null) throw new Error("expected a status glyph");
+    const glyph = screen.getByTestId("indicator-background-activity-subject-1");
     expect(glyph.tagName).toBe("svg");
     expect(glyph.getAttribute("data-status-glyph")).toBe("background");
-    // The dashed ring round a dot (status-glyph.tsx): the turn is over, work
-    // is still alive.
-    expect(
-      glyph.querySelector('circle[cx="8"][cy="8"][r="5.5"]'),
-    ).not.toBeNull();
-    expect(
-      glyph.querySelector('circle[cx="8"][cy="8"][r="1.6"]'),
-    ).not.toBeNull();
+    expect(glyph.getAttribute("class")).toContain(
+      "lucide-message-square-clock",
+    );
     expect(glyph.getAttribute("class")).toContain("size-3.5");
     expect(glyph.getAttribute("class")).toContain("text-muted-foreground");
   });
@@ -333,6 +320,7 @@ function renderIconContent(
       style={undefined}
       runningTitle="Task activity in progress"
       defaultIcon={<span data-testid="default-icon" />}
+      agentSurface="gui"
     />
   );
 }

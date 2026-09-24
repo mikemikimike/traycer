@@ -297,6 +297,23 @@ describe("<StripLiveAgentsPortal />", () => {
     expect(
       screen.getByTestId("strip-live-agent-chat-failed").dataset.liveKind,
     ).toBe("failure");
+    // The tone titles from the notification vocabulary, not the row's own
+    // wording - so the Activity list can never drift from the Agents tree.
+    expect(
+      screen
+        .getByTestId("strip-live-agent-chat-running")
+        .getAttribute("aria-label"),
+    ).toContain("Agent in progress");
+    expect(
+      screen
+        .getByTestId("strip-live-agent-chat-background")
+        .getAttribute("aria-label"),
+    ).toContain("Background activity — agent idle");
+    expect(
+      screen
+        .getByTestId("strip-live-agent-chat-failed")
+        .getAttribute("aria-label"),
+    ).toContain("Task needs attention");
   });
 
   it("renders nothing (not an empty list) when no agent is live", () => {

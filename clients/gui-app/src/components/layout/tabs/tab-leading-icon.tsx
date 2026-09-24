@@ -53,6 +53,7 @@ export function TabLeadingIcon(props: {
           style={undefined}
           runningTitle="Task activity in progress"
           defaultIcon={defaultIcon}
+          agentSurface="gui"
         />
       </span>
       {iconCharacters.length > 0 ? (

@@ -96,6 +96,7 @@ export function HistoryRowStatusIcon(props: {
           />
         )
       }
+      agentSurface="gui"
     />
   );
 }

@@ -53,7 +53,7 @@ const GLYPH_ICONS: Readonly<Record<ChatDockCompactChipGlyph, LucideIcon>> = {
   filesChanged: FileDiff,
   activeAgents: Bot,
   // The section's own mark, resting and working alike - the same
-  // chat-with-a-clock `BackgroundActivityGlyph` draws for background-only
+  // chat-with-a-clock `StatusGlyph` draws for background-only
   // activity elsewhere. Never a per-kind icon and never a pause: what the rows
   // are is the panel's to draw, and whether a shell is held is stated in this
   // chip's sentence.

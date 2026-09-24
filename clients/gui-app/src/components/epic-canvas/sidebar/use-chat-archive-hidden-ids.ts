@@ -79,7 +79,7 @@ export function chatDescendantKind(
   // newer live turn/Done is a stronger statement of current state. Once this
   // chat is rolled into a collapsed parent it is a distinct failed child and
   // must remain attention-priority over a sibling's activity or completion.
-  if (terminalFailureTone(indicatorState) !== null) return "failure";
+  if (terminalFailureTone(indicatorState, "gui") !== null) return "failure";
   if (tier !== undefined) return activityTierKind(tier);
   if (indicatorState.unreadDone) return "done";
   return null;

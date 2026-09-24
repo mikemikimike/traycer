@@ -108,10 +108,13 @@ const SETUP_GUIDES = {
       },
       {
         section: "layout",
-        selector: `[data-settings-anchor="${LAYOUT.definitions.sidebar.anchor}"]`,
+        // The areas and the picked one together rather than one area's card:
+        // only the picked area is on screen, and the list says where the
+        // rest live.
+        selector: "[data-layout-areas]",
         title: "Every piece has a row",
         content:
-          "One row per piece of chrome, grouped by where it sits: show it, hide it, or move it. Each sidebar row carries the button it moves.",
+          "Pick where it sits, then find one row per piece of chrome there: show it, hide it, or move it. Each sidebar row carries the button it moves.",
       },
       // The guide ends by SHOWING the editor rather than entering it (L-50):
       // the chrome around Settings dims the way it does on the canvas, so the
@@ -122,7 +125,7 @@ const SETUP_GUIDES = {
         selector: `[data-settings-anchor="${LAYOUT.definitions.customizeEntry.anchor}"]`,
         title: "Or point at the chrome itself",
         content:
-          "The app dims around what you can change. Customize layout opens a sample workspace, so your own task is left alone.",
+          "The app dims around what you can change. The editor opens on a sample workspace, so your own task is left alone.",
         litChrome: true,
       },
     ],

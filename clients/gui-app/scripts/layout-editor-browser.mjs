@@ -1821,7 +1821,7 @@ async function checkRail(client, variant, base) {
       continue;
     }
     // Ink: pixels in the chip's middle that differ from the fill beside them.
-    const ink = await inkInside(client, tile.chip);
+    const ink = await inkInside(client, tile.chip, null);
     if (ink < 4) {
       violations.push(
         `the "${tile.text}" monogram paints ${String(ink)} ink pixels, so its letters are not drawn`,
@@ -2013,8 +2013,6 @@ async function checkRowKit(client) {
         `the badge is ${kit.badge.rect.width.toFixed(1)}x${kit.badge.rect.height.toFixed(1)}, expected ${String(SIDE_TAB_BADGE)}px (S-17)`,
       );
     }
-    const badgeCx = kit.badge.rect.x + kit.badge.rect.width / 2;
-    const badgeCy = kit.badge.rect.y + kit.badge.rect.height / 2;
     // A8: the badge sits in the space reserved beside the tile, level with its
     // top, so it never covers the monogram and its 2px ring never reaches the
     // title.
@@ -2046,22 +2044,17 @@ async function checkRowKit(client) {
         `the badge's ring reaches y=${(kit.badge.rect.y - 2).toFixed(1)}, above the scroller's top at y=${kit.scroller.y.toFixed(1)}, so it is clipped`,
       );
     }
-    const painted = await samplePixelAt(client, badgeCx, badgeCy);
+    // MessageSquareX paints through the centre; count ink against the known
+    // ground because the badge is too small for an empty padding sample.
     const expected = await resolveRgb(client, kit.badge.color);
-    const off =
-      painted === null || expected === null
-        ? Number.POSITIVE_INFINITY
-        : Math.max(
-            ...painted.map((channel, index) =>
-              Math.abs(channel - expected[index]),
-            ),
-          );
+    const ink =
+      expected === null ? 0 : await inkInside(client, kit.badge.rect, expected);
     notes.push(
-      `badge centre paints rgb(${String(painted)}), its colour is rgb(${String(expected)})`,
+      `badge ink pixels: ${String(ink)} against its ground colour rgb(${String(expected)})`,
     );
-    if (off > SOLID_FILL_TOLERANCE) {
+    if (ink < 4) {
       violations.push(
-        `the badge's centre paints rgb(${String(painted)}), not its own colour rgb(${String(expected)}), so something covers it`,
+        `the badge paints ${String(ink)} ink pixels inside its ${kit.badge.rect.width.toFixed(1)}x${kit.badge.rect.height.toFixed(1)} box, so its status glyph is not drawn`,
       );
     }
   }
@@ -7595,8 +7588,8 @@ async function resolveRgb(client, cssColor) {
   return pixel;
 }
 
-/** Pixels in a tile's middle half that differ clearly from the tile's own fill at its padding. */
-async function inkInside(client, rect) {
+/** Middle-half ink pixels against `fill`, or a padding sample when `null`. */
+async function inkInside(client, rect, fill) {
   await ensurePixelTools(client);
   const shot = await client.send("Page.captureScreenshot", {
     format: "png",
@@ -7625,7 +7618,7 @@ async function inkInside(client, rect) {
       context.drawImage(image, 0, 0);
       const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
       const at = (x, y) => { const i = (y * width + x) * 4; return [data[i], data[i + 1], data[i + 2]]; };
-      const fill = at(4, Math.floor(height / 2));
+      const fill = ${fill === null ? "at(4, Math.floor(height / 2))" : JSON.stringify(fill)};
       let ink = 0;
       for (let y = Math.floor(height / 4); y < Math.ceil((height * 3) / 4); y += 1) {
         for (let x = Math.floor(width / 4); x < Math.ceil((width * 3) / 4); x += 1) {

@@ -8,7 +8,7 @@ import {
 } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
-import { BackgroundActivityGlyph } from "@/components/notifications/background-activity-glyph";
+import { StatusGlyph } from "@/components/notifications/status-glyph";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { AgentStopButton } from "@/components/chat/agent-stop-button";
 import {
@@ -54,8 +54,11 @@ function ActivityDot(props: {
   }
   if (props.activity === "background") {
     return (
-      <BackgroundActivityGlyph
+      <StatusGlyph
+        status="background"
+        className="size-3.5"
         testId={`active-agent-background-activity-${props.agentId}`}
+        label={null}
       />
     );
   }

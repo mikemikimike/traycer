@@ -112,10 +112,16 @@ import { useTabsStore } from "@/stores/tabs/store";
 import { tabAppearance } from "@/stores/tabs/types";
 import { seedSideStripTabs } from "./side-tab-strip-seed";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
+import { ProvidersSettingsPanel } from "@/components/settings/panels/providers-settings-panel";
 import { useSettingsAnchorReveal } from "@/components/settings/use-settings-anchor-reveal";
+import { navigateToLayoutRegion } from "@/lib/settings-navigation";
+import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
+import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
+import type { SystemTabModalApi } from "@/stores/tabs/use-system-tab-modal";
 import { SettingsDensityContext } from "@/providers/settings-density-context";
 import { AppStatusBar } from "@/components/layout/status-bar/app-status-bar";
 import { USAGE_LIMITS_REGION } from "@/components/layout-editor/regions/status-bar-regions";
+import { focusGuideTarget } from "@/components/onboarding/guide-target";
 import { NavigatorResourceHotspotChip } from "@/components/resources/resource-usage-chip";
 import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
 import "@/lib/theme-applier";
@@ -287,6 +293,10 @@ interface CanvasVariant {
    * operate every setting there and read its effect on the product.
    */
   readonly settings: boolean;
+  /** Which settings panel the pane holds under `settings=1` (H2): `providers` for the side-by-side. */
+  readonly panel: "layout" | "providers";
+  /** `full` draws the settings pane ALONE, filling the window, so a width is the panel's own (H2). */
+  readonly pane: "side" | "full";
 }
 
 interface LayoutCanvasProbe {
@@ -311,6 +321,12 @@ interface LayoutCanvasProbe {
    * it - so the driver can show the strip's reading follows Style (G6).
    */
   readonly applyUsageStyle: (exampleId: string) => void;
+  /** A Settings search result for `anchor` on the Layout page (H2). */
+  readonly revealSetting: (anchor: string) => void;
+  /** The editor door's deep link to a region's row, as the width gate sends it (H2). */
+  readonly landOnRegion: (regionId: RegionId) => void;
+  /** A setup guide step's focus return onto the element at `selector` (H2). */
+  readonly focusGuideTarget: (selector: string) => boolean;
   /** Hidden AND Chip, the shape whose only picture used to be the row it never takes. */
   readonly hideChangedFilesAsChip: () => void;
   /**
@@ -430,6 +446,8 @@ function readVariant(): CanvasVariant {
     readings: readReadings(params.get("readings")),
     header: params.get("header") === "app" ? "app" : "specimen",
     settings: params.get("settings") === "1",
+    panel: params.get("panel") === "providers" ? "providers" : "layout",
+    pane: params.get("pane") === "full" ? "full" : "side",
   };
 }
 
@@ -788,6 +806,17 @@ const messengerFactory: MessengerFactory<HostRpcRegistry> = ({ registry }) =>
     },
   });
 
+/** A system modal that is showing Settings, for `landOnRegion`. */
+const SETTINGS_OPEN_API: SystemTabModalApi = {
+  active: null,
+  openSettings: () => undefined,
+  openHistory: () => undefined,
+  close: () => undefined,
+  setSection: () => undefined,
+  promoteToTab: () => undefined,
+  isOverlayActive: (kind) => kind === "settings",
+};
+
 function regionNames(): Readonly<Record<string, string>> {
   const names: Record<string, string> = {};
   for (const regionId of LAYOUT_REGION_IDS)
@@ -838,6 +867,19 @@ function buildProbe(): LayoutCanvasProbe {
       useLayoutStore
         .getState()
         .setRegionValues("mic", { shown: shown ? "shown" : "hidden" });
+    },
+    revealSetting: (anchor) => {
+      useSettingsSearchStore.getState().requestReveal("layout", anchor);
+    },
+    landOnRegion: (regionId) => {
+      // The settings pane is already open here, which is what the modal's API
+      // would answer; the door needs one to publish its request.
+      setSystemTabModalApi(SETTINGS_OPEN_API);
+      navigateToLayoutRegion(regionId);
+    },
+    focusGuideTarget: (selector) => {
+      const target = document.querySelector<HTMLElement>(selector);
+      return target !== null && focusGuideTarget(target);
     },
     applyUsageStyle: (exampleId) => {
       for (const row of USAGE_LIMITS_REGION.rows) {
@@ -1308,6 +1350,8 @@ export function CanvasFixture(): ReactNode {
     };
   }, []);
 
+  if (VARIANT.settings && VARIANT.pane === "full")
+    return <SettingsFixturePane />;
   return (
     <div className="flex min-h-safe-dvh bg-canvas text-canvas-foreground">
       <RootDndProvider>
@@ -1351,15 +1395,24 @@ export function CanvasFixture(): ReactNode {
  * the modal's pane, a SIMULATED surface, as the preset miniature is.
  */
 function SettingsFixturePane(): ReactNode {
-  useSettingsAnchorReveal("layout");
+  useSettingsAnchorReveal(VARIANT.panel);
   return (
     <SettingsDensityContext.Provider value="compact">
       <div
         data-settings-panel-pane
         data-fixture-settings-pane
-        className="h-safe-dvh w-[36rem] max-w-[50vw] shrink-0 overflow-x-hidden overflow-y-auto border-l bg-background"
+        className={cn(
+          "h-safe-dvh shrink-0 overflow-x-hidden overflow-y-auto bg-background text-foreground",
+          VARIANT.pane === "full"
+            ? "w-full"
+            : "w-[36rem] max-w-[50vw] border-l",
+        )}
       >
-        <LayoutSettingsPanel />
+        {VARIANT.panel === "providers" ? (
+          <ProvidersSettingsPanel />
+        ) : (
+          <LayoutSettingsPanel />
+        )}
       </div>
     </SettingsDensityContext.Provider>
   );

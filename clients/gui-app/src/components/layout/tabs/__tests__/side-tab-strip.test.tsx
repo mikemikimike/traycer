@@ -1013,7 +1013,7 @@ describe("<SideTabStrip />", () => {
       ).not.toBeNull();
     });
 
-    it("shows the glyph's unread dot for an unread completion, not the old completion icon", async () => {
+    it("shows the done glyph for an unread completion", async () => {
       openEpicTabs(["Alpha"]);
       indicatorState.value = {
         epics: {
@@ -1032,7 +1032,7 @@ describe("<SideTabStrip />", () => {
       const row = screen.getByTestId("tab-epic-e-alpha");
       const leading = within(row).getByTestId("side-tab-leading");
       expect(
-        leading.querySelector('[data-status-glyph="unread"]'),
+        leading.querySelector('[data-status-glyph="done"]'),
       ).not.toBeNull();
     });
   });

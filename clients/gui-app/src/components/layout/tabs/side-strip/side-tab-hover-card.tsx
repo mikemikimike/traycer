@@ -11,14 +11,25 @@ import { cn } from "@/lib/utils";
 import { useEpicAgentActivity } from "@/stores/agent-activity-store";
 import type { SideTabLiveAgents } from "./agent-meter";
 import { sideTabAgentCounts } from "./side-tab-live-agents";
-import type { RailBadgeKind } from "./rail-badge-kind";
+import { RAIL_BADGE_TONE, type RailBadgeKind } from "./rail-badge-kind";
 import {
+  BACKGROUND_ACTIVITY_TITLE,
   PARTIAL_ACTIVITY_NOTICE,
   UNKNOWN_ACTIVITY_TITLE,
 } from "@/components/notifications/notification-indicator-icon";
 import { StatusGlyph } from "@/components/notifications/status-glyph";
 import { UnknownActivityGlyph } from "@/components/notifications/unknown-activity-glyph";
-import { STATUS_GLYPH_LABEL } from "@/components/notifications/status-glyph-kind";
+
+/**
+ * The state line's words: short, since they sit under the task's own title.
+ * The icon and any accessible name come from the tone.
+ */
+const HOVER_CARD_STATE_TEXT: Readonly<Record<RailBadgeKind, string>> = {
+  approval: "Needs approval",
+  reply: "Needs a reply",
+  failed: "Failed",
+  unread: "Done, unread",
+};
 
 /** The most agents the card names; the rest are counted. */
 const HOVER_CARD_MAX_AGENTS = 6;
@@ -103,8 +114,13 @@ function HoverCardState(props: {
   if (props.badge !== null) {
     return (
       <>
-        <StatusGlyph kind={props.badge} className="size-3.5" label={null} />
-        <span>{STATUS_GLYPH_LABEL[props.badge]}</span>
+        <StatusGlyph
+          status={RAIL_BADGE_TONE[props.badge]}
+          className="size-3.5"
+          testId={undefined}
+          label={null}
+        />
+        <span>{HOVER_CARD_STATE_TEXT[props.badge]}</span>
       </>
     );
   }
@@ -163,12 +179,13 @@ function WarmAgentList(props: { readonly epicId: string }): ReactNode {
           className="flex min-w-0 items-center gap-1.5"
         >
           <StatusGlyph
-            kind={agent.tier === "turn" ? "running" : "background"}
-            className="size-3.5"
+            status={agent.tier === "turn" ? "running" : "background"}
+            className="size-3.5 text-muted-foreground"
+            testId={undefined}
             label={
-              STATUS_GLYPH_LABEL[
-                agent.tier === "turn" ? "running" : "background"
-              ]
+              agent.tier === "turn"
+                ? "Agent in progress"
+                : BACKGROUND_ACTIVITY_TITLE
             }
           />
           <span className="min-w-0 truncate text-foreground">

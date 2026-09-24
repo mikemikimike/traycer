@@ -45,32 +45,20 @@ export const LAYOUT = defineSettingsSection("layout", {
     ],
   },
   /**
-   * The card holding the way into the canvas editor (L-15, L-33), and the
-   * coachmark target the "Appearance and layout" guide ends on (L-50).
-   *
-   * The card contributes its words to the row inside it rather than owning an
-   * entry of its own: both say "Customize layout", and two results under one
-   * name on one page is a choice with no answer.
+   * The page header's way into the canvas editor (L-15, L-33, H2), and the
+   * coachmark target the "Appearance and layout" guide ends on (L-50). On no
+   * area, so a search result for it picks none.
    */
-  customize: {
-    kind: "group",
-    search: { contributesTo: "customizeEntry" },
-    label: "Customize layout",
-    description: null,
-    breadcrumb: null,
-    availableWhen: alwaysAvailable,
-    keywords: [],
-  },
   customizeEntry: {
     kind: "row",
-    group: "customize",
+    group: null,
     search: { anchor: "layout-customize" },
     label: "Customize layout",
     // What pressing it actually does (L-87): the editor always opens a sample
     // workspace, so the user's own task is never rearranged under them. The old
     // copy said "where it lives", which read as "in your task".
     description:
-      "Point at the app's own chrome in a sample workspace and change it there. Everything below is the same set of settings.",
+      "Point at the app's own chrome in a sample workspace and change it there. The areas on this page are the same set of settings.",
     availableWhen: alwaysAvailable,
     keywords: [
       "customize",

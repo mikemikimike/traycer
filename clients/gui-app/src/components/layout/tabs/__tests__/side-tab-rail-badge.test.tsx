@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { SideTabRailBadge } from "../side-strip/side-tab-rail-badge";
 import {
   railBadgeOf,
+  RAIL_BADGE_TONE,
   worstRailBadge,
   type RailBadgeKind,
 } from "../side-strip/rail-badge-kind";
@@ -10,7 +11,6 @@ import {
   SIDE_TAB_BADGE_CLASS,
   SIDE_TAB_RAIL_BADGE_CLASS,
 } from "../side-strip/side-strip-tokens";
-import { STATUS_GLYPH_LABEL } from "@/components/notifications/status-glyph-kind";
 import {
   EMPTY_NOTIFICATION_INDICATOR_STATE,
   type NotificationIndicatorState,
@@ -125,8 +125,11 @@ describe("SideTabRailBadge", () => {
     for (const token of sizeClass.split(" ")) {
       expect(badge.classList.contains(token)).toBe(true);
     }
-    expect(badge.getAttribute("aria-label")).toBe(STATUS_GLYPH_LABEL[kind]);
-    expect(badge.querySelector(`[data-status-glyph="${kind}"]`)).not.toBeNull();
+    const tone = RAIL_BADGE_TONE[kind];
+    expect(badge.getAttribute("aria-label")).toBe(tone.title);
+    expect(
+      badge.querySelector(`[data-status-glyph="${tone.testId}"]`),
+    ).not.toBeNull();
   });
 
   it("renders on a leading-slot badge with the smaller glyph size", () => {
@@ -143,17 +146,20 @@ describe("SideTabRailBadge", () => {
     expect(glyph?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("gives approval a diamond shape distinct from reply's bubble", () => {
+  it("gives approval an icon distinct from reply's, not colour alone", () => {
     render(<SideTabRailBadge kind="approval" size="tile" testId="a" />);
     render(<SideTabRailBadge kind="reply" size="tile" testId="b" />);
-    const approvalPath = screen
+    const approvalGlyph = screen
       .getByTestId("a")
-      .querySelector('[data-status-glyph="approval"] path');
-    const replyPath = screen
+      .querySelector('[data-status-glyph="approval"]');
+    const replyGlyph = screen
       .getByTestId("b")
-      .querySelector('[data-status-glyph="reply"] path');
-    expect(approvalPath?.getAttribute("d")).not.toBe(
-      replyPath?.getAttribute("d"),
-    );
+      .querySelector('[data-status-glyph="interview"]');
+    expect(
+      approvalGlyph?.classList.contains("lucide-message-square-warning"),
+    ).toBe(true);
+    expect(
+      replyGlyph?.classList.contains("lucide-message-square-question-mark"),
+    ).toBe(true);
   });
 });

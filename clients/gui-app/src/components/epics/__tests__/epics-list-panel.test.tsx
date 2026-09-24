@@ -2633,7 +2633,7 @@ describe("<EpicsListPanel />", () => {
     );
     expect(
       backgroundIcon
-        .querySelector("[data-status-glyph]")
+        .closest("[data-status-glyph]")
         ?.getAttribute("data-status-glyph"),
     ).toBe("background");
     expect(anyTooltipHasText("Background activity — agent idle")).toBe(true);

@@ -40,7 +40,8 @@ const PIP_FILL: Readonly<Record<MeterPip, string>> = {
   background: "ring-1 ring-inset ring-muted-foreground",
   waiting: "bg-warning",
   failed: "bg-destructive",
-  unread: "bg-info",
+  // The completed tone's green, verified >=3:1 on the strip's grounds.
+  unread: "bg-success-foreground",
 };
 
 /**
