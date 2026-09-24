@@ -211,11 +211,10 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
   // The attached panel is built ONCE, here, and everything that claims a panel
   // is open follows THE NODE rather than the pill that asked for it.
   //
-  // A pill exists on a wider predicate than its panel does - Active agents
-  // keeps its pill on received A2A rows alone, while `dockPanelContent`
-  // declines to draw the panel without a self record - so "the pill is there"
-  // and "the panel has something to draw" are different questions and the pill
-  // must not answer the second. Deriving `openSection` from the node closes
+  // A pill exists on its member's content gate, and `dockPanelContent` can
+  // still decline to draw the panel (Active agents without a self record), so
+  // "the pill is there" and "the panel has something to draw" are different
+  // questions and the pill must not answer the second. Deriving `openSection` from the node closes
   // that for every member at once: a pressed pill pointing at an
   // `aria-controls` id no element carries, and a separator drawn under
   // nothing, are both impossible by construction rather than by each

@@ -20,7 +20,6 @@ import {
   useChatDockOpenSection,
   useChatDockOpenStore,
 } from "@/stores/chats/chat-dock-open-store";
-import { isReceivedAgentResponse } from "@/components/chat/chat-queue-utils";
 import { chatChangesPanelHasContent } from "@/components/chat/chat-pinned-stack-utils";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
 import type { AgentRow } from "@/hooks/agent/use-agent-stop-controls";
@@ -41,8 +40,6 @@ export interface ChatDockChrome {
   readonly folded: ReadonlySet<ChatDockSection>;
   /** The one pill whose panel is attached above the composer, or `null`. */
   readonly openSection: ChatDockSection | null;
-  /** The queue as the dock should render it - see `foldedQueue`. */
-  readonly dockQueue: ChatSessionState["queue"];
   readonly strip: ChatDockCompactStripValue;
   /** The vertical order of the three reorderable dock rows. */
   readonly dockOrder: ReadonlyArray<ChatDockSection>;
@@ -157,14 +154,6 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
 
   const changesPresent =
     input.snapshotLoaded && chatChangesPanelHasContent(input.restore);
-  const receivedAgentCount = input.queue.items.filter(
-    isReceivedAgentResponse,
-  ).length;
-  // The row's own content gate (self + descendants), not the chip's broader
-  // one: a received-only queue item with no descendants keeps the chip alive
-  // (see `agentsChip` below) but the panel this hotspot anchors has nothing of
-  // its own to draw.
-  const activeAgentsHasContent = input.activeAgentsVisible;
   // This tile's three dock regions, registered here because this is the
   // component that DRAWS them. There is exactly one gate deciding whether a
   // mounted component's region reaches the editor, and it is inside
@@ -201,10 +190,7 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       ? 0
       : input.activeAgents.length +
         (input.selfAgent.activity === false ? 0 : 1);
-  // Gated on `selfAgent` exactly as the count is, so the three never disagree:
-  // with no self record the count is 0, the panel declines to render at all,
-  // and a chip surviving on received A2A rows alone must not spin or name
-  // agents over that zero.
+  // Gated on `selfAgent` exactly as the count is, so the two never disagree.
   //
   // Mid-turn is the only tier that lights the chip. An agent kept alive by
   // background work alone is counted, but nothing is being written on its
@@ -280,34 +266,19 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     ghost: filesChangedHotspot.ghost,
     hasContent: changesPresent,
   });
-  // Received A2A rows follow this mode, so the chip is also owed when they are
-  // the only thing folded: without it, folding would make them unreachable.
-  const agentsHasContent = input.activeAgentsVisible || receivedAgentCount > 0;
+  // Agents only. Replies other agents sent are queued messages, and the queue
+  // is never a pill (G1-G2, staging round 4): the dock is handed the whole
+  // queue, so counting them here too would be a second surface for one row.
   const agentsChip = dockMemberFolded({
     values: runningAgentsValues,
     ghost: activeAgentsHotspot.ghost,
-    hasContent: agentsHasContent,
+    hasContent: input.activeAgentsVisible,
   });
   const backgroundChip = dockMemberFolded({
     values: backgroundValues,
     ghost: backgroundHotspot.ghost,
     hasContent: input.backgroundVisible,
   });
-
-  // The queue minus its received-A2A rows while the Active agents pill stands
-  // for them, and the identical object otherwise - the dock's queue section
-  // and the surrounding spacing both key off this array's length, so handing
-  // back a fresh copy of an unchanged queue would churn both. An OPEN agents
-  // pill puts them back: that panel lists the agents, never the responses they
-  // queued, so nothing else would show them.
-  // The RAW stored section equals the derived `openSection` here, and the `&&`
-  // is why: `openSection` is `storedOpenSection` filtered by `chipPresent`, and
-  // `chipPresent`'s entry for this member IS `agentsChip`.
-  const agentsRowsFolded = agentsChip && storedOpenSection !== "activeAgents";
-  const dockQueue = useMemo(
-    () => foldedQueue(input.queue, agentsRowsFolded),
-    [input.queue, agentsRowsFolded],
-  );
 
   // Todo is a dock member too (L-139): same Full row / Chip / Hidden
   // semantics, same reordering, same pill treatment.
@@ -404,19 +375,16 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // words it - the chip draws it, the sentence says it.
         working: agentsWorking,
         lineDeltas: null,
-        text:
-          receivedAgentCount > 0
-            ? `${agentsRunningCount} · ${receivedAgentCount}`
-            : `${agentsRunningCount}`,
+        text: `${agentsRunningCount}`,
         // The roster is the panel's row list folded into the sentence: the
         // chip is the only door to that list while the row is away, so its
         // tooltip has to say WHO is running, not just how many.
-        label: `Active agents. ${agentsRunningCount} running${receivedAgentCount > 0 ? `, ${receivedAgentCount} received from other agents and queued` : ""}.${agentsRoster === null ? "" : ` ${agentsRoster}.`}`,
+        label: `Active agents. ${agentsRunningCount} running.${agentsRoster === null ? "" : ` ${agentsRoster}.`}`,
         // Counts, not the roster: the sentence above names who is running for
         // a screen reader, and a tooltip that listed three agents and "and 2
         // more" under a heading would stop being the small block L-153 asks
         // for. The panel one click away is where the roster belongs.
-        detail: activeAgentsDetail(agentsRunningCount, receivedAgentCount),
+        detail: `${agentsRunningCount} running`,
         // Only the first agent starting is worth an eye-flick - which is the
         // moment this chip appears; a count moving between two non-zero values
         // is the same fact, updated.
@@ -487,7 +455,6 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     agentsRunningCount,
     agentsWorking,
     agentsRoster,
-    receivedAgentCount,
     backgroundRunning,
     input.backgroundFailureToken,
     filesChangedHotspot.ref,
@@ -514,7 +481,7 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
       editing: activeAgentsHotspot.editing,
       ghost: activeAgentsHotspot.ghost,
       shown: runningAgentsValues.shown === "shown",
-      hasContent: activeAgentsHasContent,
+      hasContent: input.activeAgentsVisible,
     },
     background: {
       hotspotRef: backgroundHotspot.ref,
@@ -532,7 +499,7 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     },
   };
 
-  return { folded, openSection, dockQueue, strip, dockOrder, hotspots };
+  return { folded, openSection, strip, dockOrder, hotspots };
 }
 
 /** How many agents the chip's sentence names before it starts counting. */
@@ -570,22 +537,6 @@ function agentStateWord(activity: AgentRow["activity"]): string {
   }
   const unreachable: never = activity;
   return unreachable;
-}
-
-/**
- * The queue minus its received-A2A rows when the Active agents chip is standing
- * for them, and the identical object otherwise - the dock's queue section and
- * the surrounding spacing both key off this array's length, so handing back a
- * fresh copy of an unchanged queue would churn both.
- */
-function foldedQueue(
-  queue: ChatSessionState["queue"],
-  agentsFolded: boolean,
-): ChatSessionState["queue"] {
-  if (!agentsFolded) return queue;
-  const items = queue.items.filter((item) => !isReceivedAgentResponse(item));
-  if (items.length === queue.items.length) return queue;
-  return { status: queue.status, items };
 }
 
 function fileCountPhrase(count: number): string {
@@ -636,18 +587,6 @@ function filesChangedDetail(fileCount: number, totals: DiffLineCounts): string {
   if (totals.deletions > 0) deltas.push(`−${totals.deletions}`);
   const files = fileCountPhrase(fileCount);
   return deltas.length === 0 ? files : `${files}, ${deltas.join(" ")}`;
-}
-
-/**
- * The Active agents pill's tooltip detail. Received rows are named rather than
- * counted into the running total, exactly as the pill's `N · M` splits them.
- */
-function activeAgentsDetail(running: number, received: number): string {
-  const parts = [`${running} running`];
-  if (received > 0) {
-    parts.push(`${received} queued from other agents`);
-  }
-  return parts.join(", ");
 }
 
 function lineWord(count: number): string {

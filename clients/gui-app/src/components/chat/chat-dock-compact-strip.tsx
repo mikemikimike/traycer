@@ -7,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AnimatePresence, useIsPresent } from "motion/react";
 import * as m from "motion/react-m";
 import { Bot, FileDiff, ListChecks, type LucideIcon } from "lucide-react";
 import { MessageSquareClock } from "@/components/notifications/message-square-clock";
@@ -162,50 +161,35 @@ function ChipGlyph(props: {
 }
 
 /**
- * A pill arriving and a pill leaving, in the values the rest of the window
- * already keeps: the leader badge's 140ms `easeOut` on the way in, a touch
- * shorter on the way out.
+ * A pill arriving, in the values the rest of the window already keeps: the
+ * leader badge's 140ms `easeOut`.
  *
  * `0.96` rather than `0` because a pill that grows from nothing reads as a
  * thing being BUILT beside the input; 4% is the smallest amount that still
  * says "this was not here a moment ago" while the pill stays the same object
  * throughout. Only `transform` and `opacity` move, so nothing here reflows the
  * composer underneath.
+ *
+ * Arrival only. A leaving pill goes in the frame it was removed in, and that
+ * is deliberate (staging round 4): an exit animation needs `AnimatePresence`
+ * to hold the element in the document, and a pill whose section came back
+ * before every exit in its batch had finished was revived as that same node,
+ * in flow, at the exit's `opacity: 0` - an invisible pill holding its width
+ * and pushing the pills after it off the composer's left edge. A pill that
+ * mounts fresh every time it arrives cannot be revived half-gone.
  */
 const PILL_HIDDEN = { opacity: 0, scale: 0.96 } as const;
 const PILL_SHOWN = { opacity: 1, scale: 1 } as const;
 const PILL_ENTER_TRANSITION = { duration: 0.14, ease: "easeOut" } as const;
-const PILL_EXIT = {
-  ...PILL_HIDDEN,
-  transition: { duration: 0.11, ease: "easeOut" },
-} as const;
-
-/**
- * What a pill does on the way out with motion turned off: goes, in the frame
- * it was removed in. Not "the same exit with a zero duration written on the
- * strip", because the exit's own duration is what holds the element in the
- * document, and a pill that lingers invisibly is still a pill the pointer can
- * be over.
- */
-const PILL_EXIT_INSTANT = { opacity: 0, transition: { duration: 0 } } as const;
 
 /**
  * One pill, and the element the Customize editor knows it by.
  *
- * The region marking is on the INNER span rather than on the animated one, and
- * it is taken off the moment this pill starts leaving. That is the whole
- * reason this is a component and not two lines in the map below: an exiting
- * `popLayout` ghost is still in the document while it fades, and a ghost still
- * wearing `data-layout-region` / `data-layout-group` is a member the canvas
- * drag would reflow against and the editor's registry would hand a rect for -
- * a dead member, out of flow, that the arrangement no longer contains.
- * `useIsPresent` flips on the exit, React hands the old ref its `null`, and
- * `useLayoutRegion` unnames and unregisters the node on the spot.
- *
- * The drag's own transforms are written on that inner span; the animated one
- * is its parent and they compose rather than fight. Nothing arrives or leaves
- * mid-drag anyway - a drag reorders the members that are there - so the two
- * never run on the same element at the same time.
+ * The region marking is on the INNER span rather than on the animated one: the
+ * drag's own transforms are written there, the arrival's on its parent, and
+ * they compose rather than fight. Nothing arrives mid-drag anyway - a drag
+ * reorders the members that are there - so the two never run on the same
+ * element at the same time.
  */
 function ChatDockCompactPill(props: {
   readonly chip: ChatDockCompactChipModel;
@@ -214,14 +198,16 @@ function ChatDockCompactPill(props: {
   readonly controls: string | null;
   readonly onToggle: () => void;
 }): ReactNode {
-  const present = useIsPresent();
+  // Destructured before it reaches a `ref=`: `react-hooks/refs` reads a ref
+  // callback taken off a props BAG as a ref access during render.
+  const { hotspotRef } = props.chip;
   return (
     <span
       // `contents` at rest, a real box while a session is live: the hotspot
       // ref lands here, and a `display: contents` node has no rect for the
       // hover outline or the travelling ring to measure (C-06).
       className={cn(props.editing ? "inline-flex items-center" : "contents")}
-      ref={present ? props.chip.hotspotRef : null}
+      ref={hotspotRef}
     >
       <ChatDockCompactChip
         icon={
@@ -318,11 +304,9 @@ export function ChatDockCompactStrip(props: {
   // pill a turn brings at once - would ring together, which is L-148's failure
   // through the other door. And "the snapshot has LOADED" is not enough
   // either, because the pills are built from independently arriving sources in
-  // `chat-tile-lower-surfaces.tsx`: the received agent responses the Active
-  // agents pill counts come from the session store's queue and the background
-  // rows from the host's own stream, neither
-  // of which waits for the snapshot, so a strip can hold a pill before the
-  // snapshot lands and would then be armed for the burst the snapshot brings
+  // `chat-tile-lower-surfaces.tsx`: the background rows come from the host's
+  // own stream, which does not wait for the snapshot, so a strip can hold a
+  // pill before the snapshot lands and would then be armed for the burst the snapshot brings
   // with it (`changesPresent` and `todoHasContent` are both gated on it).
   // Requiring both means the arming commit is the first one in which this dock
   // has real data AND something to draw, and everything arriving in it is
@@ -348,38 +332,34 @@ export function ChatDockCompactStrip(props: {
         className="flex min-w-0 flex-wrap items-center gap-1.5"
       >
         <ChatDockChipArrival suppressed={!settled}>
-          {/* `initial={false}` is mandatory rather than stylistic: without it
+          {/* Gated on `settled` for the same reason the ring is: without it
               a chat opening would animate every pill it opens with, which is
               the same first-paint noise the pulse suppression above removes.
-              `popLayout` takes an exiting pill out of flow so the gap closes
-              in one frame exactly as it does today and only the ghost fades.
-              And no `layout` prop anywhere here: this row is `flex-wrap`
-              directly above the composer, so a layout animation across a wrap
-              boundary would move the input. */}
-          <AnimatePresence initial={false} mode="popLayout">
-            {value.chips.map((chip) => (
-              <m.span
-                key={chip.section}
-                className="inline-flex shrink-0 items-center"
-                initial={motionEnabled ? PILL_HIDDEN : false}
-                animate={PILL_SHOWN}
-                exit={motionEnabled ? PILL_EXIT : PILL_EXIT_INSTANT}
-                transition={PILL_ENTER_TRANSITION}
-              >
-                <ChatDockCompactPill
-                  chip={chip}
-                  editing={editing}
-                  expanded={value.openSection === chip.section}
-                  controls={
-                    value.openSection === chip.section ? value.panelId : null
-                  }
-                  onToggle={() => {
-                    value.onToggle(chip.section);
-                  }}
-                />
-              </m.span>
-            ))}
-          </AnimatePresence>
+              `initial` is read once, at mount, so a pill already drawn never
+              replays it. And no `layout` prop anywhere here: this row is
+              `flex-wrap` directly above the composer, so a layout animation
+              across a wrap boundary would move the input. */}
+          {value.chips.map((chip) => (
+            <m.span
+              key={chip.section}
+              className="inline-flex shrink-0 items-center"
+              initial={motionEnabled && settled ? PILL_HIDDEN : false}
+              animate={PILL_SHOWN}
+              transition={PILL_ENTER_TRANSITION}
+            >
+              <ChatDockCompactPill
+                chip={chip}
+                editing={editing}
+                expanded={value.openSection === chip.section}
+                controls={
+                  value.openSection === chip.section ? value.panelId : null
+                }
+                onToggle={() => {
+                  value.onToggle(chip.section);
+                }}
+              />
+            </m.span>
+          ))}
         </ChatDockChipArrival>
         {/* Always mounted, empty while nothing is open: `ml-auto` on an empty
             box takes the row's slack and nothing else, so the pills sit where

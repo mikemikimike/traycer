@@ -12,6 +12,12 @@
 // the fixture's other dock member, so the queue is always read beside a
 // surface that folds into a pill in Compact.
 //
+// Staging round 4 adds two things. An agent's reply is a queued row like any
+// other, attached with no click in every preset and never counted by the
+// Active agents pill. And the pill row starts at the composer's left edge,
+// every pill fully drawn, for every combination of pills and after a pill
+// returns while another is still leaving.
+//
 // Usage: node scripts/composer-queue-dock-browser.mjs [--out DIR]
 //   --out DIR   also write a screenshot of the lower surface per step into DIR.
 import assert from "node:assert/strict";
@@ -35,6 +41,15 @@ const THEMES = ["light", "dark"];
 const EPSILON = 1;
 // Row heights are stated, not emergent (L-171), so they are compared tighter.
 const ROW_EPSILON = 0.5;
+// The pills' arrival (`PILL_ENTER_TRANSITION`, 140ms) and then some, so a
+// reading never catches a pill mid-scale.
+const PILL_ARRIVAL_MS = 250;
+// Every non-empty combination of the pill-able members the fixture carries.
+const MEMBER_COMBINATIONS = [1, 2, 3, 4, 5, 6, 7].map((bits) => ({
+  todo: (bits & 1) !== 0,
+  changes: (bits & 2) !== 0,
+  agents: (bits & 4) !== 0,
+}));
 
 /**
  * The one-line row every dock panel is held to (L-171): the fixture's own
@@ -80,8 +95,15 @@ const READ = `(() => {
   const box = (element) => {
     if (element === null) return null;
     const rect = element.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, height: rect.height };
+    return {
+      top: rect.top,
+      bottom: rect.bottom,
+      left: rect.left,
+      height: rect.height,
+    };
   };
+  const pills = [...document.querySelectorAll("[data-chat-dock-chip]")];
+  const agentsPill = document.querySelector('[data-testid="chat-dock-chip-activeAgents"]');
   const composer = document.querySelector("[data-probe-composer]");
   const frame = composer.closest("[data-composer-editor-frame]") ?? composer;
   return {
@@ -96,6 +118,28 @@ const READ = `(() => {
     ),
     provenance: document.querySelector('[data-testid="queued-message-provenance-chip"]') !== null,
     focused: document.activeElement === composer,
+    firstPillLeft:
+      pills.length === 0
+        ? null
+        : Math.min(...pills.map((pill) => pill.getBoundingClientRect().left)),
+    agentsPill: agentsPill === null ? null : agentsPill.textContent,
+    pillCount: pills.length,
+    // The lowest opacity any pill is drawn at, its own and its ancestors' up to
+    // the pill row: a pill at 0 is a box the row still lays out.
+    faintestPill: Math.min(
+      1,
+      ...pills.map((pill) => {
+        let opacity = 1;
+        for (
+          let node = pill;
+          node !== null && node.dataset.testid !== "chat-dock-compact-strip";
+          node = node.parentElement
+        ) {
+          opacity *= Number(getComputedStyle(node).opacity);
+        }
+        return opacity;
+      }),
+    ),
   };
 })()`;
 
@@ -297,15 +341,30 @@ try {
           }
         }
       }
-      // An agent's reply carries the provenance badge (L-172). Default only:
-      // in Compact the Active agents pill stands for received replies, so the
-      // queue is not handed them unless that pill is open.
-      if (preset === "default") {
-        await evaluate(client, `window.__probeQueueAgentReply("ok")`);
+      // An agent's reply carries the provenance badge (L-172), and it is a
+      // queued message like any other (staging round 4): attached above the
+      // composer with no click in every preset, never folded into the Active
+      // agents pill - whether or not this chat has agents of its own running.
+      // Agents running is Compact only: Default draws them as a full row,
+      // which needs a live host runtime this fixture does not provide, and
+      // has no pill for the reply to fold into.
+      for (const agents of preset === "compact" ? [false, true] : [false]) {
+        await evaluate(
+          client,
+          `window.__probeDock({ todo: true, changes: false, agents: ${agents} })`,
+        );
+        if (!agents) {
+          await evaluate(client, `window.__probeQueueAgentReply("ok")`);
+        }
         await settle(client);
         const reading = await evaluate(client, READ);
-        await shoot(client, `${where}.4-agent-reply`);
-        const step = `${where} with an agent's reply queued`;
+        await shoot(client, `${where}.4-agent-reply${agents ? "-agents" : ""}`);
+        const step = `${where} with an agent's reply queued${agents ? " and agents running" : ""}`;
+        if (reading.queue === null) {
+          failures.push(
+            `${step}: the reply is not attached above the composer`,
+          );
+        }
         if (!reading.provenance) failures.push(`${step}: no provenance badge`);
         if (reading.rowHeights.length !== 1) {
           failures.push(`${step}: ${reading.rowHeights.length} rows drawn`);
@@ -316,8 +375,99 @@ try {
             `${step}: the badged row measures ${reading.rowHeights[0]}px, not the ${rowReference}px row metric`,
           );
         }
+        if (reading.agentsPill !== null && !agents) {
+          failures.push(
+            `${step}: an Active agents pill "${reading.agentsPill}" stands for the queue`,
+          );
+        }
+        if (reading.agentsPill?.includes("·")) {
+          failures.push(
+            `${step}: the Active agents pill "${reading.agentsPill}" also counts the queue`,
+          );
+        }
+      }
+
+      // The pill row starts at the composer's left edge whatever combination
+      // of pills it holds, a lone pill included, with the queue full or empty.
+      // Compact only: Default draws every member as a full row.
+      for (const queued of preset === "compact" ? [true, false] : []) {
+        if (!queued) {
+          await evaluate(client, "window.__probeQueueClear()");
+        }
+        for (const members of MEMBER_COMBINATIONS) {
+          await evaluate(
+            client,
+            `window.__probeDock(${JSON.stringify(members)})`,
+          );
+          await settle(client);
+          await delay(PILL_ARRIVAL_MS);
+          const reading = await evaluate(client, READ);
+          const name = Object.keys(members)
+            .filter((key) => members[key])
+            .join("+");
+          const step = `${where} with ${name} ${queued ? "and a queued reply" : "and an empty queue"}`;
+          await shoot(
+            client,
+            `${where}.5-pills-${name}${queued ? "-queued" : ""}`,
+          );
+          checkPillRow(reading, step);
+        }
+      }
+
+      // A pill whose section comes back while another pill's exit is still
+      // running (staging round 4, the lone pill off the left edge), from an
+      // empty pill row so the sequence meets a fresh row every time: Files
+      // changed leaves as Todo arrives, Todo leaves 80ms later - before that
+      // 110ms exit has finished - and Files changed returns 90ms after that,
+      // once its own exit is over and while Todo's is not. It must come back
+      // as a pill you can see, not as an invisible box holding its width in
+      // front of the rest.
+      if (preset === "compact") {
+        await evaluate(
+          client,
+          `(async () => {
+             const steps = [
+               [{ todo: false, changes: false, agents: false }, 400],
+               [{ todo: false, changes: true, agents: true }, 400],
+               [{ todo: true, changes: false, agents: true }, 80],
+               [{ todo: false, changes: false, agents: true }, 90],
+               [{ todo: false, changes: true, agents: true }, 0],
+             ];
+             for (const [members, ms] of steps) {
+               window.__probeDock(members);
+               await new Promise((resolve) => setTimeout(resolve, ms));
+             }
+           })()`,
+        );
+        await delay(PILL_ARRIVAL_MS * 3);
+        const reading = await evaluate(client, READ);
+        await shoot(client, `${where}.6-pill-returns-mid-exit`);
+        const step = `${where} after Files changed returns mid-exit`;
+        if (reading.pillCount !== 2) {
+          failures.push(`${step}: ${reading.pillCount} pills, not 2`);
+        }
+        checkPillRow(reading, step);
       }
       console.log(`${where}: done (row metric ${rowReference}px)`);
+
+      function checkPillRow(reading, step) {
+        if (reading.firstPillLeft === null) {
+          failures.push(`${step}: no pill row`);
+          return;
+        }
+        if (
+          Math.abs(reading.firstPillLeft - reading.composer.left) > ROW_EPSILON
+        ) {
+          failures.push(
+            `${step}: the pill row starts at ${reading.firstPillLeft}px, the composer at ${reading.composer.left}px`,
+          );
+        }
+        if (reading.faintestPill < 1) {
+          failures.push(
+            `${step}: a pill is drawn at opacity ${reading.faintestPill}, holding its width unseen`,
+          );
+        }
+      }
     }
   }
 

@@ -19,12 +19,14 @@ import { useChatDockChrome } from "@/components/epic-canvas/renderers/use-chat-d
 import { ComposerShell } from "@/components/home/composer/composer-shell";
 import { createComposerPickerStore } from "@/components/chat/composer/picker/composer-picker-store";
 import {
+  SAMPLE_AGENT_DESCENDANTS,
   SAMPLE_CHAT_ID,
   SAMPLE_EPIC_ID,
   SAMPLE_HOST_ID,
   SAMPLE_NO_PENDING_STOPS,
   SAMPLE_QUEUE,
   SAMPLE_RESTORE,
+  SAMPLE_SELF_AGENT,
   SAMPLE_TODO,
   SAMPLE_VIEW_TAB_ID,
   sampleNoop,
@@ -47,7 +49,9 @@ import "@/index.css";
  * Typing into the composer and pressing Enter queues a message, the way a send
  * during a running turn does. Todo rides along as the "other" dock member, so
  * the queue is always read next to a surface that DOES fold into a pill in the
- * Compact preset. `scripts/composer-queue-dock-browser.mjs` drives it.
+ * Compact preset; `__probeDock` adds or removes Files changed and Active agents
+ * beside it (staging round 4). `scripts/composer-queue-dock-browser.mjs`
+ * drives it.
  */
 type ChatQueueState = ChatSessionState["queue"];
 
@@ -69,10 +73,20 @@ function queuedPrompt(index: number, text: string): ChatQueuedPromptItem {
   };
 }
 
+/** Which of the other dock members have something to show. */
+interface ProbeDockMembers {
+  readonly todo: boolean;
+  readonly changes: boolean;
+  readonly agents: boolean;
+}
+
 interface ProbeWindow extends Window {
   __probePreset?: (preset: LayoutPresetId) => void;
+  __probeDock?: (members: ProbeDockMembers) => void;
   __probeTheme?: (mode: "light" | "dark") => void;
   __probeQueueAgentReply?: (text: string) => void;
+  /** Empties the queue, agent replies included: those have no Delete. */
+  __probeQueueClear?: () => void;
   /** The row recipe every dock panel's one-line row is held to (L-171). */
   __probeRowRecipe?: string;
   __probeReady?: boolean;
@@ -97,13 +111,24 @@ export function ComposerQueueDockFixture(): ReactElement {
     status: "running",
     items: [],
   });
+  const [members, setMembers] = useState<ProbeDockMembers>({
+    todo: true,
+    changes: false,
+    agents: false,
+  });
+  const restore = members.changes
+    ? SAMPLE_RESTORE
+    : { ...SAMPLE_RESTORE, accumulatedFileChanges: [] };
+  const selfAgent = members.agents ? SAMPLE_SELF_AGENT : null;
+  const activeAgents = members.agents ? SAMPLE_AGENT_DESCENDANTS : [];
+  const todo = members.todo ? SAMPLE_TODO : null;
   const chrome = useChatDockChrome({
     snapshotLoaded: true,
     chatId: SAMPLE_CHAT_ID,
-    restore: { ...SAMPLE_RESTORE, accumulatedFileChanges: [] },
-    selfAgent: null,
-    activeAgents: [],
-    activeAgentsVisible: false,
+    restore,
+    selfAgent,
+    activeAgents,
+    activeAgentsVisible: members.agents,
     backgroundVisible: false,
     backgroundItems: [],
     runningManagedCommands: [],
@@ -111,9 +136,13 @@ export function ComposerQueueDockFixture(): ReactElement {
     backgroundFailureToken: null,
     portForwardCount: 0,
     queue,
-    todo: SAMPLE_TODO,
+    todo,
   });
   useEffect(() => {
+    probeWindow.__probeDock = setMembers;
+    probeWindow.__probeQueueClear = () => {
+      setQueue((current) => ({ ...current, items: [] }));
+    };
     // A reply another agent queued: the row that carries a provenance badge,
     // which has to measure the same as a user's own one-line row (L-172).
     probeWindow.__probeQueueAgentReply = (text) => {
@@ -148,7 +177,7 @@ export function ComposerQueueDockFixture(): ReactElement {
   // The real tile's `lowerSurfaceTopSpacing`: anything in the joined frame tucks
   // into the input, a pills-only dock keeps the composer's own `pt-4`.
   const frameFilled =
-    chrome.dockQueue.items.length > 0 ||
+    queue.items.length > 0 ||
     chrome.dockOrder.some(
       (section) =>
         chrome.hotspots[section].hasContent && !chrome.folded.has(section),
@@ -164,11 +193,11 @@ export function ComposerQueueDockFixture(): ReactElement {
               epicId={SAMPLE_EPIC_ID}
               chatId={SAMPLE_CHAT_ID}
               viewTabId={SAMPLE_VIEW_TAB_ID}
-              selfAgent={null}
-              activeAgents={[]}
-              todo={SAMPLE_TODO}
-              restore={SAMPLE_RESTORE}
-              queue={chrome.dockQueue}
+              selfAgent={selfAgent}
+              activeAgents={activeAgents}
+              todo={todo}
+              restore={restore}
+              queue={queue}
               folded={chrome.folded}
               dockOrder={chrome.dockOrder}
               hotspots={chrome.hotspots}

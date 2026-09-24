@@ -866,17 +866,17 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     expect(chip.getAttribute("aria-label")).toBe("Background. 1 waiting.");
   });
 
-  // The most important case: no self agent, no descendants, but the queue
-  // holds prompts *received* from other agents. `agentsChip` in
-  // `chat-tile-lower-surfaces.tsx` reads
-  // `runningAgentsValues.shown === "shown" && runningAgentsValues.size === "chip" && (input.activeAgentsVisible || receivedAgentCount > 0)`.
-  // Delete the `receivedAgentCount > 0` half of that clause and two things
-  // happen at once: the chip stops existing (this suite's first assertion
-  // below fails), AND `folded` never gains "activeAgents" - so
-  // `foldedQueue` hands the received rows straight through and they render
-  // in the dock (the second assertion fails too). Both are needed to pin the
-  // clause; neither alone would catch every way of dropping it.
-  it("folds received A2A prompts into a '0 · N' chip and keeps only the user-typed item in the dock", () => {
+  // The most important case now: no self agent, no descendants, but the
+  // queue holds prompts *received* from other agents. Before this fix,
+  // `receivedAgentCount > 0` kept `agentsChip` alive on its own and
+  // `foldedQueue` hid these two rows behind it until the chip was clicked
+  // open. The queue is never a pill now (G1-G2, staging round 4): a received
+  // row buys the chip nothing, and every row in the queue renders
+  // unconditionally. Reintroduce the old `receivedAgentCount > 0` clause on
+  // `agentsChip` and the first assertion below fails (a chip with no agent
+  // behind it); reintroduce `foldedQueue` and the two received rows vanish
+  // from the second.
+  it("keeps agent-sent queued rows out of the agents chip when nothing is running", () => {
     useLayoutStore
       .getState()
       .setRegionValues("runningAgents", { size: "chip" });
@@ -893,18 +893,25 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
       }),
     );
 
-    const chip = screen.getByTestId("chat-dock-chip-activeAgents");
-    expect(chipText("activeAgents")).toBe("0 · 2");
-    expect(chip.getAttribute("aria-label")).toBe(
-      "Active agents. 0 running, 2 received from other agents and queued.",
-    );
+    expect(screen.queryByTestId("chat-dock-chip-activeAgents")).toBeNull();
 
+    // All three rows render plainly - no click needed to reveal the two the
+    // chip used to fold away.
     const queueRows = screen.getByTestId("queued-message-rows");
+    expect(within(queueRows).getAllByTestId("queued-message-row")).toHaveLength(
+      3,
+    );
     const previews = within(queueRows).getAllByTestId(
       "queued-message-content-preview",
     );
-    expect(previews).toHaveLength(1);
-    expect(previews[0]?.textContent).toContain("My own message");
+    expect(previews.map((preview) => preview.textContent)).toEqual([
+      "Received prompt one",
+      "Received prompt two",
+      "My own message",
+    ]);
+    expect(
+      within(queueRows).getAllByTestId("queued-message-provenance-chip"),
+    ).toHaveLength(2);
   });
 
   // The roster is bounded by fleet size, so an uncapped join would read a
@@ -935,35 +942,6 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     expect(chipText("activeAgents")).toBe("5");
     expect(chip.getAttribute("aria-label")).toBe(
       "Active agents. 5 running. This chat working, Child one working, Child two in background, and 2 more.",
-    );
-  });
-
-  // Reachable only through the received-A2A clause: with no self record the
-  // count is 0 and the panel renders nothing, so the chip must not spin or
-  // name working agents over that zero.
-  it("keeps the spinner and the roster off a chip standing for received prompts alone", () => {
-    useLayoutStore
-      .getState()
-      .setRegionValues("runningAgents", { size: "chip" });
-    setAgentStopControls({
-      self: null,
-      descendants: [agentRow("child-1", "Child one", "turn")],
-    });
-
-    renderSurfaces(
-      surfacesProps({
-        restoreContext: EMPTY_RESTORE,
-        queueItems: [receivedAgentQueueItem("received-1", "Received prompt")],
-        backgroundItems: [],
-      }),
-    );
-
-    const chip = screen.getByTestId("chat-dock-chip-activeAgents");
-    expect(chipText("activeAgents")).toBe("0 · 1");
-    expect(chipWorking("activeAgents")).toBe(false);
-    expect(chip.querySelector("svg.lucide-bot")).not.toBeNull();
-    expect(chip.getAttribute("aria-label")).toBe(
-      "Active agents. 0 running, 1 received from other agents and queued.",
     );
   });
 
@@ -1214,10 +1192,15 @@ describe("each pill's tooltip", () => {
     );
   });
 
-  // Its own render: the agents pill needs an agent, and the received-A2A row
-  // is the cheapest one that makes the pill exist.
-  it("counts the agents rather than listing them", async () => {
+  // Its own render: the agents pill needs a genuinely running agent now that
+  // a received A2A row alone no longer creates it (staging round 4) - that
+  // case is covered on its own above.
+  it("counts the agents rather than listing them, with the agent-sent row still in the queue", async () => {
     allPills();
+    setAgentStopControls({
+      self: agentRow("chat-1", "This chat", "turn"),
+      descendants: [agentRow("child-1", "Child one", "background")],
+    });
     renderSurfaces(
       surfacesProps({
         restoreContext: EMPTY_RESTORE,
@@ -1226,8 +1209,11 @@ describe("each pill's tooltip", () => {
       }),
     );
 
+    // Plain running count, no "· N" split for received rows any more.
+    expect(chipText("activeAgents")).toBe("2");
+    expect(chipText("activeAgents")).not.toContain("·");
     expect((await tooltipFor("activeAgents")).textContent).toBe(
-      "Active agents0 running, 1 queued from other agentsClick to open",
+      "Active agents2 runningClick to open",
     );
     // The ROSTER - who is running, by name - stays on the accessible
     // sentence. A tooltip that named three agents and "and 2 more" under a
@@ -1238,8 +1224,17 @@ describe("each pill's tooltip", () => {
         .getByTestId("chat-dock-chip-activeAgents")
         .getAttribute("aria-label"),
     ).toBe(
-      "Active agents. 0 running, 1 received from other agents and queued.",
+      "Active agents. 2 running. This chat working, Child one in background.",
     );
+
+    // The received row still sits in the queue, with no click needed.
+    const queueRows = screen.getByTestId("queued-message-rows");
+    expect(within(queueRows).getAllByTestId("queued-message-row")).toHaveLength(
+      1,
+    );
+    expect(
+      within(queueRows).getAllByTestId("queued-message-provenance-chip"),
+    ).toHaveLength(1);
   });
 
   it("offers to CLOSE the pill that is open", async () => {

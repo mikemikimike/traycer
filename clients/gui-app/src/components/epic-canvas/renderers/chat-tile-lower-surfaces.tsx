@@ -500,10 +500,8 @@ export function ChatLowerInteractionSurfaces(
   const pinnedStackVisible = dockTodoVisible || dockFilesChangedVisible;
   // Show the queue surface whenever it holds anything - user-typed sends and
   // received A2A responses alike (the latter render read-only). It is never a
-  // pill (G1-G2), but received rows follow the Active agents mode, so a folded
-  // agents pill takes them with it and this reads the queue the dock will
-  // actually be handed.
-  const queueVisible = chrome.dockQueue.items.length > 0;
+  // pill, in any mode (G1-G2, staging round 4).
+  const queueVisible = props.queue.value.items.length > 0;
   const dockAgentsVisible = drawsInDock("activeAgents", activeAgentsVisible);
   const dockBackgroundVisible = drawsInDock("background", backgroundVisible);
   const approvalVisible = approvalSurfaceVisible(
@@ -599,7 +597,7 @@ export function ChatLowerInteractionSurfaces(
           activeAgents={activeAgents}
           todo={props.todo}
           restore={props.restoreContext}
-          queue={chrome.dockQueue}
+          queue={props.queue.value}
           folded={chrome.folded}
           dockOrder={chrome.dockOrder}
           hotspots={chrome.hotspots}

@@ -628,30 +628,21 @@ describe("<ChatDockCompactStrip />", () => {
     });
   });
 
-  // The one claim about a LEAVING pill that jsdom can decide, and it needs the
-  // motion features loaded to decide it: without them `AnimatePresence` drops
-  // an exiting child in the same commit and there is no ghost to inspect.
-  //
-  // With them, the pill is still in the document while it fades - and it must
-  // already have let go of its region marking by then. A `popLayout` ghost is
-  // out of flow and no longer in the arrangement, so one still answering to
-  // `data-layout-region` / `data-layout-group` is a dead member the canvas
-  // drag would reflow against and the editor's registry would hand a rect for.
-  it("releases a leaving pill's region hotspot while the ghost is still on screen", () => {
-    const seen: Array<HTMLElement | null> = [];
-    const hotspotRef = (node: HTMLElement | null) => {
-      seen.push(node);
-    };
-    const chips = [
-      { ...unitChip("filesChanged"), hotspotRef },
-      { ...unitChip("activeAgents"), hotspotRef },
-    ];
+  // The bug this exists to catch (staging round 4): `AnimatePresence` +
+  // `popLayout` held an exiting pill in the document at its own opacity, and a
+  // section that returned before that exit had finished was revived as the
+  // SAME node - back in flow, stuck invisible, holding its width and pushing
+  // the pills after it off the composer's left edge. With no exit tracking, a
+  // removed pill leaves the tree in the commit that removes it, so there is
+  // nothing left to revive.
+  it("removes a leaving pill from the DOM in the same commit, with no ghost left behind", () => {
+    const chips = [unitChip("filesChanged"), unitChip("activeAgents")];
     const { rerender } = render(
       <LazyMotion features={domAnimation}>
         {stripUi(stripValue(chips), true)}
       </LazyMotion>,
     );
-    expect(seen.filter((node) => node === null)).toHaveLength(0);
+    expect(screen.getByTestId("chat-dock-chip-activeAgents")).not.toBeNull();
 
     rerender(
       <LazyMotion features={domAnimation}>
@@ -659,8 +650,44 @@ describe("<ChatDockCompactStrip />", () => {
       </LazyMotion>,
     );
 
-    expect(screen.queryByTestId("chat-dock-chip-activeAgents")).not.toBeNull();
-    expect(seen.at(-1)).toBeNull();
+    expect(screen.queryByTestId("chat-dock-chip-activeAgents")).toBeNull();
+  });
+
+  // The other half: a pill that comes back is a fresh mount rather than the
+  // stale node `AnimatePresence` would have reused mid-exit - a reused node is
+  // exactly what stayed frozen at the exit's opacity. Read off the hotspot
+  // ref, the one hook that sees the actual DOM node the strip hands out.
+  it("brings a removed pill back as a new element rather than reviving the old one", () => {
+    const seen: Array<HTMLElement | null> = [];
+    const hotspotRef = (node: HTMLElement | null) => {
+      seen.push(node);
+    };
+    const chips = [
+      unitChip("filesChanged"),
+      { ...unitChip("activeAgents"), hotspotRef },
+    ];
+    const { rerender } = render(
+      <LazyMotion features={domAnimation}>
+        {stripUi(stripValue(chips), true)}
+      </LazyMotion>,
+    );
+    const firstNode = seen.at(-1);
+    expect(firstNode).not.toBeNull();
+
+    rerender(
+      <LazyMotion features={domAnimation}>
+        {stripUi(stripValue([chips[0]]), true)}
+      </LazyMotion>,
+    );
+    rerender(
+      <LazyMotion features={domAnimation}>
+        {stripUi(stripValue(chips), true)}
+      </LazyMotion>,
+    );
+
+    const revivedNode = seen.at(-1);
+    expect(revivedNode).not.toBeNull();
+    expect(revivedNode).not.toBe(firstNode);
   });
 
   it("calls onToggle with the clicked chip's section", () => {
@@ -680,14 +707,11 @@ describe("<ChatDockCompactStrip />", () => {
 });
 
 /**
- * Two motion decisions that jsdom cannot observe at all, so they are read off
- * the source the way `dock-chip-ring-css.test.ts` reads the stylesheet.
- *
- * `popLayout` takes an exiting pill OUT of flow, which needs a real layout to
- * measure - in jsdom every offset is zero and the mode does nothing. And a
- * `layout` prop's damage is the composer moving underneath, which is a painted
- * fact about a `flex-wrap` row and a rect. Neither can be asserted from the
- * DOM here, and both are one word away from being lost in an edit.
+ * A motion decision jsdom cannot observe at all, so it is read off the source
+ * the way `dock-chip-ring-css.test.ts` reads the stylesheet: a `layout` prop's
+ * damage is the composer moving underneath, which is a painted fact about a
+ * `flex-wrap` row and a rect that cannot be asserted from the DOM here and is
+ * one word away from being lost in an edit.
  */
 describe("the strip's motion contract", () => {
   const source = readFileSync(
@@ -698,17 +722,6 @@ describe("the strip's motion contract", () => {
     ),
     "utf8",
   );
-
-  it("pops an exiting pill out of flow rather than closing the gap over it", () => {
-    // The two props, read off the opening tag rather than off one exact line,
-    // so the claim survives the formatter wrapping it. The empty-match guard
-    // is what keeps the two assertions below from passing vacuously.
-    const openingTag = /<AnimatePresence[^>]*>/.exec(source)?.[0] ?? "";
-
-    expect(openingTag).not.toBe("");
-    expect(openingTag).toContain("initial={false}");
-    expect(openingTag).toContain('mode="popLayout"');
-  });
 
   // The row is `flex-wrap` directly above the composer, so a layout animation
   // across a wrap boundary would animate the position of the input itself -

@@ -296,9 +296,9 @@ describe("<ChatLowerDock />", () => {
     );
   });
 
-  // A pill exists on a WIDER predicate than its panel does: Active agents
-  // keeps its pill on received A2A rows alone, while the panel declines to
-  // draw without a self record. Clicking that pill used to leave three wrong
+  // A pill can exist while its panel draws nothing: `dockPanelContent`
+  // declines to draw the Active agents panel without a self record even when
+  // the chip itself is showing. Clicking that pill used to leave three wrong
   // outputs behind - a pressed pill, an `aria-controls` naming an id no
   // element carries, and the frame's first row drawing a separator under
   // nothing. Everything now follows the NODE the dock built, so a panel that
@@ -539,13 +539,12 @@ describe("<ChatLowerDock />", () => {
     });
   });
 
-  // The Active agents chip stands in for received A2A responses too, so
-  // dropping them from the queue when that chip is folded is the CALLER's job
-  // (`useChatDockChrome`'s `foldedQueue`, upstream of this component) - this
-  // dock does no A2A filtering of its own. Handing it a queue that still
-  // carries a received response, even while "activeAgents" is folded, proves
-  // the dock renders exactly the array it is given rather than re-deriving
-  // the fold itself, which is the boundary the caller's filtering depends on.
+  // The queue is never filtered by any dock fold (G1-G2, staging round 4):
+  // there is no upstream `foldedQueue` any more, and this dock does no A2A
+  // filtering of its own either. Handing it a queue that still carries a
+  // received response, even while "activeAgents" is folded, proves the dock
+  // renders exactly the array it is given rather than deriving a fold of its
+  // own.
   it("renders every row in the queue it is handed, including a received A2A item, regardless of the activeAgents fold", () => {
     const receivedItem = receivedAgentQueueItem(
       "received-1",
