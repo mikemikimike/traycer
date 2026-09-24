@@ -201,6 +201,12 @@ if (runsFirstShard) {
       exitCode,
       runBrowserRegression("scripts/status-bar-usage-scroll-browser.mjs"),
     );
+    // Primitive migration behavior (toast, concealment, nested dismissal).
+    // Settled pixel baselines live in the migration artifact and run manually.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/primitive-gate-behavior.mjs"),
+    );
     // NOT here, deliberately, and each for its own reason:
     // - `scripts/window-host-modal-alignment-browser.mjs` measures the
     //   local-bootstrap body against ONE LEFT EDGE (A1/A2/A5/PC4) - the design
@@ -209,9 +215,6 @@ if (runsFirstShard) {
     //   current component it reports the centring as a 58px misalignment. It
     //   is a manual instrument for the left-aligned arrangement it was written
     //   for, not a gate on the current one; re-base it before wiring it here.
-    // - `scripts/toast-over-modal-hittest.mjs` prints hit-test figures and
-    //   asserts nothing, so a gate on it would be a gate on a number nobody
-    //   reads - run it by hand.
   }
 }
 process.exit(exitCode);
