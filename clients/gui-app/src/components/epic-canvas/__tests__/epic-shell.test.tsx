@@ -290,6 +290,8 @@ describe("<EpicShell />", () => {
     expect(shell.dataset.sessionReady).toBe("false");
     expect(shell.className).not.toContain("rounded-r-lg");
     expect(canvas.className).not.toContain("rounded-t-lg");
+    // The content sheet owns the border; a second one here doubles it.
+    expect(canvas.className).not.toMatch(/\bborder\b/);
     expect(screen.queryByTestId("epic-session-loading")).toBeNull();
   });
 
