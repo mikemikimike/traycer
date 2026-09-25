@@ -108,7 +108,9 @@ const COMPACT_VALUES: LayoutValues = {
     memory: false,
     processes: false,
     ramShare: false,
-    agentRows: true,
+    // The sidebar's per-agent CPU/RSS/process readout crowds the agent titles
+    // out of a narrow row; the status bar's total still reads.
+    agentRows: false,
   },
   contextUsage: {
     shown: "shown",
