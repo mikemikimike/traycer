@@ -71,7 +71,7 @@ function GitDiffPanelMenuItems(props: { readonly epicId: string }): ReactNode {
   return (
     <>
       <DropdownMenuItem
-        onSelect={handleToggleLayout}
+        onClick={handleToggleLayout}
         data-testid="git-diff-panel-layout-toggle"
       >
         {listLayout === "sections" ? (
@@ -82,7 +82,7 @@ function GitDiffPanelMenuItems(props: { readonly epicId: string }): ReactNode {
         {layoutToggleLabel}
       </DropdownMenuItem>
       <DropdownMenuItem
-        onSelect={refresh.trigger}
+        onClick={refresh.trigger}
         disabled={selectedRepo === null || refresh.refreshing}
         data-testid="git-diff-panel-refresh"
       >
@@ -117,25 +117,27 @@ export function GitDiffPanelActions(props: LeftPanelHeaderSlotProps) {
         sideOffset={undefined}
         align={undefined}
       >
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="muted"
-            size="icon-sm"
-            aria-label="More Git Diff actions"
-            data-testid="git-diff-panel-more"
-            className="shrink-0"
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="muted"
+              size="icon-sm"
+              aria-label="More Git Diff actions"
+              data-testid="git-diff-panel-more"
+              className="shrink-0"
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          }
+        />
       </TooltipWrapper>
       <DropdownMenuContent
         side="right"
         align="start"
         sideOffset={8}
-        avoidCollisions={false}
-        className="w-[var(--radix-dropdown-menu-content-available-width)] min-w-0 max-w-52"
+        collisionAvoidance={{ side: "none", align: "none" }}
+        className="w-[var(--available-width)] min-w-0 max-w-52"
       >
         <GitDiffPanelMenuItems epicId={props.epicId} />
       </DropdownMenuContent>
@@ -161,18 +163,20 @@ export function GitDiffPanelInlineActions(props: {
 
   return (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="muted"
-          size="icon-sm"
-          aria-label="More Git Diff actions"
-          data-testid="git-diff-panel-more"
-          className="shrink-0"
-        >
-          <MoreHorizontal className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="muted"
+            size="icon-sm"
+            aria-label="More Git Diff actions"
+            data-testid="git-diff-panel-more"
+            className="shrink-0"
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        }
+      />
       <DropdownMenuContent
         side="bottom"
         align="end"

@@ -118,7 +118,8 @@ function softDisabledProps(
   readonly softDisabled: boolean;
   readonly aria: SidebarRowMenuItemAria | null;
   readonly reasonId: string | undefined;
-  readonly onSelect: (event: Event) => void;
+  readonly onClick: (() => void) | undefined;
+  readonly closeOnClick: boolean;
 } {
   const explained = entry.disabled && entry.disabledTooltip !== null;
   if (!explained) {
@@ -127,7 +128,8 @@ function softDisabledProps(
       softDisabled: false,
       aria: null,
       reasonId: undefined,
-      onSelect: entry.onSelect,
+      onClick: entry.onSelect,
+      closeOnClick: true,
     };
   }
   const reasonId = `${reasonIdPrefix}${entry.id}`;
@@ -136,7 +138,8 @@ function softDisabledProps(
     softDisabled: true,
     aria: { "aria-disabled": true, "aria-describedby": reasonId },
     reasonId,
-    onSelect: (event: Event) => event.preventDefault(),
+    onClick: undefined,
+    closeOnClick: false,
   };
 }
 
@@ -201,7 +204,8 @@ export function SidebarDropdownMenuItems(props: {
           {...(state.aria ?? {})}
           variant={entry.variant}
           data-testid={entry.testIds.dropdown}
-          onSelect={state.onSelect}
+          onClick={state.onClick}
+          closeOnClick={state.closeOnClick}
         >
           {entry.icon}
           {entry.label}
@@ -231,7 +235,8 @@ export function SidebarContextMenuItems(props: {
           {...(state.aria ?? {})}
           variant={entry.variant}
           data-testid={entry.testIds.context}
-          onSelect={state.onSelect}
+          onClick={state.onClick}
+          closeOnClick={state.closeOnClick}
         >
           {entry.icon}
           {entry.label}

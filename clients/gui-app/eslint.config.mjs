@@ -2343,11 +2343,8 @@ export default tseslint.config(
     },
   },
   {
-    // Raw Base is the control in T02 proofs and the permanent focus parity gate.
-    files: [
-      "src/__tests__/browser/base-ui-proofs.tsx",
-      "src/__tests__/browser/portal-lifecycle-gate.tsx",
-    ],
+    // Raw Base is the control in the permanent focus parity gate.
+    files: ["src/__tests__/browser/portal-lifecycle-gate.tsx"],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
         "posthog",

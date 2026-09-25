@@ -36,7 +36,10 @@ import * as Command from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
-import { PortalConcealmentProvider } from "@/components/ui/portal-concealment-context";
+import {
+  PortalConcealmentBoundary,
+  PortalConcealmentProvider,
+} from "@/components/ui/portal-concealment-context";
 import { SurfacePresentationBoundary } from "@/components/layout/surface-presentation-boundary";
 import { PromotableModalFrame } from "@/components/layout/dialogs/promotable-modal-frame";
 import {
@@ -44,6 +47,7 @@ import {
   useOverlayFrame,
 } from "@/components/ui/overlay-frame-context";
 import { useSettingsStore } from "@/stores/settings/settings-store";
+import { escapeOwnedElsewhere } from "@/components/onboarding/guide-overlays";
 import "@/lib/theme-applier";
 import "@/index.css";
 
@@ -58,6 +62,14 @@ declare global {
       focusEvents: string[];
       ownerClose: () => void;
       toast: () => void;
+      closeNested: () => void;
+      registrySize: () => number;
+      cancelNestedClose: (value: boolean) => void;
+      openUnrelated: () => void;
+      unmountNested: () => void;
+      showNestedTooltip: () => void;
+      concealNested: (value: boolean) => void;
+      escapeOwnedElsewhere: (within: ReadonlyArray<Element | null>) => boolean;
     };
   }
 }
@@ -76,17 +88,31 @@ const trigger = <Button data-gate-trigger>Open settings</Button>;
 function MenuCase(props: {
   readonly name: string;
   readonly open: boolean | undefined;
-  readonly onOpenChange: ((value: boolean) => void) | undefined;
+  readonly onOpenChange: ComponentProps<
+    typeof Menu.DropdownMenu
+  >["onOpenChange"];
   readonly onCloseFocus: (() => void) | undefined;
+  // D16: real Tooltip/HoverCard triggers whose own trigger element IS a
+  // DropdownMenuItem - hovering one must present its passive preview while
+  // the menu stays open, without stealing ownership or blocking ordinary
+  // menu dismissal.
+  readonly withPassivePreviews: boolean | undefined;
 }): ReactNode {
   return (
     <Menu.DropdownMenu open={props.open} onOpenChange={props.onOpenChange}>
-      <Menu.DropdownMenuTrigger asChild>
-        <Button data-gate-trigger={props.name}>Open menu</Button>
-      </Menu.DropdownMenuTrigger>
+      <Menu.DropdownMenuTrigger
+        render={<Button data-gate-trigger={props.name}>Open menu</Button>}
+      />
       <Menu.DropdownMenuContent
         data-gate-popup={props.name}
-        onCloseAutoFocus={props.onCloseFocus}
+        finalFocus={
+          props.onCloseFocus
+            ? () => {
+                props.onCloseFocus?.();
+                return true;
+              }
+            : undefined
+        }
       >
         <Menu.DropdownMenuLabel>Workspace</Menu.DropdownMenuLabel>
         <Menu.DropdownMenuItem
@@ -98,10 +124,37 @@ function MenuCase(props: {
         >
           {label}
         </Menu.DropdownMenuItem>
+        {props.withPassivePreviews ? (
+          <>
+            <Tooltip.Tooltip>
+              <Tooltip.TooltipTrigger
+                render={
+                  <Menu.DropdownMenuItem data-gate-item="tooltip-preview">
+                    Hover for tooltip
+                  </Menu.DropdownMenuItem>
+                }
+              />
+              <Tooltip.TooltipContent data-gate-popup="tooltip-in-menu">
+                Tooltip preview
+              </Tooltip.TooltipContent>
+            </Tooltip.Tooltip>
+            <Hover.HoverCard>
+              <Hover.HoverCardTrigger
+                render={
+                  <Menu.DropdownMenuItem data-gate-item="hover-preview">
+                    Hover for preview
+                  </Menu.DropdownMenuItem>
+                }
+              />
+              <Hover.HoverCardContent data-gate-popup="preview-in-menu">
+                Preview card content
+              </Hover.HoverCardContent>
+            </Hover.HoverCard>
+          </>
+        ) : null}
         <Menu.DropdownMenuCheckboxItem
-          checked={
-            state === "indeterminate" ? "indeterminate" : state === "checked"
-          }
+          checked={state === "checked"}
+          aria-checked={state === "indeterminate" ? "mixed" : undefined}
         >
           Show details
         </Menu.DropdownMenuCheckboxItem>
@@ -132,13 +185,14 @@ function MenuCase(props: {
 function SelectCase(props: {
   readonly name: string;
   readonly open: boolean | undefined;
-  readonly onOpenChange: ((value: boolean) => void) | undefined;
+  readonly onOpenChange: ComponentProps<typeof Select.Select>["onOpenChange"];
   readonly onCloseFocus: (() => void) | undefined;
 }): ReactNode {
   return (
     <Select.Select
       open={props.open}
       onOpenChange={props.onOpenChange}
+      items={{ one: "First view", two: label, three: "Unavailable" }}
       defaultValue={
         state === "selected" || mode === "conceal" ? "one" : undefined
       }
@@ -152,7 +206,14 @@ function SelectCase(props: {
       </Select.SelectTrigger>
       <Select.SelectContent
         data-gate-popup={props.name}
-        onCloseAutoFocus={props.onCloseFocus}
+        finalFocus={
+          props.onCloseFocus
+            ? () => {
+                props.onCloseFocus?.();
+                return true;
+              }
+            : undefined
+        }
       >
         <Select.SelectGroup>
           <Select.SelectLabel>Views</Select.SelectLabel>
@@ -166,6 +227,15 @@ function SelectCase(props: {
     </Select.Select>
   );
 }
+// Real per-primitive detail unions (each includes the wrapper's own
+// non-cancelable PresentationLossDetails member), extracted straight from
+// the actual onOpenChange prop types - no hand-duplicated shape.
+type MenuChangeDetails = Parameters<
+  NonNullable<ComponentProps<typeof Menu.DropdownMenu>["onOpenChange"]>
+>[1];
+type SelectChangeDetails = Parameters<
+  NonNullable<ComponentProps<typeof Select.Select>["onOpenChange"]>
+>[1];
 function TooltipCase(): ReactNode {
   return (
     <Tooltip.Tooltip>
@@ -176,6 +246,54 @@ function TooltipCase(): ReactNode {
         {label}
       </Tooltip.TooltipContent>
     </Tooltip.Tooltip>
+  );
+}
+// Matches base-ui-proofs.tsx's own passive tooltip (~line 1010): fully
+// controlled open={true}, no onOpenChange - nothing can close it, so
+// nestedChecks() can prove exclusion against a tooltip that is genuinely,
+// unconditionally presented, not one a hover/backdrop race might miss.
+function PassiveTooltipCase(): ReactNode {
+  return (
+    <Tooltip.Tooltip open>
+      <Tooltip.TooltipTrigger
+        render={<Button data-gate-trigger="tooltip">Details</Button>}
+      />
+      <Tooltip.TooltipContent data-gate-popup="tooltip">
+        {label}
+      </Tooltip.TooltipContent>
+    </Tooltip.Tooltip>
+  );
+}
+interface NestedCaseProps {
+  readonly open: boolean | undefined;
+  readonly onOpenChange:
+    | ((
+        value: boolean,
+        details: MenuChangeDetails | SelectChangeDetails,
+      ) => void)
+    | undefined;
+}
+// Pulled out of the `dialog` case purely to keep its own complexity in
+// check - same three branches (select/tooltip/menu), same gating on
+// nestedMounted, no behavior change.
+function renderNestedCase(
+  nestedMounted: boolean,
+  nestedProps: NestedCaseProps,
+): ReactNode {
+  if (!((family === "nested" || mode === "nested") && nestedMounted))
+    return null;
+  if (["select", "select-in-dialog"].includes(state))
+    return (
+      <SelectCase name="nested" {...nestedProps} onCloseFocus={undefined} />
+    );
+  if (state === "tooltip") return <TooltipCase />;
+  return (
+    <MenuCase
+      name="nested"
+      {...nestedProps}
+      onCloseFocus={undefined}
+      withPassivePreviews={undefined}
+    />
   );
 }
 interface OverlayFrame {
@@ -194,6 +312,12 @@ interface CaseProps {
   readonly onOpenFocus: () => void;
   readonly onCloseFocus: () => void;
   readonly frame: OverlayFrame;
+  readonly nestedOpen: boolean;
+  readonly setNestedOpen: (value: boolean) => void;
+  readonly cancelNestedClose: boolean;
+  readonly nestedMounted: boolean;
+  readonly nestedTooltipVisible: boolean;
+  readonly nestedConcealed: boolean;
 }
 const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   button: (): ReactNode => {
@@ -383,6 +507,7 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
     const variant = state.startsWith("line") ? "line" : "default";
     const size = state.includes("sm") ? "sm" : "default";
     const index = scope ? Number(state.slice(-1)) : 0;
+    const disabledIndex = state === "disabled" ? 1 : -1;
     return (
       <Tabs.Tabs
         defaultValue={String(index)}
@@ -399,7 +524,7 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
               data-gate-control={i === 0 ? "true" : undefined}
               value={String(i)}
               variant={scope ? "scope" : undefined}
-              disabled={state === "disabled" && i === 1}
+              disabled={i === disabledIndex}
             >
               {text}
             </Tabs.TabsTrigger>
@@ -465,30 +590,40 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
     onOpenFocus,
     onCloseFocus,
     frame,
+    nestedOpen,
+    setNestedOpen,
+    cancelNestedClose,
+    nestedMounted,
+    nestedTooltipVisible,
+    nestedConcealed,
   }): ReactNode => {
     const isFramed = family === "frame" || state === "menu-in-frame";
-    let nested: ReactNode = null;
-    if (family === "nested" || mode === "nested") {
-      if (["select", "select-in-dialog"].includes(state))
-        nested = (
-          <SelectCase
-            name="nested"
-            open={undefined}
-            onOpenChange={undefined}
-            onCloseFocus={undefined}
-          />
-        );
-      else if (state === "tooltip") nested = <TooltipCase />;
-      else
-        nested = (
-          <MenuCase
-            name="nested"
-            open={undefined}
-            onOpenChange={undefined}
-            onCloseFocus={undefined}
-          />
-        );
-    }
+    // Only nestedChecks()'s own family==="frame" path is controlled (lets
+    // the driver force a synchronous close via `closeNested()`); the older
+    // family==="nested" states stay fully uncontrolled, unchanged.
+    const nestedControlled = family === "frame";
+    const nestedProps = nestedControlled
+      ? {
+          open: nestedOpen,
+          // The owner's own onOpenChange can veto a close (Base's `cancel`
+          // lever) - `cancelNestedClose` lets the driver arm that veto and
+          // prove both the child and the frame survive a press that would
+          // otherwise have closed the child. PresentationLossDetails carries
+          // no `cancel` at all, so `"cancel" in details` excludes it by
+          // construction - that close must never be vetoed.
+          onOpenChange: (
+            value: boolean,
+            details: MenuChangeDetails | SelectChangeDetails,
+          ) => {
+            if (!value && cancelNestedClose && "cancel" in details) {
+              details.cancel();
+              return;
+            }
+            setNestedOpen(value);
+          },
+        }
+      : { open: undefined, onOpenChange: undefined };
+    const nested = renderNestedCase(nestedMounted, nestedProps);
     const titleSize = state === "title-lg" ? "lg" : "default";
     return (
       <Dialog.Dialog
@@ -530,7 +665,19 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
             >
               <div className="flex w-full flex-col">
                 {body}
-                {nested}
+                {family === "frame" ? (
+                  <PortalConcealmentBoundary concealed={nestedConcealed}>
+                    {nested}
+                  </PortalConcealmentBoundary>
+                ) : (
+                  nested
+                )}
+                {/* A passive tooltip coexisting in the same frame - it never
+                    registers in OverlayFrameContext (tooltip.tsx doesn't use
+                    useOverlayFrameRegistration), so it must not be able to
+                    claim or block the nested child's own dismissal. Opt-in
+                    only, so every other case's DOM shape is unchanged. */}
+                {nestedTooltipVisible ? <PassiveTooltipCase /> : null}
               </div>
             </PromotableModalFrame>
           </OverlayFrameContext.Provider>
@@ -606,8 +753,12 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   },
   drawer: ({ open, changeOpen, body }): ReactNode => {
     return (
-      <Drawer.Drawer open={open} onOpenChange={changeOpen} direction="bottom">
-        <Drawer.DrawerTrigger asChild>{trigger}</Drawer.DrawerTrigger>
+      <Drawer.Drawer
+        open={open}
+        onOpenChange={changeOpen}
+        swipeDirection="down"
+      >
+        <Drawer.DrawerTrigger render={trigger} />
         <Drawer.DrawerContent data-gate-popup="outer" className="max-h-[85dvh]">
           <Drawer.DrawerHeader>
             <Drawer.DrawerTitle>Workspace settings</Drawer.DrawerTitle>
@@ -616,7 +767,10 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
           <div className="overflow-auto pb-safe-bottom">
             {body}
             {state === "long" ? (
-              <div data-vaul-no-drag className="max-h-[40dvh] overflow-auto">
+              <div
+                data-base-ui-swipe-ignore
+                className="max-h-[40dvh] overflow-auto"
+              >
                 {Array.from({ length: 20 }, (_, i) => (
                   <p key={i}>File {i + 1}: staged changes</p>
                 ))}
@@ -689,16 +843,30 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
         open={open}
         onOpenChange={changeOpen}
         onCloseFocus={onCloseFocus}
+        withPassivePreviews={state === "passive-previews"}
       />
     );
   },
-  "context-menu": (): ReactNode => {
+  "context-menu": ({ open, changeOpen, onCloseFocus }): ReactNode => {
     return (
-      <Context.ContextMenu>
+      <Context.ContextMenu
+        open={mode === "conceal" && state === "uncontrolled" ? undefined : open}
+        onOpenChange={changeOpen}
+      >
         <Context.ContextMenuTrigger data-gate-trigger="context">
           <Button>Right-click for actions</Button>
         </Context.ContextMenuTrigger>
-        <Context.ContextMenuContent data-gate-popup="outer">
+        <Context.ContextMenuContent
+          data-gate-popup="outer"
+          finalFocus={
+            mode === "visual"
+              ? undefined
+              : () => {
+                  onCloseFocus();
+                  return true;
+                }
+          }
+        >
           <Context.ContextMenuItem
             variant={state === "destructive" ? "destructive" : "default"}
             disabled={state === "disabled"}
@@ -723,10 +891,15 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
       </Context.ContextMenu>
     );
   },
-  menubar: (): ReactNode => {
+  menubar: ({ open, changeOpen }): ReactNode => {
+    // Uncontrolled for the pixel/visual fixture (unchanged rendering, no new
+    // wiring risk); controlled only in behavior mode, so toastChecks()'s
+    // owner counters (data-gate-state's data-open) are meaningful for it too.
+    const menuProps =
+      mode === "visual" ? {} : { open, onOpenChange: changeOpen };
     return (
       <Menubar.Menubar>
-        <Menubar.MenubarMenu>
+        <Menubar.MenubarMenu {...menuProps}>
           <Menubar.MenubarTrigger data-gate-trigger>
             Workspace
           </Menubar.MenubarTrigger>
@@ -794,6 +967,30 @@ export function Fixture(): ReactNode {
   const [actions, setActions] = useState(0);
   const [closeFocus, setCloseFocus] = useState(0);
   const [openFocus, setOpenFocus] = useState(0);
+  // Controlled state for the "frame" family's nested menu/select child only
+  // (mode==="nested" && family==="frame", used by nestedChecks()) - lets the
+  // driver force a synchronous, flushSync-committed close/reopen of just the
+  // child, independent of any real gesture. The older family==="nested"
+  // (menu-in-dialog, select-in-dialog, ...) path stays fully uncontrolled.
+  const [nestedOpen, setNestedOpen] = useState(false);
+  // Arms the nested child's onOpenChange cancel lever - see `dialog`'s
+  // `nestedProps.onOpenChange` above.
+  const [cancelNestedClose, setCancelNestedClose] = useState(false);
+  // A sibling overlay rendered outside OverlayFrameContext.Provider (see the
+  // Fixture return below) - proves an overlay unrelated to this frame never
+  // gets counted as one of its children.
+  const [unrelatedOpen, setUnrelatedOpen] = useState(false);
+  // Removes the nested child from the tree entirely, so its registration
+  // releases via unmount cleanup rather than a controlled open=false.
+  const [nestedMounted, setNestedMounted] = useState(true);
+  // Opt-in only (default false) - every other nestedChecks() case must keep
+  // its exact existing DOM shape.
+  const [nestedTooltipVisible, setNestedTooltipVisible] = useState(false);
+  // Wraps ONLY the nested child (never the tooltip) in the real production
+  // PortalConcealmentBoundary - concealing it flips the wrapper's own
+  // computed `open` (logical && present) to false, closing and deregistering
+  // it, without touching `nestedOpen` (the logical/controlled state) itself.
+  const [nestedConcealed, setNestedConcealed] = useState(false);
   // Only the "dialog" case (family=frame / state=menu-in-frame) uses this,
   // but it must be called unconditionally here rather than from inside the
   // `cases` record - those are plain functions, not components, so a hook
@@ -831,17 +1028,44 @@ export function Fixture(): ReactNode {
       document.querySelector<HTMLElement>("[data-gate-outside]")?.focus();
     };
     window.primitiveGate = {
+      // The true branch is synchronous too: an interrupted-close driver
+      // script restores presentation and clicks the trigger to reopen it in
+      // the SAME task (never waiting out the exit animation), which only
+      // sees a committed `paneFocused`/`visible` value if this commits before
+      // that click's `useClosingOverlay` gate reads it.
       focus: (value) =>
-        value ? setFocused(true) : transfer(() => setFocused(false)),
+        value
+          ? flushSync(() => setFocused(true))
+          : transfer(() => setFocused(false)),
       visible: (value) =>
-        value ? setVisible(true) : transfer(() => setVisible(false)),
+        value
+          ? flushSync(() => setVisible(true))
+          : transfer(() => setVisible(false)),
       conceal: setConcealed,
       focusEvents,
       ownerClose: () => setOpen(false),
       toast: showToast,
+      // Forces a synchronous, flushSync-committed close of the "frame"
+      // family's nested menu/select child (mode==="nested" &&
+      // family==="frame" only - see `nestedOpen` above). By the time this
+      // returns, `useOverlayFrameRegistration`'s cleanup has already run
+      // (flushSync flushes layout effects too), so `registrySize()` read
+      // right after is a genuine post-close value, not an inferred one.
+      closeNested: () => flushSync(() => setNestedOpen(false)),
+      registrySize: () => frame.registry.size,
+      cancelNestedClose: (value) =>
+        flushSync(() => setCancelNestedClose(value)),
+      openUnrelated: () => flushSync(() => setUnrelatedOpen(true)),
+      unmountNested: () => flushSync(() => setNestedMounted(false)),
+      showNestedTooltip: () => flushSync(() => setNestedTooltipVisible(true)),
+      concealNested: (value) => flushSync(() => setNestedConcealed(value)),
+      escapeOwnedElsewhere,
     };
     return () => document.removeEventListener("focusin", recordFocus);
-  }, []);
+    // `frame.registry` (the Set) is stable across renders (useOverlayFrame's
+    // own useState), even though `frame` itself is a fresh object each call -
+    // depend on the stable Set, not a snapshotted `.size` that would go stale.
+  }, [frame.registry]);
   const input = (
     <Input
       data-gate-input
@@ -889,6 +1113,12 @@ export function Fixture(): ReactNode {
     onOpenFocus: () => setOpenFocus((count) => count + 1),
     onCloseFocus: () => setCloseFocus((count) => count + 1),
     frame,
+    nestedOpen,
+    setNestedOpen,
+    cancelNestedClose,
+    nestedMounted,
+    nestedTooltipVisible,
+    nestedConcealed,
   });
   if (content === undefined || content === null)
     throw new Error("Empty gate case: " + family + "/" + state);
@@ -922,6 +1152,35 @@ export function Fixture(): ReactNode {
                 />
               ) : null}
               {content}
+              {family === "frame" ? (
+                <Popover.Popover
+                  open={unrelatedOpen}
+                  // Independent, controlled, and deliberately never closed by
+                  // an ordinary press - it must stay open and presented for
+                  // the whole test, so "excluded from frame ownership" is
+                  // proven against a genuinely open sibling, not one that
+                  // already closed itself on the same outside click.
+                  onOpenChange={(next, details) => {
+                    if (!next) {
+                      details.cancel();
+                      return;
+                    }
+                    setUnrelatedOpen(next);
+                  }}
+                >
+                  <Popover.PopoverTrigger
+                    render={
+                      <Button data-gate-unrelated-trigger>Unrelated</Button>
+                    }
+                  />
+                  <Popover.PopoverContent
+                    data-gate-unrelated
+                    initialFocus={false}
+                  >
+                    Unrelated overlay
+                  </Popover.PopoverContent>
+                </Popover.Popover>
+              ) : null}
             </div>
           </main>
         </PortalConcealmentProvider>

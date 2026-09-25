@@ -46,7 +46,7 @@ export function HiddenTabsMenu(props: {
               <button
                 type="button"
                 aria-label={label}
-                className="flex h-7 min-w-9 items-center justify-center gap-1 rounded-md border border-border bg-foreground/8 px-1.5 text-ui-xs font-medium tabular-nums text-foreground transition-colors hover:bg-foreground/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-foreground/40 data-[state=open]:bg-foreground/12 [-webkit-app-region:no-drag]"
+                className="flex h-7 min-w-9 items-center justify-center gap-1 rounded-md border border-border bg-foreground/8 px-1.5 text-ui-xs font-medium tabular-nums text-foreground transition-colors hover:bg-foreground/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-popup-open:border-foreground/40 data-popup-open:bg-foreground/12 [-webkit-app-region:no-drag]"
               >
                 {count}
                 <ChevronDown className="size-3" aria-hidden />

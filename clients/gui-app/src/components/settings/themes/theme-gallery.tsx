@@ -621,35 +621,37 @@ function ThemeActions({
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            ref={trigger}
-            size="icon-sm"
-            variant="ghost"
-            aria-label={`Manage ${theme.name}`}
-          >
-            <Ellipsis />
-          </Button>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              ref={trigger}
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Manage ${theme.name}`}
+            >
+              <Ellipsis />
+            </Button>
+          }
+        />
         <DropdownMenuContent
           align="end"
-          onCloseAutoFocus={(event) => {
+          finalFocus={() => {
             if (confirmDelete) {
-              event.preventDefault();
-              cancel.current?.focus();
+              return cancel.current;
             }
+            return true;
           }}
         >
           <DropdownMenuItem
             disabled={draft !== null}
-            onSelect={() => onEdit(theme)}
+            onClick={() => onEdit(theme)}
           >
             <Pencil />
             Edit theme
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={draft !== null}
-            onSelect={() =>
+            onClick={() =>
               onEdit({
                 ...theme,
                 id: crypto.randomUUID(),
@@ -661,11 +663,11 @@ function ThemeActions({
             <Copy />
             Duplicate theme
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => exportThemes([theme])}>
+          <DropdownMenuItem onClick={() => exportThemes([theme])}>
             <Download />
             Export theme
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setConfirmDelete(true)}>
+          <DropdownMenuItem onClick={() => setConfirmDelete(true)}>
             <Trash2 />
             Delete theme
           </DropdownMenuItem>

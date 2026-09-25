@@ -65,25 +65,27 @@ export function UserMenu(props: UserMenuProps) {
           sideOffset={6}
           align={undefined}
         >
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Open user menu"
-              data-testid="user-menu-trigger"
-              className="rounded-full"
-              onClick={() => {
-                setOpen((value) => !value);
-              }}
-            >
-              <Avatar size="sm">
-                {props.avatarUrl !== null ? (
-                  <AvatarImage src={props.avatarUrl} alt="" />
-                ) : null}
-                <AvatarFallback>{initials}</AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Open user menu"
+                data-testid="user-menu-trigger"
+                className="rounded-full"
+                onClick={() => {
+                  setOpen((value) => !value);
+                }}
+              >
+                <Avatar size="sm">
+                  {props.avatarUrl !== null ? (
+                    <AvatarImage src={props.avatarUrl} alt="" />
+                  ) : null}
+                  <AvatarFallback>{initials}</AvatarFallback>
+                </Avatar>
+              </Button>
+            }
+          />
         </TooltipWrapper>
         <DropdownMenuContent
           align="end"
@@ -104,7 +106,7 @@ export function UserMenu(props: UserMenuProps) {
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onSelect={() => {
+            onClick={() => {
               setOpen(false);
               useDesktopDialogStore.getState().openDrafts("menu");
             }}
@@ -115,7 +117,7 @@ export function UserMenu(props: UserMenuProps) {
           {props.showAppSettings ? (
             <DropdownMenuItem
               data-testid="user-menu-app-settings"
-              onSelect={() => {
+              onClick={() => {
                 setOpen(false);
                 Analytics.getInstance().track(AnalyticsEvent.SettingsOpened, {
                   source: "direct_ui",
@@ -149,7 +151,7 @@ export function UserMenu(props: UserMenuProps) {
           {isMobileApp() ? null : (
             <DropdownMenuItem
               data-testid="user-menu-manage-subscription"
-              onSelect={() => {
+              onClick={() => {
                 setOpen(false);
                 // Tracked on the RESOLVED open only: a failed OS handoff is not
                 // a subscription-management visit (R11). The failure toast is
@@ -172,7 +174,7 @@ export function UserMenu(props: UserMenuProps) {
           <DropdownMenuItem
             data-testid="user-menu-sign-out"
             variant="destructive"
-            onSelect={() => {
+            onClick={() => {
               setOpen(false);
               setSignOutOpen(true);
             }}

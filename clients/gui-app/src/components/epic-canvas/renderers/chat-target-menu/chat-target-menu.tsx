@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactElement } from "react";
 
 import {
   DropdownMenu,
@@ -23,7 +23,7 @@ interface ChatTargetMenuProps {
    * artifact popover's anchor both go here; the roster does not care what it
    * looks like, only that Radix has a trigger to position against.
    */
-  readonly trigger: ReactNode;
+  readonly trigger: ReactElement;
 }
 
 /**
@@ -56,7 +56,7 @@ export function ChatTargetMenu(props: ChatTargetMenuProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
     >
-      <DropdownMenuTrigger asChild>{props.trigger}</DropdownMenuTrigger>
+      <DropdownMenuTrigger render={props.trigger} />
       <DropdownMenuContent
         align="start"
         className="flex w-max min-w-[min(90vw,14rem)] max-w-[min(90vw,20rem)] flex-col overflow-y-hidden"
@@ -86,7 +86,7 @@ export function ChatTargetMenu(props: ChatTargetMenuProps) {
             <DropdownMenuSeparator className="shrink-0" />
           </>
         ) : null}
-        <DropdownMenuItem className="shrink-0" onSelect={props.onSelectNewChat}>
+        <DropdownMenuItem className="shrink-0" onClick={props.onSelectNewChat}>
           New chat
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -112,7 +112,7 @@ function ChatTargetItem(props: {
   return (
     <DropdownMenuItem
       disabled={props.target.isOnOtherHost}
-      onSelect={() => props.onSelect(props.target.chatId)}
+      onClick={() => props.onSelect(props.target.chatId)}
     >
       <span className="min-w-0 flex-1 truncate">{props.target.title}</span>
       {meta === null ? null : (

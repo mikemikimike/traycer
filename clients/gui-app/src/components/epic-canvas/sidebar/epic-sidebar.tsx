@@ -2204,18 +2204,20 @@ function PanelHeaderMoreMenuTrigger(props: {
       sideOffset={undefined}
       align={undefined}
     >
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="muted"
-          size="icon-sm"
-          aria-label={props.label}
-          className="shrink-0"
-          data-testid={props.testId}
-        >
-          <MoreHorizontal className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="muted"
+            size="icon-sm"
+            aria-label={props.label}
+            className="shrink-0"
+            data-testid={props.testId}
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        }
+      />
     </TooltipWrapper>
   );
 }
@@ -2268,19 +2270,19 @@ function ChatHeaderMoreMenu(props: {
         side="right"
         align="start"
         sideOffset={8}
-        avoidCollisions={false}
-        className="w-[var(--radix-dropdown-menu-content-available-width)] min-w-0 max-w-56"
-        onCloseAutoFocus={(event) => {
-          if (!searchSelectedRef.current) return;
+        collisionAvoidance={{ side: "none", align: "none" }}
+        className="w-[var(--available-width)] min-w-0 max-w-56"
+        finalFocus={() => {
+          if (!searchSelectedRef.current) return true;
           searchSelectedRef.current = false;
           // Search owns the next focus target. Radix otherwise restores focus
           // to the now-secondary overflow trigger after the input has mounted.
-          event.preventDefault();
+          return false;
         }}
       >
         {props.searching ? null : (
           <DropdownMenuItem
-            onSelect={() => {
+            onClick={() => {
               searchSelectedRef.current = true;
               openSearch(props.tabId, "chats", "");
             }}
@@ -2291,14 +2293,14 @@ function ChatHeaderMoreMenu(props: {
           </DropdownMenuItem>
         )}
         <CommGraphOpenMenuItem epicId={props.epicId} disabled={false} />
-        <DropdownMenuItem onSelect={props.onCollapseAll}>
+        <DropdownMenuItem onClick={props.onCollapseAll}>
           <CopyMinus className="size-4" />
           Collapse all
         </DropdownMenuItem>
         {isEditableRole(permissionRole) ? (
           <DropdownMenuItem
             disabled={!selectionEnabled}
-            onSelect={selection.enterSelectionMode}
+            onClick={selection.enterSelectionMode}
           >
             <ListChecks className="size-4" />
             Select agents
@@ -2336,14 +2338,14 @@ function ArtifactHeaderMoreMenu(props: {
         side="right"
         align="start"
         sideOffset={8}
-        avoidCollisions={false}
-        className="w-[var(--radix-dropdown-menu-content-available-width)] min-w-0 max-w-52"
-        onCloseAutoFocus={(event) => {
-          if (!searchSelectedRef.current) return;
+        collisionAvoidance={{ side: "none", align: "none" }}
+        className="w-[var(--available-width)] min-w-0 max-w-52"
+        finalFocus={() => {
+          if (!searchSelectedRef.current) return true;
           searchSelectedRef.current = false;
           // Keep the caret in the search input instead of returning it to the
           // overflow trigger when the selection closes this menu.
-          event.preventDefault();
+          return false;
         }}
       >
         {/* Hidden when the Epic has NO artifacts or is open read-only - see
@@ -2351,7 +2353,7 @@ function ArtifactHeaderMoreMenu(props: {
             this and a size threshold does not. */}
         {searchAvailable && !props.searching ? (
           <DropdownMenuItem
-            onSelect={() => {
+            onClick={() => {
               searchSelectedRef.current = true;
               openSearch(props.tabId, "artifacts", "");
             }}
@@ -2362,13 +2364,13 @@ function ArtifactHeaderMoreMenu(props: {
           </DropdownMenuItem>
         ) : null}
         <DeletedArtifactsOpenMenuItem epicId={props.epicId} />
-        <DropdownMenuItem onSelect={props.onCollapseAll}>
+        <DropdownMenuItem onClick={props.onCollapseAll}>
           <CopyMinus className="size-4" />
           Collapse all
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!selection.canSelect}
-          onSelect={selection.enterSelectionMode}
+          onClick={selection.enterSelectionMode}
         >
           <ListChecks className="size-4" />
           Select artifacts
@@ -2544,30 +2546,32 @@ function SidebarBulkSelectionActions() {
       </TooltipWrapper>
       {selection.panelId === "artifacts" ? (
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Export selected artifacts"
-              disabled={!canExportSelected || exportArtifacts.isPending}
-            >
-              {exportArtifacts.isPending ? (
-                <AgentSpinningDots
-                  className={undefined}
-                  testId={undefined}
-                  variant={undefined}
-                />
-              ) : (
-                <Download className="size-4" />
-              )}
-            </Button>
-          </DropdownMenuTrigger>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Export selected artifacts"
+                disabled={!canExportSelected || exportArtifacts.isPending}
+              >
+                {exportArtifacts.isPending ? (
+                  <AgentSpinningDots
+                    className={undefined}
+                    testId={undefined}
+                    variant={undefined}
+                  />
+                ) : (
+                  <Download className="size-4" />
+                )}
+              </Button>
+            }
+          />
           <DropdownMenuContent align="end">
             <DropdownMenuItem
               data-testid="epic-sidebar-export-selected-markdown"
               disabled={!canExportSelected || exportArtifacts.isPending}
-              onSelect={() => {
+              onClick={() => {
                 exportSelected("markdown");
               }}
             >
@@ -2576,7 +2580,7 @@ function SidebarBulkSelectionActions() {
             <DropdownMenuItem
               data-testid="epic-sidebar-export-selected-pdf"
               disabled={!canExportSelected || exportArtifacts.isPending}
-              onSelect={() => {
+              onClick={() => {
                 exportSelected("pdf");
               }}
             >

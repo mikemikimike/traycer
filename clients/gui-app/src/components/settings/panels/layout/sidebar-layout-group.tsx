@@ -828,21 +828,23 @@ function SidebarPanelRowMenu(props: SidebarPanelRowMenuProps): ReactNode {
   const { panelId, title, groups, onRunAction } = props;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`${title} panel actions`}
-          data-testid={panelMenuTestId(panelId)}
-        >
-          <EllipsisVertical />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`${title} panel actions`}
+            data-testid={panelMenuTestId(panelId)}
+          >
+            <EllipsisVertical />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end" className="min-w-48">
         <DropdownMenuItem
           disabled={!props.canMoveUp}
-          onSelect={() =>
+          onClick={() =>
             onRunAction(panelId, moveSidebarPanelUp(groups, panelId))
           }
         >
@@ -850,7 +852,7 @@ function SidebarPanelRowMenu(props: SidebarPanelRowMenuProps): ReactNode {
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!props.canMoveDown}
-          onSelect={() =>
+          onClick={() =>
             onRunAction(panelId, moveSidebarPanelDown(groups, panelId))
           }
         >
@@ -858,7 +860,7 @@ function SidebarPanelRowMenu(props: SidebarPanelRowMenuProps): ReactNode {
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!props.canGroupWithPrevious}
-          onSelect={() =>
+          onClick={() =>
             onRunAction(panelId, groupSidebarPanelWithPrevious(groups, panelId))
           }
         >
@@ -866,7 +868,7 @@ function SidebarPanelRowMenu(props: SidebarPanelRowMenuProps): ReactNode {
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!props.canUngroup}
-          onSelect={() =>
+          onClick={() =>
             onRunAction(panelId, ungroupSidebarPanel(groups, panelId))
           }
         >

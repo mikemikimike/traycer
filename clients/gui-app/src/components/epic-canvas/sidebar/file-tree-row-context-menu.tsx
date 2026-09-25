@@ -117,12 +117,10 @@ export function FileTreeRowContextMenu(props: FileTreeRowContextMenuProps) {
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        asChild
+        render={props.children}
         onContextMenu={handleContextMenu}
         onPointerDown={handlePointerDown}
-      >
-        {props.children}
-      </ContextMenuTrigger>
+      />
       {row === null ? null : (
         <FileTreeRowContextMenuContent
           row={row}
@@ -211,7 +209,7 @@ function FileTreeRowContextMenuContent(
             key={target.id}
             data-testid={`epic-file-tree-row-open-${target.id}`}
             disabled={opening}
-            onSelect={() => openPath(target.id)}
+            onClick={() => openPath(target.id)}
           >
             {opening ? (
               <AgentSpinningDots
@@ -229,14 +227,14 @@ function FileTreeRowContextMenuContent(
       {openTargets.length > 0 ? <ContextMenuSeparator /> : null}
       <ContextMenuItem
         data-testid="epic-file-tree-row-copy-path"
-        onSelect={() => copyAbsolutePath(absolutePath)}
+        onClick={() => copyAbsolutePath(absolutePath)}
       >
         <Copy className="size-3.5" aria-hidden />
         <span>Copy Path</span>
       </ContextMenuItem>
       <ContextMenuItem
         data-testid="epic-file-tree-row-copy-relative-path"
-        onSelect={() => copyRelativePath(relativePath)}
+        onClick={() => copyRelativePath(relativePath)}
       >
         <Copy className="size-3.5" aria-hidden />
         <span>Copy Relative Path</span>

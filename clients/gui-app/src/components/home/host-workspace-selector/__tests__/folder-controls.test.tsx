@@ -31,15 +31,24 @@ vi.mock("@/hooks/host/use-host-query", () => ({
   useHostQuery: () => ({ data: undefined, isLoading: false }),
 }));
 
-// Render the Radix dropdown menu (and its submenu) inline + always-open so the
+// Render the Base dropdown menu (and its submenu) inline + always-open so the
 // test can assert the menu items without fighting pointer-open semantics in
 // jsdom. This mirrors the established mock in epic-sidebar-selection-mode.test.
 vi.mock("@/components/ui/dropdown-menu", () => {
   const passthrough = (props: { readonly children: ReactNode }): ReactNode =>
     props.children;
+  const trigger = (props: {
+    readonly children?: ReactNode;
+    readonly render?: ReactNode;
+  }): ReactNode => props.render ?? props.children;
+  // Shared by `DropdownMenuItem` and `DropdownMenuSubTrigger`. The real
+  // `DropdownMenuItem` is called with `onClick`, not `onSelect` (Base's own
+  // API, unlike Radix's) - a mock still reading `onSelect` receives
+  // `undefined` and never fires on click. `DropdownMenuSubTrigger`'s real
+  // callers pass no click handler at all, so this is a no-op button for it.
   const item = (props: {
     readonly children: ReactNode;
-    readonly onSelect?: () => void;
+    readonly onClick?: () => void;
     readonly disabled?: boolean;
     readonly "data-testid"?: string;
   }): ReactNode => (
@@ -47,14 +56,14 @@ vi.mock("@/components/ui/dropdown-menu", () => {
       type="button"
       data-testid={props["data-testid"]}
       disabled={props.disabled ?? false}
-      onClick={props.onSelect}
+      onClick={props.onClick}
     >
       {props.children}
     </button>
   );
   return {
     DropdownMenu: passthrough,
-    DropdownMenuTrigger: passthrough,
+    DropdownMenuTrigger: trigger,
     DropdownMenuContent: (props: {
       readonly children: ReactNode;
       readonly "data-testid"?: string;

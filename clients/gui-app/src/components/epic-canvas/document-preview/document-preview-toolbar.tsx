@@ -346,45 +346,48 @@ function DocumentPreviewOverflowMenu(
         sideOffset={undefined}
         align={undefined}
       >
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="More actions"
-            className="hidden @max-lg:inline-flex"
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="More actions"
+              className="hidden @max-lg:inline-flex"
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          }
+        />
       </TooltipWrapper>
       <DropdownMenuContent
         align="end"
-        onCloseAutoFocus={(event) => {
+        finalFocus={() => {
           if (keepFocusAwayRef.current) {
-            event.preventDefault();
             keepFocusAwayRef.current = false;
+            return false;
           }
+          return true;
         }}
       >
         {/* Zoom is a repeated gesture - keep the menu open across picks so
             three steps in is three clicks, not three menu reopenings. */}
         <DropdownMenuItem
           disabled={!props.documentReady}
-          onSelect={(event) => {
-            event.preventDefault();
+          onClick={() => {
             props.onZoomIn();
           }}
+          closeOnClick={false}
         >
           <Plus className="size-4" />
           Zoom in
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!props.documentReady}
-          onSelect={(event) => {
-            event.preventDefault();
+          onClick={() => {
             props.onZoomOut();
           }}
+          closeOnClick={false}
         >
           <Minus className="size-4" />
           Zoom out
@@ -392,7 +395,7 @@ function DocumentPreviewOverflowMenu(
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={!props.documentReady}
-          onSelect={props.onFitWidth}
+          onClick={props.onFitWidth}
         >
           <Scan className="size-4" />
           Fit to width
@@ -400,7 +403,7 @@ function DocumentPreviewOverflowMenu(
         {props.onRotate === null ? null : (
           <DropdownMenuItem
             disabled={!props.documentReady}
-            onSelect={props.onRotate}
+            onClick={props.onRotate}
           >
             <RotateCw className="size-4" />
             Rotate 90°

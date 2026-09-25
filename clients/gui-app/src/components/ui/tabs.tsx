@@ -69,6 +69,12 @@ function TabsList({
       data-slot="tabs-list"
       data-variant={variant}
       data-size={size}
+      // Base defaults to `activateOnFocus: false`; the old Radix Tabs
+      // defaulted to automatic (arrow-key focus activates immediately).
+      // No pre-migration consumer opted into manual activation, so this
+      // restores that default wholesale - a caller can still override via
+      // `props` below, which wins over this literal.
+      activateOnFocus
       className={cn(tabsListVariants({ variant, size }), className)}
       {...props}
     >

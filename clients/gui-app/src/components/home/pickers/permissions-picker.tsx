@@ -146,32 +146,34 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
   // `data-state`, the ref - landed on a generic span instead of the focusable
   // control.
   const trigger = (
-    <DropdownMenuTrigger asChild>
-      <ToolbarPillButton
-        aria-label={label}
-        disabled={disabled}
-        className={cn(
-          "max-w-[min(32cqw,13rem)] disabled:cursor-not-allowed disabled:opacity-50",
-          compact && "justify-center",
-        )}
-      >
-        <Icon className="size-4 shrink-0" />
-        <span
+    <DropdownMenuTrigger
+      render={
+        <ToolbarPillButton
+          aria-label={label}
+          disabled={disabled}
           className={cn(
-            "min-w-0 flex-1 truncate whitespace-nowrap @max-lg:hidden",
-            compact && "hidden",
+            "max-w-[min(32cqw,13rem)] disabled:cursor-not-allowed disabled:opacity-50",
+            compact && "justify-center",
           )}
         >
-          {label}
-        </span>
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground @max-lg:hidden",
-            compact && "hidden",
-          )}
-        />
-      </ToolbarPillButton>
-    </DropdownMenuTrigger>
+          <Icon className="size-4 shrink-0" />
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate whitespace-nowrap @max-lg:hidden",
+              compact && "hidden",
+            )}
+          >
+            {label}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground @max-lg:hidden",
+              compact && "hidden",
+            )}
+          />
+        </ToolbarPillButton>
+      }
+    />
   );
 
   return (
@@ -195,14 +197,13 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
         // the user can keep typing after picking a mode. Without this Radix
         // restores focus to the trigger, leaving the caret out of the textbox.
         // A `"trigger"` caller keeps Radix's own restore (see `closeFocus`).
-        onCloseAutoFocus={(event) => {
+        finalFocus={() => {
           if (openingSettingsRef.current) {
             openingSettingsRef.current = false;
-            event.preventDefault();
-            return;
+            return false;
           }
-          if (closeFocus !== "composer") return;
-          if (focusActiveComposer()) event.preventDefault();
+          if (closeFocus !== "composer") return true;
+          return !focusActiveComposer();
         }}
       >
         <DropdownMenuRadioGroup
@@ -282,7 +283,7 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onSelect={() => {
+              onClick={() => {
                 openingSettingsRef.current = true;
                 onOpenPermissionSettings();
               }}

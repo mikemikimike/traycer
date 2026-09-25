@@ -2150,21 +2150,23 @@ function ArtifactMoreMenu(props: {
   const { nodeId, nodeName, entries } = props;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Artifact actions for ${nodeName}`}
-          data-testid={`epic-sidebar-more-${nodeId}`}
-          className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/tree-item:opacity-100 aria-expanded:opacity-100"
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          <MoreHorizontal className="size-3" />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Artifact actions for ${nodeName}`}
+            data-testid={`epic-sidebar-more-${nodeId}`}
+            className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/tree-item:opacity-100 aria-expanded:opacity-100"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <MoreHorizontal className="size-3" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end" className="w-max">
         <SidebarDropdownMenuItems entries={entries} />
       </DropdownMenuContent>

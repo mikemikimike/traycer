@@ -335,8 +335,13 @@ export function AppearanceSettingsPanel() {
             row={APPEARANCE.definitions.agentOfficeDefaultView}
             control={
               <Select
+                items={OFFICE_VIEW_CHOICES.map((value) => ({
+                  value,
+                  label: officeViewChoiceLabel(value),
+                }))}
                 value={agentOfficeDefaultView}
                 onValueChange={(value) => {
+                  if (value === null) return;
                   if (!isOfficeViewChoice(value)) return;
                   trackAppearanceSetting("agentOfficeDefaultView");
                   setAgentOfficeDefaultView(value);
@@ -425,9 +430,17 @@ function AvailableDesktopZoomSettingsRow() {
       control={
         <div className="flex items-center gap-2">
           <Select
+            items={[
+              { value: "loading", label: "Loading" },
+              ...zoom.ladder.map((candidate) => ({
+                value: String(candidate),
+                label: formatZoomPercent(candidate),
+              })),
+            ]}
             value={percent === null ? "loading" : String(percent)}
             disabled={setMutation.isPending || resetMutation.isPending}
             onValueChange={(value) => {
+              if (value === null) return;
               const nextPercent = Number.parseInt(value, 10);
               if (!Number.isFinite(nextPercent)) return;
               setMutation.mutate(nextPercent);

@@ -71,7 +71,7 @@ export function ComposerOptionsSheet(props: ComposerOptionsSheetProps) {
 
   return (
     <Drawer
-      direction="bottom"
+      swipeDirection="down"
       open={props.open}
       onOpenChange={props.onOpenChange}
     >

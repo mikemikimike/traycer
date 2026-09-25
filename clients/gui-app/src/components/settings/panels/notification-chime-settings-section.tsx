@@ -78,8 +78,10 @@ function NotificationChimeSelect(props: {
 }) {
   return (
     <Select
+      items={NOTIFICATION_CHIME_LABELS}
       value={props.sound}
       onValueChange={(next) => {
+        if (next === null) return;
         if (!isNotificationChimeSound(next)) return;
         props.setSoundForEvent(props.eventType, next);
       }}

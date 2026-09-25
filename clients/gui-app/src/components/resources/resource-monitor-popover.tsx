@@ -1567,17 +1567,19 @@ function ResourceMonitorPanel(props: {
                   open={sortMenuOpen}
                   onOpenChange={setSortMenuOpen}
                 >
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      ref={sortTriggerRef}
-                      type="button"
-                      className="flex h-6 items-center gap-1 rounded-sm px-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
-                      aria-label="Sort resource rows"
-                    >
-                      <ArrowDownNarrowWide className="size-3.5" />
-                      <span>{SORT_LABELS[sortOption]}</span>
-                    </button>
-                  </DropdownMenuTrigger>
+                  <DropdownMenuTrigger
+                    render={
+                      <button
+                        ref={sortTriggerRef}
+                        type="button"
+                        className="flex h-6 items-center gap-1 rounded-sm px-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground"
+                        aria-label="Sort resource rows"
+                      >
+                        <ArrowDownNarrowWide className="size-3.5" />
+                        <span>{SORT_LABELS[sortOption]}</span>
+                      </button>
+                    }
+                  />
                   <DropdownMenuContent align="end" className="w-40">
                     <DropdownMenuRadioGroup
                       value={sortOption}

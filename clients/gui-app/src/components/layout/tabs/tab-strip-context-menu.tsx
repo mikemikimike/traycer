@@ -208,11 +208,12 @@ function EpicTabMenuItems(props: {
     pinReadingKnown,
   });
   const pinUnavailable = pinUnavailableReason !== null;
+  const pinEnabled = !pinUnavailable && taskPinned !== null;
   return (
     <>
       {props.canEditTitle ? (
         <ContextMenuItem
-          onSelect={props.onEditTitle}
+          onClick={props.onEditTitle}
           data-testid={`tab-edit-title-epic-${tabId}`}
         >
           <Pencil />
@@ -246,14 +247,12 @@ function EpicTabMenuItems(props: {
         data-preserved-orphan-pin-unavailable={
           pinUnavailableReason === "preserved-orphan" || undefined
         }
-        onSelect={(event) => {
-          if (pinUnavailable || taskPinned === null) {
-            event.preventDefault();
-            return;
-          }
+        onClick={() => {
+          if (pinUnavailable || taskPinned === null) return;
           props.onSetTaskPinned(!taskPinned);
         }}
         data-testid={`tab-pin-history-${tabId}`}
+        closeOnClick={pinEnabled}
       >
         <Pin className={taskPinned === true ? "fill-current" : undefined} />
         {pinActionLabel(pinUnavailableReason, taskPinned)}
@@ -310,7 +309,7 @@ export function TabContextMenuContent(
   const showOpenInNewWindow = tab.canOpenInNewWindow;
 
   return (
-    <ContextMenuContent onCloseAutoFocus={(event) => event.preventDefault()}>
+    <ContextMenuContent finalFocus={false}>
       <TabAppearanceMenu tab={tab} />
       {tab.kind === "epic" ? (
         <EpicTabMenuItems
@@ -328,7 +327,7 @@ export function TabContextMenuContent(
       ) : null}
       {showDuplicate ? (
         <ContextMenuItem
-          onSelect={() => onDuplicateTab(tab)}
+          onClick={() => onDuplicateTab(tab)}
           data-testid={`tab-duplicate-${tab.kind}-${tab.id}`}
         >
           <CopyPlus />
@@ -346,7 +345,7 @@ export function TabContextMenuContent(
       {showOpenInNewWindow ? (
         <ContextMenuItem
           disabled={!canOpenInNewWindow}
-          onSelect={() => onOpenInNewWindow(tab)}
+          onClick={() => onOpenInNewWindow(tab)}
           data-testid={`tab-open-new-window-${tab.kind}-${tab.id}`}
         >
           <ExternalLink />
@@ -358,7 +357,7 @@ export function TabContextMenuContent(
       <ContextMenuSeparator />
       <ContextMenuItem
         disabled={!canCloseOtherTabs}
-        onSelect={() => onCloseOtherTabs(tab)}
+        onClick={() => onCloseOtherTabs(tab)}
         data-testid={`tab-close-others-${tab.kind}-${tab.id}`}
       >
         <X />
@@ -368,7 +367,7 @@ export function TabContextMenuContent(
       <ContextMenuItem
         disabled={!recovery.available}
         data-testid="tab-reopen-closed"
-        onSelect={() => {
+        onClick={() => {
           void recovery.reopen();
         }}
       >
@@ -454,7 +453,7 @@ function TabSplitMenuItems(props: {
     <>
       <ContextMenuItem
         disabled={!splitAvailability.add}
-        onSelect={() => onSplitCommand(TAB_SPLIT_COMMANDS.add.id, tab)}
+        onClick={() => onSplitCommand(TAB_SPLIT_COMMANDS.add.id, tab)}
         data-testid={`tab-add-split-${tab.kind}-${tab.id}`}
       >
         <SplitSquareHorizontal />
@@ -462,7 +461,7 @@ function TabSplitMenuItems(props: {
       </ContextMenuItem>
       <ContextMenuItem
         disabled={!splitAvailability.pair}
-        onSelect={() => onSplitCommand(TAB_SPLIT_COMMANDS.pair.id, tab)}
+        onClick={() => onSplitCommand(TAB_SPLIT_COMMANDS.pair.id, tab)}
         data-testid={`tab-pair-current-${tab.kind}-${tab.id}`}
       >
         {TAB_SPLIT_COMMANDS.pair.label}
@@ -496,7 +495,7 @@ function TabSplitArrangeItems(props: {
     <>
       <ContextMenuItem
         disabled={!availability.separate}
-        onSelect={() => onSplitCommand(TAB_SPLIT_COMMANDS.separate.id, tab)}
+        onClick={() => onSplitCommand(TAB_SPLIT_COMMANDS.separate.id, tab)}
         data-testid={`tab-separate-split-${tab.kind}-${tab.id}`}
       >
         <Maximize2 />
@@ -505,7 +504,7 @@ function TabSplitArrangeItems(props: {
       <ContextMenuSeparator />
       <ContextMenuItem
         disabled={availability.closeLeft === null}
-        onSelect={() => onSplitCommand(TAB_SPLIT_COMMANDS.closeLeft.id, tab)}
+        onClick={() => onSplitCommand(TAB_SPLIT_COMMANDS.closeLeft.id, tab)}
         data-testid={`tab-close-left-${tab.kind}-${tab.id}`}
       >
         <PanelLeftClose />
@@ -513,7 +512,7 @@ function TabSplitArrangeItems(props: {
       </ContextMenuItem>
       <ContextMenuItem
         disabled={availability.closeRight === null}
-        onSelect={() => onSplitCommand(TAB_SPLIT_COMMANDS.closeRight.id, tab)}
+        onClick={() => onSplitCommand(TAB_SPLIT_COMMANDS.closeRight.id, tab)}
         data-testid={`tab-close-right-${tab.kind}-${tab.id}`}
       >
         <PanelRightClose />
@@ -522,7 +521,7 @@ function TabSplitArrangeItems(props: {
       <ContextMenuSeparator />
       <ContextMenuItem
         disabled={!availability.swap}
-        onSelect={() => onSplitCommand(TAB_SPLIT_COMMANDS.swap.id, tab)}
+        onClick={() => onSplitCommand(TAB_SPLIT_COMMANDS.swap.id, tab)}
         data-testid={`tab-swap-split-${tab.kind}-${tab.id}`}
       >
         <ArrowLeftRight />
@@ -547,7 +546,7 @@ export function SplitSlotMenuContent(props: {
     id: props.partner.id,
   });
   return (
-    <ContextMenuContent onCloseAutoFocus={(event) => event.preventDefault()}>
+    <ContextMenuContent finalFocus={false}>
       <TabSplitArrangeItems
         tab={props.partner}
         availability={availability}
@@ -567,14 +566,10 @@ export function SplitQuickActionsMenuContent(props: {
     id: props.tab.id,
   });
   return (
-    <DropdownMenuContent
-      align="start"
-      className="w-52"
-      onCloseAutoFocus={(event) => event.preventDefault()}
-    >
+    <DropdownMenuContent align="start" className="w-52" finalFocus={false}>
       <DropdownMenuItem
         disabled={!availability.separate}
-        onSelect={() =>
+        onClick={() =>
           props.onSplitCommand(TAB_SPLIT_COMMANDS.separate.id, props.tab)
         }
         data-testid={`split-quick-separate-${props.tab.kind}-${props.tab.id}`}
@@ -585,7 +580,7 @@ export function SplitQuickActionsMenuContent(props: {
       <DropdownMenuSeparator />
       <DropdownMenuItem
         disabled={availability.closeLeft === null}
-        onSelect={() =>
+        onClick={() =>
           props.onSplitCommand(TAB_SPLIT_COMMANDS.closeLeft.id, props.tab)
         }
         data-testid={`split-quick-close-left-${props.tab.kind}-${props.tab.id}`}
@@ -595,7 +590,7 @@ export function SplitQuickActionsMenuContent(props: {
       </DropdownMenuItem>
       <DropdownMenuItem
         disabled={availability.closeRight === null}
-        onSelect={() =>
+        onClick={() =>
           props.onSplitCommand(TAB_SPLIT_COMMANDS.closeRight.id, props.tab)
         }
         data-testid={`split-quick-close-right-${props.tab.kind}-${props.tab.id}`}
@@ -606,7 +601,7 @@ export function SplitQuickActionsMenuContent(props: {
       <DropdownMenuSeparator />
       <DropdownMenuItem
         disabled={!availability.swap}
-        onSelect={() =>
+        onClick={() =>
           props.onSplitCommand(TAB_SPLIT_COMMANDS.swap.id, props.tab)
         }
         data-testid={`split-quick-swap-${props.tab.kind}-${props.tab.id}`}

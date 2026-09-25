@@ -945,8 +945,13 @@ function ScanWindowSelect(props: {
   const { tone, scanWindow, onChange } = props;
   return (
     <Select
+      items={SESSION_IMPORT_SCAN_WINDOW_OPTIONS.map((option) => ({
+        value: option.window === null ? "all" : String(option.window),
+        label: option.label,
+      }))}
       value={scanWindow === null ? "all" : String(scanWindow)}
       onValueChange={(value) => {
+        if (value === null) return;
         const option = SESSION_IMPORT_SCAN_WINDOW_OPTIONS.find(
           (candidate) =>
             (candidate.window === null ? "all" : String(candidate.window)) ===

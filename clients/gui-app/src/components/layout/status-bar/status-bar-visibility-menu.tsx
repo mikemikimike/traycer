@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from "react";
+import type { MouseEvent, ReactNode, ReactElement } from "react";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -35,7 +35,7 @@ interface StatusBarVisibilityMenuProps {
    */
   readonly providers: ReadonlyArray<StatusBarMenuProvider>;
   /** The bar itself - the region a right-click opens this menu over. */
-  readonly children: ReactNode;
+  readonly children: ReactElement;
 }
 
 /**
@@ -72,7 +72,7 @@ export function StatusBarVisibilityMenu(
   return (
     <ContextMenu>
       <ContextMenuTrigger
-        asChild
+        render={props.children}
         onContextMenu={(event: MouseEvent<HTMLElement>) => {
           // Radix composes this ahead of its own opener and skips that opener
           // once the event is defaulted-prevented, so an exempt subtree keeps
@@ -85,9 +85,7 @@ export function StatusBarVisibilityMenu(
             event.preventDefault();
           }
         }}
-      >
-        {props.children}
-      </ContextMenuTrigger>
+      />
       <ContextMenuContent>
         {props.providers.map((provider) => (
           <ContextMenuCheckboxItem
@@ -115,7 +113,7 @@ export function StatusBarVisibilityMenu(
         </ContextMenuCheckboxItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          onSelect={() => {
+          onClick={() => {
             navigateToSettingsSection("layout");
           }}
         >
@@ -123,7 +121,7 @@ export function StatusBarVisibilityMenu(
         </ContextMenuItem>
         {narrowViewport ? null : (
           <ContextMenuItem
-            onSelect={() => {
+            onClick={() => {
               trackSettingChanged("layout", "layout.statusBar.placement");
               setPlacement("header");
             }}

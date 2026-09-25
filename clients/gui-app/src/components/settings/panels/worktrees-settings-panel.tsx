@@ -480,39 +480,41 @@ function WorktreeFilterMenu(props: {
   );
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-w-0"
-          data-testid="worktrees-filter-trigger"
-          aria-label={`Filter: ${label}`}
-        >
-          <ListFilter className="size-4" />
-          <span className="grid min-w-0">
-            {/* Reserve every label's intrinsic width without fixed sizing. */}
-            {WORKTREE_TIER_ORDER.map((tier) => (
-              <span
-                key={tier}
-                aria-hidden
-                data-label={WORKTREE_TIER_LABEL[tier]}
-                className="invisible col-start-1 row-start-1 truncate after:content-[attr(data-label)]"
-              />
-            ))}
-            <span className="col-start-1 row-start-1 truncate">{label}</span>
-          </span>
-          <ChevronDown className="size-4 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-w-0"
+            data-testid="worktrees-filter-trigger"
+            aria-label={`Filter: ${label}`}
+          >
+            <ListFilter className="size-4" />
+            <span className="grid min-w-0">
+              {/* Reserve every label's intrinsic width without fixed sizing. */}
+              {WORKTREE_TIER_ORDER.map((tier) => (
+                <span
+                  key={tier}
+                  aria-hidden
+                  data-label={WORKTREE_TIER_LABEL[tier]}
+                  className="invisible col-start-1 row-start-1 truncate after:content-[attr(data-label)]"
+                />
+              ))}
+              <span className="col-start-1 row-start-1 truncate">{label}</span>
+            </span>
+            <ChevronDown className="size-4 text-muted-foreground" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end">
         <DropdownMenuCheckboxItem
           checked={noneSelected}
-          onSelect={(event) => {
-            event.preventDefault();
+          onClick={() => {
             props.onClearTierFilters();
           }}
           data-testid="worktrees-filter-all"
+          closeOnClick={false}
         >
           All
         </DropdownMenuCheckboxItem>
@@ -520,11 +522,11 @@ function WorktreeFilterMenu(props: {
           <DropdownMenuCheckboxItem
             key={tier}
             checked={props.tierFilters.has(tier)}
-            onSelect={(event) => {
-              event.preventDefault();
+            onClick={() => {
               props.onToggleTier(tier);
             }}
             data-testid={`worktrees-filter-${tier}`}
+            closeOnClick={false}
           >
             {WORKTREE_TIER_LABEL[tier]}
           </DropdownMenuCheckboxItem>
@@ -549,43 +551,45 @@ function WorktreeSortMenu(props: {
 }): ReactNode {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-w-0"
-          data-testid="worktrees-sort-trigger"
-          aria-label={`Sort: ${WORKTREE_SORT_LABEL[props.sortMode]}`}
-        >
-          <ArrowDownWideNarrow className="size-4" />
-          <span className="grid min-w-0">
-            {Object.entries(WORKTREE_SORT_LABEL).map(([mode, label]) => (
-              <span
-                key={mode}
-                aria-hidden
-                data-label={label}
-                className="invisible col-start-1 row-start-1 truncate after:content-[attr(data-label)]"
-              />
-            ))}
-            <span className="col-start-1 row-start-1 truncate">
-              {WORKTREE_SORT_LABEL[props.sortMode]}
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-w-0"
+            data-testid="worktrees-sort-trigger"
+            aria-label={`Sort: ${WORKTREE_SORT_LABEL[props.sortMode]}`}
+          >
+            <ArrowDownWideNarrow className="size-4" />
+            <span className="grid min-w-0">
+              {Object.entries(WORKTREE_SORT_LABEL).map(([mode, label]) => (
+                <span
+                  key={mode}
+                  aria-hidden
+                  data-label={label}
+                  className="invisible col-start-1 row-start-1 truncate after:content-[attr(data-label)]"
+                />
+              ))}
+              <span className="col-start-1 row-start-1 truncate">
+                {WORKTREE_SORT_LABEL[props.sortMode]}
+              </span>
             </span>
-          </span>
-          <ChevronDown className="size-4 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
+            <ChevronDown className="size-4 text-muted-foreground" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end">
         <DropdownMenuCheckboxItem
           checked={props.sortMode === "newest"}
-          onSelect={() => props.onSortModeChange("newest")}
+          onClick={() => props.onSortModeChange("newest")}
           data-testid="worktrees-sort-newest"
         >
           Newest
         </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem
           checked={props.sortMode === "oldest"}
-          onSelect={() => props.onSortModeChange("oldest")}
+          onClick={() => props.onSortModeChange("oldest")}
           data-testid="worktrees-sort-oldest"
         >
           Oldest
@@ -3300,17 +3304,19 @@ function WorktreeRowActions(props: {
   return (
     <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-1">
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="muted"
-            size="icon-sm"
-            aria-label={props.triggerLabel}
-            data-testid="worktree-row-actions-trigger"
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="muted"
+              size="icon-sm"
+              aria-label={props.triggerLabel}
+              data-testid="worktree-row-actions-trigger"
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          }
+        />
         <DropdownMenuContent
           align="end"
           className="w-max min-w-32 max-w-[min(80vw,14rem)]"
@@ -3318,7 +3324,7 @@ function WorktreeRowActions(props: {
         >
           <DropdownMenuItem
             data-testid="worktree-row-copy-path"
-            onSelect={props.onCopyPath}
+            onClick={props.onCopyPath}
             className="gap-2"
           >
             <Copy className="size-3.5" aria-hidden />
@@ -3327,7 +3333,7 @@ function WorktreeRowActions(props: {
           <DropdownMenuItem
             data-testid="worktree-row-manage-scripts"
             aria-haspopup="dialog"
-            onSelect={props.onManageScripts}
+            onClick={props.onManageScripts}
             className="items-start gap-2 whitespace-normal text-left"
           >
             <FileSliders className="size-3.5" aria-hidden />
@@ -3348,7 +3354,7 @@ function WorktreeRowActions(props: {
                 variant="destructive"
                 aria-label={deleteLabel}
                 disabled={deleteDisabled}
-                onSelect={props.onDelete}
+                onClick={props.onDelete}
                 className="gap-2"
               >
                 <Trash2 className="size-3.5" aria-hidden />

@@ -345,10 +345,10 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
       <Drawer
         open={open}
         onOpenChange={(nextOpen) => setOpen(nextOpen, "button")}
-        direction="bottom"
+        swipeDirection="down"
       >
         <DraftsTriggerRail>
-          <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+          <DrawerTrigger render={trigger} />
         </DraftsTriggerRail>
         {/* A drawer is portalled and `fixed`, so `#root`'s reservation never
             reaches it, and the edge it is anchored to is the one it has to pad

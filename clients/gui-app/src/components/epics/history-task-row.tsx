@@ -197,10 +197,8 @@ export function HistoryTaskRow(props: HistoryTaskRowProps): ReactNode {
         rowCard
       ) : (
         <ContextMenu>
-          <ContextMenuTrigger asChild>{rowCard}</ContextMenuTrigger>
-          <ContextMenuContent
-            onCloseAutoFocus={(event) => event.preventDefault()}
-          >
+          <ContextMenuTrigger render={rowCard} />
+          <ContextMenuContent finalFocus={false}>
             {props.contextMenuItems}
             {props.openInNewWindowControl}
             {props.sweepMenuItem}
@@ -248,7 +246,7 @@ function HistoryRowTrailingMetadata(props: {
           worktrees={props.worktrees}
           detailOnHover
           maximumVisible={2}
-          className="pointer-events-none col-start-1 row-start-1 max-w-[min(36vw,22rem)] overflow-hidden opacity-0 transition-opacity group-hover/list-row:pointer-events-auto group-hover/list-row:opacity-100 group-focus-within/list-row:pointer-events-auto group-focus-within/list-row:opacity-100 has-data-[state=open]:pointer-events-auto has-data-[state=open]:opacity-100 max-md:pointer-events-auto max-md:max-w-full max-md:opacity-100"
+          className="pointer-events-none col-start-1 row-start-1 max-w-[min(36vw,22rem)] overflow-hidden opacity-0 transition-opacity group-hover/list-row:pointer-events-auto group-hover/list-row:opacity-100 group-focus-within/list-row:pointer-events-auto group-focus-within/list-row:opacity-100 has-data-popup-open:pointer-events-auto has-data-popup-open:opacity-100 max-md:pointer-events-auto max-md:max-w-full max-md:opacity-100"
           testId={`task-history-prs-${props.epicId}`}
           openPrInApp={null}
         />

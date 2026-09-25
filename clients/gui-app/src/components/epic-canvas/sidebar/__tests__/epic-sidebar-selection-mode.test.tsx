@@ -406,23 +406,29 @@ vi.mock("@/hooks/notifications/use-host-notification-indicators-query", () => ({
 
 vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: (props: { readonly children: ReactNode }) => props.children,
-  DropdownMenuTrigger: (props: { readonly children: ReactNode }) =>
-    props.children,
+  DropdownMenuTrigger: (props: {
+    readonly children?: ReactNode;
+    readonly render?: ReactNode;
+  }) => props.render ?? props.children,
   DropdownMenuContent: (props: { readonly children: ReactNode }) => (
     <div>{props.children}</div>
   ),
-  // Forwards `aria-disabled` as well as `disabled`: real Radix renders a
+  // Forwards `aria-disabled` as well as `disabled`: real Base renders a
   // `<div role="menuitem" aria-disabled>`, and an entry that carries a
   // disabled-reason is soft-disabled through ARIA alone (so it stays
   // keyboard-reachable). A mock that dropped it would report every such entry
   // as ENABLED and quietly invert the assertions that depend on it.
   DropdownMenuItem: (props: {
     readonly children: ReactNode;
-    readonly onSelect: () => void;
+    // `SidebarDropdownMenuItems` calls the real `DropdownMenuItem` with
+    // `onClick`, not `onSelect` (Base's own API, unlike Radix's) - a mock
+    // still reading `onSelect` receives `undefined` and never fires on
+    // click, silently no-opping any test that clicks this entry.
+    readonly onClick: (() => void) | undefined;
     readonly "data-testid": string;
     readonly disabled: boolean;
     // `undefined` is not padding: a HARD-disabled entry OMITS the key entirely
-    // so Radix's own derived `aria-disabled` survives, and only a soft-disabled
+    // so Base's own derived `aria-disabled` survives, and only a soft-disabled
     // one spreads `true`. Declaring it as a required boolean would describe a
     // shape the production component never emits.
     readonly "aria-disabled": boolean | undefined;
@@ -435,7 +441,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
       disabled={props.disabled}
       aria-disabled={props["aria-disabled"]}
       aria-describedby={props["aria-describedby"]}
-      onClick={props.onSelect}
+      onClick={props.onClick}
     >
       {props.children}
     </button>
@@ -445,7 +451,15 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
 
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: (props: { readonly children: ReactNode }) => props.children,
-  TooltipTrigger: (props: { readonly children: ReactNode }) => props.children,
+  // Real callers (e.g. `epic-sidebar-artifact-tree.tsx`'s unread/status-dot
+  // markers) pass `render={<span data-testid=... .../>}`, not `children` -
+  // a mock reading only `children` silently drops that entire element,
+  // which is how a marker's data-testid/aria-label went missing from the
+  // test DOM without any test appearing to fail loudly.
+  TooltipTrigger: (props: {
+    readonly children?: ReactNode;
+    readonly render?: ReactNode;
+  }) => props.render ?? props.children,
   // `role="tooltip"` so `tooltipTextIn` can find the label this mock renders
   // eagerly (the real content only exists while the tooltip is open).
   TooltipContent: (props: { readonly children: ReactNode }) => (
@@ -4889,7 +4903,7 @@ describe("chat row archive", () => {
       "group-focus-within/tree-item:hidden",
     );
     expect(idleTimeSlot?.className).toContain(
-      "group-has-[[data-state=open]]/tree-item:hidden",
+      "group-has-data-popup-open/tree-item:hidden",
     );
     expect(idleTimeSlot?.className).not.toContain(
       "group-hover/tree-item:invisible",

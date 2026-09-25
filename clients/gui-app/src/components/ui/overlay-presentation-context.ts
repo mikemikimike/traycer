@@ -12,18 +12,24 @@ import {
 import {
   usePaneFocused,
   usePaneFocusProbe,
+  usePaneVisible,
+  usePanePortalContainer,
 } from "@/components/epic-tabs/pane-visibility-context";
 import {
   usePortalConcealed,
   PortalPresentationContext,
 } from "@/components/ui/portal-concealment-context";
 import { mergeRefs } from "@/lib/merge-refs";
-import { isToastEvent } from "@/components/ui/overlay-guards";
+import {
+  isToastEvent,
+  isOwnPaneTriggerEvent,
+} from "@/components/ui/overlay-guards";
 import { useOverlayFrameRegistration } from "@/components/ui/overlay-frame-context";
 
 type ChangeDetails = {
   reason: string;
   event: Event;
+  trigger: Element | undefined;
   cancel: () => void;
   isCanceled: boolean;
 };
@@ -60,6 +66,29 @@ function focusedElement(): HTMLElement | null {
     : null;
 }
 
+function nextCycle(
+  cycle: Cycle,
+  logical: boolean,
+  present: boolean,
+  pendingActivation: boolean,
+): Cycle {
+  const open = logical && present;
+  // Closing an owner that was already un-presented has no user-facing
+  // completion or focus work, even when Activity reveals it in this render.
+  const noPresentationWork = !present || (!open && !cycle.open);
+  return {
+    token: cycle.token + 1,
+    open,
+    logical,
+    presentationOnly: noPresentationWork,
+    focusSuppressed: noPresentationWork,
+    resumed: open && cycle.logical && !pendingActivation,
+    // Capture before descendants mount: their effects may focus an input
+    // before Base asks for initialFocus. Presentation returns keep the opener.
+    opener: logical && !cycle.logical ? focusedElement() : cycle.opener,
+  };
+}
+
 /** Dialog/Popover retain owner state while Base releases document effects. */
 export function useOverlayPresentation<D extends ChangeDetails>(props: {
   open: boolean | undefined;
@@ -72,6 +101,8 @@ export function useOverlayPresentation<D extends ChangeDetails>(props: {
   const logical = props.open ?? internalOpen;
   const concealed = usePortalConcealed();
   const paneFocused = usePaneFocused();
+  const paneVisible = usePaneVisible();
+  const panePortal = usePanePortalContainer();
   const isPaneFocused = usePaneFocusProbe();
   const host = useContext(PortalPresentationContext);
   const present = !concealed && (!props.paneAware || paneFocused);
@@ -85,20 +116,15 @@ export function useOverlayPresentation<D extends ChangeDetails>(props: {
     resumed: false,
     opener: logical ? focusedElement() : null,
   }));
-  if (cycle.open !== open || cycle.logical !== logical)
-    setCycle({
-      token: cycle.token + 1,
-      open,
-      logical,
-      // Closing an owner that was already un-presented has no user-facing
-      // completion or focus work, even when Activity reveals it in this render.
-      presentationOnly: !present || (!open && !cycle.open),
-      focusSuppressed: !present || (!open && !cycle.open),
-      resumed: open && cycle.logical,
-      // Capture before descendants mount: their effects may focus an input
-      // before Base asks for initialFocus. Presentation returns keep the opener.
-      opener: logical && !cycle.logical ? focusedElement() : cycle.opener,
-    });
+  // Set only for the specific transition onOpenChange accepted as a cold-pane
+  // trigger activation; a false "resumed" for that one transition tells
+  // initialFocus to run fresh instead of treating it as a returning owner.
+  const [pendingActivation, setPendingActivation] = useState(false);
+  if (cycle.open !== open || cycle.logical !== logical) {
+    setCycle(nextCycle(cycle, logical, present, pendingActivation));
+  }
+  if ((present || concealed || !paneVisible || !logical) && pendingActivation)
+    setPendingActivation(false);
   const closeReason = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (logical) closeReason.current = null;
@@ -137,12 +163,22 @@ export function useOverlayPresentation<D extends ChangeDetails>(props: {
     isPresented() &&
     (host === null || host.isGeneration(host.generation));
   const onOpenChange = (next: boolean, details: D): void => {
-    if (!present || (!next && isToastEvent(details))) {
+    const activating =
+      next &&
+      !present &&
+      paneVisible &&
+      !concealed &&
+      (host?.isPresented() ?? true) &&
+      isOwnPaneTriggerEvent(details, panePortal);
+    if ((!present && !activating) || (!next && isToastEvent(details))) {
       details.cancel();
       return;
     }
+    setPendingActivation(activating);
     props.onOpenChange?.(next, details);
-    if (!details.isCanceled) {
+    if (details.isCanceled) {
+      setPendingActivation(false);
+    } else {
       closeReason.current = next ? null : details.reason;
       setInternalOpen(next);
     }

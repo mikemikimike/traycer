@@ -35,7 +35,7 @@ vi.mock("@/hooks/rate-limits/use-profile-usage-comparison", () => ({
     return { hostId: args.runTargetHostId, isReady: true, entries: new Map() };
   },
 }));
-// The profile dropdown (ProfileDropdown) renders through Radix's real
+// The profile dropdown (ProfileDropdown) renders through Base's real
 // DropdownMenu, which opens on pointerdown rather than click - render it
 // inline + always-open so tests can click its rows without fighting
 // pointer-open semantics in jsdom (mirrors the established mock in
@@ -43,9 +43,13 @@ vi.mock("@/hooks/rate-limits/use-profile-usage-comparison", () => ({
 vi.mock("@/components/ui/dropdown-menu", () => {
   const passthrough = (props: { readonly children: ReactNode }): ReactNode =>
     props.children;
+  const trigger = (props: {
+    readonly children?: ReactNode;
+    readonly render?: ReactNode;
+  }): ReactNode => props.render ?? props.children;
   return {
     DropdownMenu: passthrough,
-    DropdownMenuTrigger: passthrough,
+    DropdownMenuTrigger: trigger,
     DropdownMenuContent: (props: {
       readonly children: ReactNode;
       readonly container: HTMLElement | null | undefined;
@@ -63,7 +67,10 @@ vi.mock("@/components/ui/dropdown-menu", () => {
     ),
     DropdownMenuItem: (props: {
       readonly children: ReactNode;
-      readonly onSelect: (() => void) | undefined;
+      // The real `DropdownMenuItem` is called with `onClick`, not `onSelect`
+      // (Base's own API, unlike Radix's) - a mock still reading `onSelect`
+      // receives `undefined` and never fires on click.
+      readonly onClick: (() => void) | undefined;
       readonly "aria-label": string | undefined;
       readonly "aria-current": "true" | undefined;
       readonly className: string | undefined;
@@ -78,7 +85,7 @@ vi.mock("@/components/ui/dropdown-menu", () => {
         className={props.className}
         disabled={props.disabled}
         title={props.title}
-        onClick={props.onSelect}
+        onClick={props.onClick}
       >
         {props.children}
       </button>
@@ -100,6 +107,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { stubSliderGeometry } from "@/components/home/pickers/__tests__/slider-pointer-geometry";
 import { matchDigitAction } from "@/lib/keybindings/dispatch";
 import type {
   HarnessModelSelection,
@@ -1905,6 +1914,7 @@ describe("<HarnessModelPicker />", () => {
   });
 
   it("opens on the first click when both pickers are closed and its pane is inactive", async () => {
+    const user = userEvent.setup({ delay: null });
     const harness = pickerHarness(undefined);
     render(<ColdInactivePanePicker harness={harness} />);
 
@@ -1914,9 +1924,11 @@ describe("<HarnessModelPicker />", () => {
       "false",
     );
 
-    fireEvent.pointerDown(trigger);
-    trigger.focus();
-    fireEvent.click(trigger);
+    // A real pointerdown+focus+click sequence (not three hand-picked
+    // fireEvent calls missing mousedown/pointerup) - the pane's
+    // onPointerDownCapture/onFocusCapture still see it, since those are
+    // ordinary capture-phase listeners on a real, bubbling event sequence.
+    await user.click(trigger);
 
     const input = await screen.findByRole("textbox", { name: /^Search/ });
     expect(input).toBe(document.activeElement);
@@ -4168,31 +4180,46 @@ describe("<HarnessModelPicker />", () => {
   });
 
   it("renders the thinking-effort slider in the picker footer", async () => {
-    const { reasoningChanges } = renderPicker({
-      reasoning: "high",
-      storeModels: [
-        model({
-          slug: "gpt-5.5",
-          label: "GPT-5.5",
-          supportedReasoningEfforts: [
-            { id: "low", label: "Low", description: null },
-            { id: "high", label: "High", description: null },
-          ],
-        }),
-      ],
-    });
+    // jsdom measures every element as zero-size, so Base's Thumb positioner
+    // - which needs a real, nonzero rect to place itself - stays
+    // visibility:hidden (out of the accessibility tree) indefinitely, not
+    // just for a microtask; findByRole alone would time out waiting for a
+    // layout that never happens. Scoped to this one test (not this whole
+    // file's beforeEach/afterEach) since it's the only slider case here -
+    // see harness-model-picker-reasoning-slider.test.tsx's own beforeEach/
+    // afterEach for the shared, file-wide version of the same stub.
+    const restoreSliderGeometry = stubSliderGeometry();
+    try {
+      const { reasoningChanges } = renderPicker({
+        reasoning: "high",
+        storeModels: [
+          model({
+            slug: "gpt-5.5",
+            label: "GPT-5.5",
+            supportedReasoningEfforts: [
+              { id: "low", label: "Low", description: null },
+              { id: "high", label: "High", description: null },
+            ],
+          }),
+        ],
+      });
 
-    await openPicker();
+      await openPicker();
 
-    expect(
-      screen.getByRole("group", { name: "Thinking effort" }),
-    ).not.toBeNull();
-    const slider = screen.getByRole("slider", { name: "Thinking effort" });
-    expect(slider.getAttribute("aria-valuetext")).toBe("High");
+      expect(
+        screen.getByRole("group", { name: "Thinking effort" }),
+      ).not.toBeNull();
+      const slider = await screen.findByRole("slider", {
+        name: "Thinking effort",
+      });
+      expect(slider.getAttribute("aria-valuetext")).toBe("High");
 
-    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+      fireEvent.keyDown(slider, { key: "ArrowLeft" });
 
-    expect(reasoningChanges).toEqual(["low"]);
+      expect(reasoningChanges).toEqual(["low"]);
+    } finally {
+      restoreSliderGeometry();
+    }
   });
 
   it("renders thinking effort buttons in the picker footer under the list setting", async () => {

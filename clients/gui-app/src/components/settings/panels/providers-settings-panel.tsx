@@ -893,8 +893,22 @@ function ProvidersMobileSelect(props: {
 }): ReactNode {
   return (
     <Select
+      items={props.providers.map((provider) => ({
+        value: provider.providerId,
+        label: (
+          <span className="flex min-w-0 items-center gap-2">
+            <HarnessIcon
+              harnessId={providerIdToGuiHarnessId(provider.providerId)}
+            />
+            <span className="min-w-0 truncate">
+              {PROVIDER_DISPLAY_NAMES[provider.providerId]}
+            </span>
+          </span>
+        ),
+      }))}
       value={props.activeId}
       onValueChange={(value) => {
+        if (value === null) return;
         // Resolve through the provider list instead of asserting the select's
         // string value back into the ProviderId union.
         const match = props.providers.find((p) => p.providerId === value);

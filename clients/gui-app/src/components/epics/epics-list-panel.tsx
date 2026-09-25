@@ -1750,7 +1750,7 @@ const EpicsListRow = memo(function EpicsListRow(props: EpicsListRowProps) {
   // available - it goes through the route.
   const backgroundMenuItem = isPhase ? null : (
     <ContextMenuItem
-      onSelect={openInBackground}
+      onClick={openInBackground}
       disabled={isOpen}
       data-testid="epics-list-row-open-background"
     >
@@ -1765,7 +1765,7 @@ const EpicsListRow = memo(function EpicsListRow(props: EpicsListRowProps) {
   );
   const newWindowMenuItem = openInNewWindowAvailable ? (
     <ContextMenuItem
-      onSelect={openInNewWindow}
+      onClick={openInNewWindow}
       data-testid="epics-list-row-open-new-window"
     >
       <ExternalLink />
@@ -2043,7 +2043,7 @@ function HistorySweepMenuItem(props: {
   if (!props.sweep.canSweep) return null;
   return (
     <ContextMenuItem
-      onSelect={props.sweep.requestSweep}
+      onClick={props.sweep.requestSweep}
       data-testid="epics-list-row-sweep-menu"
     >
       <Paintbrush />

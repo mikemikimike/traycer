@@ -15,8 +15,10 @@ import { profileCommitId } from "../provider-profile-model";
 // click its rows without fighting pointer-open semantics in jsdom (mirrors
 // the established mock in worktrees-settings-panel.test / folder-controls.test).
 vi.mock("@/components/ui/dropdown-menu", () => {
-  const passthrough = (props: { readonly children: ReactNode }): ReactNode =>
-    props.children;
+  const passthrough = (props: {
+    readonly children?: ReactNode;
+    readonly render?: ReactNode;
+  }): ReactNode => props.render ?? props.children;
   return {
     DropdownMenu: (props: {
       readonly children: ReactNode;

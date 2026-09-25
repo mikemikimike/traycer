@@ -3533,7 +3533,7 @@ function ChatRowButton(props: ChatRowButtonProps) {
             className={cn(
               "flex-none",
               reserveArchiveSlot &&
-                "group-hover/tree-item:hidden group-focus-within/tree-item:hidden group-has-[[data-state=open]]/tree-item:hidden",
+                "group-hover/tree-item:hidden group-focus-within/tree-item:hidden group-has-data-popup-open/tree-item:hidden",
             )}
           >
             <ChatRowIdleTime updatedAt={updatedAt} />
@@ -4322,26 +4322,28 @@ function ChatMoreMenu(props: {
   const revealed = useRevealRowControls();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label={`Agent actions for ${nodeName}`}
-          data-testid={`epic-sidebar-more-${nodeId}`}
-          className={cn(
-            "absolute right-1 top-1/2 -translate-y-1/2 transition-opacity",
-            revealed
-              ? "opacity-100"
-              : "opacity-0 focus-visible:opacity-100 group-hover/tree-item:opacity-100 aria-expanded:opacity-100",
-          )}
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
-        >
-          <MoreHorizontal className="size-3" />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Agent actions for ${nodeName}`}
+            data-testid={`epic-sidebar-more-${nodeId}`}
+            className={cn(
+              "absolute right-1 top-1/2 -translate-y-1/2 transition-opacity",
+              revealed
+                ? "opacity-100"
+                : "opacity-0 focus-visible:opacity-100 group-hover/tree-item:opacity-100 aria-expanded:opacity-100",
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <MoreHorizontal className="size-3" />
+          </Button>
+        }
+      />
       <DropdownMenuContent align="end" className="w-max">
         <SidebarDropdownMenuItems entries={entries} />
       </DropdownMenuContent>

@@ -855,62 +855,64 @@ function TabItemBody(
         tileItemId={tab.instanceId}
         offsetX={props.offsetX}
       >
-        <ContextMenuTrigger asChild>
-          <div
-            ref={setRef}
-            {...listeners}
-            role="tab"
-            aria-selected={isActive}
-            tabIndex={isActive ? 0 : -1}
-            data-testid={`tab-item-${tab.instanceId}`}
-            data-tab-id={tab.instanceId}
-            data-active={isActive ? "true" : "false"}
-            data-preview={isPreview ? "true" : "false"}
-            data-globally-active={isGloballyActive ? "true" : "false"}
-            onClick={selectTab}
-            onDoubleClick={handleDoubleClick}
-            onKeyDown={handleKeyDown}
-            onAuxClick={handleAuxClick}
-            className={cn(
-              "group relative flex h-9 shrink-0 cursor-pointer items-center gap-1.5 border-r border-canvas-border/70 px-3 text-ui-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              "transition-[background-color,color] duration-300 ease-spring",
-              "hover:bg-card/60 active:scale-97",
-              // Paint over the strip border so the active tab merges with the panel below.
-              isActive &&
-                "bg-(--app-background) text-canvas-foreground shadow-[inset_0_-1px_0_0_var(--app-background)]",
-              !isActive && "text-muted-foreground hover:text-foreground/90",
-            )}
-          >
-            <TabStripDropIndicator visible={showDropIndicatorBefore} />
-            {isGloballyActive ? (
-              <DropLine
-                orientation="horizontal"
-                glow={false}
-                className="absolute inset-x-0 top-0 origin-left animate-in fade-in slide-in-from-left-2 duration-300 ease-spring"
-                testId="tab-active-accent"
+        <ContextMenuTrigger
+          render={
+            <div
+              ref={setRef}
+              {...listeners}
+              role="tab"
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              data-testid={`tab-item-${tab.instanceId}`}
+              data-tab-id={tab.instanceId}
+              data-active={isActive ? "true" : "false"}
+              data-preview={isPreview ? "true" : "false"}
+              data-globally-active={isGloballyActive ? "true" : "false"}
+              onClick={selectTab}
+              onDoubleClick={handleDoubleClick}
+              onKeyDown={handleKeyDown}
+              onAuxClick={handleAuxClick}
+              className={cn(
+                "group relative flex h-9 shrink-0 cursor-pointer items-center gap-1.5 border-r border-canvas-border/70 px-3 text-ui-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "transition-[background-color,color] duration-300 ease-spring",
+                "hover:bg-card/60 active:scale-97",
+                // Paint over the strip border so the active tab merges with the panel below.
+                isActive &&
+                  "bg-(--app-background) text-canvas-foreground shadow-[inset_0_-1px_0_0_var(--app-background)]",
+                !isActive && "text-muted-foreground hover:text-foreground/90",
+              )}
+            >
+              <TabStripDropIndicator visible={showDropIndicatorBefore} />
+              {isGloballyActive ? (
+                <DropLine
+                  orientation="horizontal"
+                  glow={false}
+                  className="absolute inset-x-0 top-0 origin-left animate-in fade-in slide-in-from-left-2 duration-300 ease-spring"
+                  testId="tab-active-accent"
+                />
+              ) : null}
+              <TabIcon
+                epicId={epicId}
+                tab={tab}
+                titleGenerationPending={titleGenerationPending}
+                browserPresentation={browserPresentation}
               />
-            ) : null}
-            <TabIcon
-              epicId={epicId}
-              tab={tab}
-              titleGenerationPending={titleGenerationPending}
-              browserPresentation={browserPresentation}
-            />
-            <TabItemLabelSlot
-              displayTitle={displayTitle}
-              isArchived={isArchived}
-              tooltipContent={tooltipContent}
-              inputProps={rename.inputProps}
-              isActive={isActive}
-              isEditing={rename.isEditing}
-              isPreview={isPreview}
-              leaderBadge={leaderBadge}
-              onClose={handleClose}
-              tabInstanceId={tab.instanceId}
-              tabIndex={index}
-            />
-          </div>
-        </ContextMenuTrigger>
+              <TabItemLabelSlot
+                displayTitle={displayTitle}
+                isArchived={isArchived}
+                tooltipContent={tooltipContent}
+                inputProps={rename.inputProps}
+                isActive={isActive}
+                isEditing={rename.isEditing}
+                isPreview={isPreview}
+                leaderBadge={leaderBadge}
+                onClose={handleClose}
+                tabInstanceId={tab.instanceId}
+                tabIndex={index}
+              />
+            </div>
+          }
+        />
       </TabItemMotionFrame>
       <TabStripContextMenu
         {...menuProps}

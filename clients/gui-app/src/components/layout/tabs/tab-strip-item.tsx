@@ -478,69 +478,71 @@ export const TabItem = memo(function TabItem(props: TabItemProps) {
         };
   const control = (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          ref={combinedRef}
-          {...listeners}
-          role="tab"
-          tabIndex={0}
-          aria-selected={isActive}
-          data-testid={`tab-${tab.kind}-${tab.id}`}
-          data-header-tab-key={tabRefKey(tab)}
-          data-tab-kind={tab.kind}
-          data-tab-index={index}
-          onClick={activateTab}
-          onKeyDown={handleKeyDown}
-          onTouchCancel={cancelLongPress}
-          onTouchEnd={cancelLongPress}
-          onTouchMove={cancelLongPress}
-          onTouchStart={handleTouchStart}
-          className={cn(
-            headerTabClassName(chrome, isActive),
-            NO_DRAG_CLASS,
-            "cursor-pointer",
-          )}
-        >
-          <HeaderTabDropIndicator
-            visible={showDropIndicatorBefore}
-            side="left"
-          />
-          <HeaderTabVisual
-            tab={tab}
-            appearance={appearance}
-            indicatorState={indicatorState}
-            displayName={displayName}
-            chrome={chrome}
-            isActive={isActive}
-            titleControl={
-              rename.isEditing ? (
-                <input
-                  {...rename.inputProps}
-                  aria-label="Edit epic title"
-                  data-testid={`tab-title-input-${tab.kind}-${tab.id}`}
-                  className="min-w-0 flex-1 rounded-sm border border-border bg-background px-1 text-left text-ui-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring [-webkit-app-region:no-drag]"
+      <ContextMenuTrigger
+        render={
+          <div
+            ref={combinedRef}
+            {...listeners}
+            role="tab"
+            tabIndex={0}
+            aria-selected={isActive}
+            data-testid={`tab-${tab.kind}-${tab.id}`}
+            data-header-tab-key={tabRefKey(tab)}
+            data-tab-kind={tab.kind}
+            data-tab-index={index}
+            onClick={activateTab}
+            onKeyDown={handleKeyDown}
+            onTouchCancel={cancelLongPress}
+            onTouchEnd={cancelLongPress}
+            onTouchMove={cancelLongPress}
+            onTouchStart={handleTouchStart}
+            className={cn(
+              headerTabClassName(chrome, isActive),
+              NO_DRAG_CLASS,
+              "cursor-pointer",
+            )}
+          >
+            <HeaderTabDropIndicator
+              visible={showDropIndicatorBefore}
+              side="left"
+            />
+            <HeaderTabVisual
+              tab={tab}
+              appearance={appearance}
+              indicatorState={indicatorState}
+              displayName={displayName}
+              chrome={chrome}
+              isActive={isActive}
+              titleControl={
+                rename.isEditing ? (
+                  <input
+                    {...rename.inputProps}
+                    aria-label="Edit epic title"
+                    data-testid={`tab-title-input-${tab.kind}-${tab.id}`}
+                    className="min-w-0 flex-1 rounded-sm border border-border bg-background px-1 text-left text-ui-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring [-webkit-app-region:no-drag]"
+                  />
+                ) : null
+              }
+              trailingControl={
+                <TabTrailingSlot
+                  label={`Close ${displayName}`}
+                  testId={`tab-close-${tab.kind}-${tab.id}`}
+                  onClose={() => onClose(displayTab)}
+                  leaderBadge={leaderBadge}
+                  disabled={!canClose}
                 />
-              ) : null
-            }
-            trailingControl={
-              <TabTrailingSlot
-                label={`Close ${displayName}`}
-                testId={`tab-close-${tab.kind}-${tab.id}`}
-                onClose={() => onClose(displayTab)}
-                leaderBadge={leaderBadge}
-                disabled={!canClose}
-              />
-            }
-            leaderVisible={leaderBadge !== null}
-          />
-          <StripPairPreview tabKind={tab.kind} tabId={tab.id} />
-          <HeaderTabSeparator visible={showSeparatorAfter} />
-          <HeaderTabDropIndicator
-            visible={showDropIndicatorAfter}
-            side="right"
-          />
-        </div>
-      </ContextMenuTrigger>
+              }
+              leaderVisible={leaderBadge !== null}
+            />
+            <StripPairPreview tabKind={tab.kind} tabId={tab.id} />
+            <HeaderTabSeparator visible={showSeparatorAfter} />
+            <HeaderTabDropIndicator
+              visible={showDropIndicatorAfter}
+              side="right"
+            />
+          </div>
+        }
+      />
       <TabContextMenuContent
         tab={displayTab}
         canCloseOtherTabs={canCloseOtherTabs}

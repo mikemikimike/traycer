@@ -168,6 +168,7 @@ const report = {
   motion: {},
   behavior: [],
   deferrals: [],
+  measurements: {},
 };
 // Pixel/motion diffs are collected here rather than thrown immediately, so one
 // residual raster difference doesn't abort the run before the rest of the
@@ -511,11 +512,22 @@ try {
   for(let i=0;i<x.data.length;i+=4){let changed=false;for(let c=0;c<4;c++){const d=Math.abs(x.data[i+c]-y.data[i+c]);maxDelta=Math.max(maxDelta,d);changed ||= d!==0;}if(changed)pixels++;x.data.set(changed?[255,0,80,255]:[0,0,0,0],i);}ctx.putImageData(x,0,0);return {pixels,maxDelta,image:canvas.toDataURL()};})()`);
   }
   async function toastChecks() {
+    // D16: DropdownMenu, ContextMenu, Menubar and Select all route their
+    // outside-dismiss through isToastEvent same as Popover, so a toast stays
+    // reachable and an ordinary outside gesture still dismisses normally -
+    // this is independent of each family's own modal/backdrop behavior,
+    // which the branch below keys off separately. Drawer defaults modal
+    // like Dialog.
     for (const [family, state] of [
       ["dialog", "default"],
       ["popover", "default"],
       ["frame", "default"],
       ["frame", "nonmodal"],
+      ["drawer", "default"],
+      ["dropdown-menu", "default"],
+      ["context-menu", "default"],
+      ["menubar", "default"],
+      ["select", "default"],
     ]) {
       await load(family, state, "toast", views[0], "light");
       await open(family, state, views[0]);
@@ -526,7 +538,10 @@ try {
       );
       await delay(400);
       await settle();
-      if (family !== "popover" && state !== "nonmodal") {
+      if (
+        ["dialog", "frame", "drawer"].includes(family) &&
+        state !== "nonmodal"
+      ) {
         // D17: Base's dialog backdrop does not mask the whole viewport with a
         // body pointer-events lock the way Radix's DismissableLayer did (see
         // useDialogRoot: only useScrollLock + useDismiss, no pointer mask), so
@@ -541,7 +556,7 @@ try {
         await clickAt(p.x, p.y, "left");
         await check(
           "modal toast action fires exactly once, modal stays open",
-          "document.querySelector('[data-gate-state]').dataset.actions === '1' && document.querySelector('[data-gate-state]').dataset.open === 'true'",
+          "document.querySelector('[data-gate-state]').dataset.actions === '1' && document.querySelector('[data-gate-state]').dataset.open === 'true' && window.gatePresented('[data-gate-popup]')",
         );
         await hoverSelector("[data-sonner-toast]");
         await settle();
@@ -556,7 +571,7 @@ try {
         );
         await check(
           "toast close retains the modal",
-          "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+          "document.querySelector('[data-gate-state]').dataset.open === 'true' && window.gatePresented('[data-gate-popup]')",
         );
         await clickAt(8, 8, "left");
         await wait(
@@ -594,7 +609,7 @@ try {
       await clickSelector("[data-gate-toast-action]", "left", true);
       await check(
         "toast action once, overlay retained",
-        "document.querySelector('[data-gate-state]').dataset.actions === '1' && document.querySelector('[data-gate-state]').dataset.open === 'true'",
+        "document.querySelector('[data-gate-state]').dataset.actions === '1' && document.querySelector('[data-gate-state]').dataset.open === 'true' && window.gatePresented('[data-gate-popup]')",
       );
       await hoverSelector("[data-sonner-toast]");
       await settle();
@@ -609,7 +624,7 @@ try {
       );
       await check(
         "toast close retains overlay",
-        "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+        "document.querySelector('[data-gate-state]').dataset.open === 'true' && window.gatePresented('[data-gate-popup]')",
       );
       await clickAt(8, 8, "left");
       if (family === "frame" && state === "nonmodal") {
@@ -623,8 +638,89 @@ try {
         "ordinary close path",
         "document.querySelector('[data-gate-state]').dataset.open === 'false'",
       );
+      await settle();
+      // Select retains its Popup DOM node hidden instead of unmounting it, so
+      // a stale logical counter can't be trusted - prove real closure instead
+      // (ported from the lifecycle lane's assertClosed/waitClosed).
+      await wait(
+        "popup reaches the closed-pure boundary",
+        "window.gateClosedPure('[data-gate-popup]')",
+      );
+      const unreachable = await evaluate(
+        "window.gateUnreachable('[data-gate-popup]', '[data-gate-trigger]')",
+      );
+      assert(
+        unreachable.closed,
+        `popup must be fully unreachable after ordinary close: ${JSON.stringify(unreachable)}`,
+      );
+      const stillExists = await evaluate(
+        "!!document.querySelector('[data-gate-popup]')",
+      );
+      if (stillExists) {
+        const rect = await evaluate(
+          "(() => { const r = document.querySelector('[data-gate-popup]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; })()",
+        );
+        if (rect.w > 0 && rect.h > 0) {
+          const hitInside = await evaluate(
+            `document.querySelector('[data-gate-popup]').contains(document.elementFromPoint(${rect.x}, ${rect.y}))`,
+          );
+          assert(
+            !hitInside,
+            "a real hit-test at the retained popup's own rect must not resolve inside it",
+          );
+        }
+        await key("Tab", 0);
+        const landedInside = await evaluate(
+          "document.querySelector('[data-gate-popup]')?.contains(document.activeElement) ?? false",
+        );
+        assert(
+          !landedInside,
+          "a real Tab press must never land focus inside the closed/retained popup",
+        );
+      }
       report.behavior.push(`toast/${family}/${state}/pointer`);
     }
+    // Positive control for the isToastEvent widening: Select's cancel-open
+    // close comes from a press-on-trigger/release-outside gesture (native
+    // <select> shape), not a full click, so drive that exact sequence with
+    // no toast involved and prove the wider guard doesn't swallow it.
+    await load("select", "default", "toast", views[0], "light");
+    const selectTrigger = await center("[data-gate-trigger]");
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: selectTrigger.x,
+      y: selectTrigger.y,
+    });
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x: selectTrigger.x,
+      y: selectTrigger.y,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    });
+    await wait(
+      "select opens on press",
+      "window.gatePresented('[data-gate-popup]')",
+    );
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: 8,
+      y: 8,
+    });
+    await client.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x: 8,
+      y: 8,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    });
+    await wait(
+      "press-drag-release-outside closes Select with no toast involved",
+      "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+    );
+    report.behavior.push("toast/select/cancel-open-outside-no-toast");
     await load("popover", "default", "toast", views[0], "light");
     await open("popover", "default", views[0]);
     await evaluate("window.primitiveGate.toast()");
@@ -774,10 +870,25 @@ try {
       ["dropdown-menu", "default"],
       ["select", "controlled"],
       ["select", "uncontrolled"],
+      ["context-menu", "controlled"],
+      ["context-menu", "uncontrolled"],
     ];
     // Positive controls: each callback we assert must fire on an ordinary close.
     for (const [family, state] of guarded) {
       await load(family, state, "conceal", views[0], "light");
+      // ContextMenu's trigger wraps a real focusable `<button>` child (its
+      // own gate case, primitive-gate.tsx:722-724) inside a non-focusable
+      // right-click zone - not plain text. Measured via
+      // portal-lifecycle-gate's native-vs-production `contextButton=true`
+      // comparison (both native Base and production agree): a right-click on
+      // it DOES focus that child button in a real browser, and Escape's
+      // close-focus restores to it, not to any previously-focused element.
+      // Establish a real previously-focused element (B) first anyway, so the
+      // restoration check below stays a genuine proof that the close-focus
+      // callback moved focus, not a no-op because it was already there.
+      // Every other family keeps its existing expectation.
+      if (family === "context-menu")
+        await clickSelector("[data-gate-outside]", "left", true);
       await open(family, state, views[0]);
       await settle();
       if (["dialog", "popover"].includes(family))
@@ -792,8 +903,12 @@ try {
         "document.querySelector('[data-gate-state]').dataset.closeFocus==='1'",
       );
       await check(
-        "ordinary close restores trigger",
-        "document.activeElement.matches('[data-gate-trigger]')",
+        family === "context-menu"
+          ? "ordinary close restores the captured child button inside the trigger zone"
+          : "ordinary close restores trigger",
+        family === "context-menu"
+          ? "document.activeElement.matches('[data-gate-trigger] button')"
+          : "document.activeElement.matches('[data-gate-trigger]')",
       );
       report.behavior.push(`focus-control/${family}/${state}`);
     }
@@ -841,6 +956,26 @@ try {
         const before = await evaluate(
           "({...document.querySelector('[data-gate-state]').dataset})",
         );
+        // D13 (user ruling, t07-overlay-wave-2): menus and dropdowns close on
+        // concealment, no patch. Every family here EXCEPT Dialog/Popover
+        // (their older useOverlayPresentation guard never touches the owner)
+        // and the borrowed conceal-only Sheet/Tooltip/Hover-card cases now
+        // routes presentation-loss through the real useClosingOverlay guard,
+        // so its owner genuinely closes - `open` flips false and `changes`
+        // increments by exactly one - instead of merely hiding while staying
+        // logically open.
+        const genuinelyCloses = ![
+          "dialog",
+          "popover",
+          "sheet",
+          "tooltip",
+          "hover-card",
+        ].includes(family);
+        // Tracks the `changes` count a genuinely-closing family is expected to
+        // carry at each checkpoint below - bumped exactly where a real
+        // `changeOpen` call is expected (a presentation-loss close or an
+        // explicit reopen), never guessed as a flat multiple.
+        let expectedChanges = Number(before.changes);
         const hide = `window.primitiveGate.${control}(${control === "conceal"})`;
         const show = `window.primitiveGate.${control}(${control !== "conceal"})`;
         await evaluate(hide);
@@ -902,43 +1037,50 @@ try {
         );
         await key("Escape", 0);
         await clickSelector("[data-gate-outside]", "left", true);
+        if (genuinelyCloses) expectedChanges += 1;
         await check(
           "hidden owners untouched",
-          `document.querySelector('[data-gate-state]').dataset.changes===${JSON.stringify(before.changes)} && document.querySelector('[data-gate-state]').dataset.draft===${JSON.stringify(before.draft)}`,
+          `document.querySelector('[data-gate-state]').dataset.changes===${JSON.stringify(String(expectedChanges))} && document.querySelector('[data-gate-state]').dataset.draft===${JSON.stringify(before.draft)}`,
         );
         const hidden = await evaluate(
           "({...document.querySelector('[data-gate-state]').dataset})",
         );
-        if (guarded.some(([f, s]) => f === family && s === state)) {
-          // D13: "Presentation-only owner changes, completions and final
-          // focus are suppressed" - Dialog/Popover now route every
-          // presentation-loss reason (visible, conceal - focus already did)
-          // through the real useOverlayPresentation guard, so none of them
-          // count as a genuine close. dropdown-menu/select are still Radix
-          // (T07) and keep their original expectation.
-          const converted = family === "dialog" || family === "popover";
-          assert.equal(
-            Number(hidden.closeFocus) - Number(before.closeFocus),
-            control === "focus" || converted ? 0 : 1,
-            `${family}: current close-focus sequence on ${control}`,
-          );
-        }
+        // D13: every family that genuinely closes on presentation loss still
+        // routes it through the real useClosingOverlay guard as a mandatory,
+        // non-cancellable notification - never a counted close-focus event
+        // (that stays reserved for an ordinary, user-driven close). This
+        // matches Dialog/Popover's pre-existing useOverlayPresentation
+        // guarantee, just reached by a different mechanism.
+        assert.equal(
+          Number(hidden.closeFocus) - Number(before.closeFocus),
+          0,
+          `${family}: presentation-loss must not fire a close-focus event on ${control}`,
+        );
         await evaluate(show);
         await wait(
           "presentation restored",
           `document.querySelector('[data-gate-state]').dataset.${attribute}==='${control !== "conceal"}'`,
         );
-        const retained = !(
-          family === "select" &&
-          state === "uncontrolled" &&
-          control !== "conceal"
-        );
-        if (!retained)
-          await check(
-            "uncontrolled select closes on pane blur but keeps its value",
-            "!window.gatePresented('[data-gate-popup]') && document.querySelector('[data-gate-trigger]').textContent.includes('First view')",
-          );
-        else if (["tooltip", "hover-card"].includes(family)) {
+        if (genuinelyCloses) {
+          if (family === "select")
+            await check(
+              `${family}/${state}: closes on presentation loss but keeps its value`,
+              "!window.gatePresented('[data-gate-popup]') && document.querySelector('[data-gate-trigger]').textContent.includes('First view')",
+            );
+          else
+            await check(
+              `${family}: closes on presentation loss`,
+              "!window.gatePresented('[data-gate-popup]')",
+            );
+          // Genuinely closed means Base never mounts a closed owner's popup -
+          // restoring presentation alone cannot bring it back, unlike
+          // Dialog/Popover which never lost `open` to begin with. Reopen
+          // explicitly so every assertion below still exercises a real,
+          // presented popup.
+          await open(family, state, views[0]);
+          await settle();
+          expectedChanges += 1;
+        } else if (["tooltip", "hover-card"].includes(family)) {
           await hoverSelector("[data-gate-trigger]");
           await wait(
             "hover reopens",
@@ -952,12 +1094,11 @@ try {
         await settle();
         await check(
           "draft and logical callback count preserved",
-          `document.querySelector('[data-gate-state]').dataset.changes===${JSON.stringify(before.changes)} && document.querySelector('[data-gate-state]').dataset.draft===${JSON.stringify(before.draft)}`,
+          `document.querySelector('[data-gate-state]').dataset.changes===${JSON.stringify(String(expectedChanges))} && document.querySelector('[data-gate-state]').dataset.draft===${JSON.stringify(before.draft)}`,
         );
         // Each owner-controlled family gets a quick A→B→A cycle and a distinct
         // close-while-concealed commit. Completion API probes belong to T02.
         if (
-          retained &&
           !["tooltip", "hover-card"].includes(family) &&
           state !== "uncontrolled"
         ) {
@@ -971,8 +1112,14 @@ try {
             "quick control commit",
             `document.querySelector('[data-gate-state]').dataset.${attribute}==='${control === "conceal"}'`,
           );
+          if (genuinelyCloses) expectedChanges += 1;
           if (interruptedSelect) {
-            // Inspect and re-show in one browser task: never wait out the exit.
+            // (a) Observe the mid-exit state and restore presentation WITHOUT
+            // any trigger action. D13 already closed the owner for real the
+            // instant `hide` ran, so `show` restoring presentation cannot by
+            // itself reopen anything - this only proves the exit animation is
+            // left alone (not force-finished, not restarted) while focus and
+            // callbacks stay untouched throughout it.
             const pending = await evaluate(`(() => {
               const popup = document.querySelector('[data-gate-popup]');
               const animations = document.getAnimations().filter(a => a.effect?.target instanceof Element && (a.effect.target === popup || a.effect.target.contains(popup)));
@@ -984,44 +1131,61 @@ try {
             assert.deepEqual(
               pending,
               { pending: true, painted: true },
-              "Rapid Select cycle did not interrupt a pending visible close",
+              "Rapid Select cycle did not observe a pending visible close",
             );
             console.log(
-              `PASS interrupted Select ${control} close before halfway`,
+              `PASS observed Select ${control} close before halfway, no reopen`,
             );
-          } else await evaluate(show);
-          await wait(
-            "quick re-present",
-            "window.gatePresented('[data-gate-popup]')",
-          );
-          await settle();
-          if (interruptedSelect) {
-            // Re-presentation must preserve the focus deliberately transferred
-            // to B; an interrupted Select close never remounts its FocusScope.
+            await wait(
+              "exit finishes fully closed",
+              "!window.gatePresented('[data-gate-popup]')",
+            );
+            await settle();
             await check(
-              "interrupted Select preserves focus in B",
+              "mid-exit presentation return preserves focus in B",
               "document.activeElement.matches('[data-gate-outside]')",
             );
             assert.deepEqual(
               await evaluate("window.primitiveGate.focusEvents"),
               ["B"],
-              "Interrupted Select transiently stole focus",
+              "Presentation return during exit transiently stole focus",
             );
             assert.equal(
               await evaluate(
                 "document.querySelector('[data-gate-state]').dataset.closeFocus",
               ),
               beforeRapid.closeFocus,
-              "Interrupted close fired a stale close-focus callback",
+              "Presentation return during exit fired a stale close-focus callback",
             );
-          } else
+            // (b) A separate, later reopen is a FRESH open and owns focus
+            // normally - deliberately not conflated with the mid-exit return
+            // above, which must never itself trigger a reopen.
+            await open(family, state, views[0]);
+            expectedChanges += 1;
+            await settle();
+            await check(
+              "separate reopen after exit owns focus normally",
+              "document.querySelector('[data-gate-popup]').contains(document.activeElement)",
+            );
+          } else {
+            await evaluate(show);
+            if (genuinelyCloses) {
+              await open(family, state, views[0]);
+              expectedChanges += 1;
+            }
+            await wait(
+              "quick re-present",
+              "window.gatePresented('[data-gate-popup]')",
+            );
+            await settle();
             await check(
               "re-presented popup owns focus",
               "document.querySelector('[data-gate-popup]').contains(document.activeElement)",
             );
+          }
           await check(
             "rapid cycle retains logical owner state",
-            `document.querySelector('[data-gate-state]').dataset.open===${JSON.stringify(before.open)} && document.querySelector('[data-gate-state]').dataset.changes===${JSON.stringify(before.changes)} && document.querySelector('[data-gate-state]').dataset.draft===${JSON.stringify(before.draft)}`,
+            `document.querySelector('[data-gate-state]').dataset.open===${JSON.stringify(before.open)} && document.querySelector('[data-gate-state]').dataset.changes===${JSON.stringify(String(expectedChanges))} && document.querySelector('[data-gate-state]').dataset.draft===${JSON.stringify(before.draft)}`,
           );
           const focusHistory = await evaluate(
             "window.primitiveGate.focusEvents.slice()",
@@ -1261,32 +1425,10 @@ try {
           );
         else await clickAt(8, 8, "left");
         await settle();
-        let deferred = false;
-        try {
-          await check(
-            "first gesture preserves frame",
-            "document.querySelector('[data-gate-state]').dataset.open === 'true'",
-          );
-        } catch (error) {
-          if (!(error instanceof assert.AssertionError)) throw error;
-          // D16: named per-gesture deferral, never a blanket catch - only
-          // THIS one assertion is caught, and only because it is
-          // attributable to mixed Menu/Select ownership (the still-Radix
-          // `state` families here). A runtime/fixture/timeout error above
-          // still throws normally. Recorded separately from
-          // `report.behavior` so it never inflates the pass count or reads
-          // as a resolved/generic known defect.
-          deferred = true;
-          report.deferrals.push({
-            name: `nested/${state}/${gesture}/frame-preserved`,
-            reason:
-              "mixed Menu/Select ownership (D16): still-Radix nested gesture handling does not scope to the top layer only",
-            error: error.message,
-          });
-          console.log(
-            `D16 DEFERRED (non-gating) nested ${state}/${gesture}: first gesture did not preserve frame`,
-          );
-        }
+        await check(
+          "first gesture preserves frame",
+          "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+        );
         if (["cancel", "virtual"].includes(gesture)) {
           if (
             await evaluate("window.gatePresented('[data-gate-popup=nested]')")
@@ -1331,10 +1473,157 @@ try {
         console.log(
           `nested ${state}/${gesture}: frame closes on gesture ${presses + 1}${secondClosed ? "" : " (known extra press)"}`,
         );
-        // A deferred case is already recorded in `report.deferrals` above -
-        // it must never also land in `report.behavior`, or it inflates the
-        // pass count for a gesture that just failed its own assertion.
-        if (!deferred) report.behavior.push(`nested/${state}/${gesture}`);
+        report.behavior.push(`nested/${state}/${gesture}`);
+      }
+    // Distinct from the "cancel" gesture above (a touch/pointer INTERACTION
+    // cancellation) - this cancels via Base's own onOpenChange `details.cancel()`,
+    // the owner's logical veto lever. A press that would otherwise close the
+    // child must instead preserve both child and frame.
+    for (const state of ["menu", "select"]) {
+      await load("frame", state, "nested", views[0], "light");
+      await open("frame", state, views[0]);
+      await settle();
+      await clickSelector('[data-gate-trigger="nested"]', "left", true);
+      await wait(
+        "nested opens",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await settle();
+      await evaluate("window.primitiveGate.cancelNestedClose(true)");
+      await clickAt(8, 8, "left");
+      await settle();
+      await check(
+        "owner-cancelled close preserves the child",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await check(
+        "owner-cancelled close preserves the frame",
+        "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+      );
+      // Disarm and prove the same press closes normally - the veto above was
+      // genuinely load-bearing, not a press that does nothing on its own.
+      await evaluate("window.primitiveGate.cancelNestedClose(false)");
+      await clickAt(8, 8, "left");
+      await wait(
+        "child closes once the veto is disarmed",
+        "!window.gatePresented('[data-gate-popup=nested]')",
+      );
+      report.behavior.push(
+        `nested/${state}/owner-cancelled-close-preserves-child-and-frame`,
+      );
+    }
+    // An overlay outside this frame's OverlayFrameContext.Provider must
+    // never be counted as one of its children. The sibling is wired to
+    // never close itself on an ordinary press, so it stays genuinely open
+    // (and excluded from the registry) for the whole exchange below.
+    for (const state of ["menu", "select"]) {
+      await load("frame", state, "nested", views[0], "light");
+      await open("frame", state, views[0]);
+      await settle();
+      await clickSelector('[data-gate-trigger="nested"]', "left", true);
+      await wait(
+        "nested opens",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await settle();
+      await check(
+        "registry holds only the nested child before the sibling opens",
+        "window.primitiveGate.registrySize() === 1",
+      );
+      await evaluate("window.primitiveGate.openUnrelated()");
+      await wait(
+        "unrelated overlay opens",
+        "window.gatePresented('[data-gate-unrelated]')",
+      );
+      await settle();
+      await check(
+        "registry excludes the unrelated overlay",
+        "window.primitiveGate.registrySize() === 1",
+      );
+      await clickAt(8, 8, "left");
+      await settle();
+      await check(
+        "unrelated overlay does not claim frame ownership: first gesture still closes the child",
+        "!window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await check(
+        "first gesture preserves the frame",
+        "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+      );
+      await check(
+        "unrelated overlay is still presented after the first press",
+        "window.gatePresented('[data-gate-unrelated]')",
+      );
+      await clickAt(8, 8, "left");
+      await wait(
+        "frame closes on the next press despite the unrelated overlay staying open",
+        "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+      );
+      await check(
+        "unrelated overlay is still presented after the frame closes",
+        "window.gatePresented('[data-gate-unrelated]')",
+      );
+      report.behavior.push(
+        `nested/${state}/unrelated-overlay-excluded-from-frame-ownership`,
+      );
+    }
+    // Child release paths with a passive tooltip coexisting in the same
+    // frame: the tooltip never registers in OverlayFrameContext, so it must
+    // stay open, unaffected, and never block the frame from recognizing the
+    // child's own release, whichever path releases it.
+    for (const state of ["menu", "select"])
+      for (const operation of ["close", "unmount", "conceal"]) {
+        await load("frame", state, "nested", views[0], "light");
+        await open("frame", state, views[0]);
+        await settle();
+        await clickSelector('[data-gate-trigger="nested"]', "left", true);
+        await wait(
+          "nested opens",
+          "window.gatePresented('[data-gate-popup=nested]')",
+        );
+        await settle();
+        // Fully controlled (open, no onOpenChange) - matches base-ui-
+        // proofs.tsx's own passive tooltip exactly, so nothing (hover loss,
+        // a backdrop, the release below) can close it out from under this
+        // test.
+        await evaluate("window.primitiveGate.showNestedTooltip()");
+        await wait(
+          "passive tooltip opens",
+          "window.gatePresented('[data-gate-popup=tooltip]')",
+        );
+        await settle();
+        await check(
+          "registry holds only the nested child while both are painted",
+          "window.primitiveGate.registrySize() === 1",
+        );
+        await evaluate(
+          operation === "close"
+            ? "window.primitiveGate.closeNested()"
+            : operation === "unmount"
+              ? "window.primitiveGate.unmountNested()"
+              : "window.primitiveGate.concealNested(true)",
+        );
+        await wait(
+          `child releases via ${operation}`,
+          "!window.gatePresented('[data-gate-popup=nested]')",
+        );
+        await settle();
+        await check(
+          `${operation}: registry releases the child`,
+          "window.primitiveGate.registrySize() === 0",
+        );
+        await check(
+          `${operation}: passive tooltip stays painted and unaffected`,
+          "window.gatePresented('[data-gate-popup=tooltip]')",
+        );
+        await clickAt(8, 8, "left");
+        await wait(
+          `${operation}: frame closes normally despite the passive tooltip`,
+          "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+        );
+        report.behavior.push(
+          `nested/${state}/${operation}-with-passive-tooltip`,
+        );
       }
     for (const state of ["menu", "select"]) {
       await load("frame", state, "nested", views[0], "light");
@@ -1383,6 +1672,572 @@ try {
       "document.querySelector('[data-gate-state]').dataset.open === 'false'",
     );
     report.behavior.push("nested/passive-tooltip");
+    // T02 promotion (base-ui-proofs.mjs's `pointerdown ownership survives
+    // synchronous child close` and `virtual click without pointerdown while
+    // child is open`): `overlay-frame-context.ts`'s registry is the exact
+    // logic T02's own synthetic prototype proved out - a document-level
+    // CAPTURE-phase pointerdown listener snapshots `registry.size > 0`
+    // before any bubble-phase handler on the target can react, and a click
+    // with no paired pointerdown (`detail === 0`) samples ownership fresh
+    // instead of trusting a stale snapshot. Both cases drive the REAL
+    // production frame/menu/select fixture already used above, with no new
+    // fixture surface - only raw DOM event dispatch, the same technique the
+    // existing "virtual" gesture case already relies on.
+    for (const state of ["menu", "select"]) {
+      // Positive: an ordinary trigger.click() only SCHEDULES React's close -
+      // it is not proof of a synchronous commit. Use the fixture's
+      // `closeNested()` (flushSync) instead, and PROVE the close and the
+      // registry's deregistration already committed - via the real,
+      // live `registrySize()`, not inferred timing - strictly BEFORE the
+      // paired click is dispatched.
+      await load("frame", state, "nested", views[0], "light");
+      await open("frame", state, views[0]);
+      await settle();
+      await clickSelector('[data-gate-trigger="nested"]', "left", true);
+      await wait(
+        "nested opens",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await settle();
+      await check(
+        "registry holds exactly the nested child before closing it",
+        "window.primitiveGate.registrySize() === 1",
+      );
+      // One-time BUBBLE-phase listener on the backdrop that closes the
+      // child synchronously, mid-gesture - after the registry's own
+      // document-level CAPTURE-phase handler has already run (capture
+      // always precedes the target's own bubble-phase listeners), so the
+      // ownership snapshot it took is necessarily from BEFORE the child
+      // closed.
+      await evaluate(
+        `document.querySelector('[data-slot=dialog-overlay]').addEventListener('pointerdown', () => window.primitiveGate.closeNested(), {once: true})`,
+      );
+      await evaluate(
+        `document.querySelector('[data-slot=dialog-overlay]').dispatchEvent(new PointerEvent('pointerdown',{pointerId:99,bubbles:true}))`,
+      );
+      // Proves the COMMITTED logical closure (registry deregistered, the
+      // popup's own data-closed and the trigger's aria-expanded=false, all
+      // synchronous with the flushSync commit) - not that the ~100ms exit
+      // animation has already finished painting. gatePresented/gatePainted
+      // answer a different question (is it still visible) and would still
+      // be true here even though the close already committed.
+      await check(
+        "child closed and deregistered synchronously, strictly before the paired click",
+        "window.primitiveGate.registrySize() === 0 && document.querySelector('[data-gate-popup=nested]')?.hasAttribute('data-closed') === true && document.querySelector('[data-gate-trigger=\"nested\"]')?.getAttribute('aria-expanded') === 'false'",
+      );
+      await evaluate(
+        `document.querySelector('[data-slot=dialog-overlay]').dispatchEvent(new MouseEvent('click',{detail:1,bubbles:true}))`,
+      );
+      await settle();
+      await check(
+        "pointerdown ownership survives the synchronous child close: frame stays open",
+        "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+      );
+      await clickAt(8, 8, "left");
+      await wait(
+        "frame closes on the next ordinary backdrop press",
+        "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+      );
+      report.behavior.push(
+        `nested/${state}/race-survives-synchronous-child-close`,
+      );
+      // Negative control: identical setup, but the paired close is a
+      // VIRTUAL click (no real pointerdown at all) - no snapshot exists to
+      // protect it, so the registry samples ownership FRESH at click time
+      // (already empty, since the child closed first), and this must
+      // dismiss the frame in ONE press. This is the case that must FAIL to
+      // stay open, proving the positive result above is genuinely load-
+      // bearing on the snapshot, not on frames always staying open.
+      await load("frame", state, "nested", views[0], "light");
+      await open("frame", state, views[0]);
+      await settle();
+      await clickSelector('[data-gate-trigger="nested"]', "left", true);
+      await wait(
+        "nested opens",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await settle();
+      await evaluate("window.primitiveGate.closeNested()");
+      // Same committed-logical-closure proof as the positive case above -
+      // not the exit animation's paint completion.
+      await check(
+        "negative control: child closed and deregistered before the virtual click",
+        "window.primitiveGate.registrySize() === 0 && document.querySelector('[data-gate-popup=nested]')?.hasAttribute('data-closed') === true && document.querySelector('[data-gate-trigger=\"nested\"]')?.getAttribute('aria-expanded') === 'false'",
+      );
+      await evaluate(
+        "document.querySelector('[data-slot=dialog-overlay]').click()",
+      );
+      await wait(
+        "negative control: frame dismisses in one press with no snapshot to protect it",
+        "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+      );
+      report.behavior.push(
+        `nested/${state}/race-negative-control-no-snapshot-dismisses`,
+      );
+    }
+    for (const state of ["menu", "select"]) {
+      await load("frame", state, "nested", views[0], "light");
+      await open("frame", state, views[0]);
+      await settle();
+      await clickSelector('[data-gate-trigger="nested"]', "left", true);
+      await wait(
+        "nested opens",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await settle();
+      // A virtual click (`.click()`, `detail === 0`, no preceding real
+      // pointerdown) has no paired-pointerdown snapshot to trust, so the
+      // registry samples ownership fresh at click time. With the child
+      // still open and registered, that fresh sample is `owned === true`,
+      // so this must dismiss nothing - not the child, not the frame.
+      await evaluate(
+        "document.querySelector('[data-slot=dialog-overlay]').click()",
+      );
+      await settle();
+      await check(
+        "virtual click while child is open dismisses nothing: child stays open",
+        "window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await check(
+        "virtual click while child is open dismisses nothing: frame stays open",
+        "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+      );
+      await key("Escape", 0);
+      await wait(
+        "child closes on Escape",
+        "!window.gatePresented('[data-gate-popup=nested]')",
+      );
+      await settle();
+      // Same virtual-click technique, now with the child gone (unowned) -
+      // proving the earlier non-dismissal was genuinely about ownership,
+      // not about virtual clicks being ignored outright.
+      await evaluate(
+        "document.querySelector('[data-slot=dialog-overlay]').click()",
+      );
+      await wait(
+        "frame closes once the child no longer owns the gesture",
+        "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+      );
+      report.behavior.push(
+        `nested/${state}/virtual-click-respects-child-ownership`,
+      );
+    }
+  }
+  async function passivePreviewInMenuChecks() {
+    // D16: real DropdownMenu items serving as passive Tooltip/HoverCard
+    // triggers - each must present while the menu stays open, hovering
+    // away must not dismiss or steal ownership from the menu, and ordinary
+    // menu dismissal (Escape) must still close everything afterward.
+    for (const [item, popup] of [
+      ["tooltip-preview", "tooltip-in-menu"],
+      ["hover-preview", "preview-in-menu"],
+    ]) {
+      await load(
+        "dropdown-menu",
+        "passive-previews",
+        "visual",
+        views[0],
+        "light",
+      );
+      await open("dropdown-menu", "passive-previews", views[0]);
+      await settle();
+      await hoverSelector(`[data-gate-item="${item}"]`);
+      await wait(
+        `${item} presents while the menu stays open`,
+        `window.gatePresented('[data-gate-popup="${popup}"]') && window.gatePresented('[data-gate-popup="outer"]')`,
+      );
+      await check(
+        `${item}: presenting the passive preview does not steal focus from the menu`,
+        `document.querySelector('[data-gate-popup="outer"]').contains(document.activeElement)`,
+      );
+      await hoverSelector("[data-gate-item]");
+      await wait(
+        `${item} closes on hover-away, menu stays open`,
+        `!window.gatePresented('[data-gate-popup="${popup}"]') && window.gatePresented('[data-gate-popup="outer"]')`,
+      );
+      await check(
+        `${item}: closing the passive preview leaves focus inside the menu`,
+        `document.querySelector('[data-gate-popup="outer"]').contains(document.activeElement)`,
+      );
+      await key("Escape", 0);
+      await wait(
+        `ordinary Escape still closes the whole menu after ${item}`,
+        "document.querySelector('[data-gate-state]').dataset.open === 'false' && !window.gatePresented('[data-gate-popup=\"outer\"]')",
+      );
+      report.behavior.push(`passivePreview/${item}/coexists-with-open-menu`);
+    }
+  }
+  async function guideOwnershipChecks() {
+    // Real-Chrome parity for guide-overlays.ts's escapeOwnedElsewhere(): each
+    // family's actual popup DOM (data-open/role/data-slot, not a jsdom
+    // approximation) must be recognized as owning Escape while open. Calls
+    // the real production function through window.primitiveGate.
+    // escapeOwnedElsewhere - no reimplemented selector logic here.
+    for (const family of [
+      "dialog",
+      "popover",
+      "sheet",
+      "dropdown-menu",
+      "context-menu",
+      "menubar",
+      "select",
+      "drawer",
+    ]) {
+      await load(family, "default", "visual", views[0], "light");
+      await check(
+        `${family}: nothing owns Escape before opening`,
+        "!window.primitiveGate.escapeOwnedElsewhere([])",
+      );
+      await open(family, "default", views[0]);
+      await wait(
+        `${family}: real popup DOM owns Escape once open`,
+        "window.primitiveGate.escapeOwnedElsewhere([])",
+      );
+      await check(
+        `${family}: a node inside the actual popup is not counted as elsewhere`,
+        "!window.primitiveGate.escapeOwnedElsewhere([document.querySelector('[data-gate-popup]')])",
+      );
+      await key("Escape", 0);
+      await wait(
+        `${family}: closes on Escape`,
+        "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+      );
+      await settle();
+      await wait(
+        `${family}: nothing owns Escape after closing`,
+        "!window.primitiveGate.escapeOwnedElsewhere([])",
+      );
+      report.behavior.push(`guideOwnership/${family}`);
+    }
+  }
+  async function drawerGestureChecks() {
+    // D16: real touch-emulated drags against Base's own useSwipeDismiss/
+    // DrawerViewport thresholds (getBaseSwipeSize*0.5 distance,
+    // MIN_SWIPE_RELEASE_VELOCITY), not a reimplementation of them - margins
+    // are generous (well past/under threshold, paused before release for a
+    // near-zero velocity dismiss) rather than tuned to the exact constants.
+    async function popupRect() {
+      return evaluate(
+        "(() => { const r = document.querySelector('[data-gate-popup]').getBoundingClientRect(); return {height:r.height}; })()",
+      );
+    }
+    async function touchPressAndDrag(startX, startY, totalDeltaY) {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: startX, y: startY }],
+      });
+      const steps = 6;
+      for (let i = 1; i <= steps; i++) {
+        await client.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x: startX, y: startY + (totalDeltaY * i) / steps }],
+        });
+        await delay(30);
+      }
+    }
+    async function touchRelease(pauseBeforeRelease) {
+      if (pauseBeforeRelease) await delay(300);
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+      });
+    }
+
+    // Keyboard: Escape still closes an ordinary (non-dragging) drawer.
+    await load("drawer", "default", "visual", views[1], "light");
+    await open("drawer", "default", views[1]);
+    await key("Escape", 0);
+    await wait(
+      "drawer: Escape closes normally",
+      "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+    );
+    report.behavior.push("drawer/keyboard-escape-closes");
+
+    // Cancel: a short drag (above the ~10px registration floor, well under
+    // the ~50%-of-height dismiss threshold) must spring back open.
+    await load("drawer", "default", "visual", views[1], "light");
+    await open("drawer", "default", views[1]);
+    await settle();
+    let rect = await popupRect();
+    let start = await center("[data-slot=drawer-header]");
+    await touchPressAndDrag(start.x, start.y, Math.max(20, rect.height * 0.08));
+    await wait(
+      "drawer: short drag registers as a real swipe",
+      "document.querySelector('[data-gate-popup]').hasAttribute('data-swiping')",
+    );
+    await touchRelease(false);
+    await settle();
+    await check(
+      "drawer: short drag below threshold cancels, drawer stays open",
+      "document.querySelector('[data-gate-state]').dataset.open === 'true' && !document.querySelector('[data-gate-popup]').hasAttribute('data-swiping')",
+    );
+    report.behavior.push("drawer/short-drag-cancels");
+
+    // Dismiss: a large, slow (paused-before-release, near-zero velocity)
+    // drag well past half the popup's own height must close the drawer.
+    await load("drawer", "default", "visual", views[1], "light");
+    await open("drawer", "default", views[1]);
+    await settle();
+    rect = await popupRect();
+    start = await center("[data-slot=drawer-header]");
+    await touchPressAndDrag(start.x, start.y, rect.height * 0.9);
+    await wait(
+      "drawer: large drag registers as a real swipe",
+      "document.querySelector('[data-gate-popup]').hasAttribute('data-swiping')",
+    );
+    await touchRelease(true);
+    await wait(
+      "drawer: large slow drag past threshold dismisses",
+      "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+    );
+    report.behavior.push("drawer/large-drag-dismisses");
+
+    // Scroll region: a drag starting inside [data-base-ui-swipe-ignore] must
+    // never register as a swipe - it must actually scroll instead, not just
+    // fail to swipe. Upward finger motion (negative deltaY) is native
+    // scroll-down semantics: scrollTop must move off zero.
+    await load("drawer", "long", "visual", views[1], "light");
+    await open("drawer", "long", views[1]);
+    await settle();
+    const overflows = await evaluate(
+      "(() => { const el = document.querySelector('[data-base-ui-swipe-ignore]'); return el.scrollHeight > el.clientHeight; })()",
+    );
+    assert(
+      overflows,
+      "swipe-ignore region precondition: it must actually have overflow content to scroll",
+    );
+    const ignoreStart = await center("[data-base-ui-swipe-ignore]");
+    await touchPressAndDrag(ignoreStart.x, ignoreStart.y, -60);
+    await check(
+      "drawer: a drag starting inside the swipe-ignore region never registers as a swipe",
+      "!document.querySelector('[data-gate-popup]').hasAttribute('data-swiping')",
+    );
+    await touchRelease(false);
+    await check(
+      "drawer: stays open after releasing inside the swipe-ignore region",
+      "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+    );
+    await check(
+      "drawer: the region actually scrolled, not merely avoided swiping",
+      "document.querySelector('[data-base-ui-swipe-ignore]').scrollTop > 0",
+    );
+    report.behavior.push("drawer/swipe-ignore-region-actually-scrolls");
+  }
+  async function drawerInterruptedEnterChecks() {
+    // Compare a real touch during enter against HEAD using portable geometry.
+    async function popupState() {
+      return evaluate(`(() => {
+        const popup = document.querySelector('[data-gate-popup]');
+        if (!popup) return null;
+        const animations = popup.getAnimations().map(a => {
+          const timing = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null;
+          return { progress: timing ? timing.progress : null, playState: a.playState, currentTime: a.currentTime, duration: timing ? timing.duration : null };
+        });
+        const r = popup.getBoundingClientRect();
+        return {
+          animations,
+          rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+          // Base diagnostic; HEAD comparison uses rect movement.
+          swiping: popup.hasAttribute("data-swiping"),
+        };
+      })()`);
+    }
+    // Deterministic mid-enter pin (0.35, inside 0.2-0.6): observer, discovery
+    // and pin all run in one page-side promise chain, started before the click.
+    async function pinEnterAnimation() {
+      await evaluate(`(() => {
+        window.__enterAnimationPoint = new Promise((resolve, reject) => {
+          const observer = new MutationObserver(() => {
+            const popup = document.querySelector('[data-gate-popup]');
+            if (!popup) return;
+            observer.disconnect();
+            (async () => {
+              let target = null, duration = null;
+              for (let frame = 0; frame < 30 && !target; frame++) {
+                for (const a of popup.getAnimations()) {
+                  if (a.playState !== 'running') continue;
+                  const timing = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null;
+                  if (timing && typeof timing.duration === 'number' && timing.duration > 0) {
+                    target = a; duration = timing.duration; break;
+                  }
+                }
+                if (!target) await new Promise((r) => requestAnimationFrame(r));
+              }
+              if (!target) { reject(new Error('interrupted-enter: no running enter animation found to pin')); return; }
+              target.playbackRate = 0;
+              target.currentTime = duration * 0.35;
+              window.__pinnedEnterAnimation = target;
+              const progress = target.effect.getComputedTiming().progress;
+              if (progress === null || progress < 0.2 || progress >= 0.6) {
+                reject(new Error('interrupted-enter: pinned progress left the deterministic window (' + progress + ')'));
+                return;
+              }
+              const header = document.querySelector('[data-slot="drawer-header"]');
+              if (!header) { resolve(null); return; }
+              const r = header.getBoundingClientRect();
+              const left = Math.max(r.left, 0);
+              const top = Math.max(r.top, 0);
+              const right = Math.min(r.right, innerWidth);
+              const bottom = Math.min(r.bottom, innerHeight);
+              if (right <= left || bottom <= top) { resolve(null); return; }
+              resolve({ x: (left + right) / 2, y: (top + bottom) / 2 });
+            })();
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+        });
+      })()`);
+      await clickSelector("[data-gate-trigger]", "left", true);
+      return evaluate("window.__enterAnimationPoint");
+    }
+    await load("drawer", "default", "visual", views[1], "light");
+    const start = await pinEnterAnimation();
+    assert(
+      start,
+      "drawer header has no visible on-screen point yet - the enter transform hasn't placed any of it in the viewport",
+    );
+    const sampleBeforeTouch = await popupState();
+    // Sample before library handlers can cancel enter; prove the actual hit too.
+    await evaluate(`(() => {
+      window.__interruptedEnterProbe = null;
+      const popup = document.querySelector('[data-gate-popup]');
+      const header = document.querySelector('[data-slot="drawer-header"]');
+      document.addEventListener('touchstart', (event) => {
+        const animations = popup.getAnimations().map(a => {
+          const timing = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : null;
+          return { progress: timing ? timing.progress : null, playState: a.playState, currentTime: a.currentTime, duration: timing ? timing.duration : null };
+        });
+        const r = popup.getBoundingClientRect();
+        window.__interruptedEnterProbe = {
+          animations,
+          rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+          clientX: event.touches[0].clientX,
+          clientY: event.touches[0].clientY,
+          hitInsidePopup: popup.contains(event.target),
+          hitInsideHeader: !!header && header.contains(event.target),
+        };
+      }, { capture: true, once: true });
+    })()`);
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: start.x, y: start.y }],
+    });
+    const sampleAtTouchstart = await evaluate("window.__interruptedEnterProbe");
+    assert(
+      sampleAtTouchstart?.hitInsideHeader,
+      `interrupted-enter touch missed the drawer header - not valid parity evidence: ${JSON.stringify(sampleAtTouchstart)}`,
+    );
+    assert(
+      sampleAtTouchstart.animations.some(
+        (a) =>
+          a.playState === "running" &&
+          typeof a.progress === "number" &&
+          a.progress > 0 &&
+          a.progress < 1,
+      ),
+      `interrupted-enter probe missed the animation window - not counted as evidence either way: ${JSON.stringify(sampleAtTouchstart)}`,
+    );
+    const sampleAfterTouchstartHandled = await popupState();
+    // Assert before settle() - a forced-broken cancellation leaves this
+    // frozen (never restored on the main path), and settle() would
+    // otherwise time out generically instead of failing here.
+    if (process.env.DRAWER_REFERENCE !== "1")
+      assert(
+        sampleAfterTouchstartHandled.animations.every(
+          (animation) => animation.playState !== "running",
+        ),
+        `enter must yield to native drag at touchstart: ${JSON.stringify(sampleAfterTouchstartHandled.animations)}`,
+      );
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: start.x, y: start.y + 20 }],
+    });
+    const sampleAfterFirstMove = await popupState();
+    const steps = 5;
+    for (let i = 2; i <= steps; i++) {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: start.x, y: start.y + 20 * i }],
+      });
+      await delay(30);
+    }
+    const sampleHeld = await popupState();
+    await client.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    // All samples the assertions below read are already captured. Only the
+    // HEAD/vaul reference run unfreezes a surviving animation here, so it
+    // settles naturally instead of hanging settle() forever - a real Base
+    // run that failed to cancel it must stay frozen, or settle()'s own
+    // timeout is the only thing left to catch the missing cancellation.
+    if (process.env.DRAWER_REFERENCE === "1") {
+      await evaluate(`(() => {
+        const a = window.__pinnedEnterAnimation;
+        if (a && a.playState === 'running') a.playbackRate = 1;
+      })()`);
+    }
+    await settle();
+    const sampleSettled = {
+      ...(await popupState()),
+      open: await evaluate(
+        "document.querySelector('[data-gate-state]').dataset.open",
+      ),
+    };
+    const direction = await evaluate(
+      "document.querySelector('[data-gate-popup]')?.getAttribute('data-swipe-direction') ?? document.querySelector('[data-gate-popup]')?.getAttribute('data-vaul-drawer-direction') ?? null",
+    );
+    report.measurements.drawerInterruptedEnter = {
+      direction,
+      sampleBeforeTouch,
+      sampleAtTouchstart,
+      sampleAfterTouchstartHandled,
+      sampleAfterFirstMove,
+      sampleHeld,
+      sampleSettled,
+    };
+    for (const [name, sample] of [
+      ["sampleBeforeTouch", sampleBeforeTouch],
+      ["sampleAtTouchstart", sampleAtTouchstart],
+      ["sampleAfterTouchstartHandled", sampleAfterTouchstartHandled],
+      ["sampleAfterFirstMove", sampleAfterFirstMove],
+      ["sampleHeld", sampleHeld],
+      ["sampleSettled", sampleSettled],
+    ])
+      assert(sample, `${name} must not be null`);
+    // D12#6: strict Base outcome assertions. Skipped only here under
+    // DRAWER_REFERENCE=1 (a HEAD/vaul run) - vaul rejects drag during its
+    // own enter window entirely, so these would be false failures there, not
+    // evidence of a bug. Preconditions above (hit/animation window) still
+    // run either way - they prove the gesture itself is valid, not Base's
+    // outcome.
+    if (process.env.DRAWER_REFERENCE !== "1") {
+      assert(
+        sampleAfterTouchstartHandled.swiping,
+        "swiping must be true right after touchstart is handled",
+      );
+      assert(sampleHeld.swiping, "swiping must still be true while held");
+      assert(
+        Math.abs(sampleAfterFirstMove.rect.y - sampleAtTouchstart.rect.y) <= 1,
+        `first move must not visually jump from the captured touchstart position: ${sampleAfterFirstMove.rect.y} vs ${sampleAtTouchstart.rect.y}`,
+      );
+      assert(
+        Math.abs(sampleHeld.rect.y - sampleAfterFirstMove.rect.y - 80) <= 1,
+        `held minus first-move must track the remaining 80px of finger travel: ${sampleHeld.rect.y - sampleAfterFirstMove.rect.y}`,
+      );
+      const viewportHeight = await evaluate("innerHeight");
+      assert(
+        sampleSettled.open === "true",
+        "drawer must still be open after a sub-threshold release",
+      );
+      assert(!sampleSettled.swiping, "swiping must clear after release");
+      assert(
+        Math.abs(
+          sampleSettled.rect.y - (viewportHeight - sampleSettled.rect.height),
+        ) <= 1,
+        `settled drawer must rest flush at the viewport bottom: ${sampleSettled.rect.y} vs ${viewportHeight - sampleSettled.rect.height}`,
+      );
+    }
+    report.behavior.push("drawer/interrupted-enter-measured");
   }
   async function probeChecks() {
     await load("button", "default", "visual", views[0], "light");
@@ -1625,11 +2480,12 @@ try {
       // focus into an already-open submenu's first item; assert it actually
       // landed there before trusting ArrowLeft to close it.
       await key("ArrowRight", 0);
-      assert(
-        await evaluate(
-          "!!document.activeElement?.closest('[data-gate-subpopup]')",
-        ),
+      // Base's list navigation schedules this focus move via
+      // requestAnimationFrame (floating-ui-react's enqueueFocus, sync only
+      // when forced) - an immediate synchronous check here races that frame.
+      await wait(
         `${family}/${state}: ArrowRight must move focus into the submenu before ArrowLeft can close it`,
+        "!!document.activeElement?.closest('[data-gate-subpopup]')",
       );
       await evaluate("window.gateStartMotion('[data-gate-subpopup]')");
       await key("ArrowLeft", 0);
@@ -1654,13 +2510,28 @@ try {
   } else if (behavior) {
     const only = flag("--only");
     assert(
-      !only || ["toast", "conceal", "nested", "defaultFocus"].includes(only),
+      !only ||
+        [
+          "toast",
+          "conceal",
+          "nested",
+          "defaultFocus",
+          "passivePreview",
+          "guideOwnership",
+          "drawerGesture",
+          "drawerInterrupted",
+        ].includes(only),
       "Unknown behavior lane",
     );
     if (!only || only === "toast") await toastChecks();
     if (!only || only === "conceal") await concealChecks();
     if (!only || only === "nested") await nestedChecks();
     if (!only || only === "defaultFocus") await defaultFocusChecks();
+    if (!only || only === "passivePreview") await passivePreviewInMenuChecks();
+    if (!only || only === "guideOwnership") await guideOwnershipChecks();
+    if (!only || only === "drawerGesture") await drawerGestureChecks();
+    if (!only || only === "drawerInterrupted")
+      await drawerInterruptedEnterChecks();
     console.log(
       `PASS ${report.behavior.length} behavior cases; ${report.deferrals.length} named deferral(s)`,
     );
@@ -2068,6 +2939,71 @@ function installPresentationProbes() {
         return hit && el.contains(hit);
       });
     });
+  // Reused verbatim from the lifecycle lane (portal-lifecycle-gate.mjs):
+  // `gateClosedPure` is side-effect-free (safe to poll in a `wait` loop);
+  // `gateUnreachable` moves focus as part of its own probe, so call it once,
+  // never in a loop. A retained-but-hidden Popup (Select keeps its DOM node
+  // for typeahead) is closed here via its `[hidden]` ancestor, not removal.
+  window.gateClosedPure = (popupSelector) => {
+    const popup = document.querySelector(popupSelector);
+    if (!popup) return true;
+    return !!popup.closest("[hidden]");
+  };
+  window.gateUnreachable = (popupSelector, triggerSelector) => {
+    const popup = document.querySelector(popupSelector);
+    if (!popup)
+      return { closed: true, present: false, reason: "removed from DOM" };
+    const present = window.gatePresented(popupSelector);
+    const notPainted = !window.gatePainted(popup);
+    const isInert = !!popup.closest("[inert]");
+    const hasHiddenAncestor = !!popup.closest("[hidden]");
+    const excludedFromA11y =
+      hasHiddenAncestor ||
+      popup.getAttribute("aria-hidden") === "true" ||
+      !!popup.closest('[aria-hidden="true"]');
+    const before = document.activeElement;
+    const focusableDescendant = popup.querySelector(
+      '[tabindex], button, [href], input, select, textarea, [role="option"], [role="menuitem"], [role="menuitemcheckbox"]',
+    );
+    popup.focus?.({ preventScroll: true });
+    focusableDescendant?.focus?.({ preventScroll: true });
+    const tookFocus =
+      document.activeElement !== before &&
+      (document.activeElement === popup ||
+        popup.contains(document.activeElement));
+    if (tookFocus) before?.focus?.({ preventScroll: true });
+    const dupId = (id) =>
+      id ? document.querySelectorAll(`#${CSS.escape(id)}`).length > 1 : false;
+    const dupPopupId = dupId(popup.id);
+    const trigger = triggerSelector
+      ? document.querySelector(triggerSelector)
+      : null;
+    const dupControlsId = dupId(trigger?.getAttribute("aria-controls"));
+    const dupLabelledById = (trigger?.getAttribute("aria-labelledby") ?? "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .some(dupId);
+    return {
+      closed:
+        !present &&
+        notPainted &&
+        hasHiddenAncestor &&
+        excludedFromA11y &&
+        !tookFocus &&
+        !dupPopupId &&
+        !dupControlsId &&
+        !dupLabelledById,
+      present,
+      notPainted,
+      isInert,
+      hasHiddenAncestor,
+      excludedFromA11y,
+      tookFocus,
+      dupPopupId,
+      dupControlsId,
+      dupLabelledById,
+    };
+  };
   window.gateSurfacesHidden = () => {
     if (
       [

@@ -248,8 +248,13 @@ function PermissionsTabSelect(props: {
 }): ReactNode {
   return (
     <Select
+      items={PERMISSIONS_TABS.map((value) => ({
+        value,
+        label: PERMISSIONS_TAB_GROUPS[value].label,
+      }))}
       value={props.tab}
       onValueChange={(value) => {
+        if (value === null) return;
         if (isPermissionsTab(value)) props.onSelect(value);
       }}
     >

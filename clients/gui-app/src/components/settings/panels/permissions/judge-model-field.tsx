@@ -161,9 +161,27 @@ function ProviderField(props: {
     <div className="flex min-w-0 flex-col gap-1">
       <FieldLabel id={labelId}>Provider</FieldLabel>
       <Select
-        value={props.value ?? ""}
+        items={harnesses.map((row) => {
+          const blocker = judgeProviderBlocker(row);
+          return {
+            value: row.id,
+            label:
+              blocker === null ? (
+                row.label
+              ) : (
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{row.label}</span>
+                  <span className="text-ui-xs text-muted-foreground">
+                    {blocker}
+                  </span>
+                </span>
+              ),
+          };
+        })}
+        value={props.value}
         disabled={props.disabled || props.harnesses === undefined}
         onValueChange={(next) => {
+          if (next === null) return;
           const row = harnesses.find((candidate) => candidate.id === next);
           if (row !== undefined) props.onProvider(row);
         }}
@@ -236,9 +254,20 @@ function AccountField(props: {
     <div className="flex min-w-0 flex-col gap-1">
       <FieldLabel id={labelId}>Account</FieldLabel>
       <Select
-        value={selected?.profileId ?? ""}
+        items={props.profiles.map((profile) => {
+          const blocker = judgeProfileBlocker(profile);
+          return {
+            value: profile.profileId,
+            label:
+              blocker === null
+                ? profileDisplayLabel(profile)
+                : `${profileDisplayLabel(profile)} · ${blocker}`,
+          };
+        })}
+        value={selected?.profileId ?? null}
         disabled={props.disabled}
         onValueChange={(next) => {
+          if (next === null) return;
           const profile = props.profiles.find(
             (candidate) => candidate.profileId === next,
           );

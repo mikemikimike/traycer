@@ -177,11 +177,10 @@ function ChatLayoutGroup(): ReactNode {
         row={LAYOUT.definitions.minimapSide}
         control={
           <Select
+            items={{ right: "Right", left: "Left", hide: "Hidden" }}
             value={chatTurnMinimapSide}
             onValueChange={(value) => {
-              if (value !== "left" && value !== "right" && value !== "hide") {
-                return;
-              }
+              if (value === null) return;
               trackLayoutSetting("chatTurnMinimapSide");
               setMinimapSide(value);
             }}

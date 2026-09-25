@@ -926,6 +926,8 @@
   --font-pixel: var(--traycer-font-pixel);
   --font-mono: var(--traycer-font-mono);
   --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --animate-drawer-enter: drawer-enter var(--panel-motion-duration)
+    var(--ease-spring);
 
   --text-micro: 0.625rem;
   --text-micro--line-height: 0.875rem;

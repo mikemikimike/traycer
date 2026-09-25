@@ -269,61 +269,63 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
         the pointer through `contextPanelId` instead.
       */}
       <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div
-            ref={railDropRef}
-            onContextMenuCapture={handleRailContextMenuCapture}
-            role="toolbar"
-            aria-label="Epic left panels"
-            aria-orientation={orientation}
-            data-epic-sidebar-rail
-            data-testid="epic-sidebar-rail"
-            data-orientation={orientation}
-            className={cn(
-              "relative flex items-center gap-1 bg-background",
-              orientation === "vertical" &&
-                "h-full w-12 shrink-0 flex-col justify-start overflow-y-auto py-2",
-              orientation === "horizontal" &&
-                "h-10 w-full min-w-0 flex-row justify-center overflow-x-auto px-2",
-            )}
-          >
-            {railBoundaryIndex === 0 ? (
-              <RailBoundaryPreview
-                definition={panelSectionDropDefinition}
-                orientation={orientation}
-              />
-            ) : null}
-            {visibleGroups.map((group, groupIndex) => {
-              const groupDropPosition =
-                railPanelDropPreview?.kind === "left-panel-rail" &&
-                railPanelDropPreview.panelId === group.primaryPanel.id
-                  ? railPanelDropPreview.position
-                  : null;
-              return (
-                <Fragment key={group.primaryPanel.id}>
-                  <RailGroupButton
-                    tabId={tabId}
-                    panelIds={group.panelIds}
-                    primaryPanel={group.primaryPanel}
-                    orientation={orientation}
-                    active={groupIndex === activeGroupIndex && !collapsed}
-                    onClick={() => handleClick(group.panelIds)}
-                    onContextMenu={setContextPanelId}
-                    dropPosition={
-                      groupDropPosition === "combine" ? "combine" : null
-                    }
-                  />
-                  {railBoundaryIndex === groupIndex + 1 ? (
-                    <RailBoundaryPreview
-                      definition={panelSectionDropDefinition}
+        <ContextMenuTrigger
+          render={
+            <div
+              ref={railDropRef}
+              onContextMenuCapture={handleRailContextMenuCapture}
+              role="toolbar"
+              aria-label="Epic left panels"
+              aria-orientation={orientation}
+              data-epic-sidebar-rail
+              data-testid="epic-sidebar-rail"
+              data-orientation={orientation}
+              className={cn(
+                "relative flex items-center gap-1 bg-background",
+                orientation === "vertical" &&
+                  "h-full w-12 shrink-0 flex-col justify-start overflow-y-auto py-2",
+                orientation === "horizontal" &&
+                  "h-10 w-full min-w-0 flex-row justify-center overflow-x-auto px-2",
+              )}
+            >
+              {railBoundaryIndex === 0 ? (
+                <RailBoundaryPreview
+                  definition={panelSectionDropDefinition}
+                  orientation={orientation}
+                />
+              ) : null}
+              {visibleGroups.map((group, groupIndex) => {
+                const groupDropPosition =
+                  railPanelDropPreview?.kind === "left-panel-rail" &&
+                  railPanelDropPreview.panelId === group.primaryPanel.id
+                    ? railPanelDropPreview.position
+                    : null;
+                return (
+                  <Fragment key={group.primaryPanel.id}>
+                    <RailGroupButton
+                      tabId={tabId}
+                      panelIds={group.panelIds}
+                      primaryPanel={group.primaryPanel}
                       orientation={orientation}
+                      active={groupIndex === activeGroupIndex && !collapsed}
+                      onClick={() => handleClick(group.panelIds)}
+                      onContextMenu={setContextPanelId}
+                      dropPosition={
+                        groupDropPosition === "combine" ? "combine" : null
+                      }
                     />
-                  ) : null}
-                </Fragment>
-              );
-            })}
-          </div>
-        </ContextMenuTrigger>
+                    {railBoundaryIndex === groupIndex + 1 ? (
+                      <RailBoundaryPreview
+                        definition={panelSectionDropDefinition}
+                        orientation={orientation}
+                      />
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </div>
+          }
+        />
         <RailContextMenuContent
           context={availabilityContext}
           contextPanelId={contextPanelId}
@@ -381,7 +383,7 @@ function RailContextMenuContent(props: {
       {pointedEntry !== null && visibleCount > 1 ? (
         <>
           <ContextMenuItem
-            onSelect={() => setOverride(pointedEntry.definition.id, false)}
+            onClick={() => setOverride(pointedEntry.definition.id, false)}
             data-testid="epic-rail-hide-pointed-panel"
           >
             {`Hide '${pointedEntry.definition.title}'`}
@@ -418,7 +420,7 @@ function RailContextMenuContent(props: {
         <>
           <ContextMenuSeparator />
           <ContextMenuItem
-            onSelect={clearOverrides}
+            onClick={clearOverrides}
             data-testid="epic-rail-reset-panel-visibility"
           >
             Reset panel visibility

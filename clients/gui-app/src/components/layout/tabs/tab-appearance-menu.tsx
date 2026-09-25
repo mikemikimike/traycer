@@ -62,11 +62,10 @@ export function TabColorPicker(props: {
         return props.menu ? (
           <ContextMenuItem
             key={value}
-            asChild
-            onSelect={(event) => event.preventDefault()}
-          >
-            {button}
-          </ContextMenuItem>
+            render={button}
+            nativeButton
+            closeOnClick={false}
+          />
         ) : (
           button
         );
@@ -94,12 +93,10 @@ export function TabColorPicker(props: {
           <Pipette className="size-3 text-white drop-shadow-sm" aria-hidden />
           {props.menu ? (
             <ContextMenuItem
-              asChild
+              render={customInput}
               className="absolute inset-0 size-full p-0"
-              onSelect={(event) => event.preventDefault()}
-            >
-              {customInput}
-            </ContextMenuItem>
+              closeOnClick={false}
+            />
           ) : (
             customInput
           )}
@@ -140,10 +137,11 @@ export function TabAppearanceMenu(props: { readonly tab: HeaderTab }) {
           ) : null}
           <ContextMenuItem
             className="mt-2"
-            onSelect={(event) => {
-              event.preventDefault();
+            onClick={(event) => {
+              event.preventBaseUIHandler();
               iconInput.current?.focus();
             }}
+            closeOnClick={false}
           >
             Edit icon…
           </ContextMenuItem>
@@ -167,7 +165,7 @@ export function TabAppearanceMenu(props: { readonly tab: HeaderTab }) {
           </p>
           <ContextMenuSeparator className="my-2" />
           <ContextMenuItem
-            onSelect={() =>
+            onClick={() =>
               actions.setTabCustomization(props.tab, {
                 color: null,
                 icon: null,
@@ -184,13 +182,13 @@ export function TabAppearanceMenu(props: { readonly tab: HeaderTab }) {
           Add tab to group
         </ContextMenuSubTrigger>
         <ContextMenuSubContent>
-          <ContextMenuItem onSelect={() => actions.createGroup(props.tab)}>
+          <ContextMenuItem onClick={() => actions.createGroup(props.tab)}>
             New group
           </ContextMenuItem>
           {Object.entries(groups ?? {}).map(([id, entry]) => (
             <ContextMenuItem
               key={id}
-              onSelect={() => actions.setTabGroup(props.tab, id)}
+              onClick={() => actions.setTabGroup(props.tab, id)}
             >
               <span
                 className="size-3 rounded-full bg-[var(--swatch)]"
@@ -203,7 +201,7 @@ export function TabAppearanceMenu(props: { readonly tab: HeaderTab }) {
         </ContextMenuSubContent>
       </ContextMenuSub>
       {groupId !== null ? (
-        <ContextMenuItem onSelect={() => actions.setTabGroup(props.tab, null)}>
+        <ContextMenuItem onClick={() => actions.setTabGroup(props.tab, null)}>
           Remove from group
         </ContextMenuItem>
       ) : null}
