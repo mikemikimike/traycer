@@ -67,6 +67,7 @@ interface Reading {
 
 function recordingCallbacks(readings: Reading[]): ChatStreamCallbacks {
   return {
+    readSkeletonResume: () => null,
     onSnapshot: () => undefined,
     onWindowedSnapshot: () => undefined,
     onSkeletonChunk: () => undefined,

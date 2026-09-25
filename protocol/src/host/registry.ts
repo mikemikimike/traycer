@@ -280,6 +280,7 @@ import {
   chatSubscribeV116,
   chatSubscribeV117,
   chatSubscribeV118,
+  chatSubscribeV119,
 } from "@traycer/protocol/host/agent/gui/contracts";
 import {
   agentTuiGenerateTitleV10,
@@ -12072,7 +12073,7 @@ const HOST_STREAM_RPC_REGISTRY_DEFINITION = {
   ...HOST_STREAM_RPC_REGISTRY_OTHER_DEFINITION,
   "chat.subscribe": {
     1: {
-      latestMinor: 18,
+      latestMinor: 19,
       versions: {
         0: {
           contract: chatSubscribeV10,
@@ -12178,6 +12179,13 @@ const HOST_STREAM_RPC_REGISTRY_DEFINITION = {
         // omitted) rather than refusing the subscribe.
         18: {
           contract: chatSubscribeV118,
+        },
+        // @1.19 adds skeleton resume: a `resume` claim on the open request and
+        // `retainedRows` on the first chunk of a stream that answered it. A
+        // @1.18 open request has no claim to honor, so older peers receive a
+        // full skeleton stream.
+        19: {
+          contract: chatSubscribeV119,
         },
       },
     },

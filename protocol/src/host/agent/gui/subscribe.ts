@@ -138,6 +138,7 @@ import {
 } from "@traycer/protocol/host/agent/gui/subscribe-windowed";
 import { transcriptRowContextSchema } from "@traycer/protocol/persistence/chat-transcript/row-context";
 import { transcriptRowContextSchemaPreAntigravity } from "@traycer/protocol/persistence/chat-transcript/row-context";
+import { chatSkeletonResumeSchema } from "@traycer/protocol/persistence/chat-transcript/skeleton-resume";
 import { lazySchema } from "@traycer/protocol/framework/lazy-schema";
 import { autoJudgeTierSchema } from "@traycer/protocol/host/auto-mode/contracts";
 
@@ -170,6 +171,30 @@ export const chatSubscribeOpenRequestSchema = lazySchema(() =>
 );
 export type ChatSubscribeOpenRequest = z.infer<
   typeof chatSubscribeOpenRequestSchema
+>;
+
+/**
+ * The `1.19` open request: `1.18`'s, plus the skeleton the client already
+ * holds (see `skeleton-resume.ts`).
+ *
+ * `resume` is REQUIRED AND NULLABLE rather than optional, on the
+ * `epic.state.subscribe` precedent: "I hold nothing" and "I forgot to say what
+ * I hold" must not be the same request, because the second one silently costs
+ * a full skeleton and looks like a slow host rather than a client bug.
+ *
+ * Every earlier line keeps `chatSubscribeOpenRequestSchema`, so a client
+ * declaring an older minor to an older host has the claim stripped by that
+ * line's parse (`prepareStreamSubscribeRequest`), and a host reading a `<=1.18`
+ * open request finds no claim to honor. Neither side has to know the other
+ * resumes.
+ */
+export const chatSubscribeOpenRequestSchemaV119 = lazySchema(() =>
+  chatSubscribeOpenRequestSchema.extend({
+    resume: chatSkeletonResumeSchema.nullable(),
+  }),
+);
+export type ChatSubscribeOpenRequestV119 = z.infer<
+  typeof chatSubscribeOpenRequestSchemaV119
 >;
 
 // Frozen action set of the RELEASED `chat.subscribe@≤1.5` lines. `actionAck`
@@ -5237,6 +5262,28 @@ const chatSubscribeSkeletonChunkServerFrameSchema = lazySchema(() =>
   }),
 );
 
+/**
+ * The `1.19` skeleton chunk: `1.18`'s, plus `retainedRows` on the first chunk
+ * of a stream that answered a resume claim.
+ */
+const chatSubscribeSkeletonChunkServerFrameSchemaV119 = lazySchema(() =>
+  chatSubscribeSkeletonChunkServerFrameSchema.extend({
+    /**
+     * Present on the FIRST chunk of a skeleton stream that the host resumed
+     * from the open request's claim, and nowhere else: keep the first
+     * `retainedRows` entries the claim described, because they are current,
+     * and read this stream as starting there. Always a whole number of the
+     * claim's blocks, and always equal to this chunk's `fromOrdinal` - a
+     * stream that resumes sends nothing below it.
+     *
+     * Absent on every other chunk, including every chunk of a stream the host
+     * did not resume (no claim, a claim it could not compare, or a first block
+     * that already differed).
+     */
+    retainedRows: z.number().int().positive().optional(),
+  }),
+);
+
 const chatSubscribeIndexChangedServerFrameSchema = lazySchema(() =>
   z.object({
     kind: z.literal("indexChanged"),
@@ -5438,10 +5485,27 @@ const chatSubscribeServerFrameSchemaV117 = lazySchema(() =>
   ]),
 );
 
-export const chatSubscribeWindowedServerFrameSchema = lazySchema(() =>
+// Freeze Claude parity at 1.18 before 1.19 widens skeletonChunk.
+const chatSubscribeServerFrameSchemaV118 = lazySchema(() =>
   z.discriminatedUnion("kind", [
     chatSubscribeWindowedSnapshotServerFrameSchema,
     chatSubscribeSkeletonChunkServerFrameSchema,
+    chatSubscribeAccumulatedChangesServerFrameSchema,
+    chatSubscribeIndexChangedServerFrameSchema,
+    chatSubscribeRangeServerFrameSchema,
+    chatSubscribeTurnStateChangedServerFrameSchema,
+    chatSubscribeManagedCommandsChangedServerFrameSchema,
+    chatSubscribePortForwardsChangedServerFrameSchema,
+    chatSubscribeHeldUpdatesChangedServerFrameSchema,
+    chatSubscribeThinkingTokensServerFrameSchema,
+    ...chatSubscribeSharedServerFrameSchemas,
+  ]),
+);
+
+export const chatSubscribeWindowedServerFrameSchema = lazySchema(() =>
+  z.discriminatedUnion("kind", [
+    chatSubscribeWindowedSnapshotServerFrameSchema,
+    chatSubscribeSkeletonChunkServerFrameSchemaV119,
     chatSubscribeAccumulatedChangesServerFrameSchema,
     chatSubscribeIndexChangedServerFrameSchema,
     chatSubscribeRangeServerFrameSchema,
@@ -6147,6 +6211,19 @@ export const chatSubscribeV118 = defineStreamRpcContract({
   method: "chat.subscribe",
   schemaVersion: { major: 1, minor: 18 } as const,
   openRequestSchema: chatSubscribeOpenRequestSchema,
+  serverFrameSchema: chatSubscribeServerFrameSchemaV118,
+  clientFrameSchema: chatSubscribeWindowedClientFrameSchema,
+});
+
+/**
+ * The skeleton-resume line. `1.19` adds a nullable resume claim to the open
+ * request and `retainedRows` to the first chunk that answers it. A peer below
+ * `1.19` has no claim to honor and receives the full skeleton as before.
+ */
+export const chatSubscribeV119 = defineStreamRpcContract({
+  method: "chat.subscribe",
+  schemaVersion: { major: 1, minor: 19 } as const,
+  openRequestSchema: chatSubscribeOpenRequestSchemaV119,
   serverFrameSchema: chatSubscribeWindowedServerFrameSchema,
   clientFrameSchema: chatSubscribeWindowedClientFrameSchema,
 });
