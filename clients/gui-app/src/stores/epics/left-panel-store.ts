@@ -17,6 +17,10 @@ import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import "@/lib/layout/legacy-layout-records";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 import {
+  currentMaxRailNaturalWidthPx,
+  useMaxRailNaturalWidthPx,
+} from "@/stores/epics/sidebar-rail-width-store";
+import {
   isLeftPanelId,
   type LeftPanelId,
   type PanelVisibilityOverrideById,
@@ -199,6 +203,20 @@ export function clampSidebarWidthPx(widthPx: number): number {
   return Math.min(
     MAX_SIDEBAR_WIDTH_PX,
     Math.max(MIN_SIDEBAR_WIDTH_PX, Math.round(widthPx)),
+  );
+}
+
+/**
+ * `MIN_SIDEBAR_WIDTH_PX` widened by whichever mounted tab's rail currently
+ * needs the most room (`sidebar-rail-width-store.ts`), capped at the same
+ * ceiling a manual drag already respects - a rail with enough panels to
+ * outgrow it scrolls internally rather than pushing the sidebar past the
+ * width the rest of the layout was sized for.
+ */
+export function dynamicMinSidebarWidthPx(): number {
+  return Math.min(
+    MAX_SIDEBAR_WIDTH_PX,
+    Math.max(MIN_SIDEBAR_WIDTH_PX, currentMaxRailNaturalWidthPx()),
   );
 }
 
@@ -703,7 +721,10 @@ export const useLeftPanelStore = create<LeftPanelStore>()(
 
       setSidebarWidthPx: (widthPx) => {
         set((state) => {
-          const next = clampSidebarWidthPx(widthPx);
+          const next = Math.max(
+            clampSidebarWidthPx(widthPx),
+            dynamicMinSidebarWidthPx(),
+          );
           if (next === state.sidebarWidthPx) return state;
           return { sidebarWidthPx: next };
         });
@@ -1209,6 +1230,14 @@ export function useMainPanelCollapsed(tabId: string): boolean {
 
 export function useSidebarWidthPx(): number {
   return useLeftPanelStore((s) => s.sidebarWidthPx);
+}
+
+/** Reactive counterpart of {@link dynamicMinSidebarWidthPx}. */
+export function useMinSidebarWidthPx(): number {
+  return Math.min(
+    MAX_SIDEBAR_WIDTH_PX,
+    Math.max(MIN_SIDEBAR_WIDTH_PX, useMaxRailNaturalWidthPx()),
+  );
 }
 
 export function useCommentsPanelRevealed(tabId: string): boolean {

@@ -251,12 +251,13 @@
 }
 
 /* The sheet join: the active task tab (top), row, tile or split pair (side)
-   runs into its task's sheet, so the tab and everything the task owns read
+   runs into its task's surface, so the tab and everything the task owns read
    as one shape. The joined element takes the fill of the pane it meets and
-   the sheet's border, open on the sheet side; the bridge, anchored to it,
-   runs that fill across the gap onto the sheet, 1px over the sheet's
-   border, and its pseudo-elements are the concave corners where it meets
-   the sheet. One mechanism for both placements.
+   the canvas border, open on the surface side; the bridge, anchored to it,
+   runs that fill onto the surface, 1px over its edge (opening the epic
+   canvas's own border where the canvas meets the strip), and its
+   pseudo-elements are the concave corners that flare out along the
+   surface's edge. One mechanism for both placements.
 
    The fill is the pane's: `data-join-pane` names it (the epic panel, its
    collapsed rail, or the canvas, the default and the only one a top tab
@@ -380,7 +381,8 @@
     }
   }
 
-  /* Tabs on the side: the strip's edge is one shell gap off the sheet. */
+  /* Tabs on the side: from the row's inner edge across the strip's gutter
+     onto the surface. */
   :has([data-sheet-joined="left"]) > [data-sheet-join-bridge="left"],
   :has([data-sheet-joined="right"]) > [data-sheet-join-bridge="right"] {
     top: anchor(top);
@@ -1346,26 +1348,27 @@
   transition-duration: 0s;
 }
 
-/* The frame owns the inset; each retained route and each task owns one sheet
-   on the ground. Its top edge is where the active top tab's join lands. */
+/* The task surface fills the space beside the strip and under the header
+   edge to edge: no inset, no enclosing box. One seam line runs along the edge
+   facing the tabs (the header's baseline, or the side strip's edge), and the
+   active tab's join opens it; the epic canvas draws its own border. */
 @utility task-surface-frame {
-  margin: var(--shell-gap);
   anchor-name: --task-frame;
 
-  & [data-shell-sheet] {
-    border: 1px solid var(--canvas-border);
-    border-radius: var(--radius-xl);
+  &[data-tab-edge="top"] {
+    border-top: 1px solid var(--canvas-border);
+  }
+
+  &[data-tab-edge="left"] {
+    border-left: 1px solid var(--canvas-border);
+  }
+
+  &[data-tab-edge="right"] {
+    border-right: 1px solid var(--canvas-border);
   }
 
   & [data-shell-sheet="route"] {
     background-color: var(--canvas);
-  }
-}
-
-/* A portalled browser guest needs the same inner clip as its own sheet. */
-[data-browser-guest-sheet] {
-  @variant md {
-    clip-path: inset(1px round calc(var(--radius-xl) - 1px));
   }
 }
 

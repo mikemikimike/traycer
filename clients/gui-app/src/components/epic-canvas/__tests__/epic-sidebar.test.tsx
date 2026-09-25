@@ -49,6 +49,7 @@ import {
 } from "@/stores/host/surface-host-selection-store";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
+import { useSidebarRailWidthStore } from "@/stores/epics/sidebar-rail-width-store";
 
 interface CapturedDroppableInput {
   readonly id: string;
@@ -1527,5 +1528,124 @@ describe("Browsers panel registration", () => {
     expect(reorderedRailIds.indexOf("epic-rail-browsers")).toBeLessThan(
       reorderedRailIds.indexOf("epic-rail-terminals"),
     );
+  });
+});
+
+describe("the horizontal rail's reported natural width (bug #1)", () => {
+  function stubRailScrollWidth(widthPx: number): () => void {
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.getAttribute("data-testid") === "epic-sidebar-rail"
+          ? widthPx
+          : 0;
+      },
+    });
+    return () => {
+      Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+        configurable: true,
+        get: () => 0,
+      });
+    };
+  }
+
+  let restoreScrollWidth: (() => void) | null = null;
+
+  beforeEach(() => {
+    resetLeftPanelStore();
+    resetDndStore();
+    resetTestState();
+    setPullRequestPresence(true);
+    useSidebarRailWidthStore.setState({ naturalWidthPxByTabId: {} });
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetLeftPanelStore();
+    resetDndStore();
+    resetTestState();
+    setPullRequestPresence(false);
+    useSidebarRailWidthStore.setState({ naturalWidthPxByTabId: {} });
+    restoreScrollWidth?.();
+    restoreScrollWidth = null;
+  });
+
+  it("publishes its scrollWidth under the tab id once mounted horizontally", () => {
+    restoreScrollWidth = stubRailScrollWidth(344);
+
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="horizontal"
+      />,
+    );
+
+    expect(
+      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
+    ).toBe(344);
+  });
+
+  it("reports nothing for the collapsed vertical rail", () => {
+    restoreScrollWidth = stubRailScrollWidth(344);
+
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    expect(
+      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
+    ).toBeUndefined();
+  });
+
+  it("clears its reported width once the horizontal rail unmounts", () => {
+    restoreScrollWidth = stubRailScrollWidth(344);
+
+    const view = render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="horizontal"
+      />,
+    );
+    expect(
+      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
+    ).toBe(344);
+
+    view.unmount();
+
+    expect(
+      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
+    ).toBeUndefined();
+  });
+
+  it("re-measures once the rail's own item list changes", () => {
+    restoreScrollWidth = stubRailScrollWidth(344);
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="horizontal"
+      />,
+    );
+    expect(
+      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
+    ).toBe(344);
+
+    // A narrower rail (one fewer icon) reporting a SMALLER scrollWidth: the
+    // effect has to re-measure rather than keep the value from first mount.
+    restoreScrollWidth();
+    restoreScrollWidth = stubRailScrollWidth(300);
+    act(() => {
+      setRailVisibilityOverride("sharing", false);
+    });
+
+    expect(
+      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
+    ).toBe(300);
   });
 });

@@ -28,6 +28,7 @@ import {
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { useTabsStore } from "@/stores/tabs/store";
 import { tabAutoTint } from "@/components/layout/tabs/tab-identity";
+import { useSidebarRailWidthStore } from "@/stores/epics/sidebar-rail-width-store";
 
 const sidebarRenderCounts = vi.hoisted(() => ({
   liveHost: 0,
@@ -166,6 +167,7 @@ describe("<EpicSidebarColumn />", () => {
       mainCollapsedByTabId: {},
       sidebarWidthPx: DEFAULT_SIDEBAR_WIDTH_PX,
     });
+    useSidebarRailWidthStore.setState({ naturalWidthPxByTabId: {} });
     useEpicCanvasStore.setState(useEpicCanvasStore.getInitialState(), true);
     useTabsStore.setState(useTabsStore.getInitialState(), true);
   });
@@ -335,6 +337,40 @@ describe("<EpicSidebarColumn />", () => {
     expect(column.style.width).toBe(`${DEFAULT_SIDEBAR_WIDTH_PX}px`);
   });
 
+  // Bug #1: the rail is mocked out in this file, so the widest-mounted-rail
+  // floor is exercised directly through its store rather than through a real
+  // rail's own measurement (that measurement is covered in
+  // `epic-sidebar-rail.test.tsx`).
+  it("widens the panel past the persisted width when a mounted rail needs more room", () => {
+    act(() => {
+      useSidebarRailWidthStore
+        .getState()
+        .setRailNaturalWidthPx("other-tab", 400);
+    });
+
+    renderColumn();
+
+    expect(screen.getByTestId("epic-sidebar-column").style.width).toBe("400px");
+  });
+
+  it("settles back to the persisted width once the wider tab's rail unmounts", () => {
+    act(() => {
+      useSidebarRailWidthStore
+        .getState()
+        .setRailNaturalWidthPx("other-tab", 400);
+    });
+    renderColumn();
+    expect(screen.getByTestId("epic-sidebar-column").style.width).toBe("400px");
+
+    act(() => {
+      useSidebarRailWidthStore.getState().clearRailNaturalWidthPx("other-tab");
+    });
+
+    expect(screen.getByTestId("epic-sidebar-column").style.width).toBe(
+      `${DEFAULT_SIDEBAR_WIDTH_PX}px`,
+    );
+  });
+
   it("nudges the committed width with arrow keys from the handle", () => {
     renderColumn();
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
@@ -461,6 +497,48 @@ describe("<EpicSidebarColumn />", () => {
     expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(
       MIN_SIDEBAR_WIDTH_PX,
     );
+  });
+
+  it("keeps a live drag from going narrower than the widest mounted rail's reported floor", () => {
+    act(() => {
+      useSidebarRailWidthStore
+        .getState()
+        .setRailNaturalWidthPx("other-tab", 260);
+    });
+    const { handle, column } = setUpDragSurface();
+
+    fireEvent(
+      handle,
+      pointerEvent("pointerdown", {
+        pointerId: 7,
+        clientX: DEFAULT_SIDEBAR_WIDTH_PX,
+        clientY: 10,
+        button: 0,
+      }),
+    );
+    // Far left: would floor at the static MIN_SIDEBAR_WIDTH_PX (200) without
+    // the fix; the mounted rail's own 260px floor wins instead.
+    fireEvent(
+      handle,
+      pointerEvent("pointermove", {
+        pointerId: 7,
+        clientX: -5000,
+        clientY: 10,
+        button: 0,
+      }),
+    );
+    expect(column.style.width).toBe("260px");
+
+    fireEvent(
+      handle,
+      pointerEvent("pointerup", {
+        pointerId: 7,
+        clientX: -5000,
+        clientY: 10,
+        button: 0,
+      }),
+    );
+    expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(260);
   });
 
   it("restores the pre-drag inline width on pointer-cancel without committing", () => {

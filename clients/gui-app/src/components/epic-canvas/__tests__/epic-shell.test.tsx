@@ -6,6 +6,12 @@ import type { EpicStreamCallbacks } from "@traycer-clients/shared/host-transport
 import type { PermissionRole } from "@traycer/protocol/host/epic/unary-schemas";
 import type { SnapshotMetaEpic } from "@traycer/protocol/host/epic/snapshot-meta";
 import { EpicShell } from "@/components/epic-canvas/epic-shell";
+import {
+  DEFAULT_ARRANGEMENT,
+  type EdgeSide,
+  type TabStripPlacement,
+} from "@/lib/layout/layout-arrangement";
+import { useLayoutStore } from "@/stores/layout/layout-store";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TestEpicSessionTab } from "@/lib/registries/test-support/test-epic-session-tab";
 import {
@@ -269,10 +275,28 @@ async function waitForSessionReady(): Promise<void> {
   });
 }
 
+function placeArrangement(patch: {
+  readonly tabStripPlacement: TabStripPlacement;
+  readonly sidebarSide: EdgeSide;
+}): void {
+  useLayoutStore.setState({
+    arrangement: { ...DEFAULT_ARRANGEMENT, ...patch },
+  });
+}
+
+function canvasFrame(): HTMLElement {
+  const frame = screen
+    .getByTestId("tile-canvas-loading")
+    .closest("[data-epic-canvas-frame]");
+  if (frame === null) throw new Error("canvas frame not rendered");
+  return frame as HTMLElement;
+}
+
 describe("<EpicShell />", () => {
   beforeEach(() => {
     window.localStorage.clear();
     __getOpenEpicRegistryForTests().disposeAll();
+    useLayoutStore.setState({ arrangement: DEFAULT_ARRANGEMENT });
   });
 
   afterEach(() => {
@@ -280,6 +304,7 @@ describe("<EpicShell />", () => {
     __getOpenEpicRegistryForTests().disposeAll();
     // RESTORED, not nulled - see `previousWorkerFactory`.
     __setEpicRuntimeWorkerFactoryForTests(previousWorkerFactory);
+    useLayoutStore.setState({ arrangement: DEFAULT_ARRANGEMENT });
   });
 
   it("renders the stable shell frame while the session is not ready", () => {
@@ -295,14 +320,12 @@ describe("<EpicShell />", () => {
     expect(screen.queryByTestId("epic-session-loading")).toBeNull();
   });
 
-  it("draws the status row's own bottom divider above the canvas (one-sheet design)", () => {
+  it("draws no divider of its own: the canvas frame below it owns the border now (flush surface)", () => {
     render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
 
     const statusRow = screen.getByTestId("epic-shell-status-row");
-    // TileCanvas lost its own border in the one-sheet design, so the status
-    // row now owns the divider that separates it from the canvas below.
-    expect(statusRow.className).toContain("border-b");
-    expect(statusRow.className).toContain("border-canvas-border/70");
+    expect(statusRow.className).not.toContain("border-b");
+    expect(statusRow.className).not.toContain("border-canvas-border/70");
   });
 
   it("is canvas-only: the sidebar is hoisted out of the keep-alive pane", () => {
@@ -569,5 +592,86 @@ describe("<EpicShell />", () => {
 
       queryClient.clear();
     });
+  });
+
+  describe("the canvas frame's border (flush surface)", () => {
+    it("draws a 1px canvas-border frame around the canvas, on every side by default", () => {
+      render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
+
+      const frame = canvasFrame();
+      expect(frame.className).toContain("border");
+      expect(frame.className).toContain("border-canvas-border/70");
+      expect(frame.className).toContain("max-md:border-0");
+      expect(frame.className).not.toContain("md:border-s-0");
+      expect(frame.className).not.toContain("md:border-e-0");
+    });
+
+    it("suppresses its bottom border while the app status bar is shown below it, so the two never double up", () => {
+      render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
+
+      // DEFAULT_ARRANGEMENT hosts both readings on the status bar, so it is
+      // shown by default - the canvas frame's own border-b would otherwise
+      // stack directly on the status bar's border-t.
+      expect(canvasFrame().className).toContain("md:border-b-0");
+    });
+
+    it("draws its own bottom border once the status bar has nothing hosted there to show", () => {
+      placeArrangement({
+        tabStripPlacement: "top",
+        sidebarSide: "left",
+      });
+      useLayoutStore.setState({
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          usageHost: "header",
+          resourceHost: "header",
+        },
+      });
+      render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
+
+      expect(canvasFrame().className).not.toContain("md:border-b-0");
+    });
+
+    it.each([
+      {
+        tabStripPlacement: "left",
+        sidebarSide: "right",
+        suppressed: "md:border-s-0",
+      },
+      {
+        tabStripPlacement: "right",
+        sidebarSide: "left",
+        suppressed: "md:border-e-0",
+      },
+    ] as const)(
+      "suppresses the seam-side border where the canvas meets the side strip: strip=$tabStripPlacement, sidebar=$sidebarSide",
+      ({ tabStripPlacement, sidebarSide, suppressed }) => {
+        placeArrangement({ tabStripPlacement, sidebarSide });
+        render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
+
+        const frame = canvasFrame();
+        expect(frame.className).toContain(suppressed);
+        const other =
+          suppressed === "md:border-s-0" ? "md:border-e-0" : "md:border-s-0";
+        expect(frame.className).not.toContain(other);
+      },
+    );
+
+    it.each([
+      { tabStripPlacement: "top", sidebarSide: "left" },
+      { tabStripPlacement: "top", sidebarSide: "right" },
+      { tabStripPlacement: "left", sidebarSide: "left" },
+      { tabStripPlacement: "right", sidebarSide: "right" },
+    ] as const)(
+      "draws the full border with no seam suppression: strip=$tabStripPlacement, sidebar=$sidebarSide",
+      ({ tabStripPlacement, sidebarSide }) => {
+        placeArrangement({ tabStripPlacement, sidebarSide });
+        render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
+
+        const frame = canvasFrame();
+        expect(frame.className).not.toContain("md:border-s-0");
+        expect(frame.className).not.toContain("md:border-e-0");
+      },
+    );
   });
 });

@@ -331,6 +331,7 @@ function PresetCard(props: {
         props.onArrowMove(event.key === "ArrowRight" ? 1 : -1);
       }}
     >
+      <span className="text-micro text-muted-foreground uppercase">Sample</span>
       <PresetMiniature presetId={presetId} arrangement={arrangement} />
       <span
         className={cn(
@@ -403,12 +404,12 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
  *
  * The frame it is drawn into is the app's own shell: the ground, a top bar or
  * a side strip on it where the stored placement puts the tabs (S-03), and the
- * surface frame's one task sheet - a task's panel pane (its rail across the
- * top, its header, its agents) on the stored sidebar side and the content
- * pane (a transcript with a few turns in it, the dock the preset produces, a
+ * task surface edge to edge - a task's panel (its rail across the top, its
+ * header, its agents) on the stored sidebar side and the bordered epic canvas
+ * (a transcript with a few turns in it, the dock the preset produces, a
  * composer box) - then the status strip. The strip is the user's own: the
- * 60px rail while it is collapsed, its active task joined to the sheet as the
- * live one is, and its live agents listed in the Activity view. That part
+ * 60px rail while it is collapsed, its active task joined to the surface as
+ * the live one is, and its live agents listed in the Activity view. That part
  * is inert static markup, and it is there because a card that was 60% empty
  * `bg-card` read as a near-black rectangle in every dark preset, where
  * `--card` and `--background` are the same colour (I-03). Everything in it
@@ -463,8 +464,21 @@ function PresetMiniature(props: {
   const edge = sideTabStripEdge(arrangement.tabStripPlacement);
 
   const panel = <MiniaturePanel {...frame} />;
+  // The live canvas border, less any side that lies on the surface's seam
+  // line (the picture has no status row between the header and the canvas)
+  // and less the bottom, which the status strip below always draws its own
+  // top border against (mirrors `CanvasColumn`'s live suppression).
+  const sideSeam = edge === arrangement.sidebarSide ? null : edge;
   const content = (
-    <div className="flex min-w-0 flex-1 flex-col overflow-clip bg-canvas">
+    <div
+      className={cn(
+        "flex min-w-0 flex-1 flex-col overflow-clip border border-canvas-border/70 bg-canvas",
+        statusBarHostsAnyRegion(arrangement) && "border-b-0",
+        edge === null && "border-t-0",
+        sideSeam === "left" && "border-s-0",
+        sideSeam === "right" && "border-e-0",
+      )}
+    >
       <MiniatureChatArea {...frame} />
       <div className="px-6 py-2">
         <AppFrameComposerStack {...frame} />
@@ -500,10 +514,11 @@ function PresetMiniature(props: {
         {edge === null ? <MiniatureTopBar {...frame} /> : null}
         <div className="flex min-h-0 flex-1">
           {edge === "left" ? strip : null}
-          {/* The shell's own surface frame: its margin is the ground around
-              the task sheet, and it gives that sheet its border and radius. */}
+          {/* The shell's own surface frame, edge to edge: only the epic
+              canvas inside it draws a border. */}
           <div
             data-testid="preset-miniature-surface"
+            data-tab-edge={edge ?? "top"}
             className="task-surface-frame flex min-h-0 min-w-0 flex-1"
           >
             <div
@@ -657,10 +672,7 @@ function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
 function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div
-      className={cn(
-        "flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-canvas-border bg-(--sidebar)",
-        arrangement.sidebarSide === "right" ? "border-s" : "border-e",
-      )}
+      className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-(--sidebar)"
       style={{ width: DEFAULT_SIDEBAR_WIDTH_PX }}
     >
       {/* Each rail picture comes in the vertical rail's 48px column frame

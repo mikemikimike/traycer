@@ -456,6 +456,25 @@ describe("the miniature follows the stored placement and sidebar side", () => {
     }
   });
 
+  it("stamps data-tab-edge on the surface frame, matching the strip's placement (or top)", () => {
+    for (const [tabStripPlacement, expected] of [
+      ["top", "top"],
+      ["left", "left"],
+      ["right", "right"],
+    ] as const) {
+      setArrangement({ tabStripPlacement });
+      render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+      for (const miniature of miniatures()) {
+        const surface = within(miniature).getByTestId(
+          "preset-miniature-surface",
+        );
+        expect(surface.dataset.tabEdge).toBe(expected);
+      }
+      cleanup();
+    }
+  });
+
   it("never moves the placement or the sidebar side when a preset is clicked, and each click still lands (L-20, S-29)", () => {
     setArrangement({ tabStripPlacement: "left", sidebarSide: "right" });
     render(<PresetsBlock onPreviewPreset={() => {}} />);
@@ -474,4 +493,107 @@ describe("the miniature follows the stored placement and sidebar side", () => {
       }
     }
   });
+});
+
+/**
+ * Flush surface (ticket): the miniature's panel no longer draws a pane
+ * divider, and the content pane draws its own border - suppressed on
+ * whichever edge already carries the surface frame's own seam line, exactly
+ * mirroring `EpicShell`'s live `CanvasColumn` (S-01, S-06).
+ */
+describe("the miniature's content pane border (flush surface)", () => {
+  function setArrangement(overrides: Partial<LayoutArrangement>): void {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, ...overrides },
+      layoutCarryDone: true,
+    });
+  }
+
+  function contentOf(miniature: HTMLElement): HTMLElement {
+    const surface = within(miniature).getByTestId("preset-miniature-surface");
+    const sheet = surface.querySelector<HTMLElement>(
+      '[data-shell-sheet="task"]',
+    );
+    if (sheet === null) throw new Error("expected the one task sheet");
+    const panel = within(sheet).getByTestId(
+      "preset-miniature-rail",
+    ).parentElement;
+    const content = [...sheet.children].find((child) => child !== panel);
+    if (!(content instanceof HTMLElement)) {
+      throw new Error("expected the content pane");
+    }
+    return content;
+  }
+
+  it("gives the panel no border of its own (no pane divider)", () => {
+    setArrangement({ sidebarSide: "left" });
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      const panel = within(miniature).getByTestId(
+        "preset-miniature-rail",
+      ).parentElement;
+      if (panel === null) throw new Error("expected the panel");
+      expect(panel.className).not.toMatch(/\bborder\b/);
+    }
+  });
+
+  it("draws the content pane's own border, suppressed on top (the picture has no status row)", () => {
+    render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+    for (const miniature of miniatures()) {
+      const content = contentOf(miniature);
+      expect(content.className).toContain("border");
+      expect(content.className).toContain("border-canvas-border/70");
+      expect(content.className).toContain("border-t-0");
+      expect(content.className).not.toContain("border-s-0");
+      expect(content.className).not.toContain("border-e-0");
+    }
+  });
+
+  it.each([
+    {
+      tabStripPlacement: "left",
+      sidebarSide: "right",
+      suppressed: "border-s-0",
+    },
+    {
+      tabStripPlacement: "right",
+      sidebarSide: "left",
+      suppressed: "border-e-0",
+    },
+  ] as const)(
+    "suppresses the seam side where the content pane meets the strip: strip=$tabStripPlacement, sidebar=$sidebarSide",
+    ({ tabStripPlacement, sidebarSide, suppressed }) => {
+      setArrangement({ tabStripPlacement, sidebarSide });
+      render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+      for (const miniature of miniatures()) {
+        const content = contentOf(miniature);
+        expect(content.className).toContain(suppressed);
+        expect(content.className).not.toContain("border-t-0");
+        const other = suppressed === "border-s-0" ? "border-e-0" : "border-s-0";
+        expect(content.className).not.toContain(other);
+      }
+    },
+  );
+
+  it.each([
+    { tabStripPlacement: "left", sidebarSide: "left" },
+    { tabStripPlacement: "right", sidebarSide: "right" },
+  ] as const)(
+    "draws the full border with no suppression when the strip and sidebar share a side: strip=$tabStripPlacement, sidebar=$sidebarSide",
+    ({ tabStripPlacement, sidebarSide }) => {
+      setArrangement({ tabStripPlacement, sidebarSide });
+      render(<PresetsBlock onPreviewPreset={() => {}} />);
+
+      for (const miniature of miniatures()) {
+        const content = contentOf(miniature);
+        expect(content.className).not.toContain("border-t-0");
+        expect(content.className).not.toContain("border-s-0");
+        expect(content.className).not.toContain("border-e-0");
+      }
+    },
+  );
 });

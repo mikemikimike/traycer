@@ -160,11 +160,12 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
       "epic-sidebar-resize-handle",
     ]);
     const panel = screen.getByTestId("epic-sidebar-column");
-    // One-sheet design: no `data-shell-sheet` marker on the panel any more
-    // - it carries its own hairline against the content pane instead.
+    // One-sheet design: no `data-shell-sheet` marker on the panel any more.
     expect(panel.dataset.shellSheet).toBeUndefined();
-    expect(panel.className).toContain("md:border-e");
-    expect(panel.className).toContain("md:border-canvas-border");
+    // Flush surface: the panel no longer draws a pane divider against the
+    // content pane - only the epic canvas frame draws a border now.
+    expect(panel.className).not.toContain("md:border-e");
+    expect(panel.className).not.toContain("md:border-canvas-border");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
     // One-sheet design: the handle lost its centred `--shell-gap` hit
     // target margin - there is no ground gap to centre in any more. It
@@ -184,8 +185,9 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
     ]);
     const panel = screen.getByTestId("epic-sidebar-column");
     expect(panel.dataset.shellSheet).toBeUndefined();
-    expect(panel.className).toContain("md:border-s");
-    expect(panel.className).toContain("md:border-canvas-border");
+    // Flush surface: no pane divider on the panel, either side.
+    expect(panel.className).not.toContain("md:border-s");
+    expect(panel.className).not.toContain("md:border-canvas-border");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
     // No side-specific classes left to mirror: the ground hover/drag line
     // is the same on both sides now.
@@ -212,14 +214,17 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
     ]);
     const [leftCollapsedRail, leftPanel] = leftChildren;
     expect(leftCollapsedRail.dataset.shellSheet).toBeUndefined();
-    expect(leftCollapsedRail.className).toContain("md:border-e");
-    expect(leftCollapsedRail.className).toContain("md:border-canvas-border");
+    // Flush surface: no pane divider on the collapsed rail either.
+    expect(leftCollapsedRail.className).not.toContain("md:border-e");
+    expect(leftCollapsedRail.className).not.toContain(
+      "md:border-canvas-border",
+    );
     expect(
       leftCollapsedRail.querySelector('[data-testid="epic-rail-static-stub"]'),
     ).not.toBeNull();
     expect(leftPanel.dataset.shellSheet).toBeUndefined();
-    expect(leftPanel.className).toContain("md:border-e");
-    expect(leftPanel.className).toContain("md:border-canvas-border");
+    expect(leftPanel.className).not.toContain("md:border-e");
+    expect(leftPanel.className).not.toContain("md:border-canvas-border");
     cleanup();
 
     renderColumn("right");
@@ -235,8 +240,10 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
     ]);
     const rightCollapsedRail = rightChildren[2];
     expect(rightCollapsedRail.dataset.shellSheet).toBeUndefined();
-    expect(rightCollapsedRail.className).toContain("md:border-s");
-    expect(rightCollapsedRail.className).toContain("md:border-canvas-border");
+    expect(rightCollapsedRail.className).not.toContain("md:border-s");
+    expect(rightCollapsedRail.className).not.toContain(
+      "md:border-canvas-border",
+    );
     expect(
       rightCollapsedRail.querySelector('[data-testid="epic-rail-static-stub"]'),
     ).not.toBeNull();

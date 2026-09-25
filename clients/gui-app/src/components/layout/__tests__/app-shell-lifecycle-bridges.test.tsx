@@ -186,6 +186,7 @@ import {
 import { setMobileApp } from "@/lib/mobile-app";
 import { setNativeKeyboardState } from "@/lib/native-keyboard";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useMobileNavStore } from "@/stores/layout/mobile-nav-store";
 import { useTabsStore } from "@/stores/tabs/store";
 
@@ -478,6 +479,107 @@ describe("<AppShell />", () => {
       statusBar.compareDocumentPosition(probe) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  // Both readings hosted in the footer, and both individually switched off:
+  // the strip used to stay mounted here forever as an empty, still-bordered
+  // shell, because `usageHost`/`resourceHost` naming the footer is a
+  // PLACEMENT fact and says nothing about whether either reading is actually
+  // on. `useStatusBarVisible` is the fix - these cases exercise it through
+  // the real shell rather than in isolation.
+  describe("status-bar auto-hide when both hosted readings are off", () => {
+    afterEach(() => {
+      useLayoutEditorStore.getState().endSession();
+    });
+
+    it("unmounts the strip once both hosted readings are hidden", async () => {
+      selectFooterPlacement();
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("resourceMonitor", { shown: "hidden" });
+
+      queryClient = renderAppShell();
+
+      await screen.findByTestId("app-shell-child");
+
+      expect(screen.queryByTestId("app-status-bar")).toBeNull();
+    });
+
+    it("keeps the strip mounted while only one of the two hosted readings is hidden", async () => {
+      selectFooterPlacement();
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { shown: "hidden" });
+
+      queryClient = renderAppShell();
+
+      await screen.findByTestId("app-shell-child");
+
+      expect(screen.getByTestId("app-status-bar")).not.toBeNull();
+    });
+
+    it("remounts the strip the moment a hidden reading is switched back on", async () => {
+      selectFooterPlacement();
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("resourceMonitor", { shown: "hidden" });
+
+      queryClient = renderAppShell();
+
+      await screen.findByTestId("app-shell-child");
+      expect(screen.queryByTestId("app-status-bar")).toBeNull();
+
+      act(() => {
+        useLayoutStore
+          .getState()
+          .setRegionValues("usageLimits", { shown: "shown" });
+      });
+
+      expect(screen.getByTestId("app-status-bar")).not.toBeNull();
+    });
+
+    it("keeps the strip mounted while both are hidden but a layout-editor session is open", async () => {
+      selectFooterPlacement();
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("resourceMonitor", { shown: "hidden" });
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+      });
+
+      queryClient = renderAppShell();
+
+      await screen.findByTestId("app-shell-child");
+
+      expect(screen.getByTestId("app-status-bar")).not.toBeNull();
+    });
+
+    it("stays unmounted when both readings are hidden but neither is hosted in the footer", async () => {
+      selectHeaderPlacement();
+      useLayoutStore
+        .getState()
+        .setRegionValues("usageLimits", { shown: "hidden" });
+      useLayoutStore
+        .getState()
+        .setRegionValues("resourceMonitor", { shown: "hidden" });
+
+      queryClient = renderAppShell();
+
+      await screen.findByTestId("app-shell-child");
+
+      expect(screen.queryByTestId("app-status-bar")).toBeNull();
+    });
   });
 
   function selectTabStripPlacement(placement: "top" | "left" | "right"): void {

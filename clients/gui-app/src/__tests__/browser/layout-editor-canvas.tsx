@@ -1244,18 +1244,12 @@ function EpicSurfaceStandIn(): ReactNode {
   const handle = (
     <SidebarWidthResizeHandle side={sidebarSide} hidden={mainCollapsed} />
   );
-  // `EpicSidebarColumn`'s hairline between the panel pane and the content.
-  const paneDivider =
-    sidebarSide === "right"
-      ? "md:border-s md:border-canvas-border"
-      : "md:border-e md:border-canvas-border";
   const panel = (
     <div
       data-epic-sidebar-panel
       data-fixture-panel
       className={cn(
         "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
-        paneDivider,
         mainCollapsed && "hidden",
       )}
       style={{ width: sidebarWidthPx }}
@@ -1279,7 +1273,7 @@ function EpicSurfaceStandIn(): ReactNode {
   const collapsedRail = mainCollapsed ? (
     <div
       data-fixture-collapsed-rail
-      className={cn("shrink-0 overflow-clip bg-background", paneDivider)}
+      className="shrink-0 overflow-clip bg-background"
     >
       <EpicLeftPanelRail
         epicId={EPIC_SURFACE_ID}

@@ -22,12 +22,6 @@ import {
 import { cn } from "@/lib/utils";
 import { useTitleBarDraggingSuppressed } from "@/stores/layout/title-bar-drag-store";
 
-// The arc starts one border width inside the tab box. Reserve the sheet gap,
-// its corner and the arc, less that border, the header's px-3 and TAB_BOX_CLASS's
-// inset-0.5. Empty edge clusters supply the reserve; populated ones already do.
-const SHEET_TAB_EDGE_RESERVE_CLASS =
-  "md:min-w-[max(0px,calc(var(--shell-gap)+var(--radius-xl)+var(--radius-lg)-1px-var(--spacing)*3.5))]";
-
 export type AppHeaderVariant = "app" | "host-loading";
 
 export interface AppHeaderProps {
@@ -101,9 +95,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
           the header's own controls do (G6 review A). */}
       {navDisabled ? null : (
         <div
-          className={cn("relative z-10 flex min-w-0 items-center gap-2", {
-            [SHEET_TAB_EDGE_RESERVE_CLASS]: showTabStrip && !framelessDesktop,
-          })}
+          className="relative z-10 flex min-w-0 items-center gap-2"
           style={framelessDesktop ? NO_DRAG_STYLE : undefined}
         >
           <HeaderBarCluster side="left" />
@@ -144,10 +136,7 @@ function DesktopAppHeader(props: AppHeaderProps): ReactNode {
       {/* Shrinkable for the readings in it alone: the controls after them
           never give way (G6 review A). */}
       <div
-        className={cn("relative z-10 flex min-w-0 items-center gap-2", {
-          "justify-end": showTabStrip,
-          [SHEET_TAB_EDGE_RESERVE_CLASS]: showTabStrip,
-        })}
+        className="relative z-10 flex min-w-0 items-center gap-2"
         style={framelessDesktop ? NO_DRAG_STYLE : undefined}
       >
         {!navDisabled ? <AppUpdateHeaderButton layout="icon" /> : null}

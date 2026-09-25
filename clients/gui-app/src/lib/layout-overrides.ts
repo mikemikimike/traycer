@@ -11,6 +11,7 @@ import {
 } from "@/lib/layout/layout-values";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
@@ -226,6 +227,42 @@ export function useBarPlacements(): Readonly<
       resourceMonitor: { host: resourceHost, side: resourceSide },
     }),
     [usageHost, usageSide, resourceHost, resourceSide],
+  );
+}
+
+/**
+ * Whether the app-wide status bar strip should actually mount - the app
+ * shell's own gate, distinct from {@link statusBarHostsAnyRegion}
+ * (`layout-arrangement.ts`), which only answers whether either reading is
+ * ASSIGNED to this bar. That narrower question is right for placement logic
+ * (the menu, the toggle) - but a reading that is hosted here and individually
+ * switched off (never re-hosted, just hidden) still passes it, which used to
+ * leave the strip mounted forever as an empty, still-bordered shell: its own
+ * `GhostRegion` placeholder only materialises while the layout editor has a
+ * session open and is pointing at it, so outside editing there was nothing
+ * left to draw.
+ *
+ * Shown once at least one hosted reading is actually on; while editing, shown
+ * as soon as anything is hosted here at all, so a hidden reading's ghost
+ * stays a click away to switch back on rather than disappearing along with
+ * the strip it belongs to.
+ */
+export function useStatusBarVisible(): boolean {
+  const isMobileViewport = useIsMobileViewport();
+  const mobileFooter = useArrangementValue("mobileFooter");
+  const usageHost = useArrangementValue("usageHost");
+  const resourceHost = useArrangementValue("resourceHost");
+  const usageShown = useRegionShown("usageLimits");
+  const resourcesShown = useRegionShown("resourceMonitor");
+  const editing = useLayoutEditorStore((state) => state.session !== null);
+  if (isMobileViewport) return mobileFooter;
+  const hostedHere =
+    usageHost === "status-bar" || resourceHost === "status-bar";
+  if (!hostedHere) return false;
+  if (editing) return true;
+  return (
+    (usageHost === "status-bar" && usageShown) ||
+    (resourceHost === "status-bar" && resourcesShown)
   );
 }
 

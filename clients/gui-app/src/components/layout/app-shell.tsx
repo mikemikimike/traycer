@@ -38,7 +38,7 @@ import { useAddressableHostId } from "@/hooks/host/use-addressable-host-id";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { PrimaryFocusCoordinatorProvider } from "@/lib/focus/primary-focus-coordinator-provider";
 import { sideTabStripEdge } from "@/lib/layout/layout-arrangement";
-import { useStatusBarShown } from "@/stores/layout/layout-store";
+import { useStatusBarVisible } from "@/lib/layout-overrides";
 
 interface AppShellProps {
   children: ReactNode;
@@ -58,9 +58,12 @@ export function AppShell(props: AppShellProps) {
   // The shared answer, not an inline read of the store: the usage panel's
   // per-account eye and the header glyph gate on the same question, and a
   // strip that one of them thought was mounted while this shell did not would
-  // offer a control for a surface that is not there. `statusBarShown` explains
-  // why a mobile viewport ignores where the two readings say they live.
-  const showStatusBar = useStatusBarShown();
+  // offer a control for a surface that is not there. `useStatusBarVisible`
+  // additionally stands the strip down once neither reading it hosts is
+  // actually switched on, rather than leaving an empty bordered shell on
+  // screen - see its own doc comment for why that differs from the
+  // placement-only `statusBarHostsAnyRegion`.
+  const showStatusBar = useStatusBarVisible();
   // Observed, never rendered. A publication fork resolves itself now - the
   // banner and the dialog that used to read this query are gone - but the
   // per-chat `pendingFork` indicator is derived from an open fork episode and

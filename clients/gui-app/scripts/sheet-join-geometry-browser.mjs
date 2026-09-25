@@ -21,9 +21,10 @@
 //               `clients/gui-app` (default 5393). This script does not spawn
 //               or manage a dev server of its own - point it at one that is
 //               already serving this workspace.
-//   --corners   run the corners suite instead (arcs must stay past the
-//               joined sheet's own corner radius, plus the desktop-vs-browser
-//               header edge-reserve scoping check) - see `runCorners`.
+//   --corners   run the seam suite instead (flush surface: arcs must land on
+//               the surface frame's own seam line - its border on the
+//               tab-facing edge - never past it, plus the top strip's first
+//               (Home) and scrolled-to-last tab) - see `runCorners`.
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
@@ -195,7 +196,6 @@ const CORNER_VARIANTS = [
   },
 ];
 const CORNER_DPRS = [1, 1.5, 2];
-const DESKTOP_WCO_VALUES = ["mac", "mac-fullscreen", "win"];
 const TOKEN_OVERRIDE_CSS =
   ":root { --shell-gap: 10px; --radius-xl: 16px; --radius-lg: 12px; }";
 
@@ -310,23 +310,6 @@ async function removeInjectedStyle(client) {
   );
 }
 
-// Structural, not class-based: the reserve class is CONDITIONALLY ABSENT on
-// desktop (the thing under test), so a class-name selector can never find
-// this element there. Walk from the tab-strip scroller up to header's direct
-// child, then back one real (non-`aria-hidden`) sibling.
-const LEADING_CLUSTER_RECT_EXPRESSION = `(() => {
-  const header = document.querySelector('[data-testid="app-header"]');
-  const scroller = header?.querySelector('[data-strip-axis="x"]');
-  let stripChild = scroller ?? null;
-  while (stripChild !== null && stripChild.parentElement !== header) stripChild = stripChild.parentElement;
-  if (header === null || stripChild === null) return null;
-  let cluster = stripChild.previousElementSibling;
-  while (cluster !== null && cluster.hasAttribute("aria-hidden")) cluster = cluster.previousElementSibling;
-  if (cluster === null) return null;
-  const r = cluster.getBoundingClientRect();
-  return { left: r.left, width: r.width };
-})()`;
-
 /**
  * Shared by `measureExpression` and `cornerMeasureExpression`: `bridge`/
  * `bridgeBox` must already be in scope. Computes the bridge's own padding
@@ -370,13 +353,6 @@ const AXIS_HELPERS = `
     const before = getComputedStyle(bridge, "::before");
     const after = getComputedStyle(bridge, "::after");
 `;
-
-/** [corners mode] Which of `[data-shell-sheet]`'s corners each bridge's arcs face. */
-const CORNER_RADIUS_PROPS = {
-  top: { before: "borderTopLeftRadius", after: "borderTopRightRadius" },
-  left: { before: "borderTopLeftRadius", after: "borderBottomLeftRadius" },
-  right: { before: "borderTopRightRadius", after: "borderBottomRightRadius" },
-};
 
 const CORNERS_MODE = process.argv.includes("--corners");
 const portArgIndex = process.argv.indexOf("--port");
@@ -505,13 +481,19 @@ async function runOffsets(client, baseUrl) {
 }
 
 /**
- * [corners mode] A visible arc's OUTER edge must land past the joined sheet's
- * (`[data-shell-sheet]`, `task-surface-frame`'s child - both top and side
- * bridges anchor to it) own corner radius, never inside it. Re-run with
- * `--shell-gap`/`--radius-xl`/`--radius-lg` enlarged to prove the bound tracks
- * the sheet's actual computed radius, not a hardcoded number. Also checks that
- * the browser-only header edge reserve leaves desktop's leading controls
- * alone, and that a partially clipped active top tab unjoins and rejoins.
+ * [corners mode / flush surface] A visible arc's OUTER edge must never land
+ * past the surface FRAME's own bounds (`[data-tab-edge]`, the
+ * `task-surface-frame` element itself - both top and side bridges anchor to
+ * it via `--task-frame`). The frame draws one seam line, on the edge facing
+ * the tabs, with no radius left to carve a corner out of - so "past the
+ * joined sheet's own corner radius" (the pre-flush-surface invariant) is now
+ * just "past the frame's own edge on the flare axis": the seam runs straight
+ * the whole way, and an arc that overshoots it has overshot the surface it is
+ * supposed to land on. Re-run with `--shell-gap`/`--radius-xl`/`--radius-lg`
+ * enlarged to prove the bound still holds as the join's own `--join-radius`
+ * (`--radius-lg`) grows the arcs. Also checks that a partially clipped active
+ * top tab unjoins and rejoins, and that the strip's first (Home) and
+ * scrolled-to-last tabs still land on the seam at both ends of the strip.
  */
 async function runCorners(client, baseUrl) {
   const violations = [];
@@ -582,49 +564,9 @@ async function runCorners(client, baseUrl) {
     `${CORNER_VARIANTS.length} corner variants x 2 (default + enlarged tokens) x ${CORNER_DPRS.length} DPRs measured`,
   );
 
-  for (const wco of DESKTOP_WCO_VALUES) {
-    await openFixture(
-      client,
-      `${baseUrl}?tabs=top&header=app&surface=epic&wco=${wco}`,
-      `wco=${wco}`,
-    );
-    await client.send("Emulation.setDeviceMetricsOverride", {
-      width: 1400,
-      height: 860,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
-    await settle(client);
-    const before = await evaluate(client, LEADING_CLUSTER_RECT_EXPRESSION);
-    if (before === null) {
-      violations.push(`wco=${wco}: leading control cluster not found`);
-      continue;
-    }
-    await injectStyle(client, TOKEN_OVERRIDE_CSS);
-    await settle(client);
-    const after = await evaluate(client, LEADING_CLUSTER_RECT_EXPRESSION);
-    await removeInjectedStyle(client);
-    if (after === null) {
-      violations.push(
-        `wco=${wco}: leading control cluster disappeared after the token override`,
-      );
-      continue;
-    }
-    if (
-      Math.abs(after.left - before.left) > EPSILON ||
-      Math.abs(after.width - before.width) > EPSILON
-    ) {
-      violations.push(
-        `wco=${wco}: leading control cluster moved (left ${before.left}->${after.left}, width ${before.width}->${after.width}px) when --shell-gap/--radius-xl/--radius-lg grew - the browser-only edge reserve must not reach desktop`,
-      );
-    }
-  }
-  console.log(
-    `${DESKTOP_WCO_VALUES.length} desktop wco leading-control checks measured`,
-  );
-
   await runTopClipRejoinCheck(client, baseUrl, violations);
   await runSideEdgeExtremesCheck(client, baseUrl, violations);
+  await runTopEdgeExtremesCheck(client, baseUrl, violations);
 
   assert.deepEqual(
     violations,
@@ -823,6 +765,62 @@ async function runSideEdgeExtremesCheck(client, baseUrl, violations) {
   }
 }
 
+/**
+ * [corners mode / flush surface] Replaces the removed browser-only header
+ * edge-reserve check (no sheet corner exists to reserve for any more): the
+ * top strip's own extremes still land on the seam - the first tab (Home,
+ * leftmost) and the last tab scrolled to the strip's right extreme.
+ */
+async function runTopEdgeExtremesCheck(client, baseUrl, violations) {
+  const label = "top extremes";
+  await openFixture(
+    client,
+    `${baseUrl}?tabs=top&header=app&surface=epic`,
+    label,
+  );
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: 1400,
+    height: 860,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  const bridgeSelector = '[data-sheet-join-bridge="top"]';
+  const joinedSelector = '[data-sheet-joined="top"]';
+  const measureRow = () =>
+    evaluate(
+      client,
+      cornerMeasureExpression(bridgeSelector, joinedSelector, "top"),
+    );
+  const recordRow = (row, result) => {
+    if (!result.present) {
+      violations.push(`${label} ${row}: no matching join rendered`);
+      return;
+    }
+    for (const v of result.violations) violations.push(`${label} ${row}: ${v}`);
+  };
+
+  await activateHome(client);
+  await settle(client);
+  await waitFor(
+    client,
+    `the ${label} first-tab (Home) join`,
+    joinPresenceExpression(bridgeSelector, joinedSelector),
+  );
+  recordRow("first (Home)", await measureRow());
+
+  await evaluate(
+    client,
+    `{ window.__layoutCanvasProbe.activateEpicTab('fixture-zeta'); document.querySelector('[data-strip-axis="x"]').scrollLeft = 99999; }`,
+  );
+  await settle(client);
+  await waitFor(
+    client,
+    `the ${label} last-tab join`,
+    joinPresenceExpression(bridgeSelector, joinedSelector),
+  );
+  recordRow("last", await measureRow());
+}
+
 function joinPresenceExpression(bridgeSelector, joinedSelector) {
   return `(() => {
     const bridge = document.querySelector(${JSON.stringify(bridgeSelector)});
@@ -925,68 +923,64 @@ function measureExpression(bridgeSelector, joinedSelector, kind) {
 }
 
 /**
- * [corners mode] Builds the in-page expression asserting a bridge's arcs stay
- * past `[data-shell-sheet]`'s own corner radius on the corner they face, never
- * inside it. Both top and side bridges anchor to this one sheet element
- * (`--task-frame`). Reuses `AXIS_HELPERS`' padding-box axis math, but reads
- * each pseudo's OUTER edge (the end away from the bridge) instead of its
- * inner one, and compares it to the sheet's rect + that corner's radius
+ * [corners mode / flush surface] Builds the in-page expression asserting a
+ * bridge's arcs stay within the surface FRAME's own bounds on the axis they
+ * flare along, never past it. Both top and side bridges anchor to this one
+ * frame element (`[data-tab-edge]`, `--task-frame`'s own anchor). There is no
+ * radius left anywhere on the frame or the sheet it holds - flush surface
+ * draws one straight seam line the full width/height of the facing edge - so
+ * the old "past the sheet's corner radius" bound collapses to "past the
+ * frame's own edge" with no radius term. Reuses `AXIS_HELPERS`' padding-box
+ * axis math, but reads each pseudo's OUTER edge (the end away from the
+ * bridge) instead of its inner one, and compares it to the frame's rect
  * instead of the bridge's own padding box.
  */
 function cornerMeasureExpression(bridgeSelector, joinedSelector, bridgeSide) {
-  const corners = CORNER_RADIUS_PROPS[bridgeSide];
   return `(() => {
     const bridge = document.querySelector(${JSON.stringify(bridgeSelector)});
     const joined = document.querySelector(${JSON.stringify(joinedSelector)});
-    const sheet = document.querySelector('[data-shell-sheet]');
-    if (bridge === null || joined === null || sheet === null) return { present: false, violations: [] };
+    const frame = document.querySelector('[data-tab-edge]');
+    if (bridge === null || joined === null || frame === null) return { present: false, violations: [] };
     const bridgeBox = bridge.getBoundingClientRect();
     const joinedBox = joined.getBoundingClientRect();
-    const sheetBox = sheet.getBoundingClientRect();
+    const frameBox = frame.getBoundingClientRect();
     if (
       bridgeBox.width === 0 ||
       bridgeBox.height === 0 ||
       joinedBox.width === 0 ||
       joinedBox.height === 0 ||
-      sheetBox.width === 0 ||
-      sheetBox.height === 0
+      frameBox.width === 0 ||
+      frameBox.height === 0
     ) {
       return { present: false, violations: [] };
     }
     ${AXIS_HELPERS}
-    const sheetStyle = getComputedStyle(sheet);
-    const beforeRadius = parseFloat(sheetStyle.${corners.before});
-    const afterRadius = parseFloat(sheetStyle.${corners.after});
     const EPS = ${EPSILON};
     const violations = [];
     if (${JSON.stringify(bridgeSide)} === "top") {
       const beforeAxis = resolveAxis(before.left, before.right, parseFloat(before.width), paddingBox.left, paddingBox.right);
-      const beforeMin = sheetBox.left + beforeRadius;
-      if (beforeAxis.start < beforeMin - EPS) {
+      if (beforeAxis.start < frameBox.left - EPS) {
         violations.push(
-          "left arc's outer edge is " + (beforeMin - beforeAxis.start).toFixed(3) + "px inside the sheet's top-left corner radius",
+          "left arc's outer edge is " + (frameBox.left - beforeAxis.start).toFixed(3) + "px past the surface frame's left edge - the seam has no corner to flare past",
         );
       }
       const afterAxis = resolveAxis(after.left, after.right, parseFloat(after.width), paddingBox.left, paddingBox.right);
-      const afterMax = sheetBox.right - afterRadius;
-      if (afterAxis.end > afterMax + EPS) {
+      if (afterAxis.end > frameBox.right + EPS) {
         violations.push(
-          "right arc's outer edge is " + (afterAxis.end - afterMax).toFixed(3) + "px inside the sheet's top-right corner radius",
+          "right arc's outer edge is " + (afterAxis.end - frameBox.right).toFixed(3) + "px past the surface frame's right edge",
         );
       }
     } else {
       const beforeAxis = resolveAxis(before.top, before.bottom, parseFloat(before.height), paddingBox.top, paddingBox.bottom);
-      const beforeMin = sheetBox.top + beforeRadius;
-      if (beforeAxis.start < beforeMin - EPS) {
+      if (beforeAxis.start < frameBox.top - EPS) {
         violations.push(
-          "top arc's outer edge is " + (beforeMin - beforeAxis.start).toFixed(3) + "px inside the sheet's " + ${JSON.stringify(bridgeSide)} + "-top corner radius",
+          "top arc's outer edge is " + (frameBox.top - beforeAxis.start).toFixed(3) + "px past the surface frame's top edge",
         );
       }
       const afterAxis = resolveAxis(after.top, after.bottom, parseFloat(after.height), paddingBox.top, paddingBox.bottom);
-      const afterMax = sheetBox.bottom - afterRadius;
-      if (afterAxis.end > afterMax + EPS) {
+      if (afterAxis.end > frameBox.bottom + EPS) {
         violations.push(
-          "bottom arc's outer edge is " + (afterAxis.end - afterMax).toFixed(3) + "px inside the sheet's " + ${JSON.stringify(bridgeSide)} + "-bottom corner radius",
+          "bottom arc's outer edge is " + (afterAxis.end - frameBox.bottom).toFixed(3) + "px past the surface frame's bottom edge",
         );
       }
     }

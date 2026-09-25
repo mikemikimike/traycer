@@ -54,9 +54,9 @@ import { useMaybeOpenEpicHandle } from "@/providers/use-open-epic-handle";
 import {
   DEFAULT_SIDEBAR_WIDTH_PX,
   MAX_SIDEBAR_WIDTH_PX,
-  MIN_SIDEBAR_WIDTH_PX,
   useLeftPanelStore,
   useMainPanelCollapsed,
+  useMinSidebarWidthPx,
   useSidebarWidthPx,
 } from "@/stores/epics/left-panel-store";
 import { cn } from "@/lib/utils";
@@ -95,14 +95,16 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
   const mainCollapsed = useMainPanelCollapsed(tabId);
   const sessionReady = useMaybeOpenEpicHandle() !== null;
   const sidebarWidthPx = useSidebarWidthPx();
-  // The hairline between this pane and the content pane of the one task sheet.
-  const paneDivider =
-    side === "right"
-      ? "md:border-s md:border-canvas-border"
-      : "md:border-e md:border-canvas-border";
+  // Widened past the persisted preference when this (or another open) tab's
+  // rail currently needs more room than that - see bug #1's fix in
+  // `sidebar-rail-width-store.ts`. The persisted value itself is untouched;
+  // narrowing the rail's content (closing panels, another tab taking over)
+  // lets the panel settle back to it without a second write.
+  const minWidthPx = useMinSidebarWidthPx();
+  const effectiveWidthPx = Math.max(sidebarWidthPx, minWidthPx);
 
   const collapsedRail = mainCollapsed ? (
-    <div className={cn("shrink-0 overflow-clip bg-background", paneDivider)}>
+    <div className="shrink-0 overflow-clip bg-background">
       <ColumnRail
         epicId={epicId}
         tabId={tabId}
@@ -121,10 +123,9 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
       data-session-ready={sessionReady ? "true" : "false"}
       className={cn(
         "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
-        paneDivider,
         mainCollapsed && "hidden",
       )}
-      style={{ width: sidebarWidthPx }}
+      style={{ width: effectiveWidthPx }}
     >
       <SidebarArtwork />
       <SidebarProvider defaultOpen className="h-full min-h-0 w-full flex-col">
@@ -280,6 +281,7 @@ function SidebarSnapshotScope(props: { readonly children: ReactNode }) {
 
 interface SidebarDragState {
   readonly startWidth: number;
+  readonly minWidth: number;
   readonly maxWidth: number;
   readonly panelElement: HTMLElement;
   /** Inline style string at drag start, restored on cancel. */
@@ -317,6 +319,7 @@ export function SidebarWidthResizeHandle(props: {
 }) {
   const { side, hidden } = props;
   const sidebarWidthPx = useSidebarWidthPx();
+  const minWidthPx = useMinSidebarWidthPx();
   const setSidebarWidthPx = useLeftPanelStore((s) => s.setSidebarWidthPx);
   const dragRef = useRef<SidebarDragState | null>(null);
   const sign = side === "right" ? -1 : 1;
@@ -338,6 +341,7 @@ export function SidebarWidthResizeHandle(props: {
       const startWidth = panelElement.getBoundingClientRect().width;
       dragRef.current = {
         startWidth,
+        minWidth: minWidthPx,
         maxWidth: Math.min(
           MAX_SIDEBAR_WIDTH_PX,
           containerWidth * MAX_SIDEBAR_DRAG_FRACTION,
@@ -353,7 +357,7 @@ export function SidebarWidthResizeHandle(props: {
       if (drag === null) return;
       const nextWidth = Math.min(
         drag.maxWidth,
-        Math.max(MIN_SIDEBAR_WIDTH_PX, drag.startWidth + deltaPx * sign),
+        Math.max(drag.minWidth, drag.startWidth + deltaPx * sign),
       );
       drag.latestWidth = nextWidth;
       // Direct DOM mutation - zero React renders while the pointer moves.
@@ -384,8 +388,8 @@ export function SidebarWidthResizeHandle(props: {
   return (
     <div
       {...sliderProps}
-      aria-valuenow={sidebarWidthPx}
-      aria-valuemin={MIN_SIDEBAR_WIDTH_PX}
+      aria-valuenow={Math.max(sidebarWidthPx, minWidthPx)}
+      aria-valuemin={minWidthPx}
       aria-valuemax={MAX_SIDEBAR_WIDTH_PX}
       aria-label="Resize sidebar"
       data-testid="epic-sidebar-resize-handle"

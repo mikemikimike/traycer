@@ -75,7 +75,10 @@ export function AppColumnFrame(props: AppColumnFrameProps): ReactNode {
               epic status row and sidebar rail sat under the app header until
               a tab switch remounted the surface. A clipped box has no scroll
               offset to drift. */}
-            <div className="relative flex min-h-0 flex-1 overflow-clip md:task-surface-frame">
+            <div
+              data-tab-edge={edge ?? "top"}
+              className="relative flex min-h-0 flex-1 overflow-clip md:task-surface-frame"
+            >
               {props.surface}
             </div>
             {props.mainTail}

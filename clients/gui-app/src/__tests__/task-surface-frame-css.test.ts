@@ -81,15 +81,15 @@ describe("task-surface-frame", () => {
   const body = utilityBody("task-surface-frame");
   const rules = nestedRules(body);
 
-  it("no longer uses a tray wrapper: it owns the ground inset itself, margin only, and anchors the frame", () => {
-    // One sheet design (ticket, one-sheet): there is no separate tray
-    // plate around the frame any more. The frame owns the whole inset
-    // (margin, no padding - it holds exactly one sheet now) and anchors
-    // itself directly, rather than a tray anchoring around it.
+  it("flush surface: draws no margin or padding of its own, and still anchors the frame", () => {
+    // Flush surface: the frame fills the space beside the strip and under
+    // the header edge to edge - no ground inset any more, and no separate
+    // tray plate around it either. It only anchors itself, for the sheet
+    // join bridge to find.
     const declarations = topLevelDeclarations(body);
-    expect(declarations).toContain("margin: var(--shell-gap);");
-    expect(declarations).toContain("anchor-name: --task-frame;");
+    expect(declarations).not.toContain("margin:");
     expect(declarations).not.toContain("padding:");
+    expect(declarations).toContain("anchor-name: --task-frame;");
   });
 
   it("has no task-tray utility left in the stylesheet", () => {
@@ -101,17 +101,44 @@ describe("task-surface-frame", () => {
     expect(css).not.toContain("--task-tray-border");
   });
 
-  it("gives every sheet descendant the sheet radius and a 1px canvas border", () => {
-    const declarations = rules.get("& [data-shell-sheet]");
-    expect(declarations).toBeDefined();
-    expect(declarations).toContain("border: 1px solid var(--canvas-border);");
-    expect(declarations).toContain("border-radius: var(--radius-xl);");
+  it("draws one seam line, a 1px canvas border, on the edge facing the tabs - keyed by data-tab-edge", () => {
+    expect(rules.get('&[data-tab-edge="top"]')).toBe(
+      "border-top: 1px solid var(--canvas-border);",
+    );
+    expect(rules.get('&[data-tab-edge="left"]')).toBe(
+      "border-left: 1px solid var(--canvas-border);",
+    );
+    expect(rules.get('&[data-tab-edge="right"]')).toBe(
+      "border-right: 1px solid var(--canvas-border);",
+    );
+  });
+
+  it("draws no border on any edge other than the one its own data-tab-edge names", () => {
+    // Each rule owns exactly one border-* declaration - the one for its own
+    // edge - so a top frame never also grows a left/right seam and vice
+    // versa.
+    for (const edge of ["top", "left", "right"] as const) {
+      const declarations = rules.get(`&[data-tab-edge="${edge}"]`);
+      if (declarations === undefined) {
+        throw new Error(`no rule for data-tab-edge="${edge}"`);
+      }
+      const borderDeclarationCount = declarations
+        .split(";")
+        .filter((declaration) =>
+          declaration.trim().startsWith("border"),
+        ).length;
+      expect(borderDeclarationCount).toBe(1);
+    }
+  });
+
+  it("no longer gives every [data-shell-sheet] descendant its own border and radius: the epic canvas draws its own border now", () => {
+    expect(rules.get("& [data-shell-sheet]")).toBeUndefined();
   });
 
   it("paints a single-sheet (non-epic) route in --canvas", () => {
     // Home/History/Settings mount `data-shell-sheet="route"` on their own
     // wrapper (`TopLevelSurfaceMount`); the epic surface paints its own two
-    // sheets (`panel`/`content`) itself and does not rely on this fill.
+    // panes itself and does not rely on this fill.
     expect(rules.get('& [data-shell-sheet="route"]')).toBe(
       "background-color: var(--canvas);",
     );
@@ -119,8 +146,8 @@ describe("task-surface-frame", () => {
 
   it("carries no leftover top-only concave-corner tricks", () => {
     // The old contract clipped a rounded top corner OUT of the frame with
-    // `::before`/`::after` pseudo-elements; the sheet is a real bordered box
-    // now, drawn by the `[data-shell-sheet]` descendant rule above.
+    // `::before`/`::after` pseudo-elements; there is no radius left to clip
+    // out any more.
     expect(body).not.toContain("::before");
     expect(body).not.toContain("::after");
     expect(body).not.toContain("content:");
@@ -129,17 +156,7 @@ describe("task-surface-frame", () => {
 });
 
 describe("[data-browser-guest-sheet]", () => {
-  it("clips a portalled browser guest to the sheet radius under md, leaving mobile unclipped", () => {
-    const head = "[data-browser-guest-sheet] {";
-    const start = css.indexOf(head);
-    if (start === -1) throw new Error("no [data-browser-guest-sheet] rule");
-    const body = bracedBody(start + head.length)
-      .replace(/\s+/g, " ")
-      .trim();
-
-    expect(body).toContain("@variant md");
-    expect(body).toContain(
-      "clip-path: inset(1px round calc(var(--radius-xl) - 1px));",
-    );
+  it("the clip-path rule is gone: flush surface leaves no sheet radius left to clip a guest to", () => {
+    expect(css.includes("[data-browser-guest-sheet]")).toBe(false);
   });
 });

@@ -201,6 +201,21 @@ describe("AppColumnFrame", () => {
       },
     );
 
+    it("stamps data-tab-edge=top for the top placement", () => {
+      renderFrame(TOP);
+
+      expect(surfaceFrame().dataset.tabEdge).toBe("top");
+    });
+
+    it("stamps data-tab-edge with the strip's own edge for a side placement", () => {
+      renderFrame(LEFT_NONE);
+      expect(surfaceFrame().dataset.tabEdge).toBe("left");
+      cleanup();
+
+      renderFrame(RIGHT_BAND);
+      expect(surfaceFrame().dataset.tabEdge).toBe("right");
+    });
+
     it("renders exactly one top join bridge for the top placement", () => {
       renderFrame(TOP);
 

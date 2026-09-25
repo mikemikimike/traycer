@@ -1,4 +1,12 @@
-import { Fragment, use, useCallback, useMemo, useState } from "react";
+import {
+  Fragment,
+  use,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   useDraggable,
   useDroppable,
@@ -78,6 +86,7 @@ import {
   selectPrScopeHasItems,
   usePrPresenceStore,
 } from "@/stores/epics/pr-presence-store";
+import { useSidebarRailWidthStore } from "@/stores/epics/sidebar-rail-width-store";
 import { type LucideIcon } from "lucide-react";
 
 export type RailOrientation = "vertical" | "horizontal";
@@ -266,6 +275,34 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
     id: getPaneScopedDndId(tabId, getLeftPanelRailListDropId(epicId)),
     data: railListDropData,
   });
+  // The horizontal rail's own unclamped content width (bug #1): every icon
+  // and divider is `shrink-0`, so `scrollWidth` is the room this tab's rail
+  // actually needs regardless of how narrow the sidebar currently is.
+  // Reported into the shared store so the sidebar's one global width never
+  // clips whichever tab is on screen (`sidebar-rail-width-store.ts`). Not a
+  // concern for the collapsed vertical rail, which is a fixed `w-12` outside
+  // the resizable panel entirely.
+  const horizontalRailRef = useRef<HTMLDivElement | null>(null);
+  const setRailNaturalWidthPx = useSidebarRailWidthStore(
+    (s) => s.setRailNaturalWidthPx,
+  );
+  const clearRailNaturalWidthPx = useSidebarRailWidthStore(
+    (s) => s.clearRailNaturalWidthPx,
+  );
+  useLayoutEffect(() => {
+    if (orientation !== "horizontal") return;
+    const element = horizontalRailRef.current;
+    if (element === null) return;
+    setRailNaturalWidthPx(tabId, element.scrollWidth);
+  }, [orientation, items, dividersEditing, tabId, setRailNaturalWidthPx]);
+  useLayoutEffect(() => {
+    if (orientation !== "horizontal") return;
+    return () => clearRailNaturalWidthPx(tabId);
+  }, [orientation, tabId, clearRailNaturalWidthPx]);
+  const setRailRootRef = useMemo(
+    () => mergeRefs<HTMLDivElement>(railDropRef, horizontalRailRef),
+    [railDropRef],
+  );
   // Narrow selector hooks: a rail drag preview tick re-renders ONLY the rail,
   // and a canvas-source preview tick (pane bodies / strips) never reaches it.
   const railPanelDropPreview = useLeftPanelRailDropPreview(tabId);
@@ -366,7 +403,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
-            ref={railDropRef}
+            ref={setRailRootRef}
             onContextMenuCapture={handleRailContextMenuCapture}
             role="toolbar"
             aria-label="Epic left panels"

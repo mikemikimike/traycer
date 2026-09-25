@@ -125,8 +125,9 @@ export function EpicSurface(props: EpicSurfaceProps) {
 }
 
 /**
- * The epic surface's one task sheet: the sidebar column (the panel pane) on
- * `sidebarSide` and the content pane beside it, split by a hairline.
+ * The epic surface, edge to edge with no enclosing box: the sidebar column
+ * (the panel pane) on `sidebarSide` and the content pane beside it. Only the
+ * epic canvas inside the content pane draws a border.
  */
 export function EpicSurfaceSheets(props: {
   readonly tabId: string;

@@ -39,6 +39,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
+import { useSidebarRailWidthStore } from "@/stores/epics/sidebar-rail-width-store";
 
 const PERSIST_KEY = "traycer-gui-app:left-panel";
 const LAYOUT_PERSIST_KEY = "traycer-gui-app:layout";
@@ -130,6 +131,7 @@ function readPersistedLeftPanelState(): PersistedLeftPanelState {
 function resetStore(): void {
   window.localStorage.clear();
   resetLayoutStore();
+  useSidebarRailWidthStore.setState({ naturalWidthPxByTabId: {} });
   useLeftPanelStore.setState({
     activePanelIdByTabId: {},
     mainCollapsedByTabId: {},
@@ -258,6 +260,45 @@ describe("useLeftPanelStore", () => {
     expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(
       DEFAULT_SIDEBAR_WIDTH_PX,
     );
+  });
+
+  // Bug #1: a horizontal rail reports its own unclamped content width
+  // (`sidebar-rail-width-store.ts`) as it mounts, so the one global width
+  // every tab shares can never land narrower than whichever mounted tab
+  // currently needs the most room - the icons used to clip past that point.
+  it("widens the floor to match the widest mounted rail's reported width", () => {
+    useSidebarRailWidthStore.getState().setRailNaturalWidthPx("tab-a", 260);
+
+    useLeftPanelStore.getState().setSidebarWidthPx(MIN_SIDEBAR_WIDTH_PX);
+
+    expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(260);
+  });
+
+  it("takes the widest of several mounted tabs' rails, not just the last one reported", () => {
+    useSidebarRailWidthStore.getState().setRailNaturalWidthPx("tab-a", 240);
+    useSidebarRailWidthStore.getState().setRailNaturalWidthPx("tab-b", 300);
+
+    useLeftPanelStore.getState().setSidebarWidthPx(MIN_SIDEBAR_WIDTH_PX);
+
+    expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(300);
+  });
+
+  it("never widens past the absolute max width even for a very wide rail", () => {
+    useSidebarRailWidthStore.getState().setRailNaturalWidthPx("tab-a", 10_000);
+
+    useLeftPanelStore.getState().setSidebarWidthPx(MIN_SIDEBAR_WIDTH_PX);
+
+    expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(
+      MAX_SIDEBAR_WIDTH_PX,
+    );
+  });
+
+  it("still honors a requested width above the dynamic floor", () => {
+    useSidebarRailWidthStore.getState().setRailNaturalWidthPx("tab-a", 260);
+
+    useLeftPanelStore.getState().setSidebarWidthPx(400);
+
+    expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(400);
   });
 
   it("restores a collapsed sidebar after refresh", async () => {
