@@ -7,6 +7,7 @@ import { InspectorShell } from "@/components/layout-editor/inspector/inspector-s
 import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
 import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -19,9 +20,43 @@ import {
  * standing up. The windows themselves are `provider-limits-choose.test.tsx`'s
  * subject.
  */
-vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
-  useProviderLimitWindows: () => ({ windows: [], drawnKeys: [] }),
-}));
+vi.mock(
+  "@/components/layout-editor/inspector/provider-limit-windows",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/components/layout-editor/inspector/provider-limit-windows")
+    >()),
+    ProviderLimitWindowsReader: (props: {
+      readonly children: (limits: {
+        windows: ReadonlyArray<never>;
+        drawnKeys: ReadonlyArray<never>;
+      }) => ReactNode;
+    }) => props.children({ windows: [], drawnKeys: [] }),
+  }),
+);
+
+/**
+ * `OrderGroupList`'s "usageProviders" group (`ProvidersChildrenRow`, one of
+ * Usage limits' own rows) filters the catalog to `useLayoutUsage().providerIds`
+ * - the watched host's own reported set - since the phase-2 shared-usage read.
+ * Resolving that for real needs the same host runtime the reader mock above
+ * exists to avoid, so it is fixed here to the whole catalog instead: this
+ * harness's own claim is about the LADDER (walking into a level and back out
+ * of it), not about which providers a particular host happens to report.
+ */
+vi.mock(
+  "@/components/layout-editor/inspector/use-layout-usage",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/components/layout-editor/inspector/use-layout-usage")
+    >()),
+    useLayoutUsage: () => ({
+      providerIds: USAGE_PROVIDER_IDS,
+      cluster: { kind: "no-providers" as const },
+      hostName: "the watched host",
+    }),
+  }),
+);
 
 function popLevel(): void {
   useLayoutEditorStore.getState().popInspectorLevel();

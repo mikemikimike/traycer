@@ -1,4 +1,7 @@
-import { getLeftPanelDefinition } from "@/components/epic-canvas/sidebar/left-panel-registry";
+import {
+  COMMENTS_AUTO_HINT,
+  getLeftPanelDefinition,
+} from "@/components/epic-canvas/sidebar/left-panel-registry";
 import {
   SHOW_HIDE_VERBS,
   type LayoutRegion,
@@ -96,6 +99,6 @@ export const RAIL_COMMENTS_REGION: LayoutRegion<"railComments"> = {
   ...railRegionBase(
     "railComments",
     ["comments", "notes", "feedback"],
-    "Auto - appears when an artifact is open",
+    COMMENTS_AUTO_HINT,
   ),
 };

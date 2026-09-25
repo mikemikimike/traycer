@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
 import { setMobileApp } from "@/lib/mobile-app";
@@ -16,7 +17,10 @@ import {
 } from "@/components/layout-editor/regions/region-facts";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_ARRANGEMENT,
+  USAGE_PROVIDER_IDS,
+} from "@/lib/layout/layout-arrangement";
 import type { HideableRegionId } from "@/lib/layout/layout-values";
 import { navigateToLayoutRegion } from "@/lib/settings-navigation";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
@@ -43,9 +47,41 @@ vi.mock("@/lib/host", async (importOriginal) => ({
 // about. Mocked at the same one boundary `provider-limits-choose.test.tsx`
 // mocks, so the page is tested for its COMPOSITION and the control is tested
 // where it lives.
-vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
-  useProviderLimitWindows: () => ({ windows: [], drawnKeys: [] }),
-}));
+vi.mock(
+  "@/components/layout-editor/inspector/provider-limit-windows",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/components/layout-editor/inspector/provider-limit-windows")
+    >()),
+    ProviderLimitWindowsReader: (props: {
+      readonly children: (limits: {
+        windows: ReadonlyArray<never>;
+        drawnKeys: ReadonlyArray<never>;
+      }) => ReactNode;
+    }) => props.children({ windows: [], drawnKeys: [] }),
+    // The page wraps itself in this directly (the shared watched-usage read),
+    // which resolves a host scope through a runner-host provider this suite
+    // has none of. A pass-through here, and the fixed catalog below, keep the
+    // "usage providers are a Status bar list" cases drawing real rows without
+    // standing up that scope for real.
+    LayoutUsageProvider: (props: { readonly children: ReactNode }) =>
+      props.children,
+  }),
+);
+
+vi.mock(
+  "@/components/layout-editor/inspector/use-layout-usage",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/components/layout-editor/inspector/use-layout-usage")
+    >()),
+    useLayoutUsage: () => ({
+      providerIds: USAGE_PROVIDER_IDS,
+      cluster: { kind: "no-providers" as const },
+      hostName: "the watched host",
+    }),
+  }),
+);
 
 // The width gate reads the window, and the door is not what this suite is
 // about: every case below wants the page's own rows, not a session.

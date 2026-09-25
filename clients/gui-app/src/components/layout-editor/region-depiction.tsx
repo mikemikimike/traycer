@@ -1,3 +1,5 @@
+import { LayoutUsageContext } from "@/components/layout-editor/inspector/use-layout-usage";
+import { NoLayoutUsageProviders } from "@/components/layout-editor/inspector/provider-limit-windows";
 import type { ReactNode } from "react";
 import {
   Bot,
@@ -47,6 +49,7 @@ import {
 import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
 import {
   formatCompactWindowDuration,
+  isWindowedRateLimitProvider,
   type RateLimitWindowKind,
 } from "@/lib/rate-limits/rate-limit-window-catalog";
 import { tightestRateLimitWindow } from "@/lib/rate-limits/tightest-window";
@@ -89,7 +92,7 @@ import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-ba
  * to show what a region WOULD look like, so `shown` is the one value no
  * renderer here reads; the stage dims itself instead.
  *
- * Nothing in this file fetches, subscribes, writes or opens anything: it is a
+ * Nothing in this file fetches, writes or opens anything: it is a
  * value in, one picture out. That is the passivity contract `lib/layout-overrides.ts`
  * spells out, and it is why the specimen data below is static rather than the
  * watched host's own numbers.
@@ -410,19 +413,23 @@ export function depictUsageProvider(
  * The caller reads them; this module still asks for nothing (the passivity
  * contract in the header).
  *
- * An empty list is the same answer as `null` - a provider that has reported
- * nothing yet - because a segment drawn from no windows is a picture of no
- * reading at all.
+ * `null` requests specimen data. An empty live list stays empty: the provider
+ * level must never turn an absent reading into an invented one.
  */
 function depictUsageProviderSegment(
   providerId: RateLimitProviderId,
   values: UsageLimitsValues,
   windows: ReadonlyArray<StatusBarRateLimitWindow> | null,
 ): ReactNode {
-  const drawn =
-    windows === null || windows.length === 0
-      ? [specimenWindow(providerId)]
-      : windows;
+  if (!isWindowedRateLimitProvider(providerId)) return null;
+  if (windows !== null && windows.length === 0) {
+    return (
+      <span className="text-ui-xs text-muted-foreground">
+        No limits reported
+      </span>
+    );
+  }
+  const drawn = windows ?? [specimenWindow(providerId)];
   return (
     <StatusBarUsageReadings
       display={{
@@ -452,30 +459,33 @@ function depictUsageProviderSegment(
   );
 }
 
-/**
- * EVERY shown provider, in the arrangement's own order (P2, R3-03).
- *
- * Not a sample of them: on Settings ▸ Layout the band above the providers list
- * is the only feedback that list's Shown/Hidden control has, so a picture that
- * stopped after three said nothing when the fourth was hidden - and the preset
- * miniatures drew a status bar that was not the reader's own. Eight segments
- * are more than a 320px dock holds; that is what the host frame's clip fade is
- * for (`region-depiction-frame.tsx`), and cutting the model to fit the frame
- * is the wrong end of it. The readings stay varied per provider
- * (`specimenReadingFor`), which is what LV2-19 actually asked for.
- */
+/** Sample readings for the watched host's renderable providers, in saved order. */
 function depictUsageLimits(
   values: UsageLimitsValues,
   arrangement: LayoutArrangement,
 ): ReactNode {
-  const shownProviders = arrangement.usageProviders.filter(
-    (providerId) => !arrangement.hiddenProviders.includes(providerId),
+  return (
+    <LayoutUsageContext.Consumer>
+      {(usage) => {
+        const providerIds = usage?.providerIds ?? [];
+        if (providerIds.length === 0) return <NoLayoutUsageProviders />;
+        return arrangement.usageProviders
+          .filter(
+            (id) =>
+              providerIds.includes(id) &&
+              !arrangement.hiddenProviders.includes(id),
+          )
+          .map((providerId) => (
+            <span
+              key={providerId}
+              className="inline-flex shrink-0 items-center"
+            >
+              {depictUsageProviderSegment(providerId, values, null)}
+            </span>
+          ));
+      }}
+    </LayoutUsageContext.Consumer>
   );
-  return shownProviders.map((providerId) => (
-    <span key={providerId} className="inline-flex shrink-0 items-center">
-      {depictUsageProviderSegment(providerId, values, null)}
-    </span>
-  ));
 }
 
 /**

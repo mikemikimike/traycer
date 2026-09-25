@@ -1,3 +1,5 @@
+import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { isVoiceInputRowAvailable } from "@/lib/settings/settings-availability";
 import { regionValuesHidden } from "@/lib/layout/layout-values";
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Rows2 } from "lucide-react";
@@ -163,6 +165,7 @@ interface InspectorIndexProps {
  */
 export function InspectorIndex(props: InspectorIndexProps): ReactNode {
   const { onPreviewPreset } = props;
+  const availability = useSettingsAvailabilityContext();
   const filter = useLayoutEditorStore((state) => state.filter);
   const selectedSurface = useLayoutEditorStore(
     (state) => state.selectedSurface,
@@ -182,7 +185,12 @@ export function InspectorIndex(props: InspectorIndexProps): ReactNode {
     entries:
       group.id === "sidebar"
         ? railIndexEntries(snapshot.arrangement.rail, filter)
-        : surfaceIndexEntries(group.id, filter),
+        : surfaceIndexEntries(group.id, filter).filter(
+            (entry) =>
+              entry.kind !== "region" ||
+              entry.region.id !== "mic" ||
+              isVoiceInputRowAvailable(availability),
+          ),
   })).filter(
     (entry) =>
       entry.entries.length > 0 ||

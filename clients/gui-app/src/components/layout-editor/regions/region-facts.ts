@@ -140,3 +140,20 @@ export function regionStateWord<K extends RegionId>(
   ) => string = LAYOUT_REGIONS[region].stateWord;
   return stateWord(values[region], arrangement);
 }
+
+/** Device-local settings that the compact toolbar/footer actually honors. */
+export function regionRowAvailable(
+  regionId: RegionId,
+  row: RegionRowFacts,
+  narrow: boolean,
+): boolean {
+  if (!narrow) return true;
+  if (row.kind === "position-host") return false;
+  if (
+    row.kind === "position-order" &&
+    (row.group === "toolbarLeft" || row.group === "toolbarRight")
+  )
+    return false;
+  if (regionId === "access" && row.kind === "size") return false;
+  return regionId !== "model" || row.kind !== "style";
+}

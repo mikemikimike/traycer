@@ -1,3 +1,6 @@
+import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { isVoiceInputRowAvailable } from "@/lib/settings/settings-availability";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import { Fragment, type ReactNode } from "react";
 import {
   ArrowLeft,
@@ -48,7 +51,6 @@ import { tabAutoTint } from "@/components/layout/tabs/tab-identity";
 import {
   SIDE_STRIP_ACCOUNT_ROW_CLASS,
   SIDE_STRIP_FOOT_CLASS,
-  SIDE_STRIP_HOST_DOT_CLASS,
   SIDE_STRIP_INSET_CLASS,
   SIDE_STRIP_LIST_CLASS,
   SIDE_STRIP_NAV_TILE_CLASS,
@@ -557,8 +559,7 @@ function AppFrameLiveAgents(): ReactNode {
 function AppFrameAccount(props: { readonly collapsed: boolean }): ReactNode {
   const avatar = (
     <span className="relative flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-micro font-medium text-muted-foreground">
-      AL
-      <span className={cn(SIDE_STRIP_HOST_DOT_CLASS, "bg-success")} />
+      S
     </span>
   );
   if (props.collapsed) {
@@ -580,10 +581,10 @@ function AppFrameAccount(props: { readonly collapsed: boolean }): ReactNode {
       {avatar}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-ui-sm font-medium text-foreground">
-          Ada Lovelace
+          Sample account
         </span>
         <span className="truncate text-ui-xs text-muted-foreground">
-          This Mac
+          Sample host
         </span>
       </span>
       <ChevronsUpDown
@@ -861,6 +862,13 @@ export function AppFrameRegion<
 }): ReactNode {
   const { regionId, values, arrangement } = props;
   const regionValues = values[regionId];
+  const availability = useSettingsAvailabilityContext();
+  const voiceEnabled = useSettingsStore((state) => state.voiceInputEnabled);
+  if (
+    regionId === "mic" &&
+    (!isVoiceInputRowAvailable(availability) || !voiceEnabled)
+  )
+    return null;
   if (regionValuesHidden(regionValues)) return null;
   return depictRegion(regionId, regionValues, arrangement);
 }

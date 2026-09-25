@@ -1,4 +1,5 @@
 import { act, cleanup, render } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cancelLayoutDrag,
@@ -37,9 +38,27 @@ vi.mock(
  * `provider-limits-choose.test.tsx`'s subject; here the level only has to
  * mount so the ladder and the back row can be driven through it.
  */
-vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
-  useProviderLimitWindows: () => ({ windows: [], drawnKeys: [] }),
-}));
+vi.mock(
+  "@/components/layout-editor/inspector/provider-limit-windows",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/components/layout-editor/inspector/provider-limit-windows")
+    >()),
+    ProviderLimitWindowsReader: (props: {
+      readonly children: (limits: {
+        windows: ReadonlyArray<never>;
+        drawnKeys: ReadonlyArray<never>;
+      }) => ReactNode;
+    }) => props.children({ windows: [], drawnKeys: [] }),
+    // `LayoutEditor` wraps its inspector body in this directly (the shared
+    // watched-usage read), which resolves a host scope the same way the
+    // reader's own standalone fallback did - needing the `<HostRuntimeProvider>`
+    // this root has none of. Nothing here reads ambient usage content, so a
+    // pass-through is the whole fix.
+    LayoutUsageProvider: (props: { readonly children: ReactNode }) =>
+      props.children,
+  }),
+);
 
 function mountColumn(): HTMLDivElement {
   const column = document.createElement("div");

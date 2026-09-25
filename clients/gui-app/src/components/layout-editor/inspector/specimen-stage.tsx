@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 interface SpecimenStageProps {
   readonly children: ReactNode;
+  readonly label: string | null;
   /** Greyed when the region (or the provider) is off (L-08's "everything below Shown"). */
   readonly off: boolean;
 }
@@ -60,9 +61,11 @@ export function SpecimenStage(props: SpecimenStageProps): ReactNode {
           "radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--foreground) 7%, transparent) 0%, transparent 62%)",
       }}
     >
-      <span className="absolute top-1.5 left-2.5 text-micro tracking-[0.09em] text-muted-foreground uppercase opacity-80">
-        Specimen
-      </span>
+      {props.label === null ? null : (
+        <span className="absolute top-1.5 right-2.5 left-2.5 truncate text-micro tracking-[0.09em] text-muted-foreground uppercase opacity-80">
+          {props.label}
+        </span>
+      )}
       {/* `inert`, the same rule `PresetCard`'s miniature already follows: a
         specimen draws the REAL leaf, and several of them are genuinely
         interactive components with their own buttons. A stage is a PICTURE,

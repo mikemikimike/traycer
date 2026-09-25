@@ -1,5 +1,9 @@
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { isVoiceInputRowAvailable } from "@/lib/settings/settings-availability";
 import type { ReactNode } from "react";
 import { RegionShownControl } from "@/components/layout-editor/inspector/region-controls";
+import { useLayoutUsage } from "@/components/layout-editor/inspector/use-layout-usage";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import { assertNever } from "@/components/layout-editor/inspector/rows/assert-never";
 import { ProvidersChildrenRow } from "@/components/layout-editor/inspector/rows/children-row";
@@ -15,6 +19,7 @@ import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-region
 import { regionDepiction } from "@/components/layout-editor/region-depiction";
 import {
   regionFacts,
+  regionRowAvailable,
   regionWhere,
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";
@@ -56,6 +61,9 @@ interface RegionSectionProps {
  */
 export function RegionSection(props: RegionSectionProps): ReactNode {
   const { regionId, onOpenProvider } = props;
+  const { providerIds } = useLayoutUsage();
+  const availability = useSettingsAvailabilityContext();
+  const narrow = useIsMobileViewport();
   const snapshot = useLayoutSnapshot();
   const filter = useLayoutEditorStore((state) => state.filter);
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
@@ -63,14 +71,27 @@ export function RegionSection(props: RegionSectionProps): ReactNode {
   const region = LAYOUT_REGIONS[regionId];
   const facts = regionFacts(regionId);
   const shown = !regionValuesHidden(values[regionId]);
+  const hasSample =
+    regionId !== "usageLimits" ||
+    arrangement.usageProviders.some(
+      (id) =>
+        providerIds.includes(id) && !arrangement.hiddenProviders.includes(id),
+    );
   // Composed rather than indexed by one region's host: the two bar readings
   // each answer for themselves now (L-156), so the line under a name is the
   // registry's sentence for the bar THIS region is in, plus its own side.
-  const where = regionWhere(regionId, arrangement);
+  const where = regionWhere(
+    regionId,
+    narrow
+      ? { ...arrangement, usageHost: "status-bar", resourceHost: "status-bar" }
+      : arrangement,
+  );
+  if (regionId === "mic" && !isVoiceInputRowAvailable(availability))
+    return null;
 
   return (
     <div className="flex flex-col">
-      <SpecimenStage off={!shown}>
+      <SpecimenStage off={!shown} label={hasSample ? "Sample" : null}>
         {regionDepiction(regionId, values, arrangement)}
       </SpecimenStage>
       {/* `flex-wrap` plus a floor on the text column, the same rule the rows
@@ -166,7 +187,9 @@ export function GrammarRowView(props: {
     onOpenProvider,
     regionHidden,
   } = props;
+  const narrow = useIsMobileViewport();
   const regionValues = values[regionId];
+  if (!regionRowAvailable(regionId, row, narrow)) return null;
 
   switch (row.kind) {
     case "size":

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AppFrameComposerStack,
   AppFrameRailEntries,
+  AppFrameRegion,
   AppFrameSideStrip,
   AppFrameStatusBarRow,
   AppFrameTopBar,
@@ -13,6 +14,8 @@ import {
 } from "@/lib/layout/layout-arrangement";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import type { LayoutValues } from "@/lib/layout/layout-values";
+import { setMobileApp } from "@/lib/mobile-app";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 
 /** The shipped values, with one dock member folded down to a pill. */
 const MIXED_DOCK: LayoutValues = {
@@ -366,8 +369,8 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
     const foot = screen.getByTestId("app-frame-side-strip-foot");
     expect(foot.querySelector("svg.lucide-history")).toBeNull();
     expect(foot.querySelector("svg.lucide-bell")).toBeNull();
-    expect(within(foot).getByText("Ada Lovelace")).not.toBeNull();
-    expect(within(foot).getByText("This Mac")).not.toBeNull();
+    expect(within(foot).getByText("Sample account")).not.toBeNull();
+    expect(within(foot).getByText("Sample host")).not.toBeNull();
   });
 
   it("puts a header-hosted reading in the foot, and nowhere else", () => {
@@ -534,5 +537,49 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
       ).toBeNull();
       expect(within(row).getByTestId("chat-row-idle-time")).toBeTruthy();
     }
+  });
+});
+
+describe("AppFrameRegion's own Mic gate, ahead of the region's ordinary shown/hidden check", () => {
+  afterEach(() => {
+    setMobileApp(false);
+    useSettingsStore.setState({ voiceInputEnabled: true });
+  });
+
+  it("draws the mic tile normally", () => {
+    render(
+      <AppFrameRegion
+        regionId="mic"
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Voice input" }),
+    ).not.toBeNull();
+  });
+
+  it("omits the mic tile in the installed mobile app - it draws no picture of a control the build cannot perform", () => {
+    setMobileApp(true);
+    render(
+      <AppFrameRegion
+        regionId="mic"
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Voice input" })).toBeNull();
+  });
+
+  it("omits the mic tile while voice input is off, same as the real control being disabled", () => {
+    useSettingsStore.setState({ voiceInputEnabled: false });
+    render(
+      <AppFrameRegion
+        regionId="mic"
+        values={PRESET_VALUES.default}
+        arrangement={DEFAULT_ARRANGEMENT}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Voice input" })).toBeNull();
   });
 });

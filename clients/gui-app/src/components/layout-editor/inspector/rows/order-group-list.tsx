@@ -1,3 +1,8 @@
+import { useLayoutUsage } from "@/components/layout-editor/inspector/use-layout-usage";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { isVoiceInputRowAvailable } from "@/lib/settings/settings-availability";
+import { NoLayoutUsageProviders } from "@/components/layout-editor/inspector/provider-limit-windows";
 import type { ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
@@ -117,6 +122,9 @@ export function OrderGroupHeader(props: {
   const facts = ORDER_GROUPS[group];
   const gutter = useSortableRowPadding();
   const page = useLayoutFormHost() === "page";
+  const narrow = useIsMobileViewport();
+  if (narrow && (group === "toolbarLeft" || group === "toolbarRight"))
+    return null;
   return (
     <div
       className={cn(
@@ -156,6 +164,14 @@ function OrderGroupRows(props: {
 }): ReactNode {
   const { group, selectedId, values, arrangement, onOpenProvider, decorate } =
     props;
+  const { providerIds } = useLayoutUsage();
+  const narrow = useIsMobileViewport();
+  const availability = useSettingsAvailabilityContext();
+  const toolbarRegions = (ids: ReadonlyArray<ToolbarRegionId>) =>
+    ids.filter((id) => id !== "mic" || isVoiceInputRowAvailable(availability));
+  const visibleProviders = arrangement.usageProviders.filter((id) =>
+    providerIds.includes(id),
+  );
   switch (group) {
     case "dock":
       return (
@@ -176,13 +192,25 @@ function OrderGroupRows(props: {
         <SortableList<ToolbarRegionId>
           label={orderGroupListLabel(group)}
           selectedId={selectedId}
-          items={regionRowItems(arrangement.toolbarLeft, values, decorate)}
-          onMove={(id, toIndex) => {
-            writeArrangement({
-              ...arrangement,
-              toolbarLeft: movedById(arrangement.toolbarLeft, id, toIndex),
-            });
-          }}
+          items={regionRowItems(
+            toolbarRegions(narrow ? ["attachImage"] : arrangement.toolbarLeft),
+            values,
+            decorate,
+          )}
+          onMove={
+            narrow
+              ? null
+              : (id, toIndex) => {
+                  writeArrangement({
+                    ...arrangement,
+                    toolbarLeft: movedById(
+                      arrangement.toolbarLeft,
+                      id,
+                      toIndex,
+                    ),
+                  });
+                }
+          }
         />
       );
     case "toolbarRight":
@@ -190,26 +218,45 @@ function OrderGroupRows(props: {
         <SortableList<ToolbarRegionId>
           label={orderGroupListLabel(group)}
           selectedId={selectedId}
-          items={regionRowItems(arrangement.toolbarRight, values, decorate)}
-          onMove={(id, toIndex) => {
-            writeArrangement({
-              ...arrangement,
-              toolbarRight: movedById(arrangement.toolbarRight, id, toIndex),
-            });
-          }}
+          items={regionRowItems(
+            toolbarRegions(narrow ? ["mic"] : arrangement.toolbarRight),
+            values,
+            decorate,
+          )}
+          onMove={
+            narrow
+              ? null
+              : (id, toIndex) => {
+                  writeArrangement({
+                    ...arrangement,
+                    toolbarRight: movedById(
+                      arrangement.toolbarRight,
+                      id,
+                      toIndex,
+                    ),
+                  });
+                }
+          }
         />
       );
     case "usageProviders":
+      if (visibleProviders.length === 0) return <NoLayoutUsageProviders />;
       return (
         <SortableList<RateLimitProviderId>
           label={orderGroupListLabel(group)}
           selectedId={selectedId}
-          items={providerOrderItems(arrangement, onOpenProvider, decorate)}
+          items={providerOrderItems(
+            arrangement,
+            providerIds,
+            onOpenProvider,
+            decorate,
+          )}
           onMove={(id, toIndex) => {
             writeArrangement({
               ...arrangement,
-              usageProviders: movedById(
+              usageProviders: reorderVisibleProviders(
                 arrangement.usageProviders,
+                visibleProviders,
                 id,
                 toIndex,
               ),
@@ -251,4 +298,18 @@ function movedById<Id extends string>(
 ): ReadonlyArray<Id> {
   const fromIndex = list.indexOf(id);
   return fromIndex < 0 ? list : movedWithin(list, fromIndex, toIndex);
+}
+
+/** Omitted providers keep their slots, including preferences for hosts enabled later. */
+function reorderVisibleProviders(
+  order: ReadonlyArray<RateLimitProviderId>,
+  visible: ReadonlyArray<RateLimitProviderId>,
+  id: RateLimitProviderId,
+  toIndex: number,
+): ReadonlyArray<RateLimitProviderId> {
+  const moved = movedById(visible, id, toIndex);
+  let index = 0;
+  return order.map((providerId) =>
+    visible.includes(providerId) ? moved[index++] : providerId,
+  );
 }

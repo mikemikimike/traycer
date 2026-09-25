@@ -1,3 +1,5 @@
+import { useLayoutUsage } from "@/components/layout-editor/inspector/use-layout-usage";
+import { NoLayoutUsageProviders } from "@/components/layout-editor/inspector/provider-limit-windows";
 import type { ReactNode } from "react";
 import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import {
@@ -12,10 +14,7 @@ import {
   depictUsageProvider,
   regionDepiction,
 } from "@/components/layout-editor/region-depiction";
-import {
-  USAGE_PROVIDER_IDS,
-  type LayoutArrangement,
-} from "@/lib/layout/layout-arrangement";
+import { type LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -41,6 +40,14 @@ export function StyleRow(props: {
 }): ReactNode {
   const { examples, description, specimen, regionId, values, arrangement } =
     props;
+  const { providerIds } = useLayoutUsage();
+  const providers = arrangement.usageProviders.filter((id) =>
+    providerIds.includes(id),
+  );
+  const providerId =
+    providers.find((id) => !arrangement.hiddenProviders.includes(id)) ??
+    providers.at(0) ??
+    null;
   const regionValues = values[regionId];
   const matches = examples.map((example) =>
     Object.entries(example.patch).every(
@@ -54,6 +61,8 @@ export function StyleRow(props: {
   // revert" L-20 asks for (G1-17).
   const keys = exampleKeys(examples);
   const changed = changedControlKeys(regionId, keys).length > 0;
+  if (specimen === "usage-provider" && providerId === null)
+    return <NoLayoutUsageProviders />;
 
   return (
     <div className="border-t border-border px-3.5 py-3">
@@ -70,6 +79,9 @@ export function StyleRow(props: {
           />
         ) : null}
       </div>
+      <span className="mb-1.5 text-micro text-muted-foreground uppercase">
+        Sample
+      </span>
       {/* The radios need an owner, or a screen reader announces five orphans
         with no group name and no position in a set (G1-16). */}
       <div
@@ -113,12 +125,13 @@ export function StyleRow(props: {
               picture out of focus, hit testing and the a11y tree in one, which
               leaves this radio as the row's one control. */}
             <span inert className="min-w-0 flex-1 overflow-hidden">
-              {drawExample(
+              {drawExample({
                 specimen,
                 regionId,
-                valuesWithPatch(regionId, values, example.patch),
+                values: valuesWithPatch(regionId, values, example.patch),
                 arrangement,
-              )}
+                providerId,
+              })}
             </span>
           </button>
         ))}
@@ -142,17 +155,20 @@ export function StyleRow(props: {
  * `depictUsageProvider` is the same framed segment the provider level puts on
  * its stage, so the example row and that level draw identical pixels.
  */
-function drawExample(
-  specimen: StyleSpecimen,
-  regionId: RegionId,
-  values: LayoutValues,
-  arrangement: LayoutArrangement,
-): ReactNode {
+function drawExample(props: {
+  readonly specimen: StyleSpecimen;
+  readonly regionId: RegionId;
+  readonly values: LayoutValues;
+  readonly arrangement: LayoutArrangement;
+  readonly providerId: RateLimitProviderId | null;
+}): ReactNode {
+  const { specimen, regionId, values, arrangement, providerId } = props;
   if (specimen === "region") {
     return regionDepiction(regionId, values, arrangement);
   }
+  if (providerId === null) return <NoLayoutUsageProviders />;
   return depictUsageProvider(
-    specimenProvider(arrangement),
+    providerId,
     values.usageLimits,
     arrangement,
     // The specimen's own window, not live ones: a Style example is a picture
@@ -160,21 +176,6 @@ function drawExample(
     // the five rows. Only the provider level draws from live windows, because
     // there the windows are what is being picked (L-96).
     null,
-  );
-}
-
-/**
- * The provider a usage example is drawn from: the first one the strip actually
- * shows, so the example matches what the user is looking at, and the first
- * configured provider when they have hidden them all.
- */
-function specimenProvider(arrangement: LayoutArrangement): RateLimitProviderId {
-  return (
-    arrangement.usageProviders.find(
-      (providerId) => !arrangement.hiddenProviders.includes(providerId),
-    ) ??
-    arrangement.usageProviders.at(0) ??
-    USAGE_PROVIDER_IDS[0]
   );
 }
 

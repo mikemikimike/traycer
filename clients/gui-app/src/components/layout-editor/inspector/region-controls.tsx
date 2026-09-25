@@ -1,4 +1,8 @@
-import type { ReactNode } from "react";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
+import { isVoiceInputRowAvailable } from "@/lib/settings/settings-availability";
+import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useId, type ReactNode } from "react";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import {
   readControlValue,
@@ -63,6 +67,8 @@ export function RegionShownControl(props: {
 }): ReactNode {
   const { regionId, values } = props;
   const facts = regionFacts(regionId);
+  if (regionId === "mic")
+    return <MicrophoneVisibilityControl values={values} page={false} />;
   if (!regionHides(regionId)) return null;
   const shownValue = String(readControlValue(values[regionId], "shown"));
   if (!offersAuto(regionId)) {
@@ -123,6 +129,10 @@ export function RegionDisplayControl(props: {
   const facts = regionFacts(regionId);
   const regionValues = values[regionId];
   const hidden = regionValuesHidden(regionValues);
+  const narrow = useIsMobileViewport();
+  if (regionId === "mic")
+    return <MicrophoneVisibilityControl values={values} page />;
+  if (regionId === "access" && narrow) return null;
   // One wording for all three option sets, so every row on the page has the
   // same accessible-name pattern whatever its options are.
   const ariaLabel = `${facts.name} display`;
@@ -276,14 +286,16 @@ export function RegionSideControl(props: {
 }): ReactNode {
   const { regionId, arrangement } = props;
   const bar = asBarRegionId(regionId);
+  const narrow = useIsMobileViewport();
   const placement = bar === null ? null : barPlacement(arrangement, bar);
+  const host = narrow ? "status-bar" : placement?.host;
   return (
     <SegmentedControl
       ariaLabel={`${regionFacts(regionId).name} side`}
       options={
         placement === null
           ? EDGE_SIDE_OPTIONS
-          : edgeSideOptions(placement.host, arrangement.tabStripPlacement)
+          : edgeSideOptions(host ?? "status-bar", arrangement.tabStripPlacement)
       }
       value={placement === null ? arrangement.minimapSide : placement.side}
       onChange={(next) => {
@@ -320,5 +332,52 @@ export function BarHostControl(props: {
         writeArrangement(withBarHost(arrangement, regionId, next));
       }}
     />
+  );
+}
+
+function MicrophoneVisibilityControl(props: {
+  readonly values: LayoutValues;
+  readonly page: boolean;
+}): ReactNode {
+  const availability = useSettingsAvailabilityContext();
+  const enabled = useSettingsStore((state) => state.voiceInputEnabled);
+  const reasonId = useId();
+  if (!isVoiceInputRowAvailable(availability)) return null;
+  const shown = props.values.mic.shown !== "hidden";
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1.5">
+      {props.page ? (
+        <SegmentedControl
+          ariaLabel="Microphone display"
+          value={shown ? "shown" : "hidden"}
+          options={SHOWN_HIDDEN_OPTIONS.map((option) => ({
+            ...option,
+            disabled: !enabled,
+            describedBy: enabled ? undefined : reasonId,
+          }))}
+          onChange={(next) => {
+            setRegionShown("mic", next === "shown");
+          }}
+        />
+      ) : (
+        <Switch
+          aria-label="Show Microphone"
+          aria-describedby={enabled ? undefined : reasonId}
+          disabled={!enabled}
+          checked={shown}
+          onCheckedChange={(next) => {
+            setRegionShown("mic", next);
+          }}
+        />
+      )}
+      {!enabled ? (
+        <p
+          id={reasonId}
+          className="whitespace-normal text-ui-xs text-muted-foreground"
+        >
+          Enable Voice input in General settings to show the microphone.
+        </p>
+      ) : null}
+    </div>
   );
 }

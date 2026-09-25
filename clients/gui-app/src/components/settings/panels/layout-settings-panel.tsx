@@ -1,3 +1,4 @@
+import { LayoutUsageProvider } from "@/components/layout-editor/inspector/provider-limit-windows";
 import {
   useCallback,
   useEffect,
@@ -144,108 +145,110 @@ export function LayoutSettingsPanel(): ReactNode {
       {/* Every row below reads its density and its "where does a deeper level
         open" from here, once, rather than from a prop threaded through each
         list (P-4, L-89). */}
-      <LayoutFormHostContext value="page">
-        <TabsPrimitive.Root
-          ref={rootRef}
-          value={area}
-          onValueChange={(value) => {
-            const next = LAYOUT_AREAS.find((entry) => entry.id === value);
-            if (next !== undefined) setArea(next.id);
-          }}
-          orientation="vertical"
-          // The setup guide's "Every piece has a row" target: the areas and
-          // the picked one together, on a phone as on a desktop.
-          data-layout-areas
-          className="flex flex-col md:h-full md:min-h-0"
-        >
-          <SettingsMasterDetail
-            railLabel="Layout areas"
-            mobileSelect={
-              <SettingsMasterSelect
-                label="Layout area"
-                value={area}
-                options={LAYOUT_AREAS.map((entry) => ({
-                  value: entry.id,
-                  label: entry.label,
-                  icon: <entry.icon className="size-4 shrink-0" />,
-                  trailing: changed(entry.id) ? <ChangedDot /> : null,
-                }))}
-                onSelect={setArea}
-              />
-            }
-            rail={
-              <TabsPrimitive.List
-                aria-label="Layout areas"
-                // Shrinks and scrolls in a short pane, as Providers' list does,
-                // so the last areas are never clipped by the card.
-                className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
-              >
-                {LAYOUT_AREAS.map((entry) => (
-                  <TabsPrimitive.Trigger
-                    key={entry.id}
-                    value={entry.id}
-                    className={settingsRailRowClassName(area === entry.id)}
-                  >
-                    <entry.icon className="size-4 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">
-                      {entry.label}
-                    </span>
-                    {changed(entry.id) ? <ChangedDot /> : null}
-                  </TabsPrimitive.Trigger>
-                ))}
-              </TabsPrimitive.List>
-            }
+      <LayoutUsageProvider>
+        <LayoutFormHostContext value="page">
+          <TabsPrimitive.Root
+            ref={rootRef}
+            value={area}
+            onValueChange={(value) => {
+              const next = LAYOUT_AREAS.find((entry) => entry.id === value);
+              if (next !== undefined) setArea(next.id);
+            }}
+            orientation="vertical"
+            // The setup guide's "Every piece has a row" target: the areas and
+            // the picked one together, on a phone as on a desktop.
+            data-layout-areas
+            className="flex flex-col md:h-full md:min-h-0"
           >
-            {LAYOUT_AREAS.map((entry) => (
-              <TabsPrimitive.Content
-                key={entry.id}
-                value={entry.id}
-                forceMount
-                hidden={area !== entry.id}
-                // Named by its area rather than by the rail's trigger, which a
-                // phone does not draw.
-                aria-labelledby={undefined}
-                aria-label={entry.label}
-                className="flex flex-1 flex-col outline-none md:min-h-0"
-              >
-                <div className="border-b border-border/60 pb-4">
-                  <SettingsDetailHeader
-                    title={entry.label}
-                    badge={null}
-                    description={entry.description}
-                    footer={null}
-                    action={
-                      // Presets carries its own two resets in its body, "Reset
-                      // to <preset>" and "Reset everything"; a third here
-                      // would be a choice with no answer.
-                      entry.id !== "presets" && changed(entry.id) ? (
-                        <ResetAreaButton
-                          surface={entry.id}
-                          label={entry.label}
-                        />
-                      ) : null
-                    }
-                  />
-                </div>
-                {/* From `md` up the scroll owner, so the rail and the area's
+            <SettingsMasterDetail
+              railLabel="Layout areas"
+              mobileSelect={
+                <SettingsMasterSelect
+                  label="Layout area"
+                  value={area}
+                  options={LAYOUT_AREAS.map((entry) => ({
+                    value: entry.id,
+                    label: entry.label,
+                    icon: <entry.icon className="size-4 shrink-0" />,
+                    trailing: changed(entry.id) ? <ChangedDot /> : null,
+                  }))}
+                  onSelect={setArea}
+                />
+              }
+              rail={
+                <TabsPrimitive.List
+                  aria-label="Layout areas"
+                  // Shrinks and scrolls in a short pane, as Providers' list does,
+                  // so the last areas are never clipped by the card.
+                  className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
+                >
+                  {LAYOUT_AREAS.map((entry) => (
+                    <TabsPrimitive.Trigger
+                      key={entry.id}
+                      value={entry.id}
+                      className={settingsRailRowClassName(area === entry.id)}
+                    >
+                      <entry.icon className="size-4 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {entry.label}
+                      </span>
+                      {changed(entry.id) ? <ChangedDot /> : null}
+                    </TabsPrimitive.Trigger>
+                  ))}
+                </TabsPrimitive.List>
+              }
+            >
+              {LAYOUT_AREAS.map((entry) => (
+                <TabsPrimitive.Content
+                  key={entry.id}
+                  value={entry.id}
+                  forceMount
+                  hidden={area !== entry.id}
+                  // Named by its area rather than by the rail's trigger, which a
+                  // phone does not draw.
+                  aria-labelledby={undefined}
+                  aria-label={entry.label}
+                  className="flex flex-1 flex-col outline-none md:min-h-0"
+                >
+                  <div className="border-b border-border/60 pb-4">
+                    <SettingsDetailHeader
+                      title={entry.label}
+                      badge={null}
+                      description={entry.description}
+                      footer={null}
+                      action={
+                        // Presets carries its own two resets in its body, "Reset
+                        // to <preset>" and "Reset everything"; a third here
+                        // would be a choice with no answer.
+                        entry.id !== "presets" && changed(entry.id) ? (
+                          <ResetAreaButton
+                            surface={entry.id}
+                            label={entry.label}
+                          />
+                        ) : null
+                      }
+                    />
+                  </div>
+                  {/* From `md` up the scroll owner, so the rail and the area's
                   header stay put: nothing passes UNDER them, so neither needs
                   an opaque fill over the card's translucent surface. */}
-                <div
-                  data-layout-area-body
-                  className="-mx-5 flex flex-col gap-4 px-5 pt-4 pb-5 md:min-h-0 md:flex-1 md:overflow-y-auto"
-                >
-                  <LayoutAreaBody
-                    area={entry.id}
-                    snapshot={snapshot}
-                    openRows={openRows}
-                    onToggleRow={toggleRow}
-                  />
-                </div>
-              </TabsPrimitive.Content>
-            ))}
-          </SettingsMasterDetail>
-        </TabsPrimitive.Root>
-      </LayoutFormHostContext>
+                  <div
+                    data-layout-area-body
+                    className="-mx-5 flex flex-col gap-4 px-5 pt-4 pb-5 md:min-h-0 md:flex-1 md:overflow-y-auto"
+                  >
+                    <LayoutAreaBody
+                      area={entry.id}
+                      snapshot={snapshot}
+                      openRows={openRows}
+                      onToggleRow={toggleRow}
+                    />
+                  </div>
+                </TabsPrimitive.Content>
+              ))}
+            </SettingsMasterDetail>
+          </TabsPrimitive.Root>
+        </LayoutFormHostContext>
+      </LayoutUsageProvider>
     </SettingsPanelShell>
   );
 }

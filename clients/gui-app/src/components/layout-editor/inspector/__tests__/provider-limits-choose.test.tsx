@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
@@ -10,6 +11,7 @@ import {
   providerChanged,
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
+import { USAGE_PROVIDER_LEVEL } from "@/components/layout-editor/regions/usage-provider-level";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
@@ -21,8 +23,22 @@ import {
 /**
  * The one boundary: what the host has READ for this provider. The level is
  * forbidden a query of its own (L-96), so the windows arrive through the
- * strip's own passive read - mocked here to the two shapes that matter, a
+ * reader's own passive read - mocked here to the two shapes that matter, a
  * provider with limits and a provider nobody has read yet.
+ *
+ * Mocked at `ProviderLimitWindowsReader` rather than at the `useProviderLimitWindows`
+ * hook it used to be: the reader is the module boundary `ProviderLevel` and
+ * `ProviderLimitsControl` now share (one watched-host binding for both,
+ * `provider-level.tsx`'s own doc comment), so mocking one layer further in
+ * would leave the "one reading, shared" contract this suite pins unreachable.
+ * The reader's OWN routing (credit-only bypass, an unusable explicit pick) is
+ * proved for real against its real dependencies in
+ * `provider-limit-windows.test.tsx` / `provider-limit-windows-scoped-cache.test.tsx` -
+ * this mock always calls through to `children`, which is what lets the tests
+ * below prove `provider-level.tsx`'s OWN independent guards (the credit-only
+ * `isWindowedRateLimitProvider` checks inside `ProviderLevelBody` and
+ * `ProviderLimitsPick`) hold even when fed live windows, rather than only
+ * because the reader withheld them.
  */
 const live = vi.hoisted(() => ({
   windows: [] as ReadonlyArray<StatusBarRateLimitWindow>,
@@ -31,10 +47,28 @@ const live = vi.hoisted(() => ({
   reads: 0,
 }));
 vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
-  useProviderLimitWindows: () => {
+  ProviderLimitWindowsReader: (props: {
+    readonly providerId: RateLimitProviderId;
+    readonly children: (limits: typeof live) => ReactNode;
+  }) => {
     live.reads += 1;
-    return live;
+    return props.children(live);
   },
+}));
+
+/**
+ * `ProviderLevelBody`'s own `hostName` source, mocked separately from the
+ * windows reader above: a distinct, controllable name is what makes the
+ * "Live · {hostName}" marker tests below prove the real value flows through,
+ * rather than a coincidence with `EMPTY_USAGE`'s own fallback string.
+ */
+const usage = vi.hoisted(() => ({ hostName: "Ivy's Mac" }));
+vi.mock("@/components/layout-editor/inspector/use-layout-usage", () => ({
+  useLayoutUsage: () => ({
+    providerIds: [],
+    cluster: { kind: "no-providers" as const },
+    hostName: usage.hostName,
+  }),
 }));
 
 import {
@@ -43,6 +77,7 @@ import {
 } from "@/components/layout-editor/inspector/provider-level";
 
 const PROVIDER: RateLimitProviderId = "claude-code";
+const CREDIT_PROVIDER: RateLimitProviderId = "kilocode";
 
 function limitWindow(
   windowKey: string,
@@ -212,15 +247,118 @@ describe('the provider level\'s "Choose..." checklist (L-96, I-14)', () => {
     live.drawnKeys = [];
     render(<ProviderLevel providerId={PROVIDER} />);
 
-    expect(
-      screen.getByText("No limits reported yet - showing the tightest one."),
-    ).not.toBeNull();
+    expect(screen.getByText(USAGE_PROVIDER_LEVEL.limitsEmpty)).not.toBeNull();
+    // The stage above the pick is the real `depictUsageProviderSegment`
+    // (`region-depiction.tsx`), not a fixture - its own empty-state text,
+    // never a bar drawn from specimen numbers standing in for a reading that
+    // does not exist.
+    expect(screen.getByText("No limits reported")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("radio", { name: "Choose..." }));
 
     expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
     expect(limitsMode()).toBe("Automatic (recommended)");
     expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
+  });
+
+  it("disables Choose... with a reason while empty, and the reason names an element aria-describedby actually points at", () => {
+    live.windows = [];
+    live.drawnKeys = [];
+    render(<ProviderLevel providerId={PROVIDER} />);
+
+    const choose = screen.getByRole("radio", { name: "Choose..." });
+    expect(choose.hasAttribute("disabled")).toBe(true);
+    const describedById = choose.getAttribute("aria-describedby");
+    expect(describedById).not.toBeNull();
+    const reason = document.getElementById(describedById as string);
+    expect(reason?.textContent).toBe(USAGE_PROVIDER_LEVEL.limitsEmpty);
+
+    // Functionally inert, not just visually: a disabled radio must not flip
+    // the mode on a click, which is the difference `aria-disabled` alone
+    // would not have guaranteed.
+    fireEvent.click(choose);
+    expect(limitsMode()).toBe("Automatic (recommended)");
+    expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
+  });
+
+  it("shows Automatic over a STALE stored pick once the reading goes empty, without discarding the pick", () => {
+    // The bug this guards: the segmented value used to key off
+    // `selection.limitKeys.length > 0` alone, ignoring `windows.length` - so
+    // a provider that had a stored pick and then reported nothing showed
+    // "Choose..." checked with no checklist under it, a broken half-state.
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      providerLimits: { [PROVIDER]: { limitKeys: ["5h", "week"] } },
+    });
+    live.windows = [];
+    live.drawnKeys = [];
+    render(<ProviderLevel providerId={PROVIDER} />);
+
+    expect(limitsMode()).toBe("Automatic (recommended)");
+    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
+    // Untouched: an empty reading must not rewrite or clear the arrangement,
+    // only change what is DRAWN from it.
+    expect(selection()).toEqual({ limitKeys: ["5h", "week"] });
+  });
+
+  it("re-activates the stale pick once the watched host warms back up, in catalog order", () => {
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      providerLimits: { [PROVIDER]: { limitKeys: ["5h", "week"] } },
+    });
+    live.windows = [];
+    live.drawnKeys = [];
+    const { rerender } = render(<ProviderLevel providerId={PROVIDER} />);
+    expect(limitsMode()).toBe("Automatic (recommended)");
+
+    live.windows = [limitWindow("5h", "5h"), limitWindow("week", "Weekly")];
+    live.drawnKeys = ["5h"];
+    rerender(<ProviderLevel providerId={PROVIDER} />);
+
+    expect(limitsMode()).toBe("Choose...");
+    const list = screen.getByRole("group", { name: "Limits to draw" });
+    expect(
+      [...list.querySelectorAll("label")].map((row) => row.textContent),
+    ).toEqual(["5h", "Weekly"]);
+    expect(selection()).toEqual({ limitKeys: ["5h", "week"] });
+  });
+});
+
+describe("credit-only providers (isWindowedRateLimitProvider: false) never get a Limits pick", () => {
+  it("draws no stage and no Limits control at all, even when fed live windows", () => {
+    // The mocked reader (top of file) always calls through to `children` with
+    // whatever `live` holds - non-empty by `beforeEach` - so this proves
+    // `provider-level.tsx`'s OWN `isWindowedRateLimitProvider` guards, not the
+    // reader's bypass (that half is `provider-limit-windows.test.tsx`'s).
+    render(<ProviderLevel providerId={CREDIT_PROVIDER} />);
+
+    expect(screen.queryByRole("radiogroup", { name: "Limits" })).toBeNull();
+    expect(screen.queryByText("No limits reported")).toBeNull();
+    expect(
+      screen.queryByText("No limits reported yet - showing the tightest one."),
+    ).toBeNull();
+  });
+
+  it("stays pick-less even with a stale stored selection for it (no fabricated time bar)", () => {
+    // A pick left over from when this id was (or is later) a windowed
+    // provider - migrated arrangement state, not something the UI can write
+    // for a credit-only provider today. Must never surface as a checklist or
+    // a countdown bar.
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      providerLimits: { [CREDIT_PROVIDER]: { limitKeys: ["5h"] } },
+    });
+
+    render(<ProviderLevel providerId={CREDIT_PROVIDER} />);
+
+    expect(screen.queryByRole("radiogroup", { name: "Limits" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
+  });
+
+  it("ProviderLimitsControl (the page's own entry point) is equally pick-less", () => {
+    render(<ProviderLimitsControl providerId={CREDIT_PROVIDER} />);
+
+    expect(screen.queryByRole("radiogroup", { name: "Limits" })).toBeNull();
   });
 });
 
@@ -260,5 +398,35 @@ describe("what the level costs and what it hides (R3-15, R3-16)", () => {
     const group = mode.closest("fieldset");
     expect(group?.disabled).toBe(true);
     expect(group?.getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+describe("the stage's own live label (Phase D)", () => {
+  it("names the watched host once a limit window is actually drawn", () => {
+    // beforeEach already seeds a non-empty drawnKeys, so this is the level's
+    // ordinary rendering, not a special setup.
+    render(<ProviderLevel providerId={PROVIDER} />);
+    expect(screen.getByText("Live · Ivy's Mac")).not.toBeNull();
+  });
+
+  it("shows no marker when nothing is actually drawn, even with windows on hand", () => {
+    // Windows present but none of them are the one the stage draws: the
+    // label tracks `drawnKeys`, not merely a non-empty reading.
+    live.drawnKeys = [];
+    render(<ProviderLevel providerId={PROVIDER} />);
+    expect(screen.queryByText(/^Live/)).toBeNull();
+  });
+
+  it("clears the marker once the drawn window goes away, and restores it once it comes back", () => {
+    const { rerender } = render(<ProviderLevel providerId={PROVIDER} />);
+    expect(screen.getByText("Live · Ivy's Mac")).not.toBeNull();
+
+    live.drawnKeys = [];
+    rerender(<ProviderLevel providerId={PROVIDER} />);
+    expect(screen.queryByText(/^Live/)).toBeNull();
+
+    live.drawnKeys = ["5h"];
+    rerender(<ProviderLevel providerId={PROVIDER} />);
+    expect(screen.getByText("Live · Ivy's Mac")).not.toBeNull();
   });
 });

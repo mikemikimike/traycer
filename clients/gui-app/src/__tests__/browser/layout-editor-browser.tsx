@@ -146,7 +146,7 @@ export function PictureRow(props: { readonly regionId: RegionId }): ReactNode {
   const values = effectiveLayoutValues(basePreset, overrides);
   return (
     <div data-region-row={regionId} style={{ width: 360 }}>
-      <SpecimenStage off={false}>
+      <SpecimenStage off={false} label="Sample">
         {regionDepiction(regionId, values, arrangement)}
       </SpecimenStage>
     </div>
@@ -309,7 +309,7 @@ function ClipFadeCase(): ReactNode {
   const values = effectiveLayoutValues(basePreset, overrides);
   return (
     <div data-clip-case="usage-limits" style={{ width: 292 }}>
-      <SpecimenStage off={false}>
+      <SpecimenStage off={false} label="Sample">
         {depictRegion("usageLimits", values.usageLimits, {
           ...arrangement,
           usageProviders: USAGE_PROVIDER_IDS,

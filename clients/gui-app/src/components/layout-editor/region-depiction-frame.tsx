@@ -89,11 +89,11 @@ const HOST_CONTEXT_CLASS: Readonly<Record<HostContextId, string>> = {
  * because a row that fits - a full-width dock row, whose right edge IS the
  * frame's - would otherwise fade content nothing was hiding.
  *
- * The same class strings as `hooks/ui/use-horizontal-scroll-edges.ts`, which
- * is the app's other measured edge fade.
+ * Finish the fade before the clipping edge: the transparent final 8px keep
+ * even a partial trailing glyph from meeting the hard boundary.
  */
 const CLIP_FADE =
-  "data-[clipped=true]:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%-34px),transparent)] data-[clipped=true]:[mask-image:linear-gradient(to_right,black_calc(100%-34px),transparent)]";
+  "data-[clipped=true]:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent_calc(100%-8px))] data-[clipped=true]:[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent_calc(100%-8px))]";
 
 export function HostContextFrame(props: {
   readonly host: HostContextId;

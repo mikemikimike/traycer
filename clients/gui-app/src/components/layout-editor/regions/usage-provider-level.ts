@@ -26,5 +26,5 @@ export const USAGE_PROVIDER_LEVEL = {
    * the ordinary state of one nobody has used this session - and with nothing
    * to pick, `Automatic` is the only answer there is.
    */
-  limitsEmpty: "No limits reported yet - showing the tightest one.",
+  limitsEmpty: "The watched host has not reported this provider's limits yet.",
 };

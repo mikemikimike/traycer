@@ -635,7 +635,7 @@ function SortableRowLine<Id extends string>(props: {
             <SortableRowName item={item} />
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 max-md:ml-auto">
+        <div className="flex max-w-full shrink-0 items-center gap-1.5 max-md:ml-auto">
           {item.control}
           {/* The counterpart of the link row's Remove (L-168), on the panel
             ABOVE where the link would go, in a slot the list reserves for the

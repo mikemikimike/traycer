@@ -7,8 +7,10 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RegionSection } from "@/components/layout-editor/inspector/region-section";
 import { RAIL_REGION_IDS } from "@/lib/layout/rail";
+import { LayoutUsageContext } from "@/components/layout-editor/inspector/use-layout-usage";
+import { RegionSection } from "@/components/layout-editor/inspector/region-section";
+import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -16,6 +18,30 @@ import {
 } from "@/stores/layout/layout-store";
 
 function noop(): void {}
+
+/**
+ * This suite is about the ROW shapes `RegionSection` composes, not about
+ * `useLayoutUsage()`'s own watched-host filtering (`order-group-list.test.tsx`,
+ * `style-row`'s own owner) - so every stored provider is treated as watched,
+ * through the REAL `LayoutUsageContext` (both `useLayoutUsage()` and
+ * `region-depiction.tsx`'s own direct `LayoutUsageContext.Consumer` resolve
+ * through it) rather than a mocked hook, read live off the store at render
+ * time since several cases below mutate `hiddenProviders`/`usageProviders`
+ * mid-test through the real store.
+ */
+function renderRegionSection(regionId: RegionId): void {
+  render(
+    <LayoutUsageContext.Provider
+      value={{
+        providerIds: useLayoutStore.getState().arrangement.usageProviders,
+        cluster: { kind: "no-providers" },
+        hostName: "the watched host",
+      }}
+    >
+      <RegionSection regionId={regionId} onOpenProvider={noop} />
+    </LayoutUsageContext.Provider>,
+  );
+}
 
 function styleExamples(): ReadonlyArray<HTMLElement> {
   return within(screen.getByRole("radiogroup", { name: "Style" })).getAllByRole(
@@ -56,7 +82,7 @@ describe("the Style block's example subject (L-10, I-06)", () => {
     // for a segment per provider and was masked off after the first two.
     expect(shown.length).toBeGreaterThan(1);
 
-    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
+    renderRegionSection("usageLimits");
 
     const examples = styleExamples();
     expect(examples.length).toBeGreaterThan(1);
@@ -67,7 +93,7 @@ describe("the Style block's example subject (L-10, I-06)", () => {
 
   it("takes its specimen from the first provider the strip still shows", () => {
     const shown = useLayoutStore.getState().arrangement.usageProviders;
-    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
+    renderRegionSection("usageLimits");
 
     act(() => {
       const arrangement = useLayoutStore.getState().arrangement;
@@ -83,7 +109,7 @@ describe("the Style block's example subject (L-10, I-06)", () => {
   });
 
   it("keeps drawing the region itself for every other region", () => {
-    render(<RegionSection regionId="contextUsage" onOpenProvider={noop} />);
+    renderRegionSection("contextUsage");
 
     for (const example of styleExamples()) {
       expect(providerIdsIn(example)).toEqual([]);
@@ -92,9 +118,37 @@ describe("the Style block's example subject (L-10, I-06)", () => {
   });
 });
 
+/**
+ * Phase D: `RegionSection`'s own stage label is a static literal ("Sample" or
+ * absent), never `ProviderLevelBody`'s dynamic "Live · {hostName}" - the two
+ * components share `SpecimenStage` but not its label source, so a rich,
+ * real-looking usage context here must never make the marker read "Live".
+ */
+describe("the stage's own label (Phase D)", () => {
+  it("keeps the static Sample label even under a rich, real usage context", () => {
+    // `getByTitle`, not `getByText`: the Style block below draws its own
+    // unrelated "Sample" caption over its radiogroup (`style-row.tsx`), so
+    // only the stage marker's own `title` attribute names it uniquely.
+    renderRegionSection("usageLimits");
+    expect(screen.getByTitle("Sample")).not.toBeNull();
+    expect(screen.queryByTitle(/^Live/)).toBeNull();
+  });
+
+  it("drops the marker entirely once no stored provider is both watched and shown", () => {
+    const { arrangement } = useLayoutStore.getState();
+    useLayoutStore.getState().setArrangement({
+      ...arrangement,
+      hiddenProviders: arrangement.usageProviders,
+    });
+
+    renderRegionSection("usageLimits");
+    expect(screen.queryByTitle("Sample")).toBeNull();
+  });
+});
+
 describe("the providers list (I-12)", () => {
   it("gives every provider row a glyph of its own", () => {
-    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
+    renderRegionSection("usageLimits");
 
     const rows = [...document.querySelectorAll("[data-sortable-id]")];
     expect(rows.length).toBeGreaterThan(1);
@@ -123,7 +177,7 @@ describe("the providers list (I-12)", () => {
 
 describe("the per-row revert (L-20, I-04)", () => {
   it("draws exactly one revert on a changed unstacked row, not one per side", () => {
-    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
+    renderRegionSection("usageLimits");
     expect(
       screen.queryByRole("button", { name: "Revert Position" }),
     ).toBeNull();
@@ -144,7 +198,7 @@ describe("the per-row revert (L-20, I-04)", () => {
   });
 
   it("draws exactly one revert on a stacked row too", () => {
-    render(<RegionSection regionId="runningAgents" onOpenProvider={noop} />);
+    renderRegionSection("runningAgents");
 
     act(() => {
       const arrangement = useLayoutStore.getState().arrangement;
@@ -166,7 +220,7 @@ describe("one list, two hosts (L-03, L-95)", () => {
     // rule, so its header keeps the tri-state radiogroup (G6) and this test's
     // "one control, the header's" assertion still names a radiogroup rather
     // than needing to fork on which control kind the selected panel gets.
-    render(<RegionSection regionId="railPullRequests" onOpenProvider={noop} />);
+    renderRegionSection("railPullRequests");
 
     const rows = [...document.querySelectorAll("[data-sortable-id]")];
     const ids = rows.map((node) => node.getAttribute("data-sortable-id") ?? "");
@@ -208,7 +262,7 @@ describe("the two bar readings' Position rows (L-156)", () => {
   }
 
   it("gives each reading a bar row and a side row", () => {
-    render(<RegionSection regionId="resourceMonitor" onOpenProvider={noop} />);
+    renderRegionSection("resourceMonitor");
 
     expect(screen.getByText("Position")).not.toBeNull();
     expect(screen.getByText("Side")).not.toBeNull();
@@ -225,7 +279,7 @@ describe("the two bar readings' Position rows (L-156)", () => {
   });
 
   it("writes only its own region and its own axis", () => {
-    render(<RegionSection regionId="resourceMonitor" onOpenProvider={noop} />);
+    renderRegionSection("resourceMonitor");
 
     // The usage cluster is put somewhere it did not ship first, so a write
     // that reached it would be visible rather than landing on the value it
@@ -256,7 +310,7 @@ describe("the two bar readings' Position rows (L-156)", () => {
   });
 
   it("reverts one row at a time (L-133)", () => {
-    render(<RegionSection regionId="usageLimits" onOpenProvider={noop} />);
+    renderRegionSection("usageLimits");
 
     act(() => {
       const arrangement = useLayoutStore.getState().arrangement;

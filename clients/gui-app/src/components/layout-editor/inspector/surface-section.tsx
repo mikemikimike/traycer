@@ -1,3 +1,5 @@
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
+import { isWindowedRateLimitProvider } from "@/lib/rate-limits/rate-limit-window-catalog";
 import type { ReactNode } from "react";
 import {
   type AppFrame,
@@ -30,6 +32,7 @@ import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-region
 import {
   LAYOUT_REGION_LIST,
   regionFacts,
+  regionRowAvailable,
   type AnyGrammarRow,
 } from "@/components/layout-editor/regions/region-facts";
 import { regionMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
@@ -58,6 +61,7 @@ import {
 import {
   DEFAULT_ARRANGEMENT,
   statusBarHostsAnyRegion,
+  sideTabStripEdge,
   type LayoutArrangement,
   type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
@@ -119,6 +123,7 @@ export function SurfaceSection(props: {
   const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
   const arrangement = snapshot.arrangement;
   const gutter = useSortableRowPadding();
+  const narrow = useIsMobileViewport();
 
   function decorate(id: string): SortableRowDecoration {
     const regionId = asRegionId(id);
@@ -130,7 +135,8 @@ export function SurfaceSection(props: {
     // A disclosure only where opening it shows something: the region's own
     // detail rows, or its presence rule. Most regions have neither, and a
     // chevron that opened an empty box was the no-op the owner found (G6).
-    const discloses = hint !== null || regionDetailRows(regionId).length > 0;
+    const discloses =
+      hint !== null || regionDetailRows(regionId, narrow).length > 0;
     return {
       ...BARE_ROW,
       changed,
@@ -175,7 +181,10 @@ export function SurfaceSection(props: {
   const groups = SURFACE_ORDER_GROUPS[surface].filter(
     (group) => groupMatchesFilter(group, filter) && groupIsDrawn(group, values),
   );
-  const band = surfaceBand(surface, values, arrangement);
+  const band =
+    surface === "composer" && narrow
+      ? null
+      : surfaceBand(surface, values, arrangement);
 
   return (
     <div className="flex flex-col">
@@ -193,7 +202,11 @@ export function SurfaceSection(props: {
         // prouder at the top of the card and closer to the rows it describes,
         // so the two `py` classes are displaced AFTER it rather than before.
         <div className={cn(gutter.row, "pt-4 pb-1")}>
+          <span className="mb-1.5 block text-micro text-muted-foreground uppercase">
+            Sample
+          </span>
           <div
+            inert
             data-testid="surface-band"
             className="min-w-0 max-w-full overflow-hidden rounded-lg border border-border/60 bg-foreground/3 px-3 py-2.5"
           >
@@ -256,16 +269,27 @@ function surfaceBand(
  * decides for itself (L-51, L-156).
  */
 function StatusBarBand({ values, arrangement }: AppFrame): ReactNode {
-  if (!statusBarHostsAnyRegion(arrangement)) {
+  const narrow = useIsMobileViewport();
+  const effectiveArrangement: LayoutArrangement = narrow
+    ? { ...arrangement, usageHost: "status-bar", resourceHost: "status-bar" }
+    : arrangement;
+  if (!statusBarHostsAnyRegion(effectiveArrangement)) {
     return (
       <p className="text-ui-sm text-muted-foreground">
-        Both of these are in the top bar, so there is no status bar to draw.
+        Both of these are in the{" "}
+        {sideTabStripEdge(arrangement.tabStripPlacement) === null
+          ? "top bar"
+          : "tab strip foot"}
+        , so there is no status bar to draw.
       </p>
     );
   }
   return (
     <div className="flex h-6 w-full min-w-0 items-center gap-3">
-      <AppFrameStatusBarRow values={values} arrangement={arrangement} />
+      <AppFrameStatusBarRow
+        values={values}
+        arrangement={effectiveArrangement}
+      />
     </div>
   );
 }
@@ -334,7 +358,10 @@ function SurfaceOrderList(props: {
 }): ReactNode {
   const { group, snapshot, values, decorate, ruled } = props;
   const arrangement = snapshot.arrangement;
-  const moved = reorderedGroups(arrangement).includes(group);
+  const narrow = useIsMobileViewport();
+  const movable =
+    !narrow || (group !== "toolbarLeft" && group !== "toolbarRight");
+  const moved = movable && reorderedGroups(arrangement).includes(group);
   return (
     <div className="flex flex-col">
       {/* The rules are the CARD's - where this list sits among the card's other
@@ -433,11 +460,15 @@ function providerRowDecoration(
         }}
       />
     ) : null,
-    detail: <ProviderLimitsControl providerId={providerId} />,
-    open: openRows.includes(id),
-    onToggleOpen: () => {
-      onToggleRow(id);
-    },
+    detail: isWindowedRateLimitProvider(providerId) ? (
+      <ProviderLimitsControl providerId={providerId} />
+    ) : null,
+    open: isWindowedRateLimitProvider(providerId) && openRows.includes(id),
+    onToggleOpen: isWindowedRateLimitProvider(providerId)
+      ? () => {
+          onToggleRow(id);
+        }
+      : null,
   };
 }
 
@@ -498,7 +529,8 @@ function RegionRowDetail(props: {
   readonly filter: string;
 }): ReactNode {
   const { regionId, snapshot, values, filter } = props;
-  const rows = regionDetailRows(regionId);
+  const narrow = useIsMobileViewport();
+  const rows = regionDetailRows(regionId, narrow);
   if (rows.length === 0) return null;
   return (
     <div>
@@ -540,13 +572,20 @@ const DETAIL_ROW_KINDS: ReadonlyArray<string> = [
   "fine-tune",
 ];
 
-function regionDetailRows(regionId: RegionId): ReadonlyArray<AnyGrammarRow> {
+function regionDetailRows(
+  regionId: RegionId,
+  narrow: boolean,
+): ReadonlyArray<AnyGrammarRow> {
   // Annotated rather than inferred: indexing the registry with a UNION of ids
   // gives a union of arrays, and a `filter` on one of those has no single
   // callable signature. `AnyGrammarRow` is the registry's own name for the
   // union of their elements.
   const declared: ReadonlyArray<AnyGrammarRow> = LAYOUT_REGIONS[regionId].rows;
-  return declared.filter((row) => DETAIL_ROW_KINDS.includes(row.kind));
+  return declared.filter(
+    (row) =>
+      DETAIL_ROW_KINDS.includes(row.kind) &&
+      regionRowAvailable(regionId, row, narrow),
+  );
 }
 
 /**

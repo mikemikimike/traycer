@@ -1,3 +1,4 @@
+import { LayoutUsageProvider } from "@/components/layout-editor/inspector/provider-limit-windows";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import "@/components/layout-editor/layout-editor.css";
 import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
@@ -180,7 +181,9 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
         is: once, at the root of the inspector. */}
       <TooltipsSuppressedProvider value={false}>
         <LayoutFormHostContext value="inspector">
-          <InspectorBody />
+          <LayoutUsageProvider>
+            <InspectorBody />
+          </LayoutUsageProvider>
         </LayoutFormHostContext>
         {/* Portalled over the canvas, but a React child here so its labels
           open like the panel's own. */}

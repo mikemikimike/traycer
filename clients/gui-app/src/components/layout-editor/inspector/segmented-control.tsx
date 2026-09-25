@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 export interface SegmentedControlOption {
   readonly value: string;
   readonly label: string;
+  readonly disabled?: boolean;
+  readonly describedBy?: string;
 }
 
 interface SegmentedControlProps {
@@ -39,6 +41,8 @@ export function SegmentedControl(props: SegmentedControlProps): ReactNode {
         <RadioGroupPrimitive.Item
           key={option.value}
           value={option.value}
+          disabled={option.disabled}
+          aria-describedby={option.describedBy}
           asChild
         >
           <Button type="button" variant="muted" size="xs">

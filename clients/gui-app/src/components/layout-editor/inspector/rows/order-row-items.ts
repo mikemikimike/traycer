@@ -246,24 +246,27 @@ export function dividerOrderItem(
  */
 export function providerOrderItems(
   arrangement: LayoutArrangement,
+  providerIds: ReadonlyArray<RateLimitProviderId>,
   onOpenProvider: ((providerId: RateLimitProviderId) => void) | null,
   decorate: SortableRowDecorator | null,
 ): ReadonlyArray<SortableListItem<RateLimitProviderId>> {
-  return arrangement.usageProviders.map((providerId) => ({
-    ...(decorate === null ? BARE_ROW : decorate(providerId)),
-    ...PLAIN_ROW,
-    id: providerId,
-    label: providerDisplayName(providerId),
-    // The usage cluster's own glyph, so a provider row reads like every other
-    // sortable row rather than as bare text beside them (I-12). One icon for
-    // the whole list: a provider is a reading, and the list is of readings.
-    icon: Gauge,
-    dimmed: arrangement.hiddenProviders.includes(providerId),
-    onActivate:
-      onOpenProvider === null
-        ? null
-        : () => {
-            onOpenProvider(providerId);
-          },
-  }));
+  return arrangement.usageProviders
+    .filter((providerId) => providerIds.includes(providerId))
+    .map((providerId) => ({
+      ...(decorate === null ? BARE_ROW : decorate(providerId)),
+      ...PLAIN_ROW,
+      id: providerId,
+      label: providerDisplayName(providerId),
+      // The usage cluster's own glyph, so a provider row reads like every other
+      // sortable row rather than as bare text beside them (I-12). One icon for
+      // the whole list: a provider is a reading, and the list is of readings.
+      icon: Gauge,
+      dimmed: arrangement.hiddenProviders.includes(providerId),
+      onActivate:
+        onOpenProvider === null
+          ? null
+          : () => {
+              onOpenProvider(providerId);
+            },
+    }));
 }

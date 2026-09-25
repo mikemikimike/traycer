@@ -2,7 +2,10 @@ import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-fa
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import type { RegionId } from "@/lib/layout/region-id";
 import type { SettingsSearchEntry } from "@/lib/settings-search/settings-definitions";
-import { alwaysAvailable } from "@/lib/settings/settings-availability";
+import {
+  alwaysAvailable,
+  isVoiceInputRowAvailable,
+} from "@/lib/settings/settings-availability";
 
 /**
  * One settings-search result per layout region, generated from the registry.
@@ -16,9 +19,8 @@ import { alwaysAvailable } from "@/lib/settings/settings-availability";
  * an anchor result: there is no per-region element on the page to scroll to,
  * and `launch` is what the result acts on - the editor, opened on that region.
  *
- * `alwaysAvailable`, unlike the page rows that preceded them: the Layout host
- * renders every region in every shell, and a region that the current window is
- * too narrow to SHOW is still a region whose value this page can set.
+ * Microphone follows the Voice input availability rule, so search never
+ * offers a layout region that the mobile app cannot render.
  */
 export const LAYOUT_LAUNCH_ENTRIES: ReadonlyArray<SettingsSearchEntry> =
   LAYOUT_REGION_LIST.map((region) => ({
@@ -26,7 +28,8 @@ export const LAYOUT_LAUNCH_ENTRIES: ReadonlyArray<SettingsSearchEntry> =
     anchor: null,
     launch: region.id,
     kind: "setting",
-    availableWhen: alwaysAvailable,
+    availableWhen:
+      region.id === "mic" ? isVoiceInputRowAvailable : alwaysAvailable,
     label: region.name,
     description: region.where,
     group: surfaceLabel(region.surface),

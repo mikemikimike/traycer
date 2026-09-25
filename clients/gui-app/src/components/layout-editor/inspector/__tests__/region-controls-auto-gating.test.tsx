@@ -6,9 +6,11 @@ import {
   RegionShownControl,
 } from "@/components/layout-editor/inspector/region-controls";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import { setMobileApp } from "@/lib/mobile-app";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutSnapshot,
@@ -139,5 +141,47 @@ describe("a region with no `shown` leaf at all (regionHides false)", () => {
       .map((option) => option.textContent);
     expect(options).toEqual(["Full row", "Chip"]);
     expect(screen.queryByText("Hidden")).toBeNull();
+  });
+
+  it("drops Access's own display control on a narrow page - it has no applicable size", () => {
+    const original = window.innerWidth;
+    window.innerWidth = 500;
+    try {
+      render(<LiveDisplayControl regionId="access" />);
+      expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    } finally {
+      window.innerWidth = original;
+    }
+  });
+});
+
+describe("Microphone's own control (mobile absence, voice-off gating)", () => {
+  afterEach(() => {
+    setMobileApp(false);
+    useSettingsStore.setState({ voiceInputEnabled: true });
+  });
+
+  it("is absent in the installed mobile app, on both the page's and the dock's controls", () => {
+    setMobileApp(true);
+    render(<LiveDisplayControl regionId="mic" />);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
+    cleanup();
+
+    render(<LiveShownControl regionId="mic" />);
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("disables the dock's switch and names the reason when voice input is off", () => {
+    useSettingsStore.setState({ voiceInputEnabled: false });
+    render(<LiveShownControl regionId="mic" />);
+
+    const toggle = screen.getByRole("switch", { name: "Show Microphone" });
+    expect(toggle.hasAttribute("disabled")).toBe(true);
+    const describedById = toggle.getAttribute("aria-describedby");
+    expect(describedById).not.toBeNull();
+    expect(document.getElementById(describedById as string)?.textContent).toBe(
+      "Enable Voice input in General settings to show the microphone.",
+    );
   });
 });

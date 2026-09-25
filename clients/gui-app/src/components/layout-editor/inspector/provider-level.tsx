@@ -1,13 +1,14 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Gauge } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
 import {
-  useProviderLimitWindows,
+  ProviderLimitWindowsReader,
   type ProviderLimitWindows,
 } from "@/components/layout-editor/inspector/provider-limit-windows";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
+import { useLayoutUsage } from "@/components/layout-editor/inspector/use-layout-usage";
 import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import { toggleHiddenProvider } from "@/components/layout-editor/layout-gestures";
 import { depictUsageProvider } from "@/components/layout-editor/region-depiction";
@@ -22,6 +23,7 @@ import { USAGE_PROVIDER_LEVEL } from "@/components/layout-editor/regions/usage-p
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+import { isWindowedRateLimitProvider } from "@/lib/rate-limits/rate-limit-window-catalog";
 import { cn } from "@/lib/utils";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
@@ -43,7 +45,7 @@ interface ProviderLevelProps {
  * usage-limits value from a per-provider screen.
  *
  * `Choose...` opens a checklist of this provider's OWN live windows, read
- * through `useProviderLimitWindows` - the strip's own read, observed
+ * through `ProviderLimitWindowsReader` - the strip's own read, observed
  * passively, never a query of this level's own (L-96).
  *
  * The level asks for those windows ONCE and hands them down (R3-15): the stage
@@ -52,26 +54,48 @@ interface ProviderLevelProps {
  * question.
  */
 export function ProviderLevel(props: ProviderLevelProps): ReactNode {
-  const { providerId } = props;
+  return (
+    <ProviderLimitWindowsReader providerId={props.providerId}>
+      {(limits) => (
+        <ProviderLevelBody providerId={props.providerId} limits={limits} />
+      )}
+    </ProviderLimitWindowsReader>
+  );
+}
+
+function ProviderLevelBody(
+  props: ProviderLevelProps & {
+    readonly limits: ProviderLimitWindows;
+  },
+): ReactNode {
+  const { providerId, limits } = props;
   const basePreset = useLayoutStore((state) => state.basePreset);
   const overrides = useLayoutStore((state) => state.overrides);
   const arrangement = useLayoutStore((state) => state.arrangement);
-  const limits = useProviderLimitWindows(providerId);
   const { windows, drawnKeys } = limits;
+  const { hostName } = useLayoutUsage();
+  const drawnWindows = windows.filter((window) =>
+    drawnKeys.includes(window.windowKey),
+  );
   const values = effectiveLayoutValues(basePreset, overrides);
   const providerName = providerDisplayName(providerId);
   const shown = !arrangement.hiddenProviders.includes(providerId);
 
   return (
     <div className="flex flex-col">
-      <SpecimenStage off={!shown}>
-        {depictUsageProvider(
-          providerId,
-          values.usageLimits,
-          arrangement,
-          windows.filter((window) => drawnKeys.includes(window.windowKey)),
-        )}
-      </SpecimenStage>
+      {isWindowedRateLimitProvider(providerId) ? (
+        <SpecimenStage
+          off={!shown}
+          label={drawnWindows.length > 0 ? `Live · ${hostName}` : null}
+        >
+          {depictUsageProvider(
+            providerId,
+            values.usageLimits,
+            arrangement,
+            drawnWindows,
+          )}
+        </SpecimenStage>
+      ) : null}
       <div className="flex items-start gap-2.5 px-3.5 pt-3.5 pb-3">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground">
           <Gauge className="size-3.5" />
@@ -116,9 +140,13 @@ export function ProviderLevel(props: ProviderLevelProps): ReactNode {
  * once itself and passes them straight to {@link ProviderLimitsPick} (R3-15).
  */
 export function ProviderLimitsControl(props: ProviderLevelProps): ReactNode {
-  const { providerId } = props;
-  const limits = useProviderLimitWindows(providerId);
-  return <ProviderLimitsPick providerId={providerId} limits={limits} />;
+  return (
+    <ProviderLimitWindowsReader providerId={props.providerId}>
+      {(limits) => (
+        <ProviderLimitsPick providerId={props.providerId} limits={limits} />
+      )}
+    </ProviderLimitWindowsReader>
+  );
 }
 
 /** The pick itself, over windows its caller has already read. */
@@ -127,6 +155,7 @@ function ProviderLimitsPick(props: {
   readonly limits: ProviderLimitWindows;
 }): ReactNode {
   const { providerId, limits } = props;
+  const emptyReasonId = useId();
   const { windows, drawnKeys } = limits;
   const arrangement = useLayoutStore((state) => state.arrangement);
   const shown = !arrangement.hiddenProviders.includes(providerId);
@@ -135,13 +164,13 @@ function ProviderLimitsPick(props: {
   // The two modes are exclusive by construction: `Automatic` is an empty pick
   // list and `Choose...` is a non-empty one, so "switching back to Automatic
   // clears the picks" (L-96) is not a second rule to keep - it is the only way
-  // back. A pick that no longer names a live window still counts as choosing:
-  // the strip falls back to the tightest for the drawing, and silently
-  // demoting the level to `Automatic` would throw the pick away on a reading
-  // the user never saw.
-  const choosing = selection.limitKeys.length > 0;
+  // back. With no windows the control displays Automatic, but retains stored
+  // picks so they return when the watched host reports those windows again.
+  const choosing = windows.length > 0 && selection.limitKeys.length > 0;
   const picked = new Set(selection.limitKeys);
-  const pickingLimits = choosing && windows.length > 0;
+  const pickingLimits = choosing;
+
+  if (!isWindowedRateLimitProvider(providerId)) return null;
 
   return (
     // GREYED IN PLACE, which is what L-08 asks for and what `inert` was not
@@ -176,7 +205,14 @@ function ProviderLimitsPick(props: {
           <div className="flex flex-col gap-2.5">
             <SegmentedControl
               ariaLabel={USAGE_PROVIDER_LEVEL.limitsLabel}
-              options={USAGE_PROVIDER_LEVEL.limitsOptions}
+              options={USAGE_PROVIDER_LEVEL.limitsOptions.map((option) => ({
+                ...option,
+                disabled: option.value === "choose" && windows.length === 0,
+                describedBy:
+                  option.value === "choose" && windows.length === 0
+                    ? emptyReasonId
+                    : undefined,
+              }))}
               value={choosing ? "choose" : "automatic"}
               onChange={(next) => {
                 if (next !== "choose") {
@@ -199,7 +235,10 @@ function ProviderLimitsPick(props: {
               }}
             />
             {windows.length === 0 ? (
-              <p className="text-ui-xs text-muted-foreground">
+              <p
+                id={emptyReasonId}
+                className="text-ui-xs text-muted-foreground"
+              >
                 {USAGE_PROVIDER_LEVEL.limitsEmpty}
               </p>
             ) : null}
