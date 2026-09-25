@@ -179,9 +179,9 @@ export function McpScopePicker(props: {
             {multiScope ? (
               <CommandGroup heading="Everywhere">
                 <CommandItem
-                  value={GLOBAL_VALUE}
+                  itemKey={GLOBAL_VALUE}
                   keywords={["global", "everywhere", "all workspaces"]}
-                  onSelect={() => {
+                  onAction={() => {
                     props.onSelectGlobal();
                     setOpen(false);
                   }}
@@ -202,12 +202,12 @@ export function McpScopePicker(props: {
                 {targets.map((target) => (
                   <CommandItem
                     key={target.path}
-                    value={target.path}
+                    itemKey={target.path}
                     keywords={[
                       target.name,
                       ...(target.branch === null ? [] : [target.branch]),
                     ]}
-                    onSelect={() => {
+                    onAction={() => {
                       props.onSelectProject(target.path);
                       setOpen(false);
                     }}
@@ -250,10 +250,10 @@ export function McpScopePicker(props: {
                     config from here at all. This row is that way: it opens the
                     same host folder picker the Home workspace selector uses. */}
                 <CommandItem
-                  value={BROWSE_VALUE}
+                  itemKey={BROWSE_VALUE}
                   keywords={["add", "browse", "open", "folder", "workspace"]}
                   disabled={browsePending}
-                  onSelect={() => {
+                  onAction={() => {
                     setOpen(false);
                     onBrowse();
                   }}

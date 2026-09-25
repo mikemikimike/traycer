@@ -410,9 +410,9 @@ export function HostSwitcher(props: {
             {trailingAction === null ? null : (
               <CommandGroup>
                 <CommandItem
-                  value={trailingAction.commandValue}
+                  itemKey={trailingAction.commandValue}
                   keywords={[...trailingAction.keywords]}
-                  onSelect={() => {
+                  onAction={() => {
                     setOpen(false);
                     trailingAction.onSelect();
                   }}
@@ -557,7 +557,7 @@ function HostSwitcherRow(props: {
   });
   return (
     <CommandItem
-      value={host.hostId}
+      itemKey={host.hostId}
       // One predicate, asked here exactly as the button list asks it, so a row
       // that explains why it cannot be picked is also a row that cannot be
       // picked — on both kinds of container.
@@ -567,7 +567,7 @@ function HostSwitcherRow(props: {
         formatPlatform(host.platform) ?? "",
         formatHostVersion(host.version) ?? "",
       ]}
-      onSelect={props.onSelect}
+      onAction={props.onSelect}
       data-testid={`settings-host-switcher-option-${host.hostId}`}
       data-scoped={props.scoped ? "true" : "false"}
       data-checked={props.scoped ? "true" : undefined}

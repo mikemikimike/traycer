@@ -404,7 +404,7 @@ function ModelField(props: {
             <CommandInput
               aria-label="Search models"
               value={query}
-              onValueChange={setQuery}
+              onChange={(event) => setQuery(event.target.value)}
               placeholder="Search models…"
               spellCheck={false}
             />
@@ -417,11 +417,11 @@ function ModelField(props: {
                   {filtered.map((model) => (
                     <CommandItem
                       key={model.slug}
-                      value={model.slug}
+                      itemKey={model.slug}
                       data-checked={
                         model.slug === props.value ? "true" : "false"
                       }
-                      onSelect={() => {
+                      onAction={() => {
                         setOpen(false);
                         setQuery("");
                         props.onModel(model.slug);

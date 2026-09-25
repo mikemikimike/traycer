@@ -7,6 +7,10 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import {
+  isCommandCompositionKey,
+  type CommandComposition,
+} from "@/components/ui/command-context";
 import { LayersPlus } from "lucide-react";
 import { useStore } from "zustand";
 
@@ -82,6 +86,10 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
   const mobile = useIsMobileViewport();
   const [open, setOpenState] = useState(false);
   const openRef = useRef(open);
+  const composition = useRef<CommandComposition>({
+    active: false,
+    endedAt: -Infinity,
+  });
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const restoreEditorFocusRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -216,12 +224,25 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
 
   useEffect(() => {
     if (!open || !active || mobile) return;
+    composition.current = { active: false, endedAt: -Infinity };
+    const onCompositionStart = () => {
+      composition.current.active = true;
+    };
+    const onCompositionEnd = (event: CompositionEvent) => {
+      composition.current = { active: false, endedAt: event.timeStamp };
+    };
+    window.addEventListener("compositionstart", onCompositionStart, true);
+    window.addEventListener("compositionend", onCompositionEnd, true);
+    return () => {
+      window.removeEventListener("compositionstart", onCompositionStart, true);
+      window.removeEventListener("compositionend", onCompositionEnd, true);
+    };
+  }, [open, active, mobile]);
+
+  useEffect(() => {
+    if (!open || !active || mobile) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      // An IME confirming a candidate reports Enter too; it is the composer's
-      // to consume, not a request to open the highlighted row. 229 is the
-      // keyCode browsers report for a key an IME has swallowed.
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- Safari reports the IME-confirming Enter with isComposing already false; only keyCode 229 marks it, and there is no non-deprecated spelling
-      if (event.isComposing || event.keyCode === 229) return;
+      if (isCommandCompositionKey(event, composition.current)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -280,10 +301,10 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
 
   const list = (
     <Command
-      loop
+      loopNavigation
       variant="embedded"
-      value={selectedId ?? ""}
-      onValueChange={setHighlightedId}
+      highlightedValue={selectedId ?? ""}
+      onHighlightChange={setHighlightedId}
       className="max-h-full min-h-0"
     >
       <div className="flex items-center justify-between gap-2 border-b border-border/60 px-2.5 py-1.5">

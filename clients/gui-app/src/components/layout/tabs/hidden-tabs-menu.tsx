@@ -108,9 +108,9 @@ function HiddenTabMenuItem(props: {
   if (customIcon) icon = <span className="shrink-0">{customIcon}</span>;
   return (
     <CommandItem
-      value={tabRefKey(props.tab)}
+      itemKey={tabRefKey(props.tab)}
       keywords={[displayName]}
-      onSelect={props.onActivate}
+      onAction={props.onActivate}
     >
       <span
         aria-hidden

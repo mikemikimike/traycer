@@ -106,8 +106,8 @@ export function ThemePresetPicker(props: ThemePresetPickerProps) {
         initialFocus={coarseInitialFocus}
       >
         <Command
-          value={commandValue}
-          onValueChange={setCommandValue}
+          highlightedValue={commandValue}
+          onHighlightChange={setCommandValue}
           variant="embedded"
           selection="flat"
         >
@@ -121,9 +121,9 @@ export function ThemePresetPicker(props: ThemePresetPickerProps) {
             {THEME_PRESETS.map((preset) => (
               <CommandItem
                 key={preset.id}
-                value={preset.label}
+                itemKey={preset.label}
                 data-checked={preset.id === value ? "true" : "false"}
-                onSelect={() => {
+                onAction={() => {
                   onChange(preset.id);
                   setOpen(false);
                 }}

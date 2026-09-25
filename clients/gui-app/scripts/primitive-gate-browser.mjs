@@ -38,7 +38,7 @@ const flag = (name) => {
   return args[i + 1];
 };
 if (args.includes("--help")) {
-  console.log(`bun scripts/primitive-gate-browser.mjs --behavior [--only toast|conceal|nested]
+  console.log(`bun scripts/primitive-gate-browser.mjs --behavior [--only toast|conceal|nested|command]
 bun scripts/primitive-gate-browser.mjs --capture DIR [--filter family/state] [--viewport desktop|portrait|landscape]
 bun scripts/primitive-gate-browser.mjs --compare BASELINE --out DIR [--filter family/state]
 bun scripts/primitive-gate-browser.mjs --known-defects
@@ -387,6 +387,8 @@ try {
         "nested",
         "tooltip",
         "hover-card",
+        "command-in-dialog",
+        "command-in-popover",
       ].includes(family) ||
       (family === "select" && state === "disabled")
     )
@@ -1383,6 +1385,755 @@ try {
     // measured directly (the initial attempt asserted the input and failed
     // on exactly this), not a production defect. Left out rather than
     // guessing a different selector this round.
+  }
+  // Ported off the retired T02 proof lane's own row dataset and assertions
+  // (see git history 5bcc0c8ad, base-ui-proofs.{tsx,mjs}) - now driven
+  // against the real, shipped `@/components/ui/command`, plus net-new cases
+  // (dynamic mutation, D16 Command-in-overlay) the proof never covered.
+  async function commandChecks() {
+    const visibleValues = (name) =>
+      `[...document.querySelectorAll('[data-gate-palette=${name}] [role=option]:not([hidden])')].map(e=>e.dataset.value)`;
+    const pickedOf = (name) =>
+      `document.querySelector('[data-gate-command-state=${name}]').dataset.picked`;
+    const activeIdOf = (name) =>
+      `document.getElementById(document.querySelector('[data-gate-palette=${name}] input').getAttribute('aria-activedescendant'))?.dataset.value`;
+    const focusInput = async (name) => {
+      // The stacked fixtures are taller than the viewport, and
+      // `[data-gate-stage]` vertically centers its content - a click's
+      // coordinates are viewport-relative and never auto-scroll, so an
+      // un-scrolled palette below/above the fold hit-tests against nothing.
+      await evaluate(
+        `document.querySelector('[data-gate-palette=${name}] input').scrollIntoView({block:'center'})`,
+      );
+      await clickSelector(`[data-gate-palette=${name}] input`, "left", true);
+    };
+    const typeQuery = async (name, text) => {
+      await focusInput(name);
+      await evaluate(
+        `document.querySelector('[data-gate-palette=${name}] input').select()`,
+      );
+      await client.send("Input.insertText", { text });
+      await delay(40);
+    };
+
+    await load("command", "default", "command", views[0], "light");
+
+    await check(
+      "default highlight lands on the first ENABLED row, skipping the disabled one entirely",
+      `${activeIdOf("one")}==='tree'`,
+    );
+    report.behavior.push("command/ranking/default-highlight-skips-disabled");
+
+    const beforeExactId = await evaluate(
+      "document.querySelector('[data-gate-palette=one] [data-value=exact]').id",
+    );
+    await typeQuery("one", "Project");
+    await check(
+      "an exact label match ranks first, ties keep source-registration order, and non-matching duplicates are excluded",
+      `JSON.stringify(${visibleValues("one")})===JSON.stringify(['exact','r2','r3','r4','r5','r6','r7','r8','r9','r10','r11'])`,
+    );
+    report.behavior.push(
+      "command/ranking/exact-match-first-ties-in-source-order",
+    );
+    const afterExactId = await evaluate(
+      "document.querySelector('[data-gate-palette=one] [data-value=exact]').id",
+    );
+    assert.equal(
+      beforeExactId,
+      afterExactId,
+      "command/stable-ids: filtering must not remount a row",
+    );
+    report.behavior.push("command/stable-ids/row-not-remounted-by-filter");
+
+    await key("Enter", 0);
+    await check(
+      "Enter picks the highlighted row and RETAINS the typed query",
+      `${pickedOf("one")}==='exact' && document.querySelector('[data-gate-palette=one] input').value==='Project'`,
+    );
+    await check(
+      "a second, independent Command instance is untouched by the first's query/pick",
+      `document.querySelector('[data-gate-palette=two] input').value==='' && ${pickedOf("two")}===''`,
+    );
+    report.behavior.push(
+      "command/independence/two-instances-do-not-share-state",
+    );
+    report.behavior.push("command/selection/query-retained-after-pick");
+
+    await typeQuery("one", "Duplicate");
+    await check(
+      "both tied 'Duplicate' rows survive filtering, nothing else does",
+      `JSON.stringify(${visibleValues("one")})===JSON.stringify(['r0','r1'])`,
+    );
+    await key("ArrowDown", 0);
+    await key("Enter", 0);
+    await check(
+      "ArrowDown moved off the default first duplicate onto the second",
+      `${pickedOf("one")}==='r1'`,
+    );
+    report.behavior.push(
+      "command/duplicates/both-tied-rows-kept-arrowdown-picks-second",
+    );
+
+    await typeQuery("one", "zzzz");
+    await check(
+      "a zero-match query empties the row list and shows the empty state, without clearing the LAST pick",
+      `${visibleValues("one")}.length===0 && ${pickedOf("one")}==='r1' && document.querySelector('[data-gate-palette=one] [data-slot=command-empty]')?.textContent==='No results'`,
+    );
+    report.behavior.push(
+      "command/empty/zero-matches-shows-empty-state-keeps-last-pick",
+    );
+
+    // Fresh page for paging/disabled-skip/controlled-highlight/IME.
+    await load("command", "default", "command", views[0], "light");
+    await focusInput("one");
+    await key("ArrowDown", 0);
+    await check(
+      "ArrowDown from the default skips the disabled row entirely",
+      `${activeIdOf("one")}==='r0'`,
+    );
+    report.behavior.push("command/navigation/arrowdown-skips-disabled-row");
+    await key("Home", 0);
+    await check(
+      "Home returns to the first enabled row",
+      `${activeIdOf("one")}==='tree'`,
+    );
+
+    const pageSize = await evaluate(
+      "(()=>{const list=document.querySelector('[data-gate-palette=one] [data-slot=command-list]');const first=list.querySelector('[role=option]:not([hidden])');return Math.max(1,Math.floor(list.clientHeight/(first?.offsetHeight||36))-1)})()",
+    );
+    await key("PageDown", 0);
+    const afterPageDown = await evaluate(activeIdOf("one"));
+    const enabledInOrder = await evaluate(
+      "[...document.querySelectorAll('[data-gate-palette=one] [role=option]:not([hidden])')].filter(e=>e.getAttribute('aria-disabled')!=='true').map(e=>e.dataset.value)",
+    );
+    assert.equal(
+      afterPageDown,
+      enabledInOrder[pageSize],
+      "command/navigation: PageDown must land exactly pageSize enabled rows forward",
+    );
+    report.behavior.push(
+      "command/navigation/pagedown-moves-by-page-size-over-enabled-rows",
+    );
+    await key("PageUp", 0);
+    await check(
+      "PageUp returns symmetrically",
+      `${activeIdOf("one")}==='tree'`,
+    );
+    report.behavior.push("command/navigation/pageup-returns-symmetrically");
+
+    await evaluate("window.primitiveGate.command.setHighlight('one','r1')");
+    await delay(20);
+    await check(
+      "an externally controlled highlight resolves through the real input's aria-activedescendant",
+      `${activeIdOf("one")}==='r1'`,
+    );
+    report.behavior.push(
+      "command/controlled-highlight/aria-activedescendant-resolves-to-forced-row",
+    );
+
+    // IME: three ways an Enter can arrive mid-composition must all be
+    // swallowed; only a real Enter past the 50ms post-composition grace
+    // window may pick. The compositionend/Enter boundary cases are driven
+    // by an EXPLICIT synthetic `timeStamp` (via `Object.defineProperty`,
+    // which shadows the read-only prototype getter) rather than a real
+    // wall-clock `delay()` - a fixed, deterministic ms gap on either side
+    // of the 50ms threshold, never flaky against CI/host clock jitter.
+    const IME_T0 = 100000;
+    const dispatchAt = (type, ctor, init, timeStamp) =>
+      evaluate(
+        `(()=>{const input=document.querySelector('[data-gate-palette=one] input');const ev=new ${ctor}(${JSON.stringify(type)},${JSON.stringify(init)});Object.defineProperty(ev,'timeStamp',{value:${timeStamp},configurable:true});input.dispatchEvent(ev);})()`,
+      );
+    await evaluate(
+      "document.querySelector('[data-gate-palette=one] input').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))",
+    );
+    await check(
+      "a composing Enter (isComposing=true) never picks",
+      `${pickedOf("one")}!=='r1'`,
+    );
+    await evaluate(
+      "(()=>{const input=document.querySelector('[data-gate-palette=one] input');input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:false,bubbles:true,cancelable:true}));})()",
+    );
+    await check(
+      "an Enter while composition is still ACTIVE never picks",
+      `${pickedOf("one")}!=='r1'`,
+    );
+    await dispatchAt(
+      "compositionend",
+      "CompositionEvent",
+      { bubbles: true },
+      IME_T0,
+    );
+    await dispatchAt(
+      "keydown",
+      "KeyboardEvent",
+      { key: "Enter", isComposing: false, bubbles: true, cancelable: true },
+      IME_T0 + 49,
+    );
+    await check(
+      "an Enter 49ms after compositionend - just INSIDE the 50ms grace window - never picks",
+      `${pickedOf("one")}!=='r1'`,
+    );
+    report.behavior.push(
+      "command/ime/three-negative-enters-swallowed-during-and-just-after-composition",
+    );
+    await dispatchAt(
+      "keydown",
+      "KeyboardEvent",
+      { key: "Enter", isComposing: false, bubbles: true, cancelable: true },
+      IME_T0 + 51,
+    );
+    await check(
+      "an Enter 51ms after compositionend - just PAST the 50ms grace window - picks normally",
+      `${pickedOf("one")}==='r1'`,
+    );
+    report.behavior.push("command/ime/enter-past-grace-window-picks");
+
+    // shouldFilter=false: caller order survives even a query that would
+    // zero-score everything under the real scorer.
+    const beforeNoFilter = await evaluate(visibleValues("nofilter"));
+    await typeQuery("nofilter", "zzzz");
+    const afterNoFilter = await evaluate(visibleValues("nofilter"));
+    assert.deepEqual(
+      afterNoFilter,
+      beforeNoFilter,
+      "command/shouldFilter-false: row order must survive an unmatched query untouched",
+    );
+    report.behavior.push(
+      "command/shouldFilter-false/order-preserved-under-unmatched-query",
+    );
+
+    // Dynamic mutation against live-registered rows: remove / disable /
+    // reorder, each proven against the real DOM, not a bypassed assertion.
+    await check(
+      "dynamic fixture starts as a,b,c,d",
+      `JSON.stringify(${visibleValues("dyn")})===JSON.stringify(['a','b','c','d'])`,
+    );
+    await evaluate("window.primitiveGate.command.setHighlight('dyn','b')");
+    await delay(20);
+    await check(
+      "b is the highlighted row before removal (setup)",
+      `${activeIdOf("dyn")}==='b'`,
+    );
+    await evaluate("window.primitiveGate.command.removeRow('dyn','b')");
+    await delay(20);
+    await check(
+      "a removed row is gone from the DOM entirely, not just hidden",
+      `!document.querySelector('[data-gate-palette=dyn] [data-value=b]') && JSON.stringify(${visibleValues("dyn")})===JSON.stringify(['a','c','d'])`,
+    );
+    await check(
+      "removing the HIGHLIGHTED row leaves aria-activedescendant resolving to a REAL remaining row, never a stale id pointing at nothing",
+      `${activeIdOf("dyn")}!==undefined && document.querySelector('[data-gate-palette=dyn] input').getAttribute('aria-activedescendant')===document.querySelector('[data-gate-palette=dyn] [role=option]:not([hidden])').id`,
+    );
+    report.behavior.push(
+      "command/dynamic/removeRow-drops-the-row-from-the-dom",
+    );
+
+    // Stashed on `window` rather than compared by `.id` string: an id
+    // attribute survives a hypothetical `cloneNode` swap, so only a real
+    // `===` reference comparison against the SAME DOM node object actually
+    // proves "reused", not "recreated with a matching id".
+    await evaluate(
+      "void (window.__gateReorderElement = document.querySelector('[data-gate-palette=dyn] [data-value=a]'))",
+    );
+    await evaluate("window.primitiveGate.command.toggleDisabled('dyn','c')");
+    await delay(20);
+    await focusInput("dyn");
+    await key("Home", 0);
+    await key("ArrowDown", 0);
+    await check(
+      "navigation honors the live-toggled disabled row c, skipping straight to d",
+      `${activeIdOf("dyn")}==='d'`,
+    );
+    report.behavior.push(
+      "command/dynamic/toggleDisabled-is-honored-by-navigation-live",
+    );
+
+    await evaluate("window.primitiveGate.command.reorder('dyn',['d','a','c'])");
+    await delay(20);
+    await check(
+      "reorder changes DOM order to the supplied sequence",
+      "JSON.stringify([...document.querySelectorAll('[data-gate-palette=dyn] [role=option]')].map(e=>e.dataset.value))===JSON.stringify(['d','a','c'])",
+    );
+    await check(
+      "command/dynamic: reordering must reuse the EXACT SAME DOM node (real === reference identity, not just a matching id string), never remount",
+      "document.querySelector('[data-gate-palette=dyn] [data-value=a]')===window.__gateReorderElement",
+    );
+    report.behavior.push("command/dynamic/reorder-preserves-row-identity");
+
+    // T08 review R1: navigation must read the COMMITTED anchor order, not a
+    // render-time DOM snapshot that still describes the previous caller
+    // order. Reorder just landed ['d','a','c'] with 'c' disabled (toggled
+    // above); press Home/End IMMEDIATELY, with no intervening query change -
+    // the exact gap the review's own probe found (the old browser case
+    // changed the query before its next order check, which happened to
+    // refresh the stale collection and mask the bug).
+    await focusInput("dyn");
+    await key("Home", 0);
+    await check(
+      "immediately after a reorder, with no query change, Home lands on the NEW first row - not the pre-reorder one",
+      `${activeIdOf("dyn")}==='d'`,
+    );
+    await key("End", 0);
+    await check(
+      "immediately after a reorder, with no query change, End lands on the NEW last ENABLED row - not the pre-reorder one, and not the disabled 'c'",
+      `${activeIdOf("dyn")}==='a'`,
+    );
+    report.behavior.push(
+      "command/dynamic/reorder-immediate-home-end-no-query-change",
+    );
+
+    // After an external reorder, a re-render triggered by something else
+    // (query typed then cleared) must not silently revert to the
+    // pre-reorder authored order - `orderCommandElements` re-derives DOM
+    // order from ranked/blocks (tied scores + anchor position) on every
+    // query change, and the anchors themselves now follow the REORDERED
+    // `rows` state, not the original JSX literal order.
+    await typeQuery("dyn", "zzzz");
+    await typeQuery("dyn", "");
+    await check(
+      "a later unrelated re-render keeps the externally-set order - it does not revert to source/authored order",
+      "JSON.stringify([...document.querySelectorAll('[data-gate-palette=dyn] [role=option]:not([hidden])')].map(e=>e.dataset.value))===JSON.stringify(['d','a','c'])",
+    );
+    report.behavior.push(
+      "command/dynamic/reorder-survives-a-later-unrelated-rerender",
+    );
+
+    // ArrowUp/Home/End against a dataset disabled at BOTH array endpoints -
+    // must land on the nearest ENABLED row, never clamp onto a disabled
+    // edge. Ports the unit-level "Home/End skip disabled rows even at the
+    // array's own endpoints" case into the real browser lane.
+    await focusInput("endpoints");
+    await check(
+      "default highlight already skips the disabled first row",
+      `${activeIdOf("endpoints")}==='one'`,
+    );
+    await key("End", 0);
+    await check(
+      "End lands on the last ENABLED row, skipping the disabled last row",
+      `${activeIdOf("endpoints")}==='three'`,
+    );
+    await key("Home", 0);
+    await check(
+      "Home lands on the first ENABLED row, skipping the disabled first row",
+      `${activeIdOf("endpoints")}==='one'`,
+    );
+    await key("ArrowDown", 0);
+    await check(
+      "ArrowDown from the first enabled row moves forward normally",
+      `${activeIdOf("endpoints")}==='two'`,
+    );
+    await key("ArrowUp", 0);
+    await check(
+      "ArrowUp moves back to the first enabled row",
+      `${activeIdOf("endpoints")}==='one'`,
+    );
+    await key("ArrowUp", 0);
+    await check(
+      "ArrowUp from the first enabled row clamps there rather than reaching past it toward the disabled endpoint",
+      `${activeIdOf("endpoints")}==='one'`,
+    );
+    report.behavior.push(
+      "command/navigation/arrowup-home-end-clamp-at-disabled-endpoints",
+    );
+
+    // Fresh page: T08 review R1 (tied-query + nested-consumer reorder) and
+    // R2 (dropped modifier-key chords) regressions, against a clean mount of
+    // every fixture below.
+    await load("command", "default", "command", views[0], "light");
+
+    // R1, second probe case: tied rows reordered while an ACTIVE query stays
+    // UNCHANGED - no query change is inserted anywhere in this case to force
+    // a refresh, which is exactly what let the bug through the review's own
+    // probe missed it with.
+    await typeQuery("dyn", "Row");
+    await check(
+      "a query that ties every row (same label prefix, same match position) keeps source-registration order",
+      `JSON.stringify(${visibleValues("dyn")})===JSON.stringify(['a','b','c','d'])`,
+    );
+    await evaluate(
+      "window.primitiveGate.command.reorder('dyn',['d','c','b','a'])",
+    );
+    await delay(20);
+    await check(
+      "tied rows reordered under an ACTIVE, UNCHANGED query: DOM reflects the new caller order immediately - it does not stay on the pre-reorder order waiting for a later query change",
+      `JSON.stringify(${visibleValues("dyn")})===JSON.stringify(['d','c','b','a'])`,
+    );
+    report.behavior.push(
+      "command/dynamic/tied-query-reorder-applies-without-a-query-change",
+    );
+
+    // R1, third probe case: a reorder driven entirely by a component NESTED
+    // under Command (its own local state) - Command itself never re-renders
+    // from this trigger, so only its MutationObserver can pick it up. Same
+    // tied-query shape as above, to exercise the SCORED reordering path
+    // (`orderCommandElements` under `filtering=true`), which is the one that
+    // needs the observer's own fresh `committedSourcePositions` read, not
+    // just `navigate()`'s independent live read.
+    await typeQuery("nested", "Nested");
+    await check(
+      "nested fixture: a tying query keeps source-registration order before any reorder",
+      `JSON.stringify(${visibleValues("nested")})===JSON.stringify(['n1','n2','n3'])`,
+    );
+    await evaluate(
+      "window.primitiveGate.command.nestedReorder(['n3','n1','n2'])",
+    );
+    await delay(20);
+    await check(
+      "a reorder driven by a component NESTED under Command (Command itself never re-renders) still lands in the new order under an active tied query - only the MutationObserver path can produce this",
+      `JSON.stringify(${visibleValues("nested")})===JSON.stringify(['n3','n1','n2'])`,
+    );
+    report.behavior.push(
+      "command/dynamic/nested-consumer-owned-reorder-observed-without-command-rerender",
+    );
+
+    // R2: default modifier-key navigation. `chords` is 3 groups - g1=[a,b],
+    // g2=[skip1,skip2] (disabled-only), g3=[c,d] - so `enabled` is
+    // [a,b,c,d] and g2 is invisible to every one of these checks.
+    await focusInput("chords");
+    await check(
+      "chords fixture: default highlight lands on the first enabled row",
+      `${activeIdOf("chords")}==='a'`,
+    );
+    await key("n", 2);
+    await check("Ctrl+N maps to ArrowDown", `${activeIdOf("chords")}==='b'`);
+    await key("j", 2);
+    await check(
+      "Ctrl+J maps to ArrowDown too, and skips the disabled-only group g2 the same way plain ArrowDown would",
+      `${activeIdOf("chords")}==='c'`,
+    );
+    await key("p", 2);
+    await check("Ctrl+P maps to ArrowUp", `${activeIdOf("chords")}==='b'`);
+    await key("k", 2);
+    await check("Ctrl+K maps to ArrowUp too", `${activeIdOf("chords")}==='a'`);
+    report.behavior.push("command/chords/ctrl-njpk-remap-to-arrow-navigation");
+
+    await key("ArrowDown", 4);
+    await check(
+      "Meta+ArrowDown jumps to the last ENABLED row (End)",
+      `${activeIdOf("chords")}==='d'`,
+    );
+    await key("ArrowUp", 4);
+    await check(
+      "Meta+ArrowUp jumps to the first ENABLED row (Home)",
+      `${activeIdOf("chords")}==='a'`,
+    );
+    report.behavior.push("command/chords/meta-arrow-jumps-to-endpoints");
+
+    await key("ArrowDown", 1);
+    await check(
+      "Alt+ArrowDown from g1 hops to g3's FIRST enabled row, skipping the disabled-only g2 AND skipping 'b' within g1 - proving this is a GROUP hop, not an ordinary/Ctrl-remapped single step (which would land on 'b')",
+      `${activeIdOf("chords")}==='c'`,
+    );
+    await key("ArrowDown", 0);
+    await check(
+      "plain ArrowDown (no modifier) still moves by one enabled row within the current group",
+      `${activeIdOf("chords")}==='d'`,
+    );
+    await key("ArrowUp", 1);
+    await check(
+      "Alt+ArrowUp from g3's LAST row hops back to g1's FIRST enabled row 'a' - not the nearer row 'c' it started next to and not 'b' - confirming the hop always lands on the target group's first enabled row regardless of direction or starting row",
+      `${activeIdOf("chords")}==='a'`,
+    );
+    report.behavior.push(
+      "command/chords/alt-arrow-hops-groups-lands-on-first-enabled-row",
+    );
+
+    await key("ArrowDown", 4);
+    await key("ArrowDown", 1);
+    await check(
+      "Alt+ArrowDown at the LAST group (no next group) falls back to an ordinary single step rather than erroring or wrapping - here that clamps at the already-last row",
+      `${activeIdOf("chords")}==='d'`,
+    );
+    report.behavior.push(
+      "command/chords/alt-arrow-falls-back-to-ordinary-step-at-group-boundary",
+    );
+
+    // R2 collision audit: a consumer's own onKeyDown that preventDefault()s
+    // unconditionally must short-circuit Command's chord handling entirely -
+    // `Command`'s bubble handler checks `event.defaultPrevented` right after
+    // calling the consumer callback, before any navigation.
+    await focusInput("guarded");
+    await check(
+      "guarded fixture: default highlight lands on the first enabled row (setup)",
+      `${activeIdOf("guarded")}==='a'`,
+    );
+    await key("n", 2);
+    await key("ArrowDown", 4);
+    await key("ArrowDown", 1);
+    await check(
+      "a consumer onKeyDown that calls preventDefault() unconditionally blocks EVERY chord family - Ctrl+N, Meta+ArrowDown and Alt+ArrowDown all leave the highlight untouched",
+      `${activeIdOf("guarded")}==='a'`,
+    );
+    report.behavior.push(
+      "command/chords/consumer-preventdefault-short-circuits-all-chord-families",
+    );
+
+    // R2 collision audit: window-capture precedence. `KeybindingProvider`
+    // claims app shortcuts (Ctrl+K/J/N on non-mac) in window CAPTURE phase,
+    // before any bubble-phase listener (including Command's own) ever sees
+    // the event; `composer-drafts-control.tsx` claims ArrowUp/Down for its
+    // own dialog the same way. This reproduces that same real DOM
+    // capture-before-bubble guarantee with a minimal capture listener rather
+    // than mounting the full KeybindingProvider/Drafts dialog trees, which
+    // need router/action-registry/composer context this fixture does not
+    // carry - the guarantee under test is the event-order structure, which
+    // this exercises identically.
+    await focusInput("chords");
+    await key("ArrowUp", 4);
+    await check(
+      "chords fixture: back at the first enabled row (setup)",
+      `${activeIdOf("chords")}==='a'`,
+    );
+    await evaluate(
+      "window.__gateCaptured=false; window.__gateCapture=(e)=>{if(e.ctrlKey&&e.key==='n'){e.preventDefault();e.stopPropagation();window.__gateCaptured=true;}}; window.addEventListener('keydown',window.__gateCapture,true);",
+    );
+    await key("n", 2);
+    await check(
+      "a window-capture listener claiming Ctrl+N (mirrors KeybindingProvider's app-shortcut precedence on non-mac) intercepts the event before Command's own bubble handler ever sees it - the capture listener fired, and Command did not navigate",
+      `window.__gateCaptured===true && ${activeIdOf("chords")}==='a'`,
+    );
+    await evaluate(
+      "window.removeEventListener('keydown',window.__gateCapture,true); delete window.__gateCapture; delete window.__gateCaptured;",
+    );
+    await evaluate(
+      "window.__gateCaptured=false; window.__gateCapture=(e)=>{if(e.key==='ArrowDown'){e.preventDefault();e.stopPropagation();window.__gateCaptured=true;}}; window.addEventListener('keydown',window.__gateCapture,true);",
+    );
+    await key("ArrowDown", 0);
+    await check(
+      "a window-capture ArrowDown listener (mirrors composer-drafts-control's own capture-phase interception while its dialog is open) wins the same way - Command's chord handling never reaches it either",
+      `window.__gateCaptured===true && ${activeIdOf("chords")}==='a'`,
+    );
+    await evaluate(
+      "window.removeEventListener('keydown',window.__gateCapture,true); delete window.__gateCapture; delete window.__gateCaptured;",
+    );
+    report.behavior.push(
+      "command/chords/window-capture-listener-precedes-commands-own-bubble-handler",
+    );
+
+    // Two real production `<Command>` instances sharing the SAME real
+    // `pathTreeRow` tree id, rendered through the actual exported
+    // `SubpageView` -> `PathSubpageRows`. Isolation must come from
+    // `Command`'s own per-instance store (`useState(createOpenerFileTreeStore)`),
+    // never a global one.
+    const treeOptionValues = (name) =>
+      `[...document.querySelectorAll('[data-gate-palette=${name}] [role=option]')].map(e=>e.textContent)`;
+    await evaluate(
+      "document.querySelector('[data-gate-palette=tree-one] input').scrollIntoView({block:'center'})",
+    );
+    const beforeExpand = await evaluate(treeOptionValues("tree-one"));
+    assert.deepEqual(
+      beforeExpand,
+      ["src", "README.md"],
+      "command/tree-isolation setup: both instances start collapsed",
+    );
+    await clickSelector(
+      "[data-gate-palette=tree-one] [role=option]",
+      "left",
+      true,
+    );
+    await delay(60);
+    const afterExpandOne = await evaluate(treeOptionValues("tree-one"));
+    const afterExpandTwo = await evaluate(treeOptionValues("tree-two"));
+    assert.deepEqual(
+      afterExpandOne,
+      ["src", "lib", "index.ts", "README.md"],
+      "command/tree-isolation: expanding tree-one must reveal its real nested rows",
+    );
+    assert.deepEqual(
+      afterExpandTwo,
+      ["src", "README.md"],
+      "command/tree-isolation: an identically-keyed second instance must stay collapsed",
+    );
+    report.behavior.push(
+      "command/tree-isolation/same-tree-id-two-instances-stay-independent",
+    );
+
+    // Real `AgentSubpageRows` / `ArtifactSubpageRows` (via `SubpageView`),
+    // two side-by-side instances per surface with the SAME node ids - proves
+    // their ArrowLeft/ArrowRight `document.addEventListener(..., true)`
+    // handlers are scoped to the instance that OWNS the event's target, not
+    // just that each instance's expand/collapse STATE happens to be local
+    // (local state alone doesn't isolate a document-level listener - an
+    // unscoped one fires against every mounted instance on every keydown).
+    // Depth-0 rows default-expanded (`isExpanded`'s `row.depth === 0` term),
+    // so both start at 2 visible rows (parent + child); ArrowLeft on the
+    // highlighted parent collapses it.
+    const optionCount = (name) =>
+      `document.querySelectorAll('[data-gate-palette=${name}] [role=option]:not([hidden])').length`;
+    for (const [one, two, kind] of [
+      ["agents-one", "agents-two", "agent"],
+      ["artifacts-one", "artifacts-two", "artifact"],
+    ]) {
+      await focusInput(one);
+      await check(
+        `command/${kind}-tree setup: both ${one} and ${two} start with the depth-0 parent's child row already visible`,
+        `${optionCount(one)}===2 && ${optionCount(two)}===2`,
+      );
+      await key("ArrowLeft", 0);
+      await check(
+        `command/${kind}-tree: ArrowLeft on ${one}'s highlighted parent collapses ONLY ${one}, never the sibling ${two} instance sharing the same node ids`,
+        `${optionCount(one)}===1 && ${optionCount(two)}===2`,
+      );
+      await key("ArrowRight", 0);
+      await check(
+        `command/${kind}-tree: ArrowRight re-expands ${one} without affecting ${two}`,
+        `${optionCount(one)}===2 && ${optionCount(two)}===2`,
+      );
+      report.behavior.push(
+        `command/${kind}-tree/arrowleft-right-scoped-to-owning-command-instance`,
+      );
+    }
+
+    // Real `PinToggle`, composed the same way `command-palette-shell.tsx`'s
+    // own `GroupBlock` does it (`buildPinnedBucket` returns null with no
+    // pins, exactly like this fixture's own `pinnedItems.length > 0 ? ... :
+    // null` - confirmed by reading `src/lib/commands/grouping.ts` before
+    // writing this case, not assumed). A keyboard user arrows to a row (the
+    // real reveal trigger - `group-data-[selected=true]/command-item:inline-flex`,
+    // not hover) then Tabs to its pin button and activates it with a real
+    // keyboard Enter (CDP `Input.dispatchKeyEvent`, which triggers the
+    // browser's own default button-activation - unlike a raw
+    // `dispatchEvent(new KeyboardEvent(...))`, which does not synthesize a
+    // click at all).
+    //
+    // Production fix (`pin-toggle.tsx`): on click, if the button owned
+    // keyboard focus, it calls `highlight(row.id)` on the row's PRE-remount
+    // id (the row is still in its CURRENT group at that point, so the
+    // context's `enabled.find` lookup resolves), then re-focuses the
+    // palette's own input - both before `onToggle()` moves the row to the
+    // other CommandGroup. This is now a real gating check: it throws (via
+    // `check`) rather than deferring, for both directions on the same item.
+    async function pinTogglePreservesFocusAndHighlight(
+      itemId,
+      testid,
+      direction,
+    ) {
+      await focusInput("pin");
+      await key("Home", 0);
+      for (
+        let i = 0;
+        i < 5 && (await evaluate(activeIdOf("pin"))) !== itemId;
+        i++
+      ) {
+        await key("ArrowDown", 0);
+      }
+      await check(
+        `command/pin setup: keyboard navigation reaches ${itemId} before ${direction}`,
+        `${activeIdOf("pin")}==='${itemId}'`,
+      );
+      // Proves onToggle() actually fired, not just the focus/highlight fix.
+      const groupHeadingOf = (id) =>
+        `document.querySelector('[data-gate-palette=pin] [data-value="${id}"]').closest('[data-slot="command-group"]').querySelector('[data-slot="command-group-heading"]').textContent`;
+      const beforePressed = direction === "pin" ? "false" : "true";
+      const afterPressed = direction === "pin" ? "true" : "false";
+      const beforeGroup = direction === "pin" ? "Actions" : "Pinned";
+      const afterGroup = direction === "pin" ? "Pinned" : "Actions";
+      await check(
+        `command/pin setup: ${itemId}'s pin button starts aria-pressed=${beforePressed} in the "${beforeGroup}" group before ${direction}`,
+        `document.querySelector('[data-gate-palette=pin] [data-testid="${testid}"]').getAttribute('aria-pressed')==='${beforePressed}' && ${groupHeadingOf(itemId)}==='${beforeGroup}'`,
+      );
+      await settle();
+      await key("Tab", 0);
+      await delay(40);
+      await check(
+        `command/pin setup: Tab from the highlighted row ${itemId} reaches its own pin button before ${direction}`,
+        `document.activeElement.dataset.testid==='${testid}'`,
+      );
+      await key("Enter", 0);
+      await delay(60);
+      const name = `command/pin/${direction}-${itemId}-keyboard-activation`;
+      await check(
+        `${direction} ${itemId} via real keyboard Enter returns focus to the palette's own input, not the pin button or <body>`,
+        `document.activeElement===document.querySelector('[data-gate-palette=pin] input')`,
+      );
+      await check(
+        `${direction} ${itemId} keeps it the highlighted row across the CommandGroup move, with a live aria-activedescendant resolving to it`,
+        `${activeIdOf("pin")}==='${itemId}'`,
+      );
+      await check(
+        `${direction} ${itemId} actually toggled - pin button now aria-pressed=${afterPressed} and the row now lives in the "${afterGroup}" CommandGroup, not a no-op onToggle`,
+        `document.querySelector('[data-gate-palette=pin] [data-testid="${testid}"]').getAttribute('aria-pressed')==='${afterPressed}' && ${groupHeadingOf(itemId)}==='${afterGroup}'`,
+      );
+      report.behavior.push(name);
+    }
+    // First call pins beta (Actions -> Pinned, a newly-mounted group);
+    // second call unpins it (Pinned -> Actions, both groups already
+    // mounted) - both directions.
+    await pinTogglePreservesFocusAndHighlight(
+      "beta",
+      "command-palette-pin-beta",
+      "pin",
+    );
+    await pinTogglePreservesFocusAndHighlight(
+      "beta",
+      "command-palette-pin-beta",
+      "unpin",
+    );
+
+    // A genuinely harmless rerender (a controlled `highlightedValue` change
+    // that does NOT move the row across CommandGroup parents) must NOT
+    // itself cause focus loss - isolates that the defect above is
+    // specifically about the cross-group move, not "any rerender
+    // whatsoever". Uses "gamma", never pinned/moved by the cases above.
+    await evaluate(
+      'document.querySelector(\'[data-gate-palette=pin] [data-value="gamma"]\').scrollIntoView({block:"center"})',
+    );
+    await clickSelector("[data-gate-palette=pin] input", "left", true);
+    await hoverSelector('[data-gate-palette=pin] [data-value="gamma"]');
+    await settle();
+    await key("Tab", 0);
+    await delay(40);
+    await check(
+      "Tab reaches gamma's pin button (never pinned/moved by the cases above)",
+      "document.activeElement.dataset.testid==='command-palette-pin-gamma'",
+    );
+    await evaluate("window.primitiveGate.command.setHighlight('pin','gamma')");
+    await delay(60);
+    await check(
+      "a harmless rerender that does not move the row across groups retains focus on its pin button",
+      "document.activeElement.dataset.testid==='command-palette-pin-gamma'",
+    );
+    report.behavior.push("command/pin/harmless-rerender-retains-focus");
+
+    // D16: Command mounted inside Dialog/Popover gets Base's REAL default
+    // focus (first-tabbable on open, restore-to-trigger on close) - never a
+    // forced `initialFocus`, so this proves the actual production wiring a
+    // real call site gets, not a callback the fixture injected for itself.
+    for (const family of ["command-in-dialog", "command-in-popover"]) {
+      await load(family, "default", "visual", views[0], "light");
+      await open(family, "default", views[0]);
+      await settle();
+      await check(
+        "opening focuses the Command search input by Base's real default (no forced initialFocus)",
+        "document.activeElement.matches('[data-gate-palette=one] input')",
+      );
+      report.behavior.push(
+        `command/in-overlay/${family}/opens-focused-on-search-input`,
+      );
+      await evaluate(
+        "document.querySelector('[data-gate-palette=one] input').select()",
+      );
+      await client.send("Input.insertText", { text: "Project" });
+      await delay(40);
+      await key("Enter", 0);
+      await check(
+        "picking a row inside the overlay still works exactly like the standalone case",
+        `${pickedOf("one")}==='exact'`,
+      );
+      report.behavior.push(`command/in-overlay/${family}/pick-still-works`);
+      await key("Escape", 0);
+      await wait(
+        "overlay closed",
+        "!document.querySelector('[data-gate-popup]')",
+      );
+      await check(
+        "closing restores focus to the trigger by Base's real default",
+        "document.activeElement.matches('[data-gate-trigger]')",
+      );
+      report.behavior.push(
+        `command/in-overlay/${family}/closes-focus-returns-to-trigger`,
+      );
+    }
   }
   async function nestedChecks() {
     for (const state of ["menu", "select"])
@@ -2520,6 +3271,7 @@ try {
           "guideOwnership",
           "drawerGesture",
           "drawerInterrupted",
+          "command",
         ].includes(only),
       "Unknown behavior lane",
     );
@@ -2532,6 +3284,7 @@ try {
     if (!only || only === "drawerGesture") await drawerGestureChecks();
     if (!only || only === "drawerInterrupted")
       await drawerInterruptedEnterChecks();
+    if (!only || only === "command") await commandChecks();
     console.log(
       `PASS ${report.behavior.length} behavior cases; ${report.deferrals.length} named deferral(s)`,
     );
@@ -2723,23 +3476,34 @@ async function key(key, modifiers) {
     Tab: 9,
     Enter: 13,
     Escape: 27,
+    PageUp: 33,
+    PageDown: 34,
+    End: 35,
+    Home: 36,
     ArrowLeft: 37,
+    ArrowUp: 38,
     ArrowRight: 39,
     ArrowDown: 40,
     t: 84,
+    n: 78,
+    j: 74,
+    p: 80,
+    k: 75,
   };
+  const letterCode = { n: "KeyN", j: "KeyJ", p: "KeyP", k: "KeyK" };
+  const code = key === "t" ? "KeyT" : (letterCode[key] ?? key);
   await client.send("Input.dispatchKeyEvent", {
     type: "keyDown",
     text: key === "Enter" ? "\r" : "",
     key,
-    code: key === "t" ? "KeyT" : key,
+    code,
     windowsVirtualKeyCode: codes[key],
     modifiers,
   });
   await client.send("Input.dispatchKeyEvent", {
     type: "keyUp",
     key,
-    code: key === "t" ? "KeyT" : key,
+    code,
     windowsVirtualKeyCode: codes[key],
     modifiers,
   });

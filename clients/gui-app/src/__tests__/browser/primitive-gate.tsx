@@ -48,6 +48,20 @@ import {
 } from "@/components/ui/overlay-frame-context";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import { escapeOwnedElsewhere } from "@/components/onboarding/guide-overlays";
+import { PinToggle } from "@/components/command-palette/pin-toggle";
+import { SubpageView } from "@/components/command-palette/palette-cmdk";
+import {
+  buildPathTreeItems,
+  openerPathTreeId,
+  type PathTreeLeaf,
+} from "@/lib/commands/sources/open/path-tree-items";
+import { openerActionLeaf } from "@/lib/commands/sources/open/open-leaf";
+import type {
+  CommandContext,
+  CommandItem,
+  CommandSubpage,
+} from "@/lib/commands/types";
+import type { KeybindingRouter } from "@/lib/keybindings/dispatch";
 import "@/lib/theme-applier";
 import "@/index.css";
 
@@ -70,9 +84,61 @@ declare global {
       showNestedTooltip: () => void;
       concealNested: (value: boolean) => void;
       escapeOwnedElsewhere: (within: ReadonlyArray<Element | null>) => boolean;
+      command: CommandGateApi;
     };
   }
 }
+// `mode==="command"` fixture components patch these in from their own
+// effects (mirrors the retired T02 proof lane's `window.baseProof.highlight`
+// pattern). A module-level object rather than a field the shared Fixture
+// component's own mount effect assigns: that effect replaces
+// `window.primitiveGate` wholesale, and child effects run BEFORE a parent's
+// on mount, so a child-owned key would be wiped by the parent's later,
+// same-commit assignment. Referencing this stable object instead of copying
+// it sidesteps the ordering hazard entirely.
+interface CommandGateApi {
+  setHighlight: (palette: string, key: string) => void;
+  removeRow: (palette: string, key: string) => void;
+  toggleDisabled: (palette: string, key: string) => void;
+  reorder: (palette: string, keys: ReadonlyArray<string>) => void;
+  // T08 review R1: reorders a row set owned entirely by a component NESTED
+  // under `Command` (its own local `useState`), never by `Command`'s own
+  // ancestor-level fixture state - so this, unlike `reorder` above, never
+  // causes `Command` itself to re-render. Only `Command`'s own
+  // `MutationObserver` (watching `listRef.current` for DOM mutations
+  // regardless of cause) can pick this up.
+  nestedReorder: (keys: ReadonlyArray<string>) => void;
+}
+interface CommandPaletteGateHandlers {
+  readonly setHighlight: (key: string) => void;
+  readonly removeRow: (key: string) => void;
+  readonly toggleDisabled: (key: string) => void;
+  readonly reorder: (keys: ReadonlyArray<string>) => void;
+}
+// Keyed by palette name rather than one shared per-method slot: several
+// CommandBehaviorFixture instances mount as siblings (never nested), so
+// mount-effect order across them is unspecified beyond "before paint" - a
+// design where each instance's effect directly REPLACES a shared function
+// would leave only the last-mounted instance's closure reachable, silently
+// dropping every call meant for an earlier one. Each instance instead
+// registers its own handlers under its own name, and these dispatchers just
+// look the palette up.
+const commandPaletteRegistry = new Map<string, CommandPaletteGateHandlers>();
+// Single slot, not keyed by name like `commandPaletteRegistry` above: only
+// one `NestedLocalReorderRows` instance exists in this fixture, and its own
+// reorder path is the whole point under test (see `CommandGateApi.nestedReorder`).
+let nestedReorderHandler: ((keys: ReadonlyArray<string>) => void) | undefined;
+const commandGateApi: CommandGateApi = {
+  setHighlight: (palette, key) =>
+    commandPaletteRegistry.get(palette)?.setHighlight(key),
+  removeRow: (palette, key) =>
+    commandPaletteRegistry.get(palette)?.removeRow(key),
+  toggleDisabled: (palette, key) =>
+    commandPaletteRegistry.get(palette)?.toggleDisabled(key),
+  reorder: (palette, keys) =>
+    commandPaletteRegistry.get(palette)?.reorder(keys),
+  nestedReorder: (keys) => nestedReorderHandler?.(keys),
+};
 const params = new URLSearchParams(location.search);
 const family = params.get("family") ?? "button";
 const state = params.get("state") ?? "default";
@@ -262,6 +328,507 @@ function PassiveTooltipCase(): ReactNode {
         {label}
       </Tooltip.TooltipContent>
     </Tooltip.Tooltip>
+  );
+}
+// Real production `@/components/ui/command`, ported off the retired T02
+// proof's own row dataset ("tree"/"disabled" + 2 tied "Duplicate" rows +
+// r2..r11 "Project N" rows + an exact-match "exact" row) so the browser-lane
+// assertions below are the same ones the proof already validated - just
+// against the shipped component instead of a throwaway fixture. The toy
+// ArrowRight/ArrowLeft "tree expand" feature the proof bolted on is dropped:
+// that was proof-only scaffolding, not a real Command feature (the real
+// per-Command file-tree store is exercised separately, by the opener
+// sub-page cases, not here).
+interface CommandFixtureRow {
+  readonly key: string;
+  readonly label: string;
+  readonly group: string;
+  readonly disabled?: boolean;
+}
+const COMMAND_FIXTURE_ROWS: ReadonlyArray<CommandFixtureRow> = [
+  { key: "tree", label: "Parent", group: "tree" },
+  { key: "disabled-row", label: "Disabled", group: "tree", disabled: true },
+  { key: "r0", label: "Duplicate", group: "projects" },
+  { key: "r1", label: "Duplicate", group: "projects" },
+  ...Array.from({ length: 10 }, (_, index) => ({
+    key: `r${index + 2}`,
+    label: `Project ${index + 2}`,
+    group: "projects",
+  })),
+  { key: "exact", label: "Project", group: "best" },
+];
+const COMMAND_DYNAMIC_ROWS: ReadonlyArray<CommandFixtureRow> = [
+  { key: "a", label: "Row A", group: "dyn" },
+  { key: "b", label: "Row B", group: "dyn" },
+  { key: "c", label: "Row C", group: "dyn" },
+  { key: "d", label: "Row D", group: "dyn" },
+];
+// Disabled at BOTH array endpoints - Home/End must land on the nearest
+// ENABLED row, never clamp to index 0 / length-1 regardless of that row's
+// disabled state. Mirrors the unit-level
+// "Home/End skip disabled rows even at the array's own endpoints" case in
+// command-navigation.test.tsx; this ports the same shape into the real
+// browser lane.
+const COMMAND_DISABLED_ENDPOINTS_ROWS: ReadonlyArray<CommandFixtureRow> = [
+  { key: "zero", label: "Zero", group: "endpoints", disabled: true },
+  { key: "one", label: "One", group: "endpoints" },
+  { key: "two", label: "Two", group: "endpoints" },
+  { key: "three", label: "Three", group: "endpoints" },
+  { key: "four", label: "Four", group: "endpoints", disabled: true },
+];
+// T08 review R2: 3 groups, the middle one entirely disabled - Alt+ArrowUp/Down
+// group-hop must skip a hidden/disabled-only group, always land on the FIRST
+// enabled row of the target group (never the row nearest the current one),
+// and fall back to an ordinary single step at a group boundary. `enabled`
+// (skipping "skip1"/"skip2") is [a, b, c, d]: an Alt-hop from "a" must reach
+// "c" directly, skipping "b" too - the one thing that tells a group-hop apart
+// from plain/Ctrl-remapped ArrowDown, which would land on "b".
+const COMMAND_CHORD_ROWS: ReadonlyArray<CommandFixtureRow> = [
+  { key: "a", label: "Alpha", group: "g1" },
+  { key: "b", label: "Bravo", group: "g1" },
+  { key: "skip1", label: "Skip One", group: "g2", disabled: true },
+  { key: "skip2", label: "Skip Two", group: "g2", disabled: true },
+  { key: "c", label: "Charlie", group: "g3" },
+  { key: "d", label: "Delta", group: "g3" },
+];
+// T08 review R1: a nested-consumer-owned reorder. Same shared label prefix so
+// a query ties all three under the real scorer (`compareSource` is the only
+// tiebreaker) - the case the review's own "tied results reordered while a
+// query remains active" probe covers, but here the reorder is driven by a
+// component NESTED under `Command`, not the top-level fixture (see
+// `NestedLocalReorderRows` below).
+const COMMAND_NESTED_ROWS: ReadonlyArray<CommandFixtureRow> = [
+  { key: "n1", label: "Nested One", group: "nested" },
+  { key: "n2", label: "Nested Two", group: "nested" },
+  { key: "n3", label: "Nested Three", group: "nested" },
+];
+// Owns ITS OWN local `useState`, a sibling of `CommandBehaviorFixture`'s own
+// rows state, not a descendant of it. Reordering here re-renders only this
+// component and its own subtree - `Command` itself is never re-invoked, so
+// its render-time `sourcePositions` state and `useLayoutEffect` (the one that
+// runs "after every commit" - of `Command`, not of any arbitrary descendant)
+// never get a chance to run from this trigger. Only `Command`'s
+// `MutationObserver`, watching `listRef.current` for DOM mutations regardless
+// of which component's render caused them, can observe this and re-derive
+// order/ranking. Proves the observer path exists and is load-bearing, not
+// just the render-time fix.
+function NestedLocalReorderRows(props: {
+  readonly rows: ReadonlyArray<CommandFixtureRow>;
+}): ReactNode {
+  const { rows: initialRows } = props;
+  const [rows, setRows] = useState(initialRows);
+  useEffect(() => {
+    nestedReorderHandler = (keys) =>
+      flushSync(() =>
+        setRows((current) =>
+          keys
+            .map((key) => current.find((row) => row.key === key))
+            .filter((row): row is CommandFixtureRow => row !== undefined),
+        ),
+      );
+    return () => {
+      nestedReorderHandler = undefined;
+    };
+  }, []);
+  return (
+    <>
+      {rows.map((row) => (
+        <Command.CommandItem
+          key={row.key}
+          itemKey={row.key}
+          searchText={row.label}
+        >
+          {row.label}
+        </Command.CommandItem>
+      ))}
+    </>
+  );
+}
+function CommandNestedReorderFixture(): ReactNode {
+  return (
+    <Command.Command data-gate-palette="nested">
+      <Command.CommandInput aria-label="nested" placeholder="nested" />
+      <Command.CommandList>
+        <Command.CommandGroup heading="nested">
+          <NestedLocalReorderRows rows={COMMAND_NESTED_ROWS} />
+        </Command.CommandGroup>
+      </Command.CommandList>
+    </Command.Command>
+  );
+}
+function CommandBehaviorFixture(props: {
+  readonly name: string;
+  readonly rows: ReadonlyArray<CommandFixtureRow>;
+  readonly shouldFilter?: boolean;
+  // T08 review R2 collision audit: lets a case mount a Command instance whose
+  // consumer callback preventDefault()s unconditionally, proving Command's
+  // own chord handling honors `event.defaultPrevented` (checked right after
+  // the consumer callback runs, before any navigation) rather than always
+  // acting first.
+  readonly onKeyDown?: ComponentProps<typeof Command.Command>["onKeyDown"];
+}): ReactNode {
+  const { name, rows: initialRows, shouldFilter, onKeyDown } = props;
+  const [rows, setRows] = useState(initialRows);
+  const [highlightedValue, setHighlightedValue] = useState("");
+  const [picked, setPicked] = useState("");
+  useEffect(() => {
+    commandPaletteRegistry.set(name, {
+      setHighlight: (key) => flushSync(() => setHighlightedValue(key)),
+      removeRow: (key) =>
+        flushSync(() =>
+          setRows((current) => current.filter((row) => row.key !== key)),
+        ),
+      toggleDisabled: (key) =>
+        flushSync(() =>
+          setRows((current) =>
+            current.map((row) =>
+              row.key === key ? { ...row, disabled: !row.disabled } : row,
+            ),
+          ),
+        ),
+      reorder: (keys) =>
+        flushSync(() =>
+          setRows((current) =>
+            keys
+              .map((key) => current.find((row) => row.key === key))
+              .filter((row): row is CommandFixtureRow => row !== undefined),
+          ),
+        ),
+    });
+    return () => {
+      commandPaletteRegistry.delete(name);
+    };
+  }, [name]);
+  const groups = [...new Set(rows.map((row) => row.group))];
+  return (
+    <Command.Command
+      data-gate-palette={name}
+      highlightedValue={highlightedValue}
+      onHighlightChange={setHighlightedValue}
+      shouldFilter={shouldFilter}
+      onKeyDown={onKeyDown}
+    >
+      <Command.CommandInput aria-label={name} placeholder={name} />
+      <Command.CommandList>
+        <Command.CommandEmpty>No results</Command.CommandEmpty>
+        {groups.map((group) => (
+          <Command.CommandGroup key={group} heading={group}>
+            {rows
+              .filter((row) => row.group === group)
+              .map((row) => (
+                <Command.CommandItem
+                  key={row.key}
+                  itemKey={row.key}
+                  searchText={row.label}
+                  disabled={row.disabled}
+                  onAction={() => setPicked(row.key)}
+                >
+                  {row.label}
+                </Command.CommandItem>
+              ))}
+          </Command.CommandGroup>
+        ))}
+      </Command.CommandList>
+      <div hidden data-gate-command-state={name} data-picked={picked} />
+    </Command.Command>
+  );
+}
+// Two independent production `<Command>` mounts sharing the SAME real
+// `pathTreeRow` tree id, rendered through the actual exported `SubpageView` ->
+// `PathSubpageRows` (`palette-cmdk.tsx`) against real `buildPathTreeItems`/
+// `openerPathTreeId` output (`path-tree-items.ts`) - not a rebuilt Files-
+// opener host-data pipeline (that needs a live host client, workspace search
+// RPC and an open-epic Yjs projection, none of which exist in this fixture),
+// and not the raw file-tree hooks either. Isolation comes entirely from
+// `Command`'s own `useState(createOpenerFileTreeStore)` +
+// `OpenerFileTreeContext.Provider` (`command.tsx`); this proves it against
+// the REAL consumer of that store. `open:agents` (`AgentSubpageRows`) and
+// `open:artifacts` (`ArtifactSubpageRows`) keep their OWN local `useState`
+// expand/collapse sets - they never reach the shared file-tree store at all,
+// so DATA isolation is trivially true for them by construction and there is
+// nothing for a same-tree-id case to prove there. `pathTreeRow` (driving
+// `PathSubpageRows`, `files`/`diff` opener sub-pages) is the one real
+// consumer this store isolation actually matters for.
+//
+// Local state does NOT, on its own, prove EVENT isolation though: both
+// `AgentSubpageRows` and `ArtifactSubpageRows` handle ArrowLeft/ArrowRight
+// via their own `document.addEventListener("keydown", onKeyDown, true)`
+// (mirroring `PathSubpageRows`'s own pattern below), and a document-level
+// capture listener can fire against every mounted instance regardless of
+// which one's local state "owns" the row - two side-by-side instances with
+// unscoped listeners would both react to the same keystroke. Read both and
+// confirmed each one DOES scope itself the same way `PathSubpageRows` does
+// (`ownerMarkerRef.current?.closest('[data-slot="command"]')` compared
+// against `event.target.closest('[data-slot="command"]')`, bailing out when
+// they differ) - `CommandAgentArtifactScopingFixture` below proves this
+// empirically for both surfaces.
+const COMMAND_GATE_ROUTER: KeybindingRouter = {
+  getPathname: () => "/",
+  navigateHome: () => undefined,
+  navigateSettings: () => undefined,
+  navigateToEpic: () => undefined,
+  navigateToEpicTab: () => undefined,
+  navigateToEpicList: () => undefined,
+  navigateSettingsSection: () => undefined,
+  navigateToTabIntent: () => undefined,
+  goBack: () => undefined,
+  goForward: () => undefined,
+  isHistoryNavAvailable: () => false,
+  canGoBack: () => false,
+  canGoForward: () => false,
+};
+const COMMAND_GATE_CTX: CommandContext = {
+  pathname: "/",
+  router: COMMAND_GATE_ROUTER,
+  activeTabId: null,
+  activeEpicId: null,
+  focusedComposerKind: null,
+  targetGroupId: null,
+};
+function commandGatePathTreeLeaf(path: string): PathTreeLeaf {
+  return {
+    item: openerActionLeaf({
+      id: `open:files:${path}`,
+      label: path,
+      keywords: [path],
+      run: () => undefined,
+    }),
+    path,
+    displaySegments: null,
+    structuralSegments: null,
+    gitStatus: undefined,
+  };
+}
+// Deliberately the SAME treeId for both mounted instances - the point of
+// this case is `Command`'s own per-instance store, not
+// `openerPathTreeId`'s hostId/workspacePath uniqueness (which would differ
+// per real call site and never collide in practice).
+const COMMAND_SHARED_PATH_TREE_ID = openerPathTreeId(
+  "files",
+  "gate-host",
+  "/gate-workspace",
+);
+const COMMAND_TREE_LEAVES: ReadonlyArray<PathTreeLeaf> = [
+  commandGatePathTreeLeaf("src/index.ts"),
+  commandGatePathTreeLeaf("src/lib/utils.ts"),
+  commandGatePathTreeLeaf("README.md"),
+];
+function commandGateTreeSubpage(title: string): CommandSubpage {
+  return {
+    id: "open:files:code-root",
+    title,
+    useItems: () =>
+      buildPathTreeItems(COMMAND_SHARED_PATH_TREE_ID, COMMAND_TREE_LEAVES, []),
+  };
+}
+function CommandTreeIsolationFixture(props: {
+  readonly name: string;
+}): ReactNode {
+  return (
+    <Command.Command data-gate-palette={props.name}>
+      <Command.CommandInput aria-label={props.name} placeholder={props.name} />
+      <Command.CommandList>
+        <SubpageView
+          subpage={commandGateTreeSubpage(props.name)}
+          ctx={COMMAND_GATE_CTX}
+          onSelect={() => undefined}
+        />
+      </Command.CommandList>
+    </Command.Command>
+  );
+}
+// Two-row trees (one expandable parent + one child) for the Agent/Artifact
+// ArrowLeft/Right event-scoping proof - deliberately the SAME nodeId set
+// across both mounted instances of a given kind, the same "same tree id,
+// two instances" shape the path-tree case above uses, since that is exactly
+// the scenario an unscoped document-level listener would leak across.
+function commandGateAgentSubpage(title: string): CommandSubpage {
+  const items: ReadonlyArray<CommandItem> = [
+    {
+      ...openerActionLeaf({
+        id: "gate-agent-parent",
+        label: "Parent agent",
+        keywords: [],
+        run: () => undefined,
+      }),
+      agentTreeRow: {
+        nodeId: "agent-parent",
+        depth: 0,
+        ancestorIds: [],
+        hasChildren: true,
+        interface: "chat",
+        activity: "idle",
+      },
+    },
+    {
+      ...openerActionLeaf({
+        id: "gate-agent-child",
+        label: "Child agent",
+        keywords: [],
+        run: () => undefined,
+      }),
+      agentTreeRow: {
+        nodeId: "agent-child",
+        depth: 1,
+        ancestorIds: ["agent-parent"],
+        hasChildren: false,
+        interface: "chat",
+        activity: "idle",
+      },
+    },
+  ];
+  return { id: "open:agents", title, useItems: () => items };
+}
+function commandGateArtifactSubpage(title: string): CommandSubpage {
+  const items: ReadonlyArray<CommandItem> = [
+    {
+      ...openerActionLeaf({
+        id: "gate-artifact-parent",
+        label: "Parent artifact",
+        keywords: [],
+        run: () => undefined,
+      }),
+      artifactTreeRow: {
+        nodeId: "artifact-parent",
+        depth: 0,
+        ancestorIds: [],
+        hasChildren: true,
+        kind: "story",
+        status: null,
+      },
+    },
+    {
+      ...openerActionLeaf({
+        id: "gate-artifact-child",
+        label: "Child artifact",
+        keywords: [],
+        run: () => undefined,
+      }),
+      artifactTreeRow: {
+        nodeId: "artifact-child",
+        depth: 1,
+        ancestorIds: ["artifact-parent"],
+        hasChildren: false,
+        kind: "ticket",
+        status: null,
+      },
+    },
+  ];
+  return { id: "open:artifacts", title, useItems: () => items };
+}
+function CommandAgentArtifactScopingFixture(props: {
+  readonly name: string;
+  readonly kind: "agents" | "artifacts";
+}): ReactNode {
+  const subpage =
+    props.kind === "agents"
+      ? commandGateAgentSubpage(props.name)
+      : commandGateArtifactSubpage(props.name);
+  return (
+    <Command.Command data-gate-palette={props.name}>
+      <Command.CommandInput aria-label={props.name} placeholder={props.name} />
+      <Command.CommandList>
+        <SubpageView
+          subpage={subpage}
+          ctx={COMMAND_GATE_CTX}
+          onSelect={() => undefined}
+        />
+      </Command.CommandList>
+    </Command.Command>
+  );
+}
+// Real `PinToggle`, composed the same way `command-palette-shell.tsx`'s own
+// `GroupBlock` does it: a pinned item leaves its default group entirely and
+// reappears as the first row of a separately-mounted "Pinned" group - which
+// is a real React-tree move, not just a within-group DOM reorder. Proves
+// (or disproves) that the pin button survives that move without losing
+// focus; that is the actual shape of the gesture a keyboard user performs.
+interface CommandPinFixtureItem {
+  readonly id: string;
+  readonly label: string;
+}
+const COMMAND_PIN_FIXTURE_ITEMS: ReadonlyArray<CommandPinFixtureItem> = [
+  { id: "alpha", label: "Alpha action" },
+  { id: "beta", label: "Beta action" },
+  { id: "gamma", label: "Gamma action" },
+];
+function CommandPinFixture(): ReactNode {
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(new Set());
+  const [highlightedValue, setHighlightedValue] = useState("");
+  // Registered under the same commandPaletteRegistry the other Command
+  // fixtures use, so the driver can force a harmless, group-preserving
+  // rerender (a controlled `highlightedValue` change) from the outside
+  // WITHOUT any DOM interaction that would itself move keyboard focus -
+  // isolating whether focus loss is about "any rerender" or specifically
+  // the cross-CommandGroup move a pin toggle causes.
+  useEffect(() => {
+    commandPaletteRegistry.set("pin", {
+      setHighlight: (key) => flushSync(() => setHighlightedValue(key)),
+      removeRow: () => undefined,
+      toggleDisabled: () => undefined,
+      reorder: () => undefined,
+    });
+    return () => {
+      commandPaletteRegistry.delete("pin");
+    };
+  }, []);
+  const togglePin = (id: string): void =>
+    setPinned((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const pinnedItems = COMMAND_PIN_FIXTURE_ITEMS.filter((item) =>
+    pinned.has(item.id),
+  );
+  const restItems = COMMAND_PIN_FIXTURE_ITEMS.filter(
+    (item) => !pinned.has(item.id),
+  );
+  return (
+    <Command.Command
+      data-gate-palette="pin"
+      highlightedValue={highlightedValue}
+      onHighlightChange={setHighlightedValue}
+    >
+      <Command.CommandInput aria-label="pin" placeholder="pin" />
+      <Command.CommandList>
+        {pinnedItems.length > 0 ? (
+          <Command.CommandGroup heading="Pinned">
+            {pinnedItems.map((item) => (
+              <Command.CommandItem
+                key={item.id}
+                itemKey={item.id}
+                searchText={item.label}
+              >
+                <span className="truncate">{item.label}</span>
+                <PinToggle
+                  itemId={item.id}
+                  pinned
+                  onToggle={() => togglePin(item.id)}
+                />
+              </Command.CommandItem>
+            ))}
+          </Command.CommandGroup>
+        ) : null}
+        <Command.CommandGroup heading="Actions">
+          {restItems.map((item) => (
+            <Command.CommandItem
+              key={item.id}
+              itemKey={item.id}
+              searchText={item.label}
+            >
+              <span className="truncate">{item.label}</span>
+              <PinToggle
+                itemId={item.id}
+                pinned={false}
+                onToggle={() => togglePin(item.id)}
+              />
+            </Command.CommandItem>
+          ))}
+        </Command.CommandGroup>
+      </Command.CommandList>
+    </Command.Command>
   );
 }
 interface NestedCaseProps {
@@ -931,6 +1498,46 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
     );
   },
   command: (): ReactNode => {
+    // mode==="command" is strictly additive, new-value-gated behavior
+    // fixtures for the browser lane; the 6 static visual states above
+    // (mode==="visual", the default) are untouched byte-for-byte.
+    if (mode === "command")
+      return (
+        <div className="flex flex-col gap-4">
+          <CommandBehaviorFixture name="one" rows={COMMAND_FIXTURE_ROWS} />
+          <CommandBehaviorFixture name="two" rows={COMMAND_FIXTURE_ROWS} />
+          <CommandBehaviorFixture
+            name="nofilter"
+            rows={COMMAND_FIXTURE_ROWS}
+            shouldFilter={false}
+          />
+          <CommandBehaviorFixture name="dyn" rows={COMMAND_DYNAMIC_ROWS} />
+          <CommandBehaviorFixture
+            name="endpoints"
+            rows={COMMAND_DISABLED_ENDPOINTS_ROWS}
+          />
+          <CommandBehaviorFixture name="chords" rows={COMMAND_CHORD_ROWS} />
+          <CommandBehaviorFixture
+            name="guarded"
+            rows={COMMAND_CHORD_ROWS}
+            onKeyDown={(event) => event.preventDefault()}
+          />
+          <CommandNestedReorderFixture />
+          <CommandTreeIsolationFixture name="tree-one" />
+          <CommandTreeIsolationFixture name="tree-two" />
+          <CommandAgentArtifactScopingFixture name="agents-one" kind="agents" />
+          <CommandAgentArtifactScopingFixture name="agents-two" kind="agents" />
+          <CommandAgentArtifactScopingFixture
+            name="artifacts-one"
+            kind="artifacts"
+          />
+          <CommandAgentArtifactScopingFixture
+            name="artifacts-two"
+            kind="artifacts"
+          />
+          <CommandPinFixture />
+        </div>
+      );
     return (
       <Command.Command
         variant={state === "embedded" ? "embedded" : "standalone"}
@@ -944,18 +1551,47 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
           <Command.CommandEmpty>No results</Command.CommandEmpty>
           <Command.CommandGroup heading="Workspace">
             <Command.CommandItem
-              value="settings"
+              itemKey="settings"
               disabled={state === "disabled"}
               data-checked={state === "checked"}
             >
               Settings
             </Command.CommandItem>
-            <Command.CommandItem value="files">Files</Command.CommandItem>
+            <Command.CommandItem itemKey="files">Files</Command.CommandItem>
           </Command.CommandGroup>
         </Command.CommandList>
       </Command.Command>
     );
   },
+  // D16: Command mounted inside Dialog/Popover, proving Base's real DEFAULT
+  // focus behavior (focus-first-tabbable on open, restore-to-trigger on
+  // close) against the Command search input - never the callback-forced
+  // `initialFocus`/`finalFocus` the `dialog`/`popover` cases use for their
+  // own onOpenFocus/onCloseFocus checks. Deliberately its own top-level
+  // family, not a `dialog`/`popover` state: reusing those would either give
+  // up the real-default-focus assertion (their non-visual branches force
+  // focus via a callback) or require branching their existing, already
+  // pixel-gated bodies.
+  "command-in-dialog": ({ open, changeOpen }): ReactNode => (
+    <Dialog.Dialog open={open} onOpenChange={changeOpen}>
+      <Dialog.DialogTrigger render={trigger} />
+      <Dialog.DialogContent data-gate-popup="outer">
+        <Dialog.DialogHeader>
+          <Dialog.DialogTitle>Command in dialog</Dialog.DialogTitle>
+          <Dialog.DialogDescription>{label}</Dialog.DialogDescription>
+        </Dialog.DialogHeader>
+        <CommandBehaviorFixture name="one" rows={COMMAND_FIXTURE_ROWS} />
+      </Dialog.DialogContent>
+    </Dialog.Dialog>
+  ),
+  "command-in-popover": ({ open, changeOpen }): ReactNode => (
+    <Popover.Popover open={open} onOpenChange={changeOpen}>
+      <Popover.PopoverTrigger render={trigger} />
+      <Popover.PopoverContent data-gate-popup="outer" layout="bare">
+        <CommandBehaviorFixture name="one" rows={COMMAND_FIXTURE_ROWS} />
+      </Popover.PopoverContent>
+    </Popover.Popover>
+  ),
 };
 export function Fixture(): ReactNode {
   const [open, setOpen] = useState(false);
@@ -1060,6 +1696,7 @@ export function Fixture(): ReactNode {
       showNestedTooltip: () => flushSync(() => setNestedTooltipVisible(true)),
       concealNested: (value) => flushSync(() => setNestedConcealed(value)),
       escapeOwnedElsewhere,
+      command: commandGateApi,
     };
     return () => document.removeEventListener("focusin", recordFocus);
     // `frame.registry` (the Set) is stable across renders (useOverlayFrame's

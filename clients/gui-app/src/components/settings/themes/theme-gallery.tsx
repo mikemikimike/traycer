@@ -361,7 +361,7 @@ function ThemePicker({
       >
         <Command
           label={`Search ${appearance} themes`}
-          defaultValue={
+          defaultHighlightedValue={
             saved.some((theme) => theme.id === id)
               ? `saved:${id}`
               : `builtin:${id}`
@@ -380,11 +380,11 @@ function ThemePicker({
                 {saved.map((theme) => (
                   <CommandItem
                     key={theme.id}
-                    value={`saved:${theme.id}`}
+                    itemKey={`saved:${theme.id}`}
                     keywords={[theme.name, theme.collection?.name ?? ""]}
                     aria-label={`Use ${theme.name} ${appearance}`}
                     data-checked={theme.id === id}
-                    onSelect={() => choose(theme.id)}
+                    onAction={() => choose(theme.id)}
                   >
                     <PaletteSwatch
                       colors={{
@@ -403,11 +403,11 @@ function ThemePicker({
               {THEME_PRESETS.map((preset) => (
                 <CommandItem
                   key={preset.id}
-                  value={`builtin:${preset.id}`}
+                  itemKey={`builtin:${preset.id}`}
                   keywords={[preset.label]}
                   aria-label={`Use ${preset.label} ${appearance}`}
                   data-checked={preset.id === id}
-                  onSelect={() => choose(preset.id)}
+                  onAction={() => choose(preset.id)}
                 >
                   <PaletteSwatch
                     colors={getBuiltinThemeColors(preset.id, appearance)}

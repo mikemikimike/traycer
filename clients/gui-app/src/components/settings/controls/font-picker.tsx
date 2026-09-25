@@ -141,16 +141,16 @@ export function FontPicker(props: FontPickerProps) {
             <CommandInput
               aria-label={`Search ${ariaLabel.toLowerCase()}`}
               value={query}
-              onValueChange={setQuery}
+              onChange={(event) => setQuery(event.target.value)}
               placeholder="Search fonts…"
               spellCheck={false}
             />
             <CommandList className="max-h-[min(50vh,18rem)] p-1">
               <CommandGroup>
                 <CommandItem
-                  value="__default__"
+                  itemKey="__default__"
                   data-checked={value === null ? "true" : "false"}
-                  onSelect={() => commit(null)}
+                  onAction={() => commit(null)}
                 >
                   <span className="min-w-0 flex-1 break-words text-muted-foreground">
                     {defaultLabel}
@@ -160,8 +160,8 @@ export function FontPicker(props: FontPickerProps) {
               {showCustom ? (
                 <CommandGroup>
                   <CommandItem
-                    value={`custom:${trimmedQuery}`}
-                    onSelect={() => commit(trimmedQuery)}
+                    itemKey={`custom:${trimmedQuery}`}
+                    onAction={() => commit(trimmedQuery)}
                   >
                     <span className="min-w-0 flex-1 break-words">
                       {`Use "${trimmedQuery}"`}
@@ -181,9 +181,9 @@ export function FontPicker(props: FontPickerProps) {
                   {filtered.map((font) => (
                     <CommandItem
                       key={font.family}
-                      value={font.family}
+                      itemKey={font.family}
                       data-checked={font.family === value ? "true" : "false"}
-                      onSelect={() => commit(font.family)}
+                      onAction={() => commit(font.family)}
                     >
                       <span
                         className="min-w-0 flex-1 break-words"
