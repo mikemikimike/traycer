@@ -427,7 +427,7 @@ export function Sheet(props: {
 }): ReactNode {
   return (
     <div
-      data-shell-sheet="content"
+      data-shell-sheet="task"
       data-fixture-sheet={props.tabId}
       style={{ anchorName: browserGuestCssSheetAnchorName(props.tabId) }}
       className="relative min-h-0 min-w-0 flex-1 bg-canvas"

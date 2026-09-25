@@ -81,10 +81,24 @@ describe("task-surface-frame", () => {
   const body = utilityBody("task-surface-frame");
   const rules = nestedRules(body);
 
-  it("insets the sheet from the ground by --shell-gap on every edge", () => {
-    // A single `margin` shorthand, not four longhands: the sheet insets
-    // uniformly on all four edges (D1/D2), replacing the old top-only tuck.
-    expect(topLevelDeclarations(body)).toBe("margin: var(--shell-gap);");
+  it("no longer uses a tray wrapper: it owns the ground inset itself, margin only, and anchors the frame", () => {
+    // One sheet design (ticket, one-sheet): there is no separate tray
+    // plate around the frame any more. The frame owns the whole inset
+    // (margin, no padding - it holds exactly one sheet now) and anchors
+    // itself directly, rather than a tray anchoring around it.
+    const declarations = topLevelDeclarations(body);
+    expect(declarations).toContain("margin: var(--shell-gap);");
+    expect(declarations).toContain("anchor-name: --task-frame;");
+    expect(declarations).not.toContain("padding:");
+  });
+
+  it("has no task-tray utility left in the stylesheet", () => {
+    expect(css.includes("@utility task-tray {")).toBe(false);
+  });
+
+  it("has no leftover task-tray color tokens", () => {
+    expect(css).not.toContain("--task-tray");
+    expect(css).not.toContain("--task-tray-border");
   });
 
   it("gives every sheet descendant the sheet radius and a 1px canvas border", () => {

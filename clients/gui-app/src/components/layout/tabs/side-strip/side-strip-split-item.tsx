@@ -1,4 +1,5 @@
 import {
+  use,
   useCallback,
   useMemo,
   useRef,
@@ -9,6 +10,7 @@ import {
 } from "react";
 import { Plus } from "lucide-react";
 import * as m from "motion/react-m";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { useDroppable } from "@dnd-kit/core";
 import { useEpicDndStore } from "@/components/epic-canvas/dnd/dnd-store";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -43,7 +45,7 @@ import {
 import { SideSplitRowPair } from "./side-split-row-pair";
 import { SideStripLiveAgentsSlot } from "./side-strip-live-agents-slot";
 import { SideStripTabRow } from "./side-strip-tab-row";
-import { joinedAttribute, useSideTabJoinedEdge } from "./side-tab-join";
+import { joinedAttribute, useSideTabJoin } from "./side-tab-join";
 import {
   SideTabRow,
   type SideGroupLine,
@@ -133,12 +135,13 @@ export function SideSplitItem(
         active={props.isActive}
       />
     ) : null;
-  // The pair joins as one unit, through the half that sits against the strip.
+  // The pair joins as one unit.
   const [pairNode, setPairNode] = useState<HTMLDivElement | null>(null);
-  const joined = useSideTabJoinedEdge(
-    props.isActive,
-    (edge) => memberTab(item[edge])?.kind === "epic",
+  const edge = use(ColumnEdgeContext);
+  const joined = useSideTabJoin(
+    props.isActive && !isDragging,
     pairNode,
+    edge === null ? null : memberTab(item[edge]),
   );
   const pairFrame: SideRowFrame = {
     ref: setPairNode,

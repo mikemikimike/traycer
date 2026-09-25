@@ -250,21 +250,57 @@
   animation: side-strip-waiting-pulse 600ms ease-out 2;
 }
 
-/* The joined tab (D3): the active row, tile or split pair beside its epic's
-   panel sheet takes the sheet's fill and border, open on the sheet side. The
-   strip's bridge, anchored to it, runs that fill across the list inset and the
-   shell gap over the sheet's border, and its pseudo-elements are the concave
-   corners where it meets the sheet. Unlayered, so the fill beats the row's
-   `bg-*` utility; sheets exist only from md, and so does the join. */
-[data-side-tab-join-bridge] {
+/* The sheet join: the active task tab (top), row, tile or split pair (side)
+   runs into its task's sheet, so the tab and everything the task owns read
+   as one shape. The joined element takes the fill of the pane it meets and
+   the sheet's border, open on the sheet side; the bridge, anchored to it,
+   runs that fill across the gap onto the sheet, 1px over the sheet's
+   border, and its pseudo-elements are the concave corners where it meets
+   the sheet. One mechanism for both placements.
+
+   The fill is the pane's: `data-join-pane` names it (the epic panel, its
+   collapsed rail, or the canvas, the default and the only one a top tab
+   meets by rule).
+
+   Arc geometry: absolute offsets resolve against the bridge's padding box.
+   At 100%, each arc already overlaps its 1px border, landing on the border's
+   inner edge. Subtracting 1px again pushes the arc into the joined fill.
+
+   Unlayered, so the fill beats the element's `bg-*` utility; sheets exist
+   only from md, and so does the join. */
+[data-sheet-join-bridge] {
   display: none;
 }
 
 @variant md {
-  [data-side-tab-joined] {
+  [data-sheet-joined] {
+    --join-fill: var(--canvas);
+    anchor-name: --sheet-joined;
+    background-color: var(--join-fill);
+  }
+
+  [data-sheet-joined][data-join-pane="panel"],
+  :has([data-sheet-joined][data-join-pane="panel"]) > [data-sheet-join-bridge] {
+    --join-fill: var(--sidebar);
+  }
+
+  [data-sheet-joined][data-join-pane="rail"],
+  :has([data-sheet-joined][data-join-pane="rail"]) > [data-sheet-join-bridge] {
+    --join-fill: var(--background);
+  }
+
+  /* A header tab's box already carries its border; it only opens at the
+     bottom. */
+  [data-sheet-joined="top"] {
+    border-color: var(--canvas-border);
+    border-bottom-width: 0;
+    border-end-start-radius: 0;
+    border-end-end-radius: 0;
+  }
+
+  [data-sheet-joined="left"],
+  [data-sheet-joined="right"] {
     position: relative;
-    anchor-name: --side-tab-joined;
-    background-color: var(--background);
 
     &::before {
       content: "";
@@ -276,7 +312,7 @@
     }
   }
 
-  [data-side-tab-joined="left"] {
+  [data-sheet-joined="left"] {
     border-start-end-radius: 0;
     border-end-end-radius: 0;
 
@@ -285,7 +321,7 @@
     }
   }
 
-  [data-side-tab-joined="right"] {
+  [data-sheet-joined="right"] {
     border-start-start-radius: 0;
     border-end-start-radius: 0;
 
@@ -294,23 +330,22 @@
     }
   }
 
-  :has([data-side-tab-joined]) > [data-side-tab-join-bridge] {
+  :has([data-sheet-joined]) > [data-sheet-join-bridge] {
+    --join-fill: var(--canvas);
     --join-radius: var(--radius-lg);
     --join-arc:
       transparent calc(var(--join-radius) - 1px),
       var(--canvas-border) calc(var(--join-radius) - 1px) var(--join-radius),
-      var(--background) var(--join-radius);
+      var(--join-fill) var(--join-radius);
     display: block;
-    position: absolute;
-    position-anchor: --side-tab-joined;
+    /* The dragged anchor lives in a fixed DragOverlay in this scope. */
+    position: fixed;
+    position-anchor: --sheet-joined;
     position-visibility: anchors-visible;
-    top: anchor(top);
-    bottom: anchor(bottom);
     /* Over the strip's resize handle (z-20), whose hover line would otherwise
        cut the joined band in two; the handle still takes the pointer here. */
     z-index: 21;
-    border-block: 1px solid var(--canvas-border);
-    background-color: var(--background);
+    background-color: var(--join-fill);
     pointer-events: none;
 
     &::before,
@@ -320,6 +355,37 @@
       width: var(--join-radius);
       height: var(--join-radius);
     }
+  }
+
+  /* Tabs on top: from the tab's bottom down onto the sheet, whose top edge is
+     the surface frame's, its own anchor, so the run follows whatever sits
+     between them (a banner included). */
+  :has([data-sheet-joined="top"]) > [data-sheet-join-bridge="top"] {
+    left: anchor(left);
+    right: anchor(right);
+    top: anchor(bottom);
+    bottom: calc(anchor(--task-frame top) - 1px);
+    border-inline: 1px solid var(--canvas-border);
+
+    &::before {
+      right: 100%;
+      bottom: 0;
+      background: radial-gradient(circle at 0 0, var(--join-arc));
+    }
+
+    &::after {
+      left: 100%;
+      bottom: 0;
+      background: radial-gradient(circle at 100% 0, var(--join-arc));
+    }
+  }
+
+  /* Tabs on the side: the strip's edge is one shell gap off the sheet. */
+  :has([data-sheet-joined="left"]) > [data-sheet-join-bridge="left"],
+  :has([data-sheet-joined="right"]) > [data-sheet-join-bridge="right"] {
+    top: anchor(top);
+    bottom: anchor(bottom);
+    border-block: 1px solid var(--canvas-border);
 
     &::before {
       bottom: 100%;
@@ -330,10 +396,9 @@
     }
   }
 
-  /* The bridge ends 1px into the sheet, over its border. */
-  :has([data-side-tab-joined]) > [data-side-tab-join-bridge="left"] {
+  :has([data-sheet-joined="left"]) > [data-sheet-join-bridge="left"] {
     left: anchor(right);
-    right: calc(-1 * var(--shell-gap) - 1px);
+    right: calc(anchor(--task-frame left) - 1px);
 
     &::before {
       right: 0;
@@ -346,9 +411,9 @@
     }
   }
 
-  :has([data-side-tab-joined]) > [data-side-tab-join-bridge="right"] {
+  :has([data-sheet-joined="right"]) > [data-sheet-join-bridge="right"] {
     right: anchor(left);
-    left: calc(-1 * var(--shell-gap) - 1px);
+    left: calc(anchor(--task-frame right) - 1px);
 
     &::before {
       left: 0;
@@ -1281,9 +1346,11 @@
   transition-duration: 0s;
 }
 
-/* The frame owns the inset; each retained route or epic column owns a sheet. */
+/* The frame owns the inset; each retained route and each task owns one sheet
+   on the ground. Its top edge is where the active top tab's join lands. */
 @utility task-surface-frame {
   margin: var(--shell-gap);
+  anchor-name: --task-frame;
 
   & [data-shell-sheet] {
     border: 1px solid var(--canvas-border);

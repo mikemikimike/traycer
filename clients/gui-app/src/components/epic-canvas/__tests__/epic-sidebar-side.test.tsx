@@ -160,14 +160,17 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
       "epic-sidebar-resize-handle",
     ]);
     const panel = screen.getByTestId("epic-sidebar-column");
-    expect(panel.dataset.shellSheet).toBe("panel");
+    // One-sheet design: no `data-shell-sheet` marker on the panel any more
+    // - it carries its own hairline against the content pane instead.
+    expect(panel.dataset.shellSheet).toBeUndefined();
+    expect(panel.className).toContain("md:border-e");
+    expect(panel.className).toContain("md:border-canvas-border");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    // Sheet shell (ticket 02): the handle's hit target is centred in the
-    // `--shell-gap` ground gap on either side now, not traced with a
-    // side-specific hairline - the gap itself separates the sheets. It
-    // carries the shared ground hover/drag line instead (finding 9/B6), with
-    // no resting `before:bg-*` - only the hover/active variants.
-    expect(handle.className).toContain("md:mx-[calc(var(--shell-gap)/-2)]");
+    // One-sheet design: the handle lost its centred `--shell-gap` hit
+    // target margin - there is no ground gap to centre in any more. It
+    // still carries the shared ground hover/drag line, with no resting
+    // `before:bg-*` - only the hover/active variants.
+    expect(handle.className).not.toContain("md:mx-[calc(var(--shell-gap)/-2)]");
     expect(handle.className).toContain("md:w-0");
     expectGroundResizeHandleLine(handle);
   });
@@ -180,11 +183,13 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
       "epic-sidebar-column",
     ]);
     const panel = screen.getByTestId("epic-sidebar-column");
-    expect(panel.dataset.shellSheet).toBe("panel");
+    expect(panel.dataset.shellSheet).toBeUndefined();
+    expect(panel.className).toContain("md:border-s");
+    expect(panel.className).toContain("md:border-canvas-border");
     const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    // No side-specific classes left to mirror: the centred hit target and
-    // the ground hover/drag line are the same on both sides now.
-    expect(handle.className).toContain("md:mx-[calc(var(--shell-gap)/-2)]");
+    // No side-specific classes left to mirror: the ground hover/drag line
+    // is the same on both sides now.
+    expect(handle.className).not.toContain("md:mx-[calc(var(--shell-gap)/-2)]");
     expect(handle.className).toContain("md:w-0");
     expectGroundResizeHandleLine(handle);
   });
@@ -206,11 +211,15 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
       "epic-sidebar-resize-handle",
     ]);
     const [leftCollapsedRail, leftPanel] = leftChildren;
-    expect(leftCollapsedRail.dataset.shellSheet).toBe("panel");
+    expect(leftCollapsedRail.dataset.shellSheet).toBeUndefined();
+    expect(leftCollapsedRail.className).toContain("md:border-e");
+    expect(leftCollapsedRail.className).toContain("md:border-canvas-border");
     expect(
       leftCollapsedRail.querySelector('[data-testid="epic-rail-static-stub"]'),
     ).not.toBeNull();
-    expect(leftPanel.dataset.shellSheet).toBe("panel");
+    expect(leftPanel.dataset.shellSheet).toBeUndefined();
+    expect(leftPanel.className).toContain("md:border-e");
+    expect(leftPanel.className).toContain("md:border-canvas-border");
     cleanup();
 
     renderColumn("right");
@@ -225,7 +234,9 @@ describe("<EpicSidebarColumn /> side (S-06)", () => {
       undefined,
     ]);
     const rightCollapsedRail = rightChildren[2];
-    expect(rightCollapsedRail.dataset.shellSheet).toBe("panel");
+    expect(rightCollapsedRail.dataset.shellSheet).toBeUndefined();
+    expect(rightCollapsedRail.className).toContain("md:border-s");
+    expect(rightCollapsedRail.className).toContain("md:border-canvas-border");
     expect(
       rightCollapsedRail.querySelector('[data-testid="epic-rail-static-stub"]'),
     ).not.toBeNull();
@@ -352,34 +363,29 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
     ]);
   });
 
-  it("is the two-sheet epic surface: panel + content, no single-sheet route marker (D1/D2)", () => {
+  it("is the one task sheet: data-shell-sheet=task on the outer box, no nested per-pane markers (D1/D2)", () => {
     renderSurface(TAB_ID, EPIC_ID);
 
-    const container = document.querySelector(`[data-epic-surface="${TAB_ID}"]`);
-    if (container === null) throw new Error("epic surface row not found");
-    const sheets = [
-      ...container.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
-    ];
-    expect(sheets.map((sheet) => sheet.dataset.shellSheet).sort()).toEqual([
-      "content",
-      "panel",
-    ]);
-
-    const content = container.querySelector<HTMLElement>(
-      '[data-shell-sheet="content"]',
+    const container = document.querySelector<HTMLElement>(
+      `[data-epic-surface="${TAB_ID}"]`,
     );
-    if (content === null) throw new Error("content sheet not found");
+    if (container === null) throw new Error("epic surface row not found");
+    // One-sheet design: the marker sits on the OUTER box itself, which
+    // holds the panel and content panes directly - no nested "panel" /
+    // "content" markers any more.
+    expect(container.dataset.shellSheet).toBe("task");
+    expect(container.querySelectorAll("[data-shell-sheet]")).toHaveLength(0);
+
     // The browser guest's outer sheet clipper anchors to this element by the
     // same per-tab name (`browserGuestCssSheetAnchorName`), so a guest
     // presented on this tab clips to this sheet's own rounded corners.
-    expect(content.style.getPropertyValue("anchor-name")).toBe(
+    expect(container.style.getPropertyValue("anchor-name")).toBe(
       browserGuestCssSheetAnchorName(TAB_ID),
     );
-    expect(container.querySelector('[data-shell-sheet="route"]')).toBeNull();
   });
 
   it.each(["top", "left", "right"] as const)(
-    "holds the two-sheet epic composition inside the placement's own surface frame, placement=%s",
+    "holds the one-sheet epic composition inside the placement's own surface frame, placement=%s",
     (placement) => {
       render(
         <AppColumnFrame
@@ -400,6 +406,8 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
         />,
       );
 
+      // One-sheet design: no tray wrapper, so the frame is `<main>`'s own
+      // direct child.
       const frame = document.querySelector<HTMLElement>(
         "[data-layout-column] main > div",
       );
@@ -410,10 +418,7 @@ describe("<EpicSurface /> sidebar side (S-06)", () => {
       const sheets = [
         ...frame.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
       ];
-      expect(sheets.map((sheet) => sheet.dataset.shellSheet).sort()).toEqual([
-        "content",
-        "panel",
-      ]);
+      expect(sheets.map((sheet) => sheet.dataset.shellSheet)).toEqual(["task"]);
     },
   );
 

@@ -15,16 +15,18 @@ export const TAB_CLASS_BASE =
  * Where a header tab's box sits in its 36px frame: 2px in from every side, so
  * the box is 32px tall and centred in the 40px header, and neighbouring boxes
  * keep 4px of ground between them. The corners are the sheets' own
- * `radius-xl`: the active tab, a hover and a split's focused member are all
- * this one box (staging round 1, F4).
+ * `radius-xl`: a hover, a split's focused member and an unjoined active tab
+ * are this one box; the joined active tab is the same box opened at the
+ * bottom onto the task tray (the tray join in `index.css`).
  */
 export const TAB_BOX_CLASS =
   "pointer-events-none absolute inset-0.5 rounded-xl";
 
 /**
  * A tab's colour on a tab with no box of its own to wear it: a short line
- * centred inside the box's bottom edge, the same for a lone tab and a split
- * member. Never a rule across the tab - the header has no baseline (F4).
+ * centred inside the box's bottom edge, the same for a lone tab, a split
+ * member and the joined active tab. Never a rule across the tab - the header
+ * has no baseline.
  */
 export const TAB_COLOR_MARK_CLASS =
   "pointer-events-none absolute bottom-1.25 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-(--swatch)";

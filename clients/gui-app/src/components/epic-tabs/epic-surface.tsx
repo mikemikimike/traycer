@@ -125,8 +125,8 @@ export function EpicSurface(props: EpicSurfaceProps) {
 }
 
 /**
- * The epic surface's two sheets: the sidebar column (the panel sheet) on
- * `sidebarSide` and the content sheet beside it, with the ground between.
+ * The epic surface's one task sheet: the sidebar column (the panel pane) on
+ * `sidebarSide` and the content pane beside it, split by a hairline.
  */
 export function EpicSurfaceSheets(props: {
   readonly tabId: string;
@@ -147,18 +147,16 @@ export function EpicSurfaceSheets(props: {
   }, [sidebarSide]);
   return (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-row md:gap-(--shell-gap)"
+      data-shell-sheet="task"
+      style={{ anchorName: browserGuestCssSheetAnchorName(tabId) }}
+      className="flex min-h-0 min-w-0 flex-1 flex-row md:overflow-clip"
       data-epic-surface={tabId}
     >
       {/* DOM order follows `sidebarSide` (S-06), never CSS `order`, so
           focus and reading order track what is on screen. Split panes each
           render an `EpicSurface`, so both follow the one global side. */}
       {sidebarSide === "right" ? null : sidebar}
-      <div
-        data-shell-sheet="content"
-        style={{ anchorName: browserGuestCssSheetAnchorName(tabId) }}
-        className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas"
-      >
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col md:overflow-clip md:bg-canvas">
         {props.children}
       </div>
       {sidebarSide === "right" ? sidebar : null}

@@ -38,7 +38,7 @@ import {
 import { SideStripLiveAgentsSlot } from "./side-strip-live-agents-slot";
 import { SideSplitItem } from "./side-strip-split-item";
 import { SideStripTabRow } from "./side-strip-tab-row";
-import { useSideTabJoinedEdge } from "./side-tab-join";
+import { useSideTabJoin } from "./side-tab-join";
 import { SIDE_STRIP_LIST_CLASS } from "./side-strip-tokens";
 import { SideTabGroupHeader } from "./side-tab-group-header";
 import type { SideTabRowVariant } from "./side-tab-row";
@@ -289,10 +289,10 @@ function SideTabItem(
     },
     [rootRef],
   );
-  const joined = useSideTabJoinedEdge(
-    props.isActive,
-    () => props.tab.kind === "epic",
+  const joined = useSideTabJoin(
+    props.isActive && !item.isDragging,
     rowNode,
+    props.tab,
   );
   return (
     <m.div

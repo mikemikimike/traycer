@@ -95,12 +95,14 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
   const mainCollapsed = useMainPanelCollapsed(tabId);
   const sessionReady = useMaybeOpenEpicHandle() !== null;
   const sidebarWidthPx = useSidebarWidthPx();
+  // The hairline between this pane and the content pane of the one task sheet.
+  const paneDivider =
+    side === "right"
+      ? "md:border-s md:border-canvas-border"
+      : "md:border-e md:border-canvas-border";
 
   const collapsedRail = mainCollapsed ? (
-    <div
-      data-shell-sheet="panel"
-      className="shrink-0 overflow-clip bg-background"
-    >
+    <div className={cn("shrink-0 overflow-clip bg-background", paneDivider)}>
       <ColumnRail
         epicId={epicId}
         tabId={tabId}
@@ -112,7 +114,6 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
 
   const panel = (
     <div
-      data-shell-sheet="panel"
       data-epic-sidebar-panel
       data-testid="epic-sidebar-column"
       data-epic-id={epicId}
@@ -120,6 +121,7 @@ function EpicSidebarColumnBody(props: EpicSidebarColumnProps): ReactNode {
       data-session-ready={sessionReady ? "true" : "false"}
       className={cn(
         "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
+        paneDivider,
         mainCollapsed && "hidden",
       )}
       style={{ width: sidebarWidthPx }}
@@ -391,7 +393,7 @@ export function SidebarWidthResizeHandle(props: {
         "relative z-10 shrink-0 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
         pointerDragHandleAxisClassName("horizontal"),
         GROUND_RESIZE_HANDLE_LINE_CLASS,
-        "md:mx-[calc(var(--shell-gap)/-2)] md:w-0",
+        "md:w-0",
         hidden && "hidden",
       )}
     />

@@ -1,8 +1,15 @@
 import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
 import { INERT_ROOT_STATE_PORT } from "@/stores/epics/open-epic/test-support/root-state-port-fixture";
 import { TabStrip } from "@/components/layout/tabs/tab-strip";
-import { SplitMemberChrome } from "@/components/layout/tabs/split-tab-chrome";
-import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
+import {
+  SplitMemberChrome,
+  SplitTabLayout,
+} from "@/components/layout/tabs/split-tab-chrome";
+import {
+  TabChrome,
+  HeaderTabPreview,
+} from "@/components/layout/tabs/header-tab-visual";
+import { TabStripHomeItemView } from "@/components/layout/tabs/tab-strip-home-item";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { paneTabRefs } from "@/stores/epics/canvas/actions";
 import { createEmptyCanvas } from "@/stores/epics/canvas/canvas-state";
@@ -796,7 +803,9 @@ describe("<TabStrip />", () => {
   });
 
   it("uses the project color for the active outline while keeping the neutral fill", () => {
-    render(<TabChrome isActive color="#12ab34" session={false} />);
+    render(
+      <TabChrome isActive joined={false} color="#12ab34" session={false} />,
+    );
 
     const box = screen.getByTestId("tab-chrome-box");
     expect(box.style.getPropertyValue("--swatch")).toBe(
@@ -807,7 +816,12 @@ describe("<TabStrip />", () => {
 
   it("keeps the project color on an inactive tab", () => {
     const { container } = render(
-      <TabChrome isActive={false} color="#12ab34" session={false} />,
+      <TabChrome
+        isActive={false}
+        joined={false}
+        color="#12ab34"
+        session={false}
+      />,
     );
 
     expect(
@@ -817,13 +831,20 @@ describe("<TabStrip />", () => {
 
   it("draws an inactive lone tab's color as the color mark, and no mark on the active one (F4 round 2)", () => {
     const { rerender } = render(
-      <TabChrome isActive={false} color="#12ab34" session={false} />,
+      <TabChrome
+        isActive={false}
+        joined={false}
+        color="#12ab34"
+        session={false}
+      />,
     );
     expect(
       screen.getByTestId("tab-color-mark").style.getPropertyValue("--swatch"),
     ).toBe("#12ab34");
 
-    rerender(<TabChrome isActive color="#12ab34" session={false} />);
+    rerender(
+      <TabChrome isActive joined={false} color="#12ab34" session={false} />,
+    );
     // The box's own border carries the color once the tab is active; nothing
     // left for the mark to draw.
     expect(screen.queryByTestId("tab-color-mark")).toBeNull();
@@ -837,7 +858,14 @@ describe("<TabStrip />", () => {
    * around the screen owns the only amber line while a session is live.
    */
   it("fills the editor's own tab instead of outlining it like every other", () => {
-    render(<TabChrome isActive color="var(--warning-foreground)" session />);
+    render(
+      <TabChrome
+        isActive
+        joined={false}
+        color="var(--warning-foreground)"
+        session
+      />,
+    );
 
     const box = screen.getByTestId("tab-chrome-box");
     expect(box.style.getPropertyValue("--swatch")).toBe(
@@ -854,7 +882,9 @@ describe("<TabStrip />", () => {
    * replaced.
    */
   it("draws the active tab as exactly one box on the sheets' geometry, no silhouette left", () => {
-    render(<TabChrome isActive color="#12ab34" session={false} />);
+    render(
+      <TabChrome isActive joined={false} color="#12ab34" session={false} />,
+    );
 
     expect(screen.getAllByTestId("tab-chrome-box")).toHaveLength(1);
     const box = screen.getByTestId("tab-chrome-box");
@@ -867,7 +897,14 @@ describe("<TabStrip />", () => {
   });
 
   it("draws an inactive tab's hover state as the same box geometry", () => {
-    render(<TabChrome isActive={false} color={null} session={false} />);
+    render(
+      <TabChrome
+        isActive={false}
+        joined={false}
+        color={null}
+        session={false}
+      />,
+    );
 
     const hoverBox = screen.getByTestId("tab-hover-box");
     expect(hoverBox.className).toContain("rounded-xl");
@@ -882,7 +919,12 @@ describe("<TabStrip />", () => {
    */
   it("leaves the resting editor tab's bottom edge to the session mark", () => {
     const { container } = render(
-      <TabChrome isActive={false} color="var(--warning-foreground)" session />,
+      <TabChrome
+        isActive={false}
+        joined={false}
+        color="var(--warning-foreground)"
+        session
+      />,
     );
 
     expect(
@@ -1075,6 +1117,152 @@ describe("<TabStrip />", () => {
 
     rerender(<SplitMemberChrome focused={false} color={null} />);
     expect(screen.queryByTestId("tab-color-mark")).toBeNull();
+  });
+
+  describe("the task tray join (top strip)", () => {
+    it("joins the active tab's chrome box to the tray, and draws no chrome box at all on the inactive one", async () => {
+      seedTwoEpicTabs();
+      const router = buildRouter("/epics/e-a/e-a");
+      render(<RouterProvider router={router} />);
+
+      const activeTab = await screen.findByTestId("tab-epic-e-a");
+      expect(
+        within(activeTab)
+          .getByTestId("tab-chrome-box")
+          .getAttribute("data-sheet-joined"),
+      ).toBe("top");
+
+      const inactiveTab = screen.getByTestId("tab-epic-e-b");
+      expect(within(inactiveTab).queryByTestId("tab-chrome-box")).toBeNull();
+    });
+
+    it("keeps the active tab joined while another tab is dragged", async () => {
+      const { beta } = seedTwoEpicTabs();
+      const router = buildRouter("/epics/e-a/e-a");
+      render(<RouterProvider router={router} />);
+
+      const activeTab = await screen.findByTestId("tab-epic-e-a");
+      expect(
+        within(activeTab)
+          .getByTestId("tab-chrome-box")
+          .hasAttribute("data-sheet-joined"),
+      ).toBe(true);
+
+      act(() => {
+        useEpicDndStore.getState().headerTabDragStarted(
+          {
+            kind: "header-tab",
+            stripItemId: tabItemId(beta),
+            tabKind: "epic",
+            tabId: EPIC_B.id,
+            index: 1,
+          },
+          { width: 120, height: 36 },
+          "x",
+          null,
+        );
+      });
+
+      expect(
+        within(activeTab)
+          .getByTestId("tab-chrome-box")
+          .hasAttribute("data-sheet-joined"),
+      ).toBe(true);
+    });
+
+    it("never joins the layout editor's own (session) tab", async () => {
+      const sampleRef: TabRef = {
+        kind: "sample-workspace",
+        id: "sample-workspace",
+      };
+      useTabsStore.setState({
+        version: 2,
+        items: [{ kind: "tab", id: tabItemId(sampleRef), ref: sampleRef }],
+        activeItemId: tabItemId(sampleRef),
+        stripOrder: [sampleRef],
+        systemTabs: { history: null, settings: null },
+      });
+      const router = buildRouter("/sample-workspace");
+      render(<RouterProvider router={router} />);
+
+      const sessionTab = await screen.findByTestId(
+        "tab-sample-workspace-sample-workspace",
+      );
+      expect(
+        within(sessionTab)
+          .getByTestId("tab-chrome-box")
+          .hasAttribute("data-sheet-joined"),
+      ).toBe(false);
+    });
+
+    it("joins the active Home tab", () => {
+      render(
+        <TooltipProvider>
+          <TabStripHomeItemView isActive onActivate={() => undefined} />
+        </TooltipProvider>,
+      );
+      expect(
+        screen.getByTestId("tab-chrome-box").getAttribute("data-sheet-joined"),
+      ).toBe("top");
+    });
+
+    // The active overlay DOES join during a real drag - `HeaderTabDragOverlay`
+    // threads `joined={isActive}` into this same component (see
+    // `header-strip-active-join.test.tsx`). This is the leaf's own prop
+    // contract: given `joined={false}` explicitly, it draws no marker.
+    it("honors an explicit joined={false} on the preview, drawing no sheet marker", () => {
+      seedTwoEpicTabs();
+      const tab = getHeaderTabs().find(
+        (candidate) =>
+          candidate.kind === "epic" && candidate.epicId === EPIC_A.id,
+      );
+      if (tab === undefined) throw new Error("expected alpha's header tab");
+
+      render(
+        <TooltipProvider>
+          <HeaderTabPreview
+            tab={tab}
+            ghost={null}
+            chrome="own"
+            isActive
+            joined={false}
+          />
+        </TooltipProvider>,
+      );
+      expect(
+        screen.getByTestId("tab-chrome-box").hasAttribute("data-sheet-joined"),
+      ).toBe(false);
+    });
+
+    it("joins an active split pair as one container, and draws no marker when inactive", () => {
+      const { rerender } = render(
+        <SplitTabLayout
+          splitId="split-a"
+          selectedSide="left"
+          joined
+          control={null}
+          left={<span>left</span>}
+          right={<span>right</span>}
+        />,
+      );
+      expect(
+        screen
+          .getByTestId("split-tab-joined-split-a")
+          .getAttribute("data-sheet-joined"),
+      ).toBe("top");
+
+      rerender(
+        <SplitTabLayout
+          splitId="split-a"
+          selectedSide="left"
+          joined={false}
+          control={null}
+          left={<span>left</span>}
+          right={<span>right</span>}
+        />,
+      );
+      expect(screen.queryByTestId("split-tab-joined-split-a")).toBeNull();
+    });
   });
 
   it("shows the pair highlight on the approach half during a merge", async () => {

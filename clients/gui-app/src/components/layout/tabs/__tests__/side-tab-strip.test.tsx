@@ -1038,57 +1038,43 @@ describe("<SideTabStrip />", () => {
   });
 
   describe("the joined active row (D3)", () => {
-    it("joins the active epic row's edge when the strip and the sidebar share a side", async () => {
-      setSidebarSide("left");
+    it("joins the active epic row's own strip edge, regardless of which side the sidebar panel is on", async () => {
+      setSidebarSide("right");
       openEpicTabs(["Alpha", "Beta"]);
       await renderStrip("/elsewhere", LEFT_STRIP);
 
       expect(
         screen
           .getByTestId("tab-epic-e-alpha")
-          .getAttribute("data-side-tab-joined"),
+          .getAttribute("data-sheet-joined"),
       ).toBe("left");
       expect(
-        screen
-          .getByTestId("tab-epic-e-beta")
-          .getAttribute("data-side-tab-joined"),
+        screen.getByTestId("tab-epic-e-beta").getAttribute("data-sheet-joined"),
       ).toBeNull();
       expect(
-        document.querySelector('[data-side-tab-join-bridge="left"]'),
+        document.querySelector('[data-sheet-join-bridge="left"]'),
       ).not.toBeNull();
     });
 
-    it("joins on the right edge when the strip and the sidebar are both right", async () => {
-      setSidebarSide("right");
+    it("joins on the right edge when the strip is on the right, even with the sidebar on the left", async () => {
+      setSidebarSide("left");
       openEpicTabs(["Alpha"]);
       await renderStrip("/elsewhere", { ...LEFT_STRIP, edge: "right" });
 
       expect(
         screen
           .getByTestId("tab-epic-e-alpha")
-          .getAttribute("data-side-tab-joined"),
+          .getAttribute("data-sheet-joined"),
       ).toBe("right");
     });
 
-    it("does not join when the strip and the sidebar are on opposite sides", async () => {
+    it("joins a non-epic active surface too - the join no longer cares about surface kind", async () => {
       setSidebarSide("right");
-      openEpicTabs(["Alpha"]);
-      await renderStrip("/elsewhere", LEFT_STRIP);
-
-      expect(
-        screen
-          .getByTestId("tab-epic-e-alpha")
-          .getAttribute("data-side-tab-joined"),
-      ).toBeNull();
-    });
-
-    it("does not join a non-epic active surface, even on a matching side", async () => {
-      setSidebarSide("left");
       openHistoryTab();
       await renderStrip("/elsewhere", LEFT_STRIP);
 
       const history = screen.getByTestId("tab-history-history");
-      expect(history.getAttribute("data-side-tab-joined")).toBeNull();
+      expect(history.getAttribute("data-sheet-joined")).toBe("left");
     });
 
     it("keeps the join on the collapsed tile", async () => {
@@ -1100,26 +1086,24 @@ describe("<SideTabStrip />", () => {
       expect(
         screen
           .getByTestId("tab-epic-e-alpha")
-          .getAttribute("data-side-tab-joined"),
+          .getAttribute("data-sheet-joined"),
       ).toBe("left");
     });
 
     it("joins the split pair container, on its strip-side epic member, and never a member row", async () => {
-      setSidebarSide("left");
+      setSidebarSide("right");
       openSplitPair("left");
       await renderStrip("/elsewhere", LEFT_STRIP);
 
       const pair = screen.getByTestId("split-tab-group-split-a");
-      expect(pair.getAttribute("data-side-tab-joined")).toBe("left");
+      expect(pair.getAttribute("data-sheet-joined")).toBe("left");
       expect(
         screen
           .getByTestId("tab-epic-e-alpha")
-          .getAttribute("data-side-tab-joined"),
+          .getAttribute("data-sheet-joined"),
       ).toBeNull();
       expect(
-        screen
-          .getByTestId("tab-epic-e-beta")
-          .getAttribute("data-side-tab-joined"),
+        screen.getByTestId("tab-epic-e-beta").getAttribute("data-sheet-joined"),
       ).toBeNull();
     });
   });

@@ -15,6 +15,7 @@ import {
   type StripAxisId,
   type StripEdge,
 } from "@/components/epic-canvas/dnd/strip-axis";
+import type { RectLike } from "@/components/epic-canvas/dnd/dnd";
 import type {
   StripDragGeometry,
   StripSlot,
@@ -161,13 +162,10 @@ export function readHeaderStripSlots(
 }
 
 /**
- * Rendered size of a strip item, for the drag overlay to take. Null when the
+ * Rendered bounds of a strip item, for the drag overlay to take. Null when the
  * item is not in the strip.
  */
-export function readHeaderStripItemSize(stripItemId: string): {
-  readonly width: number;
-  readonly height: number;
-} | null {
+export function readHeaderStripItemRect(stripItemId: string): RectLike | null {
   // A quoted attribute value only needs `"` and `\` escaped; `CSS.escape`
   // is not available in every environment this module runs in (jsdom).
   const quoted = stripItemId.replace(/["\\]/g, "\\$&");
@@ -176,7 +174,12 @@ export function readHeaderStripItemSize(stripItemId: string): {
   );
   if (item === null || item === undefined) return null;
   const rect = item.getBoundingClientRect();
-  return { width: rect.width, height: rect.height };
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
 }
 
 /**

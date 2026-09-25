@@ -47,6 +47,8 @@ interface HeaderTabVisualProps {
   readonly displayName: string;
   readonly chrome: "own" | "member";
   readonly isActive: boolean;
+  /** Whether the active tab runs into its task's sheet; see `TabChromeBackground`. */
+  readonly joined: boolean;
   readonly titleControl: ReactNode;
   readonly trailingControl: ReactNode;
   readonly leaderVisible: boolean;
@@ -64,6 +66,7 @@ export function HeaderTabVisual(props: HeaderTabVisualProps) {
       {props.chrome === "own" ? (
         <TabChrome
           isActive={props.isActive}
+          joined={props.joined}
           color={color}
           session={sessionColor !== null}
         />
@@ -156,6 +159,7 @@ export function HeaderTabPreview(props: {
   readonly ghost: HeaderTabDragGhost | null;
   readonly chrome: "own" | "member";
   readonly isActive: boolean;
+  readonly joined: boolean;
 }) {
   const { displayName } = useHeaderTabTitle(props.tab);
   const indicatorState = useSurfaceNotificationIndicatorState(
@@ -193,6 +197,7 @@ export function SplitFillableMemberVisual(props: {
 
 export function TabChrome(props: {
   readonly isActive: boolean;
+  readonly joined: boolean;
   readonly color: string | null;
   /** The layout editor's own tab (L-87, L-163). See `borderColor` below. */
   readonly session: boolean;
@@ -214,31 +219,42 @@ export function TabChrome(props: {
       </>
     );
   }
+  // The editor's own tab is a mode, not a place: it keeps its coloured box
+  // and never joins the sheet.
+  const joined = props.joined && !props.session;
   return (
-    <TabChromeBackground
-      // ACTIVE, the editor's tab is the colour and wears none of it on its
-      // edge (L-163): the fill is the token at full strength and the stroke is
-      // the sheets' border, so the frame around the screen owns the only
-      // amber LINE while a session is live and this tab is the only amber
-      // OBJECT. A dilution cannot do that job: every share of the token over
-      // `--background` trades the tab reading as coloured against its own
-      // label staying legible on it, and the largest that clears 4.5:1 on all
-      // the built-in palettes is 4.5% - a tab indistinguishable from the strip
-      // it sits in. Nor can a stroke in the colour, because the frame's dotted
-      // run and the tab's top edge share a line to within a quarter of a pixel
-      // and read as one broken stroke.
-      // `layout-editor-contrast.test.ts` measures the label on this fill.
-      fill={
-        props.session
-          ? (props.color ?? "var(--color-background)")
-          : "var(--color-background)"
-      }
-      borderColor={
-        props.session
-          ? "var(--canvas-border)"
-          : (props.color ?? "var(--canvas-border)")
-      }
-      className="transition-opacity duration-300 ease-spring"
-    />
+    <>
+      <TabChromeBackground
+        // ACTIVE, the editor's tab is the colour and wears none of it on its
+        // edge (L-163): the fill is the token at full strength and the stroke is
+        // the sheets' border, so the frame around the screen owns the only
+        // amber LINE while a session is live and this tab is the only amber
+        // OBJECT. A dilution cannot do that job: every share of the token over
+        // `--background` trades the tab reading as coloured against its own
+        // label staying legible on it, and the largest that clears 4.5:1 on all
+        // the built-in palettes is 4.5% - a tab indistinguishable from the strip
+        // it sits in. Nor can a stroke in the colour, because the frame's dotted
+        // run and the tab's top edge share a line to within a quarter of a pixel
+        // and read as one broken stroke.
+        // `layout-editor-contrast.test.ts` measures the label on this fill.
+        fill={
+          props.session
+            ? (props.color ?? "var(--color-background)")
+            : "var(--color-background)"
+        }
+        borderColor={
+          props.session
+            ? "var(--canvas-border)"
+            : (props.color ?? "var(--canvas-border)")
+        }
+        joined={joined}
+        className="transition-opacity duration-300 ease-spring"
+      />
+      {/* Joined, the box's edge is the sheet's, so the tab's colour moves to
+        the mark every other tab wears it as. */}
+      {joined && props.color !== null ? (
+        <TabColorMark color={props.color} />
+      ) : null}
+    </>
   );
 }

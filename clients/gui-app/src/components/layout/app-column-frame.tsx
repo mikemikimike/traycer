@@ -51,7 +51,9 @@ export function AppColumnFrame(props: AppColumnFrameProps): ReactNode {
       data-tab-strip-placement={placement}
       // Read by styles/window-chrome.css to size `--app-title-band-height`.
       data-app-title-band={titleBand}
-      className="relative flex h-safe-dvh min-w-0 flex-1 flex-col md:bg-shell-ground"
+      // Scoped so a picture of the frame inside it (the layout editor's
+      // preset miniatures) can never lend the bridge its anchors.
+      className="relative flex h-safe-dvh min-w-0 flex-1 flex-col [anchor-scope:--sheet-joined,--task-frame] md:bg-shell-ground"
       {...{ [SWIPE_NAV_SCREEN_ATTRIBUTE]: "" }}
     >
       {titleBand === "header" ? props.header : null}
@@ -81,6 +83,15 @@ export function AppColumnFrame(props: AppColumnFrameProps): ReactNode {
         </div>
         {edge === "right" ? props.strip : null}
       </div>
+      {/* The top tabs' sheet join: from the active tab down onto its task's
+          sheet. After both of its anchors (the tab and the surface frame),
+          which it must follow in tree order. The side strip draws its own. */}
+      {edge === null ? (
+        <>
+          <div data-strip-drag-overlay-host className="contents" />
+          <span aria-hidden data-sheet-join-bridge="top" />
+        </>
+      ) : null}
       {props.tail}
     </div>
   );

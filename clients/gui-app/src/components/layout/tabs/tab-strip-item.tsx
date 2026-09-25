@@ -70,6 +70,7 @@ interface TabItemProps {
 export const TabItem = memo(function TabItem(props: TabItemProps) {
   const { tab, dnd, chrome, includeMotionFrame, isActive } = props;
   const { rootRef, ...item } = useStripTabItem(props);
+  const joined = isActive && chrome === "own" && !item.isDragging;
   const control = (
     <StripTabContextMenu item={item} input={props}>
       <div
@@ -93,6 +94,7 @@ export const TabItem = memo(function TabItem(props: TabItemProps) {
           displayName={item.displayName}
           chrome={chrome}
           isActive={isActive}
+          joined={joined}
           titleControl={
             item.rename.isEditing ? (
               <StripTabTitleInput

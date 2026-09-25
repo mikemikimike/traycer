@@ -209,7 +209,7 @@ function EpicShellStatusRow(props: EpicShellStatusRowProps) {
       data-testid="epic-shell-status-row"
       // The phone single-tile design has no status row; the global mobile
       // header carries app-wide status instead. Desktop (>=768px) is unchanged.
-      className="flex h-10 shrink-0 items-center justify-end gap-1.5 px-3 text-foreground max-md:hidden"
+      className="flex h-10 shrink-0 items-center justify-end gap-1.5 border-b border-canvas-border/70 px-3 text-foreground max-md:hidden"
     >
       {props.sessionReady ? (
         <EpicShellSessionStatus

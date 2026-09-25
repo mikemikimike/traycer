@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { TabChromeBackground, TabColorMark } from "./tab-chrome-background";
 import { TAB_BOX_CLASS } from "./tab-chrome-tokens";
+import { useWhollyInTabStrip } from "./use-wholly-in-tab-strip";
 
 const SPLIT_ROW_PADDING_CLASS = "pr-[clamp(0.75rem,5%,1.5rem)] pl-2";
 const SPLIT_CONTROL_WIDTH_CLASS = "w-11";
@@ -9,6 +10,12 @@ const SPLIT_CONTROL_WIDTH_CLASS = "w-11";
 interface SplitTabLayoutProps {
   readonly splitId: string;
   readonly selectedSide: "left" | "right" | null;
+  /**
+   * Whether the active pair runs into the sheet below as one tab: the pair
+   * owns both surfaces under it, so the join is the group's
+   * box and the focused member keeps its own box inside it.
+   */
+  readonly joined: boolean;
   readonly control: ReactNode;
   readonly left: ReactNode;
   readonly right: ReactNode;
@@ -16,6 +23,8 @@ interface SplitTabLayoutProps {
 
 /** Shared group layout keeps both member footprints equal in the strip and overlay. */
 export function SplitTabLayout(props: SplitTabLayoutProps): ReactNode {
+  const [node, setNode] = useState<HTMLSpanElement | null>(null);
+  const inStrip = useWhollyInTabStrip(node, props.joined);
   return (
     <div className="relative flex w-full min-w-0 items-end">
       <div
@@ -24,6 +33,15 @@ export function SplitTabLayout(props: SplitTabLayoutProps): ReactNode {
           SPLIT_ROW_PADDING_CLASS,
         )}
       >
+        {props.joined ? (
+          <span
+            aria-hidden
+            data-testid={`split-tab-joined-${props.splitId}`}
+            ref={setNode}
+            data-sheet-joined={inStrip ? "top" : undefined}
+            className={cn(TAB_BOX_CLASS, "border border-transparent")}
+          />
+        ) : null}
         <span
           className={cn(
             "relative z-20 flex shrink-0 items-center",
@@ -114,6 +132,7 @@ export function SplitMemberChrome(props: {
       <TabChromeBackground
         fill="var(--color-background)"
         borderColor={props.color ?? "var(--color-primary)"}
+        joined={false}
         className={undefined}
       />
     );

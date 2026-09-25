@@ -27,7 +27,6 @@ import {
 import {
   barClusterRegions,
   liveAgentsInStrip,
-  sideTabJoinsPanel,
   type BarHost,
   type BarRegionId,
   type EdgeSide,
@@ -68,6 +67,10 @@ import type {
   RegionId,
   ToolbarRegionId,
 } from "@/lib/layout/region-id";
+import {
+  joinedAttribute,
+  type SheetJoin,
+} from "@/components/layout/tabs/side-strip/side-tab-join";
 import { cn } from "@/lib/utils";
 
 /**
@@ -225,6 +228,9 @@ export function AppFrameTabEntries({
       {APP_FRAME_TABS.map((tab) => (
         <span
           key={tab.id}
+          // The active tab runs into its task's sheet, as the live one does; the
+          // frame drawing this bar draws the bridge.
+          {...(tab.active ? { "data-sheet-joined": "top" } : {})}
           className={cn(
             "flex h-8 shrink-0 items-center rounded-xl border border-transparent px-3 text-ui-sm text-muted-foreground",
             tab.active && "border-canvas-border bg-background text-foreground",
@@ -257,10 +263,9 @@ function AppFrameTaskChip(props: { readonly task: AppFrameTask }): ReactNode {
  * tasks and New Task tiles, a divider, Home and a 40x44 tile per task (its
  * monogram chip over its meter), then the avatar.
  *
- * The frame beside it is always a task's, so the active task joins its panel
- * sheet exactly when the live strip's does (`sideTabJoinsPanel`), through the
- * same `data-side-tab-joined` marker and the same bridge span, which the
- * shipped stylesheet paints. In the Activity view the expanded strip lists
+ * The active task always joins its task's sheet, as the live strip's does,
+ * through the same `data-sheet-joined` marker and the same bridge span, which
+ * the shipped stylesheet paints. In the Activity view the expanded strip lists
  * the active task's live agents under its row (D9).
  *
  * Takes no size or padding: the strip's width and its place in the frame stay
@@ -275,11 +280,6 @@ export function AppFrameSideStrip({
   readonly edge: EdgeSide;
   readonly collapsed: boolean;
 }): ReactNode {
-  const joined = sideTabJoinsPanel(
-    arrangement.tabStripPlacement,
-    arrangement.sidebarSide,
-    true,
-  );
   const liveAgents = liveAgentsInStrip(
     arrangement.tabStripPlacement,
     collapsed,
@@ -287,6 +287,10 @@ export function AppFrameSideStrip({
   );
   const CollapseIcon = COLLAPSE_ICON[edge][collapsed ? "expand" : "collapse"];
   const home = values.homeTab.shown === "shown";
+  const join: SheetJoin = {
+    edge,
+    pane: arrangement.sidebarSide === edge ? "panel" : "canvas",
+  };
   return (
     <div
       data-testid="app-frame-side-strip"
@@ -355,9 +359,9 @@ export function AppFrameSideStrip({
         {APP_FRAME_TABS.map((task) => (
           <Fragment key={task.id}>
             {collapsed ? (
-              <AppFrameTaskTile task={task} joined={joined ? edge : null} />
+              <AppFrameTaskTile task={task} joined={join} />
             ) : (
-              <AppFrameTaskRow task={task} joined={joined ? edge : null} />
+              <AppFrameTaskRow task={task} joined={join} />
             )}
             {task.active && liveAgents ? <AppFrameLiveAgents /> : null}
           </Fragment>
@@ -397,7 +401,7 @@ export function AppFrameSideStrip({
         </div>
         <AppFrameAccount collapsed={collapsed} />
       </div>
-      <span aria-hidden data-side-tab-join-bridge={edge} />
+      <span aria-hidden data-sheet-join-bridge={edge} />
     </div>
   );
 }
@@ -476,14 +480,12 @@ function AppFrameHomeTile(): ReactNode {
  */
 function AppFrameTaskRow(props: {
   readonly task: AppFrameTask;
-  readonly joined: EdgeSide | null;
+  readonly joined: SheetJoin;
 }): ReactNode {
   const { task } = props;
   return (
     <span
-      {...(task.active && props.joined !== null
-        ? { "data-side-tab-joined": props.joined }
-        : {})}
+      {...joinedAttribute(task.active ? props.joined : null)}
       className={cn(
         "flex items-center text-muted-foreground",
         SIDE_TAB_ROW_CLASS,
@@ -504,14 +506,12 @@ function AppFrameTaskRow(props: {
 /** A rail tile: the task's monogram chip over its meter, 40x44. */
 function AppFrameTaskTile(props: {
   readonly task: AppFrameTask;
-  readonly joined: EdgeSide | null;
+  readonly joined: SheetJoin;
 }): ReactNode {
   const { task } = props;
   return (
     <span
-      {...(task.active && props.joined !== null
-        ? { "data-side-tab-joined": props.joined }
-        : {})}
+      {...joinedAttribute(task.active ? props.joined : null)}
       className={cn(
         "flex shrink-0 items-center justify-center",
         SIDE_TAB_TILE_CLASS,

@@ -104,6 +104,7 @@ import { snapCenterToCursor } from "@dnd-kit/modifiers";
 import type { Modifier } from "@dnd-kit/core";
 import { useNavigate, type UseNavigateResult } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useHostBinding } from "@/lib/host";
 import {
@@ -122,7 +123,7 @@ import {
   HEADER_STRIP_SCROLL_TEST_ID,
   measureHeaderStripGeometry,
   readHeaderStripContentOrigin,
-  readHeaderStripItemSize,
+  readHeaderStripItemRect,
   readHeaderStripSession,
   readHeaderStripSlots,
   type HeaderStripDeclaration,
@@ -172,6 +173,8 @@ const EMPTY_HEADER_OFFSETS: ReadonlyMap<string, number> = new Map();
  */
 interface HeaderStripDragSession extends HeaderStripDeclaration {
   readonly geometry: StripDragGeometry;
+  readonly sourceRect: RectLike;
+  readonly overlayOrigin: PointLike | null;
 }
 
 /**
@@ -282,12 +285,16 @@ function beginHeaderStripSession(
 ): HeaderStripDragSession | null {
   const declaration = readHeaderStripSession();
   if (declaration === null) return null;
+  const sourceRect = readHeaderStripItemRect(stripItemId);
+  if (sourceRect === null) return null;
   const geometry = measureHeaderStripGeometry({
     stripItemId,
     pointer: declaration.axis.pointerMain(grab),
     axis: declaration.axis,
   });
-  return geometry === null ? null : { ...declaration, geometry };
+  return geometry === null
+    ? null
+    : { ...declaration, geometry, sourceRect, overlayOrigin: null };
 }
 
 /** The press position for a starting gesture, most reliable source first. */
@@ -363,6 +370,8 @@ const rootDragOverlayModifier: Modifier = (args) => {
       : { ...args.transform, y: 0 };
   }
   const { axis, geometry } = session;
+  const origin = headerOverlayOrigin(session, args.activeNodeRect);
+  if (origin === null) return args.transform;
   const strip = document.querySelector(
     `[data-testid="${HEADER_STRIP_SCROLL_TEST_ID}"]`,
   );
@@ -376,11 +385,29 @@ const rootDragOverlayModifier: Modifier = (args) => {
     stripEnd:
       stripRect === null ? Number.POSITIVE_INFINITY : axis.mainEnd(stripRect),
   });
-  const main = start - geometry.sourceInitialStart;
+  const tearOff = useEpicDndStore.getState().headerTearOffPreview;
+  const main =
+    start - (tearOff ? geometry.sourceInitialStart : axis.pointerMain(origin));
+  const cross = tearOff
+    ? 0
+    : axis.crossStart(session.sourceRect) - axis.pointerCross(origin);
   return axis.id === "x"
-    ? { ...args.transform, x: main, y: 0 }
-    : { ...args.transform, x: 0, y: main };
+    ? { ...args.transform, x: main, y: cross }
+    : { ...args.transform, x: cross, y: main };
 };
+
+// DragOverlay is anchored to the grabbed node, which can be a member
+// inside a split. Keep that initial origin while the source frame slides.
+function headerOverlayOrigin(
+  session: HeaderStripDragSession,
+  nodeRect: RectLike | null,
+): PointLike | null {
+  if (session.overlayOrigin !== null) return session.overlayOrigin;
+  if (nodeRect === null) return null;
+  const origin = { x: nodeRect.left, y: nodeRect.top };
+  activeHeaderStripSession = { ...session, overlayOrigin: origin };
+  return origin;
+}
 
 const ROOT_DRAG_OVERLAY_MODIFIERS = [rootDragOverlayModifier];
 
@@ -1347,7 +1374,10 @@ export function RootDndProvider(props: RootDndProviderProps) {
           headerTab,
           session === null
             ? null
-            : readHeaderStripItemSize(headerTab.stripItemId),
+            : {
+                width: session.sourceRect.width,
+                height: session.sourceRect.height,
+              },
           session === null ? null : session.axis.id,
           readHeaderTabDragGhost(event.active.data.current),
         );
@@ -1594,9 +1624,21 @@ export function RootDndProvider(props: RootDndProviderProps) {
       onDragCancel={handleDragCancel}
     >
       {props.children}
-      <DragOverlay dropAnimation={null} modifiers={ROOT_DRAG_OVERLAY_MODIFIERS}>
-        <EpicRootDragOverlayContent />
-      </DragOverlay>
+      <RootDragOverlay />
     </DndContext>
   );
+}
+
+function RootDragOverlay() {
+  const headerTab = useEpicDndStore((state) => state.activeHeaderTab);
+  const host =
+    headerTab === null
+      ? null
+      : document.querySelector("[data-strip-drag-overlay-host]");
+  const overlay = (
+    <DragOverlay dropAnimation={null} modifiers={ROOT_DRAG_OVERLAY_MODIFIERS}>
+      <EpicRootDragOverlayContent />
+    </DragOverlay>
+  );
+  return host === null ? overlay : createPortal(overlay, host);
 }

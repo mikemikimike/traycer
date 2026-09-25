@@ -883,6 +883,8 @@ describe("TopLevelSurfaceMount: single-sheet route marker (D1/D2)", () => {
   }
 
   function surfaceFrame(): HTMLElement {
+    // One-sheet design: no tray wrapper around the surface frame any more,
+    // so it is `<main>`'s own direct child.
     const frame = document.querySelector<HTMLElement>(
       "[data-layout-column] main > div",
     );

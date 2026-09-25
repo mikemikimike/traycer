@@ -567,20 +567,6 @@ export function sideTabStripEdge(
 }
 
 /**
- * Whether the vertical strip's active tab joins its panel sheet like a folder
- * tab (D3): the strip and the epic sidebar share an edge and the active
- * surface is an epic, so the panel sheet is the strip's neighbour. A collapsed
- * panel still counts, because its rail is still a sheet.
- */
-export function sideTabJoinsPanel(
-  placement: TabStripPlacement,
-  sidebarSide: EdgeSide,
-  activeSurfaceIsEpic: boolean,
-): boolean {
-  return activeSurfaceIsEpic && sideTabStripEdge(placement) === sidebarSide;
-}
-
-/**
  * Whether the strip lists the active task's live agents under its row (D9):
  * only the expanded vertical strip in the Activity view has room for them.
  */

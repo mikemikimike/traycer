@@ -188,8 +188,6 @@ export const SIDE_STRIP_INSET_CLASS = "px-2";
 export const SIDE_STRIP_FOOT_CLASS = "gap-2 p-2";
 /** A group header's member count. */
 export const SIDE_TAB_GROUP_COUNT_CLASS = "text-ui-xs tabular-nums";
-/** The dragged row or pair: an opaque, raised copy of the source. */
-export const SIDE_TAB_DRAG_OVERLAY_CLASS = "rounded-lg bg-canvas shadow-lg";
 /**
  * A nav control's collapsed form - the expand toggle, Inbox, All tasks, New
  * Task and the avatar: a 32px icon tile (D6), on the rail's axis. The rail's

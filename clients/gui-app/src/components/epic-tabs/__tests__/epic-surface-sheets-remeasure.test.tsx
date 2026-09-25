@@ -165,7 +165,7 @@ describe("EpicSurfaceSheets re-measures hosted geometry on a sidebarSide flip", 
     expect(rects).toEqual([{ left: 0, top: 0, width: 760, height: 600 }]);
   });
 
-  it("orders the sidebar before the content sheet on the left and after it on the right", () => {
+  it("orders the sidebar before the content pane on the left and after it on the right", () => {
     const { container, rerender } = render(
       <EpicSurfaceSheets
         tabId={TAB_ID}
@@ -186,7 +186,7 @@ describe("EpicSurfaceSheets re-measures hosted geometry on a sidebarSide flip", 
       (el) => el.getAttribute("data-testid") === "sidebar",
     );
     const contentIndexLeft = leftChildren.findIndex(
-      (el) => el.getAttribute("data-shell-sheet") === "content",
+      (el) => el.querySelector('[data-testid="body"]') !== null,
     );
     expect(sidebarIndexLeft).toBeGreaterThanOrEqual(0);
     expect(sidebarIndexLeft).toBeLessThan(contentIndexLeft);
@@ -208,7 +208,7 @@ describe("EpicSurfaceSheets re-measures hosted geometry on a sidebarSide flip", 
       (el) => el.getAttribute("data-testid") === "sidebar",
     );
     const contentIndexRight = rightChildren.findIndex(
-      (el) => el.getAttribute("data-shell-sheet") === "content",
+      (el) => el.querySelector('[data-testid="body"]') !== null,
     );
     expect(contentIndexRight).toBeGreaterThanOrEqual(0);
     expect(contentIndexRight).toBeLessThan(sidebarIndexRight);

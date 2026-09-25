@@ -386,11 +386,18 @@ describe("the miniature follows the stored placement and sidebar side", () => {
         const surface = within(miniature).getByTestId(
           "preset-miniature-surface",
         );
-        const panel = surface.querySelector<HTMLElement>(
-          '[data-shell-sheet="panel"]',
+        const sheet = surface.querySelector<HTMLElement>(
+          '[data-shell-sheet="task"]',
         );
-        const content = surface.querySelector('[data-shell-sheet="content"]');
-        if (panel === null || content === null) {
+        if (sheet === null) throw new Error("expected the one task sheet");
+        // No per-pane marker any more (one-sheet design): the panel is the
+        // rail's own parent pane, and the content pane is the sheet's other
+        // direct child.
+        const panel = within(sheet).getByTestId(
+          "preset-miniature-rail",
+        ).parentElement;
+        const content = [...sheet.children].find((child) => child !== panel);
+        if (panel === null || content === undefined) {
           throw new Error("expected both the panel and content sheets");
         }
         expect(
@@ -434,7 +441,7 @@ describe("the miniature follows the stored placement and sidebar side", () => {
     }
   });
 
-  it("gives both sheets their own data-shell-sheet marker, panel and content alike", () => {
+  it("gives the miniature's one task sheet its data-shell-sheet marker", () => {
     setArrangement({ sidebarSide: "left" });
     render(<PresetsBlock onPreviewPreset={() => {}} />);
 
@@ -443,10 +450,9 @@ describe("the miniature follows the stored placement and sidebar side", () => {
       const sheets = [
         ...surface.querySelectorAll<HTMLElement>("[data-shell-sheet]"),
       ];
-      expect(sheets.map((sheet) => sheet.dataset.shellSheet).sort()).toEqual([
-        "content",
-        "panel",
-      ]);
+      // One-sheet design: the marker sits once, on the box holding both
+      // panes, not on the panel and content panes separately.
+      expect(sheets.map((sheet) => sheet.dataset.shellSheet)).toEqual(["task"]);
     }
   });
 

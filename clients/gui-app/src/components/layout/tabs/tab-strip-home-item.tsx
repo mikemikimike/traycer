@@ -3,6 +3,7 @@ import { House } from "lucide-react";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { HomeTabContextMenu } from "./tab-strip-context-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { useEpicDndStore } from "@/components/epic-canvas/dnd/dnd-store";
 import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
 import { headerTabClassName } from "@/components/layout/tabs/tab-chrome-tokens";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,10 @@ export function TabStripHomeItemView(
   props: TabStripHomeItemProps & { ref?: Ref<HTMLButtonElement> },
 ): ReactNode {
   const { isActive, onActivate, ref } = props;
+  // Home is a surface with a sheet like any tab, so it joins it; see
+  // `TabItem` for why a drag unjoins.
+  const dragging = useEpicDndStore((state) => state.activeHeaderTab !== null);
+  const joined = isActive && !dragging;
 
   return (
     <TooltipWrapper
@@ -89,7 +94,12 @@ export function TabStripHomeItemView(
           record to carry an appearance and nothing in the menu to set one.
           `session={false}` for the same reason - Home is a place, and the one
           tab that is a MODE is the layout editor's own (L-87). */}
-        <TabChrome isActive={isActive} color={null} session={false} />
+        <TabChrome
+          isActive={isActive}
+          joined={joined}
+          color={null}
+          session={false}
+        />
         <House className="relative z-20 size-4" />
       </button>
     </TooltipWrapper>

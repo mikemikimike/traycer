@@ -1,3 +1,5 @@
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
+import { useTabStripPlacement } from "@/components/layout/tabs/use-tab-strip-placement";
 import type { ReactNode } from "react";
 import { ChatIndicatorHostScopes } from "@/components/notifications/chat-indicator-host-scopes";
 /**
@@ -198,6 +200,7 @@ function HeaderTabOverlayChip(props: {
   readonly tab: HeaderTabDragData;
   readonly width: number | null;
 }) {
+  const placement = useTabStripPlacement();
   const item = useAppearanceHeaderStripItem(props.tab.stripItemId);
   const ghost = useActiveHeaderTabGhost();
   const tearOff = useEpicDndStore((state) => state.headerTearOffPreview);
@@ -211,19 +214,28 @@ function HeaderTabOverlayChip(props: {
   if (axis === "y") {
     return (
       <HeaderTabOverlayIndicators>
-        <SideTabDragOverlay
-          item={item}
-          ghost={ghost}
-          size={size}
-          source={props.tab}
-          isActive={isActive}
-        />
+        <ColumnEdgeContext.Provider
+          value={placement === "top" ? null : placement}
+        >
+          <SideTabDragOverlay
+            item={item}
+            ghost={ghost}
+            size={size}
+            source={props.tab}
+            isActive={isActive}
+          />
+        </ColumnEdgeContext.Provider>
       </HeaderTabOverlayIndicators>
     );
   }
   if (item.kind === "tab" && ghost !== null) {
     return (
-      <HeaderTabDragOverlay tab={item.tab} ghost={ghost} width={props.width} />
+      <HeaderTabDragOverlay
+        tab={item.tab}
+        ghost={ghost}
+        width={props.width}
+        isActive={isActive}
+      />
     );
   }
   return (
@@ -233,6 +245,7 @@ function HeaderTabOverlayChip(props: {
           tab={item.tab}
           ghost={ghost}
           width={props.width}
+          isActive={isActive}
         />
       ) : (
         <SplitTabDragOverlay

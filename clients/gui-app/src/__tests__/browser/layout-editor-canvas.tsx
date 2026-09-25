@@ -215,7 +215,7 @@ const SESSION_TAB_COLOR: string | null =
 function SessionTabSpecimen(): ReactNode {
   return (
     <span data-fixture-session-tab className="relative h-9 w-48 shrink-0">
-      <TabChrome isActive color={SESSION_TAB_COLOR} session />
+      <TabChrome isActive joined={false} color={SESSION_TAB_COLOR} session />
       {/* The label colour the real tab gives itself on this fill, restated
           rather than imported: `header-tab-visual.tsx` exports components
           only, and a string export would cost that file its fast refresh. */}
@@ -1227,9 +1227,9 @@ function renderFixtureHostedBody(): ReactNode {
 
 /**
  * A task's surface as `EpicSurface` lays it out, through the REAL
- * `EpicSurfaceSheets`: the panel sheet on the stored sidebar side, the REAL
- * width handle in the gap, and the content sheet beside it. The panel draws
- * the REAL rail across its top (vertical in the collapsed rail sheet) and the
+ * `EpicSurfaceSheets`: one task sheet, the panel pane on the stored sidebar
+ * side, the REAL width handle on the hairline, and the content pane beside it.
+ * The panel draws the REAL rail across its top (vertical in the collapsed rail) and the
  * REAL task header; the body below is left out (the real panel needs a live
  * host). The content sheet holds a REAL `TileSurfaceSlot`, and the REAL
  * `StableTileSurfaceHost` plane sits over the surface as `TopLevelTabHost`
@@ -1244,13 +1244,18 @@ function EpicSurfaceStandIn(): ReactNode {
   const handle = (
     <SidebarWidthResizeHandle side={sidebarSide} hidden={mainCollapsed} />
   );
+  // `EpicSidebarColumn`'s hairline between the panel pane and the content.
+  const paneDivider =
+    sidebarSide === "right"
+      ? "md:border-s md:border-canvas-border"
+      : "md:border-e md:border-canvas-border";
   const panel = (
     <div
-      data-shell-sheet="panel"
       data-epic-sidebar-panel
       data-fixture-panel
       className={cn(
         "flex h-full min-h-0 max-w-[50vw] shrink-0 flex-col overflow-hidden bg-background",
+        paneDivider,
         mainCollapsed && "hidden",
       )}
       style={{ width: sidebarWidthPx }}
@@ -1268,14 +1273,13 @@ function EpicSurfaceStandIn(): ReactNode {
       )}
     </div>
   );
-  // `EpicSidebarColumn`'s collapsed rail sheet, with its classes: no width of
+  // `EpicSidebarColumn`'s collapsed rail pane, with its classes: no width of
   // its own, so it is as wide as the real vertical rail inside it (`w-12`,
   // 48px). The panel stays mounted and hidden beside it, as in the app.
   const collapsedRail = mainCollapsed ? (
     <div
-      data-shell-sheet="panel"
       data-fixture-collapsed-rail
-      className="shrink-0 overflow-clip bg-background"
+      className={cn("shrink-0 overflow-clip bg-background", paneDivider)}
     >
       <EpicLeftPanelRail
         epicId={EPIC_SURFACE_ID}

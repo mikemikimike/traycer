@@ -4,7 +4,6 @@ import { LeaderDigitBadge } from "@/components/ui/leader-digit-badge";
 import { leaderDigitFor } from "@/components/ui/leader-digit-shortcuts";
 import { useEpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import { useRegisteredEpicTitleGenerating } from "@/lib/epic-selectors";
-import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import type { HeaderTab } from "@/stores/tabs/types";
 import {
   StripTabContextMenu,
@@ -23,7 +22,7 @@ import {
   type SideTabRowVariant,
 } from "./side-tab-row";
 import { SideTabHoverCardBody } from "./side-tab-hover-card";
-import { joinedAttribute } from "./side-tab-join";
+import { joinedAttribute, type SheetJoin } from "./side-tab-join";
 import { sideTabTileOf, tabAutoTint } from "../tab-identity";
 
 /**
@@ -38,8 +37,8 @@ export function SideStripTabRow(props: {
   readonly variant: SideTabRowVariant;
   readonly groupLine: SideGroupLine | null;
   readonly dropIndicator: DropIndicator;
-  /** The edge this row joins its panel sheet on (D3); `null` for a plain row. */
-  readonly joined: EdgeSide | null;
+  /** How this row joins its task's sheet; `null` for a plain row. */
+  readonly joined: SheetJoin | null;
 }): ReactNode {
   const { item, input, rootRef } = props;
   const { tab, isActive } = input;

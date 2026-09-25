@@ -395,6 +395,7 @@ function sessionTabVisualProps(isActive: boolean) {
     displayName: SESSION_TAB.name,
     chrome: "own" as const,
     isActive,
+    joined: isActive,
     titleControl: null,
     trailingControl: null,
     leaderVisible: false,
@@ -580,7 +581,14 @@ describe("layout-editor.css is read, not assumed", () => {
   it("paints the editor's tab and the editing frame from the same token", () => {
     expect(SAMPLE_TAB_COLOR).toBe(EDITING_FRAME_COLOR);
     const color = `var(${SAMPLE_TAB_COLOR})`;
-    render(createElement(TabChrome, { isActive: true, color, session: true }));
+    render(
+      createElement(TabChrome, {
+        isActive: true,
+        joined: true,
+        color,
+        session: true,
+      }),
+    );
     const box = screen.getByTestId("tab-chrome-box");
     expect(box.style.getPropertyValue("--swatch")).toBe(color);
     expect(box.style.getPropertyValue("--swatch-border")).toBe(

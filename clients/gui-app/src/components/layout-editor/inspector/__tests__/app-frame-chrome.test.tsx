@@ -409,63 +409,51 @@ describe("the tab entries and the side strip (S-01, S-03, ticket 11)", () => {
   });
 
   it.each(["left", "right"] as const)(
-    "marks the active row joined exactly when the strip edge (%s) matches the sidebar side",
+    "marks the active row joined on the strip's own edge (%s), for either sidebar side",
     (edge) => {
-      render(
-        <AppFrameSideStrip
-          values={PRESET_VALUES.default}
-          arrangement={{
-            ...DEFAULT_ARRANGEMENT,
-            tabStripPlacement: edge,
-            sidebarSide: edge,
-          }}
-          edge={edge}
-          collapsed={false}
-        />,
-      );
-      const strip = screen.getByTestId("app-frame-side-strip");
-      const activeRow = within(strip).getByText("Sample chat").parentElement;
-      expect(activeRow?.getAttribute("data-side-tab-joined")).toBe(edge);
-      cleanup();
-
-      const otherEdge = edge === "left" ? "right" : "left";
-      render(
-        <AppFrameSideStrip
-          values={PRESET_VALUES.default}
-          arrangement={{
-            ...DEFAULT_ARRANGEMENT,
-            tabStripPlacement: edge,
-            sidebarSide: otherEdge,
-          }}
-          edge={edge}
-          collapsed={false}
-        />,
-      );
-      const strip2 = screen.getByTestId("app-frame-side-strip");
-      const activeRow2 = within(strip2).getByText("Sample chat").parentElement;
-      expect(activeRow2?.hasAttribute("data-side-tab-joined")).toBe(false);
+      for (const sidebarSide of ["left", "right"] as const) {
+        render(
+          <AppFrameSideStrip
+            values={PRESET_VALUES.default}
+            arrangement={{
+              ...DEFAULT_ARRANGEMENT,
+              tabStripPlacement: edge,
+              sidebarSide,
+            }}
+            edge={edge}
+            collapsed={false}
+          />,
+        );
+        const strip = screen.getByTestId("app-frame-side-strip");
+        const activeRow = within(strip).getByText("Sample chat").parentElement;
+        expect(activeRow?.getAttribute("data-sheet-joined")).toBe(edge);
+        cleanup();
+      }
     },
   );
 
-  it("collapsed: marks the active tile joined exactly when the strip edge matches the sidebar side", () => {
-    render(
-      <AppFrameSideStrip
-        values={PRESET_VALUES.default}
-        arrangement={{
-          ...DEFAULT_ARRANGEMENT,
-          tabStripPlacement: "left",
-          sidebarSide: "left",
-        }}
-        edge="left"
-        collapsed
-      />,
-    );
-    const strip = screen.getByTestId("app-frame-side-strip");
-    const activeChip = within(strip).getAllByTestId(
-      "side-tab-monogram-chip",
-    )[1];
-    const activeTile = activeChip.parentElement;
-    expect(activeTile?.getAttribute("data-side-tab-joined")).toBe("left");
+  it("collapsed: marks the active tile joined on the strip's own edge, for either sidebar side", () => {
+    for (const sidebarSide of ["left", "right"] as const) {
+      render(
+        <AppFrameSideStrip
+          values={PRESET_VALUES.default}
+          arrangement={{
+            ...DEFAULT_ARRANGEMENT,
+            tabStripPlacement: "left",
+            sidebarSide,
+          }}
+          edge="left"
+          collapsed
+        />,
+      );
+      const strip = screen.getByTestId("app-frame-side-strip");
+      const activeChip = within(strip).getAllByTestId(
+        "side-tab-monogram-chip",
+      )[1];
+      const activeTile = activeChip.parentElement;
+      expect(activeTile?.getAttribute("data-sheet-joined")).toBe("left");
+      cleanup();
+    }
   });
 
   it("draws the Activity list only for an expanded strip in the Activity view", () => {

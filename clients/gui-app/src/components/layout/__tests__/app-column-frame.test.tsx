@@ -185,4 +185,39 @@ describe("AppColumnFrame", () => {
       expect(column.lastElementChild).toBe(screen.getByTestId("tail-last"));
     },
   );
+
+  describe("the task surface frame (no tray wrapper)", () => {
+    it.each([TOP, LEFT_NONE, RIGHT_BAND])(
+      "sits directly under <main>, with no wrapper around it, for $placement",
+      (chrome) => {
+        renderFrame(chrome);
+
+        const frame = surfaceFrame();
+        const main = screen.getByRole("main");
+        // One-sheet design: the frame is `<main>`'s own child that holds the
+        // surface, not a second box a tray wraps it in.
+        expect(frame.parentElement).toBe(main);
+        expect(frame.classList.contains("md:task-surface-frame")).toBe(true);
+      },
+    );
+
+    it("renders exactly one top join bridge for the top placement", () => {
+      renderFrame(TOP);
+
+      expect(
+        document.querySelectorAll('[data-sheet-join-bridge="top"]'),
+      ).toHaveLength(1);
+    });
+
+    it.each([LEFT_NONE, RIGHT_BAND])(
+      "renders no join bridge from the frame itself for a side placement ($placement)",
+      (chrome) => {
+        renderFrame(chrome);
+
+        expect(
+          document.querySelectorAll("[data-sheet-join-bridge]"),
+        ).toHaveLength(0);
+      },
+    );
+  });
 });

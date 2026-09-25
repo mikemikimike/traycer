@@ -403,12 +403,12 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
  *
  * The frame it is drawn into is the app's own shell: the ground, a top bar or
  * a side strip on it where the stored placement puts the tabs (S-03), and the
- * surface frame's two sheets - a task's panel (its rail across the top, its
- * header, its agents) on the stored sidebar side and the content (a
- * transcript with a few turns in it, the dock the preset produces, a composer
- * box) - then the status strip. The strip is the user's own: the 60px rail
- * while it is collapsed, its active task joined to the panel sheet where the
- * live one joins, and its live agents listed in the Activity view. That part
+ * surface frame's one task sheet - a task's panel pane (its rail across the
+ * top, its header, its agents) on the stored sidebar side and the content
+ * pane (a transcript with a few turns in it, the dock the preset produces, a
+ * composer box) - then the status strip. The strip is the user's own: the
+ * 60px rail while it is collapsed, its active task joined to the sheet as the
+ * live one is, and its live agents listed in the Activity view. That part
  * is inert static markup, and it is there because a card that was 60% empty
  * `bg-card` read as a near-black rectangle in every dark preset, where
  * `--card` and `--background` are the same colour (I-03). Everything in it
@@ -464,10 +464,7 @@ function PresetMiniature(props: {
 
   const panel = <MiniaturePanel {...frame} />;
   const content = (
-    <div
-      data-shell-sheet="content"
-      className="flex min-w-0 flex-1 flex-col overflow-clip bg-canvas"
-    >
+    <div className="flex min-w-0 flex-1 flex-col overflow-clip bg-canvas">
       <MiniatureChatArea {...frame} />
       <div className="px-6 py-2">
         <AppFrameComposerStack {...frame} />
@@ -491,7 +488,9 @@ function PresetMiniature(props: {
       }}
     >
       <div
-        className="absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-shell-ground text-canvas-foreground"
+        // Its own anchor scope: the live frame's bridge must never find this
+        // picture's tab or frame, nor this one the live frame's.
+        className="absolute top-0 left-0 flex origin-top-left flex-col overflow-hidden bg-shell-ground text-canvas-foreground [anchor-scope:--sheet-joined,--task-frame]"
         style={{
           width: MINIATURE_FRAME_WIDTH,
           height: MINIATURE_FRAME_HEIGHT,
@@ -502,18 +501,26 @@ function PresetMiniature(props: {
         <div className="flex min-h-0 flex-1">
           {edge === "left" ? strip : null}
           {/* The shell's own surface frame: its margin is the ground around
-              the sheets, and it gives them their border and radius. */}
+              the task sheet, and it gives that sheet its border and radius. */}
           <div
             data-testid="preset-miniature-surface"
-            className="task-surface-frame flex min-h-0 min-w-0 flex-1 gap-(--shell-gap)"
+            className="task-surface-frame flex min-h-0 min-w-0 flex-1"
           >
-            {arrangement.sidebarSide === "left" ? panel : null}
-            {content}
-            {arrangement.sidebarSide === "right" ? panel : null}
+            <div
+              data-shell-sheet="task"
+              className="flex min-h-0 min-w-0 flex-1 overflow-clip"
+            >
+              {arrangement.sidebarSide === "left" ? panel : null}
+              {content}
+              {arrangement.sidebarSide === "right" ? panel : null}
+            </div>
           </div>
           {edge === "right" ? strip : null}
         </div>
         <MiniatureStatusBar {...frame} />
+        {edge === null ? (
+          <span aria-hidden data-sheet-join-bridge="top" />
+        ) : null}
       </div>
     </div>
   );
@@ -643,15 +650,17 @@ function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
 }
 
 /**
- * The task's panel sheet at its default width: the rail across its top as the
+ * The task's panel pane at its default width: the rail across its top as the
  * expanded panel draws it, holding the frame chrome's entries (L-155), the
  * task header (D12), and the Agents tree.
  */
 function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div
-      data-shell-sheet="panel"
-      className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-background"
+      className={cn(
+        "flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-canvas-border bg-(--sidebar)",
+        arrangement.sidebarSide === "right" ? "border-s" : "border-e",
+      )}
       style={{ width: DEFAULT_SIDEBAR_WIDTH_PX }}
     >
       {/* Each rail picture comes in the vertical rail's 48px column frame

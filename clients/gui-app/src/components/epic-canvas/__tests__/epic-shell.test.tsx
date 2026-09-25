@@ -295,6 +295,16 @@ describe("<EpicShell />", () => {
     expect(screen.queryByTestId("epic-session-loading")).toBeNull();
   });
 
+  it("draws the status row's own bottom divider above the canvas (one-sheet design)", () => {
+    render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
+
+    const statusRow = screen.getByTestId("epic-shell-status-row");
+    // TileCanvas lost its own border in the one-sheet design, so the status
+    // row now owns the divider that separates it from the canvas below.
+    expect(statusRow.className).toContain("border-b");
+    expect(statusRow.className).toContain("border-canvas-border/70");
+  });
+
   it("is canvas-only: the sidebar is hoisted out of the keep-alive pane", () => {
     render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
 

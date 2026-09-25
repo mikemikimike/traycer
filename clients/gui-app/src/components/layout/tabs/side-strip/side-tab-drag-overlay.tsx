@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { use, type ReactNode } from "react";
+import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
+import { joinedAttribute, useSideTabJoin } from "./side-tab-join";
 import { Plus } from "lucide-react";
 import {
   useEpicDndStore,
@@ -7,7 +9,6 @@ import {
 import { useSurfaceNotificationIndicatorState } from "@/components/notifications/notification-indicator-context";
 import { useEpicActivityStatus } from "@/hooks/epic/use-epic-activity-status";
 import { useRegisteredEpicTitleGenerating } from "@/lib/epic-selectors";
-import { cn } from "@/lib/utils";
 import { useSideStripCollapsed } from "@/stores/layout/side-tab-strip-store";
 import { tabAppearance, type HeaderTab } from "@/stores/tabs/types";
 import type {
@@ -23,7 +24,6 @@ import { railBadgeOf } from "./rail-badge-kind";
 import { sideTabTileOf, tabAutoTint } from "../tab-identity";
 import { SideSplitRowPair } from "./side-split-row-pair";
 import { SideTabRow, type SideTabRowVariant } from "./side-tab-row";
-import { SIDE_TAB_DRAG_OVERLAY_CLASS } from "./side-strip-tokens";
 
 /**
  * The dragged object of a vertical strip drag: the row (or the split pair)
@@ -66,10 +66,7 @@ export function SideTabDragOverlay(props: {
     <div
       data-testid="header-tab-drag-overlay"
       data-merge-targeted={mergeTargeted}
-      className={cn(
-        SIDE_TAB_DRAG_OVERLAY_CLASS,
-        "pointer-events-none flex cursor-grabbing flex-col select-none data-[merge-targeted=true]:opacity-45",
-      )}
+      className="pointer-events-none flex cursor-grabbing flex-col select-none data-[merge-targeted=true]:opacity-45"
       style={
         size === null ? undefined : { width: size.width, height: size.height }
       }
@@ -79,7 +76,8 @@ export function SideTabDragOverlay(props: {
           tab={single}
           ghost={props.ghost}
           variant={variant}
-          active
+          active={props.isActive}
+          join={tornMember === null}
         />
       ) : null}
       {single === null && item.kind === "split" ? (
@@ -104,9 +102,16 @@ function OverlaySplitPair(props: {
 }): ReactNode {
   const { item, draggedMember } = props;
   const focusedSide = props.isActive ? item.focusedSide : null;
+  const edge = use(ColumnEdgeContext);
+  const edgeMember = edge === null ? null : item[edge];
+  const joined = useSideTabJoin(
+    props.isActive,
+    null,
+    edgeMember?.kind === "tab" ? edgeMember.tab : null,
+  );
   return (
     <SideSplitRowPair
-      frame={{}}
+      frame={joinedAttribute(joined)}
       variant={props.variant}
       testId={`split-tab-group-overlay-${item.id}`}
       first={
@@ -143,6 +148,7 @@ function OverlayMember(props: {
         ghost={props.ghost}
         variant={props.variant}
         active={props.focused}
+        join={false}
       />
     );
   }
@@ -179,8 +185,10 @@ function OverlayTabRow(props: {
   readonly ghost: HeaderTabDragGhost | null;
   readonly variant: SideTabRowVariant;
   readonly active: boolean;
+  readonly join: boolean;
 }): ReactNode {
   const { tab, ghost } = props;
+  const joined = useSideTabJoin(props.active && props.join, null, tab);
   const epicId = tab.kind === "epic" ? tab.epicId : null;
   const { resolvedTabName, displayName } = useHeaderTabTitle(tab);
   const liveIndicator = useSurfaceNotificationIndicatorState(
@@ -204,7 +212,7 @@ function OverlayTabRow(props: {
   );
   return (
     <SideTabRow
-      frame={{}}
+      frame={joinedAttribute(joined)}
       variant={props.variant}
       active={props.active}
       session={null}

@@ -136,9 +136,10 @@ export function SideTabStrip(props: {
             className={cn("min-h-0 flex-1", dragClass)}
           />
           <SideStripFoot variant={variant} />
-          {/* The joined tab's run into its panel sheet (D3), anchored to the
-            joined row and drawn only while one exists (`index.css`). */}
-          <span aria-hidden data-side-tab-join-bridge={edge} />
+          {/* The joined tab's run onto its task's sheet, anchored to the joined
+            row and drawn only while one exists (`index.css`). */}
+          <div data-strip-drag-overlay-host className="contents" />
+          <span aria-hidden data-sheet-join-bridge={edge} />
           <SideStripResizeHandle edge={edge} stripRef={stripRef} />
           {controller.dialogs}
         </nav>

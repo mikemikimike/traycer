@@ -98,6 +98,7 @@ export const SplitTabItem = memo(function SplitTabItem(
       state.activeHeaderTab !== null &&
       state.activeHeaderTab.stripItemId === props.item.id,
   );
+  const joined = props.isActive && !isDragging;
   const quickActionsTab =
     memberTab(props.item.left) ?? memberTab(props.item.right);
 
@@ -149,6 +150,7 @@ export const SplitTabItem = memo(function SplitTabItem(
       <SplitTabLayout
         splitId={props.item.id}
         selectedSide={props.isActive ? props.item.focusedSide : null}
+        joined={joined}
         control={
           quickActionsTab === null ? null : (
             <SplitQuickActions
