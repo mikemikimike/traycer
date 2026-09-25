@@ -335,9 +335,9 @@ function GeometryPopoverShell(props: {
   if (!props.open) return null;
   return (
     <div
-      data-radix-popper-content-wrapper=""
+      data-slot="popover-positioner"
       data-testid="popper-wrapper"
-      style={{ transform: "translate(0, -200%)" }}
+      style={{ transform: "translate(0, -200%)", opacity: "0" }}
     >
       <NotificationsPopover
         onNavigate={() => undefined}
@@ -391,16 +391,17 @@ function renderGeometryPopover(): void {
 
 function forcePopperPlacement(shell: HTMLElement): void {
   const wrapper = shell.closest<HTMLElement>(
-    "[data-radix-popper-content-wrapper]",
+    '[data-slot="popover-positioner"]',
   );
   if (wrapper === null) {
-    throw new Error("missing radix popper content wrapper");
+    throw new Error("missing popover positioner wrapper");
   }
   act(() => {
     wrapper.style.transform = "translate(0, -200%)";
   });
   act(() => {
     wrapper.style.transform = "translate(0px, 0px)";
+    wrapper.style.removeProperty("opacity");
   });
 }
 
@@ -1526,6 +1527,10 @@ describe("NotificationsPopover feed controls (T05)", () => {
 
       renderGeometryPopover();
       const shell = await screen.findByTestId("notifications-popover");
+      // The geometry lock is genuinely deferred until the positioner reports
+      // placed (opacity leaves "0") - not already taken from the unplaced
+      // mount styles alone.
+      expect(shell.style.width).toBe("");
       forcePopperPlacement(shell);
       const locked = await waitForGeometryLock(shell);
 

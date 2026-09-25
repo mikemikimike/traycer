@@ -269,23 +269,25 @@ function PrOwnerOverflow(props: {
   const nouns = prOwnerCollectionNouns(props.owners);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Badge
-          render={
-            <button
-              type="button"
-              // The row itself opens the PR tile; this chip means "show the rest".
-              onClick={(event) => event.stopPropagation()}
-              aria-label={`Show all ${props.owners.length} ${nouns.plural}`}
-              data-testid="pr-owner-overflow"
-            >
-              {`+${props.hidden}`}
-            </button>
-          }
-          variant="muted"
-          className="cursor-pointer hover:bg-foreground/8 hover:text-foreground"
-        />
-      </PopoverTrigger>
+      <PopoverTrigger
+        render={
+          <Badge
+            render={
+              <button
+                type="button"
+                // The row itself opens the PR tile; this chip means "show the rest".
+                onClick={(event) => event.stopPropagation()}
+                aria-label={`Show all ${props.owners.length} ${nouns.plural}`}
+                data-testid="pr-owner-overflow"
+              >
+                {`+${props.hidden}`}
+              </button>
+            }
+            variant="muted"
+            className="cursor-pointer hover:bg-foreground/8 hover:text-foreground"
+          />
+        }
+      />
       <PopoverContent
         layout="bare"
         align="start"
@@ -315,7 +317,7 @@ function PrOwnerOverflow(props: {
         //
         // `overflow-hidden` is what makes the height cap bite - without it the
         // list paints straight past the popover's box.
-        className="max-h-[min(var(--radix-popover-content-available-height,100vh),60vh)] w-max max-w-[min(80vw,var(--radix-popover-content-available-width,100vw),28rem)] overflow-hidden"
+        className="max-h-[min(var(--available-height,100vh),60vh)] w-max max-w-[min(80vw,var(--available-width,100vw),28rem)] overflow-hidden"
       >
         <p className="shrink-0 border-b px-3 py-2 text-ui-xs text-muted-foreground">
           {`${nouns.capitalized} this PR came from`}

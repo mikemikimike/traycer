@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type ReactElement,
 } from "react";
 import { FolderPlus } from "lucide-react";
 import { FirstTaskWorkspaceSetup } from "@/components/onboarding/first-task-workspace-setup";
@@ -26,7 +27,7 @@ import type { WorktreeWorkspacesRefresh } from "@/hooks/worktree/use-worktree-wo
 import { isEditableEventTarget } from "@/lib/keybindings/editable-target";
 import { useBareKeyClaimer } from "@/lib/keybindings/use-bare-key-claimer";
 import { useCompactRelativeTime } from "@/lib/relative-time";
-import { preserveWhenNestedOverlay } from "./preserve-when-nested-overlay";
+import { isNestedOverlayTarget } from "./preserve-when-nested-overlay";
 import { useDialogOverlayBoundaryEl } from "@/providers/dialog-overlay-boundary-context";
 import {
   ADD_FOLDER_LABEL,
@@ -349,7 +350,7 @@ export function WorkspaceFolderSummaryControl(props: {
         });
       }}
     >
-      <PopoverTrigger asChild>{previewTrigger}</PopoverTrigger>
+      <PopoverTrigger render={previewTrigger} />
     </HoverPreviewCard>
   );
 
@@ -383,10 +384,25 @@ export function WorkspaceFolderSummaryControl(props: {
   const picker = (
     <Popover
       open={overlayState.workspacePopoverOpen}
-      onOpenChange={(open) => {
+      onOpenChange={(next, details) => {
+        if (
+          !next &&
+          (details.reason === "outside-press" ||
+            details.reason === "focus-out") &&
+          isNestedOverlayTarget(
+            details.reason === "focus-out" &&
+              details.event instanceof FocusEvent
+              ? details.event.relatedTarget
+              : details.event.target,
+            contentRef.current,
+          )
+        )
+          details.cancel();
+        if (details.isCanceled) return;
+
         setOverlayState((current) => ({
-          workspacePopoverOpen: open,
-          summaryHoverOpen: open ? false : current.summaryHoverOpen,
+          workspacePopoverOpen: next,
+          summaryHoverOpen: next ? false : current.summaryHoverOpen,
         }));
         // Opening the picker is an explicit intent edge - the user is about to
         // decide something per folder - so re-derive from disk once, here.
@@ -406,7 +422,7 @@ export function WorkspaceFolderSummaryControl(props: {
         // folder set whose host is unbound would reject into "Couldn't refresh
         // folder details" - an error toast the user never asked for, next to a
         // Refresh button correctly rendered disabled.
-        if (open && canRefresh) triggerRefresh();
+        if (next && canRefresh) triggerRefresh();
       }}
     >
       {popoverTrigger}
@@ -417,18 +433,15 @@ export function WorkspaceFolderSummaryControl(props: {
         align="start"
         collisionPadding={12}
         container={dialogBoundaryEl ?? undefined}
-        className="w-[min(92vw,42rem)] max-w-[var(--radix-popover-content-available-width)] max-h-[min(var(--radix-popover-content-available-height),32rem)] overflow-hidden"
+        className="w-[min(92vw,42rem)] max-w-[var(--available-width)] max-h-[min(var(--available-height),32rem)] overflow-hidden"
         data-testid={props.popoverTestId}
-        onOpenAutoFocus={(event) => event.preventDefault()}
-        onCloseAutoFocus={(event) => {
-          if (!confirmingSetupRef.current) return;
+        initialFocus={false}
+        finalFocus={() => {
+          if (!confirmingSetupRef.current) return true;
           confirmingSetupRef.current = false;
-          event.preventDefault();
           props.onFirstTaskSetupComplete?.();
+          return false;
         }}
-        onInteractOutside={(event) =>
-          preserveWhenNestedOverlay(event, contentRef.current)
-        }
       >
         {/* Match the sidebar owner card's structure: the content owns the
             scroll, while the refresh row stays outside it. This keeps one
@@ -500,7 +513,7 @@ function EmptyRecentAddFolderContent(props: {
 }
 
 function EmptyRecentFolderTrigger(props: {
-  readonly trigger: ReactNode;
+  readonly trigger: ReactElement;
   readonly disabled: boolean;
   readonly disabledReason: string | null;
   readonly iconOnly: boolean;
@@ -514,7 +527,7 @@ function EmptyRecentFolderTrigger(props: {
         sideOffset={undefined}
         align={undefined}
       >
-        <PopoverTrigger asChild>{props.trigger}</PopoverTrigger>
+        <PopoverTrigger render={props.trigger} />
       </TooltipWrapper>
     );
   }

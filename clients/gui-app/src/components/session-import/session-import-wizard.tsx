@@ -737,24 +737,26 @@ function SessionImportFilterSheet(
   const dirty = sessionImportFiltersDirty(props);
   return (
     <Sheet>
-      <SheetTrigger asChild>
-        <button
-          type="button"
-          aria-label="Filters"
-          data-testid="session-import-filters"
-          data-filtered={dirty}
-          className="onboarding-import-bar-button"
-        >
-          <SlidersHorizontal aria-hidden className="size-4" />
-          {dirty ? (
-            <span
-              aria-hidden
-              data-testid="session-import-filters-dot"
-              className="onboarding-import-filter-dot"
-            />
-          ) : null}
-        </button>
-      </SheetTrigger>
+      <SheetTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Filters"
+            data-testid="session-import-filters"
+            data-filtered={dirty}
+            className="onboarding-import-bar-button"
+          >
+            <SlidersHorizontal aria-hidden className="size-4" />
+            {dirty ? (
+              <span
+                aria-hidden
+                data-testid="session-import-filters-dot"
+                className="onboarding-import-filter-dot"
+              />
+            ) : null}
+          </button>
+        }
+      />
       <SheetContent
         side="bottom"
         className="onboarding-import-filter-sheet max-h-[85svh] overflow-y-auto"

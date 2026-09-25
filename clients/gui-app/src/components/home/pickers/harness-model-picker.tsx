@@ -1,3 +1,4 @@
+import { isProfileUsageSidecarTarget } from "@/components/providers/profile-usage-sidecar-target";
 import { useStore } from "zustand";
 
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
@@ -1036,33 +1037,62 @@ function HarnessModelPickerImpl(props: HarnessModelPickerProps) {
   );
 
   return (
-    <Popover open={visibleOpen} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <TooltipWrapper
-          label={tooltipLabel}
-          side="top"
-          sideOffset={undefined}
-          align={undefined}
-        >
-          <HarnessModelTrigger
-            {...paneActivationDeferProps}
-            selection={selection}
-            label={presentation.label}
-            reasoningLabel={presentation.reasoningLabel}
-            reasoningStep={presentation.reasoningStep}
-            reasoningIndicator={reasoningIndicator}
-            serviceTierLabel={presentation.activeServiceTierLabel}
-            serviceTierActive={presentation.serviceTierActive}
-            profileLabel={presentation.profileLabel}
-            profileAccentDot={presentation.profileAccentDot}
-            isLoading={presentation.isLoading}
-            disabled={disabled}
-            labelDisplay={props.labelDisplay}
-          />
-        </TooltipWrapper>
-      </PopoverTrigger>
+    <Popover
+      open={visibleOpen}
+      onOpenChange={(next, details) => {
+        if (
+          !next &&
+          details.reason === "escape-key" &&
+          trimmedQuery.length > 0
+        ) {
+          details.cancel();
+          handleQueryChange("");
+          return;
+        }
+        if (
+          !next &&
+          (details.reason === "outside-press" ||
+            details.reason === "focus-out") &&
+          isProfileUsageSidecarTarget(
+            details.reason === "focus-out" &&
+              details.event instanceof FocusEvent
+              ? details.event.relatedTarget
+              : details.event.target,
+          )
+        ) {
+          details.cancel();
+          return;
+        }
+        handleOpenChange(next);
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <TooltipWrapper
+            label={tooltipLabel}
+            side="top"
+            sideOffset={undefined}
+            align={undefined}
+          >
+            <HarnessModelTrigger
+              {...paneActivationDeferProps}
+              selection={selection}
+              label={presentation.label}
+              reasoningLabel={presentation.reasoningLabel}
+              reasoningStep={presentation.reasoningStep}
+              reasoningIndicator={reasoningIndicator}
+              serviceTierLabel={presentation.activeServiceTierLabel}
+              serviceTierActive={presentation.serviceTierActive}
+              profileLabel={presentation.profileLabel}
+              profileAccentDot={presentation.profileAccentDot}
+              isLoading={presentation.isLoading}
+              disabled={disabled}
+              labelDisplay={props.labelDisplay}
+            />
+          </TooltipWrapper>
+        }
+      />
       <HarnessModelPickerPanel
-        trimmedQuery={trimmedQuery}
         hasQuery={hasQuery}
         listboxId={listboxId}
         idPrefix={idPrefix}

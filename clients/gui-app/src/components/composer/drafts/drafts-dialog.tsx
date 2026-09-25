@@ -131,9 +131,7 @@ export function DraftsDialog(props: {
       <DialogContent
         className="flex max-h-[80dvh] flex-col overflow-hidden sm:max-w-2xl"
         aria-describedby={undefined}
-        onCloseAutoFocus={(event) => {
-          if (openingRow.current) event.preventDefault();
-        }}
+        finalFocus={() => !openingRow.current}
       >
         <DialogHeader>
           <DialogTitle>Drafts</DialogTitle>
@@ -174,19 +172,21 @@ export function DraftsDialog(props: {
               />
             </div>
             <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant={filtered ? "secondary" : "ghost"}
-                  size="icon-sm"
-                  aria-label="Filter drafts"
-                  className="mt-1.5"
-                  // cmdk would take the Enter for the highlighted row.
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  <ListFilter aria-hidden />
-                </Button>
-              </PopoverTrigger>
+              <PopoverTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant={filtered ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    aria-label="Filter drafts"
+                    className="mt-1.5"
+                    // cmdk would take the Enter for the highlighted row.
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <ListFilter aria-hidden />
+                  </Button>
+                }
+              />
               <PopoverContent
                 align="end"
                 className="w-auto"

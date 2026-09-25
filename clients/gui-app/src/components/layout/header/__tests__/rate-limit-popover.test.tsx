@@ -665,16 +665,16 @@ function parseTranslate(transform: string): {
   };
 }
 
-function mockRadixResizeGeometry(
+function mockPopoverResizeGeometry(
   surface: HTMLElement,
   initialWidth: number,
   initialHeight: number,
 ) {
   const positionWrapper = surface.closest<HTMLElement>(
-    "[data-radix-popper-content-wrapper]",
+    '[data-slot="popover-positioner"]',
   );
   if (positionWrapper === null) {
-    throw new Error("Expected the Radix popover positioning elements");
+    throw new Error("Expected the popover positioning elements");
   }
   const startLeftPx = 100;
   const startTopPx = 100;
@@ -692,7 +692,7 @@ function mockRadixResizeGeometry(
     initialTransform,
     positionWrapper,
     rectSpy,
-    overwriteRadixPosition: (xPx: number, yPx: number) => {
+    overwritePopoverPosition: (xPx: number, yPx: number) => {
       positionWrapper.style.transform = `translate(${xPx}px, ${yPx}px)`;
     },
   };
@@ -867,17 +867,13 @@ describe("<RateLimitPopover /> zero-provider state", () => {
     renderPopover();
 
     const surface = screen.getByTestId("rate-limit-popover-resize-surface");
+    expect(surface.className).toContain("max-w-[var(--available-width)]");
+    expect(surface.className).toContain("max-h-[var(--available-height)]");
     expect(surface.className).toContain(
-      "max-w-[var(--radix-popover-content-available-width)]",
+      "min-w-[min(92vw,20rem,var(--available-width))]",
     );
     expect(surface.className).toContain(
-      "max-h-[var(--radix-popover-content-available-height)]",
-    );
-    expect(surface.className).toContain(
-      "min-w-[min(92vw,20rem,var(--radix-popover-content-available-width))]",
-    );
-    expect(surface.className).toContain(
-      "min-h-[min(20vh,8rem,var(--radix-popover-content-available-height))]",
+      "min-h-[min(20vh,8rem,var(--available-height))]",
     );
     expect(
       Array.from(surface.querySelectorAll("[data-resize-direction]")).map(
@@ -911,7 +907,7 @@ describe("<RateLimitPopover /> rail", () => {
     "keeps the opposite edges fixed while resizing $direction",
     ({ direction, deltaX, deltaY, expected }) => {
       const surface = renderCodexPopover();
-      mockRadixResizeGeometry(surface, 480, 360);
+      mockPopoverResizeGeometry(surface, 480, 360);
 
       dragResize(surface, direction, 7, { x: deltaX, y: deltaY });
 
@@ -930,13 +926,13 @@ describe("<RateLimitPopover /> rail", () => {
     },
   );
 
-  it("keeps the wrapper locked when Radix rewrites its transform mid-drag", async () => {
+  it("keeps the wrapper locked when the popover repositions mid-drag", async () => {
     const surface = renderCodexPopover();
-    const geometry = mockRadixResizeGeometry(surface, 480, 360);
+    const geometry = mockPopoverResizeGeometry(surface, 480, 360);
     dragResize(surface, "e", 8, { x: 40, y: 0 });
 
     await act(async () => {
-      geometry.overwriteRadixPosition(-80, 120);
+      geometry.overwritePopoverPosition(-80, 120);
       await Promise.resolve();
     });
 
@@ -948,9 +944,9 @@ describe("<RateLimitPopover /> rail", () => {
     endResize(surface, "pointerup", 8, { x: 40, y: 0 });
   });
 
-  it("does not accumulate position across repeated horizontal Radix rewrites", async () => {
+  it("does not accumulate position across repeated horizontal repositions", async () => {
     const surface = renderCodexPopover();
-    const geometry = mockRadixResizeGeometry(surface, 480, 360);
+    const geometry = mockPopoverResizeGeometry(surface, 480, 360);
     fireEvent(
       screen.getByTestId("rate-limit-popover-resize-e"),
       pointerEvent("pointerdown", {
@@ -971,8 +967,8 @@ describe("<RateLimitPopover /> rail", () => {
         }),
       );
       await act(async () => {
-        // Simulate bottom-end Radix re-anchoring after each content-size update.
-        geometry.overwriteRadixPosition(100 - deltaX, 100);
+        // Simulate bottom-end re-anchoring after each content-size update.
+        geometry.overwritePopoverPosition(100 - deltaX, 100);
         await Promise.resolve();
       });
       const rect = surface.getBoundingClientRect();
@@ -996,7 +992,7 @@ describe("<RateLimitPopover /> rail", () => {
       .mockReturnValue(600);
     try {
       const surface = renderCodexPopover();
-      mockRadixResizeGeometry(surface, 480, 360);
+      mockPopoverResizeGeometry(surface, 480, 360);
       dragResize(surface, "ne", 9, { x: 1_000, y: -1_000 });
 
       const rect = surface.getBoundingClientRect();
@@ -1024,7 +1020,7 @@ describe("<RateLimitPopover /> rail", () => {
       .mockReturnValue(600);
     try {
       const surface = renderCodexPopover();
-      const geometry = mockRadixResizeGeometry(surface, 480, 360);
+      const geometry = mockPopoverResizeGeometry(surface, 480, 360);
 
       dragResize(surface, "e", 15, { x: 100, y: 0 });
       expect(surface.getBoundingClientRect().width).toBe(480);
@@ -1047,7 +1043,7 @@ describe("<RateLimitPopover /> rail", () => {
     "rolls back an interrupted drag on %s",
     (eventType) => {
       const surface = renderCodexPopover();
-      const geometry = mockRadixResizeGeometry(surface, 480, 360);
+      const geometry = mockPopoverResizeGeometry(surface, 480, 360);
       dragResize(surface, "ne", 10, { x: 40, y: -40 });
       expect(geometry.positionWrapper.style.transform).not.toBe(
         geometry.initialTransform,
@@ -1066,7 +1062,7 @@ describe("<RateLimitPopover /> rail", () => {
 
   it("ignores events from a different pointer id", () => {
     const surface = renderCodexPopover();
-    mockRadixResizeGeometry(surface, 480, 360);
+    mockPopoverResizeGeometry(surface, 480, 360);
     fireEvent(
       screen.getByTestId("rate-limit-popover-resize-e"),
       pointerEvent("pointerdown", {
@@ -1106,7 +1102,7 @@ describe("<RateLimitPopover /> rail", () => {
 
   it("does not roll back a committed resize when capture is lost after pointer-up", () => {
     const surface = renderCodexPopover();
-    mockRadixResizeGeometry(surface, 480, 360);
+    mockPopoverResizeGeometry(surface, 480, 360);
     dragResize(surface, "ne", 12, { x: 40, y: -40 });
     endResize(surface, "pointerup", 12, { x: 40, y: -40 });
     const committedSize = useRateLimitPopoverStore.getState().size;
@@ -1126,7 +1122,7 @@ describe("<RateLimitPopover /> rail", () => {
     const first = renderPopover();
 
     const surface = screen.getByTestId("rate-limit-popover-resize-surface");
-    const geometry = mockRadixResizeGeometry(surface, 480, 360);
+    const geometry = mockPopoverResizeGeometry(surface, 480, 360);
     dragResize(surface, "se", 13, { x: 60, y: 100 });
     endResize(surface, "pointerup", 13, { x: 60, y: 100 });
 
@@ -1137,7 +1133,7 @@ describe("<RateLimitPopover /> rail", () => {
     expect(surface.style.width).toBe("540px");
     expect(surface.style.height).toBe("460px");
     expect(surface.className).toContain(
-      "min-h-[min(35vh,16rem,var(--radix-popover-content-available-height))]",
+      "min-h-[min(35vh,16rem,var(--available-height))]",
     );
     expect(surface.className).toContain("overflow-hidden");
     // The surface owns the height; the rail/detail row is pinned to it one

@@ -2343,8 +2343,11 @@ export default tseslint.config(
     },
   },
   {
-    // Temporary T02 proof fixture; T07 promotes its assertions and deletes it.
-    files: ["src/__tests__/browser/base-ui-proofs.tsx"],
+    // Raw Base is the control in T02 proofs and the permanent focus parity gate.
+    files: [
+      "src/__tests__/browser/base-ui-proofs.tsx",
+      "src/__tests__/browser/portal-lifecycle-gate.tsx",
+    ],
     rules: {
       "@typescript-eslint/no-restricted-imports": importRestrictions(
         "posthog",

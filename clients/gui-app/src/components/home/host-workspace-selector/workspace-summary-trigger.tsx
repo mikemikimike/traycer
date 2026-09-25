@@ -151,7 +151,7 @@ export function WorkspaceSummaryTrigger(
               setReadOnlyHoverOpen(nextOpen);
             }}
           >
-            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+            <PopoverTrigger render={trigger} />
           </HoverPreviewCard>
           <PopoverContent
             side="bottom"
@@ -159,9 +159,9 @@ export function WorkspaceSummaryTrigger(
             collisionPadding={12}
             // Same desktop-scrolls-here / phone-scrolls-the-list split as the
             // editable panel in `WorkspaceFolderSummaryControl` - see the note there.
-            className="w-[min(92vw,42rem)] max-w-[var(--radix-popover-content-available-width)] max-h-[min(var(--radix-popover-content-available-height),32rem)] overflow-y-auto max-md:overflow-hidden"
+            className="w-[min(92vw,42rem)] max-w-[var(--available-width)] max-h-[min(var(--available-height),32rem)] overflow-y-auto max-md:overflow-hidden"
             data-testid="workspace-readonly-folders-popover"
-            onOpenAutoFocus={(event) => event.preventDefault()}
+            initialFocus={false}
           >
             <WorkspaceFolderRows
               items={items}

@@ -1427,3 +1427,9 @@
   stroke: var(--ring);
   stroke-width: 2;
 }
+
+/* Portals escape a concealed Activity; hide paint immediately during its close commit. */
+[data-overlay-concealed] {
+  display: none !important;
+  pointer-events: none !important;
+}

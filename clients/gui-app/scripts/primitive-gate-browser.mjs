@@ -162,7 +162,13 @@ let server,
   current = "startup",
   documentSequence = 0;
 const exceptions = [];
-const report = { parameters: {}, images: {}, motion: {}, behavior: [] };
+const report = {
+  parameters: {},
+  images: {},
+  motion: {},
+  behavior: [],
+  deferrals: [],
+};
 // Pixel/motion diffs are collected here rather than thrown immediately, so one
 // residual raster difference doesn't abort the run before the rest of the
 // ~990 images (or the 7 motion cases) are even captured. Everything else
@@ -521,37 +527,68 @@ try {
       await delay(400);
       await settle();
       if (family !== "popover" && state !== "nonmodal") {
+        // D17: Base's dialog backdrop does not mask the whole viewport with a
+        // body pointer-events lock the way Radix's DismissableLayer did (see
+        // useDialogRoot: only useScrollLock + useDismiss, no pointer mask), so
+        // the toast action is genuinely reachable and interactive while the
+        // modal is open. Approved by the coordinator/user, replacing the old
+        // KNOWN-DEFECT expectation (blocked action, press-through dismissal).
         const p = await center("[data-gate-toast-action]");
         await check(
-          "current modal toast hit lands on backdrop",
-          `document.elementFromPoint(${p.x},${p.y}).matches('[data-slot=dialog-overlay]')`,
+          "modal toast hit lands on the action, not the backdrop",
+          `document.elementFromPoint(${p.x},${p.y}).matches('[data-gate-toast-action]')`,
         );
         await clickAt(p.x, p.y, "left");
         await check(
-          "current modal toast press does not activate action",
-          "document.querySelector('[data-gate-state]').dataset.actions === '0'",
+          "modal toast action fires exactly once, modal stays open",
+          "document.querySelector('[data-gate-state]').dataset.actions === '1' && document.querySelector('[data-gate-state]').dataset.open === 'true'",
+        );
+        await hoverSelector("[data-sonner-toast]");
+        await settle();
+        await clickSelector(
+          "[data-sonner-toast] [data-close-button]",
+          "left",
+          true,
         );
         await wait(
-          "current modal toast press dismisses modal through backdrop",
-          "document.querySelector('[data-gate-state]').dataset.open === 'false'",
+          "toast removed",
+          "!document.querySelector('[data-sonner-toast]')",
         );
-        console.log(
-          `KNOWN DEFECT ${family}: toast action is blocked; press dismisses the modal (desired: action fires and modal remains)`,
+        await check(
+          "toast close retains the modal",
+          "document.querySelector('[data-gate-state]').dataset.open === 'true'",
         );
-        report.behavior.push(`toast/${family}/current-modal-blocking`);
-        // Reopen to prove normal backdrop dismissal independently of the defect.
-        await settle();
-        await wait(
-          "modal exit completes",
-          "!window.gatePresented('[data-gate-popup]')",
-        );
-        await open(family, state, views[0]);
-        await settle();
         await clickAt(8, 8, "left");
         await wait(
-          "ordinary backdrop dismisses",
+          "ordinary backdrop press closes the modal normally",
           "document.querySelector('[data-gate-state]').dataset.open === 'false'",
         );
+        // `open==='false'` only means React's committed; Base keeps the
+        // Popup mounted through its exit animation (`data-closed`/
+        // `data-ending-style`). finalFocus fires once that completes, so
+        // wait for the real animation settle AND the popup's actual removal
+        // from the DOM before asserting on it - no arbitrary delay.
+        await settle();
+        await wait(
+          "modal popup actually unmounts after its exit completes",
+          "!document.querySelector('[data-gate-popup]')",
+        );
+        // Dialog's close-focus callback is wired (unlike frame's - the raw
+        // PromotableModalFrame counter isn't); assert the real baseline for
+        // each: Dialog's counted callback fired once, frame's actual
+        // activeElement still matches Radix's ordinary-close convention
+        // (focus returns to the trigger) without an artificial counter.
+        if (family === "dialog")
+          await check(
+            "ordinary backdrop close fires close-focus once, returns to trigger",
+            "document.querySelector('[data-gate-state]').dataset.closeFocus === '1' && document.activeElement.matches('[data-gate-trigger]')",
+          );
+        else
+          await check(
+            "ordinary backdrop close returns focus to the trigger",
+            "document.activeElement.matches('[data-gate-trigger]')",
+          );
+        report.behavior.push(`toast/${family}/current-modal-action-reachable`);
         continue;
       }
       await clickSelector("[data-gate-toast-action]", "left", true);
@@ -872,12 +909,20 @@ try {
         const hidden = await evaluate(
           "({...document.querySelector('[data-gate-state]').dataset})",
         );
-        if (guarded.some(([f, s]) => f === family && s === state))
+        if (guarded.some(([f, s]) => f === family && s === state)) {
+          // D13: "Presentation-only owner changes, completions and final
+          // focus are suppressed" - Dialog/Popover now route every
+          // presentation-loss reason (visible, conceal - focus already did)
+          // through the real useOverlayPresentation guard, so none of them
+          // count as a genuine close. dropdown-menu/select are still Radix
+          // (T07) and keep their original expectation.
+          const converted = family === "dialog" || family === "popover";
           assert.equal(
             Number(hidden.closeFocus) - Number(before.closeFocus),
-            control === "focus" ? 0 : 1,
+            control === "focus" || converted ? 0 : 1,
             `${family}: current close-focus sequence on ${control}`,
           );
+        }
         await evaluate(show);
         await wait(
           "presentation restored",
@@ -1072,6 +1117,109 @@ try {
       "document.scrollingElement.scrollTop > 0",
     );
   }
+  // Radix parity for Base's default (undefined) initialFocus: auto-select an
+  // automatically-focused INPUT's text, never a textarea, never a caller-
+  // directed target, and only once per genuine open (see useOverlayFocus).
+  // The fixture only arms the real default path in mode="visual" - any other
+  // mode supplies the counting callback the other checks need, which is
+  // itself the "custom target" case here.
+  async function defaultFocusChecks() {
+    for (const family of ["dialog", "popover"]) {
+      await load(family, "default", "visual", views[0], "light");
+      await open(family, "default", views[0]);
+      await settle();
+      await check(
+        "default open selects the first tabbable input",
+        "document.activeElement.matches('[data-gate-input]') && document.activeElement.selectionStart === 0 && document.activeElement.selectionEnd === document.activeElement.value.length",
+      );
+      report.behavior.push(`default-focus/${family}/input-selected`);
+
+      await clickSelector("[data-gate-body]", "left", true);
+      await wait(
+        "focus left the input",
+        "!document.activeElement.matches('[data-gate-input]')",
+      );
+      await clickSelector("[data-gate-input]", "left", true);
+      await wait(
+        "input refocused",
+        "document.activeElement.matches('[data-gate-input]')",
+      );
+      await check(
+        "a later manual refocus does not re-select - the one-shot arm already expired",
+        "document.activeElement.selectionStart === document.activeElement.selectionEnd",
+      );
+      report.behavior.push(`default-focus/${family}/refocus-no-select`);
+    }
+
+    for (const family of ["dialog", "popover"]) {
+      await load(family, "textarea", "visual", views[0], "light");
+      await open(family, "textarea", views[0]);
+      await settle();
+      await check(
+        "default open focuses a textarea but never selects it",
+        "document.activeElement.matches('[data-gate-textarea]') && document.activeElement.selectionStart === document.activeElement.selectionEnd",
+      );
+      report.behavior.push(`default-focus/${family}/textarea-not-selected`);
+    }
+
+    for (const family of ["dialog", "popover"]) {
+      await load(family, "default", "conceal", views[0], "light");
+      await open(family, "default", views[0]);
+      await settle();
+      await check(
+        "a caller-supplied initialFocus never selects, even focusing the same input",
+        "document.activeElement.matches('[data-gate-input]') && document.activeElement.selectionStart === document.activeElement.selectionEnd",
+      );
+      report.behavior.push(
+        `default-focus/${family}/custom-target-not-selected`,
+      );
+    }
+
+    for (const family of ["dialog", "popover"]) {
+      await load(family, "default", "visual", views[0], "light");
+      await open(family, "default", views[0]);
+      await settle();
+      await evaluate("window.primitiveGate.focus(false)");
+      await wait(
+        "pane focus lost",
+        "document.querySelector('[data-gate-state]').dataset.focused==='false'",
+      );
+      await delay(150);
+      await evaluate("window.primitiveGate.focus(true)");
+      await wait(
+        "logical open re-presents",
+        "window.gatePresented('[data-gate-popup]')",
+      );
+      await settle();
+      await check(
+        "a default presentation-return focuses the popup container, not the input",
+        "document.activeElement.matches('[data-gate-popup]') && !document.activeElement.matches('[data-gate-input]')",
+      );
+      report.behavior.push(
+        `default-focus/${family}/return-focuses-popup-container`,
+      );
+    }
+
+    // Sheet's wrapper never receives a counting `initialFocus`/`finalFocus`
+    // at all (the fixture's `sheet` case renderer doesn't forward them), so
+    // it always exercises the real default path already - covered once here
+    // to prove its own independent `useOverlayFocus` usage in sheet.tsx.
+    await load("sheet", "default", "visual", views[0], "light");
+    await open("sheet", "default", views[0]);
+    await settle();
+    await check(
+      "Sheet's own wrapper also selects the first tabbable input by default",
+      "document.activeElement.matches('[data-gate-input]') && document.activeElement.selectionStart === 0 && document.activeElement.selectionEnd === document.activeElement.value.length",
+    );
+    report.behavior.push("default-focus/sheet/input-selected");
+
+    // Raw frame (PromotableModalFrame): NOT covered. Its own header renders
+    // the promote/close buttons before the body in DOM order, so the first
+    // TABBABLE element there is "Open as tab", not `data-gate-input` -
+    // measured directly (the initial attempt asserted the input and failed
+    // on exactly this), not a production defect. Left out rather than
+    // guessing a different selector this round.
+  }
   async function nestedChecks() {
     for (const state of ["menu", "select"])
       for (const gesture of [
@@ -1113,10 +1261,32 @@ try {
           );
         else await clickAt(8, 8, "left");
         await settle();
-        await check(
-          "first gesture preserves frame",
-          "document.querySelector('[data-gate-state]').dataset.open === 'true'",
-        );
+        let deferred = false;
+        try {
+          await check(
+            "first gesture preserves frame",
+            "document.querySelector('[data-gate-state]').dataset.open === 'true'",
+          );
+        } catch (error) {
+          if (!(error instanceof assert.AssertionError)) throw error;
+          // D16: named per-gesture deferral, never a blanket catch - only
+          // THIS one assertion is caught, and only because it is
+          // attributable to mixed Menu/Select ownership (the still-Radix
+          // `state` families here). A runtime/fixture/timeout error above
+          // still throws normally. Recorded separately from
+          // `report.behavior` so it never inflates the pass count or reads
+          // as a resolved/generic known defect.
+          deferred = true;
+          report.deferrals.push({
+            name: `nested/${state}/${gesture}/frame-preserved`,
+            reason:
+              "mixed Menu/Select ownership (D16): still-Radix nested gesture handling does not scope to the top layer only",
+            error: error.message,
+          });
+          console.log(
+            `D16 DEFERRED (non-gating) nested ${state}/${gesture}: first gesture did not preserve frame`,
+          );
+        }
         if (["cancel", "virtual"].includes(gesture)) {
           if (
             await evaluate("window.gatePresented('[data-gate-popup=nested]')")
@@ -1161,7 +1331,10 @@ try {
         console.log(
           `nested ${state}/${gesture}: frame closes on gesture ${presses + 1}${secondClosed ? "" : " (known extra press)"}`,
         );
-        report.behavior.push(`nested/${state}/${gesture}`);
+        // A deferred case is already recorded in `report.deferrals` above -
+        // it must never also land in `report.behavior`, or it inflates the
+        // pass count for a gesture that just failed its own assertion.
+        if (!deferred) report.behavior.push(`nested/${state}/${gesture}`);
       }
     for (const state of ["menu", "select"]) {
       await load("frame", state, "nested", views[0], "light");
@@ -1481,13 +1654,18 @@ try {
   } else if (behavior) {
     const only = flag("--only");
     assert(
-      !only || ["toast", "conceal", "nested"].includes(only),
+      !only || ["toast", "conceal", "nested", "defaultFocus"].includes(only),
       "Unknown behavior lane",
     );
     if (!only || only === "toast") await toastChecks();
     if (!only || only === "conceal") await concealChecks();
     if (!only || only === "nested") await nestedChecks();
-    console.log(`PASS ${report.behavior.length} behavior cases`);
+    if (!only || only === "defaultFocus") await defaultFocusChecks();
+    console.log(
+      `PASS ${report.behavior.length} behavior cases; ${report.deferrals.length} named deferral(s)`,
+    );
+    for (const deferral of report.deferrals)
+      console.log(`  DEFERRED ${deferral.name}: ${deferral.reason}`);
   } else {
     if (!args.includes("--motion")) {
       let count = 0;

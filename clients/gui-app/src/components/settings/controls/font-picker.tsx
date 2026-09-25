@@ -47,7 +47,7 @@ export function FontPicker(props: FontPickerProps) {
   const [dialogContainer, setDialogContainer] = useState<HTMLElement | null>(
     null,
   );
-  const { contentRef, onOpenAutoFocus: coarseOpenAutoFocus } =
+  const { contentRef, initialFocus: coarseInitialFocus } =
     useCoarsePointerOpenAutoFocus();
 
   const trimmedQuery = query.trim();
@@ -102,29 +102,31 @@ export function FontPicker(props: FontPickerProps) {
           setOpen(next);
         }}
       >
-        <PopoverTrigger asChild>
-          <button
-            ref={triggerRef}
-            type="button"
-            aria-label={ariaLabel}
-            className="inline-flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-card px-2.5 py-1.5 text-ui-sm text-foreground transition-colors hover:bg-accent/50"
-          >
-            <span
-              className={cn(
-                "min-w-0 flex-1 break-words text-left",
-                value === null && "text-muted-foreground",
-              )}
-              style={
-                value !== null
-                  ? { fontFamily: quoteFontFamily(value) }
-                  : undefined
-              }
+        <PopoverTrigger
+          render={
+            <button
+              ref={triggerRef}
+              type="button"
+              aria-label={ariaLabel}
+              className="inline-flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-card px-2.5 py-1.5 text-ui-sm text-foreground transition-colors hover:bg-accent/50"
             >
-              {value ?? defaultLabel}
-            </span>
-            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-          </button>
-        </PopoverTrigger>
+              <span
+                className={cn(
+                  "min-w-0 flex-1 break-words text-left",
+                  value === null && "text-muted-foreground",
+                )}
+                style={
+                  value !== null
+                    ? { fontFamily: quoteFontFamily(value) }
+                    : undefined
+                }
+              >
+                {value ?? defaultLabel}
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+            </button>
+          }
+        />
         <PopoverContent
           layout="bare"
           align="end"
@@ -133,7 +135,7 @@ export function FontPicker(props: FontPickerProps) {
           collisionPadding={8}
           className="w-[min(85vw,18rem)] overflow-hidden"
           ref={contentRef}
-          onOpenAutoFocus={coarseOpenAutoFocus}
+          initialFocus={coarseInitialFocus}
         >
           <Command shouldFilter={false}>
             <CommandInput

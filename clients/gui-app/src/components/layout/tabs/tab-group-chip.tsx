@@ -28,56 +28,60 @@ export function TabGroupChip(props: {
   const actions = useTabsStore.getState();
   return (
     <Popover open={editing} onOpenChange={setEditing}>
-      <PopoverTrigger asChild>
-        <TooltipWrapper
-          label="Right-click to edit group"
-          side="bottom"
-          sideOffset={6}
-          align="start"
-        >
-          <button
-            type="button"
-            aria-label={`${group.name || "Unnamed group"}: ${group.collapsed ? "expand" : "collapse"} group`}
-            aria-expanded={!group.collapsed}
-            className="relative mx-1 mb-2 flex min-h-6 max-w-48 shrink-0 items-center gap-1 rounded-md bg-[var(--swatch)] px-2 text-ui-xs font-medium text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [-webkit-app-region:no-drag]"
-            style={{ "--swatch": group.color } as CSSProperties}
-            onClick={(event) => {
-              event.preventDefault();
-              actions.updateGroup(groupId, { collapsed: !group.collapsed });
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              setEditing(true);
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.key === "F2" ||
-                event.key === "ContextMenu" ||
-                (event.shiftKey && event.key === "F10")
-              ) {
+      <PopoverTrigger
+        render={
+          <TooltipWrapper
+            label="Right-click to edit group"
+            side="bottom"
+            sideOffset={6}
+            align="start"
+          >
+            <button
+              type="button"
+              aria-label={`${group.name || "Unnamed group"}: ${group.collapsed ? "expand" : "collapse"} group`}
+              aria-expanded={!group.collapsed}
+              className="relative mx-1 mb-2 flex min-h-6 max-w-48 shrink-0 items-center gap-1 rounded-md bg-[var(--swatch)] px-2 text-ui-xs font-medium text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [-webkit-app-region:no-drag]"
+              style={{ "--swatch": group.color } as CSSProperties}
+              onClick={(event) => {
+                event.preventDefault();
+                actions.updateGroup(groupId, { collapsed: !group.collapsed });
+              }}
+              onContextMenu={(event) => {
                 event.preventDefault();
                 setEditing(true);
-              }
-            }}
-          >
-            {!group.collapsed ? (
-              <span
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "F2" ||
+                  event.key === "ContextMenu" ||
+                  (event.shiftKey && event.key === "F10")
+                ) {
+                  event.preventDefault();
+                  setEditing(true);
+                }
+              }}
+            >
+              {!group.collapsed ? (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-0 -bottom-2 h-0.5 bg-[var(--swatch)]"
+                  style={{ "--swatch": group.color } as CSSProperties}
+                />
+              ) : null}
+              <ChevronRight
                 aria-hidden
-                className="pointer-events-none absolute inset-x-0 -bottom-2 h-0.5 bg-[var(--swatch)]"
-                style={{ "--swatch": group.color } as CSSProperties}
+                className={cn(
+                  "size-3 transition-transform",
+                  !group.collapsed && "rotate-90",
+                )}
               />
-            ) : null}
-            <ChevronRight
-              aria-hidden
-              className={cn(
-                "size-3 transition-transform",
-                !group.collapsed && "rotate-90",
-              )}
-            />
-            {group.name ? <span className="truncate">{group.name}</span> : null}
-          </button>
-        </TooltipWrapper>
-      </PopoverTrigger>
+              {group.name ? (
+                <span className="truncate">{group.name}</span>
+              ) : null}
+            </button>
+          </TooltipWrapper>
+        }
+      />
       <PopoverContent align="start" className="w-fit max-w-xs">
         <Input
           aria-label="Group name"

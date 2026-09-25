@@ -193,48 +193,81 @@ export function NotificationsBell() {
       : `Notifications (${formatChordForDisplay(chord)})`;
   };
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next, details) => {
+        if (!next && details.reason === "focus-out") details.cancel();
+        if (!next && details.reason === "escape-key")
+          lifecycle.markKeyboardDismiss();
+        if (!next && details.reason === "outside-press") {
+          const shell = geometry.shellRef.current;
+          const event = details.event;
+          if (shell !== null && "clientX" in event && "clientY" in event) {
+            const rect = shell.getBoundingClientRect();
+            if (
+              event.clientX >= rect.left &&
+              event.clientX <= rect.right &&
+              event.clientY >= rect.top &&
+              event.clientY <= rect.bottom
+            ) {
+              details.cancel();
+              if (nestedMenuOpenRef.current)
+                document.dispatchEvent(
+                  new KeyboardEvent("keydown", {
+                    key: "Escape",
+                    bubbles: true,
+                    cancelable: true,
+                  }),
+                );
+            }
+          }
+        }
+        if (details.isCanceled) return;
+        setOpen(next);
+      }}
+    >
       <TooltipWrapper
         label={open ? null : bellTooltip(bellState)}
         side="top"
         sideOffset={6}
         align={undefined}
       >
-        <PopoverTrigger asChild>
-          <Button
-            ref={triggerRef}
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            data-testid="notifications-bell"
-            aria-label={ariaLabel}
-            onPointerDown={onTriggerPointerDown}
-            onKeyDown={onTriggerKeyDown}
-            // The open surface is `ghost`'s own `aria-expanded:` styling, which
-            // the PopoverTrigger sets for us.
-            className="relative"
-          >
-            <Bell
-              className="size-4 text-muted-foreground group-hover/button:text-foreground"
-              aria-hidden
-            />
-            {bellState.kind === "attention" && (
-              <span
-                data-testid="notifications-attention-badge"
+        <PopoverTrigger
+          render={
+            <Button
+              ref={triggerRef}
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-testid="notifications-bell"
+              aria-label={ariaLabel}
+              onPointerDown={onTriggerPointerDown}
+              onKeyDown={onTriggerKeyDown}
+              // The open surface is `ghost`'s own `aria-expanded:` styling, which
+              // the PopoverTrigger sets for us.
+              className="relative"
+            >
+              <Bell
+                className="size-4 text-muted-foreground group-hover/button:text-foreground"
                 aria-hidden
-                className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-md bg-destructive px-1 text-overline font-semibold leading-none text-destructive-foreground tabular-nums shadow-sm ring-2 ring-background"
-              >
-                {bellState.count}
-              </span>
-            )}
-            {bellState.kind === "quietDot" && (
-              <span
-                data-testid="notifications-quiet-dot"
-                aria-hidden
-                className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-background"
               />
-            )}
-            {/*
+              {bellState.kind === "attention" && (
+                <span
+                  data-testid="notifications-attention-badge"
+                  aria-hidden
+                  className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-md bg-destructive px-1 text-overline font-semibold leading-none text-destructive-foreground tabular-nums shadow-sm ring-2 ring-background"
+                >
+                  {bellState.count}
+                </span>
+              )}
+              {bellState.kind === "quietDot" && (
+                <span
+                  data-testid="notifications-quiet-dot"
+                  aria-hidden
+                  className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-background"
+                />
+              )}
+              {/*
               `s5-parity-gaps` gap 3. `unknown` used to fall through to the
               bare bell, which is a positive claim that nothing is waiting -
               made by a UI that does not know. On the modern free tier the
@@ -248,30 +281,31 @@ export function NotificationsBell() {
               above carries the reason so the state is not a bare gray
               dot with no path forward - the objection that kept it hidden.
             */}
-            {bellState.kind === "unknown" && (
-              <span
-                data-testid="notifications-unknown-indicator"
-                aria-hidden
-                className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-muted-foreground/70 bg-background ring-2 ring-background"
-              />
-            )}
-          </Button>
-        </PopoverTrigger>
+              {bellState.kind === "unknown" && (
+                <span
+                  data-testid="notifications-unknown-indicator"
+                  aria-hidden
+                  className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-muted-foreground/70 bg-background ring-2 ring-background"
+                />
+              )}
+            </Button>
+          }
+        />
       </TooltipWrapper>
       <PopoverContent
         layout="bare"
         align="end"
         className="w-auto overflow-hidden"
-        onOpenAutoFocus={lifecycle.onContentOpenAutoFocus}
-        onEscapeKeyDown={lifecycle.onContentEscapeKeyDown}
-        onCloseAutoFocus={lifecycle.onContentCloseAutoFocus}
+        initialFocus={lifecycle.initialFocus}
+
+        finalFocus={lifecycle.finalFocus}
         // A nested modal menu (the filter menu) traps focus into its own
         // portal, outside this Content's DOM subtree - without this guard,
         // Radix's DismissableLayer reads that as focus leaving the popover
         // and dismisses it. Escape still closes the popover normally; this
         // only turns off the focus-outside path, which nothing else in the
         // T04 focus contract depends on.
-        onFocusOutside={(event) => event.preventDefault()}
+
         // Real-browser-only bug (jsdom's fireEvent bypasses hit-testing and
         // never reproduced it): while the modal filter menu is open, its
         // pointer/scroll barrier sets `body.style.pointerEvents = "none"`.
@@ -300,29 +334,6 @@ export function NotificationsBell() {
         // makes the decision correct in both orderings: dispatch Escape only
         // if the menu is still open; otherwise it already closed itself, so
         // do nothing and leave the popover open.
-        onPointerDownOutside={(event) => {
-          const shell = geometry.shellRef.current;
-          if (shell === null) return;
-          const { clientX, clientY } = event.detail.originalEvent;
-          const rect = shell.getBoundingClientRect();
-          const isInsideShell =
-            clientX >= rect.left &&
-            clientX <= rect.right &&
-            clientY >= rect.top &&
-            clientY <= rect.bottom;
-          if (isInsideShell) {
-            event.preventDefault();
-            if (nestedMenuOpenRef.current) {
-              document.dispatchEvent(
-                new KeyboardEvent("keydown", {
-                  key: "Escape",
-                  bubbles: true,
-                  cancelable: true,
-                }),
-              );
-            }
-          }
-        }}
       >
         <NotificationsPopover
           onNavigate={handleNavigate}

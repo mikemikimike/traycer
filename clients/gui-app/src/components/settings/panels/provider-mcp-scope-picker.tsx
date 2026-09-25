@@ -98,7 +98,7 @@ export function McpScopePicker(props: {
   readonly locationLabel: string;
 }): ReactNode {
   const [open, setOpen] = useState(false);
-  const { contentRef, onOpenAutoFocus: coarseOpenAutoFocus } =
+  const { contentRef, initialFocus: coarseInitialFocus } =
     useCoarsePointerOpenAutoFocus();
   const {
     multiScope,
@@ -132,41 +132,43 @@ export function McpScopePicker(props: {
         sideOffset={undefined}
         align="start"
       >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            // The DESTINATION is in the accessible name, not only the static
-            // role. `aria-label` replaces the visible text outright, so a bare
-            // role label told a screen-reader user what the control is for
-            // while withholding the one thing it displays - which of Global or
-            // a specific project it currently points at. That is the whole
-            // content of the trigger for a sighted user.
-            aria-label={`${locationLabel}: ${triggerTitle}`}
-            className="w-[min(100%,22rem)] min-w-0 justify-start text-left"
-          >
-            {effectiveScope === "global" ? (
-              <Globe className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
-            )}
-            <span className="truncate font-medium text-foreground">
-              {triggerTitle}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground">
-              {triggerDetail}
-            </span>
-            <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-          </Button>
-        </PopoverTrigger>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              // The DESTINATION is in the accessible name, not only the static
+              // role. `aria-label` replaces the visible text outright, so a bare
+              // role label told a screen-reader user what the control is for
+              // while withholding the one thing it displays - which of Global or
+              // a specific project it currently points at. That is the whole
+              // content of the trigger for a sighted user.
+              aria-label={`${locationLabel}: ${triggerTitle}`}
+              className="w-[min(100%,22rem)] min-w-0 justify-start text-left"
+            >
+              {effectiveScope === "global" ? (
+                <Globe className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : (
+                <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
+              )}
+              <span className="truncate font-medium text-foreground">
+                {triggerTitle}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground">
+                {triggerDetail}
+              </span>
+              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </Button>
+          }
+        />
       </TooltipWrapper>
       <PopoverContent
         layout="bare"
         align="start"
         className="w-[min(90vw,26rem)]"
         ref={contentRef}
-        onOpenAutoFocus={coarseOpenAutoFocus}
+        initialFocus={coarseInitialFocus}
       >
         <Command>
           <CommandInput placeholder="Search workspaces…" />

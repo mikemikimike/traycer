@@ -391,20 +391,22 @@ export function SetupCardSegment(props: {
     // renders in a portal, so the terminal session under the bar never reflows.
     return (
       <Popover open={expanded} onOpenChange={setManualExpanded}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={toggleAccessibleLabel}
-            data-testid="setup-card-toggle"
-            className={cn(
-              "flex items-center rounded-sm px-1.5 py-0.5 outline-none transition-colors",
-              "hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
-            )}
-          >
-            {labelInner}
-          </button>
-        </PopoverTrigger>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-expanded={expanded}
+              aria-label={toggleAccessibleLabel}
+              data-testid="setup-card-toggle"
+              className={cn(
+                "flex items-center rounded-sm px-1.5 py-0.5 outline-none transition-colors",
+                "hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+            >
+              {labelInner}
+            </button>
+          }
+        />
         <PopoverContent
           align="end"
           side="bottom"

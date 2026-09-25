@@ -1030,17 +1030,19 @@ function WorkspaceFilePath(props: {
             if (!popoverOpen) setHoverOpen(open);
           }}
         >
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="flex h-full max-w-full min-w-0 items-center text-left text-ui-xs text-muted-foreground"
-              aria-label="Show full file path"
-            >
-              <StartTruncatedText className="block min-w-0">
-                {props.filePath}
-              </StartTruncatedText>
-            </button>
-          </PopoverTrigger>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                className="flex h-full max-w-full min-w-0 items-center text-left text-ui-xs text-muted-foreground"
+                aria-label="Show full file path"
+              >
+                <StartTruncatedText className="block min-w-0">
+                  {props.filePath}
+                </StartTruncatedText>
+              </button>
+            }
+          />
         </HoverPreviewCard>
         <PopoverContent
           appearance="tooltip"
@@ -1068,25 +1070,27 @@ function WorkspaceFileSettingsMenu(props: {
 }): ReactNode {
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <TooltipWrapper
-          label="File view settings"
-          side="top"
-          sideOffset={undefined}
-          align={undefined}
-        >
-          <Button
-            type="button"
-            variant="muted"
-            size="icon-sm"
-            aria-label="File view settings"
-            data-testid="workspace-file-settings"
-            className="shrink-0"
+      <PopoverTrigger
+        render={
+          <TooltipWrapper
+            label="File view settings"
+            side="top"
+            sideOffset={undefined}
+            align={undefined}
           >
-            <Settings2 className="size-4" />
-          </Button>
-        </TooltipWrapper>
-      </PopoverTrigger>
+            <Button
+              type="button"
+              variant="muted"
+              size="icon-sm"
+              aria-label="File view settings"
+              data-testid="workspace-file-settings"
+              className="shrink-0"
+            >
+              <Settings2 className="size-4" />
+            </Button>
+          </TooltipWrapper>
+        }
+      />
       <PopoverContent layout="bare" align="end" className="w-[min(80vw,15rem)]">
         {/* The gutter belongs to the LIST, not to the plate: the row paints its
             own hover and would otherwise run into the plate's corner. */}

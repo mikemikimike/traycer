@@ -1,10 +1,12 @@
-import { use, useEffect, useState, type ReactNode } from "react";
+import { use, useEffect, useState, useRef, type ReactNode } from "react";
 import { isHostScopeUsable } from "@/components/settings/host-scope/host-scope-status";
 import { useScopedHostBinding } from "@/components/settings/host-scope/use-scoped-host-binding";
 import { useScopedStreamBinding } from "@/components/settings/host-scope/use-scoped-stream-binding";
 import type { HostScope } from "@/components/settings/host-scope/use-host-scope";
-import { Popover, PopoverAnchor } from "@/components/ui/popover";
-import { RateLimitPopover } from "@/components/layout/header/rate-limit-popover";
+import {
+  RateLimitPopover,
+  RateLimitPopoverRoot,
+} from "@/components/layout/header/rate-limit-popover";
 import { ResourceMonitorPopover } from "@/components/resources/resource-monitor-popover";
 import { StatusBarRateLimitCluster } from "@/components/layout/status-bar/status-bar-rate-limit-cluster";
 import { StatusBarResourceSegment } from "@/components/layout/status-bar/status-bar-resource-segment";
@@ -101,6 +103,7 @@ function ScopedAppStatusBar(props: {
   // the usage batches, the mount refresh - lives inside the gate, where the
   // binding is provably the watched host's.
   const windowedProviders = useStatusBarWindowedProviders();
+  const usageAnchorRef = useRef<HTMLSpanElement>(null);
   const [usageOpen, setUsageOpen] = useState(false);
   // One subscription bridge for the segments and the panel alike, resolved
   // where both can reach it - the same shape the header trigger uses - and
@@ -204,9 +207,8 @@ function ScopedAppStatusBar(props: {
             there is not always a trigger, and the panel still has to open at
             the left end of the strip.
           */}
-          <Popover open={usageOpen} onOpenChange={setUsageOpen}>
-            <PopoverAnchor asChild>
-              {/*
+          <RateLimitPopoverRoot open={usageOpen} onOpenChange={setUsageOpen}>
+            {/*
                 Reserved even when it holds nothing, so the right-hand cluster
                 does not shift into place when the segments land - or when the
                 preference that hides them is flipped. The notice for an
@@ -219,20 +221,22 @@ function ScopedAppStatusBar(props: {
                 readout off the right edge. The right-hand cluster is pinned
                 to the far edge either way.
               */}
-              <span
-                data-testid="status-bar-rate-limit-slot"
-                className="flex min-w-0 flex-1 items-center gap-1"
-              >
-                <StatusBarUsageSlot
-                  scopedToOwnHost={scopedToOwnHost}
-                  rateLimitsEnabled={rateLimitsEnabled}
-                  providers={windowedProviders}
-                  profileSelection={profileSelection}
-                  scope={scope}
-                />
-              </span>
-            </PopoverAnchor>
+            <span
+              ref={usageAnchorRef}
+              data-testid="status-bar-rate-limit-slot"
+              className="flex min-w-0 flex-1 items-center gap-1"
+            >
+              <StatusBarUsageSlot
+                scopedToOwnHost={scopedToOwnHost}
+                rateLimitsEnabled={rateLimitsEnabled}
+                providers={windowedProviders}
+                profileSelection={profileSelection}
+                scope={scope}
+              />
+            </span>
+
             <RateLimitPopover
+              anchor={usageAnchorRef}
               side="top"
               align="start"
               onClose={() => setUsageOpen(false)}
@@ -240,7 +244,7 @@ function ScopedAppStatusBar(props: {
               scope={scope}
               hasExplicitPick={props.hasExplicitPick}
             />
-          </Popover>
+          </RateLimitPopoverRoot>
           {/*
             Gated on the PREFERENCE only, never on the pick - the mirror of the
             usage panel above, and for the same reason. Wherever this is the

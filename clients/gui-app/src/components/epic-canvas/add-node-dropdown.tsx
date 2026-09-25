@@ -44,7 +44,7 @@ import {
   ACTIVE_HOST_WORKSPACE_CONTROLS_SCOPE,
   type HostWorkspaceControlsHostScope,
 } from "@/components/home/host-workspace-selector/host-workspace-controls-scope";
-import { preserveWhenNestedOverlay } from "@/components/home/host-workspace-selector/preserve-when-nested-overlay";
+import { isNestedOverlayTarget } from "@/components/home/host-workspace-selector/preserve-when-nested-overlay";
 import { useHostClientForHostId } from "@/hooks/host/use-host-client-for-host-id";
 import { useComposerSurfaceHostPin } from "@/hooks/host/use-composer-surface-host-pin";
 import { useProvidersListForClient } from "@/hooks/providers/use-providers-list-query";
@@ -246,7 +246,9 @@ export function AddNodeDropdown(props: AddArtifactDropdownProps) {
               // clicks inside them (stacked above this submenu) as inside it so
               // picking a host / branch doesn't dismiss the launcher.
               onInteractOutside={(event) =>
-                preserveWhenNestedOverlay(event, terminalAgentSubRef.current)
+                isNestedOverlayTarget(event.target, terminalAgentSubRef.current)
+                  ? event.preventDefault()
+                  : undefined
               }
             >
               <TerminalAgentSubMenuContent

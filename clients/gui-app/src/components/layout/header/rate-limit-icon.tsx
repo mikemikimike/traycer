@@ -1,9 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Gauge } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { PopoverTrigger } from "@/components/ui/popover";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
-import { RateLimitPopover } from "@/components/layout/header/rate-limit-popover";
+import {
+  RateLimitPopover,
+  RateLimitPopoverRoot,
+} from "@/components/layout/header/rate-limit-popover";
 import {
   useHeaderRateLimitBars,
   type HeaderRateLimitBar,
@@ -130,7 +133,7 @@ function ScopedRateLimitIconButton({
       : `${tooltipLabel} (${formatChordForDisplay(chord)})`;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <RateLimitPopoverRoot open={open} onOpenChange={setOpen}>
       <TooltipWrapper
         // The host belongs in the label only when it is NOT the obvious one.
         // Naming the active host on every hover would train people to ignore
@@ -140,22 +143,24 @@ function ScopedRateLimitIconButton({
         sideOffset={6}
         align={undefined}
       >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            aria-label="Usage limits"
-            data-testid="rate-limit-header-button"
-            className="shadow-xs"
-          >
-            {scopedToOwnHost ? (
-              <LiveRateLimitGlyph profileSelection={profileSelection} />
-            ) : (
-              <RateLimitGlyph bars={NO_BARS} />
-            )}
-          </Button>
-        </PopoverTrigger>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Usage limits"
+              data-testid="rate-limit-header-button"
+              className="shadow-xs"
+            >
+              {scopedToOwnHost ? (
+                <LiveRateLimitGlyph profileSelection={profileSelection} />
+              ) : (
+                <RateLimitGlyph bars={NO_BARS} />
+              )}
+            </Button>
+          }
+        />
       </TooltipWrapper>
       <RateLimitPopover
         side="bottom"
@@ -165,7 +170,7 @@ function ScopedRateLimitIconButton({
         scope={scope}
         hasExplicitPick={hasExplicitPick}
       />
-    </Popover>
+    </RateLimitPopoverRoot>
   );
 }
 

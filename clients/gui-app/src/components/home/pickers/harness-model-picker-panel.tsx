@@ -7,7 +7,6 @@ import { HarnessModelPickerList } from "@/components/home/pickers/harness-model-
 import { ProviderRail } from "@/components/home/pickers/harness-model-picker-group";
 import { PickerProviderAuthLine } from "@/components/home/pickers/harness-model-picker-auth-line";
 import { PickerProfileDropdown } from "@/components/home/pickers/picker-profile-dropdown";
-import { isProfileUsageSidecarTarget } from "@/components/providers/profile-usage-sidecar-target";
 import { useProviderProfileAddFlowStore } from "@/stores/settings/provider-profile-add-flow-store";
 import { pickerProfileShortcutHintForIndex } from "@/components/home/pickers/harness-model-picker-shortcut-hint";
 import type {
@@ -38,7 +37,6 @@ import {
 } from "@/components/home/pickers/harness-model-picker-footers";
 
 interface HarnessModelPickerPanelProps {
-  readonly trimmedQuery: string;
   readonly hasQuery: boolean;
   readonly listboxId: string;
   readonly idPrefix: string;
@@ -123,10 +121,9 @@ interface HarnessModelPickerPanelProps {
 }
 
 export function HarnessModelPickerPanel(props: HarnessModelPickerPanelProps) {
-  const { contentRef, onOpenAutoFocus: coarseOpenAutoFocus } =
+  const { contentRef, initialFocus: coarseInitialFocus } =
     useCoarsePointerOpenAutoFocus();
   const {
-    trimmedQuery,
     hasQuery,
     listboxId,
     idPrefix,
@@ -203,28 +200,18 @@ export function HarnessModelPickerPanel(props: HarnessModelPickerPanelProps) {
       // `isAnyDialogOpen` in keybinding-provider.tsx).
       data-leader-scope={LEADER_SCOPE_MODEL_PICKER}
       layout="panel"
-      className="h-[min(var(--radix-popover-content-available-height),23rem)] w-[min(86vw,30rem)]"
+      className="h-[min(var(--available-height),23rem)] w-[min(86vw,30rem)]"
       // Return focus to the composer editor (not the trigger pill) on close so
       // the user can keep typing after picking a model. No-op on surfaces with
       // no registered composer (e.g. the terminal launcher), where Radix's
       // default focus restore stands.
-      onCloseAutoFocus={(event) => {
-        if (focusActiveComposer()) event.preventDefault();
-      }}
+      finalFocus={() => !focusActiveComposer()}
       ref={contentRef}
       // The search field is the first tabbable descendant, so Radix's own
       // open-autofocus takes it whether or not the panel's search effect runs.
       // Both halves have to move together or the gate is a no-op.
-      onOpenAutoFocus={coarseOpenAutoFocus}
+      initialFocus={coarseInitialFocus}
       onKeyDown={onKeyDown}
-      onEscapeKeyDown={(event) => {
-        if (trimmedQuery.length === 0) return;
-        event.preventDefault();
-        onQueryChange("");
-      }}
-      onInteractOutside={(event) => {
-        if (isProfileUsageSidecarTarget(event.target)) event.preventDefault();
-      }}
     >
       <HarnessModelPickerSearch
         inputRef={inputRef}

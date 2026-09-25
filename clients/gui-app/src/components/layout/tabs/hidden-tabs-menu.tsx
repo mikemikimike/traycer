@@ -35,30 +35,33 @@ export function HiddenTabsMenu(props: {
       className="flex shrink-0 items-center self-center px-1"
     >
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <TooltipWrapper
-            label={label}
-            side="bottom"
-            sideOffset={4}
-            align="start"
-          >
-            <button
-              type="button"
-              aria-label={label}
-              className="flex h-7 min-w-9 items-center justify-center gap-1 rounded-md border border-border bg-foreground/8 px-1.5 text-ui-xs font-medium tabular-nums text-foreground transition-colors hover:bg-foreground/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-foreground/40 data-[state=open]:bg-foreground/12 [-webkit-app-region:no-drag]"
+        <PopoverTrigger
+          render={
+            <TooltipWrapper
+              label={label}
+              side="bottom"
+              sideOffset={4}
+              align="start"
             >
-              {count}
-              <ChevronDown className="size-3" aria-hidden />
-            </button>
-          </TooltipWrapper>
-        </PopoverTrigger>
+              <button
+                type="button"
+                aria-label={label}
+                className="flex h-7 min-w-9 items-center justify-center gap-1 rounded-md border border-border bg-foreground/8 px-1.5 text-ui-xs font-medium tabular-nums text-foreground transition-colors hover:bg-foreground/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-foreground/40 data-[state=open]:bg-foreground/12 [-webkit-app-region:no-drag]"
+              >
+                {count}
+                <ChevronDown className="size-3" aria-hidden />
+              </button>
+            </TooltipWrapper>
+          }
+        />
         <PopoverContent
           align="start"
           layout="panel"
           className="w-[min(90vw,20rem)]"
-          onCloseAutoFocus={(event) => {
-            if (activatedTab.current) event.preventDefault();
+          finalFocus={() => {
+            const restore = !activatedTab.current;
             activatedTab.current = false;
+            return restore;
           }}
         >
           <Command

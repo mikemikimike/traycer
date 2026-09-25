@@ -141,7 +141,21 @@ export function CommandPaletteShell(props: CommandPaletteShellProps) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next, details) => {
+        if (
+          !next &&
+          details.reason === "escape-key" &&
+          activeSubpage !== null
+        ) {
+          details.cancel();
+          popSubpage();
+        }
+        if (details.isCanceled) return;
+        handleOpenChange(next);
+      }}
+    >
       <DialogContent
         layout="banded"
         className="top-[15vh] w-full max-w-[min(90vw,40rem)] translate-y-0 overflow-hidden"
@@ -149,12 +163,6 @@ export function CommandPaletteShell(props: CommandPaletteShellProps) {
         // Radix's document-level Esc listener can't be reached via React
         // propagation; `onEscapeKeyDown` + `preventDefault` is the first-party
         // hook for popping a sub-page instead of closing the dialog.
-        onEscapeKeyDown={(event) => {
-          if (activeSubpage !== null) {
-            event.preventDefault();
-            popSubpage();
-          }
-        }}
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Command Palette</DialogTitle>

@@ -1561,24 +1561,26 @@ function TerminalAgentHeaderControls(props: {
   return (
     <div className="flex shrink-0 items-center gap-1">
       <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="muted-outline"
-            size="xs"
-            className="h-7"
-            data-testid="tui-agent-subagents-trigger"
-          >
-            <Users aria-hidden className="size-3.5" />
-            Agents
-            {/* muted-fill-ok: chip on TerminalAgentTileShell bg-canvas;
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="muted-outline"
+              size="xs"
+              className="h-7"
+              data-testid="tui-agent-subagents-trigger"
+            >
+              <Users aria-hidden className="size-3.5" />
+              Agents
+              {/* muted-fill-ok: chip on TerminalAgentTileShell bg-canvas;
                 --canvas never equals --muted */}
-            <span className="rounded bg-muted px-1 text-ui-xs">
-              {runningCount}
-            </span>
-            <ChevronDown aria-hidden className="size-3" />
-          </Button>
-        </PopoverTrigger>
+              <span className="rounded bg-muted px-1 text-ui-xs">
+                {runningCount}
+              </span>
+              <ChevronDown aria-hidden className="size-3" />
+            </Button>
+          }
+        />
         <PopoverContent
           layout="bare"
           align="end"

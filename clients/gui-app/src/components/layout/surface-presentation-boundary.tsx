@@ -49,7 +49,9 @@ export function SurfacePresentationBoundary(props: {
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const probeRef = useRef<HTMLDivElement | null>(null);
   const isPaneFocused = useCallback(
-    () => probeRef.current?.dataset.paneFocused === "true",
+    () =>
+      probeRef.current?.isConnected === true &&
+      probeRef.current.dataset.paneFocused === "true",
     [],
   );
   const activity = useMemo(

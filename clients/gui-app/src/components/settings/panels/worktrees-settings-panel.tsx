@@ -3399,7 +3399,7 @@ function WorktreeScriptReviewDialog(props: {
       onSave={(scripts) => Promise.resolve(onSave(target, scripts))}
       // No nested editor to protect here (no Branch naming section) - plain
       // Escape-closes-the-dialog behavior.
-      onEscapeKeyDown={() => {}}
+      cancelEditing={() => false}
       onOpenChange={props.onOpenChange}
     />
   );

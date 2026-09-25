@@ -3,6 +3,7 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -33,10 +34,15 @@ import * as Menubar from "@/components/ui/menubar";
 import * as Select from "@/components/ui/select";
 import * as Command from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { PortalConcealmentProvider } from "@/components/ui/portal-concealment-context";
 import { SurfacePresentationBoundary } from "@/components/layout/surface-presentation-boundary";
 import { PromotableModalFrame } from "@/components/layout/dialogs/promotable-modal-frame";
+import {
+  OverlayFrameContext,
+  useOverlayFrame,
+} from "@/components/ui/overlay-frame-context";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import "@/lib/theme-applier";
 import "@/index.css";
@@ -172,12 +178,22 @@ function TooltipCase(): ReactNode {
     </Tooltip.Tooltip>
   );
 }
+interface OverlayFrame {
+  readonly registry: Set<object>;
+  readonly backdrop: RefObject<HTMLDivElement | null>;
+  readonly guard: (details: {
+    reason: string;
+    event: Event;
+    cancel: () => void;
+  }) => void;
+}
 interface CaseProps {
   readonly open: boolean;
   readonly changeOpen: (value: boolean) => void;
   readonly body: ReactNode;
   readonly onOpenFocus: () => void;
   readonly onCloseFocus: () => void;
+  readonly frame: OverlayFrame;
 }
 const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   button: (): ReactNode => {
@@ -448,7 +464,9 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
     body,
     onOpenFocus,
     onCloseFocus,
+    frame,
   }): ReactNode => {
+    const isFramed = family === "frame" || state === "menu-in-frame";
     let nested: ReactNode = null;
     if (family === "nested" || mode === "nested") {
       if (["select", "select-in-dialog"].includes(state))
@@ -475,35 +493,67 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
     return (
       <Dialog.Dialog
         open={open}
-        onOpenChange={changeOpen}
+        paneAware={!isFramed}
+        onOpenChange={(next, details) => {
+          // A nonmodal frame never raises Base's own barrier (matching the
+          // real production case this models, epic-migration-modal.tsx: it
+          // is deliberately never dismissible by outside press/Escape - only
+          // its own explicit close control, which calls `changeOpen`
+          // directly and never goes through this callback at all).
+          if (state === "nonmodal" && !next) {
+            details.cancel();
+            return;
+          }
+          if (isFramed) {
+            frame.guard(details);
+            if (details.isCanceled) return;
+          }
+          changeOpen(next);
+        }}
         modal={state !== "nonmodal"}
       >
-        <Dialog.DialogTrigger asChild>{trigger}</Dialog.DialogTrigger>
-        {family === "frame" || state === "menu-in-frame" ? (
-          <PromotableModalFrame
-            title="Workspace settings"
-            icon={<Plus />}
-            contentClassName="w-full max-w-[min(90vw,40rem)]"
-            dataAttributes={{ "data-gate-popup": "outer" }}
-            promoteAriaLabel="Open as tab"
-            promoteTestId="promote"
-            closeTestId="close"
-            onPromote={() => undefined}
-            onClose={() => changeOpen(false)}
-            onEscapeKeyDown={() => undefined}
-            onOpenAutoFocus={undefined}
-          >
-            <div className="flex w-full flex-col">
-              {body}
-              {nested}
-            </div>
-          </PromotableModalFrame>
+        <Dialog.DialogTrigger render={trigger} />
+        {isFramed ? (
+          <OverlayFrameContext.Provider value={frame.registry}>
+            <PromotableModalFrame
+              title="Workspace settings"
+              icon={<Plus />}
+              contentClassName="w-full max-w-[min(90vw,40rem)]"
+              dataAttributes={{ "data-gate-popup": "outer" }}
+              promoteAriaLabel="Open as tab"
+              promoteTestId="promote"
+              closeTestId="close"
+              onPromote={() => undefined}
+              onClose={() => changeOpen(false)}
+              backdropRef={frame.backdrop}
+              initialFocus={mode === "visual" ? undefined : true}
+            >
+              <div className="flex w-full flex-col">
+                {body}
+                {nested}
+              </div>
+            </PromotableModalFrame>
+          </OverlayFrameContext.Provider>
         ) : (
           <Dialog.DialogContent
             data-gate-popup="outer"
             layout={state === "banded" ? "banded" : "padded"}
-            onOpenAutoFocus={onOpenFocus}
-            onCloseAutoFocus={onCloseFocus}
+            initialFocus={
+              mode === "visual"
+                ? undefined
+                : () => {
+                    onOpenFocus();
+                    return true;
+                  }
+            }
+            finalFocus={
+              mode === "visual"
+                ? undefined
+                : () => {
+                    onCloseFocus();
+                    return true;
+                  }
+            }
           >
             <Dialog.DialogHeader>
               <Dialog.DialogTitle
@@ -526,7 +576,7 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   sheet: ({ open, changeOpen, body }): ReactNode => {
     return (
       <Sheet.Sheet open={open} onOpenChange={changeOpen}>
-        <Sheet.SheetTrigger asChild>{trigger}</Sheet.SheetTrigger>
+        <Sheet.SheetTrigger render={trigger} />
         <Sheet.SheetContent
           data-gate-popup="outer"
           side={
@@ -542,9 +592,9 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
           {body}
           {family === "nested" ? (
             <Popover.Popover>
-              <Popover.PopoverTrigger asChild>
-                <Button data-gate-trigger="nested">More</Button>
-              </Popover.PopoverTrigger>
+              <Popover.PopoverTrigger
+                render={<Button data-gate-trigger="nested">More</Button>}
+              />
               <Popover.PopoverContent data-gate-popup="nested">
                 Nested settings
               </Popover.PopoverContent>
@@ -586,12 +636,26 @@ const cases: Partial<Record<string, (props: CaseProps) => ReactNode>> = {
   }): ReactNode => {
     return (
       <Popover.Popover open={open} onOpenChange={changeOpen}>
-        <Popover.PopoverTrigger asChild>{trigger}</Popover.PopoverTrigger>
+        <Popover.PopoverTrigger render={trigger} />
         <Popover.PopoverContent
           data-gate-popup="outer"
           layout={state === "bare" || state === "panel" ? state : "padded"}
-          onOpenAutoFocus={onOpenFocus}
-          onCloseAutoFocus={onCloseFocus}
+          initialFocus={
+            mode === "visual"
+              ? undefined
+              : () => {
+                  onOpenFocus();
+                  return true;
+                }
+          }
+          finalFocus={
+            mode === "visual"
+              ? undefined
+              : () => {
+                  onCloseFocus();
+                  return true;
+                }
+          }
         >
           {label}
           {body}
@@ -730,6 +794,12 @@ export function Fixture(): ReactNode {
   const [actions, setActions] = useState(0);
   const [closeFocus, setCloseFocus] = useState(0);
   const [openFocus, setOpenFocus] = useState(0);
+  // Only the "dialog" case (family=frame / state=menu-in-frame) uses this,
+  // but it must be called unconditionally here rather than from inside the
+  // `cases` record - those are plain functions, not components, so a hook
+  // called from one trips rules-of-hooks even though the call order is
+  // stable (one fixed family/state per page load).
+  const frame = useOverlayFrame();
   const changeOpen = (value: boolean): void => {
     setOpen(value);
     setChanges((count) => count + 1);
@@ -780,9 +850,23 @@ export function Fixture(): ReactNode {
       onChange={(event) => setDraft(event.target.value)}
     />
   );
+  // state="textarea" is a dedicated, unused-elsewhere value driven only by
+  // defaultFocusChecks() - every other state keeps this identical to before,
+  // so no existing pixel baseline is affected.
+  const focusTarget =
+    state === "textarea" ? (
+      <Textarea
+        data-gate-textarea
+        aria-label="Staged value"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+    ) : (
+      input
+    );
   const body = (
     <div className="flex min-w-0 flex-col gap-3 p-4">
-      {input}
+      {focusTarget}
       <Button data-gate-body>Ordinary dialog control</Button>
     </div>
   );
@@ -804,6 +888,7 @@ export function Fixture(): ReactNode {
     body,
     onOpenFocus: () => setOpenFocus((count) => count + 1),
     onCloseFocus: () => setCloseFocus((count) => count + 1),
+    frame,
   });
   if (content === undefined || content === null)
     throw new Error("Empty gate case: " + family + "/" + state);

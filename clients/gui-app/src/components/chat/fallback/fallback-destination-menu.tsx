@@ -239,11 +239,13 @@ export function FallbackDestinationMenu({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button size="sm" variant={triggerVariant} disabled={triggerDisabled}>
-          {triggerLabel}
-        </Button>
-      </PopoverTrigger>
+      <PopoverTrigger
+        render={
+          <Button size="sm" variant={triggerVariant} disabled={triggerDisabled}>
+            {triggerLabel}
+          </Button>
+        }
+      />
       <PopoverContent
         align="start"
         // Radix gives this content `role="dialog"`, so it reached the

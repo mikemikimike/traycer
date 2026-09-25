@@ -299,17 +299,24 @@ export function AddProviderProfileDialog({
       : null;
 
   return (
-    <Dialog open={open} onOpenChange={close}>
+    <Dialog
+      open={open}
+      onOpenChange={(next, details) => {
+        if (
+          !next &&
+          dismissalLocked &&
+          (details.reason === "escape-key" ||
+            details.reason === "outside-press")
+        )
+          details.cancel();
+        if (details.isCanceled) return;
+        close(next);
+      }}
+    >
       <DialogContent
         layout="banded"
         className="flex max-h-[min(85dvh,42rem)] w-[min(92vw,30rem)] flex-col overflow-hidden sm:max-w-none"
         showCloseButton={!linking}
-        onEscapeKeyDown={(event) => {
-          if (dismissalLocked) event.preventDefault();
-        }}
-        onPointerDownOutside={(event) => {
-          if (dismissalLocked) event.preventDefault();
-        }}
       >
         <DialogHeader className="gap-1.5">
           <DialogTitle>

@@ -368,7 +368,7 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
       onOpenChange={(nextOpen) => setOpen(nextOpen, "button")}
     >
       <DraftsTriggerRail>
-        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        <PopoverTrigger render={trigger} />
       </DraftsTriggerRail>
       {open ? (
         <PopoverContent
@@ -376,13 +376,13 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
           align="end"
           sideOffset={6}
           layout="bare"
-          className="max-h-[min(70dvh,var(--radix-popover-content-available-height))] w-[calc(100vw-2rem)] max-w-lg overflow-hidden"
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const shouldRestore = restoreEditorFocusRef.current;
+          className="max-h-[min(70dvh,var(--available-height))] w-[calc(100vw-2rem)] max-w-lg overflow-hidden"
+          initialFocus={false}
+          finalFocus={() => {
+            const restore = restoreEditorFocusRef.current;
             restoreEditorFocusRef.current = false;
-            if (shouldRestore) focusEditor();
+            if (restore) focusEditor();
+            return false;
           }}
         >
           {list}

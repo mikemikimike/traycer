@@ -207,6 +207,14 @@ if (runsFirstShard) {
       exitCode,
       runBrowserRegression("scripts/primitive-gate-behavior.mjs"),
     );
+    // Dialog/Popover lifecycle through the real PortalConcealmentBoundary -
+    // T02's positive proof cases promoted onto production. Its own module
+    // (not folded into primitive-gate-behavior.mjs) so it keeps its own
+    // failure surface; behavior-only, no pixel baseline of its own.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/portal-lifecycle-gate.mjs"),
+    );
     // NOT here, deliberately, and each for its own reason:
     // - `scripts/window-host-modal-alignment-browser.mjs` measures the
     //   local-bootstrap body against ONE LEFT EDGE (A1/A2/A5/PC4) - the design

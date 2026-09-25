@@ -424,17 +424,19 @@ function BrowserPrivateSessionShield() {
         sideOffset={6}
         align="center"
       >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="muted"
-            size="icon-sm"
-            aria-label={`Saved logins: ${copy.headline}`}
-            className="shrink-0"
-          >
-            <VenetianMask aria-hidden />
-          </Button>
-        </PopoverTrigger>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="muted"
+              size="icon-sm"
+              aria-label={`Saved logins: ${copy.headline}`}
+              className="shrink-0"
+            >
+              <VenetianMask aria-hidden />
+            </Button>
+          }
+        />
       </TooltipWrapper>
       <PopoverContent align="end" className="w-[min(80vw,20rem)] min-w-0">
         <PopoverHeader>

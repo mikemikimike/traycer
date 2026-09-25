@@ -179,17 +179,18 @@ async function waitForGeometryLock(
 
 function forcePopperPlacement(shell: HTMLElement): void {
   const wrapper = shell.closest<HTMLElement>(
-    "[data-radix-popper-content-wrapper]",
+    '[data-slot="popover-positioner"]',
   );
   if (wrapper === null) {
-    throw new Error("missing radix popper content wrapper");
+    throw new Error("missing popover positioner");
   }
-  // Drive the exact placement gate the production hook watches.
+  // Drive the exact placement gate the production hook watches: Base keeps
+  // the Positioner at `opacity: 0` until the first placement commits.
   act(() => {
-    wrapper.style.transform = "translate(0, -200%)";
+    wrapper.style.opacity = "0";
   });
   act(() => {
-    wrapper.style.transform = "translate(0px, 0px)";
+    wrapper.style.opacity = "1";
   });
 }
 
@@ -199,8 +200,8 @@ interface GeometryHarnessProps {
 }
 
 /**
- * Minimal deterministic harness: a Popper wrapper ancestor + real
- * NotificationsPopover content. Avoids Radix portal timing flakes while
+ * Minimal deterministic harness: a positioner ancestor + real
+ * NotificationsPopover content. Avoids Base portal timing flakes while
  * still exercising the placement-gated lock + shrink paths.
  */
 function GeometryHarness(props: GeometryHarnessProps): ReactNode {
@@ -212,9 +213,9 @@ function GeometryHarness(props: GeometryHarnessProps): ReactNode {
   if (!props.open) return null;
   return (
     <div
-      data-radix-popper-content-wrapper=""
+      data-slot="popover-positioner"
       data-testid="popper-wrapper"
-      style={{ transform: "translate(0, -200%)" }}
+      style={{ opacity: "0" }}
     >
       <NotificationsPopover
         onNavigate={() => undefined}
@@ -259,8 +260,8 @@ describe("computeNotificationCenterGeometryCaps", () => {
     const caps = computeNotificationCenterGeometryCaps({
       viewportWidthPx: 2000,
       viewportHeightPx: 2000,
-      radixAvailableWidthPx: 10_000,
-      radixAvailableHeightPx: 10_000,
+      availableWidthPx: 10_000,
+      availableHeightPx: 10_000,
       rootFontSizePx,
     });
     expect(caps.widthCapPx).toBe(
@@ -273,8 +274,8 @@ describe("computeNotificationCenterGeometryCaps", () => {
     const narrow = computeNotificationCenterGeometryCaps({
       viewportWidthPx: 400,
       viewportHeightPx: 500,
-      radixAvailableWidthPx: 10_000,
-      radixAvailableHeightPx: 10_000,
+      availableWidthPx: 10_000,
+      availableHeightPx: 10_000,
       rootFontSizePx,
     });
     expect(narrow.widthCapPx).toBe(400 * 0.9);
@@ -285,8 +286,8 @@ describe("computeNotificationCenterGeometryCaps", () => {
     const caps = computeNotificationCenterGeometryCaps({
       viewportWidthPx: 2000,
       viewportHeightPx: 2000,
-      radixAvailableWidthPx: 10_000,
-      radixAvailableHeightPx: 120,
+      availableWidthPx: 10_000,
+      availableHeightPx: 120,
       rootFontSizePx: 16,
     });
     expect(caps.heightCapPx).toBe(120);
@@ -296,8 +297,8 @@ describe("computeNotificationCenterGeometryCaps", () => {
     const caps = computeNotificationCenterGeometryCaps({
       viewportWidthPx: 2000,
       viewportHeightPx: 2000,
-      radixAvailableWidthPx: 90,
-      radixAvailableHeightPx: 10_000,
+      availableWidthPx: 90,
+      availableHeightPx: 10_000,
       rootFontSizePx: 16,
     });
     expect(caps.widthCapPx).toBe(90);
@@ -575,10 +576,7 @@ describe("useNotificationCenterGeometry integration", () => {
         isColdOpen: props.isColdOpen,
       });
       return (
-        <div
-          data-radix-popper-content-wrapper=""
-          style={{ transform: "translate(0, -200%)" }}
-        >
+        <div data-slot="popover-positioner" style={{ opacity: "0" }}>
           <div
             ref={shellRef}
             data-testid="notifications-popover"
@@ -591,7 +589,7 @@ describe("useNotificationCenterGeometry integration", () => {
     const { rerender } = render(<ColdOpenTransitionHarness isColdOpen />);
     const shell = await screen.findByTestId("notifications-popover");
 
-    // The host summary lands (isColdOpen flips to false) before Radix
+    // The host summary lands (isColdOpen flips to false) before Base
     // resolves placement. The floor must still apply: it was captured at
     // the open transition, not resampled here.
     rerender(<ColdOpenTransitionHarness isColdOpen={false} />);

@@ -294,7 +294,7 @@ function ModelField(props: {
   const [dialogContainer, setDialogContainer] = useState<HTMLElement | null>(
     null,
   );
-  const { contentRef, onOpenAutoFocus } = useCoarsePointerOpenAutoFocus();
+  const { contentRef, initialFocus } = useCoarsePointerOpenAutoFocus();
   const models = props.models ?? [];
   const needle = query.trim().toLowerCase();
   const filtered =
@@ -333,31 +333,33 @@ function ModelField(props: {
           setOpen(next);
         }}
       >
-        <PopoverTrigger asChild>
-          <Button
-            ref={triggerRef}
-            type="button"
-            variant="outline"
-            size="sm"
-            role="combobox"
-            aria-expanded={open}
-            aria-controls={popoverId}
-            aria-labelledby={labelId}
-            disabled={props.disabled}
-            className="w-full min-w-0 justify-between"
-            data-testid="judge-model-combobox"
-          >
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                valueLabel === null && "text-muted-foreground",
-              )}
+        <PopoverTrigger
+          render={
+            <Button
+              ref={triggerRef}
+              type="button"
+              variant="outline"
+              size="sm"
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={popoverId}
+              aria-labelledby={labelId}
+              disabled={props.disabled}
+              className="w-full min-w-0 justify-between"
+              data-testid="judge-model-combobox"
             >
-              {valueLabel ?? "Choose a model"}
-            </span>
-            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
-          </Button>
-        </PopoverTrigger>
+              <span
+                className={cn(
+                  "min-w-0 truncate",
+                  valueLabel === null && "text-muted-foreground",
+                )}
+              >
+                {valueLabel ?? "Choose a model"}
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+            </Button>
+          }
+        />
         <PopoverContent
           id={popoverId}
           layout="bare"
@@ -367,7 +369,7 @@ function ModelField(props: {
           collisionPadding={8}
           className="w-[min(85vw,20rem)] overflow-hidden"
           ref={contentRef}
-          onOpenAutoFocus={onOpenAutoFocus}
+          initialFocus={initialFocus}
         >
           <Command shouldFilter={false}>
             <CommandInput
