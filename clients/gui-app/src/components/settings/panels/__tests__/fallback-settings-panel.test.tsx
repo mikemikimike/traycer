@@ -466,8 +466,10 @@ describe("FallbackSettingsPanel - local validation failure sends nothing", () =>
     // control's current selection back.
     openCombobox("Longest wait for a usage limit to reset");
     expect(
-      screen.getByRole("option", { name: "1 day" }).getAttribute("data-state"),
-    ).toBe("checked");
+      screen
+        .getByRole("option", { name: "1 day" })
+        .hasAttribute("data-selected"),
+    ).toBe(true);
 
     // Scoped to "behavior" - no error under the danger zone. Stub
     // `FallbackSaveStatus`'s `activeField === props.field` gate to always
@@ -509,8 +511,8 @@ describe("FallbackSettingsPanel - a host rejection reverts and names the reason"
     expect(
       screen
         .getByRole("option", { name: "15 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("checked");
+        .hasAttribute("data-selected"),
+    ).toBe(true);
   });
 });
 
@@ -574,8 +576,8 @@ describe("FallbackSettingsPanel - reset reads from the refetch, never the mutati
     expect(
       screen
         .getByRole("option", { name: "13 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("checked");
+        .hasAttribute("data-selected"),
+    ).toBe(true);
     // The mutation's own value must not be the one in force. Stated as
     // UNCHECKED rather than absent: 10 is a standing member of
     // `GRACE_WINDOW_SECONDS`, so the option is in this menu whatever the policy
@@ -584,8 +586,8 @@ describe("FallbackSettingsPanel - reset reads from the refetch, never the mutati
     expect(
       screen
         .getByRole("option", { name: "10 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("unchecked");
+        .hasAttribute("data-selected"),
+    ).toBe(false);
   });
 });
 
@@ -1152,13 +1154,13 @@ describe("FallbackSettingsPanel - R8 a confirmed reset whose read fails is not s
     expect(
       screen
         .getByRole("option", { name: "15 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("checked");
+        .hasAttribute("data-selected"),
+    ).toBe(true);
     expect(
       screen
         .getByRole("option", { name: "13 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("unchecked");
+        .hasAttribute("data-selected"),
+    ).toBe(false);
   });
 });
 
@@ -1247,8 +1249,8 @@ describe("FallbackSettingsPanel - R8 P2 a refusal after an unread reset must not
     expect(
       screen
         .getByRole("option", { name: "13 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("checked");
+        .hasAttribute("data-selected"),
+    ).toBe(true);
   });
 
   it("clears the staleness banner when a later read-back succeeds, because its own sentence has stopped being true", async () => {
@@ -2046,13 +2048,13 @@ describe("FallbackSettingsPanel - cold review R1/R2: a failed read-back, and a w
     expect(
       screen
         .getByRole("option", { name: "15 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("checked");
+        .hasAttribute("data-selected"),
+    ).toBe(true);
     expect(
       screen
         .getByRole("option", { name: "11 seconds" })
-        .getAttribute("data-state"),
-    ).toBe("unchecked");
+        .hasAttribute("data-selected"),
+    ).toBe(false);
   });
 
   it("R2c: a read-back adopts the host's value even when the SAME control was refused in between, rather than settling on the rejected one", async () => {

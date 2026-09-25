@@ -110,7 +110,7 @@ export function ExternalHostRestartTrigger(props: {
  * Open the Updates card's **Advanced** disclosure and wait for its body.
  *
  * The auto-update switch, the OS service controls and the whole version picker
- * live behind it, and Radix does not MOUNT `CollapsibleContent` while closed —
+ * live behind it, and Base does not MOUNT `CollapsibleContent` while closed —
  * so before this runs, none of them is in the DOM at all. The failure mode is
  * the same trap as the `⋯` menu above: `queryByRole("switch")` returns null and
  * reads as "the control was deleted" rather than "the drawer is shut".
@@ -123,13 +123,14 @@ export function ExternalHostRestartTrigger(props: {
 export async function openHostOverviewAdvanced(): Promise<void> {
   const trigger = await screen.findByRole("button", { name: "Advanced" });
   fireEvent.click(trigger);
-  // Settled on the TRIGGER's own `data-state`, not on any control inside.
-  // Which controls the drawer holds is exactly what callers vary — an
-  // unreachable host has no version picker, a host with no registry row has no
-  // policy switch, an old host has no service buttons — so waiting on one of
-  // them would make this helper quietly wrong for the cases that matter most.
+  // Settled on the TRIGGER's own `data-panel-open` (Base's Collapsible.Trigger
+  // attribute), not on any control inside. Which controls the drawer holds is
+  // exactly what callers vary — an unreachable host has no version picker, a
+  // host with no registry row has no policy switch, an old host has no
+  // service buttons — so waiting on one of them would make this helper
+  // quietly wrong for the cases that matter most.
   await waitFor(() => {
-    if (trigger.getAttribute("data-state") !== "open") {
+    if (!trigger.hasAttribute("data-panel-open")) {
       throw new Error("Advanced disclosure did not open");
     }
   });

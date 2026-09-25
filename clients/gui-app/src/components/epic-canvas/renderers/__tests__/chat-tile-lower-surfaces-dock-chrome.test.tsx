@@ -1009,7 +1009,7 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     const panel = screen.getByTestId("accumulated-changes-panel");
     // Seeded open by `useChatDockSectionRevealed` - a chip click asks for the
     // panel, not for a second click to open it too.
-    expect(panel.getAttribute("data-state")).toBe("open");
+    expect(panel.hasAttribute("data-open")).toBe(true);
 
     fireEvent.click(chip);
 
@@ -1043,10 +1043,8 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     const { rerender } = renderSurfaces(withChanges);
     fireEvent.click(screen.getByTestId("chat-dock-chip-filesChanged"));
     expect(
-      screen
-        .getByTestId("accumulated-changes-panel")
-        .getAttribute("data-state"),
-    ).toBe("open");
+      screen.getByTestId("accumulated-changes-panel").hasAttribute("data-open"),
+    ).toBe(true);
 
     rerender(tile(withoutChanges));
 

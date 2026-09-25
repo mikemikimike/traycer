@@ -177,7 +177,6 @@ function PrDetailTabRow(props: PrDetailTabPickerProps): ReactNode {
             aria-controls={prDetailTabPanelId(definition.id)}
             tabIndex={selected ? 0 : -1}
             data-testid={`pr-detail-tab-${definition.id}`}
-            data-state={selected ? "active" : "inactive"}
             onClick={() => props.onSelectTab(definition.id)}
             onKeyDown={handleKeyDown}
             className={cn(

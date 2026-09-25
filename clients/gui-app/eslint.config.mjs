@@ -87,10 +87,6 @@ const importRestrictionDimensions = {
   // in src/components/ui/**. Reaching past a wrapper to the raw primitive
   // skips focus/concealment/safe-area policy those wrappers own.
   //
-  // Scoped by `importNames`, not a whole-package ban: each package also
-  // exports plain utilities with no portal/overlay behavior of their own
-  // (`Slot`, `useComposedRefs`, `toast`, cmdk's item/group sub-components)
-  // that are legitimately imported outside `src/components/ui/**` today.
   basePrimitive: [
     {
       regex: "^@base-ui/react(?:$|/(?!use-render$|merge-props$))",
@@ -99,50 +95,6 @@ const importRestrictionDimensions = {
     },
   ],
   overlayPortal: [
-    {
-      group: ["radix-ui"],
-      importNames: [
-        "AlertDialog",
-        "ContextMenu",
-        "Dialog",
-        "DropdownMenu",
-        "HoverCard",
-        "Menubar",
-        "NavigationMenu",
-        "Popover",
-        "Portal",
-        "Select",
-        "Toast",
-        "Tooltip",
-      ],
-      message:
-        "Overlay portal primitives are built only by the shadcn wrappers in src/components/ui/**. Use the wrapper - Dialog/Popover/Select/DropdownMenu/Tooltip/ContextMenu/HoverCard from @/components/ui/* - instead of importing the Radix primitive directly.",
-    },
-    {
-      group: ["radix-ui/internal"],
-      importNames: [
-        "DismissableLayer",
-        "FocusGuards",
-        "FocusScope",
-        "Menu",
-        "Popper",
-        "Presence",
-        "Primitive",
-        "RovingFocus",
-      ],
-      message:
-        "These radix-ui/internal exports hand-build overlay behavior (positioning, dismiss, focus) outside the registered wrappers. Use the shadcn wrapper in src/components/ui/** instead. `useComposedRefs` and the other ref/state utilities are unrestricted.",
-    },
-    {
-      group: ["vaul"],
-      message:
-        "vaul is wrapped by @/components/ui/sheet and @/components/ui/drawer, which register with the browser-tile occlusion coordinator. Use the wrapper instead of importing vaul directly.",
-    },
-    {
-      group: ["@radix-ui/*"],
-      message:
-        "Radix primitive packages (@radix-ui/react-dialog, @radix-ui/react-dismissable-layer, ...) are wrapped by the shadcn components in src/components/ui/**. Use the wrapper instead of importing a @radix-ui/* package directly.",
-    },
     {
       // `regex`, not `group`: `group` matching is gitignore-style (the
       // `ignore` package) - a slash-less pattern like "sonner" matches any
@@ -153,12 +105,6 @@ const importRestrictionDimensions = {
       importNames: ["Toaster"],
       message:
         'The sonner <Toaster/> portal is mounted once by @/components/ui/sonner, which registers with the browser-tile occlusion coordinator. Import `toast` from "sonner" to trigger a toast; do not mount another <Toaster/>.',
-    },
-    {
-      group: ["cmdk"],
-      importNames: ["Command", "CommandDialog", "CommandRoot"],
-      message:
-        "The cmdk Command root is wrapped by @/components/ui/command, which registers with the browser-tile occlusion coordinator. Use the wrapper's exports instead of importing cmdk's Command directly.",
     },
   ],
 };
@@ -2837,18 +2783,6 @@ export default tseslint.config(
     settings: {
       shadcn: {
         note: "See the design rules in clients/gui-app/AGENTS.md before adding a class, a token or an exception.",
-        // `vaul` exports its drawer as `Drawer`, and the rules resolve
-        // `DrawerPrimitive.Content` back through that import to the name
-        // `DrawerContent` - which is OUR component. So `ui/drawer.tsx`, the
-        // file that DEFINES the drawer, was reported as if it were a call site
-        // restyling it: 33 findings for the fill, the shadow, the per-direction
-        // borders and every safe-area inset the wrapper exists to apply. Radix
-        // primitives do not do this (`ui/dialog.tsx` writes the same kind of
-        // thing and is clean), so the fix is to tell the rules that `vaul` is a
-        // primitive library rather than a component source. Call sites are
-        // unaffected: they import `DrawerContent` from
-        // `@/components/ui/drawer`, which is still recognized.
-        ignoreImports: ["^vaul$"],
       },
     },
     rules: {

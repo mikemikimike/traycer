@@ -1520,15 +1520,10 @@ describe("FolderBranchControl — Escape close", () => {
 
     expect(document.activeElement).toBe(chip);
     expect(screen.queryByRole("tooltip")).toBeNull();
+    // Base's tooltip content carries `data-open` only while open - there is
+    // no Radix-style intermediate "delayed-open" value to check for.
     expect(
-      document.querySelector(
-        '[data-slot="tooltip-content"][data-state="open"]',
-      ),
-    ).toBeNull();
-    expect(
-      document.querySelector(
-        '[data-slot="tooltip-content"][data-state="delayed-open"]',
-      ),
+      document.querySelector('[data-slot="tooltip-content"][data-open]'),
     ).toBeNull();
   });
 });

@@ -42,11 +42,8 @@ describe("<ChatFilterMenu />", () => {
         canArchive={canArchive}
       />,
     );
-    // Radix's DropdownMenuTrigger opens on pointerdown, not the click event.
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Filter agents" }),
-      { button: 0 },
-    );
+    // Base's menu trigger is a native toggle button - it opens on click.
+    fireEvent.click(screen.getByRole("button", { name: "Filter agents" }));
   }
 
   it("names the trigger for Agents, not chats", () => {
@@ -66,9 +63,7 @@ describe("<ChatFilterMenu />", () => {
     open(false);
     const menu = screen.getByTestId("epic-sidebar-agent-view-menu");
     expect(menu.getAttribute("data-side")).toBe("right");
-    expect(menu.className).toContain(
-      "w-[var(--radix-dropdown-menu-content-available-width)]",
-    );
+    expect(menu.className).toContain("w-[var(--available-width)]");
     expect(menu.className).toContain("max-w-64");
     expect(menu.className).not.toContain("min-w-64");
     fireEvent.click(screen.getByText("Interface"));
@@ -115,12 +110,7 @@ describe("<ChatFilterMenu />", () => {
       />,
     );
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Filter agents" }),
-      {
-        button: 0,
-      },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter agents" }));
 
     expect(
       useLeftPanelStore.getState().panelSectionCollapsedByPanelId.chats,
@@ -140,10 +130,7 @@ describe("<ChatFilterMenu />", () => {
       />,
     );
 
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Filter agents" }),
-      { button: 0 },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter agents" }));
     rerender(
       <ChatFilterMenu
         key="expanded"
@@ -242,8 +229,8 @@ describe("<ChatFilterMenu />", () => {
     expect(
       screen
         .getByTestId("epic-sidebar-archive-visibility-unarchived")
-        .getAttribute("data-state"),
-    ).toBe("checked");
+        .hasAttribute("data-checked"),
+    ).toBe(true);
 
     fireEvent.click(
       screen.getByTestId("epic-sidebar-archive-visibility-archived"),
@@ -296,10 +283,7 @@ describe("<ArtifactFilterMenu />", () => {
 
   it("keeps the filter axes in the root and opens each detail to the right", () => {
     renderMenu();
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Filter artifacts" }),
-      { button: 0 },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter artifacts" }));
 
     expect(screen.getByText("Ordering")).toBeTruthy();
     expect(screen.getByText("Status")).toBeTruthy();
@@ -331,10 +315,7 @@ describe("<ArtifactFilterMenu />", () => {
 
   it("uses the create menu icon language in the Type filter detail", () => {
     renderMenu();
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "Filter artifacts" }),
-      { button: 0 },
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter artifacts" }));
     fireEvent.click(screen.getByText("Type"));
 
     const typeItems = screen.getAllByRole("menuitemcheckbox");
@@ -355,11 +336,10 @@ describe("<ArtifactFilterMenu />", () => {
     store.setArtifactSortField(EPIC_ID, "name");
     renderMenu();
 
-    fireEvent.pointerDown(
+    fireEvent.click(
       screen.getByRole("button", {
         name: "Filter artifacts, 1 filter active, ordered by Name descending",
       }),
-      { button: 0 },
     );
     fireEvent.click(screen.getByText("Reset view"));
 
