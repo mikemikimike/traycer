@@ -19,6 +19,26 @@ For the Host mental model, see [Hosts](/concepts/hosts). For Host controls, see 
 
 If Desktop shows **Starting local host…** for too long, use the retry action or open [Settings > Host](/settings/host).
 
+## Missing Home Activity
+
+<Note>
+  These Home explanations are an upcoming change, not included in Desktop
+  v1.3.0.
+</Note>
+
+**Some activity may be missing** means Home does not have a complete view of running Tasks. Read the reason beneath the notice:
+
+| Reason | What it means |
+| --- | --- |
+| **Lost connection to a machine** | Its Tasks are not shown while that connection is lost. |
+| **Reconnecting to a machine** | Traycer is restoring the connection to that Host. |
+| **A machine isn't connected to Traycer, or is reconnecting to Traycer** | Activity from your other machines may be missing, even when that Host's own Tasks are available. |
+| **Signed out or session expired** | Sign in again to load running Tasks. |
+| **Can't reach Traycer to confirm your sign-in** | Running Tasks may not load until Traycer is reachable again. |
+| **Account no longer available or session ended in another window** | This window cannot load running Tasks with its current session. |
+
+A missing activity row alone does not mean the Task was deleted. For a machine connection problem, check [Host settings](/settings/host); use [History](/concepts/history) to find previous Tasks.
+
 ## Report An Issue
 
 Use **Report Issue** when you want to send a bug report with desktop and host details attached.
