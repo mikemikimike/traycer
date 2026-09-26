@@ -27,11 +27,13 @@ import { stopHostServiceWithAttempt } from "../host/update-mutation";
 // Linked and Stop-if-idle modes): after acquiring the lock, probe the host's
 // busy state immediately before `controller.stop()`; busy (or not provably
 // idle) -> `E_HOST_BUSY` with nothing touched, the stop intent included.
-// Plain stop keeps today's per-platform semantics, which are NOT an idle-only
-// stop: Linux `systemctl stop`, Windows `schtasks /End` and a CLI-owned macOS
-// `launchctl kill` reach the host without asking it. Mutually exclusive with
-// `--force` - one flag widens the busy gate, the other removes it, the same
-// pairing `host restart` refuses.
+// Plain stop keeps the per-platform semantics, which are NOT an idle-only
+// stop: Linux `systemctl stop` and a CLI-owned macOS `launchctl kill` reach
+// the host without asking it. Windows and a Desktop-managed macOS host ask it
+// to stand down first, and a host that answers busy refuses the stop with
+// `E_HOST_BUSY`, but only at the moment of the ask and with no probe of its
+// own. Mutually exclusive with `--force` - one flag widens the busy gate, the
+// other removes it, the same pairing `host restart` refuses.
 //
 // `cli-lock` coverage (Host Update Layer Redesign Tech Plan, "Lifecycle
 // lock coverage"): a terminal stop must not enter another actor's

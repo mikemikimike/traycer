@@ -87,6 +87,7 @@ import {
   buildOverviewHostFixture,
   buildOverviewManagement,
   openHostOverviewMenu,
+  selectHostOverviewTab,
   updateCheckManifest,
   type OverviewHostFixture,
 } from "@/components/settings/panels/__tests__/host-overview-test-support";
@@ -298,6 +299,7 @@ describe("OV-2 — the version card's Update now during a foreground run", () =>
       hostVersion: "1.5.0",
       overrideHandlers: updatableManifestHandlers(),
     });
+    await selectHostOverviewTab("updates");
 
     // Positive first: only true once the update-check + lifecycle queries
     // have both resolved, which settles the render for the negative below.
@@ -317,6 +319,7 @@ describe("OV-2 — the version card's Update now during a foreground run", () =>
       hostVersion: "1.5.0",
       overrideHandlers: updatableManifestHandlers(),
     });
+    await selectHostOverviewTab("updates");
 
     await screen.findByTestId("host-overview-update-now");
     expect(screen.queryByTestId("host-overview-update-foreground")).toBeNull();
@@ -336,6 +339,8 @@ describe("OV-2 — the version card's Update now during a foreground run", () =>
     // settle on — wait for every query this render started to finish
     // instead, then assert the negative.
     await screen.findByTestId("host-identity-name-row");
+    await selectHostOverviewTab("updates");
+    await screen.findByTestId("host-overview-version-card");
     await waitFor(() => {
       expect(queryClient.isFetching()).toBe(0);
     });
@@ -1254,6 +1259,7 @@ describe("OV-7 — the version card's Update now under T08's P1-in-`none` ruling
       overrideHandlers: updatableManifestHandlers(),
       applied: { capability: "none", pending: "none" },
     });
+    await selectHostOverviewTab("updates");
 
     await waitFor(() => {
       expect(
@@ -1271,6 +1277,7 @@ describe("OV-7 — the version card's Update now under T08's P1-in-`none` ruling
       overrideHandlers: updatableManifestHandlers(),
       applied: { capability: "managed", pending: "restart-app" },
     });
+    await selectHostOverviewTab("updates");
 
     await waitFor(() => {
       expect(
@@ -1288,6 +1295,7 @@ describe("OV-7 — the version card's Update now under T08's P1-in-`none` ruling
       overrideHandlers: updatableManifestHandlers(),
       applied: MANAGED_IDLE,
     });
+    await selectHostOverviewTab("updates");
 
     await waitFor(() => {
       expect(

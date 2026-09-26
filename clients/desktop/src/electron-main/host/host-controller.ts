@@ -4548,9 +4548,13 @@ export class HostController {
     // and a `waiting-to-activate` whose claim no longer matches. This runs
     // automatically at launch whenever activation debt is seen, so it was a
     // host stopped by the desktop itself with nothing left to start it.
+    // `force` is the user's explicit Force after a busy refusal (the
+    // `"activate"` busy continuation), so it passes `--force`: a plain
+    // `host restart` refuses a busy host on Windows as on packaged macOS, and
+    // the Force would only be refused again.
     return this.runCliRecoveryServiceCycle(
       force
-        ? ["host", "restart", "--defer-if-parked"]
+        ? ["host", "restart", "--force", "--defer-if-parked"]
         : ["host", "restart", "--if-idle", "--defer-if-parked"],
       prePid,
     );

@@ -17,6 +17,10 @@ import {
 } from "../desktop-agent-shutdown";
 import { ownProcessStartIdentity } from "../../../store/process-identity";
 import { hostHomeDir } from "../../../store/paths";
+import {
+  isServiceMutationAuthorityError,
+  withServiceMutationAuthority,
+} from "../../mutation-authority";
 
 // HOME is redirected to a private temp dir BEFORE anything reads it:
 // `store/paths` binds `homedir()` at module load, so without this the suite
@@ -405,6 +409,83 @@ describe("U8: the supervisor teardown's cooperative leg never probes synchronous
     expect(MOCKS.matchLiveProcessStartIdentity).not.toHaveBeenCalled();
     expect(MOCKS.verifyProcessIdentityAsync).toHaveBeenCalled();
     expect(outcome).toEqual({ kind: "stopped" });
+  });
+});
+
+// A stop that runs under a service-mutation scope must stop mattering the
+// moment the capability is lost: an "unreachable" outcome would let the caller
+// escalate to a forced kill it no longer has the authority for. Legacy callers
+// run without a scope, which every test above relies on.
+describe("requestCooperativeShutdown under service mutation authority", () => {
+  const authority = { lost: false, verifyCalls: 0, loseOnCall: Infinity };
+
+  beforeEach(() => {
+    authority.lost = false;
+    authority.verifyCalls = 0;
+    authority.loseOnCall = Infinity;
+    MOCKS.readHostPidMetadata.mockResolvedValue(LIVE_METADATA);
+    MOCKS.isProcessAlive.mockReturnValue(true);
+  });
+
+  const verify = async (): Promise<void> => {
+    authority.verifyCalls += 1;
+    if (authority.lost || authority.verifyCalls >= authority.loseOnCall) {
+      throw new Error("capability revoked");
+    }
+  };
+
+  async function rejectionOf(work: Promise<unknown>): Promise<unknown> {
+    try {
+      await work;
+    } catch (error) {
+      return error;
+    }
+    throw new Error("expected the shutdown request to reject");
+  }
+
+  it("aborts before dialing when authority is already gone at the claim", async () => {
+    // Call 1 is the scope's own entry check; call 2 is the one right before
+    // `claimShutdown`.
+    authority.loseOnCall = 2;
+
+    const error = await rejectionOf(
+      withServiceMutationAuthority(verify, () =>
+        requestCooperativeShutdown("production", "stop", "shutdown"),
+      ),
+    );
+
+    expect(isServiceMutationAuthorityError(error)).toBe(true);
+    expect(MOCKS.callHostRpcAtEndpoint).not.toHaveBeenCalled();
+  });
+
+  it("releases a granted claim and never commits when authority is lost while the claim response is pending", async () => {
+    const claim: { grant: (() => void) | null } = { grant: null };
+    MOCKS.callHostRpcAtEndpoint.mockImplementation(async (method: string) => {
+      if (method !== "lifecycle.claimShutdown") return undefined;
+      await new Promise<void>((resolve) => {
+        claim.grant = resolve;
+      });
+      return { granted: { token: "tok-revoked" } };
+    });
+
+    const pending = rejectionOf(
+      withServiceMutationAuthority(verify, () =>
+        requestCooperativeShutdown("production", "stop", "shutdown"),
+      ),
+    );
+    await vi.waitFor(() => expect(claim.grant).not.toBeNull());
+    authority.lost = true;
+    claim.grant?.();
+
+    const error = await pending;
+
+    expect(isServiceMutationAuthorityError(error)).toBe(true);
+    expect(
+      MOCKS.callHostRpcAtEndpoint.mock.calls.map(([method]) => method),
+    ).toEqual(["lifecycle.claimShutdown", "lifecycle.releaseShutdown"]);
+    expect(MOCKS.callHostRpcAtEndpoint.mock.calls[1]?.[1]).toEqual({
+      token: "tok-revoked",
+    });
   });
 });
 

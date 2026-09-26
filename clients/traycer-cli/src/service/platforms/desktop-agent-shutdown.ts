@@ -23,6 +23,10 @@ import { callHostRpcAtEndpoint } from "../../internal/host-rpc";
 import { createCliLogger, type ILogger } from "../../logger";
 import { reportBoundedWait } from "../../runner/bounded-wait-progress";
 import type { Environment } from "../../runner/environment";
+import {
+  isServiceMutationAuthorityError,
+  verifyServiceMutationAuthority,
+} from "../mutation-authority";
 
 // Cooperative shutdown of a Desktop-managed host, through the host's own
 // lifecycle-claim RPCs instead of launchd. Who registered the OS service is
@@ -176,6 +180,7 @@ export async function requestCooperativeShutdownReporting(
   // and one stand-down stacks up to three RPCs inside a single controller
   // call; each reports as it begins (bounded-wait-progress.ts).
   try {
+    await verifyServiceMutationAuthority();
     reportBoundedWait("asking the host to shut down");
     const claimed = await callHostRpcAtEndpoint(
       "lifecycle.claimShutdown",
@@ -186,6 +191,7 @@ export async function requestCooperativeShutdownReporting(
       return { kind: "busy" };
     }
     grantedToken = claimed.granted.token;
+    await verifyServiceMutationAuthority();
     reportBoundedWait("confirming the host's shutdown");
     const committed = await callHostRpcAtEndpoint(
       "lifecycle.commitShutdown",
@@ -205,6 +211,9 @@ export async function requestCooperativeShutdownReporting(
   } catch (error) {
     const cause = error instanceof Error ? error.message : String(error);
     await releaseClaim(grantedToken);
+    // Losing the service mutation capability must abort the stop, never
+    // become an "unreachable" result that permits a forced OS fallback.
+    if (isServiceMutationAuthorityError(error)) throw error;
     logger.warn("Cooperative shutdown RPC failed", {
       environment,
       operation,

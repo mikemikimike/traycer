@@ -11803,6 +11803,52 @@ describe("R-C/R-D: the packaged-Mac park kickstart, and CLI-owned --defer-if-par
     );
   });
 
+  // `force` is the user's explicit Force after a busy refusal, so the restart
+  // passes `--force`: a plain `host restart` asks the host to stand down and
+  // refuses a busy one, which would only refuse the Force again.
+  it("(o3) CLI-owned activateInstalled(force): the `host restart` argv carries --force and --defer-if-parked, never --if-idle", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(false);
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: RC_INSTALLED_VERSION,
+      runtimeVersion: null,
+    });
+    writePidMetadata("production", {
+      version: RC_INSTALLED_VERSION,
+      pid: process.pid,
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: {
+        restarted: true,
+        installGeneration: null,
+        runtimeVersion: "1.0.0",
+        runtimeWasNull: true,
+      },
+    });
+    vi.mocked(runBundledTraycerCliJson).mockImplementation(async (args) => {
+      if (args.includes("available")) {
+        return availableSnapshotFixture(RC_INSTALLED_VERSION, [
+          RC_INSTALLED_VERSION,
+        ]);
+      }
+      if (args.includes("stamp-runtime")) {
+        return { outcome: "stamped" };
+      }
+      return {};
+    });
+
+    await controller.activateInstalled(true, true);
+
+    const restartArgv = allCliArgvCalls().find((argv) =>
+      argvHasConsecutive(argv, ["host", "restart"]),
+    );
+    expect(restartArgv).toBeDefined();
+    expect(
+      argvHasConsecutive(restartArgv ?? [], ["--force", "--defer-if-parked"]),
+    ).toBe(true);
+    expect((restartArgv ?? []).includes("--if-idle")).toBe(false);
+  });
+
   it("(o2) CLI-owned activateInstalled: a `deferredForParkedActivation` restart result is `deferred`, with no readiness wait", async () => {
     vi.mocked(hostManagesHostLoginItem).mockResolvedValue(false);
     const controller = newController("production");

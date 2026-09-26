@@ -130,7 +130,6 @@ function regionElement(
           foregroundUpdateLine: null,
         }}
         inFlight={false}
-        autoUpdate={null}
       />
     </TooltipProvider>
   );

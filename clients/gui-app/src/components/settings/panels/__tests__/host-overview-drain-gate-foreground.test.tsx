@@ -1,4 +1,4 @@
-// T08's ruling for the Overview Status tab's drain gate (`HostUpdateDrainGateRow`
+// T08's ruling for the Overview's notices-strip drain gate (`HostUpdateDrainGateRow`
 // -> `ApplyNowControl`, `host-scope/host-registry-updates.tsx`). During a LOCAL
 // foreground run the Apply now trigger is withheld and `hostForegroundUpdateLine`
 // shows in `host-apply-now-foreground-<hostId>`; a dialog already open keeps its
@@ -73,10 +73,7 @@ import {
   HOST_FOREGROUND_UPDATE_READY,
   HOST_FOREGROUND_UPDATE_READY_UNMANAGED,
 } from "@/lib/host/host-lifecycle-copy";
-import {
-  buildOverviewHostFixture,
-  selectHostOverviewTab,
-} from "@/components/settings/panels/__tests__/host-overview-test-support";
+import { buildOverviewHostFixture } from "@/components/settings/panels/__tests__/host-overview-test-support";
 import { createFakeRunnerHost } from "../../../../../__tests__/create-fake-runner-host";
 
 const OVERVIEW_METHODS = [
@@ -216,7 +213,8 @@ function renderOverview(options: {
 }
 
 async function findGate(hostId: string): Promise<HTMLElement> {
-  await selectHostOverviewTab("status");
+  // The drain gate now lives in the notices strip between the header and the
+  // tab bar, visible on every tab, so no tab selection is needed to reach it.
   return screen.findByTestId(`host-update-drain-gate-${hostId}`);
 }
 

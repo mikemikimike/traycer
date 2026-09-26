@@ -175,7 +175,11 @@ const mocks = vi.hoisted(() => ({
   // above defaults to `absent`, which never reaches it.
   publishedHostProcessGone: vi.fn(),
   // The guard's own ask, mocked whole-module: `askHostToStandDown` imports
-  // only this one export from `./desktop-agent-shutdown`.
+  // only this one export from `./desktop-agent-shutdown` (`windows.ts`
+  // imports only the reporting variant, never the plain
+  // `requestCooperativeShutdown`). Every stop fixture defaults to "no host to
+  // ask" below, which leaves it on the existing task-end and process-scan
+  // logic unless a test stages otherwise.
   requestCooperativeShutdownReporting: vi.fn(),
 }));
 
@@ -6631,6 +6635,274 @@ describe("Windows controller — installService fact: /Create's XML is built fre
   });
 });
 
+// Adapted from main (#2169): the guard in front of this ask
+// (`askHostToStandDown`'s own slot scan, F-WIN-STOP-COOP below) now runs
+// BEFORE `requestCooperativeShutdownReporting` on every non-forced site, so a
+// fixture answers the guard's scan (`convergingTableRunner` always does, even
+// with an empty table) or the ask is skipped as unreadable. Every "no OS
+// mutation yet" assertion below therefore reads "no `schtasks` call", not "no
+// calls at all" - the guard's own read is expected and is not a mutation.
+describe("Windows cooperative stop", () => {
+  const label = serviceLabelFor("staging");
+
+  beforeEach(() => {
+    mocks.readHostPidMetadata.mockReset();
+    mocks.readHostPidMetadata.mockResolvedValue(null);
+    mocks.removeHostPidMetadata.mockReset();
+    mocks.removeHostPidMetadata.mockResolvedValue(undefined);
+    mocks.requestCooperativeShutdownReporting.mockReset();
+    mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+      kind: "no-host",
+    });
+    setWindowsStartEvidenceDepsForTests(null);
+    setWindowsTaskInstallDepsForTests(null);
+  });
+
+  afterEach(() => {
+    setWindowsStartEvidenceDepsForTests(null);
+    setWindowsTaskInstallDepsForTests(null);
+  });
+
+  function idleController() {
+    const { runner, calls } = convergingTableRunner([]);
+    return {
+      calls,
+      controller: createWindowsController(runner, noTimingDeps),
+    };
+  }
+
+  // A stopped host is not there to ask; the ordinary path only sweeps the
+  // task and any survivors, and a stop with no metadata must stay idempotent.
+  // `busy` is deliberately absent from this list: it now refuses stop/restart
+  // before any OS mutation instead of falling back here (see BUSY_SITES,
+  // below), and uninstall - the one operation `busy` does not refuse - never
+  // reaches this table at all.
+  const OUTCOMES_THAT_FALL_BACK_TO_THE_EXISTING_STOP = [
+    { kind: "stopped" },
+    { kind: "no-host" },
+    { kind: "no-metadata" },
+    { kind: "unreachable", cause: "dial failed" },
+    { kind: "hung", pid: 4242 },
+  ] as const;
+
+  it("asks the host to shut down before the first OS mutation, and mutates only once that settles", async () => {
+    const outcome = (() => {
+      let resolve: (value: { kind: string }) => void = () => undefined;
+      const promise = new Promise<{ kind: string }>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    })();
+    mocks.requestCooperativeShutdownReporting.mockReturnValueOnce(
+      outcome.promise,
+    );
+    const { controller, calls } = idleController();
+
+    const stopping = controller.stop(label, { force: false });
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledTimes(1);
+    // Only the guard's read-only scan ran so far: no /End, no kill - `some
+    // call is schtasks` would miss a kill script, which is a `powershell.exe`
+    // call too, so every recorded call must still be that same read.
+    expect(calls.some((call) => call.command === "schtasks")).toBe(false);
+    expect(calls.every((call) => isScanCall(call.command, call.args))).toBe(
+      true,
+    );
+
+    outcome.resolve({ kind: "stopped" });
+    await stopping;
+
+    expect(calls.find((call) => call.command === "schtasks")).toMatchObject({
+      command: "schtasks",
+      args: ["/End", "/TN", "\\Traycer\\Host-Staging"],
+    });
+    expect(calls.some((call) => isScanCall(call.command, call.args))).toBe(
+      true,
+    );
+  });
+
+  it("tells the host whether this is a plain stop or the stop half of a restart", async () => {
+    const { controller } = idleController();
+
+    await controller.stop(label, { force: false });
+    await controller.stopForRestart(label, { force: false });
+
+    expect(
+      mocks.requestCooperativeShutdownReporting.mock.calls.map(
+        (call: unknown[]) => [call[1], call[2]],
+      ),
+    ).toEqual([
+      ["stop", "shutdown"],
+      ["restart", "restart"],
+    ]);
+  });
+
+  it("forwards the helper's host-addressed report to the caller exactly once", async () => {
+    mocks.requestCooperativeShutdownReporting.mockImplementationOnce(
+      async (
+        _environment: string,
+        _operation: string,
+        _intent: string,
+        onHostAddressed: (() => void) | null,
+      ) => {
+        onHostAddressed?.();
+        return { kind: "stopped" as const };
+      },
+    );
+    const onHostAddressed = vi.fn();
+    const { controller } = idleController();
+
+    await controller.stop(label, { force: false, onHostAddressed });
+
+    expect(onHostAddressed).toHaveBeenCalledTimes(1);
+  });
+
+  interface BusySite {
+    readonly name: string;
+    readonly invoke: (controller: ServiceController) => Promise<unknown>;
+  }
+
+  // The three routes that ask before an OS mutation: a plain stop, a
+  // restart's own top-level ask (`controller.restart`, which always asks - it
+  // takes no `force`), and the stop half of a restart
+  // (`controller.stopForRestart`). `uninstall` is deliberately not here: it
+  // does not refuse on `busy` (see the dedicated test below).
+  const BUSY_SITES: readonly BusySite[] = [
+    {
+      name: "stop",
+      invoke: (controller) => controller.stop(label, { force: false }),
+    },
+    {
+      name: "restart",
+      invoke: (controller) => controller.restart(label),
+    },
+    {
+      name: "stopForRestart",
+      invoke: (controller) =>
+        controller.stopForRestart(label, { force: false }),
+    },
+  ];
+
+  it.each(BUSY_SITES)(
+    "$name: a busy host refuses with E_HOST_BUSY before any OS mutation",
+    async ({ invoke }) => {
+      mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+        kind: "busy",
+      });
+      const { controller, calls } = idleController();
+
+      await expect(invoke(controller)).rejects.toMatchObject({
+        code: CLI_ERROR_CODES.HOST_BUSY,
+      });
+      // Only the guard's read-only scan ran: no /End, no kill - `some call is
+      // schtasks` would miss a kill script, which is a `powershell.exe` call
+      // too, so every recorded call must still be that same read.
+      expect(calls.some((call) => call.command === "schtasks")).toBe(false);
+      expect(calls.every((call) => isScanCall(call.command, call.args))).toBe(
+        true,
+      );
+      expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uninstall: a busy host does not refuse, and still issues /End and sweeps", async () => {
+    mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+      kind: "busy",
+    });
+    const { runner, calls } = convergingTableRunner([
+      { processId: 401, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.uninstall({ label, leaveForegroundRun: null }),
+    ).resolves.toBeUndefined();
+
+    expect(
+      calls.some(
+        (call) => call.command === "schtasks" && call.args[0] === "/End",
+      ),
+    ).toBe(true);
+    expect(killedPids(calls)).toEqual([401]);
+  });
+
+  it.each(["stop", "restart"] as const)(
+    "%s: losing service mutation authority during the cooperative request aborts with no OS command and no forced cleanup",
+    async (operation) => {
+      const lost = new ServiceMutationAuthorityError(new Error("revoked"));
+      mocks.requestCooperativeShutdownReporting.mockRejectedValue(lost);
+      const { controller, calls } = idleController();
+
+      const attempt =
+        operation === "stop"
+          ? controller.stop(label, { force: false })
+          : controller.stopForRestart(label, { force: false });
+
+      await expect(attempt).rejects.toBe(lost);
+      // Same reading as the busy refusal above: only the guard's read-only
+      // scan ran - no /End, no kill.
+      expect(calls.some((call) => call.command === "schtasks")).toBe(false);
+      expect(calls.every((call) => isScanCall(call.command, call.args))).toBe(
+        true,
+      );
+      expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(OUTCOMES_THAT_FALL_BACK_TO_THE_EXISTING_STOP)(
+    "stop and restart both continue into the existing verified stop when the cooperative outcome is $kind",
+    async (outcome) => {
+      for (const operation of ["stop", "restart"] as const) {
+        mocks.requestCooperativeShutdownReporting.mockResolvedValue(outcome);
+        const { runner, calls } = convergingTableRunner([
+          { processId: 401, parentProcessId: 1, slot: true },
+        ]);
+        const controller = createWindowsController(runner, noTimingDeps);
+
+        if (operation === "stop") {
+          await controller.stop(label, { force: false });
+        } else {
+          await expect(
+            controller.stopForRestart(label, { force: false }),
+          ).resolves.toEqual({ forcedRecycle: false });
+        }
+
+        expect(calls.find((call) => call.command === "schtasks")).toMatchObject(
+          {
+            command: "schtasks",
+            args: ["/End", "/TN", "\\Traycer\\Host-Staging"],
+          },
+        );
+        expect(killedPids(calls)).toEqual([401]);
+      }
+    },
+  );
+
+  it.each(["stop", "restart"] as const)(
+    "%s with force never asks the host and goes straight to the task end and kill",
+    async (operation) => {
+      const { runner, calls } = convergingTableRunner([
+        { processId: 401, parentProcessId: 1, slot: true },
+      ]);
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      if (operation === "stop") {
+        await controller.stop(label, { force: true });
+      } else {
+        await controller.stopForRestart(label, { force: true });
+      }
+
+      expect(mocks.requestCooperativeShutdownReporting).not.toHaveBeenCalled();
+      expect(calls[0]).toMatchObject({
+        command: "schtasks",
+        args: ["/End", "/TN", "\\Traycer\\Host-Staging"],
+      });
+      expect(killedPids(calls)).toEqual([401]);
+    },
+  );
+});
+
 describe("Windows controller — spawn-edge placement", () => {
   function stageEvidenceForImmediateStart(): void {
     setWindowsStartEvidenceDepsForTests({
@@ -7457,14 +7729,16 @@ describe("F-WIN-STOP-COOP: the cooperative-shutdown guard", () => {
     expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
   });
 
-  // The six `CooperativeShutdownOutcome` kinds (`desktop-agent-shutdown.ts`):
-  // whichever one the ask resolves, a plain stop treats it identically - the
-  // sweep is what actually confirms the slot is empty.
+  // The five `CooperativeShutdownOutcome` kinds a plain stop treats
+  // identically (`desktop-agent-shutdown.ts`) - the sweep is what actually
+  // confirms the slot is empty. `busy` is deliberately NOT here: it now
+  // refuses `stop`/`restart` with `E_HOST_BUSY` before any of this runs (see
+  // BUSY_REFUSAL_SITES, right below), rather than falling through to the
+  // sweep like the other five.
   const OUTCOMES: readonly CooperativeShutdownOutcome[] = [
     { kind: "stopped" },
     { kind: "no-host" },
     { kind: "no-metadata" },
-    { kind: "busy" },
     { kind: "hung", pid: 4242 },
     { kind: "unreachable", cause: "dial failed" },
   ];
@@ -7496,6 +7770,95 @@ describe("F-WIN-STOP-COOP: the cooperative-shutdown guard", () => {
       expect(mocks.removeHostPidMetadata).toHaveBeenCalledWith("staging");
     },
   );
+
+  // Re-pinned from the OUTCOMES table above: `busy` used to fall through to
+  // the sweep like every other outcome; it now throws before the sweep ever
+  // starts, for every site that actually asks. `uninstall` is excluded here
+  // on purpose - it is the one stand-down site that does NOT refuse on busy
+  // (its own test follows).
+  const BUSY_REFUSAL_SITES = STAND_DOWN_SITES.filter(
+    (site) => site.name !== "uninstall",
+  );
+
+  it.each(BUSY_REFUSAL_SITES)(
+    "$name: a busy host refuses with E_HOST_BUSY before any OS mutation, with no /End, no kill, and no pid-metadata purge",
+    async ({ invoke }) => {
+      mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+        kind: "busy",
+      });
+      const { runner, calls } = convergingTableRunner([
+        { processId: 100, parentProcessId: 1, slot: true },
+      ]);
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        invoke(controller, serviceLabelFor("staging")),
+      ).rejects.toMatchObject({ code: CLI_ERROR_CODES.HOST_BUSY });
+
+      // Only the guard's read-only scan ran: no /End, no kill - `some call is
+      // schtasks` would miss a kill script, which is a `powershell.exe` call
+      // too, so every recorded call must still be that same read, and the
+      // slot-matched host (pid 100) must never have been killed. The busy
+      // refusal never reaches the pid-metadata purge either.
+      expect(calls.some((call) => call.command === "schtasks")).toBe(false);
+      expect(calls.every((call) => isScanCall(call.command, call.args))).toBe(
+        true,
+      );
+      expect(killedPids(calls)).toEqual([]);
+      expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uninstall: a busy host does not refuse for busy, and still issues /End and sweeps", async () => {
+    mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+      kind: "busy",
+    });
+    const { runner, calls } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.uninstall({
+        label: serviceLabelFor("staging"),
+        leaveForegroundRun: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(
+      calls.some(
+        (call) => call.command === "schtasks" && call.args[0] === "/End",
+      ),
+    ).toBe(true);
+    expect(killedPids(calls)).toEqual([100]);
+  });
+
+  // A mutation-authority loss during the ask must abort the stop itself,
+  // never fall back to the sweep the way an ordinary "unreachable" does -
+  // `isServiceMutationAuthorityError` is what `askHostToStandDown` never
+  // catches (it lets the throw propagate straight out of `stopService`).
+  it("stop: a lost service-mutation authority during the ask aborts with no /End and no kill", async () => {
+    const lost = new ServiceMutationAuthorityError(new Error("revoked"));
+    mocks.requestCooperativeShutdownReporting.mockRejectedValue(lost);
+    const { runner, calls } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).rejects.toBe(lost);
+
+    // Only the guard's read-only scan ran: no /End, no kill, and the
+    // slot-matched host (pid 100) must never have been killed.
+    expect(calls.some((call) => call.command === "schtasks")).toBe(false);
+    expect(calls.every((call) => isScanCall(call.command, call.args))).toBe(
+      true,
+    );
+    expect(killedPids(calls)).toEqual([]);
+    expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
+  });
+
   // Abbreviated the same way the rest of this file already does (see e.g.
   // "kills exactly the scan-verified pids..." above) - the mock is untyped,
   // so only the fields these tests read need to be present.

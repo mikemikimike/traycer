@@ -665,13 +665,16 @@ async function stopService(
  * anything is killed. Without it every Windows stop was a kill, and a killed
  * host interrupts whatever its stores were writing.
  *
- * Every outcome goes on to the sweep (`endTaskAndSweepTree`); what differs is
- * what the sweep finds. After `stopped`, `no-host` or `no-metadata` it
- * confirms an empty slot, or ends a supervisor already on its way out. After
- * `busy`, `unreachable` or `hung` it is the kill it always was. `busy` is not
- * refused here the way the Desktop-managed macOS stop refuses it: a plain
- * Windows stop has always ended a busy host, and `--if-idle`, the one caller
- * that must not, refuses a busy host before it gets here.
+ * A `busy` answer refuses a `stop` or `restart` with `HOST_BUSY`, as the
+ * Desktop-managed macOS restart and takeover refuse it: only `--force`, which
+ * never asks, ends a host with work in progress. `uninstall` does not refuse,
+ * and neither does a stop that asked nothing (below). Every other outcome goes
+ * on to the sweep (`endTaskAndSweepTree`); what differs is what the sweep
+ * finds. After `stopped`, `no-host` or `no-metadata` it confirms an empty
+ * slot, or ends a supervisor already on its way out. After `unreachable` or
+ * `hung` it is the kill it always was. Losing the service mutation authority
+ * during the ask throws out of it (`requestCooperativeShutdownReporting`), so
+ * it aborts the stop instead of falling back to the kill.
  *
  * NEVER ASKED FROM INSIDE THE HOST'S OWN TREE. A granted claim runs the host's
  * graceful close, and that close kills the process group of every running
@@ -724,6 +727,15 @@ async function askHostToStandDown(
     intent: request.intent,
     outcome: outcome.kind,
   });
+  if (outcome.kind === "busy" && request.operation !== "uninstall") {
+    throw cliError({
+      code: CLI_ERROR_CODES.HOST_BUSY,
+      message:
+        "The host has work in progress. Retry once it finishes, or use --force to stop it anyway.",
+      details: { label: label.id },
+      exitCode: 1,
+    });
+  }
 }
 
 // The sweep every stop ends with, asked or forced: end the task's own

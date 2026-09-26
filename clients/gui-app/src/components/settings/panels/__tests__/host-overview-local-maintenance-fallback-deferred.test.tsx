@@ -86,6 +86,7 @@ import { createHostQueryInvalidator } from "@/lib/host/query-invalidator";
 import {
   buildOverviewHostFixture,
   buildOverviewManagement,
+  selectHostOverviewTab,
   updateCheckManifest,
   type OverviewHostFixture,
 } from "@/components/settings/panels/__tests__/host-overview-test-support";
@@ -271,6 +272,7 @@ describe("<HostSettingsPanel /> local-maintenance CLI fallback - a deferred (ter
       message: SENTENCE,
     });
 
+    await selectHostOverviewTab("updates");
     await screen.findByText(`v${BRIDGE_CHECK_VERSION} is available.`);
     const updateNow = await screen.findByRole("button", {
       name: "Update now",
@@ -308,6 +310,7 @@ describe("<HostSettingsPanel /> local-maintenance CLI fallback - a deferred (ter
       message: SENTENCE,
     });
 
+    await selectHostOverviewTab("updates");
     await screen.findByText(`v${BRIDGE_CHECK_VERSION} is available.`);
     // Radix's TabsTrigger activates on pointer events, not a bare `click`
     // event, so this needs `userEvent` - the same pattern
