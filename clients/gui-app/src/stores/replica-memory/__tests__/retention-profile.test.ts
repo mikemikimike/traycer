@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS } from "@traycer-clients/shared/host-transport/remote/config";
 import { DEFAULT_MAX_LIVE_EPICS } from "@/stores/replica-memory/budget-limits";
 import {
   DESKTOP_RETENTION_PROFILE,
@@ -63,6 +64,16 @@ describe("RetentionProfile", () => {
     // defeat the ratio the doc comment on `RetentionProfile` describes.
     expect(MOBILE_RETENTION_PROFILE.maxLiveEpics).toBeGreaterThan(
       MOBILE_RETENTION_PROFILE.retainedTopLevelSurfaces,
+    );
+  });
+
+  it("releases on a background only where the OS suspends the runtime, and only past a quick switch", () => {
+    // Desktop's clocks resume on wake and nothing picks a process to kill by
+    // footprint while a laptop sleeps; the phone's wait out the dwell under
+    // which a switch back is still expected to find everything warm.
+    expect(DESKTOP_RETENTION_PROFILE.releaseHiddenAfterBackgroundMs).toBeNull();
+    expect(MOBILE_RETENTION_PROFILE.releaseHiddenAfterBackgroundMs).toBe(
+      WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS,
     );
   });
 

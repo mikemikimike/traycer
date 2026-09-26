@@ -109,6 +109,26 @@ vi.mock("@capacitor/core", async (importOriginal) => {
   };
 });
 
+/**
+ * The native background hold, faked at the package boundary: every `hold`
+ * parks until the test plays the native answer.
+ */
+const backgroundGraceMocks = vi.hoisted(() => ({
+  holds: new Array<{
+    readonly ms: number;
+    readonly resolve: (result: { readonly backgrounded: boolean }) => void;
+  }>(),
+}));
+
+vi.mock("../src/background-grace", () => ({
+  BackgroundGrace: {
+    hold: (options: { readonly ms: number }) =>
+      new Promise<{ readonly backgrounded: boolean }>((resolve) => {
+        backgroundGraceMocks.holds.push({ ms: options.ms, resolve });
+      }),
+  },
+}));
+
 vi.mock("@capacitor/app", () => ({
   App: {
     addListener: (
@@ -2268,11 +2288,13 @@ describe("MobileRunnerHost", () => {
     });
   });
 
-  describe("onSystemSuspended", () => {
+  describe("onSystemBackgroundLasted", () => {
+    const AFTER_MS = 10_000;
     let state: DocumentVisibilityState = "visible";
 
     beforeEach(() => {
       state = "visible";
+      backgroundGraceMocks.holds.length = 0;
       Object.defineProperty(document, "visibilityState", {
         configurable: true,
         get: () => state,
@@ -2281,52 +2303,149 @@ describe("MobileRunnerHost", () => {
 
     afterEach(() => {
       Reflect.deleteProperty(document, "visibilityState");
+      vi.useRealTimers();
     });
 
-    it("iOS: fires once per pause, paired with the resume that closes it", () => {
+    it("iOS: raised when the native hold answers the app is still backgrounded", async () => {
       const host = runner(null);
       const events: string[] = [];
-      const suspended = host.onSystemSuspended(() => events.push("suspend"));
-      const resumed = host.onSystemResumed(() => events.push("resume"));
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
 
       fireAppPause();
       // Level-triggered: a duplicate pause is not a second episode.
       fireAppPause();
-      fireAppResume();
-      fireAppPause();
+      expect(backgroundGraceMocks.holds.map((hold) => hold.ms)).toEqual([
+        AFTER_MS,
+      ]);
+      expect(events).toEqual([]);
 
-      expect(events).toEqual(["suspend", "resume", "suspend"]);
-      suspended.dispose();
-      resumed.dispose();
+      backgroundGraceMocks.holds[0]?.resolve({ backgrounded: true });
+      await flushMicrotasks();
+
+      expect(events).toEqual(["lasted"]);
+      lasted.dispose();
     });
 
-    it("stops delivering after dispose", () => {
+    it("iOS: a background shorter than the hold raises nothing", async () => {
       const host = runner(null);
       const events: string[] = [];
-      const suspended = host.onSystemSuspended(() => events.push("suspend"));
-      suspended.dispose();
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
 
       fireAppPause();
+      fireAppResume();
+      backgroundGraceMocks.holds[0]?.resolve({ backgrounded: false });
+      await flushMicrotasks();
+
+      expect(events).toEqual([]);
+      lasted.dispose();
+    });
+
+    // The answer can land behind the resume that ended its episode. Acting on
+    // it then would release in the foreground, the moment the user is back.
+    it("iOS: an answer arriving after the resume is dropped, even a backgrounded one", async () => {
+      const host = runner(null);
+      const events: string[] = [];
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
+
+      fireAppPause();
+      fireAppResume();
+      fireAppPause();
+      backgroundGraceMocks.holds[0]?.resolve({ backgrounded: true });
+      await flushMicrotasks();
+      expect(events).toEqual([]);
+
+      backgroundGraceMocks.holds[1]?.resolve({ backgrounded: true });
+      await flushMicrotasks();
+      expect(events).toEqual(["lasted"]);
+      lasted.dispose();
+    });
+
+    it("stops delivering after dispose", async () => {
+      const host = runner(null);
+      const events: string[] = [];
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
+
+      fireAppPause();
+      lasted.dispose();
+      backgroundGraceMocks.holds[0]?.resolve({ backgrounded: true });
+      await flushMicrotasks();
 
       expect(events).toEqual([]);
     });
 
-    it("dev browser (DOM pair): a hidden edge fires, a boot that STARTS hidden does not", () => {
+    it("Android: a timer measures it, and a return first cancels it", () => {
+      capacitorEventMocks.platform = "android";
+      vi.useFakeTimers();
+      const host = runner(null);
+      const events: string[] = [];
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
+
+      const timersBefore = vi.getTimerCount();
+      fireAppState(false);
+      vi.advanceTimersByTime(AFTER_MS - 1);
+      fireAppState(true);
+      // The return cancels the episode's timer rather than leaving it to fire.
+      expect(vi.getTimerCount()).toBe(timersBefore);
+      vi.advanceTimersByTime(AFTER_MS);
+      expect(events).toEqual([]);
+
+      fireAppState(false);
+      vi.advanceTimersByTime(AFTER_MS);
+      expect(events).toEqual(["lasted"]);
+      expect(backgroundGraceMocks.holds).toEqual([]);
+      lasted.dispose();
+    });
+
+    // A frozen runtime's timer fires when it thaws, which is on the way back.
+    it("Android: a timer that fires long past its delay was frozen, and raises nothing", () => {
+      capacitorEventMocks.platform = "android";
+      vi.useFakeTimers();
+      vi.setSystemTime(100_000);
+      const host = runner(null);
+      const events: string[] = [];
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
+
+      fireAppState(false);
+      vi.setSystemTime(100_000 + 60_000);
+      vi.advanceTimersByTime(AFTER_MS);
+
+      expect(events).toEqual([]);
+      lasted.dispose();
+    });
+
+    it("dev browser (DOM pair): a hidden edge arms it, a boot that STARTS hidden does not", () => {
       capacitorEventMocks.platform = "web";
+      vi.useFakeTimers();
       state = "hidden";
       const host = runner(null);
       const events: string[] = [];
-      const suspended = host.onSystemSuspended(() => events.push("suspend"));
+      const lasted = host.onSystemBackgroundLasted(AFTER_MS, () =>
+        events.push("lasted"),
+      );
 
+      vi.advanceTimersByTime(AFTER_MS);
       expect(events).toEqual([]);
 
       state = "visible";
       document.dispatchEvent(new Event("visibilitychange"));
       state = "hidden";
       document.dispatchEvent(new Event("visibilitychange"));
+      vi.advanceTimersByTime(AFTER_MS);
 
-      expect(events).toEqual(["suspend"]);
-      suspended.dispose();
+      expect(events).toEqual(["lasted"]);
+      lasted.dispose();
     });
   });
 });

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
-import { setMobileApp } from "@/lib/mobile-app";
+import {
+  DESKTOP_RETENTION_PROFILE,
+  MOBILE_RETENTION_PROFILE,
+  setRetentionProfile,
+} from "@/stores/replica-memory/retention-profile";
 import {
   releaseForAppSuspend,
   subscribeAppSuspendRelease,
@@ -20,12 +24,9 @@ function record(plane: string, released: number): number {
 
 vi.mock("@/lib/epics/epic-parking", () => ({
   parkUnwatchedEpicsNow: () => record("park-epics", 2),
-}));
-
-vi.mock("@/lib/registries/chat-session-registry", () => ({
-  getChatSessionRegistry: () => ({
-    sleepIdleWarmSessions: () => record("sleep-chats", 3),
-  }),
+  rearmParkWindowsAfterAppResume: () => {
+    calls.order.push("rearm-park-windows");
+  },
 }));
 
 vi.mock("@/lib/registries/terminal-session-registry", () => ({
@@ -53,38 +54,63 @@ describe("subscribeAppSuspendRelease", () => {
   });
 
   afterEach(() => {
-    setMobileApp(false);
+    setRetentionProfile(DESKTOP_RETENTION_PROFILE);
   });
 
-  it("releases on the installed mobile app's background edge, epics first", () => {
-    setMobileApp(true);
+  it("releases once the background lasts the profile's delay, epics first", () => {
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
+    const afterMs = MOBILE_RETENTION_PROFILE.releaseHiddenAfterBackgroundMs;
+    if (afterMs === null) throw new Error("mobile profile releases");
     const runnerHost = makeRunnerHost();
     const dispose = subscribeAppSuspendRelease(runnerHost);
 
-    runnerHost.emitSystemSuspended();
+    runnerHost.emitSystemBackgroundLasted(afterMs);
 
-    expect(calls.order).toEqual([
-      "park-epics",
-      "sleep-chats",
-      "drop-terminals",
-    ]);
+    expect(calls.order).toEqual(["park-epics", "drop-terminals"]);
     dispose();
-    runnerHost.emitSystemSuspended();
-    expect(calls.order).toHaveLength(3);
+    runnerHost.emitSystemBackgroundLasted(afterMs);
+    expect(calls.order).toHaveLength(2);
   });
 
-  it("does nothing off the mobile app, even if a shell reports a suspend", () => {
+  it("leaves a background shorter than the delay alone", () => {
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
+    const afterMs = MOBILE_RETENTION_PROFILE.releaseHiddenAfterBackgroundMs;
+    if (afterMs === null) throw new Error("mobile profile releases");
     const runnerHost = makeRunnerHost();
     const dispose = subscribeAppSuspendRelease(runnerHost);
 
-    runnerHost.emitSystemSuspended();
+    runnerHost.emitSystemBackgroundLasted(afterMs - 1);
+
+    expect(calls.order).toEqual([]);
+    dispose();
+  });
+
+  it("hands refused parks back to their windows on every resume", () => {
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
+    const runnerHost = makeRunnerHost();
+    const dispose = subscribeAppSuspendRelease(runnerHost);
+
+    runnerHost.emitSystemResumed({ backgroundedForMs: 30_000 });
+
+    expect(calls.order).toEqual(["rearm-park-windows"]);
+    dispose();
+    runnerHost.emitSystemResumed({ backgroundedForMs: 30_000 });
+    expect(calls.order).toHaveLength(1);
+  });
+
+  it("does nothing on a profile without a release delay", () => {
+    const runnerHost = makeRunnerHost();
+    const dispose = subscribeAppSuspendRelease(runnerHost);
+
+    runnerHost.emitSystemBackgroundLasted(Number.MAX_SAFE_INTEGER);
+    runnerHost.emitSystemResumed({ backgroundedForMs: 30_000 });
 
     expect(calls.order).toEqual([]);
     dispose();
   });
 
   it("does nothing without a runner host", () => {
-    setMobileApp(true);
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
     const dispose = subscribeAppSuspendRelease(null);
     expect(calls.order).toEqual([]);
     dispose();
@@ -94,17 +120,11 @@ describe("subscribeAppSuspendRelease", () => {
   // must not keep the others' memory resident for the whole background.
   it("still runs the later planes when an earlier one throws", () => {
     calls.throwing.add("park-epics");
-    calls.throwing.add("sleep-chats");
 
     expect(releaseForAppSuspend()).toEqual({
       parkedEpics: 0,
-      sleptChats: 0,
       disposedTerminals: 1,
     });
-    expect(calls.order).toEqual([
-      "park-epics",
-      "sleep-chats",
-      "drop-terminals",
-    ]);
+    expect(calls.order).toEqual(["park-epics", "drop-terminals"]);
   });
 });

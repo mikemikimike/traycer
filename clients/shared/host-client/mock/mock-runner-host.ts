@@ -206,7 +206,10 @@ export class MockRunnerHost implements IRunnerHost {
   private readonly systemResumedHandlers = new Set<
     (event: SystemResumeEvent) => void
   >();
-  private readonly systemSuspendedHandlers = new Set<() => void>();
+  private readonly backgroundLastedSubscriptions = new Set<{
+    readonly afterMs: number;
+    readonly handler: () => void;
+  }>();
   private readonly networkPathChangedHandlers = new Set<() => void>();
   private localHost: LocalHostSnapshot | null;
   /** `undefined` means "derive from `localHost`"; `null` means "no id on disk". */
@@ -902,11 +905,12 @@ export class MockRunnerHost implements IRunnerHost {
     };
   }
 
-  onSystemSuspended(handler: () => void): Disposable {
-    this.systemSuspendedHandlers.add(handler);
+  onSystemBackgroundLasted(afterMs: number, handler: () => void): Disposable {
+    const subscription = { afterMs, handler };
+    this.backgroundLastedSubscriptions.add(subscription);
     return {
       dispose: () => {
-        this.systemSuspendedHandlers.delete(handler);
+        this.backgroundLastedSubscriptions.delete(subscription);
       },
     };
   }
@@ -948,10 +952,15 @@ export class MockRunnerHost implements IRunnerHost {
     }
   }
 
-  /** Test helper: fire the backgrounded signal to every `onSystemSuspended` subscriber. */
-  emitSystemSuspended(): void {
-    for (const handler of this.systemSuspendedHandlers) {
-      handler();
+  /**
+   * Test helper: model a background episode that has lasted
+   * `backgroundedForMs`, firing every `onSystemBackgroundLasted` subscriber
+   * whose `afterMs` it reached.
+   */
+  emitSystemBackgroundLasted(backgroundedForMs: number): void {
+    for (const subscription of Array.from(this.backgroundLastedSubscriptions)) {
+      if (backgroundedForMs < subscription.afterMs) continue;
+      subscription.handler();
     }
   }
 

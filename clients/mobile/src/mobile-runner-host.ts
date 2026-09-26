@@ -110,6 +110,10 @@ import {
 import type { SelectionAuthorityClient } from "@traycer-clients/shared/host-selection/selection-authority-contract";
 import type { Disposable } from "@traycer-clients/shared/platform/uri-callback";
 import type { MobileAuthSheet } from "./auth-sheet";
+import {
+  BackgroundGrace,
+  type BackgroundGracePluginSlice,
+} from "./background-grace";
 import type { MobilePushRegistration } from "./push-registration";
 
 export interface MobileRunnerHostOptions {
@@ -276,6 +280,7 @@ export class MobileRunnerHost implements IRunnerHost {
   // different things on iOS, Android, and Web.
   private readonly systemResume = new MobileSystemResume(
     resumeEvidenceModeFor(Capacitor.getPlatform()),
+    BackgroundGrace,
   );
   private readonly networkPath = new MobileNetworkPathWatcher(
     this.systemResume,
@@ -692,8 +697,8 @@ export class MobileRunnerHost implements IRunnerHost {
     return this.systemResume.subscribe(handler);
   }
 
-  onSystemSuspended(handler: () => void): Disposable {
-    return this.systemResume.subscribeSuspended(handler);
+  onSystemBackgroundLasted(afterMs: number, handler: () => void): Disposable {
+    return this.systemResume.subscribeBackgroundLasted(afterMs, handler);
   }
 
   onNetworkPathChanged(handler: () => void): Disposable {
@@ -1361,6 +1366,18 @@ class MobilePushPermissionHost implements IPushPermissionHost {
 /** Which paired evidence source owns background/foreground on this platform. */
 type ResumeEvidenceMode = "ios-lifecycle" | "android-app-state" | "dom";
 
+/**
+ * How late a background-lasted timer may fire and still count. One that fires
+ * later than this was frozen with the runtime (Android's cached-app freezer),
+ * and is running on the way back rather than in the background it measured.
+ */
+const BACKGROUND_LASTED_TIMER_SLACK_MS = 5_000;
+
+interface BackgroundLastedSubscription {
+  readonly afterMs: number;
+  readonly handler: () => void;
+}
+
 /** The selected evidence pair for `Capacitor.getPlatform()`'s answer. */
 function resumeEvidenceModeFor(platform: string): ResumeEvidenceMode {
   if (platform === "ios") {
@@ -1374,7 +1391,15 @@ function resumeEvidenceModeFor(platform: string): ResumeEvidenceMode {
 
 class MobileSystemResume {
   private readonly handlers = new Set<(event: SystemResumeEvent) => void>();
-  private readonly suspendHandlers = new Set<() => void>();
+  private readonly lastedSubscriptions = new Set<BackgroundLastedSubscription>();
+  /** Cancels for the JS timers the current background episode armed. */
+  private readonly lastedTimerCancels = new Set<() => void>();
+  /**
+   * Bumped on every background and foreground edge. A lasted answer carries
+   * the episode it was armed in, and one arriving after that episode ended -
+   * a native hold resolving behind the resume - is dropped.
+   */
+  private episode = 0;
   private listening = false;
   private background = false;
   /** Stamped only by the numeric modes; `null` dwell everywhere else. */
@@ -1391,7 +1416,10 @@ class MobileSystemResume {
    */
   private nativeOwnerToken = 0;
 
-  constructor(private readonly mode: ResumeEvidenceMode) {}
+  constructor(
+    private readonly mode: ResumeEvidenceMode,
+    private readonly backgroundGrace: BackgroundGracePluginSlice,
+  ) {}
 
   private readonly onVisibilityChange = (): void => {
     if (document.visibilityState === "hidden") {
@@ -1417,20 +1445,22 @@ class MobileSystemResume {
   }
 
   /**
-   * The background half of the episode, for `IRunnerHost.onSystemSuspended`.
-   * Same level-triggered source as {@link subscribe}, so a suspend and its
-   * resume always describe one episode.
+   * For `IRunnerHost.onSystemBackgroundLasted`: the handler runs once per
+   * background episode that lasts `afterMs`, measured from the same
+   * level-triggered edge {@link subscribe}'s resume closes. A subscriber
+   * joining mid-episode waits for the next one.
    */
-  subscribeSuspended(handler: () => void): Disposable {
-    // Tracking starts BEFORE the handler joins, and the order is the guard: a
-    // DOM pair installed while the document is already hidden seeds its state
-    // as backgrounded, and an app that STARTS hidden did not just leave - the
-    // same reason a cold start's first foreground is not a resume.
+  subscribeBackgroundLasted(afterMs: number, handler: () => void): Disposable {
+    // Tracking starts BEFORE the subscription joins, and the order is the
+    // guard: a DOM pair installed while the document is already hidden seeds
+    // its state as backgrounded, and an app that STARTS hidden did not just
+    // leave - the same reason a cold start's first foreground is not a resume.
     this.ensureTracking();
-    this.suspendHandlers.add(handler);
+    const subscription: BackgroundLastedSubscription = { afterMs, handler };
+    this.lastedSubscriptions.add(subscription);
     return {
       dispose: () => {
-        this.suspendHandlers.delete(handler);
+        this.lastedSubscriptions.delete(subscription);
       },
     };
   }
@@ -1442,14 +1472,59 @@ class MobileSystemResume {
     }
     this.background = true;
     this.enteredAt = stampDwell ? Date.now() : null;
-    for (const handler of Array.from(this.suspendHandlers)) {
-      try {
-        handler();
-      } catch (error) {
-        // One bad subscriber must not cost the others their release.
-        console.error("[mobile] system-suspend handler threw", error);
-      }
+    this.episode += 1;
+    for (const subscription of Array.from(this.lastedSubscriptions)) {
+      this.watchBackgroundLasted(subscription, this.episode);
     }
+  }
+
+  /**
+   * Answers whether this background episode lasted `subscription.afterMs`.
+   *
+   * On iOS the WebView's timers stop with it, so the measurement is the native
+   * hold's (see `background-grace.ts`); a JS timer there would fire on the
+   * resume. Elsewhere the runtime keeps running in the background and a timer
+   * is the measurement, discounted when it fires so late that the runtime was
+   * frozen in between.
+   */
+  private watchBackgroundLasted(
+    subscription: BackgroundLastedSubscription,
+    episode: number,
+  ): void {
+    const raise = (): void => {
+      if (episode !== this.episode || !this.background) return;
+      if (!this.lastedSubscriptions.has(subscription)) return;
+      try {
+        subscription.handler();
+      } catch (error) {
+        // One bad subscriber must not cost the others theirs.
+        console.error("[mobile] background-lasted handler threw", error);
+      }
+    };
+    if (this.mode === "ios-lifecycle") {
+      this.backgroundGrace.hold({ ms: subscription.afterMs }).then(
+        (result) => {
+          if (result.backgrounded) raise();
+        },
+        (error: unknown) => {
+          // No plugin bridge: nothing is released on a background, and the
+          // retention planes' own clocks remain.
+          console.warn("[mobile] background grace hold unavailable", error);
+        },
+      );
+      return;
+    }
+    const armedAt = Date.now();
+    const timer = setTimeout(() => {
+      this.lastedTimerCancels.delete(cancel);
+      const lateByMs = Date.now() - armedAt - subscription.afterMs;
+      if (lateByMs > BACKGROUND_LASTED_TIMER_SLACK_MS) return;
+      raise();
+    }, subscription.afterMs);
+    const cancel = (): void => {
+      clearTimeout(timer);
+    };
+    this.lastedTimerCancels.add(cancel);
   }
 
   /**
@@ -1472,6 +1547,11 @@ class MobileSystemResume {
       return;
     }
     this.background = false;
+    this.episode += 1;
+    for (const cancel of Array.from(this.lastedTimerCancels)) {
+      cancel();
+    }
+    this.lastedTimerCancels.clear();
     if (this.epochBoundaryListener !== null) {
       this.epochBoundaryListener();
     }

@@ -521,20 +521,26 @@ export interface IRunnerHost {
   onSystemResumed(handler: (event: SystemResumeEvent) => void): Disposable;
 
   /**
-   * Subscribes to the app being sent to the background: the edge that opens
-   * the episode {@link onSystemResumed} closes.
+   * Subscribes to the app having STAYED in the background for `afterMs`: raised
+   * at most once per background episode (the one {@link onSystemResumed}
+   * closes), and never for an episode shorter than `afterMs`.
    *
    * Only a shell whose runtime the OS SUSPENDS in the background raises it.
-   * Mobile fires it on the same evidence source its resume uses (iOS `pause`,
-   * Android `appStateChange(false)`, DOM `hidden` in the dev browser), once
-   * per episode. What makes the edge worth a signal of its own is what comes
-   * after it: timers stop, so work scheduled for "a few minutes after the app
-   * is hidden" never runs, and whatever the renderer still holds is what the
-   * OS weighs when it picks a process to kill. Desktop and web install a
-   * no-op whose handler never fires: a hidden desktop window keeps running
-   * and keeps its own timers.
+   * What makes the episode worth a signal of its own is what happens inside
+   * it: timers stop, so work scheduled for "a few minutes after the app is
+   * hidden" never runs, and whatever the renderer still holds is what the OS
+   * weighs when it picks a process to kill. The duration is the shell's to
+   * measure because a suspended runtime cannot: a JS timer armed at the
+   * background edge fires on the way back, not while the app is away.
+   *
+   * Mobile measures it from the same evidence source its resume uses. On iOS a
+   * native background task holds the app for `afterMs` and answers whether it
+   * is still backgrounded; Android and the dev browser keep their timers
+   * running in the background and use one. Desktop and web install a no-op
+   * whose handler never fires: a hidden desktop window keeps running and keeps
+   * its own timers.
    */
-  onSystemSuspended(handler: () => void): Disposable;
+  onSystemBackgroundLasted(afterMs: number, handler: () => void): Disposable;
 
   /**
    * Subscribes to network-path changes the shell can observe natively:

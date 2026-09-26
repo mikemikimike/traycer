@@ -1117,10 +1117,11 @@ export class DesktopRunnerHost implements IRunnerHost {
     };
   }
 
-  onSystemSuspended(handler: () => void): Disposable {
+  onSystemBackgroundLasted(afterMs: number, handler: () => void): Disposable {
     // A hidden or minimised desktop window keeps running and keeps its own
-    // timers, so there is no suspension edge to report. No-op subscription
-    // per the IRunnerHost contract.
+    // timers, so there is no suspended background to report. No-op
+    // subscription per the IRunnerHost contract.
+    void afterMs;
     void handler;
     return {
       dispose: () => undefined,

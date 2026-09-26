@@ -388,7 +388,7 @@ function createBaseRunnerHost(): IRunnerHost {
     },
     onLocalHostChange: () => ({ dispose: () => undefined }),
     onSystemResumed: () => ({ dispose: () => undefined }),
-    onSystemSuspended: () => ({ dispose: () => undefined }),
+    onSystemBackgroundLasted: () => ({ dispose: () => undefined }),
     onNetworkPathChanged: () => ({ dispose: () => undefined }),
     requestHostRespawn: () => Promise.resolve({ kind: "restarted" as const }),
     getLastKnownLocalHostId: () => Promise.resolve(null),

@@ -1,3 +1,4 @@
+import { WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS } from "@traycer-clients/shared/host-transport/remote/config";
 import { EPIC_REPLICAS_MAX_LIVE } from "./budget-limits";
 
 /**
@@ -32,6 +33,20 @@ export interface RetentionProfile {
   readonly maxWarmChatSessions: number;
   /** Lingering plain terminals (`TerminalSessionRegistry`). */
   readonly maxLingeringPlainTerminals: number;
+  /**
+   * How long the app must have stayed in the background before hidden epics
+   * and lingering terminals are released without waiting for their own
+   * clocks (`subscribeAppSuspendRelease`), or `null` for a shell that never
+   * releases on a background.
+   *
+   * The planes shed on clocks, and a runtime the OS suspends in the
+   * background stops those clocks, so it keeps everything it holds for as
+   * long as the background lasts - the footprint the OS weighs when it picks
+   * a process to kill. The delay keeps a quick app switch from paying for
+   * that: a park disposes the epic's session, its worker and its chats, and
+   * the next open is cold on both sides.
+   */
+  readonly releaseHiddenAfterBackgroundMs: number | null;
 }
 
 /** Electron desktop and the browser: the numbers the app has always run. */
@@ -40,6 +55,12 @@ export const DESKTOP_RETENTION_PROFILE: RetentionProfile = Object.freeze({
   retainedTopLevelSurfaces: 5,
   maxWarmChatSessions: 6,
   maxLingeringPlainTerminals: 6,
+  // Off. A laptop's sleep stops the clocks too, but it suspends every process
+  // at once rather than killing the largest, so nothing is weighed by
+  // footprint while it lasts; on wake the clocks run again and shed on their
+  // own windows. The desktop shell also reports no background edge
+  // (`onSystemBackgroundLasted` is a no-op there).
+  releaseHiddenAfterBackgroundMs: null,
 });
 
 /** The installed Capacitor app: a 2 GB process ceiling, one visible tab. */
@@ -48,6 +69,10 @@ export const MOBILE_RETENTION_PROFILE: RetentionProfile = Object.freeze({
   retainedTopLevelSurfaces: 2,
   maxWarmChatSessions: 3,
   maxLingeringPlainTerminals: 3,
+  // The dwell past which a resume re-dials outright because iOS has torn the
+  // sockets down: under it the app switch was quick, and what it left warm is
+  // what makes switching back instant.
+  releaseHiddenAfterBackgroundMs: WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS,
 });
 
 /**
