@@ -68,6 +68,7 @@ function SheetOverlay({
         )
       }
       {...props}
+      forceRender
     />
   );
 }

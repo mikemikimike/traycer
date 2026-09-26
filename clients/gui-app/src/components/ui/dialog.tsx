@@ -74,6 +74,7 @@ function DialogBackdrop({
   return (
     <DialogPrimitive.Backdrop
       {...props}
+      forceRender
       data-overlay-concealed={presentation.concealed || undefined}
       className={(state) =>
         cn(

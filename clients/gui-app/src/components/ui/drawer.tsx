@@ -52,6 +52,7 @@ function DrawerOverlay({
         )
       }
       {...props}
+      forceRender
     />
   );
 }
