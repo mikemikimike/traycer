@@ -19,7 +19,10 @@ import {
   __getChatSessionRegistryForTests,
   disposeAllChatSessions,
 } from "@/lib/registries/chat-session-registry";
-import { createChatSessionStore } from "@/stores/chats/chat-session-store";
+import {
+  createChatSessionStore,
+  type ChatSessionStoreHandle,
+} from "@/stores/chats/chat-session-store";
 import { IMMEDIATE_STREAM_FLUSH_COORDINATOR } from "@/stores/chats/stream-flush-coordinator";
 import { type EpicStreamClientFactory } from "@/stores/epics/open-epic/store";
 import { openStoreForTest } from "@/stores/epics/open-epic/test-support/open-store-for-test";
@@ -81,7 +84,7 @@ const ACTIVITY_HOST_ID = "host-1";
 function registerChatSession(
   chatId: string,
   managedCommands: readonly ManagedCommand[],
-): void {
+): ChatSessionStoreHandle {
   const handle = __getChatSessionRegistryForTests().acquire(
     {
       epicId: EPIC_ID,
@@ -111,6 +114,7 @@ function registerChatSession(
       }),
   );
   handle.store.setState({ managedCommands: [...managedCommands] });
+  return handle;
 }
 
 function runningShell(chatId: string): ManagedCommand {
@@ -236,6 +240,31 @@ describe("useEpicActivityStatus", () => {
       publishWorking([AGENT_ID], [AGENT_ID]);
     });
 
+    expect(result.current).toBe("turn");
+  });
+
+  it("hands a sleeping chat to the activity plane, so a turn started on the host shows", () => {
+    // The store last heard a running shell. Asleep, it hears nothing more, so
+    // its background reading must not stand in for the plane's turn.
+    registerSessionHoldingAgents([AGENT_ID]);
+    const handle = registerChatSession(AGENT_ID, [runningShell(AGENT_ID)]);
+    const { result } = renderHook(() => useEpicActivityStatus(EPIC_ID));
+    act(() => {
+      publishWorking([AGENT_ID], [AGENT_ID]);
+    });
+    // Live, the store is authoritative for its own agent.
+    expect(result.current).toBe("background");
+
+    act(() => {
+      __getChatSessionRegistryForTests().release(
+        EPIC_ID,
+        AGENT_ID,
+        ACTIVITY_HOST_ID,
+      );
+      handle.store.getState().sleep();
+    });
+
+    expect(handle.store.getState().asleep).toBe(true);
     expect(result.current).toBe("turn");
   });
 

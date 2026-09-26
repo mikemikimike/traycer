@@ -149,10 +149,21 @@ function subscribeChatSessionActivity(
   };
 }
 
-/** The row-level and list-level definition of activity for a warm chat. */
+/**
+ * The row-level and list-level definition of activity for a warm chat, or
+ * `null` - unresolved - for a store with no live stream behind it.
+ *
+ * A store whose stream is closed, asleep or for good, keeps the last run state
+ * it heard and nothing moves it. Read as authoritative, it would freeze the
+ * tier: a turn the host starts while the store sleeps (a wake, a prompt queued
+ * from another device, an agent-to-agent message) would show as whatever the
+ * store last saw, a running shell's background glyph included. Unresolved
+ * hands the agent to the activity plane's tier, which does hear it.
+ */
 export function chatSessionActivity(
   state: ChatSessionState,
 ): ChatActivityIndicator {
+  if (state.asleep || state.connectionStatus === "closed") return null;
   return chatActivityIndicator(state);
 }
 
