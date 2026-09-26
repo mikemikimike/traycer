@@ -1,4 +1,4 @@
-// T08's D-REMOVE ruling: while THIS machine's host was started in a
+// The D-REMOVE ruling: while THIS machine's host was started in a
 // terminal (`applied.admittedAs === "foreground"`), "Remove Traycer"
 // (`RemoveTraycerRow`, `host-danger-zone.tsx` ~:196-300) must not touch it -
 // the same "this app leaves a terminal-started run alone" rule the update

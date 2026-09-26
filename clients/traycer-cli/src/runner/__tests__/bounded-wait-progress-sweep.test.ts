@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// T08 §5.4 class sweep, R-E: Desktop kills a CLI that prints no NDJSON line
+// §5.4 class sweep, R-E: Desktop kills a CLI that prints no NDJSON line
 // for 600s (`CLI_STREAM_IDLE_TIMEOUT_MS`). The fix (already in the tree) is
 // `reportBoundedWait` (bounded-wait-progress.ts), called as each bounded wait
 // BEGINS, so the longest silence a caller can see is one wait's own bound,
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // SUM into a MAX.
 //
 // HOME isolation: run only through
-// `heavy.sh t03 sh round1/t03-work/sweep-home.sh round1/t03-oss/clients/traycer-cli src/runner/__tests__/bounded-wait-progress-sweep.test.ts`
+// `heavy.sh <owner> sh <sweep-home.sh path> <traycer-cli clone path> src/runner/__tests__/bounded-wait-progress-sweep.test.ts`
 // - that script points `HOME`/`USERPROFILE` at a fresh temp dir for the whole
 // process before vitest starts, so every `os.homedir()`-derived path (real,
 // unmocked reads included - s2's install/staged lookups) resolves under it.
@@ -57,7 +57,7 @@ vi.mock("../../store/process-identity", async (importOriginal) => {
 
 // s2 only: real fs I/O (readHostInstallRecord/readHostStagedRecord) settles
 // through the real event loop's I/O completion, which fake timers do not
-// drive - so, per T08's guidance, these two reads are stubbed directly
+// drive - so, per the review's guidance, these two reads are stubbed directly
 // instead of exercised against a real (if empty) HOME.
 const installRecordMock = vi.hoisted(() => ({ fn: vi.fn(async () => null) }));
 vi.mock("../../manifest/host-install", async (importOriginal) => {

@@ -7,7 +7,7 @@ import type {
   WindowRegistryRecord,
 } from "./window-registry";
 
-// Close-to-tray on Windows and Linux (host-lifecycle-modes D5, T06). Under a
+// Close-to-tray on Windows and Linux (host-lifecycle-modes D5). Under a
 // mode whose quit does something to the host - Linked stops it, Ask and
 // Stop-if-idle may - closing the last window must not be the quit: the user
 // closed a window, and only Quit (tray, menu, Ctrl+Q) runs the quit policy.

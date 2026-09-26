@@ -621,7 +621,7 @@ describe("RunnerIpcBridge", () => {
           RunnerHostInvoke.acknowledgeQuitRequest,
           RunnerHostInvoke.respondToQuitRequest,
           RunnerHostInvoke.freshUnsyncedSnapshotResponse,
-          // Host quit round-trip (host-lifecycle-modes T06): the modal's
+          // Host quit round-trip: the modal's
           // answer, plus the preload-internal readiness and servicing ack.
           RunnerHostInvoke.hostQuitRespond,
           RunnerHostInvoke.hostQuitListening,
@@ -728,7 +728,7 @@ describe("RunnerIpcBridge", () => {
           RunnerHostInvoke.traycerMaintenanceInstallVersion,
           RunnerHostInvoke.traycerHostRestartIfIdle,
           // The lifecycle card's idle-gated SERVICE restart (host-lifecycle-
-          // modes T08), registered by the same call.
+          // modes), registered by the same call.
           RunnerHostInvoke.traycerHostServiceRestartIfHostIdle,
           RunnerHostInvoke.traycerDoctorRepairQueued,
           RunnerHostInvoke.traycerDoctorRepairIfIdle,

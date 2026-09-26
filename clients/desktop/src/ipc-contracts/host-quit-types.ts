@@ -1,5 +1,5 @@
 // The quit round-trip between desktop main's quit transaction and the
-// renderer's host quit modal (host-lifecycle-modes T06 / T07), exposed on
+// renderer's host quit modal (host-lifecycle-modes), exposed on
 // `window.runnerHost.hostLifecycle`. The shapes are the renderer's contract,
 // so their one definition lives in `@traycer-clients/shared/platform/runner-host`
 // beside `IRunnerHost`; main and preload import them through this module.

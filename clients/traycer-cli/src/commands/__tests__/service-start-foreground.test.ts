@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandContext } from "../../runner/runner";
 import type { HostUpdateAttemptRecord } from "@traycer-clients/shared/host-update";
 
-// P2-takeover sibling (T04 relay): the same ruling as
+// P2-takeover sibling: the same ruling as
 // `service-install-foreground.test.ts`, applied to `traycer host service
 // start` (`../service-start.ts`). `buildServiceStartCommand` reads status and
 // requests a start over ANY live host under the target service label today,

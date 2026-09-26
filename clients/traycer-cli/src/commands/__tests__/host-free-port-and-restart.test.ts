@@ -229,7 +229,7 @@ describe("buildHostFreePortAndRestartCommand", () => {
   });
 
   it("publishes the restart's adoption proof as `maintenance`, whoever asked for it", async () => {
-    // Lifecycle modes (T03): the restart leg brings back a run that already
+    // Lifecycle modes: the restart leg brings back a run that already
     // existed, so it records `maintenance` in the proof the supervisor
     // consumes - `--lifecycle-origin` is accepted on this command and inert.
     mocks.controllerCalls = [];

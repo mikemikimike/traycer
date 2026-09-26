@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sandboxHome } from "../../__tests__/sandbox-home";
 
-// Host lifecycle modes (T05), desktop half: the controller's stop request, the
+// Host lifecycle modes, desktop half: the controller's stop request, the
 // automatic-intent suspension (`quiesce` / `holdAutomaticIntents`), the lane
 // barrier (`deferMutationsUntil`), and where `--lifecycle-origin desktop`
 // lands. Same mocking boundary as `host-controller.test.ts`: the CLI wrapper,
@@ -1488,7 +1488,7 @@ describe("F22: explicit start-capable intents are refused while the local host i
   });
 });
 
-// ---- T28: the lane-head recheck covers every host-start intent, not just
+// ---- The lane-head recheck covers every host-start intent, not just
 // convergeReady - applyStaged("launch"), the implicit activateInstalled and
 // recoverIfDown must each refuse an intent queued BEFORE quiesce() once it
 // reaches the head of the lane, not just at submission. `recoverIfDown`
@@ -1497,7 +1497,7 @@ describe("F22: explicit start-capable intents are refused while the local host i
 // in-flight install, which would make `mutationStatus` non-null and refuse it
 // before it ever reaches the lane.
 
-describe("T28: applyStaged/activateInstalled/recoverIfDown recheck suspension at the lane head", () => {
+describe("applyStaged/activateInstalled/recoverIfDown recheck suspension at the lane head", () => {
   it('applyStaged("launch") queued before quiesce is deferred and spawns no apply', async () => {
     const controller = newReachableController();
     writeInstallRecord("1.7.0");

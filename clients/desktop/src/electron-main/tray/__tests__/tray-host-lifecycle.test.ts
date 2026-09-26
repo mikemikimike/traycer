@@ -96,7 +96,7 @@ describe("F24: a dead local host is never offered Quit and Stop Host (tray)", ()
 // line still reads the mode's promise, `offerQuitAndStopHost` follows the
 // existing formula (already false for `linked`/`none`), and
 // `offerRestartHost` is unconditionally `true` whenever lanes are active -
-// T08 ruled Restart Host is hidden for a foreground run too.
+// The review ruled Restart Host is hidden for a foreground run too.
 describe("F4: a foreground run is hidden from the tray", () => {
   const foregroundModes: readonly HostLifecycleMode[] = [
     "background",
@@ -118,7 +118,7 @@ describe("F4: a foreground run is hidden from the tray", () => {
       // non-linked/none mode); already `false` for linked, so linked is not
       // red on this assertion, only on the line.
       expect(result.offerQuitAndStopHost).toBe(false);
-      // RED for every mode (T08's ruling): Restart Host is unconditionally
+      // RED for every mode (the review's ruling): Restart Host is unconditionally
       // `true` on head whenever lanes are active.
       expect(result.offerRestartHost).toBe(false);
     });

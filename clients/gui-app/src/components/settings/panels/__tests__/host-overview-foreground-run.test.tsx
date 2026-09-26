@@ -1189,7 +1189,7 @@ describe("OV-6d — the bound-dispatch offer during a foreground run", () => {
 });
 
 // ---------------------------------------------------------------------------
-// T08's P1-in-`none` ruling (Overview half): P1 only holds when
+// The P1-in-`none` ruling (Overview half): P1 only holds when
 // `applied.localHostCapability === "managed"` AND `pending !== "restart-app"`.
 // Otherwise, during a foreground run, both surfaces must show this sentence
 // instead — no constant exists yet, so the literal is asserted directly.
@@ -1250,7 +1250,7 @@ function renderForegroundOverview(options: {
   return { fixture, queryClient };
 }
 
-describe("OV-7 — the version card's Update now under T08's P1-in-`none` ruling", () => {
+describe("OV-7 — the version card's Update now under the P1-in-`none` ruling", () => {
   it("RED N1: capability none — the self-update sentence, not P1, and Update now absent", async () => {
     renderForegroundOverview({
       hostId: "host-local",
@@ -1306,7 +1306,7 @@ describe("OV-7 — the version card's Update now under T08's P1-in-`none` ruling
   });
 });
 
-describe("OV-8 — the operation card's finishing line under T08's P1-in-`none` ruling", () => {
+describe("OV-8 — the operation card's finishing line under the P1-in-`none` ruling", () => {
   it("RED N1: capability none — the self-update sentence, controls still absent", async () => {
     renderForegroundOverview({
       hostId: "host-local",

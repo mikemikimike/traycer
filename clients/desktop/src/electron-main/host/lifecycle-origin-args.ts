@@ -2,7 +2,7 @@ import { LIFECYCLE_ORIGIN_COMMANDS } from "@traycer/protocol/config/lifecycle-or
 
 /**
  * The bundled-CLI commands that can START the host, and so take the hidden
- * `--lifecycle-origin` flag the CLI (T03) carries into its adoption proof -
+ * `--lifecycle-origin` flag the CLI carries into its adoption proof -
  * plus `host uninstall`, which starts nothing but refuses the desktop's
  * Remove Traycer over a host a person started in a terminal.
  *

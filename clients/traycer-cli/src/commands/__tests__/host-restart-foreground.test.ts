@@ -24,7 +24,7 @@ import type { CommandContext } from "../../runner/runner";
 // current code has no rejection at all and proceeds to call the service
 // controller, not a TypeScript excess-property error.
 //
-// Assertion shape (T04 correction, round 3): every desktop-origin case
+// Assertion shape (a later correction, round 3): every desktop-origin case
 // asserts the FIXED (post-guard) expected mechanism values FIRST - the
 // controller (and, for `--if-idle`, the busy probe) must never be touched -
 // and only THEN asserts the refusal code. This is what keeps these tests
@@ -336,7 +336,7 @@ describe("host restart - foreground-run guard (F4-restart-sibling)", () => {
     });
   });
 
-  // F4-restart-sibling test (T04 correction, round 3): `--if-idle` with
+  // F4-restart-sibling test (a later correction, round 3): `--if-idle` with
   // `lifecycleOrigin: "desktop"` over the same live foreground run. The
   // refusal must come BEFORE the busy probe ever runs - a foreground run is
   // not the service's host, so probing whether IT is busy is meaningless,
@@ -391,7 +391,7 @@ describe("host restart - foreground-run guard (F4-restart-sibling)", () => {
     ]);
   });
 
-  // T04 correction (round 4): a `--force` restart with lifecycleOrigin
+  // A later correction (round 4): a `--force` restart with lifecycleOrigin
   // 'terminal' is the legitimate use of force - a terminal-owned host is
   // NOT what force is meant to reach here (that is the whole point of
   // tests 1/2 above), but a `terminal`-origin restart over a run that is

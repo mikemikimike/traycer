@@ -1,4 +1,4 @@
-// T08's P1-in-'none' ruling, applied to the Overview ▸ Updates version picker
+// The P1-in-'none' ruling, applied to the Overview ▸ Updates version picker
 // (`host-overview-version-picker.tsx`, rows in `host-version-rows.tsx`; props
 // built in `host-overview-updates-state.ts`, passed at
 // `host-overview-panel.tsx`). During a LOCAL foreground run, every row's
@@ -87,7 +87,7 @@ import {
 import { createFakeRunnerHost } from "../../../../../__tests__/create-fake-runner-host";
 
 /**
- * T08's P1-in-'none' ruling: the constant naming this line does not exist yet
+ * The P1-in-'none' ruling: the constant naming this line does not exist yet
  * (mirrors `HOST_FOREGROUND_UPDATE_READY` in `host-lifecycle-copy.ts`), so the
  * literal is asserted directly here too.
  */

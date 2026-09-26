@@ -1,4 +1,4 @@
-// T08's ruling for the Overview's notices-strip drain gate (`HostUpdateDrainGateRow`
+// The ruling for the Overview's notices-strip drain gate (`HostUpdateDrainGateRow`
 // -> `ApplyNowControl`, `host-scope/host-registry-updates.tsx`). During a LOCAL
 // foreground run the Apply now trigger is withheld and `hostForegroundUpdateLine`
 // shows in `host-apply-now-foreground-<hostId>`; a dialog already open keeps its

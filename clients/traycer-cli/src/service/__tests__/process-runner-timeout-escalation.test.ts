@@ -8,7 +8,7 @@ import {
   runCommandForBytes,
 } from "../process-runner";
 
-// EXPERIMENT (T08, unmodified production code): `runCommand`/
+// EXPERIMENT (unmodified production code): `runCommand`/
 // `runCommandForBytes` (process-runner.ts:22-124 / :141-173) wrap
 // `execFile` with `timeout: options.timeoutMs`. Node's own timeout sends
 // SIGTERM and destroys the child's stdio streams, but the promisified

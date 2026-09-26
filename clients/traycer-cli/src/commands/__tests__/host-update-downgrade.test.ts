@@ -339,7 +339,7 @@ describe("installHostDowngrade", () => {
   });
 
   it("hands the install lifecycle a publisher whose proof records `maintenance`", async () => {
-    // Lifecycle modes (T03): a downgrade is a `host update` leg - it replaces
+    // Lifecycle modes: a downgrade is a `host update` leg - it replaces
     // the bytes of a run that already existed - so the relaunch after the
     // swap records `maintenance` in the proof the supervisor consumes,
     // whoever invoked the update.

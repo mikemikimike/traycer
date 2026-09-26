@@ -720,7 +720,7 @@ describe("DesktopTrayController menu structure", () => {
   });
 });
 
-describe("DesktopTrayController host lifecycle (T06)", () => {
+describe("DesktopTrayController host lifecycle", () => {
   beforeEach(() => {
     mockAppState.appPath = REPO_DESKTOP_ROOT;
     mockMenuState.lastBuiltMenu = null;

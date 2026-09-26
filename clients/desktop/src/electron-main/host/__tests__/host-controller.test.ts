@@ -6478,11 +6478,11 @@ describe("convergeReady E_HOST_BUSY classification (fixup B8)", () => {
 // `err.message` a `failed` outcome actually carries).
 //
 // One test per verb that reaches the table via a genuinely different code
-// path, per T08's addendum: ensure, apply, install, activate, recover,
+// path, per the review's addendum: ensure, apply, install, activate, recover,
 // respawn (manual restart) and free-port. `activateInstalled(true, true)`
 // is driven with no staged update so it takes `activateInstalledCliOwned`
 // (`isPackagedMacOwned()` is false for `newController`), never the
-// packaged-Mac activation cycle T03 owns around host-controller.ts:2529.
+// packaged-Mac activation cycle around host-controller.ts:2529.
 // ---------------------------------------------------------------------------
 describe("E_HOST_NOT_SERVICE_RUN classification (R6)", () => {
   function expectDeferredNotServiceRun(outcome: unknown): void {
@@ -6757,7 +6757,7 @@ describe("HostControllerStatus.lastEnsureFailure (R8)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Windows bundled-host `--from` fallback (fixup A2): on Windows the per-user
+// Windows bundled-host `--from` fallback (a fixup): on Windows the per-user
 // slot CLI is a COPY outside the app bundle (symlinks need elevated
 // privilege there), so the CLI's own sibling-archive resolution can't see
 // the bundled host archive and would fall back to the registry - which
@@ -7150,7 +7150,7 @@ describe("applyPendingLoginItemRevisionIfIdle", () => {
     expect(registerHostLoginItem).toHaveBeenCalledTimes(1);
   });
 
-  // Fixed by the T2/T3 author's call-site-enrichment ruling: the classifier
+  // Fixed by the review's call-site-enrichment ruling: the classifier
   // may normalize the failure category, but caller-only discriminating
   // evidence must be appended at the presentation boundary - here that's
   // `withTakeoverDiagnostics`, composing the observed SMAppService status and
@@ -11111,7 +11111,7 @@ describe("packaged-mac register failure: CLI-owned LaunchAgent takeover fallback
   // throw (`host-controller.ts:1401-1415`) classifies the error through
   // `classifyMutationSubprocessError`, then `withTakeoverDiagnostics` appends
   // the caller-only evidence (observed status, escape hatch) the classifier
-  // is contractually forbidden to carry - fixed per the T2/T3 author's
+  // is contractually forbidden to carry - fixed per the review's
   // call-site-enrichment ruling (see the Field RCA comment above this
   // describe block: "the user was locked out with no recovery affordance").
   it("activation cycle: a failing takeover surfaces one terminal message naming the status and the manual escape hatch", async () => {
@@ -11382,7 +11382,7 @@ describe("streamBundled progress ownership: mutationEpoch (fixup E)", () => {
   });
 });
 
-// R-C/R-D (T08): the packaged-Mac park kickstart, and the CLI-owned
+// R-C/R-D: the packaged-Mac park kickstart, and the CLI-owned
 // `--defer-if-parked` gap.
 //
 // Today, packaged Mac + host DOWN + a standing (nonterminal) attempt record:
@@ -11396,7 +11396,7 @@ describe("streamBundled progress ownership: mutationEpoch (fixup E)", () => {
 // before `registerHostLoginItem` or any further CLI call ever runs. The host
 // stays down.
 //
-// T08's fix (not yet landed) inserts a two-tier fallback ahead of that
+// The review's fix (not yet landed) inserts a two-tier fallback ahead of that
 // refusal: (1) shell `host service start` through the bundled CLI (which
 // judges the park CLI-side under `supervisor-relaunch-maintenance`); (2) if
 // THAT specifically fails `E_SERVICE_CONTROL_FAILED` (the job is not
@@ -11508,7 +11508,7 @@ describe("R-C/R-D: the packaged-Mac park kickstart, and CLI-owned --defer-if-par
   // Same world, but reachability is a live flag this test can flip - and a
   // `comeUp()` helper that flips it AND writes a live pid.json in one call -
   // so a row can simulate the host actually starting mid-cycle (inside a CLI
-  // stub or a `registerHostLoginItem` mock), the way T08's real fix expects
+  // stub or a `registerHostLoginItem` mock), the way the fix is expected
   // to observe it: `readRunningRuntimeVersion`/`publishReachableHostSnapshot`
   // read the reachability probe and pid.json AFTER the start attempt, not
   // before.

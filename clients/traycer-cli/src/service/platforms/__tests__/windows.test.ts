@@ -2928,7 +2928,7 @@ describe("killHostProcessTree convergence loop", () => {
     });
   });
 
-  // F-ZOMBIE-SURVIVOR (coordinator's addendum, Diff 2): at the round bound a
+  // F-ZOMBIE-SURVIVOR (review addendum, Diff 2): at the round bound a
   // LISTING is about to fail the stop, and the whole point of this fix is
   // that a listing is no proof - an exited process can stay in the table while
   // another process still holds a handle to it. So at the bound, and only

@@ -278,7 +278,7 @@ export interface ObservedDesktopPresence {
  * desktop needs from `admission` - a terminal's run or the service's - is
  * published there as `admittedAs` (`writeSupervisorRecords`).
  *
- * Written at admission (and, from T04, whenever the policy observer changes
+ * Written at admission (and, later, whenever the policy observer changes
  * one of these facts); removed with `supervisor.json` on every supervisor
  * exit except one that owes a successor (77 / 76), which keeps it for that
  * successor to continue (`SupervisorRecordRemoval`,

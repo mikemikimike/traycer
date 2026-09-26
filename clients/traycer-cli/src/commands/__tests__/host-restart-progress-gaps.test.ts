@@ -20,7 +20,7 @@ import type {
   ProcessIdentityVerdict,
 } from "../../store/process-identity";
 
-// T08's ruling on U3 (wall-clock silence, desktop-side): the desktop streams
+// The review's ruling on U3 (wall-clock silence, desktop-side): the desktop streams
 // `host restart` through `streamBundledTraycerCliJson`, whose idle timer
 // (`CLI_STREAM_IDLE_TIMEOUT_MS`, 600s) is re-armed by every NDJSON event the
 // CLI writes.

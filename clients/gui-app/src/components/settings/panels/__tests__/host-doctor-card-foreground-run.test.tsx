@@ -393,7 +393,7 @@ describe("OV-5 — the bridge Doctor card's restart fixes during a foreground ru
     expect(isDisabled(button)).toBe(false);
   });
 
-  // R3 (D-REGISTER, T08's ruling): "Register service" (fixAction
+  // R3 (D-REGISTER, the review's ruling): "Register service" (fixAction
   // "service-install") joins the fixes withheld during a foreground run — see
   // this file's OWN "GREEN control: a non-restart fix stays enabled with no
   // reason" test above, which asserts the OPPOSITE for this exact issue and

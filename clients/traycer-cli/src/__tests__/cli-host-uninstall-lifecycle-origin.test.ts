@@ -19,7 +19,7 @@ import { hostHomeDir } from "../store/paths";
 // `cli-lifecycle-origin-flag.test.ts` (read for the program-build and
 // module-spy pattern only - that file is off-limits to edit, owned by
 // another agent in this same family; this is a NEW file for `host uninstall`
-// specifically, per T04's redirect).
+// specifically, per an earlier redirect).
 //
 // `host uninstall` is NOT one of `cli-lifecycle-origin-flag.test.ts`'s eight
 // start-capable commands and has no `--lifecycle-origin` option registered

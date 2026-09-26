@@ -54,7 +54,7 @@ type ArmedRenameFailure = {
   // `Number.POSITIVE_INFINITY` to fail every call (A3's persistent EPERM).
   remaining: number;
   // Run BEFORE the throw, so a test can simulate a third party mutating the
-  // canonical file out from under the retry (A2). Uses the real `writeFile`,
+  // canonical file out from under the retry. Uses the real `writeFile`,
   // never the wrapped one, so it is not itself subject to this same failure
   // injection.
   readonly onFailure: (() => Promise<void>) | null;
@@ -401,7 +401,7 @@ describe("rewriteLockLivenessIfToken - win32 retry against a transient reader (A
   });
 });
 
-describe("rewriteLockLivenessIfToken - ownership change between retries (A2)", () => {
+describe("rewriteLockLivenessIfToken - ownership change between retries", () => {
   it("returns false and never clobbers a fresh holder that appears mid-retry", async () => {
     const dir = await freshDir();
     const lockPath = join(dir, "host.lock");

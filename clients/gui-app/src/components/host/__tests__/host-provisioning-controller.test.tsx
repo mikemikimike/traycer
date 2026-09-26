@@ -1568,7 +1568,7 @@ describe("HostProvisioningController - the staged wait versus live progress", ()
    */
 });
 
-// T08 item 3 / P2: when Force resolves T05's terminal-host refusal
+// Item 3 / P2: when Force resolves the terminal-host refusal
 // (`{ kind: "deferred", message }`), does the person's own recovery flow
 // (`presentation.forceProvisioning` -> `run(true, ...)` -> the shared
 // `useRunnerConvergeReady` mutation) end up with SENTENCE, verbatim, on

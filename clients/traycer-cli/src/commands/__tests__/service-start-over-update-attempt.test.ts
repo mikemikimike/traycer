@@ -18,7 +18,7 @@ import {
 import { encodeInstallGeneration } from "@traycer-clients/shared/host-version/install-generation";
 import type { HostInstallRecord } from "@traycer/protocol/config/installation-records";
 
-// F1 sibling (found in T03's sweep): `traycer host service start`
+// F1 sibling (found in an earlier sweep): `traycer host service start`
 // (`commands/service-start.ts:125-133`) takes its segment under admission
 // `service-maintenance`. The shared contender's `dispositionFor`
 // (`clients/shared/host-update/contender.ts:1252-1271`) REFUSES that

@@ -32,7 +32,7 @@ vi.mock("../../app/logger", () => ({
   describeLogError: (cause: unknown) => String(cause),
 }));
 
-// The quit transaction (host-lifecycle-modes T06), driven through fakes for
+// The quit transaction (host-lifecycle-modes), driven through fakes for
 // every dependency. Every claim is asserted over the ORDERED event log the
 // fakes write (verdicts, stops, mode changes, published states, the ending),
 // so a row cannot pass by reaching the right end state through the wrong

@@ -18,7 +18,7 @@ import {
 import { encodeInstallGeneration } from "@traycer-clients/shared/host-version/install-generation";
 import type { HostInstallRecord } from "@traycer/protocol/config/installation-records";
 
-// F1 sibling (found in T03's sweep): `cli finalize-upgrade`
+// F1 sibling (found in an earlier sweep): `cli finalize-upgrade`
 // (`commands/cli-finalize-upgrade.ts`) - the hidden command the Windows (and
 // POSIX) detached finalize-helper invokes after `host restart` has already
 // STOPPED the service - ran under admission `service-maintenance`, which the
@@ -28,7 +28,7 @@ import type { HostInstallRecord } from "@traycer/protocol/config/installation-re
 // `recovery-maintenance`) that has already stopped the service, so a refusal
 // here used to leave the host down.
 //
-// T08's ruling: the START-ONLY FALLBACK. The swap stays deferred exactly as
+// The review's ruling: the START-ONLY FALLBACK. The swap stays deferred exactly as
 // before (no marker, `pendingUpgrade` kept, `finalizePendingCliUpgrade` never
 // even called) - but when the refusal is specifically the standing-attempt
 // one (`HOST_UPDATE_ATTEMPT_ACTIVE`, never a bare lock `CLI_LOCK_BUSY`), the
@@ -41,7 +41,7 @@ import type { HostInstallRecord } from "@traycer/protocol/config/installation-re
 //
 // This suite drives `cliFinalizeUpgradeCommand` end to end with the REAL
 // outer update-attempt lock and the REAL shared contender, and writes a
-// genuine attempt record to disk. Per T03: pin the fallback's exact
+// genuine attempt record to disk. Pin the fallback's exact
 // conditions and mechanism logging; still nothing about the swap/marker
 // design beyond "it never runs when the fallback fires".
 //
@@ -509,7 +509,7 @@ describe("cliFinalizeUpgradeCommand - the finalize helper's start, over a standi
 
   // Control: a `waiting-to-activate` whose claim generation does NOT match
   // the install record must stay refused - the FALLBACK's own
-  // `supervisor-relaunch-maintenance` admission refuses it too (T08's "a
+  // `supervisor-relaunch-maintenance` admission refuses it too (the review's "a
   // record supervisor-relaunch-maintenance itself REFUSES"), so it falls to
   // the third (recovery-maintenance) tier - whose `recoveryActionFor` reads
   // "stop-only" for `waiting-to-activate`, so it logs its own distinct
@@ -636,7 +636,7 @@ describe("cliFinalizeUpgradeCommand - the finalize helper's start, over a standi
   });
 });
 
-// R-A (T08): when `supervisor-relaunch-maintenance` ALSO refuses, the
+// R-A: when `supervisor-relaunch-maintenance` ALSO refuses, the
 // fallback is expected to take a third tier, `recovery-maintenance`, and
 // start the host ONLY when the contender context's `recoveryAction` reads
 // "restart-current" - the exact verdict `host restart` stopped the host

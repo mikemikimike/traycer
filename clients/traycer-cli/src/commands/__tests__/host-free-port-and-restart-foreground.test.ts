@@ -24,7 +24,7 @@ import type { KillConflictingPortOwnerResult } from "../../host/free-port-kill";
 // assertions below are real assertions against the actual production wiring
 // rather than a stand-in.
 //
-// Assertion shape (T04 correction, round 3): every desktop-origin case
+// Assertion shape (a later correction, round 3): every desktop-origin case
 // asserts the FIXED (post-guard) expected mechanism values FIRST - the kill
 // path and the controller must never be touched - and only THEN asserts the
 // refusal code. This is what keeps these tests conventional red-now/

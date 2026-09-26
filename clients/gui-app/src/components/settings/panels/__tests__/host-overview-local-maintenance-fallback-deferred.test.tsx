@@ -1,5 +1,5 @@
-// T08 item 3 / P3: on the LOCAL-MAINTENANCE FALLBACK lane (a host below the
-// maintenance floor), does a version row's Install show T05's terminal-host
+// Item 3 / P3: on the LOCAL-MAINTENANCE FALLBACK lane (a host below the
+// maintenance floor), does a version row's Install show the terminal-host
 // refusal verbatim when the lane resolves `{ kind: "deferred", message }`?
 //
 // New file, deliberately: `host-overview-local-maintenance-fallback.test.tsx`
@@ -266,7 +266,7 @@ function mountFallbackOverview(
 }
 
 describe("<HostSettingsPanel /> local-maintenance CLI fallback - a deferred (terminal-host) install outcome", () => {
-  it("P3: Update now shows T05's refusal verbatim", async () => {
+  it("P3: Update now shows the refusal verbatim", async () => {
     const { management } = mountFallbackOverview({
       kind: "deferred",
       message: SENTENCE,
@@ -289,13 +289,13 @@ describe("<HostSettingsPanel /> local-maintenance CLI fallback - a deferred (ter
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled();
     });
-    // What the toast actually shows - reported verbatim to the coordinator,
+    // What the toast actually shows - reported verbatim for review,
     // whichever it is.
     const shown = vi.mocked(toast.error).mock.calls[0]?.[0];
     expect(shown).toContain(SENTENCE);
   });
 
-  // T08 named the version ROW specifically, not the "Update now" shortcut.
+  // The ruling named the version ROW specifically, not the "Update now" shortcut.
   // Both reach the same `install()` `onError` (`host-overview-updates-state.ts`
   // ~:351), but the row lives on the Updates tab's own list
   // (`host-version-rows.tsx`, `aria-label="Install <version>"`), which the case
@@ -303,7 +303,7 @@ describe("<HostSettingsPanel /> local-maintenance CLI fallback - a deferred (ter
   // (`BRIDGE_CHECK_VERSION`) already offers one installable version other than
   // the running one, so this reuses that row rather than adding a fixture
   // entry.
-  it("P3: a version row's own Install shows T05's refusal verbatim", async () => {
+  it("P3: a version row's own Install shows the refusal verbatim", async () => {
     const user = userEvent.setup();
     const { management } = mountFallbackOverview({
       kind: "deferred",

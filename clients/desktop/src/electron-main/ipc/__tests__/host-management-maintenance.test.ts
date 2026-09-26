@@ -2631,7 +2631,7 @@ describe("maintenance identity + doctorRepairIfIdle IPC", () => {
     });
   });
 
-  // T05 DECL: a `deferred` controller outcome is not a failure. Three
+  // A `deferred` controller outcome is not a failure. Three
   // main-process routes resolve every `deferred` to a typed
   // `{kind: "declined", message}` with the outcome's exact message, never
   // rejecting; every other non-ok outcome still rejects, as today. The
@@ -2920,7 +2920,7 @@ describe("maintenance identity + doctorRepairIfIdle IPC", () => {
     });
   });
 
-  // Coordinator's required test: drive the REAL doctor read and queued
+  // Required test: drive the REAL doctor read and queued
   // repair handlers against a fake bundled CLI that keeps reporting
   // HOST_SERVICE_DEFINITION_STALE until it has actually seen `host service
   // refresh` - proving the wire-through (queued repair -> hostController

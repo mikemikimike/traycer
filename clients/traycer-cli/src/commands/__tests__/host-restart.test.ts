@@ -231,7 +231,7 @@ describe("buildHostRestartCommand", () => {
   });
 
   it("publishes the relaunch's adoption proof as `maintenance`, whoever asked for the restart", async () => {
-    // Lifecycle modes (T03): a restart brings back a run that already
+    // Lifecycle modes: a restart brings back a run that already
     // existed, so its relaunch leg records `maintenance` in the proof the
     // supervisor consumes - never the caller's `--lifecycle-origin`.
     mocks.crossSpawnEdge = true;

@@ -344,7 +344,7 @@ export function parseWindowsDeniedReadFallbackOutput(
  * offset recovers the exact UTC instant - across a DST change too, and
  * whichever bias WMI chose, since the fields and the offset were produced
  * together. Measured on Windows Server in the New Zealand zone, across its
- * 2026-09-27 change (T08 round 1): `Get-WmiObject` printed every process at
+ * 2026-09-27 change (review round 1): `Get-WmiObject` printed every process at
  * the zone's STANDARD bias, daylight time in force or not, so a process born
  * in daylight time reads as a local time the zone skips; `ToDmtfDateTime` over
  * the CIM `DateTime` printed the daylight bias for the same process. Both

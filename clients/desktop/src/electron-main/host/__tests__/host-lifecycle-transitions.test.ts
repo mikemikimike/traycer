@@ -1788,7 +1788,7 @@ describe("R4: getView surfaces admittedAs, and a foreground run pends a restart 
 });
 
 // ---------------------------------------------------------------------------
-// F4 / T08's ruling: a `→ none` stop request against a host this desktop
+// F4 / the review's ruling: a `→ none` stop request against a host this desktop
 // never started under service control reports `not-service-run`, not a
 // failure - "the desktop leaves a host that a person started in a terminal
 // untouched" means there is nothing for `host stop` to withdraw, but this
@@ -1796,7 +1796,7 @@ describe("R4: getView surfaces admittedAs, and a foreground run pends a restart 
 // fix, `not-service-run` fell into the same bucket as a genuine `failed` stop
 // (see `stopNotCommitted`) and committed nothing.
 // ---------------------------------------------------------------------------
-describe("R5: → none commits on a not-service-run stop (T08's ruling)", () => {
+describe("R5: → none commits on a not-service-run stop (the review's ruling)", () => {
   it("commits none when the stop reports not-service-run", async () => {
     const harness = makeHarness("managed", POLL_MS);
     await writeCliPolicy(harness.store, 4, "ask");
@@ -1831,7 +1831,7 @@ describe("R5: → none commits on a not-service-run stop (T08's ruling)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// T08's ruling: "the ensure ladder finishes the update once the terminal
+// The review's ruling: "the ensure ladder finishes the update once the terminal
 // host is gone." `observe()` follows the live supervisor's `admittedAs` from
 // one observation to the next; when a `"foreground"` run (a person's own
 // terminal) is followed by anything else - the record removed, stale, or now

@@ -17,7 +17,7 @@ import type {
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
 import type { SupervisorRecord } from "@traycer/protocol/config/supervisor-record";
 
-// U3 residual (ruled by T08 pass-2): `admitSupervisorLifecycle`
+// U3 residual (a later fix): `admitSupervisorLifecycle`
 // (`lifecycle-admission.ts`) already re-consumes the adoption proof ONCE
 // more right before it parks (the U3 fix), so a proof published BEFORE that
 // late consume is never lost. But a proof published AFTER it - in the window
@@ -38,7 +38,7 @@ import type { SupervisorRecord } from "@traycer/protocol/config/supervisor-recor
 //      `lease.waitForSpawn()` (`host-start-adoption.ts`,
 //      `HOST_START_ADOPTION_ACK_WAIT_MS` = 50s) times out.
 //
-// T08's ruling: closed with a STARTER-SIDE retry. If the ack wait times out,
+// The review's ruling: closed with a STARTER-SIDE retry. If the ack wait times out,
 // the starter must look again before giving up:
 //   - the service is genuinely running (another starter, or this same manager,
 //     already got it up) - report `started` and stop, no second `start`;

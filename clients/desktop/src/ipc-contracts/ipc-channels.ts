@@ -243,12 +243,12 @@ export const RunnerHostInvoke = {
   gpuAccelerationSet: "runnerHost:gpu:set",
   logLevelsGet: "runnerHost:logLevels:get",
   logLevelsSet: "runnerHost:logLevels:set",
-  // Host lifecycle mode (host-lifecycle-modes T05). A capability of its own,
+  // Host lifecycle mode (host-lifecycle-modes). A capability of its own,
   // independent of `hostManagement` and registered in `none` mode too, so a
   // machine that runs no local host can still switch back.
   hostLifecycleGet: "runnerHost:hostLifecycle:get",
   hostLifecycleSet: "runnerHost:hostLifecycle:set",
-  // The quit transaction's renderer round-trip (host-lifecycle-modes T06):
+  // The quit transaction's renderer round-trip (host-lifecycle-modes):
   // the modal's answer to a `hostQuitRequest`. Main ignores an unknown or
   // stale `requestId`.
   hostQuitRespond: "runnerHost:hostQuit:respond",

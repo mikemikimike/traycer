@@ -149,7 +149,7 @@ export interface DesktopTrayPresentation {
 }
 
 /**
- * The host lifecycle part of the tray (host-lifecycle-modes T06): the mode
+ * The host lifecycle part of the tray (host-lifecycle-modes): the mode
  * line ("Host: running · stops with app") shown in the tooltip and as a
  * disabled menu row, and whether to offer "Quit and Stop Host" and "Restart
  * Host".

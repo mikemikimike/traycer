@@ -232,7 +232,7 @@ function detachedStopCalls(): number {
   return vi.mocked(spawnDetachedBundledTraycerCliJson).mock.calls.length;
 }
 
-/** F31/T04: every detached spawn's args, in call order - the marker pins. */
+/** F31: every detached spawn's args, in call order - the marker pins. */
 function detachedArgs(): readonly (readonly string[])[] {
   return vi
     .mocked(spawnDetachedBundledTraycerCliJson)
@@ -539,10 +539,10 @@ describe("F31: only an admitted stop defers the relaunch (real HostController)",
   });
 });
 
-// Phase G / T04: `--lifecycle-origin desktop` is the marker every forced
+// Phase G: `--lifecycle-origin desktop` is the marker every forced
 // desktop-originated `host stop` carries (real HostController, real
-// detached spawner) - the argv T08 will assert supervisor `admittedAs`
-// against once T04 lands the CLI side. Pinned GREEN now, ahead of the
+// detached spawner) - the argv the supervisor's `admittedAs` is asserted
+// against once the CLI side lands. Pinned GREEN now, ahead of the
 // ablation that removes `withDesktopLifecycleOrigin` from
 // `runDetachedBundled`.
 describe("marker pins: every detached `host stop` spawn carries --lifecycle-origin desktop", () => {

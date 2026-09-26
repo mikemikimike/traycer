@@ -13,9 +13,9 @@ import type { HostUpdateAttemptRecord } from "@traycer-clients/shared/host-updat
 // the guard, not by admission, over one (test 8). The refused-by-admission
 // half is `service-start-foreground.test.ts`, tests 5-6.
 //
-// Red until `service-start.ts` takes that admission (T03, round 1): under
+// Red until `service-start.ts` takes that admission (review round 1): under
 // `service-maintenance` admission refuses the park `E_HOST_UPDATE_ATTEMPT_ACTIVE`
-// first. Kept out of t04's green run for that reason.
+// first. Kept out of the green run for that reason.
 //
 // Fixture: that file's - hoisted `node:os`, real `store/paths` +
 // `vi.resetModules()`, a `rmSync(hostHomeDir("production"))` sweep in

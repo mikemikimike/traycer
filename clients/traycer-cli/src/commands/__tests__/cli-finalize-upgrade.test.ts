@@ -262,7 +262,7 @@ describe("cliFinalizeUpgradeCommand / runFinalizeUpgradeSwap", () => {
   // scope regression regardless of OS - it just can't stand in for a real
   // Windows PowerShell + Scheduled Task run.
   it("publishes the service start's adoption proof as `maintenance`", async () => {
-    // Lifecycle modes (T03): this start completes the restart whose stop
+    // Lifecycle modes: this start completes the restart whose stop
     // released the CLI binary - a relaunch of a run that already existed -
     // so it records `maintenance` in the proof the supervisor consumes.
     mocks.finalizeResult = {

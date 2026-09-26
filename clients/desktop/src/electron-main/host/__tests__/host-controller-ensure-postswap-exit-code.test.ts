@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sandboxHome } from "../../__tests__/sandbox-home";
 
-// SSH-USERDOMAIN-WORKGROUP (coordinator-required test #2): `host-install.ts`
+// SSH-USERDOMAIN-WORKGROUP (required test #2): `host-install.ts`
 // / `host-ensure.ts` now return `exitCode: 1` when the post-swap service
 // start failed, and the desktop's streaming CLI runner
 // (`streamTraycerCliJsonWithInvocation` in `../../cli/traycer-cli.ts`) trusts

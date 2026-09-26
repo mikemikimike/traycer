@@ -206,7 +206,7 @@ describe("parseWindowsWmiCreationDate", () => {
 });
 
 // Captured on a Windows Server VM in the New Zealand zone, whose clock was set
-// across the 2026-09-27 02:00 NZST -> 03:00 NZDT change (T08 round 1 DST
+// across the 2026-09-27 02:00 NZST -> 03:00 NZDT change (review round 1 DST
 // experiment). Probe A was created in NZST, probe B in NZDT. Every string below
 // is verbatim, and each was byte-identical before and after the clock crossed
 // the change in either direction:

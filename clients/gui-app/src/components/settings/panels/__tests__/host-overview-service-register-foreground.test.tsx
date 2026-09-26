@@ -1,4 +1,4 @@
-// D-REGISTER (T08): while THIS machine's host was started in a terminal, the
+// D-REGISTER: while THIS machine's host was started in a terminal, the
 // OS-service "register" controls are disabled - and, for the OS service
 // section's own Deregister, the confirm copy stops claiming a stop the
 // foreground run makes false. Same boundaries as
@@ -107,7 +107,7 @@ const SERVICE_METHODS = [
   "host.service.deregister",
 ] as const;
 
-// The constant doesn't exist yet - T08 pinned this exact literal.
+// The constant doesn't exist yet - this exact literal is pinned.
 const REGISTER_FOREGROUND_REASON =
   "A host you started in a terminal is running; stop it, then register the service.";
 

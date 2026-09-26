@@ -1,4 +1,4 @@
-// T05's contract patch: `IHostManagement.freePortAndRestart` now resolves
+// A contract patch: `IHostManagement.freePortAndRestart` now resolves
 // `FreePortAndRestartResult = FreePortAndRestartApplied | HostMutationDeclined`
 // — main resolves `declined` for a refusal and never rejects for one (an
 // identity mismatch still rejects). Two renderer callers still assume every
@@ -40,7 +40,7 @@ import { RunnerHostProvider } from "@/providers/runner-host-provider";
 import { HostDoctorCard } from "@/components/settings/panels/host-doctor-card";
 import { runFixAction } from "@/components/settings/panels/host-doctor-actions";
 
-// T07's exact wording, reused from DR-1's D2/D1 messages — the F4 not-service-run
+// Exact wording, reused from DR-1's D2/D1 messages — the F4 not-service-run
 // text and the `none`-quiesce text, both plausible refusal reasons for a
 // free-port-and-restart repair.
 const M1 =

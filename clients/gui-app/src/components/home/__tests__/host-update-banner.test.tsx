@@ -221,7 +221,7 @@ const HOST_UPDATE_FOREGROUND_SENTENCE =
   "Update ready. A host you started in a terminal is running; stop it to finish the update.";
 
 /**
- * T08's P1-in-`none` ruling: the sentence above is true only when THIS APP
+ * The review's P1-in-`none` ruling: the sentence above is true only when THIS APP
  * can finish the update itself
  * (`applied.localHostCapability === "managed" && pending !== "restart-app"`).
  * Otherwise a foreground run gets this one instead - the constant this names
@@ -757,7 +757,7 @@ describe("HostUpdateBanner (Host Update Layer Redesign, D4)", () => {
     });
   });
 
-  describe("T08's P1-in-'none' ruling — the foreground sentence is true only when this app can finish the update itself", () => {
+  describe("The P1-in-'none' ruling — the foreground sentence is true only when this app can finish the update itself", () => {
     it("[RED N1] booted in none (localHostCapability:'none', pending:'none'): the self-serve sentence, not the P1 one, with no action", async () => {
       const management = makeManagement({ status: READY_STATUS });
       const host = withHostLifecycle(
@@ -821,7 +821,7 @@ describe("HostUpdateBanner (Host Update Layer Redesign, D4)", () => {
       expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
     });
 
-    it("[GREEN M2] managed + pending:'restart-host' (T05's restart-to-apply): the P1 sentence still shows", async () => {
+    it("[GREEN M2] managed + pending:'restart-host' (restart-to-apply): the P1 sentence still shows", async () => {
       const management = makeManagement({ status: READY_STATUS });
       const host = withHostLifecycle(
         makeHost(management),

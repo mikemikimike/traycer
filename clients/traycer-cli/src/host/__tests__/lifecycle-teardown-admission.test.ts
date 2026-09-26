@@ -16,7 +16,7 @@ import {
 import { encodeInstallGeneration } from "@traycer-clients/shared/host-version/install-generation";
 import type { HostInstallRecord } from "@traycer/protocol/config/installation-records";
 
-// R-B (T08): the supervisor's Linked-mode lifecycle teardown
+// R-B: the supervisor's Linked-mode lifecycle teardown
 // (`createLifecycleTeardownPlatform().withLock`, `update-mutation.ts`
 // ~591-610) takes its lock under admission `lifecycle-teardown-maintenance`.
 // `lifecycleTeardownDisposition` (`clients/shared/host-update/contender.ts`
@@ -29,7 +29,7 @@ import type { HostInstallRecord } from "@traycer/protocol/config/installation-re
 // that nothing can ever start again: it admits parks that the very next
 // start (supervisor relaunch, or `host ensure`) would refuse.
 //
-// T08's ruling: the teardown should admit `waiting-to-activate` only where
+// The review's ruling: the teardown should admit `waiting-to-activate` only where
 // `supervisorRelaunchDisposition` would. This suite drives the REAL
 // `createLifecycleTeardownPlatform().withLock("production", run)` against a
 // real attempt record on disk, proving today's over-admission (b1-b4, RED)

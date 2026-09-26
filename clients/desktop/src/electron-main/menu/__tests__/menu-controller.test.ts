@@ -1442,7 +1442,7 @@ describe("MenuController", () => {
     // F4: "the desktop leaves a host that a person started in a terminal
     // untouched; the mode governs the service run only." Restart Host
     // targets the SERVICE run, so it must never be offered for a run the
-    // service does not own either - T08's ruling extends the same hiding
+    // service does not own either - the review ruling extends the same hiding
     // Quit-and-Stop-Host already gets.
     it("(i) lanes active + foreground: NO Restart Host row", () => {
       const localHostLanes = new FakeLocalHostLanes(true, true);

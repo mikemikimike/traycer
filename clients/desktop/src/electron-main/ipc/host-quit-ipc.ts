@@ -6,7 +6,7 @@ import type { RunnerIpcBridge } from "./runner-ipc-bridge";
 
 /**
  * The quit transaction's round-trip with the host quit modal
- * (host-lifecycle-modes T06). `respond` is on the renderer surface
+ * (host-lifecycle-modes). `respond` is on the renderer surface
  * (`runnerHost.hostLifecycle.respondToQuitRequest`); `listening` and
  * `acknowledge` are preload-internal - the preload reports its window's
  * modal subscription and acknowledges each request that reached it, so main

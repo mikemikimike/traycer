@@ -1,4 +1,4 @@
-// DR-1 (T08): a Doctor refusal that resolves `deferred` is a declined
+// DR-1: a Doctor refusal that resolves `deferred` is a declined
 // notice, exactly like `lane-busy` / `host-changed` — not a "Fix failed"
 // error. Route 1 is the WATCHED RPC Doctor sheet's if-idle dispatch
 // (`useLocalDoctorFixMutation`, `host-settings-panel.tsx`), which today
@@ -103,12 +103,12 @@ const OVERVIEW_METHODS = [
   "diagnostics.logs.tail",
 ] as const;
 
-// T07's exact wording — the `none`-quiesce message, D1 and D3.
+// Exact wording reused — the `none`-quiesce message, D1 and D3.
 const NONE_QUIESCE_MESSAGE =
   "This app no longer starts a local host. Restart Traycer to apply the host lifecycle setting.";
 
-// T05's confirmed F4 not-service-run text, D2 — named so it can be swapped in
-// one place if T05 revises it again.
+// The confirmed F4 not-service-run text, D2 — named so it can be swapped in
+// one place if that wording changes again.
 const FOREGROUND_NOT_SERVICE_RUN_MESSAGE =
   "A host you started in a terminal is running, and Traycer leaves it alone. Stop it there to continue.";
 
@@ -611,7 +611,7 @@ describe("DR-1 route 2 — the bridge Doctor card's queued dispatch", () => {
   // against a bare disabled `<button>` in this harness before writing this
   // test. A fourth real click therefore cannot reach that branch without
   // hand-mocking the recurrence state around the lock, which the brief asked
-  // not to do. Flagged for T07 rather than faked.
+  // not to do. Flagged for follow-up rather than faked.
   it("CONTROL: three rejections do lock the card", async () => {
     const runDoctorRepairQueued = vi.fn(() =>
       Promise.reject(new Error("boom")),

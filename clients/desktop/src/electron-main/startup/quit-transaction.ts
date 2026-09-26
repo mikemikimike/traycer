@@ -29,7 +29,7 @@ import type {
 } from "../host/host-lifecycle-transitions";
 import type { HostQuitPrompt } from "../ipc/runner-ipc-bridge";
 
-// The quit transaction (host-lifecycle-modes T06, lifecycle mechanics "The
+// The quit transaction (host-lifecycle-modes, lifecycle mechanics "The
 // quit transaction"): every way the app quits - the app menu's Quit, Cmd/Ctrl+Q,
 // the tray's "Quit Traycer", the renderer's `appLifecycleQuit`, and
 // `window-all-closed` on Windows/Linux - reaches `before-quit`, and every
