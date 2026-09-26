@@ -22,6 +22,7 @@ import {
   TRANSCRIPT_WINDOW_MAX_BYTES,
 } from "@/stores/chats/transcript-window";
 import { CHAT_STORE_TEST_ENVIRONMENT } from "@/stores/chats/test-support/chat-store-test-environment";
+import { ChatSessionRegistry } from "@/stores/chats/session-registry";
 
 const EPIC_ID = "epic-viewport";
 const CHAT_ID = "chat-viewport";
@@ -1897,4 +1898,75 @@ describe("chat session viewport hydration: resnapshot after invalidation", () =>
   // `indexRevision: null`) DOES close the entry, so a later void sends a
   // fresh `requestResnapshot` - is already pinned above by "re-arms once a
   // snapshot answers".
+});
+
+describe("chat session viewport hydration: sleep", () => {
+  it("a lease-free chat mid-download is not put to sleep until its delivery completes", () => {
+    vi.useFakeTimers();
+    const harness = createViewportHarness();
+    const registry = new ChatSessionRegistry({
+      idleTtlMs: 60_000,
+      maxWarmSessions: 6,
+    });
+    try {
+      const target = {
+        epicId: EPIC_ID,
+        chatId: CHAT_ID,
+        hostId: "host-viewport",
+        scopeKey: "scope-viewport",
+      };
+      registry.acquire(target, () => harness.handle);
+      registry.release(EPIC_ID, CHAT_ID, "host-viewport");
+      hydrateTail(harness);
+      harness.callbacks().onSkeletonChunk(skeletonChunk(0, 10, false));
+
+      expect(harness.handle.store.getState().hasDeliveryInFlight()).toBe(true);
+      expect(registry.sleepIdleWarmSessions()).toBe(0);
+      expect(harness.handle.store.getState().asleep).toBe(false);
+
+      harness.callbacks().onSkeletonChunk(skeletonChunk(10, 40, true));
+
+      expect(harness.handle.store.getState().hasDeliveryInFlight()).toBe(false);
+      expect(registry.sleepIdleWarmSessions()).toBe(1);
+      expect(harness.handle.store.getState().asleep).toBe(true);
+    } finally {
+      registry.disposeAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("a sleep cut part-way through a skeleton spends none of the restream budget", () => {
+    // `sleep()` closes the stream and keeps the store. A completion watchdog
+    // still armed over the half-delivered skeleton would fire into the null
+    // client: it books a restream against the epoch and sends nothing, so the
+    // revived stream would get one restream fewer for a real stall.
+    vi.useFakeTimers();
+    const harness = createViewportHarness();
+    try {
+      hydrateTail(harness);
+      harness.callbacks().onSkeletonChunk(skeletonChunk(0, 10, false));
+
+      harness.handle.store.getState().sleep();
+      vi.advanceTimersByTime(STREAM_COMPLETION_TIMEOUT_MS * 3);
+
+      harness.handle.store.getState().retry();
+      hydrateTail(harness);
+      const before = harness.resnapshotCount();
+      for (
+        let round = 0;
+        round < MAX_WATCHDOG_RESTREAMS_PER_EPOCH + 3;
+        round += 1
+      ) {
+        harness.callbacks().onSkeletonChunk(skeletonChunk(0, 10, false));
+        vi.advanceTimersByTime(STREAM_COMPLETION_TIMEOUT_MS + 1);
+      }
+
+      expect(harness.resnapshotCount() - before).toBe(
+        MAX_WATCHDOG_RESTREAMS_PER_EPOCH,
+      );
+    } finally {
+      harness.handle.dispose();
+      vi.useRealTimers();
+    }
+  });
 });

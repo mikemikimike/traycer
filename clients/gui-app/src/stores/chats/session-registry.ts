@@ -371,6 +371,10 @@ export class ChatSessionRegistry {
       const handle = entry.session;
       if (handle.store.getState().asleep) continue;
       if (hasUnsettledChatWork(handle)) continue;
+      // Mid-download: the snapshot's skeleton or summaries, a range or a
+      // resnapshot still on the way. Closing the stream there throws away
+      // what already arrived for a re-download on the next lease.
+      if (handle.store.getState().hasDeliveryInFlight()) continue;
       handle.store.getState().sleep();
       if (handle.store.getState().asleep) slept += 1;
     }

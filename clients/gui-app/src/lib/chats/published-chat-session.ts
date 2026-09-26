@@ -423,6 +423,7 @@ export function publishedChatSessionState(
     refreshMissingWorktreePaths: () => undefined,
     retry: () => undefined,
     sleep: () => undefined,
+    hasDeliveryInFlight: () => false,
     retryFromUser: () => undefined,
     wake: () => undefined,
     // A published copy is complete: every ordinal is hydrated by construction,

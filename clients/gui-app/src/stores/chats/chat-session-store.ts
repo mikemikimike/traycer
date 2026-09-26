@@ -1779,6 +1779,17 @@ export interface ChatSessionState {
    */
   sleep: () => void;
   /**
+   * Whether this session's stream still owes it a delivery it is waiting on:
+   * a chunked skeleton or summary stream the completion watchdog is
+   * measuring, a range request, or a resnapshot. Each wait ends on its own
+   * timer, so this cannot hold forever.
+   *
+   * Not part of the park gate. A park disposes the store and everything
+   * waiting in it, and a timer ending one of these waits writes nothing to
+   * the store, so a park deferred on it would have no edge to retry on.
+   */
+  hasDeliveryInFlight: () => boolean;
+  /**
    * {@link retry}, escalated to a transport re-dial first when - and only
    * when - this chat's own transport reports itself SILENT.
    *
@@ -9452,6 +9463,16 @@ export function createChatSessionStoreWithNotificationDependencies(
         if (get().fatalClose !== null) return;
         closeStreamClient();
         clearBufferedDeltas();
+        // The per-stream timers and the in-flight range slot go with the
+        // stream, as they do in `dispose()`: each is waiting on an answer the
+        // closed stream will never deliver. Left armed, a completion watchdog
+        // over a skeleton cut part-way would fire into a null client and
+        // spend the epoch's restream budget on a stream that no longer
+        // exists. The recovery ledger stays with the store; the revival's
+        // snapshot is what settles it.
+        clearInFlightHydration();
+        clearResnapshotRequestTimer();
+        clearStreamCompletionWatchdog();
         // `closeStreamClient` retires the stream's generation, so its own
         // `closed` status never lands and nothing recomputes these: the same
         // hand-retired set `retry()` and `dispose()` clear.
@@ -9464,6 +9485,12 @@ export function createChatSessionStoreWithNotificationDependencies(
           autoPermissionModeProtocolSupported: null,
         });
       },
+      hasDeliveryInFlight: () =>
+        !disposed &&
+        streamClient !== null &&
+        (streamCompletionTimer !== null ||
+          inFlightHydrationRequest !== null ||
+          resnapshotRequestTimer !== null),
       refreshMissingWorktreePaths: (update) => {
         if (disposed) return;
         // Skip the write (and the re-render) when the on-focus recompute matches
