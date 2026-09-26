@@ -95,6 +95,15 @@ Permissions control how much the agent can do without another approval.
 
 Supervised is the safest starting point. New conversations start in the mode set in [Permissions settings](/settings/permissions); choose **Permission settings…** at the bottom of the picker to open them. Some coding agents expose fewer permission options; those compatibility details live in [Agents & Models](/agents-and-models/coding-agents).
 
+### Review An Approval
+
+When an approval card shortens a command or shows only a summary, expand **Full command** or **Full input** to inspect the complete input before deciding. A command's original line breaks are preserved. The disclosure is omitted when the card already shows the complete input verbatim.
+
+<Note>
+  The approval disclosures and mid-turn Auto behavior below describe upcoming
+  changes. They are not part of Desktop v1.3.0 or Host v1.3.1.
+</Note>
+
 ### Auto Mode
 
 In **Auto**, reads, searches, and edits run as they would in Auto-accept edits. Each command goes to a judge model first:
@@ -104,7 +113,11 @@ In **Auto**, reads, searches, and edits run as they would in Auto-accept edits. 
 
 The judge never refuses an action on its own; anything it does not approve comes to you. The one exception is a conversation another agent started with nobody watching it: there is no one to ask, so the action is refused and the chat says so.
 
-Switching to Auto mid-turn applies right away, but approvals that are already waiting still ask you. The judge, your rules, and a log of recent decisions live in [Permissions settings](/settings/permissions).
+When **Traycer's judge** reviews commands, switching to Auto mid-turn applies right away to subsequent commands. Approvals already waiting still ask you.
+
+If the conversation's provider uses its **built-in classifier**, you cannot switch into Auto during a running turn. Wait for the turn to finish and select Auto before sending your next message, or choose **Traycer's judge** in [Permissions settings](/settings/permissions#providers-with-a-built-in-reviewer) to switch during the current turn. The picker explains why Auto is unavailable. It also temporarily disables Auto while it checks which judge would review the conversation.
+
+The judge, your rules, and a log of recent decisions live in [Permissions settings](/settings/permissions).
 
 ## Thinking Effort And Fast Mode
 
