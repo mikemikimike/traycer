@@ -170,6 +170,7 @@ function useSideStripHandlers(
     taskPinnedStates,
     pendingSetPinnedEpicIds,
     onSetTaskPinned,
+    onTaskPinMenuOpen,
   } = controller;
   return useMemo(
     () => ({
@@ -183,6 +184,7 @@ function useSideStripHandlers(
       taskPinnedStates,
       pendingSetPinnedEpicIds,
       onSetTaskPinned,
+      onTaskPinMenuOpen,
     }),
     [
       onClose,
@@ -195,6 +197,7 @@ function useSideStripHandlers(
       taskPinnedStates,
       pendingSetPinnedEpicIds,
       onSetTaskPinned,
+      onTaskPinMenuOpen,
     ],
   );
 }

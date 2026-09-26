@@ -163,6 +163,8 @@ export function PictureRow(props: { readonly regionId: RegionId }): ReactNode {
 function LiveToolbar(): ReactNode {
   const [store] = useState(() =>
     createComposerToolbarStore({
+      purpose: "run",
+      reasoningFallback: "model-default",
       seedKey: "layout-editor-browser-fixture",
       values: {
         permission: "supervised",

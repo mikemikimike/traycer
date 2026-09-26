@@ -203,6 +203,7 @@ export const SAMPLE_QUEUE: ChatQueueState = {
         browserAnnotations: [],
       },
       sender: { type: "user", userId: "sample-user" },
+      sentFromHostId: null,
       settings: {
         harnessId: "claude",
         model: "sample-model",

@@ -38,7 +38,13 @@ export function navigateToSettingsSection(
     api.setSection(sectionId);
     return true;
   }
-  api.openSettings({ section: sectionId, resetToGeneral: false });
+  api.openSettings({
+    section: sectionId,
+    resetToGeneral: false,
+    tab: null,
+    draft: null,
+    hostId: null,
+  });
   return true;
 }
 

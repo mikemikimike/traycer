@@ -81,6 +81,8 @@ export function SampleWorkspaceBody() {
   const [toolbarStore] = useState(() =>
     createComposerToolbarStore({
       seedKey: SAMPLE_TILE_ID,
+      purpose: "run",
+      reasoningFallback: "model-default",
       values: SAMPLE_TOOLBAR_VALUES,
       onSettingsChange: null,
       tuiOnly: false,
@@ -284,6 +286,7 @@ export function SampleWorkspaceBody() {
                         onDrop={sampleNoop}
                         dragOverlayVariant={null}
                         utilityRail={null}
+                        expansion={null}
                         attachmentsStrip={null}
                         editor={
                           // No marker of its own: `ComposerShell` already marks

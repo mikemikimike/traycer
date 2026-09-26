@@ -22,6 +22,7 @@ export interface SideStripHandlers {
   readonly onSplitCommand: (id: TabSplitCommandId, tab: HeaderTab) => void;
   readonly taskPinnedStates: ReadonlyMap<string, TaskPinnedState>;
   readonly pendingSetPinnedEpicIds: ReadonlySet<string>;
+  readonly onTaskPinMenuOpen: (epicId: string) => void;
   readonly onSetTaskPinned: (
     epicId: string,
     pinned: boolean,
@@ -76,5 +77,6 @@ export function stripTabItemInputOf(
     taskPinnedState: pinRead.taskPinnedState,
     isTaskPinPending: pinRead.isTaskPinPending,
     onSetTaskPinned: handlers.onSetTaskPinned,
+    onTaskPinMenuOpen: handlers.onTaskPinMenuOpen,
   };
 }

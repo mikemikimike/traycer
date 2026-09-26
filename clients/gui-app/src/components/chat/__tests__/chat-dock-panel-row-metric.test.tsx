@@ -216,6 +216,7 @@ const ONE_QUEUED_MESSAGE: ChatSessionState["queue"] = {
   items: [
     {
       kind: "prompt",
+      sentFromHostId: null,
       queueItemId: "queue-1",
       messageId: "queue-1-message",
       message: {
@@ -244,6 +245,7 @@ const ONE_QUEUED_MESSAGE: ChatSessionState["queue"] = {
     },
     {
       kind: "prompt",
+      sentFromHostId: null,
       queueItemId: "queue-2",
       messageId: "queue-2-message",
       message: {

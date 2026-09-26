@@ -94,6 +94,7 @@ import {
 } from "@/stores/worktree/worktree-intent-staging-store";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import { buildPinnedTodoRenderState } from "@/components/chat/chat-pinned-todos";
+import { withholdUnpaintedRows } from "@/components/chat/chat-special-segment";
 import type { ChatMessageActions } from "@/components/chat/chat-message";
 import type { NextStepActionHandler } from "@/components/chat/segments/next-steps-action-group";
 import type {
@@ -146,12 +147,14 @@ import type {
 } from "@/stores/chats/transcript-window";
 import {
   chatTranscriptEventRowId,
+  chatTranscriptJumpForTile,
   chatTranscriptJumpKey,
   useChatTranscriptJumpStore,
 } from "@/stores/chats/chat-transcript-jump-store";
 import { useSubagentOpenStore } from "@/stores/chats/subagent-open-store";
 import { useToolOpenStore } from "@/stores/chats/tool-open-store";
 import {
+  transcriptShowsSetupCard,
   useRenderedMessages,
   type RenderedMessagesDisplayContext,
 } from "@/stores/chats/rendered-messages";
@@ -260,7 +263,12 @@ import {
   type ComposerRunSettingsEntry,
 } from "@/stores/composer/composer-run-settings-store";
 import { useSettingsStore } from "@/stores/settings/settings-store";
-import { useAnySystemOverlayActive } from "@/stores/tabs/use-system-tab-modal";
+import {
+  useAnySystemOverlayActive,
+  useSystemTabModalActions,
+} from "@/stores/tabs/use-system-tab-modal";
+import type { TabHostSettingsOpts } from "@/stores/tabs/system-overlay-types";
+import { autoModeRuleDraftWorkspace } from "@/lib/auto-mode/auto-mode-rule-copy";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import {
   makeSnapshotCumulativeBundleDiffTile,
@@ -1064,8 +1072,11 @@ export function ChatTileSessionView(props: ChatTileSessionViewProps) {
   // Parked in a store rather than called directly because the jump is issued
   // from another tile, possibly before this one exists - `openTile`
   // mounts it and the request is waiting here when it renders.
-  const transcriptJump = useChatTranscriptJumpStore(
-    (s) => s.requestsByChatId[chatTranscriptJumpKey(hostId, props.node.id)],
+  const transcriptJump = useChatTranscriptJumpStore((s) =>
+    chatTranscriptJumpForTile(
+      s.requestsByChatId[chatTranscriptJumpKey(hostId, props.node.id)],
+      props.node.instanceId,
+    ),
   );
   const consumeTranscriptJump = useChatTranscriptJumpStore(
     (s) => s.consumeJump,
@@ -1533,6 +1544,7 @@ export function ChatTileSessionView(props: ChatTileSessionViewProps) {
                 preContent={view.preContent}
                 restoreContext={view.restoreContext}
                 node={view.node}
+                taskTitle={view.taskTitle}
                 epicId={view.currentEpicId}
                 viewTabId={view.viewTabId}
                 tabHostId={view.tabHostId}
@@ -2505,6 +2517,15 @@ function useChatTileSessionViewModel(
     }
     return [...renderedMessages, activeInlineEdit.originalMessage];
   }, [activeInlineEdit, renderedMessages]);
+  // Renderer policy, like the pinned-todo pass below: a row that paints
+  // nothing (`rowPaintsNothing`, today the legacy auto-mode judge notice)
+  // leaves the list here, so `transcriptListRows` omits its ordinal instead of
+  // the timeline framing an empty row. `useRenderedMessages` still enumerates
+  // it, because that list is held to the host's projection row for row.
+  const paintedMessages = useMemo(
+    () => withholdUnpaintedRows(displayedMessages),
+    [displayedMessages],
+  );
   // On the legacy line the rendered rows are the full history, so the pinned
   // snapshot derives from the same walk that strips the inline segments. On
   // the windowed line the rows are the HYDRATED SUBSET and the fold's answer
@@ -2515,7 +2536,7 @@ function useChatTileSessionViewModel(
   const pinnedTodoRenderState = useMemo(
     () =>
       buildPinnedTodoRenderState(
-        displayedMessages,
+        paintedMessages,
         state.transcriptDerived === null
           ? { kind: "derive" }
           : {
@@ -2525,7 +2546,7 @@ function useChatTileSessionViewModel(
               activeTurnId,
             },
       ),
-    [displayedMessages, state.transcriptDerived, activeTurnId],
+    [paintedMessages, state.transcriptDerived, activeTurnId],
   );
   const hostPendingInterviewIds = useMemo(
     () =>
@@ -2613,6 +2634,10 @@ function useChatTileSessionViewModel(
     },
     [chatActions],
   );
+  const setupCardShown = useMemo(
+    () => transcriptShowsSetupCard(renderedMessages),
+    [renderedMessages],
+  );
   const { messageActionsFor, forkAtAssistantMessage, revertOnEdit } =
     useChatMessageActions({
       dispatchUi,
@@ -2632,6 +2657,7 @@ function useChatTileSessionViewModel(
       chatParentId: state.chat?.parentId ?? null,
       messages: state.messages,
       messageDelivery: state.messageDelivery,
+      setupCardShown,
       events: state.events,
       // `transcriptDerived !== null` is the line discriminator: on the legacy
       // line the window is an inert empty value and `messages`/`events` are
@@ -3435,6 +3461,21 @@ function useChatTileSessionViewModel(
     ],
   );
 
+  // The remote and branch this chat's binding records, which is what an
+  // approval card's "Allow from now on…" narrows its drafted rule by.
+  const ruleDraftWorkspace = useMemo(
+    () => autoModeRuleDraftWorkspace(state.worktreeBinding),
+    [state.worktreeBinding],
+  );
+  const { openSettings } = useSystemTabModalActions();
+  // The card's settings links open on THIS tab's machine: the judge and the
+  // rules it names are the ones this conversation's host applies.
+  const openSettingsOnTabHost = useCallback(
+    (opts: TabHostSettingsOpts) => {
+      openSettings({ ...opts, hostId: viewModelHostId });
+    },
+    [openSettings, viewModelHostId],
+  );
   const lowerApprovals = useMemo(
     () => ({
       pendingFileEditApprovals: state.pendingFileEditApprovals,
@@ -3443,6 +3484,8 @@ function useChatTileSessionViewModel(
       onApprovalDecision: dispatchApprovalDecision,
       highlightedApprovalId: composerHighlightBlockId,
       highlightedGeneration: composerHighlightGeneration,
+      ruleDraftWorkspace,
+      onOpenSettings: openSettingsOnTabHost,
     }),
     [
       composerHighlightBlockId,
@@ -3451,6 +3494,8 @@ function useChatTileSessionViewModel(
       state.pendingApprovals,
       dispatchFileEditApprovalDecision,
       dispatchApprovalDecision,
+      ruleDraftWorkspace,
+      openSettingsOnTabHost,
     ],
   );
 
@@ -3574,9 +3619,16 @@ function useChatTileSessionViewModel(
     [state.pendingFallback, state.pendingReturn],
   );
 
+  const chatStateTitle = state.chat?.title ?? "";
   return {
     handle,
     node,
+    // The title the tab strip shows. `node.name` is the tile's persisted
+    // opening-name snapshot, so a chat opened before its title was generated
+    // announced every finished turn as "Untitled agent" for the tile's life.
+    taskTitle:
+      projectedChatTitle ??
+      (chatStateTitle.length > 0 ? chatStateTitle : node.name),
     viewTabId,
     tileId,
     tabHostId: activeHostId,
@@ -3736,6 +3788,8 @@ interface ChatSessionMessagesSurfaceProps {
   readonly preContent: ChatTilePreContentFrame | null;
   readonly restoreContext: ChatRestoreContextValue;
   readonly node: ChatSurfaceNode;
+  /** The chat's live title, for the transcript's own announcements. */
+  readonly taskTitle: string;
   readonly epicId: string;
   readonly viewTabId: string;
   readonly tabHostId: string | null;
@@ -3857,7 +3911,7 @@ function ChatSessionMessagesSurface(
             workspaceRoots={props.workspaceRoots}
           >
             <ChatMessages
-              taskTitle={props.node.name}
+              taskTitle={props.taskTitle}
               taskId={props.node.id}
               epicId={props.epicId}
               hostId={props.tabHostId}

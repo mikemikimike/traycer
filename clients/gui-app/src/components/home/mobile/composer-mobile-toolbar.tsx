@@ -11,6 +11,7 @@ import {
 } from "@/components/home/data/landing-options";
 import { useHostMethodSchemaVersion } from "@/hooks/host/use-host-supports-method";
 import { useAutoJudgeBilling } from "@/hooks/auto-mode/use-auto-judge-billing";
+import { useOpenPermissionSettings } from "@/hooks/settings/use-open-permission-settings";
 import { HarnessModelPicker } from "@/components/home/pickers/harness-model-picker";
 import {
   ComposerMicSlot,
@@ -120,7 +121,13 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
       : autoModeOfferableHere(listHarnessesLine, chatLineCarriesAutoMode);
   // Same two inputs as the desktop toolbar - see `ComposerToolbar`.
   const runHarnessId = useStore(store, (s) => s.selection.harnessId);
-  const judgeBilling = useAutoJudgeBilling(runTargetHostId, runHarnessId);
+  const runModelSlug = useStore(store, (s) => s.selection.modelSlug);
+  const judgeBilling = useAutoJudgeBilling(
+    runTargetHostId,
+    runHarnessId,
+    runModelSlug,
+  );
+  const openPermissionSettings = useOpenPermissionSettings(runTargetHostId);
   // Same gate as `ComposerToolbarRight`: an empty slug is the transient
   // "catalog still loading" marker and must never reach the wire as `model: ""`.
   const modelResolved = useStore(
@@ -205,6 +212,7 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
           // Model name only: the row has room for it, but the thinking-effort
           // suffix the desktop pill adds reads as clutter at this width.
           labelDisplay="model-only"
+          embedding={null}
         />
         {/* The slot, not the bare button: it is what honours Layout's
           Microphone switch, which this row used to ignore (G6). */}
@@ -234,6 +242,7 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
         turnActive={activeTurnStatus !== null && !settingsLocked}
         judgeBilling={judgeBilling}
         settingsLocked={settingsLocked}
+        onOpenPermissionSettings={openPermissionSettings}
       />
     </div>
   );

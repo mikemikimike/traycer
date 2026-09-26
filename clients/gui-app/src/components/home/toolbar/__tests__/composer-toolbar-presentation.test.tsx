@@ -55,6 +55,8 @@ const TILE = "presentation-tile";
 
 function toolbarStore() {
   return createComposerToolbarStore({
+    purpose: "run",
+    reasoningFallback: "model-default",
     seedKey: "composer-toolbar-presentation-test",
     values: {
       permission: "supervised",

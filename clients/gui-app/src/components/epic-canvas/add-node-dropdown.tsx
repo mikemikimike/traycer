@@ -453,6 +453,7 @@ function TerminalAgentSubMenuContent(props: TerminalAgentSubMenuContentProps) {
             // button and names the chat picker instead.
             terminalLoginSurface={null}
             profileAdmission={null}
+            embedding={null}
           />
         </div>
       </section>

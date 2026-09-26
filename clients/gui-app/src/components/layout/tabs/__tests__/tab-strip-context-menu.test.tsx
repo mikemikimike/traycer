@@ -27,6 +27,7 @@ import { type EpicStreamClientFactory } from "@/stores/epics/open-epic/store";
 import { openStoreForTest } from "@/stores/epics/open-epic/test-support/open-store-for-test";
 import type { HeaderTab } from "@/stores/tabs/types";
 import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
+import { useAuthStore } from "@/stores/auth/auth-store";
 
 /**
  * `useEpicPinLocalHomeSupported` resolves a host client, which throws outside a
@@ -62,6 +63,21 @@ vi.mock("@/hooks/epic/use-epic-pin-local-home-support", () => ({
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
   useNavigate: () => vi.fn(),
+}));
+
+// This suite exercises the tab context menu's pin and keybinding guards. The
+// appearance submenu now composes the organization task-context query, but no
+// case here supplies an organization host or asserts that submenu's data.
+// Keep that unrelated presentation branch inert at its host-query boundary so
+// these tests continue to cover the real menu guards without fabricating a
+// runtime provider for an unconnected host.
+vi.mock("@/hooks/epic/use-epic-get-task-contexts-query", () => ({
+  useEpicGetTaskContexts: () => ({
+    tasksById: new Map(),
+    localHomedTaskIds: new Set(),
+    isFetching: false,
+    error: null,
+  }),
 }));
 
 const EPIC_TAB: Extract<HeaderTab, { kind: "epic" }> = {
@@ -635,5 +651,76 @@ describe("the Tabs placement radio group", () => {
     ).toBeTruthy();
     fireEvent.click(left);
     expect(placement()).toBe("left");
+  });
+});
+
+/**
+ * `epic.getTaskContexts` can now settle a chunk without resolving a
+ * cloud-homed epic (a cloud leg past its deadline, a 5xx, an errored chunk),
+ * which reports as an UNANSWERED reading (`pinnedKnown: false`) rather than
+ * absence. Before `tabPinUnavailableReason` checked `pinReadingUnanswered`
+ * for a cloud-homed row too, that row had NO entry at all under the old
+ * behavior and the item spun forever; here it renders a real reading object,
+ * so this is the settled-miss case in isolation.
+ */
+describe("TabContextMenuContent cloud-homed pin reading unanswered (settled miss)", () => {
+  const PROFILE = { userId: "user-1", userName: "U", email: "u@example.com" };
+  const CONTEXT = { userId: "user-1", username: "U" };
+
+  afterEach(() => {
+    cleanup();
+    useAuthStore.getState().setSignedOut();
+  });
+
+  it("renders pin state unknown, with no spinner, and selecting it does nothing", async () => {
+    useAuthStore.getState().setSignedIn(PROFILE, CONTEXT, []);
+    const onSetTaskPinned = vi.fn<(pinned: boolean) => void>();
+
+    renderPinMenu(onSetTaskPinned, {
+      pinned: false,
+      home: undefined,
+      hostId: null,
+      pinnedKnown: false,
+    });
+
+    const item = await screen.findByTestId(`tab-pin-history-${EPIC_TAB.id}`);
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.getAttribute("data-disabled")).toBeNull();
+    expect(item.textContent).toContain(
+      "Pin Task in History — pin state unknown",
+    );
+    expect(
+      screen.queryByTestId(`tab-pin-history-spinner-${EPIC_TAB.id}`),
+    ).toBeNull();
+
+    fireEvent.click(item);
+    expect(onSetTaskPinned).not.toHaveBeenCalled();
+  });
+
+  it("still shows the spinner for a null (genuinely in-flight) reading", async () => {
+    useAuthStore.getState().setSignedIn(PROFILE, CONTEXT, []);
+    const onSetTaskPinned = vi.fn<(pinned: boolean) => void>();
+
+    renderPinMenu(onSetTaskPinned, null);
+
+    expect(
+      await screen.findByTestId(`tab-pin-history-spinner-${EPIC_TAB.id}`),
+    ).not.toBeNull();
+  });
+
+  it("renders Unpin for a resolved, pinned cloud reading", async () => {
+    useAuthStore.getState().setSignedIn(PROFILE, CONTEXT, []);
+    const onSetTaskPinned = vi.fn<(pinned: boolean) => void>();
+
+    renderPinMenu(onSetTaskPinned, {
+      pinned: true,
+      home: undefined,
+      hostId: null,
+      pinnedKnown: true,
+    });
+
+    const item = await screen.findByTestId(`tab-pin-history-${EPIC_TAB.id}`);
+    expect(item.textContent).toContain("Unpin Task in History");
+    expect(item.getAttribute("aria-disabled")).toBeNull();
   });
 });

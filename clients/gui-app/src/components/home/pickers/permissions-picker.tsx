@@ -1,10 +1,13 @@
 import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
+import { useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { NarrowOnlyTooltip } from "@/components/home/toolbar/narrow-only-tooltip";
@@ -28,6 +31,7 @@ import {
 } from "@/components/home/data/landing-options";
 import {
   autoJudgeMetaLine,
+  autoModeMidTurnLock,
   type AutoJudgeBilling,
 } from "@/lib/auto-mode/auto-judge-billing";
 
@@ -92,6 +96,13 @@ interface PermissionsPickerProps {
    *  default-permission row): keeps that row from registering the
    *  `composer.access` hotspot under the shared `"landing"` tile id. */
   readonly interactive: boolean;
+  /**
+   * The trailing "Permission settings…" item's action, or `null` to render no
+   * such item. A composer passes one (it always has a run-target host); the
+   * Settings default-mode row passes `null`, because a Settings surface must
+   * not open Settings.
+   */
+  onOpenPermissionSettings: (() => void) | null;
 }
 
 export function PermissionsPicker(props: PermissionsPickerProps) {
@@ -107,7 +118,13 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
     judgeBilling,
     closeFocus,
     interactive,
+    onOpenPermissionSettings,
   } = props;
+  // Set by the trailing Settings item for the close it causes. That close must
+  // not hand focus back to the composer: the composer registry can name an
+  // editor in another tab, and restoring focus there would pull that tab over
+  // the Settings surface this item just opened.
+  const openingSettingsRef = useRef(false);
   // Display value is the *normalized* one: when the sticky value isn't in the
   // active harness's supported set (rehydration of a saved chat, the one-frame
   // window between a harness swap and the parent's clamp commit, or any race
@@ -123,6 +140,13 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
   );
   const Icon = findPermissionOption(displayValue).icon;
   const label = findPermissionLabel(displayValue);
+  // The Auto row's mid-turn lock, when the run's own provider would review:
+  // see `autoModeMidTurnLock`. Read once, for the guard and the row alike.
+  const autoMidTurnLock = autoModeMidTurnLock({
+    turnActive,
+    currentModeIsAuto: displayValue === "auto",
+    judgeBilling,
+  });
   // Layout ▸ Composer's floor for this picker, never `hidden`: the pill reports
   // the permission the next send will run under, so `compact` takes it to the
   // shape a narrow composer already puts it in - icon alone, name on hover -
@@ -176,6 +200,11 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
         // restores focus to the trigger, leaving the caret out of the textbox.
         // A `"trigger"` caller keeps Radix's own restore (see `closeFocus`).
         onCloseAutoFocus={(event) => {
+          if (openingSettingsRef.current) {
+            openingSettingsRef.current = false;
+            event.preventDefault();
+            return;
+          }
           if (closeFocus !== "composer") return;
           if (focusActiveComposer()) event.preventDefault();
         }}
@@ -197,6 +226,9 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
             ) {
               return;
             }
+            // The same defense for the mid-turn lock: the host refuses this
+            // flip anyway, and a refusal is a toast after the fact.
+            if (next === "auto" && autoMidTurnLock !== null) return;
             onChange(next);
           }}
         >
@@ -211,11 +243,30 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
               option.id,
               hostKnowsAutoMode,
             );
+            // Supported, but not for THIS turn: the row shows the lock's own
+            // sentence in place of its description, and neither the billing
+            // line nor the "switches now" notice, both of which would
+            // contradict it.
+            const lockedMidTurn =
+              isSupported && option.id === "auto" && autoMidTurnLock !== null;
+            let description: string;
+            if (!isSupported) {
+              description = unsupportedPermissionModeCopy({
+                mode: option.id,
+                harnessLabel,
+                catalogSupportedModes,
+                hostKnowsAutoMode,
+              });
+            } else if (lockedMidTurn) {
+              description = autoMidTurnLock;
+            } else {
+              description = option.description;
+            }
             return (
               <DropdownMenuRadioItem
                 key={option.id}
                 value={option.id}
-                disabled={!isSupported}
+                disabled={!isSupported || lockedMidTurn}
                 // No `title=` here: Radix applies `data-disabled:pointer-events-none`
                 // on the dropdown-menu primitive (see ui/dropdown-menu.tsx) so a
                 // native browser tooltip would never fire on hover anyway. The
@@ -225,23 +276,18 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
                 <OptionIcon className="mt-0.5 size-4 text-muted-foreground" />
                 <PermissionOptionBody
                   label={option.label}
-                  description={
-                    isSupported
-                      ? option.description
-                      : unsupportedPermissionModeCopy({
-                          mode: option.id,
-                          harnessLabel,
-                          catalogSupportedModes,
-                          hostKnowsAutoMode,
-                        })
-                  }
+                  description={description}
                   metaLine={
-                    isSupported && option.id === "auto" && judgeBilling !== null
+                    isSupported &&
+                    !lockedMidTurn &&
+                    option.id === "auto" &&
+                    judgeBilling !== null
                       ? autoJudgeMetaLine(judgeBilling)
                       : null
                   }
                   notice={
                     isSupported &&
+                    !lockedMidTurn &&
                     option.id === "auto" &&
                     turnActive &&
                     displayValue !== "auto"
@@ -253,6 +299,19 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
             );
           })}
         </DropdownMenuRadioGroup>
+        {onOpenPermissionSettings !== null ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                openingSettingsRef.current = true;
+                onOpenPermissionSettings();
+              }}
+            >
+              Permission settings…
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

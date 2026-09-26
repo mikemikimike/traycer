@@ -241,6 +241,7 @@ export function ComposerQueueDockFixture(): ReactElement {
               >
                 <div className="relative flex flex-col gap-3">
                   <ComposerShell
+                    expansion={null}
                     pickerStore={pickerStore}
                     onDragOver={sampleNoop}
                     onDragEnter={sampleNoop}

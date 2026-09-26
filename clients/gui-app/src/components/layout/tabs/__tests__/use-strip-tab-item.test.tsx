@@ -144,6 +144,7 @@ function makeInput(recorded: Recorded): StripTabItemInput {
       pinnedKnown: true,
     },
     isTaskPinPending: false,
+    onTaskPinMenuOpen: () => undefined,
     onSetTaskPinned: (epicId, pinned, displayName) => {
       recorded.pinned.push({ epicId, pinned, displayName });
     },

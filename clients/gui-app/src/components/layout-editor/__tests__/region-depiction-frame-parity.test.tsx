@@ -281,6 +281,8 @@ function renderToolbar(): void {
         <ComposerToolbar
           presentation
           store={createComposerToolbarStore({
+            purpose: "run",
+            reasoningFallback: "model-default",
             seedKey: TILE,
             values: {
               permission: "supervised",

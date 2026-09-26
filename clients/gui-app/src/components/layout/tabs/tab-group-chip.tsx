@@ -21,7 +21,12 @@ export function TabGroupChip(props: {
   const { group, groupId } = props;
   const actions = useTabsStore.getState();
   return (
-    <Popover open={editing} onOpenChange={setEditing}>
+    <Popover
+      open={editing}
+      onOpenChange={(open) => {
+        setEditing(open);
+      }}
+    >
       <PopoverTrigger asChild>
         <TooltipWrapper
           label="Right-click to edit group"

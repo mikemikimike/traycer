@@ -8,6 +8,8 @@ import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-s
 
 function testStore() {
   return createComposerToolbarStore({
+    purpose: "run",
+    reasoningFallback: "model-default",
     seedKey: "composer-toolbar-left-test",
     values: {
       permission: "supervised",
@@ -33,7 +35,12 @@ describe("<ComposerToolbarLeft />", () => {
 
   it("opens an images-only file picker from the attachment button", () => {
     const onAttachImages = vi.fn<(files: ReadonlyArray<File>) => void>();
-    const { container } = renderToolbar(onAttachImages, false, () => undefined);
+    const { container } = renderToolbar(
+      onAttachImages,
+      false,
+      () => undefined,
+      vi.fn(),
+    );
     const input = getImageInput(container);
     const clickSpy = vi.spyOn(input, "click").mockImplementation(() => {
       return undefined;
@@ -48,7 +55,12 @@ describe("<ComposerToolbarLeft />", () => {
 
   it("passes selected image files to the attachment pipeline", () => {
     const onAttachImages = vi.fn<(files: ReadonlyArray<File>) => void>();
-    const { container } = renderToolbar(onAttachImages, false, () => undefined);
+    const { container } = renderToolbar(
+      onAttachImages,
+      false,
+      () => undefined,
+      vi.fn(),
+    );
     const input = getImageInput(container);
     const imageFile = new File(["image-bytes"], "screenshot.png", {
       type: "image/png",
@@ -64,7 +76,7 @@ describe("<ComposerToolbarLeft />", () => {
   it("locks the permission picker while settings are locked", () => {
     const onAttachImages = vi.fn<(files: ReadonlyArray<File>) => void>();
     const onPermissionChange = vi.fn<(next: PermissionMode) => void>();
-    renderToolbar(onAttachImages, true, onPermissionChange);
+    renderToolbar(onAttachImages, true, onPermissionChange, vi.fn());
 
     expect(screen.getByRole("button", { name: "Supervised" })).toHaveProperty(
       "disabled",
@@ -104,6 +116,7 @@ describe("<ComposerToolbarLeft />", () => {
           terminalLoginSurface={null}
           dictation={null}
           dictationPreparing={null}
+          onOpenPermissionSettings={vi.fn()}
         />
       </TooltipProvider>,
     );
@@ -123,12 +136,34 @@ describe("<ComposerToolbarLeft />", () => {
     expect(auto.getAttribute("aria-disabled")).toBe("true");
     expect(auto.textContent).toContain("Auto");
   });
+
+  it("forwards onOpenPermissionSettings to the picker's trailing item", () => {
+    const onAttachImages = vi.fn<(files: ReadonlyArray<File>) => void>();
+    const onPermissionChange = vi.fn<(next: PermissionMode) => void>();
+    const onOpenPermissionSettings = vi.fn();
+    renderToolbar(
+      onAttachImages,
+      false,
+      onPermissionChange,
+      onOpenPermissionSettings,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Supervised" }), {
+      button: 0,
+    });
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Permission settings…" }),
+    );
+
+    expect(onOpenPermissionSettings).toHaveBeenCalledTimes(1);
+  });
 });
 
 function renderToolbar(
   onAttachImages: (files: ReadonlyArray<File>) => void,
   settingsLocked: boolean,
   onPermissionChange: (next: PermissionMode) => void,
+  onOpenPermissionSettings: () => void,
 ) {
   return render(
     <TooltipProvider>
@@ -152,6 +187,7 @@ function renderToolbar(
         terminalLoginSurface={null}
         dictation={null}
         dictationPreparing={null}
+        onOpenPermissionSettings={onOpenPermissionSettings}
       />
     </TooltipProvider>,
   );

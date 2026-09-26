@@ -100,6 +100,7 @@ export interface StripTabItemInput {
   readonly onSplitCommand: (id: TabSplitCommandId, tab: HeaderTab) => void;
   readonly taskPinnedState: TaskPinnedState | null;
   readonly isTaskPinPending: boolean;
+  readonly onTaskPinMenuOpen: (epicId: string) => void;
   readonly onSetTaskPinned: (
     epicId: string,
     pinned: boolean,

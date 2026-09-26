@@ -220,6 +220,7 @@ function renderPermissionsPicker() {
       judgeBilling={null}
       closeFocus="composer"
       interactive
+      onOpenPermissionSettings={null}
     />,
   );
 }

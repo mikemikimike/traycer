@@ -8,6 +8,7 @@ import {
 } from "@/components/home/data/landing-options";
 import { useHostMethodSchemaVersion } from "@/hooks/host/use-host-supports-method";
 import { useAutoJudgeBilling } from "@/hooks/auto-mode/use-auto-judge-billing";
+import { useOpenPermissionSettings } from "@/hooks/settings/use-open-permission-settings";
 import { ComposerToolbarLeft } from "@/components/home/toolbar/composer-toolbar-left";
 import { ComposerToolbarRight } from "@/components/home/toolbar/composer-toolbar-right";
 import { DictationRecordingBar } from "@/components/home/toolbar/dictation-recording-bar";
@@ -74,12 +75,24 @@ function ComposerToolbarLive(props: ComposerToolbarProps) {
     props.store,
     (state) => state.selection.harnessId,
   );
-  const judgeBilling = useAutoJudgeBilling(props.runTargetHostId, runHarnessId);
+  const runModelSlug = useStore(
+    props.store,
+    (state) => state.selection.modelSlug,
+  );
+  const judgeBilling = useAutoJudgeBilling(
+    props.runTargetHostId,
+    runHarnessId,
+    runModelSlug,
+  );
+  const openPermissionSettings = useOpenPermissionSettings(
+    props.runTargetHostId,
+  );
   return (
     <ComposerToolbarView
       {...props}
       hostKnowsAutoMode={hostKnowsAutoMode}
       judgeBilling={judgeBilling}
+      onOpenPermissionSettings={openPermissionSettings}
     />
   );
 }
@@ -89,6 +102,7 @@ function ComposerToolbarImpl(props: ComposerToolbarProps) {
       {...props}
       hostKnowsAutoMode={null}
       judgeBilling={null}
+      onOpenPermissionSettings={null}
     />
   ) : (
     <ComposerToolbarLive {...props} />
@@ -98,6 +112,7 @@ function ComposerToolbarView(
   props: ComposerToolbarProps & {
     readonly hostKnowsAutoMode: boolean | null;
     readonly judgeBilling: AutoJudgeBilling | null;
+    readonly onOpenPermissionSettings: (() => void) | null;
   },
 ) {
   const {
@@ -170,6 +185,7 @@ function ComposerToolbarView(
     // surfaces cannot flip at all.
     turnActive: activeTurnStatus !== null && !settingsLocked,
     judgeBilling,
+    onOpenPermissionSettings: props.onOpenPermissionSettings,
     settingsLocked,
     store,
     createProfileHostId,

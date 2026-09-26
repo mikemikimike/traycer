@@ -29,6 +29,7 @@ export interface ComposerToolbarItemsProps {
   readonly hostKnowsAutoMode: boolean | null;
   readonly turnActive: boolean;
   readonly judgeBilling: AutoJudgeBilling | null;
+  readonly onOpenPermissionSettings: (() => void) | null;
   readonly settingsLocked: boolean;
   readonly store: ComposerToolbarStore;
   readonly createProfileHostId: string | null;
@@ -71,6 +72,7 @@ export function renderToolbarItem(
           turnActive={props.turnActive}
           judgeBilling={props.judgeBilling}
           closeFocus="composer"
+          onOpenPermissionSettings={props.onOpenPermissionSettings}
           interactive
         />
       );
@@ -90,6 +92,7 @@ export function renderToolbarItem(
           runTargetHostId={props.runTargetHostId}
           terminalLoginSurface={props.terminalLoginSurface}
           profileAdmission={null}
+          embedding={null}
         />
       );
     case "mic":

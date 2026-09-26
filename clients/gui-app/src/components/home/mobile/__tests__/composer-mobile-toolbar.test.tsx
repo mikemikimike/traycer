@@ -1,7 +1,7 @@
 import "../../../../../__tests__/test-browser-apis";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerMobileToolbar } from "@/components/home/mobile/composer-mobile-toolbar";
 import type { ComposerDictationControl } from "@/components/home/toolbar/composer-mic-button";
 import type { DictationPreparingStatus } from "@/hooks/composer/use-dictation-availability";
@@ -26,11 +26,34 @@ vi.mock("@/components/home/pickers/harness-model-picker", () => ({
 vi.mock("@/hooks/auto-mode/use-auto-judge-billing", () => ({
   useAutoJudgeBilling: () => null,
 }));
+// Same reason as the billing hook above: `useOpenPermissionSettings` reads
+// `useSystemTabModalActions()`, which resolves through the router - this test
+// renders without one, so the hook is mocked rather than pulling in a router.
+const openPermissionSettingsMock = vi.hoisted(() => vi.fn());
+const useOpenPermissionSettingsMock = vi.hoisted(() =>
+  vi.fn<(hostId: string | null) => () => void>(),
+);
+vi.mock("@/hooks/settings/use-open-permission-settings", () => ({
+  useOpenPermissionSettings: (hostId: string | null) =>
+    useOpenPermissionSettingsMock(hostId),
+}));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  openPermissionSettingsMock.mockClear();
+  useOpenPermissionSettingsMock.mockReset();
+});
+
+beforeEach(() => {
+  useOpenPermissionSettingsMock.mockImplementation(
+    () => openPermissionSettingsMock,
+  );
+});
 
 function makeStore(modelSlug: string) {
   return createComposerToolbarStore({
+    purpose: "run",
+    reasoningFallback: "model-default",
     seedKey: "mobile-toolbar-test",
     values: {
       permission: "supervised",
@@ -48,8 +71,11 @@ function makeStore(modelSlug: string) {
 function renderToolbar(
   modelSlug: string,
   onSubmit: () => void,
-  dictation: ComposerDictationControl | null,
-  dictationPreparing: DictationPreparingStatus | null,
+  voice: {
+    readonly dictation: ComposerDictationControl | null;
+    readonly preparing: DictationPreparingStatus | null;
+  },
+  runTargetHostId: string | null,
 ) {
   return render(
     <ComposerMobileToolbar
@@ -62,11 +88,11 @@ function renderToolbar(
       stopDisabled
       onStopTurn={null}
       composerDisabledHint={null}
-      dictation={dictation}
-      dictationPreparing={dictationPreparing}
+      dictation={voice.dictation}
+      dictationPreparing={voice.preparing}
       settingsLocked={false}
       createProfileHostId={null}
-      runTargetHostId={null}
+      runTargetHostId={runTargetHostId}
       terminalLoginSurface={null}
       chatLineCarriesAutoMode={null}
     />,
@@ -92,7 +118,12 @@ describe("ComposerMobileToolbar", () => {
   });
 
   it("keeps the desktop arrangement: attach, permission, model, send", () => {
-    renderToolbar("claude-opus-5", vi.fn(), null, null);
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null },
+      null,
+    );
     expect(screen.getByRole("button", { name: "Attach image" })).not.toBeNull();
     expect(screen.getByTestId("mock-model-picker")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Send" })).not.toBeNull();
@@ -101,7 +132,12 @@ describe("ComposerMobileToolbar", () => {
   });
 
   it("renders the permission as an icon, naming it only for assistive tech", () => {
-    renderToolbar("claude-opus-5", vi.fn(), null, null);
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null },
+      null,
+    );
     expect(
       screen.getByRole("button", { name: "Permissions: Supervised" }),
     ).not.toBeNull();
@@ -111,7 +147,12 @@ describe("ComposerMobileToolbar", () => {
   });
 
   it("opens the options sheet from the permission pill", async () => {
-    renderToolbar("claude-opus-5", vi.fn(), null, null);
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null },
+      null,
+    );
     expect(screen.queryByTestId("composer-options-sheet")).toBeNull();
     await userEvent.click(
       screen.getByRole("button", { name: "Permissions: Supervised" }),
@@ -121,7 +162,7 @@ describe("ComposerMobileToolbar", () => {
 
   it("blocks send while the model slug is still empty", () => {
     const onSubmit = vi.fn();
-    renderToolbar("", onSubmit, null, null);
+    renderToolbar("", onSubmit, { dictation: null, preparing: null }, null);
     expect(
       screen.getByRole("button", { name: "Send" }).hasAttribute("disabled"),
     ).toBe(true);
@@ -129,7 +170,12 @@ describe("ComposerMobileToolbar", () => {
 
   it("allows send once the model slug resolves", async () => {
     const onSubmit = vi.fn();
-    renderToolbar("claude-opus-5", onSubmit, null, null);
+    renderToolbar(
+      "claude-opus-5",
+      onSubmit,
+      { dictation: null, preparing: null },
+      null,
+    );
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(onSubmit).toHaveBeenCalled();
   });
@@ -140,7 +186,12 @@ describe("ComposerMobileToolbar", () => {
   // what makes Layout's Microphone Shown switch reach the phone toolbar.
   describe("mic slot", () => {
     it("renders the mic button when dictation is available and mic is shown (default)", () => {
-      renderToolbar("claude-opus-5", vi.fn(), IDLE_DICTATION_CONTROL, null);
+      renderToolbar(
+        "claude-opus-5",
+        vi.fn(),
+        { dictation: IDLE_DICTATION_CONTROL, preparing: null },
+        null,
+      );
       expect(
         screen.getByRole("button", { name: "Start voice input" }),
       ).not.toBeNull();
@@ -150,8 +201,8 @@ describe("ComposerMobileToolbar", () => {
       renderToolbar(
         "claude-opus-5",
         vi.fn(),
+        { dictation: null, preparing: DOWNLOADING_PREPARING_STATUS },
         null,
-        DOWNLOADING_PREPARING_STATUS,
       );
       expect(
         screen.getByRole("button", { name: /Setting up voice dictation/ }),
@@ -165,7 +216,12 @@ describe("ComposerMobileToolbar", () => {
     // editor (`useLayoutRegion`, region "mic"); that registration is the
     // actual delta the bare-button bypass loses, so pin it directly.
     it("registers the mic control as the layout editor's mic region", () => {
-      renderToolbar("claude-opus-5", vi.fn(), IDLE_DICTATION_CONTROL, null);
+      renderToolbar(
+        "claude-opus-5",
+        vi.fn(),
+        { dictation: IDLE_DICTATION_CONTROL, preparing: null },
+        null,
+      );
       const micButton = screen.getByRole("button", {
         name: "Start voice input",
       });
@@ -174,7 +230,12 @@ describe("ComposerMobileToolbar", () => {
 
     it("renders no mic control when mic.shown is hidden, regardless of dictation state", () => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
-      renderToolbar("claude-opus-5", vi.fn(), IDLE_DICTATION_CONTROL, null);
+      renderToolbar(
+        "claude-opus-5",
+        vi.fn(),
+        { dictation: IDLE_DICTATION_CONTROL, preparing: null },
+        null,
+      );
       expect(
         screen.queryByRole("button", { name: "Start voice input" }),
       ).toBeNull();
@@ -184,8 +245,8 @@ describe("ComposerMobileToolbar", () => {
       renderToolbar(
         "claude-opus-5",
         vi.fn(),
+        { dictation: null, preparing: DOWNLOADING_PREPARING_STATUS },
         null,
-        DOWNLOADING_PREPARING_STATUS,
       );
       expect(
         screen.queryByRole("button", { name: /Setting up voice dictation/ }),
@@ -193,8 +254,52 @@ describe("ComposerMobileToolbar", () => {
 
       cleanup();
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
-      renderToolbar("claude-opus-5", vi.fn(), null, null);
+      renderToolbar(
+        "claude-opus-5",
+        vi.fn(),
+        { dictation: null, preparing: null },
+        null,
+      );
       expect(screen.getByRole("button", { name: "Send" })).not.toBeNull();
     });
+  });
+
+  it("wires the sheet's trailing row to useOpenPermissionSettings", async () => {
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null },
+      null,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Permissions: Supervised" }),
+    );
+    await userEvent.click(
+      screen.getByTestId("composer-options-permission-settings"),
+    );
+
+    expect(openPermissionSettingsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands useOpenPermissionSettings the toolbar's run-target host", () => {
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null },
+      "host-b",
+    );
+
+    expect(useOpenPermissionSettingsMock).toHaveBeenCalledWith("host-b");
+  });
+
+  it("hands it null when no run target has resolved", () => {
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null },
+      null,
+    );
+
+    expect(useOpenPermissionSettingsMock).toHaveBeenLastCalledWith(null);
   });
 });

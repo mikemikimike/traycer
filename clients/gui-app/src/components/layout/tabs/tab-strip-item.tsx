@@ -64,6 +64,8 @@ interface TabItemProps {
     pinned: boolean,
     displayName: string,
   ) => void;
+  /** Re-asks for this epic's pin reading when the menu opens without one. */
+  readonly onTaskPinMenuOpen: (epicId: string) => void;
 }
 
 /** The top strip's presentation of a tab over `useStripTabItem`. */

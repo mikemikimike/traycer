@@ -4,7 +4,14 @@ import { HiddenTabsMenu } from "./hidden-tabs-menu";
 import { useHiddenHeaderTabs } from "./use-hidden-header-tabs";
 import { TabGroupChip } from "./tab-group-chip";
 import { stripRowsOf, taskPinReadOf } from "./tab-strip-rows";
-import { memo, Fragment, useCallback, useMemo, type ReactNode } from "react";
+import {
+  memo,
+  Fragment,
+  useCallback,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import { HORIZONTAL_STRIP_AXIS } from "@/components/epic-canvas/dnd/strip-axis";
 import { useNavigate } from "@tanstack/react-router";
 import { useStripScroller } from "./use-strip-scroller";
@@ -43,6 +50,7 @@ export function TabStrip() {
 }
 
 function TabStripBody() {
+  const tabListRef = useRef<HTMLDivElement | null>(null);
   const controller = useTabStripController();
   const {
     headerItemIds,
@@ -56,11 +64,15 @@ function TabStripBody() {
   const navigate = useNavigate();
   const handleWheel = useHorizontalWheelScroll();
   const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
-  const { setScrollElement, hiddenTabKeys, revealTab } =
+  const { setScrollElement, hiddenTabKeys, hasOverflow, revealTab } =
     useHiddenHeaderTabs(taskTabLayout);
   const hiddenTabs = useMemo(() => {
-    const hidden = new Set(hiddenTabKeys);
-    return allTabs.filter((tab) => hidden.has(tabRefKey(tab)));
+    const left = new Set(hiddenTabKeys.left);
+    const right = new Set(hiddenTabKeys.right);
+    return {
+      left: allTabs.filter((tab) => left.has(tabRefKey(tab))),
+      right: allTabs.filter((tab) => right.has(tabRefKey(tab))),
+    };
   }, [allTabs, hiddenTabKeys]);
   const handleActivateHiddenTab = useCallback(
     (tab: HeaderTab) => {
@@ -80,6 +92,13 @@ function TabStripBody() {
     extraRef: setScrollElement,
   });
   const surfaceRef = useLayoutSurface("topBar");
+  const stripRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      tabListRef.current = node;
+      surfaceRef(node);
+    },
+    [surfaceRef],
+  );
 
   // On the empty landing route the strip draws nothing; the header's own
   // actions stay, so no control is lost.
@@ -90,7 +109,8 @@ function TabStripBody() {
   return (
     <TabStripIndicatorScope indicators={controller.indicators}>
       <div
-        ref={surfaceRef}
+        ref={stripRef}
+        tabIndex={-1}
         role="tablist"
         aria-label="Open tabs"
         data-testid="tab-strip"
@@ -106,9 +126,11 @@ function TabStripBody() {
           />
         ) : null}
         <div className="relative flex min-w-0 max-w-full flex-[0_1_auto] items-end">
-          {hiddenTabs.length > 0 ? (
+          {hasOverflow ? (
             <HiddenTabsMenu
-              tabs={hiddenTabs}
+              tabs={hiddenTabs.left}
+              side="left"
+              fallbackFocusRef={tabListRef}
               onActivate={handleActivateHiddenTab}
             />
           ) : null}
@@ -173,12 +195,21 @@ function TabStripBody() {
                         controller.pendingSetPinnedEpicIds
                       }
                       onSetTaskPinned={controller.onSetTaskPinned}
+                      onTaskPinMenuOpen={controller.onTaskPinMenuOpen}
                     />
                   ) : null}
                 </Fragment>
               );
             })}
           </div>
+          {hasOverflow ? (
+            <HiddenTabsMenu
+              tabs={hiddenTabs.right}
+              side="right"
+              onActivate={handleActivateHiddenTab}
+              fallbackFocusRef={tabListRef}
+            />
+          ) : null}
           {/* Placed by the strip: 4px after the last tab, centred on the row. */}
           <div className="ml-1 flex shrink-0 self-center">
             <TabStripNewButton onNewTab={controller.onNewTab} />
@@ -219,6 +250,8 @@ interface HeaderStripItemRendererProps {
     pinned: boolean,
     displayName: string,
   ) => void;
+  /** See `useRetryUnansweredTaskPinReading`: re-asks when a tab's menu opens. */
+  readonly onTaskPinMenuOpen: (epicId: string) => void;
 }
 
 const HeaderStripItemRenderer = memo(function HeaderStripItemRenderer(
@@ -262,6 +295,7 @@ const HeaderStripItemRenderer = memo(function HeaderStripItemRenderer(
         taskPinnedStates={props.taskPinnedStates}
         pendingSetPinnedEpicIds={props.pendingSetPinnedEpicIds}
         onSetTaskPinned={props.onSetTaskPinned}
+        onTaskPinMenuOpen={props.onTaskPinMenuOpen}
       />
     );
   }
@@ -286,6 +320,7 @@ const HeaderStripItemRenderer = memo(function HeaderStripItemRenderer(
       taskPinnedStates={props.taskPinnedStates}
       pendingSetPinnedEpicIds={props.pendingSetPinnedEpicIds}
       onSetTaskPinned={props.onSetTaskPinned}
+      onTaskPinMenuOpen={props.onTaskPinMenuOpen}
     />
   );
 });
@@ -314,6 +349,8 @@ const HeaderStripTabItem = memo(function HeaderStripTabItem(props: {
     pinned: boolean,
     displayName: string,
   ) => void;
+  /** See `useRetryUnansweredTaskPinReading`: re-asks when a tab's menu opens. */
+  readonly onTaskPinMenuOpen: (epicId: string) => void;
 }): ReactNode {
   const pinRead = taskPinReadOf(
     props.tab,
@@ -350,6 +387,7 @@ const HeaderStripTabItem = memo(function HeaderStripTabItem(props: {
       taskPinnedState={pinRead.taskPinnedState}
       isTaskPinPending={pinRead.isTaskPinPending}
       onSetTaskPinned={props.onSetTaskPinned}
+      onTaskPinMenuOpen={props.onTaskPinMenuOpen}
     />
   );
 });

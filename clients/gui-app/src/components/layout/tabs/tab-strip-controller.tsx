@@ -49,6 +49,7 @@ import {
 } from "@/hooks/epic/use-epic-set-pinned-mutation";
 import {
   useEpicTaskPinnedStates,
+  useRetryUnansweredTaskPinReading,
   type TaskPinnedState,
 } from "@/hooks/epic/use-epic-task-pinned-states-query";
 
@@ -83,6 +84,7 @@ export interface TabStripController {
   readonly onSplitCommand: (id: TabSplitCommandId, tab: HeaderTab) => void;
   readonly taskPinnedStates: ReadonlyMap<string, TaskPinnedState>;
   readonly pendingSetPinnedEpicIds: ReadonlySet<string>;
+  readonly onTaskPinMenuOpen: (epicId: string) => void;
   readonly onSetTaskPinned: (
     epicId: string,
     pinned: boolean,
@@ -124,6 +126,9 @@ export function useTabStripController(): TabStripController {
   const offsets = useHeaderStripOffsets();
   const indicators = useHeaderTabIndicators(allTabs);
   const taskPinnedStates = useEpicTaskPinnedStates(indicators.epicIds);
+  const onTaskPinMenuOpen = useRetryUnansweredTaskPinReading(
+    indicators.epicIds,
+  );
   const pendingSetPinnedEpicIds = usePendingSetPinnedEpicIds();
   const onSetTaskPinned = useTaskPinDispatch(taskPinnedStates);
 
@@ -269,6 +274,7 @@ export function useTabStripController(): TabStripController {
     taskPinnedStates,
     pendingSetPinnedEpicIds,
     onSetTaskPinned,
+    onTaskPinMenuOpen,
     onNewTab,
     onHomeTab,
     onCloseGroup: closeTabFlow.closeGroup,

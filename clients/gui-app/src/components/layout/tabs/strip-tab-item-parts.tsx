@@ -1,3 +1,4 @@
+import { isPreservedOrphanEpic } from "./preserved-orphan-epic";
 import { useId, useState, type ReactElement, type ReactNode } from "react";
 import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -26,7 +27,25 @@ export function StripTabContextMenu(props: {
     // inside the trigger (outside that scope), the scope pulls focus back, the
     // input blurs, and `useInlineRename` blur-commits and unmounts it before a
     // keystroke lands. Un-trapped, the input keeps the focus it takes on mount.
-    <ContextMenu modal={false} onOpenChange={setOpen}>
+    <ContextMenu
+      modal={false}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (
+          !nextOpen ||
+          input.tab.kind !== "epic" ||
+          input.taskPinnedState?.pinnedKnown === true
+        )
+          return;
+        if (
+          (input.taskPinnedState?.home === "local" &&
+            input.taskPinnedState.hostId === null) ||
+          isPreservedOrphanEpic(input.tab.epicId)
+        )
+          return;
+        input.onTaskPinMenuOpen(input.tab.epicId);
+      }}
+    >
       <ContextMenuTrigger asChild>{props.children}</ContextMenuTrigger>
       <TabContextMenuContent
         tab={item.displayTab}
