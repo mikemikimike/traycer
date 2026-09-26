@@ -93,6 +93,10 @@ import {
 } from "../../spawn-edge";
 import { cliInstallHomeDir } from "../../../store/paths";
 import type { ServiceLabel } from "../../label";
+import type { ServiceController } from "../../index";
+import type { ShutdownClaimIntent } from "@traycer/protocol/host/lifecycle/schemas";
+import type { CooperativeShutdownOutcome } from "../desktop-agent-shutdown";
+import type { ForegroundHostRun } from "../../../host/foreground-host-run";
 
 // Mirrors the private `hiddenHostLauncherPath` in `windows.ts` exactly - not
 // exported, so the rollback pins below reconstruct it from the same
@@ -163,15 +167,47 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 const mocks = vi.hoisted(() => ({
   readHostPidMetadata: vi.fn(),
   removeHostPidMetadata: vi.fn(),
+  // The stop route's own liveness read behind `onHostAddressed`. Controllable
+  // (rather than a fixed inline stub) so the at-most-once report tests can
+  // stage a live record; every other fixture leaves the default in place.
+  readHostPidMetadataEvidence: vi.fn(),
+  // Read only when `readHostPidMetadataEvidence` answers `read` - the mock
+  // above defaults to `absent`, which never reaches it.
+  publishedHostProcessGone: vi.fn(),
+  // The guard's own ask, mocked whole-module: `askHostToStandDown` imports
+  // only this one export from `./desktop-agent-shutdown`.
+  requestCooperativeShutdownReporting: vi.fn(),
 }));
 
 vi.mock("../../../host/pid-metadata", () => ({
   readHostPidMetadata: mocks.readHostPidMetadata,
   removeHostPidMetadata: mocks.removeHostPidMetadata,
-  // The stop route's own liveness read behind `onHostAddressed`. No test here
-  // asserts the report; an absent record keeps every fixture's stop silent.
-  readHostPidMetadataEvidence: async () => ({ kind: "absent" as const }),
+  readHostPidMetadataEvidence: mocks.readHostPidMetadataEvidence,
+  publishedHostProcessGone: mocks.publishedHostProcessGone,
 }));
+
+vi.mock("../desktop-agent-shutdown", () => ({
+  requestCooperativeShutdownReporting:
+    mocks.requestCooperativeShutdownReporting,
+}));
+
+// Module-wide defaults for the two mocks above: every fixture's stop is
+// silent (no live record, so the ask is never reported and the guard's own
+// scan is what a test controls instead) unless it stages otherwise. A single
+// top-level `beforeEach` reaches every test in the file, nested describes
+// included, so no per-describe block has to repeat it.
+beforeEach(() => {
+  mocks.readHostPidMetadataEvidence.mockReset();
+  mocks.readHostPidMetadataEvidence.mockResolvedValue({
+    kind: "absent" as const,
+  });
+  mocks.publishedHostProcessGone.mockReset();
+  mocks.publishedHostProcessGone.mockReturnValue(false);
+  mocks.requestCooperativeShutdownReporting.mockReset();
+  mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+    kind: "no-metadata" as const,
+  });
+});
 
 // The real logger appends to the invoking user's actual ~/.traycer log file -
 // stub it so the failed-kill WARN gating pins stay hermetic and assertable,
@@ -827,7 +863,10 @@ describe("Windows service stale host cleanup", () => {
 
     await controller.stop(serviceLabelFor("staging"), { force: false });
 
-    expect(calls[0]).toMatchObject({
+    // The guard's own leading scan (`askHostToStandDown`) is a
+    // `powershell.exe` call before this - the first `schtasks` call is the
+    // sweep's `/End`, not `calls[0]`.
+    expect(calls.find((call) => call.command === "schtasks")).toMatchObject({
       command: "schtasks",
       args: ["/End", "/TN", "\\Traycer\\Host-Staging"],
     });
@@ -1028,7 +1067,11 @@ describe("killHostProcessTree convergence loop", () => {
       }
     | { readonly kind: "throw" };
 
-  function roundedRunner(responses: readonly RoundResponse[]): {
+  // Un-shifted: scan call 0 answers `responses[0]` directly. For the one
+  // caller in this describe that never reaches the guard
+  // (`killLingeringSlotProcesses`, called directly rather than through
+  // `controller.stop`/`uninstall`/`restart`).
+  function unguardedRoundedRunner(responses: readonly RoundResponse[]): {
     readonly runner: ProcessRunner;
     readonly calls: RecordedCall[];
   } {
@@ -1038,6 +1081,43 @@ describe("killHostProcessTree convergence loop", () => {
       calls.push({ command, args });
       if (isScanCall(command, args)) {
         const response = responses[scanCount] ?? { kind: "table", rows: [] };
+        scanCount += 1;
+        if (response.kind === "throw") throw new Error("spawn failed");
+        return success(tableJson(response.rows));
+      }
+      return success("");
+    };
+    return { runner, calls };
+  }
+
+  // Every `controller.stop`/`stopForRestart`/`restart`/`uninstall`
+  // (`leaveForegroundRun` null) call now issues the guard's own leading scan
+  // (`askHostToStandDown`/`scanSlotProcessTable`) before the sweep's round 0 -
+  // the identical PowerShell script, so a fixture cannot tell the two calls
+  // apart by their argv. Scan call 0 is always answered with an empty table
+  // here, absorbing that leading scan: an empty table names no ancestor of
+  // `process.pid` (`slotProcessIsAncestorOf`), so the guard always proceeds to
+  // the ask - separately mocked - and `responses[n]` keeps meaning exactly
+  // what it said before this guard existed: the SWEEP's round n. The guard's
+  // own outcome never changes what the sweep does next, so every fixture
+  // below is unaffected by it except for the one extra scan call this adds to
+  // `calls` - `scanCalls(calls)` counts one more than it used to.
+  function roundedRunner(responses: readonly RoundResponse[]): {
+    readonly runner: ProcessRunner;
+    readonly calls: RecordedCall[];
+  } {
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        const response =
+          scanCount === 0
+            ? { kind: "table" as const, rows: [] }
+            : (responses[scanCount - 1] ?? {
+                kind: "table" as const,
+                rows: [],
+              });
         scanCount += 1;
         if (response.kind === "throw") throw new Error("spawn failed");
         return success(tableJson(response.rows));
@@ -1074,7 +1154,7 @@ describe("killHostProcessTree convergence loop", () => {
     // symptom, so a regression here reports "403 was never killed" rather
     // than an arithmetic complaint about how many times we scanned.
     expect(killedPids(calls)).toEqual([401, 402, 403]);
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
 
     // Ablation (§C): in `killHostProcessTree`, change the loop bound from
     // `round <= WINDOWS_KILL_CONVERGENCE_ROUNDS` to `round <= 1` (a single
@@ -1090,11 +1170,20 @@ describe("killHostProcessTree convergence loop", () => {
     // not converging, and grinding on it forever is worse than refusing and
     // naming the survivors so an operator (or the swap's own EBUSY detail
     // scan) can act on them.
+    // Scan call 0 is the guard's own leading scan (`askHostToStandDown`,
+    // sharing the sweep's exact script): answered with an empty table so it
+    // never joins the never-converging sequence below, exactly like
+    // `roundedRunner`'s own leading response elsewhere in this describe.
     let scanCount = 0;
+    let sawGuardScan = false;
     const calls: RecordedCall[] = [];
     const runner: ProcessRunner = async (command, args) => {
       calls.push({ command, args });
       if (isScanCall(command, args)) {
+        if (!sawGuardScan) {
+          sawGuardScan = true;
+          return success(tableJson([]));
+        }
         const pid = 800 + scanCount;
         scanCount += 1;
         return success(
@@ -1115,7 +1204,7 @@ describe("killHostProcessTree convergence loop", () => {
       details: { survivingPids: [800 + WINDOWS_KILL_CONVERGENCE_ROUNDS] },
     });
 
-    expect(scanCalls(calls)).toHaveLength(WINDOWS_KILL_CONVERGENCE_ROUNDS + 1);
+    expect(scanCalls(calls)).toHaveLength(WINDOWS_KILL_CONVERGENCE_ROUNDS + 2);
     expect(killedPids(calls)).toEqual(
       Array.from(
         { length: WINDOWS_KILL_CONVERGENCE_ROUNDS },
@@ -1157,7 +1246,11 @@ describe("killHostProcessTree convergence loop", () => {
       details: { survivingPids: [900] },
     });
 
-    expect(scanCalls(calls)).toHaveLength(WINDOWS_KILL_CONVERGENCE_ROUNDS + 1);
+    // One more than the sweep's own ROUNDS + 1 (its round scans plus the
+    // final confirming one): the guard's leading scan
+    // (`askHostToStandDown`), which this stateless fixture answers with the
+    // same [900] table - harmless, since the guard never kills anything.
+    expect(scanCalls(calls)).toHaveLength(WINDOWS_KILL_CONVERGENCE_ROUNDS + 2);
     // The kill fired every round, not skipped just because it is the "same"
     // pid as last time - the loop has no way to know that without a scan
     // proving it, and a scan proving it IS what this test denies it.
@@ -1181,7 +1274,7 @@ describe("killHostProcessTree convergence loop", () => {
       controller.stop(serviceLabelFor("staging"), { force: false }),
     ).rejects.toMatchObject({ code: "E_SERVICE_CONTROL_FAILED" });
 
-    expect(scanCalls(calls)).toHaveLength(1);
+    expect(scanCalls(calls)).toHaveLength(2);
     expect(killRounds(calls)).toHaveLength(0);
     expect(mocks.readHostPidMetadata).not.toHaveBeenCalled();
 
@@ -1213,7 +1306,7 @@ describe("killHostProcessTree convergence loop", () => {
       controller.stop(serviceLabelFor("staging"), { force: false }),
     ).rejects.toMatchObject({ code: "E_SERVICE_CONTROL_FAILED" });
 
-    expect(scanCalls(calls)).toHaveLength(2);
+    expect(scanCalls(calls)).toHaveLength(3);
     // Round 0's kill still happened - the refusal is about round 1's scan,
     // not a reason to have skipped work already done.
     expect(killedPids(calls)).toEqual([901]);
@@ -1272,7 +1365,7 @@ describe("killHostProcessTree convergence loop", () => {
 
     await controller.stop(serviceLabelFor("staging"), { force: false });
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([555, 100, 555]);
 
     // Ablation (§ablation table): in `classifyCarryOverClaim`, replace the
@@ -1387,7 +1480,7 @@ describe("killHostProcessTree convergence loop", () => {
       }
     }
 
-    expect(scanCalls(calls)).toHaveLength(4);
+    expect(scanCalls(calls)).toHaveLength(5);
     expect(killedPids(calls)).toEqual([100, 555, 888]);
 
     // Ablation: in `killHostProcessTree`, keep only the latest round's
@@ -1462,7 +1555,7 @@ describe("killHostProcessTree convergence loop", () => {
 
     await controller.stop(serviceLabelFor("staging"), { force: false });
 
-    expect(scanCalls(calls)).toHaveLength(4);
+    expect(scanCalls(calls)).toHaveLength(5);
     expect(killedPids(calls)).toEqual([555, 100, 100, 555, 555]);
 
     // Ablation: in `rememberIncarnation`, replace the push with an overwrite
@@ -1572,6 +1665,14 @@ describe("killHostProcessTree convergence loop", () => {
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table, and
+          // deliberately WITHOUT touching the clock - the sample this test
+          // pins is the sweep's own `deps.now()`, taken before ITS round-0
+          // scan below, and the guard never calls `deps.now()` at all.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           const stdout = tableJson([
             { processId: 100, parentProcessId: 1, created: 1000, slot: true },
           ]);
@@ -1581,7 +1682,7 @@ describe("killHostProcessTree convergence loop", () => {
           clock = 5000;
           return success(stdout);
         }
-        if (scanCount === 2) {
+        if (scanCount === 3) {
           return success(
             tableJson([
               {
@@ -1842,7 +1943,7 @@ describe("killHostProcessTree convergence loop", () => {
       details: { unattributedPids: [888] },
     });
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([100, 200]);
 
     // Ablation (§ablation table): in `killHostProcessTree`, drop the
@@ -2024,7 +2125,7 @@ describe("killHostProcessTree convergence loop", () => {
 
     await controller.stop(serviceLabelFor("staging"), { force: false });
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([100, 200]);
   });
 
@@ -2135,7 +2236,7 @@ describe("killHostProcessTree convergence loop", () => {
       }
     }
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([100, 200]);
 
     // Ablation: in `killHostProcessTree`, record suspects from `unattributed`
@@ -2286,7 +2387,7 @@ describe("killHostProcessTree convergence loop", () => {
       }
     }
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([
       // R0: both slot rows have zeroed edges (depth 0), so pid order.
       100, 200,
@@ -2425,7 +2526,7 @@ describe("killHostProcessTree convergence loop", () => {
       }
     }
 
-    expect(scanCalls(calls)).toHaveLength(4);
+    expect(scanCalls(calls)).toHaveLength(5);
     expect(killedPids(calls)).toEqual([100, 888, 888]);
 
     // Ablation: in `killHostProcessTree`, drop the `protectedAncestors`
@@ -2514,7 +2615,7 @@ describe("killHostProcessTree convergence loop", () => {
       }
     }
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([100, 100]);
 
     // Ablation: in `computeWindowsHostKillSet`, drop `!cliBranch.has(pid)`
@@ -2641,7 +2742,7 @@ describe("killHostProcessTree convergence loop", () => {
       }
     }
 
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(killedPids(calls)).toEqual([100, 888]);
 
     // Ablation: in `killHostProcessTree`, drop the `priorProtected`
@@ -2733,7 +2834,12 @@ describe("killHostProcessTree convergence loop", () => {
       // resolved kill as "the slot was cleared, retry the rename". The hook's
       // own decision to log and retry anyway is its business; this function
       // has to hand it the truth.
-      const { runner } = roundedRunner(unattributedRefusalRounds());
+      //
+      // Unlike the three callers above, this one never reaches the guard -
+      // `killLingeringSlotProcesses` is called directly here, not through
+      // `controller.stop`/`uninstall`/`restart` - so its scans are exactly
+      // `unattributedRefusalRounds()`, unshifted.
+      const { runner } = unguardedRoundedRunner(unattributedRefusalRounds());
 
       await expect(
         killLingeringSlotProcesses(
@@ -2800,6 +2906,11 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           return success(
             tableJson([
               { processId: 501, parentProcessId: 1, created: 1000, slot: true },
@@ -2824,7 +2935,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     ).resolves.toBeUndefined();
 
     expect(killedPids(calls)).toEqual([501]);
-    expect(scanCalls(calls)).toHaveLength(2);
+    expect(scanCalls(calls)).toHaveLength(3);
     // Neither WARN fired for 501: not the immediate "unreached" one (the
     // `failed...` outcome is excluded from that filter now), and not the
     // scan-confirmed one (the next scan no longer lists 501 at all).
@@ -2851,13 +2962,18 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           return success(
             tableJson([
               { processId: 501, parentProcessId: 1, created: 1000, slot: true },
             ]),
           );
         }
-        if (scanCount === 2) {
+        if (scanCount === 3) {
           return success(
             tableJson([
               { processId: 501, parentProcessId: 1, created: 1000, slot: true },
@@ -2886,7 +3002,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     ).resolves.toBeUndefined();
 
     expect(killedPids(calls)).toEqual([501, 501]);
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
       "Windows host kill round left targets running after a failed kill",
@@ -2917,13 +3033,18 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           return success(
             tableJson([
               { processId: 501, parentProcessId: 1, created: 1000, slot: true },
             ]),
           );
         }
-        if (scanCount === 2) {
+        if (scanCount === 3) {
           return success(
             tableJson([
               { processId: 501, parentProcessId: 1, created: 2000, slot: true },
@@ -2946,7 +3067,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     ).resolves.toBeUndefined();
 
     expect(killedPids(calls)).toEqual([501, 501]);
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(loggerMock.warn).not.toHaveBeenCalled();
   });
 
@@ -2966,6 +3087,11 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           return success(
             tableJson([
               { processId: 501, parentProcessId: 1, created: 1000, slot: true },
@@ -2992,7 +3118,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       message: expect.stringContaining("could not enumerate"),
     });
 
-    expect(scanCalls(calls)).toHaveLength(2);
+    expect(scanCalls(calls)).toHaveLength(3);
     expect(killedPids(calls)).toEqual([501]);
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
@@ -3017,6 +3143,11 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           return success(
             tableJson([{ processId: 601, parentProcessId: 1, slot: true }]),
           );
@@ -3151,6 +3282,11 @@ describe("handle-bound kill script", () => {
       if (isScanCall(command, args)) {
         scanCount += 1;
         if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount === 2) {
           return success(
             tableJson([
               { processId: 100, parentProcessId: 1, created: 1000, slot: true },
@@ -3163,7 +3299,7 @@ describe("handle-bound kill script", () => {
             ]),
           );
         }
-        if (scanCount === 2) {
+        if (scanCount === 3) {
           return success(
             tableJson([
               { processId: 777, parentProcessId: 1, created: 5000, slot: true },
@@ -3187,7 +3323,7 @@ describe("handle-bound kill script", () => {
       // R1: the late spawn, in its own invocation.
       [{ processId: 777, created: 5000 }],
     ]);
-    expect(scanCalls(calls)).toHaveLength(3);
+    expect(scanCalls(calls)).toHaveLength(4);
     expect(calls.some((call) => call.command === "taskkill")).toBe(false);
 
     // Ablation: in `killHostProcessTree`, hand `killProcessIdentities` a
@@ -3203,8 +3339,11 @@ describe("handle-bound kill script", () => {
       calls.push({ command, args });
       if (isScanCall(command, args)) {
         scanCount += 1;
+        // Scan 1 is the guard's own leading scan (`askHostToStandDown`,
+        // sharing the sweep's exact script), always answered with an empty
+        // table; scan 2 is the sweep's round 0.
         return success(
-          scanCount === 1
+          scanCount === 2
             ? tableJson([{ processId: 100, parentProcessId: 1, slot: true }])
             : tableJson([]),
         );
@@ -3219,7 +3358,7 @@ describe("handle-bound kill script", () => {
     ).resolves.toBeUndefined();
 
     expect(killRounds(calls)).toHaveLength(1);
-    expect(scanCalls(calls)).toHaveLength(2);
+    expect(scanCalls(calls)).toHaveLength(3);
     expect(mocks.removeHostPidMetadata).toHaveBeenCalledWith("staging");
   });
 
@@ -3248,7 +3387,10 @@ describe("handle-bound kill script", () => {
     }
 
     expect(caught).toBe(authorityError);
-    expect(scanCalls(calls)).toHaveLength(1);
+    // One more than before: the guard's own leading scan
+    // (`askHostToStandDown`), which this stateless fixture answers with the
+    // same [100] table - harmless, since the guard never kills anything.
+    expect(scanCalls(calls)).toHaveLength(2);
     expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
   });
 
@@ -3275,8 +3417,9 @@ describe("handle-bound kill script", () => {
       600 - 2 * WINDOWS_KILL_TARGETS_PER_SCRIPT,
     ]);
     expect(killedPids(calls)).toEqual(rows.map((row) => row.processId));
-    // One round: a scan, the three scripts, the confirming scan.
-    expect(scanCalls(calls)).toHaveLength(2);
+    // The guard's own leading scan (`askHostToStandDown`), a scan, the three
+    // scripts, the confirming scan.
+    expect(scanCalls(calls)).toHaveLength(3);
   });
 
   it("a round that runs out of time issues no further script: the unsent targets are next round's, and the confirming scan still decides", async () => {
@@ -3318,8 +3461,9 @@ describe("handle-bound kill script", () => {
         WINDOWS_KILL_TARGETS_PER_SCRIPT,
         600 - 2 * WINDOWS_KILL_TARGETS_PER_SCRIPT,
       ]);
-      // Three rounds, each one script, plus the confirming scan.
-      expect(scanCalls(calls)).toHaveLength(4);
+      // The guard's own leading scan (`askHostToStandDown`), three rounds
+      // each one script, plus the confirming scan.
+      expect(scanCalls(calls)).toHaveLength(5);
       expect(live).toEqual([]);
     } finally {
       monotonic.mockRestore();
@@ -5709,7 +5853,12 @@ describe("Windows controller — spawn-edge placement", () => {
     expectPublishImmediatelyPrecedes(log, "/Run");
     const publishIndex = log.indexOf("publish");
     const preEdge = log.slice(0, publishIndex);
-    expect(preEdge[0]).toBe("/End");
+    // The guard's own leading scan (`askHostToStandDown`) is a
+    // `powershell.exe` call before this - its first logged entry is
+    // `-NoProfile`, not `/End` - so the first SCHTASKS sub-command is what
+    // pins the sweep's own `/End`.
+    const schtasksPreEdge = preEdge.filter((entry) => entry.startsWith("/"));
+    expect(schtasksPreEdge[0]).toBe("/End");
     // Every schtasks/powershell call the kill loop issues ran before publish
     // - none of it is on the grant's clock any more.
     expect(preEdge.every((entry) => entry !== "/Run")).toBe(true);
@@ -6102,5 +6251,465 @@ describe("killSupervisedHostTree", () => {
     expect(
       String(rejection instanceof Error ? rejection.message : ""),
     ).not.toContain("could not enumerate");
+  });
+});
+
+// F-WIN-STOP-COOP: every Windows stop that is not forced now asks the
+// running host to stand down (`askHostToStandDown`) before the sweep that
+// used to be the whole stop, so its graceful close - the terminal teardown
+// and the durable store close - runs before anything is killed. The guard in
+// front of that ask exists because the ask is NEVER safe from inside the
+// host's own process tree: a live managed shell does not make the host busy,
+// so a `host restart`/`host service uninstall` typed into an idle agent's
+// shell would be granted the claim, and the host's graceful close - which
+// kills every managed command's process group - would kill the CLI issuing
+// the ask before its `/Run`/`/Delete` ever ran. The guard reads the same slot
+// scan the sweep uses and skips the ask whenever a slot process sits above
+// `process.pid`, or whenever the scan that would prove it cannot run at all.
+describe("F-WIN-STOP-COOP: the cooperative-shutdown guard", () => {
+  beforeEach(() => {
+    mocks.readHostPidMetadata.mockReset();
+    mocks.readHostPidMetadata.mockResolvedValue(null);
+    mocks.removeHostPidMetadata.mockReset();
+    mocks.removeHostPidMetadata.mockResolvedValue(undefined);
+    setWindowsStartEvidenceDepsForTests({
+      captureBaseline: async () => emptySpawnBaseline(),
+      createEvidenceReader: () => ({ collect: async () => null }),
+      sleep: async () => undefined,
+      verifyTimeoutMs: 10,
+      verifyPollMs: 5,
+    });
+  });
+
+  afterEach(() => {
+    setWindowsStartEvidenceDepsForTests(null);
+  });
+
+  interface StandDownSite {
+    readonly name: string;
+    readonly operation: string;
+    readonly intent: ShutdownClaimIntent;
+    readonly invoke: (
+      controller: ServiceController,
+      label: ServiceLabel,
+    ) => Promise<void>;
+  }
+
+  // The four call sites `askHostToStandDown` sits in front of, and the
+  // (operation, intent) each one asks with.
+  const STAND_DOWN_SITES: readonly StandDownSite[] = [
+    {
+      name: "stop",
+      operation: "stop",
+      intent: "shutdown",
+      invoke: async (controller, label) => {
+        await controller.stop(label, { force: false });
+      },
+    },
+    {
+      name: "stopForRestart",
+      operation: "restart",
+      intent: "restart",
+      invoke: async (controller, label) => {
+        await controller.stopForRestart(label, { force: false });
+      },
+    },
+    {
+      name: "restart",
+      operation: "restart",
+      intent: "restart",
+      invoke: async (controller, label) => {
+        await controller.restart(label);
+      },
+    },
+    {
+      name: "uninstall",
+      operation: "uninstall",
+      intent: "shutdown",
+      invoke: async (controller, label) => {
+        await controller.uninstall({ label, leaveForegroundRun: null });
+      },
+    },
+  ];
+
+  // Both the fake runner and the ask mock push into ONE shared log, in the
+  // order they actually happen - the only way to prove the ask runs before
+  // the sweep's own `/End`, since both are otherwise invisible to each other.
+  function loggedRunner(rows: readonly TableRowInput[]): {
+    readonly runner: ProcessRunner;
+    readonly log: string[];
+  } {
+    const { runner } = convergingTableRunner(rows);
+    const log: string[] = [];
+    const wrapped: ProcessRunner = async (command, args, options) => {
+      if (command === "schtasks") log.push(args[0] ?? command);
+      return runner(command, args, options);
+    };
+    return { runner: wrapped, log };
+  }
+
+  it.each(STAND_DOWN_SITES)(
+    "$name asks the host to stand down exactly once, before /End, with (environment, operation, intent) and a null 4th arg",
+    async ({ operation, intent, invoke }) => {
+      const { runner, log } = loggedRunner([
+        { processId: 100, parentProcessId: 1, slot: true },
+      ]);
+      mocks.requestCooperativeShutdownReporting.mockImplementation(async () => {
+        log.push("ask");
+        return { kind: "no-metadata" as const };
+      });
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await invoke(controller, serviceLabelFor("staging")).catch(
+        () => undefined,
+      );
+
+      expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledWith(
+        "staging",
+        operation,
+        intent,
+        null,
+      );
+      const askIndex = log.indexOf("ask");
+      const endIndex = log.indexOf("/End");
+      expect(askIndex).toBeGreaterThanOrEqual(0);
+      expect(endIndex).toBeGreaterThan(askIndex);
+    },
+  );
+
+  it("stop's onHostAddressed reaches the ask as its 4th arg", async () => {
+    const { runner } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+      kind: "no-metadata" as const,
+    });
+    const controller = createWindowsController(runner, noTimingDeps);
+    const onHostAddressed = vi.fn();
+
+    await controller.stop(serviceLabelFor("staging"), {
+      force: false,
+      onHostAddressed,
+    });
+
+    expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledTimes(1);
+    const fourthArg =
+      mocks.requestCooperativeShutdownReporting.mock.calls[0]?.[3];
+    expect(typeof fourthArg).toBe("function");
+  });
+
+  interface ForcedSite {
+    readonly name: string;
+    readonly invoke: (
+      controller: ServiceController,
+      label: ServiceLabel,
+    ) => Promise<void>;
+  }
+
+  const FORCED_SITES: readonly ForcedSite[] = [
+    {
+      name: "stop",
+      invoke: async (controller, label) => {
+        await controller.stop(label, { force: true });
+      },
+    },
+    {
+      name: "stopForRestart",
+      invoke: async (controller, label) => {
+        await controller.stopForRestart(label, { force: true });
+      },
+    },
+  ];
+
+  it.each(FORCED_SITES)(
+    "$name with force never asks and never scans for the guard - the first call of all is /End",
+    async ({ invoke }) => {
+      const { runner, calls } = convergingTableRunner([
+        { processId: 100, parentProcessId: 1, slot: true },
+      ]);
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await invoke(controller, serviceLabelFor("staging"));
+
+      expect(mocks.requestCooperativeShutdownReporting).not.toHaveBeenCalled();
+      expect(calls[0]).toMatchObject({
+        command: "schtasks",
+        args: ["/End", "/TN", "\\Traycer\\Host-Staging"],
+      });
+    },
+  );
+
+  it("uninstall beside a foreground run never asks the host to stand down", async () => {
+    const { runner } = convergingTableRunner([]);
+    const controller = createWindowsController(runner, noTimingDeps);
+    const leaveForegroundRun: ForegroundHostRun = {
+      supervisorPid: 4242,
+      hostPid: 4243,
+    };
+
+    await controller.uninstall({
+      label: serviceLabelFor("staging"),
+      leaveForegroundRun,
+    });
+
+    expect(mocks.requestCooperativeShutdownReporting).not.toHaveBeenCalled();
+  });
+
+  // A table whose ancestry trips the guard for every site: `process.pid`
+  // (this test process's own pid) claims non-slot shell S (700) as its
+  // parent, and S claims slot-matched host H (100) as ITS parent - so H is a
+  // slot process sitting above `process.pid` over validated parent edges,
+  // exactly `slotProcessIsAncestorOf`'s guard condition. After H is killed,
+  // S's own edge to the now-dead H zeroes (a real scan can no longer vouch
+  // for it), but the CLI's edge to S stays live, so S is still found as the
+  // CLI's ancestor and stays spared.
+  function guardTrippedRunner(): {
+    readonly runner: ProcessRunner;
+    readonly calls: RecordedCall[];
+  } {
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const before: TableRowInput[] = [
+      {
+        processId: 100,
+        parentProcessId: 1,
+        claimedParentProcessId: 1,
+        created: 1000,
+        slot: true,
+      },
+      {
+        processId: 700,
+        parentProcessId: 100,
+        claimedParentProcessId: 100,
+        created: 2000,
+        slot: false,
+      },
+      {
+        processId: process.pid,
+        parentProcessId: 700,
+        claimedParentProcessId: 700,
+        created: 2500,
+        slot: false,
+      },
+    ];
+    const after: TableRowInput[] = [
+      {
+        processId: 700,
+        parentProcessId: 0,
+        claimedParentProcessId: 100,
+        created: 2000,
+        slot: false,
+      },
+      {
+        processId: process.pid,
+        parentProcessId: 700,
+        claimedParentProcessId: 700,
+        created: 2500,
+        slot: false,
+      },
+    ];
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        // Scan 1 is the guard's own read; scan 2 is the sweep's round 0 -
+        // both see the same, unkilled tree. Scan 3 is round 1's confirming
+        // scan, after H is dead.
+        return success(tableJson(scanCount <= 2 ? before : after));
+      }
+      return success("");
+    };
+    return { runner, calls };
+  }
+
+  it.each(STAND_DOWN_SITES)(
+    "$name: the guard is not asked when a slot process sits above process.pid, but the sweep still runs and kills only the slot host",
+    async ({ invoke }) => {
+      const { runner, calls } = guardTrippedRunner();
+      const controller = createWindowsController(runner, { now: () => 5000 });
+
+      await invoke(controller, serviceLabelFor("staging")).catch(
+        () => undefined,
+      );
+
+      expect(mocks.requestCooperativeShutdownReporting).not.toHaveBeenCalled();
+      expect(
+        calls.some(
+          (call) => call.command === "schtasks" && call.args[0] === "/End",
+        ),
+      ).toBe(true);
+      // H (100) killed; neither S (700) nor process.pid touched.
+      expect(killedPids(calls)).toEqual([100]);
+    },
+  );
+
+  it("stop refuses to ask when the guard's own scan cannot run, and still rejects the way an unreadable scan always has", async () => {
+    const runner: ProcessRunner = async (command) => {
+      if (command === "powershell.exe") throw new Error("spawn failed");
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).rejects.toMatchObject({ code: "E_SERVICE_CONTROL_FAILED" });
+
+    expect(mocks.requestCooperativeShutdownReporting).not.toHaveBeenCalled();
+    expect(mocks.removeHostPidMetadata).not.toHaveBeenCalled();
+  });
+
+  // The six `CooperativeShutdownOutcome` kinds (`desktop-agent-shutdown.ts`):
+  // whichever one the ask resolves, a plain stop treats it identically - the
+  // sweep is what actually confirms the slot is empty.
+  const OUTCOMES: readonly CooperativeShutdownOutcome[] = [
+    { kind: "stopped" },
+    { kind: "no-host" },
+    { kind: "no-metadata" },
+    { kind: "busy" },
+    { kind: "hung", pid: 4242 },
+    { kind: "unreachable", cause: "dial failed" },
+  ];
+
+  it.each(OUTCOMES)(
+    "outcome $kind: the stop still issues /End, sweeps, resolves, and purges pid metadata",
+    async (outcome) => {
+      mocks.requestCooperativeShutdownReporting.mockResolvedValue(outcome);
+      const { runner, calls } = convergingTableRunner([
+        { processId: 100, parentProcessId: 1, slot: true },
+      ]);
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        controller.stop(serviceLabelFor("staging"), { force: false }),
+      ).resolves.toBeUndefined();
+
+      // The ask genuinely ran and returned this outcome - not merely staged
+      // and never read.
+      expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(
+        calls.some(
+          (call) => call.command === "schtasks" && call.args[0] === "/End",
+        ),
+      ).toBe(true);
+      expect(killedPids(calls)).toEqual([100]);
+      expect(mocks.removeHostPidMetadata).toHaveBeenCalledWith("staging");
+    },
+  );
+  // Abbreviated the same way the rest of this file already does (see e.g.
+  // "kills exactly the scan-verified pids..." above) - the mock is untyped,
+  // so only the fields these tests read need to be present.
+  const LIVE_HOST_PID_METADATA = {
+    pid: 100,
+    hostId: "host-test",
+    version: "1.0.0",
+    websocketUrl: "ws://127.0.0.1:54321/rpc",
+    startedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("stop reports onHostAddressed exactly once when both the ask and the pre-sweep read find a live host", async () => {
+    const onHostAddressed = vi.fn();
+    mocks.requestCooperativeShutdownReporting.mockImplementation(
+      async (
+        _environment: string,
+        _operation: string,
+        _intent: string,
+        reported: (() => void) | null,
+      ) => {
+        reported?.();
+        return { kind: "stopped" as const };
+      },
+    );
+    mocks.readHostPidMetadataEvidence.mockResolvedValue({
+      kind: "read",
+      metadata: LIVE_HOST_PID_METADATA,
+    });
+    mocks.publishedHostProcessGone.mockReturnValue(false);
+    const { runner } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await controller.stop(serviceLabelFor("staging"), {
+      force: false,
+      onHostAddressed,
+    });
+
+    // The ask genuinely ran (its own read is the one that finds the live
+    // host here), and the callback fired exactly once despite two readers
+    // that could each have called it.
+    expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledTimes(1);
+    expect(onHostAddressed).toHaveBeenCalledTimes(1);
+  });
+
+  it("(control) stop reports onHostAddressed exactly once from the pre-sweep read alone, when the ask itself never invokes it", async () => {
+    const onHostAddressed = vi.fn();
+    mocks.requestCooperativeShutdownReporting.mockResolvedValue({
+      kind: "no-metadata" as const,
+    });
+    mocks.readHostPidMetadataEvidence.mockResolvedValue({
+      kind: "read",
+      metadata: LIVE_HOST_PID_METADATA,
+    });
+    mocks.publishedHostProcessGone.mockReturnValue(false);
+    const { runner } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await controller.stop(serviceLabelFor("staging"), {
+      force: false,
+      onHostAddressed,
+    });
+
+    // The ask genuinely ran and did NOT invoke the callback itself - the
+    // pre-sweep read is the only one that did.
+    expect(mocks.requestCooperativeShutdownReporting).toHaveBeenCalledTimes(1);
+    expect(onHostAddressed).toHaveBeenCalledTimes(1);
+  });
+
+  it("the default stays absent: a plain stop with no staged evidence never reports onHostAddressed", async () => {
+    const onHostAddressed = vi.fn();
+    const { runner } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await controller.stop(serviceLabelFor("staging"), {
+      force: false,
+      onHostAddressed,
+    });
+
+    expect(onHostAddressed).not.toHaveBeenCalled();
+  });
+
+  it("the guard's scan and the sweep's round-0 scan carry the identical -Command script text, both before the first kill in the same stop", async () => {
+    const { runner, calls } = convergingTableRunner([
+      { processId: 100, parentProcessId: 1, slot: true },
+    ]);
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await controller.stop(serviceLabelFor("staging"), { force: false });
+
+    const firstKillIndex = calls.findIndex((call) =>
+      isKillCall(call.command, call.args),
+    );
+    expect(firstKillIndex).toBeGreaterThan(-1);
+    // TWO scans precede the first kill: the guard's own read
+    // (`askHostToStandDown`) and the sweep's round-0 read - both of the
+    // still-unkilled tree, over the identical shared script. A stop with no
+    // guard has only ONE scan before its first kill (the sweep's round 0),
+    // so this count is what actually distinguishes the two calls from an
+    // ordinary pair of same-script rounds.
+    const scanScriptsBeforeFirstKill = calls
+      .slice(0, firstKillIndex)
+      .filter((call) => isScanCall(call.command, call.args))
+      .map((call) => call.args[3]);
+    expect(scanScriptsBeforeFirstKill).toHaveLength(2);
+    expect(scanScriptsBeforeFirstKill[0]).toBe(scanScriptsBeforeFirstKill[1]);
   });
 });

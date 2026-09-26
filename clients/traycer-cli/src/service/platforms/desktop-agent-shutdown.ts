@@ -31,6 +31,11 @@ import type { Environment } from "../../runner/environment";
 // (a busy host denies the claim) and mutates no registration the CLI does
 // not own. This is what turns "Traycer Desktop owns host registration" from
 // a refusal into a routing decision.
+//
+// Windows asks through the same claim before every stop that is not forced
+// (`askHostToStandDown` in `windows.ts`): there is no signal a Windows stop
+// could send instead, so the claim is the only way its host's graceful close
+// runs at all.
 
 export type CooperativeShutdownOutcome =
   // Claim granted, commit acknowledged, and the pid was observed to exit.

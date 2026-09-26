@@ -19,6 +19,8 @@ import {
 } from "../spawn-edge";
 import { WINDOWS_SCHTASKS_CREATE_TIMEOUT_MS } from "../spawn-edge-bounds";
 import { createCliLogger } from "../../logger";
+import { requestCooperativeShutdownReporting } from "./desktop-agent-shutdown";
+import type { ShutdownClaimIntent } from "@traycer/protocol/host/lifecycle/schemas";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -136,17 +138,25 @@ export function createWindowsController(
     uninstall: (options) => uninstallService(options, run, deps),
     status: (label) => statusService(label),
     stop: (label, options) =>
-      stopService(label, run, deps, options.onHostAddressed ?? null),
+      stopService(label, run, deps, {
+        force: options.force,
+        standDown: { intent: "shutdown", operation: "stop" },
+        onHostAddressed: options.onHostAddressed ?? null,
+      }),
     start: (label) => startService(label, run),
     restart: (label) => restartService(label, run, deps),
     hostStartAdoptionLabel: (label) => Promise.resolve(label.id),
     // No Desktop/SMAppService split on Windows, so the restart halves are the
     // stop and start `host restart` already performed - the named seam exists
     // so the command has one shape on every platform. `forcedRecycle` is
-    // never set: `stopService` kills the tree and waits, so nothing survives
-    // to need a recycle.
-    stopForRestart: async (label) => {
-      await stopService(label, run, deps, null);
+    // never set: `stopService` ends with the sweep, which kills the tree and
+    // waits, so nothing survives to need a recycle.
+    stopForRestart: async (label, options) => {
+      await stopService(label, run, deps, {
+        force: options.force,
+        standDown: { intent: "restart", operation: "restart" },
+        onHostAddressed: null,
+      });
       return { forcedRecycle: false };
     },
     relaunchAfterRestart: (label) =>
@@ -478,6 +488,16 @@ async function uninstallService(
   deps: WindowsControllerDeps,
 ): Promise<void> {
   const taskName = windowsTaskName(options.label);
+  // Asked first, as a stop is (`askHostToStandDown`), and never beside a host
+  // started in a terminal: that host is not the service's to stop.
+  if (options.leaveForegroundRun === null) {
+    await askHostToStandDown(
+      options.label,
+      run,
+      { intent: "shutdown", operation: "uninstall" },
+      null,
+    );
+  }
   // Ends only the task's own instance, which a supervisor started in a
   // terminal never is.
   await run("schtasks", ["/End", "/TN", taskName], {
@@ -534,7 +554,7 @@ async function uninstallService(
   ).catch((cause) => {
     if (isServiceMutationAuthorityError(cause)) throw cause;
   });
-  // Same rationale as stopService: the force-kill above skips the host's
+  // Same rationale as stopService: a host the sweep killed skips its
   // graceful pid.json cleanup, and metadata surviving an uninstall reads as
   // a crashed (rather than removed) host to anything that finds it later.
   // Beside a host started in a terminal nothing was killed, and `pid.json`
@@ -589,18 +609,131 @@ async function statusService(label: ServiceLabel): Promise<ServiceStatus> {
   return { state: "stopped", version: null, listenUrl: null, pid: null };
 }
 
+/** What a Windows stop that is not forced asks the running host first. */
+interface WindowsStandDownRequest {
+  /**
+   * What the host is told happens after it exits: `restart` publishes the
+   * restart tombstone to every attached client, so the bounce does not read as
+   * a death (`requestCooperativeShutdown`).
+   */
+  readonly intent: ShutdownClaimIntent;
+  /** A diagnostic label only, carried in the claim's `transitionId`. */
+  readonly operation: "stop" | "restart" | "uninstall";
+}
+
+interface WindowsHostStop {
+  /** `--force`: no ask and no scan for one, only the sweep. */
+  readonly force: boolean;
+  readonly standDown: WindowsStandDownRequest;
+  /**
+   * See `StopServiceOptions.onHostAddressed`: reported at most once, from the
+   * first of this route's own reads that finds the live host - the ask's, or
+   * the one in front of the sweep.
+   */
+  readonly onHostAddressed: (() => void) | null;
+}
+
 async function stopService(
   label: ServiceLabel,
   run: ProcessRunner,
   deps: WindowsControllerDeps,
-  // See `StopServiceOptions.onHostAddressed`: reported from this route's own
-  // read of the record, immediately before the task is ended.
-  onHostAddressed: (() => void) | null,
+  stop: WindowsHostStop,
 ): Promise<void> {
+  const reportAddressed = onceOnly(stop.onHostAddressed);
+  if (!stop.force) {
+    await askHostToStandDown(label, run, stop.standDown, reportAddressed);
+  }
   const before = await readHostPidMetadataEvidence(label.environment);
   if (before.kind === "read" && !publishedHostProcessGone(before.metadata)) {
-    onHostAddressed?.();
+    reportAddressed?.();
   }
+  await endTaskAndSweepTree(label, run, deps);
+  // The sweep proved the slot empty, so a record still here is one the host
+  // did not remove itself. A killed host never honors its "remove pid.json on
+  // graceful shutdown" contract, and metadata left behind makes this
+  // deliberate stop indistinguishable from a crash - the desktop's health
+  // watchdog would resurrect the host the user just stopped. After a host
+  // that stood down, the record is already gone and this removes nothing.
+  await verifyServiceMutationAuthority();
+  await removeHostPidMetadata(label.environment);
+}
+
+/**
+ * The cooperative half of every Windows stop that is not forced: ask the
+ * running host to stand down through its own lifecycle claim, so its graceful
+ * close - the terminal teardown and the durable store close - runs before
+ * anything is killed. Without it every Windows stop was a kill, and a killed
+ * host interrupts whatever its stores were writing.
+ *
+ * Every outcome goes on to the sweep (`endTaskAndSweepTree`); what differs is
+ * what the sweep finds. After `stopped`, `no-host` or `no-metadata` it
+ * confirms an empty slot, or ends a supervisor already on its way out. After
+ * `busy`, `unreachable` or `hung` it is the kill it always was. `busy` is not
+ * refused here the way the Desktop-managed macOS stop refuses it: a plain
+ * Windows stop has always ended a busy host, and `--if-idle`, the one caller
+ * that must not, refuses a busy host before it gets here.
+ *
+ * NEVER ASKED FROM INSIDE THE HOST'S OWN TREE. A granted claim runs the host's
+ * graceful close, and that close kills the process group of every running
+ * managed command, while a live managed shell does not make the host busy, so
+ * nothing denies the claim. A `host restart` or `host service uninstall` typed
+ * into an idle agent's shell would be killed by the stop it asked for, before
+ * its `/Run` or `/Delete`. The supervisor then exits 77 (restart owed), and on
+ * Windows nothing relaunches on that: Task Scheduler's `RestartOnFailure`
+ * covers a failed launch, not a non-zero exit, and the launcher re-runs only
+ * on 75. So the host would stay down, or its task stay registered. POSIX
+ * survives the same death only because launchd and systemd relaunch on 77. The
+ * sweep spares this CLI's own branch (`computeWindowsHostKillSet`), so a CLI
+ * with any slot process above it keeps exactly the stop it had before this
+ * ask existed. That includes the update reconciler's detached `host update`,
+ * which a cooperative close would not kill: the table cannot tell it from a
+ * shell, and the uniform answer is the one that regresses no caller. The check
+ * reads the same table the sweep reads. A scan that cannot run asks nothing,
+ * and the sweep's own scan then fails as it always did.
+ */
+async function askHostToStandDown(
+  label: ServiceLabel,
+  run: ProcessRunner,
+  request: WindowsStandDownRequest,
+  onHostAddressed: (() => void) | null,
+): Promise<void> {
+  const logger = createCliLogger(label.environment);
+  const table = await scanSlotProcessTable(label, run);
+  if (table === null) {
+    logger.info(
+      "Not asking the host to stand down: the process table could not be read; ending its task instead",
+      { operation: request.operation },
+    );
+    return;
+  }
+  if (slotProcessIsAncestorOf(table, process.pid)) {
+    logger.info(
+      "Not asking the host to stand down: this command runs inside the host's own process tree, which its close would end; ending its task instead",
+      { operation: request.operation },
+    );
+    return;
+  }
+  const outcome = await requestCooperativeShutdownReporting(
+    label.environment,
+    request.operation,
+    request.intent,
+    onHostAddressed,
+  );
+  logger.info("Asked the host to stand down before ending its task", {
+    operation: request.operation,
+    intent: request.intent,
+    outcome: outcome.kind,
+  });
+}
+
+// The sweep every stop ends with, asked or forced: end the task's own
+// instance, then kill whatever the slot still holds, until a scan proves it
+// empty (`killVerifiedProcessTree`).
+async function endTaskAndSweepTree(
+  label: ServiceLabel,
+  run: ProcessRunner,
+  deps: WindowsControllerDeps,
+): Promise<void> {
   await run("schtasks", ["/End", "/TN", windowsTaskName(label)], {
     env: undefined,
     cwd: undefined,
@@ -608,12 +741,34 @@ async function stopService(
     tolerateNonZeroExit: true,
   });
   await killVerifiedProcessTree(label, run, deps, callerOnlyKillScope());
-  // The force-kill above never lets the host honor its "remove pid.json on
-  // graceful shutdown" contract, and metadata left behind makes this
-  // deliberate stop indistinguishable from a crash - the desktop's health
-  // watchdog would resurrect the host the user just stopped.
-  await verifyServiceMutationAuthority();
-  await removeHostPidMetadata(label.environment);
+}
+
+/**
+ * Whether any slot process - the host, its supervisor, anything the slot
+ * match names - sits above `pid`, over the scan's validated parent edges only
+ * (`ancestorsOf` stops at an edge the scan could not vouch for).
+ */
+function slotProcessIsAncestorOf(
+  table: readonly WindowsProcessTableRow[],
+  pid: number,
+): boolean {
+  const parents = new Map<number, number>();
+  const slot = new Set<number>();
+  for (const row of table) {
+    parents.set(row.processId, row.parentProcessId);
+    if (row.slot) slot.add(row.processId);
+  }
+  return ancestorsOf(pid, parents).some((ancestor) => slot.has(ancestor));
+}
+
+function onceOnly(callback: (() => void) | null): (() => void) | null {
+  if (callback === null) return null;
+  let fired = false;
+  return () => {
+    if (fired) return;
+    fired = true;
+    callback();
+  };
 }
 
 // `schtasks /End` terminates the task's root process but can leave the host's
@@ -1564,16 +1719,17 @@ async function restartService(
   run: ProcessRunner,
   deps: WindowsControllerDeps,
 ): Promise<void> {
-  const taskName = windowsTaskName(label);
-  await run("schtasks", ["/End", "/TN", taskName], {
-    env: undefined,
-    cwd: undefined,
-    timeoutMs: WINDOWS_SCHTASKS_END_TIMEOUT_MS,
-    tolerateNonZeroExit: true,
-  });
-  // Reap the orphaned host tree before re-running, otherwise the old node keeps
-  // its port + install dir and the fresh task races a stale host.
-  await killVerifiedProcessTree(label, run, deps, callerOnlyKillScope());
+  // Asked first, as a stop is (`askHostToStandDown`); `restart` has the host
+  // publish its restart tombstone. The sweep then reaps the orphaned host tree
+  // before re-running, otherwise the old node keeps its port + install dir and
+  // the fresh task races a stale host.
+  await askHostToStandDown(
+    label,
+    run,
+    { intent: "restart", operation: "restart" },
+    null,
+  );
+  await endTaskAndSweepTree(label, run, deps);
   // Restart reuses the verified start path (baseline + post-/Run evidence)
   // so a stop-then-start that the scheduler accepts but never spawns fails
   // with Last Run Result instead of a silent no-op.
