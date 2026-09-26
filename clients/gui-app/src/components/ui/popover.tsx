@@ -116,6 +116,8 @@ function PopoverContent({
         data-slot="popover-positioner"
         className="group/popover-positioner z-50"
         positionMethod="fixed"
+        // Keep the requested edge of wide anchors when viewport padding collides.
+        collisionAvoidance={{ align: "shift" }}
         data-overlay-concealed={focus.concealed || undefined}
         anchor={anchor}
         side={side}
