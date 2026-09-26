@@ -157,6 +157,14 @@ interface EpicParkingEntry {
    * something the registry already announces.
    */
   unwatchEligibility: (() => void) | null;
+  /**
+   * Whether {@link unwatchEligibility} was installed by the app-suspend
+   * release ({@link parkUnwatchedEpicsNow}) rather than by a window that
+   * elapsed. That watch stands in for a window the release cancelled, so it
+   * belongs to the background episode and is dropped on the way back
+   * ({@link rearmParkWindowsAfterAppResume}).
+   */
+  eligibilityWatchFromSuspend: boolean;
   parked: boolean;
 }
 
@@ -214,6 +222,7 @@ function cancelParkWindow(entry: EpicParkingEntry): void {
 function stopWatchingEligibility(entry: EpicParkingEntry): void {
   entry.unwatchEligibility?.();
   entry.unwatchEligibility = null;
+  entry.eligibilityWatchFromSuspend = false;
 }
 
 function scheduleParkCheck(
@@ -276,9 +285,14 @@ function parkWindowElapsed(epicId: string, entry: EpicParkingEntry): void {
  * park is still unwinding.
  */
 function attemptPark(epicId: string, entry: EpicParkingEntry): void {
+  // A refusal re-installs the watch it replaces, and whose it was comes with
+  // it: a suspend watch retried while the agent is still working is still the
+  // background's to drop.
+  const watchFromSuspend = entry.eligibilityWatchFromSuspend;
   stopWatchingEligibility(entry);
   if (!getOpenEpicRegistry().park(epicId)) {
     waitForEligibility(epicId, entry);
+    entry.eligibilityWatchFromSuspend = watchFromSuspend;
     return;
   }
   entry.hiddenSinceMs = null;
@@ -377,10 +391,12 @@ function retryDeferredEpicParksOnce(): void {
  * Only the WINDOW is skipped. Eligibility is still `attemptPark`'s, so an epic
  * with unsynced edits, an agent working, or a draft the release would unmount
  * is refused exactly as it is when the window elapses, and waits on the same
- * eligibility watch to be parked once that settles.
+ * eligibility watch to be parked once that settles - for as long as the
+ * background lasts. The watch is marked as the release's, and the resume
+ * swaps it back for a window ({@link rearmParkWindowsAfterAppResume}).
  *
  * "In a front pane" deliberately ignores the document gate
- * {@link isEpicVisibleAnywhere} applies. The caller runs as the app is sent to
+ * {@link isEpicVisibleAnywhere} applies. The caller runs while the app is in
  * the background, when the document is hidden and that gate would claim no
  * epic is on screen; the epic the user was looking at stays live so coming
  * back to it is instant, and its own window still arms from the hidden edge.
@@ -392,11 +408,44 @@ export function parkUnwatchedEpicsNow(): number {
     if (isEpicSurfaceVisible(epicId) || isEpicVisibleInAnotherWindow(epicId)) {
       continue;
     }
+    // A watch already installed is a window that elapsed before the
+    // background and was refused: it stays that window's, and survives the
+    // resume.
+    const alreadyWaiting = entry.unwatchEligibility !== null;
     cancelParkWindow(entry);
     attemptPark(epicId, entry);
-    if (isEpicParked(epicId)) parked += 1;
+    if (isEpicParked(epicId)) {
+      parked += 1;
+      continue;
+    }
+    if (!alreadyWaiting) entry.eligibilityWatchFromSuspend = true;
   }
   return parked;
+}
+
+/**
+ * Undo what {@link parkUnwatchedEpicsNow} left pending, as the app returns to
+ * the foreground: every eligibility watch it installed is dropped, and the
+ * epic gets a fresh park window measured from now.
+ *
+ * The release's watch only makes sense in the background it was installed
+ * for. Left in place past the resume, it would park the epic the instant its
+ * agent's turn ended or its edits synced - in the foreground, however briefly
+ * the epic had been hidden, which is exactly when the user is likely to open
+ * it. Back in the foreground the clocks run again, so the epic is owed the
+ * same window any other hidden epic gets.
+ *
+ * An epic on screen again is left alone: its visibility edge has already
+ * cleared the watch and unparked it.
+ */
+export function rearmParkWindowsAfterAppResume(): void {
+  for (const [epicId, entry] of Array.from(entries)) {
+    if (!entry.eligibilityWatchFromSuspend) continue;
+    stopWatchingEligibility(entry);
+    if (entry.parked) continue;
+    if (isEpicVisibleAnywhere(epicId)) continue;
+    armParkWindow(epicId, entry);
+  }
 }
 
 /**
@@ -473,6 +522,7 @@ export function syncEpicParkingOpenTabs(open: ReadonlySet<string>): void {
       hiddenSinceMs: null,
       timer: null,
       unwatchEligibility: null,
+      eligibilityWatchFromSuspend: false,
       parked: false,
     };
     entries.set(epicId, entry);

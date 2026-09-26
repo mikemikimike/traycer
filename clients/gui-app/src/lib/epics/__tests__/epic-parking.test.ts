@@ -3,6 +3,7 @@ import {
   __resetEpicParkingForTests,
   isEpicParked,
   parkUnwatchedEpicsNow,
+  rearmParkWindowsAfterAppResume,
 } from "@/lib/epics/epic-parking";
 import { __syncEpicParkingOpenTabsForTests } from "@/lib/epics/epic-parking-open-tabs";
 import { setEpicSurfaceVisibility } from "@/lib/browser-view/tiles/surface-host-opened-tab";
@@ -4862,6 +4863,96 @@ describe("epic-parking - parkUnwatchedEpicsNow (app suspend)", () => {
       expect(parkUnwatchedEpicsNow()).toBe(0);
       expect(isEpicParked(EPIC)).toBe(false);
       expect(busy.disposed).toBe(false);
+    } finally {
+      closeEpicTab(TAB);
+    }
+  });
+
+  // The watch a refused suspend park installs belongs to the background. Kept
+  // past the resume, it parks the epic the instant its agent's turn ends - in
+  // the foreground, just as the user is likely to open it.
+  it("drops a refused park's watch on resume, and parks only when a fresh window elapses", () => {
+    const EPIC = "epic-suspend-resume-busy";
+    const TAB = "tab-suspend-resume-busy";
+    const busy = buildParkableEpicHandle(EPIC, false);
+    __getOpenEpicRegistryForTests().acquireMounted(EPIC, () => busy.handle);
+    markAgentWorking(EPIC, "agent-1");
+    openEpicTab(TAB, EPIC);
+    try {
+      setEpicSurfaceVisibility(EPIC, "view-suspend-resume-busy", false);
+      setDocumentVisibilityState("hidden");
+      expect(parkUnwatchedEpicsNow()).toBe(0);
+
+      vi.advanceTimersByTime(60_000);
+      setDocumentVisibilityState("visible");
+      rearmParkWindowsAfterAppResume();
+
+      // The turn ends in the foreground: no park.
+      publishAgentActivity([]);
+      expect(isEpicParked(EPIC)).toBe(false);
+      expect(busy.disposed).toBe(false);
+
+      // The window runs from the resume, not from the pause.
+      vi.advanceTimersByTime(PARK_HIDDEN_EPIC_AFTER_MS - 1);
+      expect(isEpicParked(EPIC)).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(isEpicParked(EPIC)).toBe(true);
+      expect(busy.disposed).toBe(true);
+    } finally {
+      closeEpicTab(TAB);
+    }
+  });
+
+  it("keeps the watch the resume drops when a retry in the background is refused again", () => {
+    const EPIC = "epic-suspend-resume-retried";
+    const TAB = "tab-suspend-resume-retried";
+    const busy = buildParkableEpicHandle(EPIC, true);
+    __getOpenEpicRegistryForTests().acquireMounted(EPIC, () => busy.handle);
+    markAgentWorking(EPIC, "agent-1");
+    openEpicTab(TAB, EPIC);
+    try {
+      setEpicSurfaceVisibility(EPIC, "view-suspend-resume-retried", false);
+      expect(parkUnwatchedEpicsNow()).toBe(0);
+
+      // Still in the background: the edits sync, the watch retries, and the
+      // working agent refuses it again.
+      busy.handle.store.setState({
+        ...busy.handle.store.getState(),
+        isDirty: false,
+      });
+      expect(isEpicParked(EPIC)).toBe(false);
+
+      rearmParkWindowsAfterAppResume();
+      publishAgentActivity([]);
+
+      expect(isEpicParked(EPIC)).toBe(false);
+      expect(busy.disposed).toBe(false);
+      // No document edge re-armed it here: the resume's own window does.
+      vi.advanceTimersByTime(PARK_HIDDEN_EPIC_AFTER_MS);
+      expect(isEpicParked(EPIC)).toBe(true);
+    } finally {
+      closeEpicTab(TAB);
+    }
+  });
+
+  it("leaves a watch from a window that elapsed before the background in place", () => {
+    const EPIC = "epic-suspend-resume-elapsed";
+    const TAB = "tab-suspend-resume-elapsed";
+    const busy = buildParkableEpicHandle(EPIC, false);
+    __getOpenEpicRegistryForTests().acquireMounted(EPIC, () => busy.handle);
+    markAgentWorking(EPIC, "agent-1");
+    openEpicTab(TAB, EPIC);
+    try {
+      setEpicSurfaceVisibility(EPIC, "view-suspend-resume-elapsed", false);
+      vi.advanceTimersByTime(PARK_HIDDEN_EPIC_AFTER_MS);
+      expect(parkUnwatchedEpicsNow()).toBe(0);
+
+      rearmParkWindowsAfterAppResume();
+      publishAgentActivity([]);
+
+      // That window was already owed a park; the background did not change it.
+      expect(isEpicParked(EPIC)).toBe(true);
+      expect(busy.disposed).toBe(true);
     } finally {
       closeEpicTab(TAB);
     }
