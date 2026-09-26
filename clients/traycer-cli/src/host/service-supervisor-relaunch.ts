@@ -65,6 +65,15 @@ export const SUPERVISOR_RELAUNCH_BOOT_ALLOWANCE_MS = 30_000;
 export const SUPERVISOR_RELAUNCH_WAIT_MS =
   Math.max(...RELAUNCH_BACKOFF_MS) + SUPERVISOR_RELAUNCH_BOOT_ALLOWANCE_MS;
 
+/**
+ * Most waits for a supervisor one call makes: the supervisor it found, and
+ * at most one successor the service manager brings up after it exits (or,
+ * for a supervisor whose relaunch is refused, the one wait its busy exit can
+ * outlast). A third means supervisors keep coming and going without a host,
+ * which is a failure to report, not to wait out.
+ */
+export const MAX_SUPERVISOR_RELAUNCH_WAITS = 2;
+
 export type SupervisorRelaunchWait =
   /** A live host answers its recorded endpoint. */
   | { readonly kind: "host-ready" }

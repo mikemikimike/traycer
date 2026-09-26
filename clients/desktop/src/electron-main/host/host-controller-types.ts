@@ -23,6 +23,24 @@ export type MutationKind =
   | "stopHost"
   | "refreshService";
 
+/**
+ * The lane jobs that can leave a local host running where none ran: every
+ * converge, apply, activation, install, service registration and restart.
+ * Each reaches the lane through `HostController.enqueueHostStart`, which
+ * refuses it while the host lifecycle suspends host starts.
+ */
+export type HostStartMutationKind = Extract<
+  MutationKind,
+  | "ensure"
+  | "apply"
+  | "activate"
+  | "install"
+  | "register"
+  | "respawn"
+  | "recoverIfDown"
+  | "freePortAndRestart"
+>;
+
 export interface MutationProgress {
   readonly stage: string | null;
   readonly percent: number | null;
@@ -136,6 +154,14 @@ export interface HostControllerStatus {
   readonly reachable: boolean;
   readonly removedByUser: boolean;
   readonly checkedAt: string;
+  /** See the shared declaration: the last failed ensure, until one is `ok` or the host is reachable. */
+  readonly lastEnsureFailure: HostEnsureFailure | null;
+}
+
+/** Mirror of `@traycer-clients/shared`'s `HostEnsureFailure` - see there. */
+export interface HostEnsureFailure {
+  readonly message: string;
+  readonly code: string | null;
 }
 
 // ---- Continuations ----------------------------------------------------
@@ -153,17 +179,29 @@ export type BusyContinuation = "retry-with-force" | "activate";
 // one definition rather than risk wording drift.
 export const HOST_REMOVED_BY_USER_MESSAGE = "Host was removed by the user.";
 
-// Emitted verbatim by an automatic intent the host lifecycle suspended (see
-// `HostController.quiesce` / `holdAutomaticIntents`). Two messages because the
-// automatic callers must tell the two apart and nothing else crosses
-// `IpcHostController`: a QUIESCED process committed `none` and starts no local
-// host again until it restarts, so a caller that retries retires instead; a
-// HELD one is inside a stop that may still be refused or cancelled, so it
-// retries on its own pacing. Neither is a failure to report.
+// Emitted verbatim by a host start the host lifecycle suspended (see
+// `HostController.quiesce` / `holdAutomaticIntents`) - an automatic one, or a
+// person's Restart, Install or Update, which shows the text as it is. Two
+// messages because the automatic callers must tell the two apart and nothing
+// else crosses `IpcHostController`: a QUIESCED process committed `none` and
+// starts no local host again until it restarts, so a caller that retries
+// retires instead; a HELD one is inside a stop that may still be refused or
+// cancelled, so it retries on its own pacing. Neither is a failure to report.
 export const AUTOMATIC_INTENTS_QUIESCED_MESSAGE =
   "This app no longer starts a local host. Restart Traycer to apply the host lifecycle setting.";
 export const AUTOMATIC_INTENTS_HELD_MESSAGE =
-  "Automatic host starts are paused while the host is being stopped.";
+  "Host starts are paused while the host is being stopped.";
+
+// Emitted verbatim by every lane job the CLI refused with
+// `E_HOST_NOT_SERVICE_RUN`: the running host is a person's `traycer host
+// start` in a terminal, and this app neither stops, restarts nor updates over
+// it (the CLI refuses those under desktop origin before touching anything).
+// A deferral, not a failure: nothing is wrong, and nothing here can change it -
+// `--force` is refused the same way, so no surface offers one. The health
+// monitor's recovery (`respawnIfDown`) matches on it to leave that run alone
+// until it is gone, and a surface shows it as it is.
+export const HOST_NOT_SERVICE_RUN_MESSAGE =
+  "A host you started in a terminal is running, and Traycer leaves it alone. Stop it there to continue.";
 
 // Who asked for a local-host mutation. Three methods take it -
 // `convergeReady`, `registerService` and `freePortAndRestart` - and they use
@@ -410,6 +448,13 @@ export interface ServiceDefinitionRefreshOk {
   readonly result: "not-registered" | "current" | "refreshed";
   readonly appliesAt: "next-start" | "next-login" | null;
 }
+
+/**
+ * Whether `HostController.spawnServiceDefinitionRefresh` got its detached
+ * child running. `spawned` promises nothing about the refresh itself: the
+ * child may finish after the app is gone.
+ */
+export type ServiceDefinitionRefreshSpawn = "spawned" | "failed";
 
 export interface UninstallOk {
   readonly removedInstallDir: boolean;

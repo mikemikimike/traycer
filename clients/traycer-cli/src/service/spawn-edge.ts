@@ -130,8 +130,47 @@ function describeRefusal(cause: unknown): string {
 
 /** What the lease-publishing facades hand back from their publisher. */
 export interface ServiceSpawnEdgeLease {
+  /**
+   * Resolves once the launched supervisor acknowledged the grant; rejects with
+   * {@link SpawnAcknowledgementTimeoutError} when none did in time.
+   */
   waitForSpawn(): Promise<void>;
   cancel(): Promise<void>;
+}
+
+/**
+ * No supervisor acknowledged a published grant in time. Its own class so the
+ * start paths that may try again (`isUnacknowledgedSpawn`, read by
+ * `startRetryingUnacknowledged` in `host/update-mutation.ts`) can tell it
+ * from every other start failure.
+ */
+export class SpawnAcknowledgementTimeoutError extends Error {
+  constructor() {
+    super("host-start supervisor did not acknowledge its spawn");
+    this.name = "SpawnAcknowledgementTimeoutError";
+  }
+}
+
+/**
+ * Post-registration failures whose lease then waited the ack out in vain
+ * (see the catch in {@link runWithLeaseAtServiceSpawnEdge}). Identity-keyed,
+ * like the refusals above, so the error itself propagates unchanged.
+ */
+const unacknowledgedSpawns = new WeakSet<object>();
+
+/**
+ * Whether `error` ended a call whose published grant no supervisor
+ * acknowledged: the ack wait's own timeout, or a failure after the service
+ * manager accepted the call - the Windows `/Run` whose spawn evidence never
+ * came - whose lease then waited the ack out without one.
+ */
+export function isUnacknowledgedSpawn(error: unknown): boolean {
+  if (error instanceof SpawnAcknowledgementTimeoutError) return true;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    unacknowledgedSpawns.has(error)
+  );
 }
 
 /**
@@ -199,7 +238,15 @@ export async function runWithLeaseAtServiceSpawnEdge(
     // lease, then surface the record error unchanged (a failed wait must not
     // replace it - see the cleanup rule below).
     if (didServiceRegistrationCommit(error)) {
-      await held.lease?.waitForSpawn().catch(() => undefined);
+      await held.lease?.waitForSpawn().catch((waited: unknown) => {
+        if (
+          waited instanceof SpawnAcknowledgementTimeoutError &&
+          typeof error === "object" &&
+          error !== null
+        ) {
+          unacknowledgedSpawns.add(error);
+        }
+      });
     }
     throw error;
   } finally {

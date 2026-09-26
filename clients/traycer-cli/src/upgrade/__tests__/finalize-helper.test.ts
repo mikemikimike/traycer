@@ -154,6 +154,37 @@ describe("scheduleFinalizationHelper", () => {
     expect(body).not.toContain("Start-Service");
   });
 
+  const SMART_QUOTES = ["\u2018", "\u2019", "\u201A", "\u201B"];
+
+  it.each(SMART_QUOTES)(
+    "doubles PowerShell single-quote %s in the Windows helper path literals",
+    async (quoteChar: string) => {
+      const writeCalls: Array<{ path: string; body: string }> = [];
+      const { scheduleFinalizationHelper } = await import("../finalize-helper");
+      const staged = `C:\\Users\\O${quoteChar}Brien\\cli\\traycer-1.5.0.exe`;
+      const live = `C:\\Users\\O${quoteChar}Brien\\cli\\traycer.exe`;
+      await scheduleFinalizationHelper({
+        environment: "production",
+        stagedBinaryPath: staged,
+        livePath: live,
+        parentPid: 4242,
+        parentExitTimeoutSeconds: 60,
+        platform: "win32",
+        spawnImpl: () => ({ pid: 99001, unref: () => undefined }),
+        writeImpl: async (path, body) => {
+          writeCalls.push({ path, body });
+        },
+      });
+      const body = writeCalls[0]?.body ?? "";
+      expect(body).toContain(
+        `$StagedBinary = 'C:\\Users\\O${quoteChar}${quoteChar}Brien\\cli\\traycer-1.5.0.exe'`,
+      );
+      expect(body).toContain(
+        `$LiveBinary = 'C:\\Users\\O${quoteChar}${quoteChar}Brien\\cli\\traycer.exe'`,
+      );
+    },
+  );
+
   it("renders a POSIX shell script with parent pid + paths and spawns /bin/sh detached on linux", async () => {
     const spawnCalls: Array<{
       command: string;

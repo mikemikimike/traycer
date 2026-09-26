@@ -72,7 +72,11 @@ const SYSTEM_SETTINGS = { open: () => Promise.resolve() };
 
 const HOST_LIFECYCLE_VIEW: HostLifecycleView = {
   desired: { mode: "background", rev: 0, updatedBy: null, updatedAt: null },
-  applied: { localHostCapability: "managed", supervisor: "enforcing" },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "enforcing",
+    admittedAs: null,
+  },
   pending: "none",
 };
 

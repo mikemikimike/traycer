@@ -82,6 +82,10 @@ import {
   type ServiceDefinitionRefresher,
 } from "../service/definition-refresh";
 import {
+  readServiceRegistrationDisabled,
+  SERVICE_REGISTRATION_DISABLED_MESSAGE,
+} from "../service/registration-disabled";
+import {
   SERVICE_REFRESH_COMMAND,
   SERVICE_REINSTALL_COMMAND,
   type ServiceDefinitionState,
@@ -919,8 +923,35 @@ export async function runDoctor(opts: RunDoctorOptions): Promise<DoctorResult> {
   issues.push(
     ...(await serviceDefinitionIssues(opts.environment, lifecycle.policy.mode)),
   );
+  issues.push(...(await serviceRegistrationIssues(opts.environment)));
 
   return { issues, lifecycle };
+}
+
+/**
+ * A registration its owner switched off: the state `host ensure` refuses to
+ * re-register over, named here with the same two repairs, in any lifecycle
+ * mode. A read that fails is not an issue; the ensure escalates as before.
+ */
+async function serviceRegistrationIssues(
+  environment: Environment,
+): Promise<DoctorIssue[]> {
+  const registration = await readServiceRegistrationDisabled(
+    serviceLabelFor(environment),
+    process.platform,
+  );
+  if (registration.kind !== "disabled") return [];
+  return [
+    {
+      code: DOCTOR_ISSUE_CODES.HOST_SERVICE_REGISTRATION_DISABLED,
+      severity: "error",
+      title: "Traycer Host task is disabled in Task Scheduler",
+      message: `${SERVICE_REGISTRATION_DISABLED_MESSAGE}. Nothing starts the host while it is disabled; installing the service registers the task enabled again and restarts the host.`,
+      fixAction: "service-install",
+      terminalCommand: SERVICE_REINSTALL_COMMAND,
+      details: null,
+    },
+  ];
 }
 
 /**

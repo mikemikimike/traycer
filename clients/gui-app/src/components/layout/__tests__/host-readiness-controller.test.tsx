@@ -61,6 +61,7 @@ const DEFAULT_PRESENTATION: DefaultHostReadinessPresentation = {
   progress: null,
   lastProgress: null,
   provisioningError: null,
+  ensureFailure: null,
   provisioning: false,
   removed: false,
   hostBusy: false,
@@ -170,6 +171,7 @@ describe("local-plane admission for the removal-sentinel read", () => {
           reachable: true,
           removedByUser: false,
           checkedAt: "2026-05-15T00:00:00Z",
+          lastEnsureFailure: null,
           localAttempt: null,
         }),
       convergeReady: notImplemented("convergeReady"),
@@ -510,7 +512,11 @@ describe("SurfaceReadinessFallback - desktop no-local-host card", () => {
   } {
     let view: HostLifecycleView = {
       desired: { mode: initialMode, rev: 1, updatedBy: null, updatedAt: null },
-      applied: { localHostCapability: "none", supervisor: "not-running" },
+      applied: {
+        localHostCapability: "none",
+        supervisor: "not-running",
+        admittedAs: null,
+      },
       pending: "none",
     };
     const listeners = new Set<(view: HostLifecycleView) => void>();
@@ -647,16 +653,18 @@ describe("SurfaceReadinessFallback - desktop no-local-host card", () => {
     ).toBeNull();
   });
 
-  it("a 'failed' result shows the message inline, keeps the run-here button, and fires no analytics", async () => {
+  it("F23: a 'failed' result shows curated copy inline (never the raw path/error text), keeps the run-here button, and fires no analytics", async () => {
     const trackSpy = vi
       .spyOn(Analytics.getInstance(), "track")
       .mockImplementation(() => true);
+    const WRITE_FAILED_HOME =
+      "The host lifecycle setting could not be saved: Error: EACCES: permission denied, open '/Users/someone/.traycer/host/lifecycle-policy.json'";
     const { host } = createFakeHostLifecycleHost(
       "none",
       (_request, currentView) => ({
         kind: "failed",
         reason: "write-failed",
-        message: "Couldn't write the policy file.",
+        message: WRITE_FAILED_HOME,
         view: currentView,
       }),
       true,
@@ -678,8 +686,12 @@ describe("SurfaceReadinessFallback - desktop no-local-host card", () => {
     await waitFor(() => {
       expect(
         screen.getByTestId("no-local-host-run-here-error").textContent,
-      ).toBe("Couldn't write the policy file.");
+      ).toBe(
+        "Couldn't save this setting. Try again, or change it from the command line with `traycer host lifecycle set <mode>`.",
+      );
     });
+    expect(document.body.textContent).not.toContain("/Users/someone");
+    expect(document.body.textContent).not.toContain("EACCES");
     expect(
       screen.getByRole("button", { name: NO_LOCAL_HOST_RUN_HERE_LABEL }),
     ).toBeTruthy();

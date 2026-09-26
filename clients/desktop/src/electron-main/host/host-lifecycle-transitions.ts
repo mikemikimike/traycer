@@ -2,8 +2,10 @@ import type { DesktopPresenceOnExit } from "@traycer/protocol/config/desktop-pre
 import {
   refreshOnModeChange,
   type HostLifecycleMode,
+  type HostLifecyclePolicy,
 } from "@traycer/protocol/config/host-lifecycle-policy";
 import type {
+  HostLifecycleRunAdmission,
   HostLifecycleSetRequest,
   HostLifecycleSetResult,
   HostLifecycleStopChoice,
@@ -12,6 +14,8 @@ import type {
 } from "../../ipc-contracts/host-lifecycle-types";
 import { log, type SafeLogFields } from "../app/logger";
 import type {
+  ApplyStagedOk,
+  ApplyStagedTrigger,
   ConvergeReadyOk,
   ConvergeReadyVersionPolicy,
   GuardedMutationOutcome,
@@ -71,12 +75,17 @@ export interface HostLifecycleTransitionsController {
     intent: LocalHostMutationIntent,
     versionPolicy: ConvergeReadyVersionPolicy,
   ): Promise<GuardedMutationOutcome<ConvergeReadyOk>>;
+  applyStaged(
+    trigger: ApplyStagedTrigger,
+    force: boolean,
+  ): Promise<MutationOutcome<ApplyStagedOk>>;
   stopHost(request: StopHostRequest): Promise<StopHostOutcome>;
   refreshServiceDefinition(): Promise<
     MutationOutcome<ServiceDefinitionRefreshOk>
   >;
   quiesce(): void;
   holdAutomaticIntents(): AutomaticIntentHold;
+  deferMutationsUntil(barrier: Promise<unknown>): void;
 }
 
 /** The slice of `HostLifecycle` that observes the host home. */
@@ -113,6 +122,27 @@ export interface QuitPolicyRead {
   readonly rev: number;
 }
 
+/** The policy a presence verdict was derived from. */
+interface PolicyStamp {
+  readonly rev: number;
+  readonly mode: HostLifecycleMode;
+}
+
+/** A presence this process wrote and saw land. */
+interface LandedPresence extends PolicyStamp {
+  readonly onExit: DesktopPresenceOnExit;
+}
+
+/**
+ * `applySetMode`'s answer when the change is a `→ none` that needs its stop:
+ * the stop runs off the serialized chain (see `commitNone`).
+ */
+interface NoneStopFirst {
+  readonly kind: "stop-first";
+  readonly stop: HostLifecycleStopChoice;
+  readonly observed: HostLifecyclePolicyRead;
+}
+
 /**
  * A failure's errno-style code, or `null`. What the lifecycle log lines carry
  * instead of the error text: a filesystem message names the host home path,
@@ -137,12 +167,20 @@ export class HostLifecycleService {
   private readonly localHostCapability: LocalHostCapability;
   private readonly pollIntervalMs: number;
 
-  /** Every write, observation and transition runs one at a time, in order. */
+  /**
+   * Every write, observation and transition runs one at a time, in order.
+   * Nothing on it waits on the host: `→ none`'s stop runs off it (F29), so a
+   * job here is file I/O and at most this process's identity probe.
+   */
   private chain: Promise<void> = Promise.resolve();
   /** `none` was committed from this session: the lanes are off until restart. */
   private noneCommitted = false;
-  /** The policy `rev` the published presence was derived from, or `null`. */
-  private presenceRev: number | null = null;
+  /**
+   * The presence this process last saw land - its verdict and the policy
+   * `(rev, mode)` it was derived from - or `null` until one lands. What an
+   * observation compares against; see `observe`.
+   */
+  private landed: LandedPresence | null = null;
   /**
    * Presence writes that failed since the last one that landed. The first
    * failure of a streak is a WARN and the rest are DEBUG: the observation tick
@@ -157,6 +195,18 @@ export class HostLifecycleService {
    * gone.
    */
   private quitVerdict: DesktopPresenceOnExit | null = null;
+  /**
+   * How the running supervisor's run was started, as the last derived view
+   * read it (`currentRunAdmission`); `null` before the first one.
+   */
+  private viewRunAdmission: HostLifecycleRunAdmission | null = null;
+  /**
+   * The same, as the last OBSERVATION read it: what `observe` compares the
+   * next read against to see a terminal run end. Kept apart from
+   * `viewRunAdmission` so a `getView` between two observations cannot consume
+   * that edge.
+   */
+  private observedRunAdmission: HostLifecycleRunAdmission | null = null;
   private observationQueued = false;
   private lastEmittedViewKey: string | null = null;
   private readonly listeners = new Set<(view: HostLifecycleView) => void>();
@@ -207,18 +257,26 @@ export class HostLifecycleService {
 
   async getView(): Promise<HostLifecycleView> {
     const read = await this.store.readPolicy();
-    const supervisor = await this.store.readSupervisorState();
+    const run = await this.store.readSupervisorRun();
+    this.viewRunAdmission = run.admittedAs;
     // Restart-to-apply is judged against the BOOT capability, which is what
     // both processes act on until the next launch - including the renderer,
     // whose local-host surfaces a committed `none` does not take away. Once
     // `none` is committed the lanes are off for this session whatever is
     // chosen next, so every mode then needs the restart.
+    //
+    // `restart-host` is a running host that does not apply an enforced mode
+    // until it restarts: an older supervisor, or one a person started in a
+    // terminal, which the mode never governs. Only that person restarts the
+    // second; the view says which through `admittedAs`, and the renderer
+    // offers no restart for it.
     const bootedWithoutLocalHost = this.localHostCapability === "none";
+    const runIgnoresMode =
+      run.state === "not-enforcing" || run.admittedAs === "foreground";
     const pending =
       this.noneCommitted || (read.mode === "none") !== bootedWithoutLocalHost
         ? "restart-app"
-        : supervisor === "not-enforcing" &&
-            SUPERVISOR_ENFORCED_MODES.has(read.mode)
+        : runIgnoresMode && SUPERVISOR_ENFORCED_MODES.has(read.mode)
           ? "restart-host"
           : "none";
     return {
@@ -230,10 +288,39 @@ export class HostLifecycleService {
       },
       applied: {
         localHostCapability: this.localHostCapability,
-        supervisor,
+        supervisor: run.state,
+        admittedAs: run.admittedAs,
       },
       pending,
     };
+  }
+
+  /**
+   * How the running supervisor's run was started, read fresh: `foreground`
+   * for a host a person started in a terminal, which this app leaves alone.
+   * `null` when no live supervisor record says (none, a dead one's leftover,
+   * or one from a CLI that predates the field). Never rejects.
+   */
+  async readRunAdmission(): Promise<HostLifecycleRunAdmission | null> {
+    try {
+      return (await this.store.readSupervisorRun()).admittedAs;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * `readRunAdmission` as the last derived view read it, for a caller that
+   * cannot wait (the tray and app menus): `null` before the first view. Every
+   * `onChange` notification is derived after it is updated.
+   */
+  currentRunAdmission(): HostLifecycleRunAdmission | null {
+    return this.viewRunAdmission;
+  }
+
+  /** See `HostLifecyclePolicyStore.readIdentifiedSupervisorPid`. */
+  readIdentifiedSupervisorPid(): Promise<number | null> {
+    return this.store.readIdentifiedSupervisorPid();
   }
 
   onChange(listener: (view: HostLifecycleView) => void): () => void {
@@ -246,17 +333,34 @@ export class HostLifecycleService {
   // ---- Launch, observation, teardown ------------------------------------------
 
   /**
+   * Launch: publish the launch presence and hold the controller's mutation
+   * lane on it (`HostController.deferMutationsUntil`), so it lands before any
+   * converge can spawn the CLI - a supervisor that desktop's own grant admits,
+   * and a crash relaunch shortly after, both see a live presence. The lane is
+   * held rather than first paint waiting: the record needs this process's
+   * start identity, which on Windows is a PowerShell probe.
+   *
+   * The hold covers only mutations submitted after it, so launch calls this
+   * as soon as the controller and this service exist, before anything can
+   * submit one. Returns the write, which settles once the record is on disk -
+   * at once with the lanes off, when nothing is written.
+   */
+  holdLaneOnLaunchPresence(): Promise<void> {
+    const launchPresence = this.writeLaunchPresence();
+    this.controller.deferMutationsUntil(launchPresence);
+    return launchPresence;
+  }
+
+  /**
    * The launch presence: this process with the mode's verdict, stamped with
-   * the policy `rev` it read. Launch holds the mutation lane on this promise
-   * (`HostController.deferMutationsUntil`), so it lands before any converge
-   * can spawn the CLI - a supervisor that desktop's own grant admits, and a
-   * crash relaunch shortly after, both see a live presence. Never rejects.
+   * the policy `rev` it read; see `holdLaneOnLaunchPresence`. Writes nothing
+   * while the lanes are off. Never rejects.
    */
   writeLaunchPresence(): Promise<void> {
     return this.serialize(async () => {
       if (!this.lanesActive()) return;
       const read = await this.store.readPolicy();
-      await this.publishPresence(presenceVerdictForMode(read.mode), read.rev);
+      await this.publishPresence(presenceVerdictForMode(read.mode), read);
     });
   }
 
@@ -308,38 +412,88 @@ export class HostLifecycleService {
   }
 
   /**
-   * One observation: follow a policy change nobody in this process made (the
-   * CLI) with a non-destructive presence rewrite, then refresh the view.
+   * One observation: bring the presence on disk to the verdict it should
+   * carry now, then refresh the view.
+   *
+   * It follows a policy change nobody in this process made (the CLI) with a
+   * non-destructive presence rewrite. The change is recognised by the
+   * policy's `(rev, mode)`, never by `rev` alone: both writers write one past
+   * the `rev` they read, so a CLI write racing this desktop's can land at the
+   * SAME `rev` with another mode, and a verdict derived from the loser's mode
+   * would stand for the rest of the session (F10).
    *
    * It is also the retry of a presence that never landed - an identity probe
-   * that timed out on a loaded machine, or a failed write. Without one the
-   * supervisor never adopts this desktop, so Linked's promise (the host ends
-   * with the app, crash included) silently does not hold for the rest of its
-   * life (F-WIN-2). The supervisor adopts on whichever tick first sees the
+   * that timed out on a loaded machine, or a failed write, a quit verdict's
+   * and a release's included (U9). Without one the supervisor never adopts
+   * this desktop, or enforces a verdict nobody chose, so Linked's promise
+   * (the host ends with the app, crash included) silently does not hold
+   * (F-WIN-2). The supervisor adopts on whichever tick first sees the
    * presence alive, so a late write restores it. A held quit verdict is what
-   * gets published if one is held; with the lanes off there is nothing to
-   * publish.
+   * gets published if one is held, and a policy change under it does not
+   * restamp it; with the lanes off there is nothing to publish.
    */
   private async observe(): Promise<void> {
     const read = await this.store.readPolicy();
-    if (this.lanesActive() && this.presenceRev === null) {
-      await this.publishPresence(
-        this.quitVerdict ?? presenceVerdictForMode(read.mode),
-        read.rev,
-      );
-    } else if (
-      this.lanesActive() &&
-      this.quitVerdict === null &&
-      this.presenceRev !== null &&
-      read.rev !== this.presenceRev
-    ) {
-      log.info("[host-lifecycle] policy changed outside this app", {
-        mode: read.mode,
-        rev: read.rev,
-      });
-      await this.publishPresence(presenceVerdictForMode(read.mode), read.rev);
+    if (this.lanesActive()) {
+      const onExit = this.quitVerdict ?? presenceVerdictForMode(read.mode);
+      const landed = this.landed;
+      const policyMoved =
+        this.quitVerdict === null &&
+        landed !== null &&
+        (landed.rev !== read.rev || landed.mode !== read.mode);
+      if (landed === null || landed.onExit !== onExit || policyMoved) {
+        if (policyMoved) {
+          log.info("[host-lifecycle] policy changed outside this app", {
+            mode: read.mode,
+            rev: read.rev,
+          });
+        }
+        await this.publishPresence(onExit, read);
+      }
     }
+    await this.followTerminalRun();
     await this.emitIfChanged();
+  }
+
+  /**
+   * Finish an update a terminal run held back, once that run is gone.
+   *
+   * A host a person started in a terminal refuses every update this app would
+   * make (`E_HOST_NOT_SERVICE_RUN`), so a stage that is ready while it runs
+   * waits on it, and the renderer says "stop it to finish the update". When
+   * an observation finds that run ended - its record gone, stale, or a
+   * service run in its place - this runs the launch reconcile's own step,
+   * `applyStaged("launch")` (`host apply --respect-hold`): a no-op with
+   * nothing staged, and a deliberately held version stays. Without it the
+   * next start - the selection authority's or the health monitor's, both
+   * `--keep-installed` - would bring the old bytes back and leave the stage
+   * waiting for the next launch.
+   *
+   * With the lanes off there is no local host for this app to start. The
+   * apply runs on the controller's lane, off this chain; its outcome is only
+   * logged.
+   */
+  private async followTerminalRun(): Promise<void> {
+    const previous = this.observedRunAdmission;
+    const run = await this.store.readSupervisorRun();
+    this.observedRunAdmission = run.admittedAs;
+    if (previous !== "foreground" || run.admittedAs === "foreground") return;
+    if (!this.lanesActive()) return;
+    log.info("[host-lifecycle] terminal host run ended", {
+      reason: "terminal-run-ended",
+    });
+    void this.controller.applyStaged("launch", false).then(
+      (outcome) => {
+        log.info("[host-lifecycle] update after the terminal run settled", {
+          reason: outcome.kind,
+        });
+      },
+      () => {
+        log.warn("[host-lifecycle] update after the terminal run settled", {
+          reason: "threw",
+        });
+      },
+    );
   }
 
   // ---- Mode transitions ------------------------------------------------------
@@ -354,38 +508,53 @@ export class HostLifecycleService {
    * - `→ none` from a desktop running the lanes: the confirmed stop first
    *   (`request.stop`), and only once it succeeded write the policy, remove
    *   the presence and quiesce the automatic intents. A refused or failed stop
-   *   commits nothing.
+   *   commits nothing. A stop that finds only a host a person started in a
+   *   terminal (`not-service-run`) commits too: the mode governs the service
+   *   run alone, there is none to stop, and that host is left running.
    * - Anything while the lanes are off (booted in `none`, or `none` committed
    *   this session): write the policy only - it takes effect at the next
    *   launch.
    *
    * Setting the mode the file already has writes nothing.
    */
-  setMode(request: HostLifecycleSetRequest): Promise<HostLifecycleSetResult> {
-    return this.serialize(async () => {
-      const result = await this.applySetMode(request);
-      await this.emitIfChanged();
-      return result;
+  async setMode(
+    request: HostLifecycleSetRequest,
+  ): Promise<HostLifecycleSetResult> {
+    const step = await this.serialize(async () => {
+      const decided = await this.applySetMode(request);
+      if (decided.kind !== "stop-first") await this.emitIfChanged();
+      return decided;
     });
+    if (step.kind !== "stop-first") return step;
+    return this.commitNone(step.stop, step.observed);
   }
 
   private async applySetMode(
     request: HostLifecycleSetRequest,
-  ): Promise<HostLifecycleSetResult> {
+  ): Promise<HostLifecycleSetResult | NoneStopFirst> {
     const current = await this.store.readPolicy();
     const lanesActive = this.lanesActive();
     // `none` while the lanes still run is never "already applied": it may be a
     // CLI-written `none` waiting for the next launch, and choosing it here is
     // a request to apply it now, which needs the stop.
     if (request.mode === "none" && lanesActive) {
-      return this.commitNone(request.stop, current);
+      if (request.stop === null) {
+        return {
+          kind: "failed",
+          reason: "confirmation-required",
+          message:
+            "Turning off the local host stops Traycer Host. Confirm the stop to continue.",
+          view: await this.getView(),
+        };
+      }
+      return { kind: "stop-first", stop: request.stop, observed: current };
     }
     if (current.mode === request.mode) {
       return { kind: "applied", view: await this.getView() };
     }
-    let rev: number;
+    let written: HostLifecyclePolicy;
     try {
-      rev = (await this.store.writePolicy(request.mode)).rev;
+      written = await this.store.writePolicy(request.mode);
     } catch (error) {
       return this.writeFailed(request.mode, error);
     }
@@ -397,10 +566,10 @@ export class HostLifecycleService {
       return { kind: "applied", view: await this.getView() };
     }
     if (this.quitVerdict === null) {
-      await this.publishPresence(presenceVerdictForMode(request.mode), rev);
+      await this.publishPresence(presenceVerdictForMode(request.mode), written);
     }
     if (request.mode === "linked") {
-      void this.convergeIfDown(rev);
+      void this.convergeIfDown(written.rev);
     }
     return { kind: "applied", view: await this.getView() };
   }
@@ -448,72 +617,122 @@ export class HostLifecycleService {
       });
   }
 
+  /**
+   * `→ none` from a desktop running the lanes: the confirmed stop, then the
+   * commit. The automatic intents - and every other host start - are held
+   * from before the stop until the commit has quiesced them or did not
+   * happen, so nothing brings the host back in between; a refused stop
+   * leaves the session exactly as it was.
+   *
+   * The stop runs OFF the serialized chain (F29). It is an attached CLI child
+   * that waits its turn on the controller's lane and cannot be withdrawn once
+   * it runs, so holding the chain across it held every quit verdict, release,
+   * observation and mode change behind it - an update install's `handoff`
+   * included - for as long as the stop took. The commit runs on the chain
+   * and re-reads the policy there.
+   */
   private async commitNone(
-    stop: HostLifecycleStopChoice | null,
+    stop: HostLifecycleStopChoice,
     observed: HostLifecyclePolicyRead,
   ): Promise<HostLifecycleSetResult> {
-    if (stop === null) {
-      return {
-        kind: "failed",
-        reason: "confirmation-required",
-        message:
-          "Turning off the local host stops Traycer Host. Confirm the stop to continue.",
-        view: await this.getView(),
-      };
-    }
-    // Reversible until the commit: a refused stop must leave the session's
-    // automatic intents (the health monitor, the ensure port) exactly as they
-    // were.
     const hold = this.controller.holdAutomaticIntents();
+    let result: HostLifecycleSetResult;
     try {
       const outcome = await this.controller.stopHost({
         mode: stop,
         spawn: "attached",
         withdrawal: null,
       });
-      if (outcome.kind !== "stopped") {
-        return this.stopNotCommitted(outcome);
-      }
-      // The stop is irreversible; the policy is not written yet. Re-read: a
-      // newer choice written while the stop ran (the CLI) must not be
-      // overwritten by this older one.
-      const after = await this.store.readPolicy();
-      if (after.rev !== observed.rev && after.mode !== "none") {
-        log.info("[host-lifecycle] none superseded by a newer policy", {
-          mode: after.mode,
-          rev: after.rev,
-          reason: "superseded",
-        });
-        return { kind: "superseded", view: await this.getView() };
-      }
-      // Already `none` on disk (a CLI `none` applied from here, or one the CLI
-      // wrote while the stop ran): the choice is recorded, nothing to write.
-      if (after.mode !== "none") {
-        try {
-          await this.store.writePolicy("none");
-        } catch (error) {
-          return this.writeFailed("none", error);
-        }
-        // Only for this write: an `after` that already says `none` was
-        // written by the CLI, whose own `lifecycle set` ran the refresh.
-        this.refreshDefinitionAfterWrite(after.mode, "none");
-      }
-      await this.store.removeOwnPresence();
-      this.presenceRev = null;
-      this.noneCommitted = true;
-      this.controller.quiesce();
-      log.info("[host-lifecycle] none committed", {
-        mode: "none",
-        reason: stop === "force" ? "stopped-forced" : "stopped-idle",
-      });
-      return { kind: "applied", view: await this.getView() };
+      // `not-service-run`: the host running is a terminal's `traycer host
+      // start`, which the mode never governs, so there is no service run
+      // to stop and `none` commits over it, leaving that host alone.
+      result =
+        outcome.kind === "stopped" || outcome.kind === "not-service-run"
+          ? await this.serialize(async () => {
+              const committed = await this.commitNoneAfterStop(
+                stop,
+                outcome.kind,
+                observed,
+              );
+              await this.emitIfChanged();
+              return committed;
+            })
+          : await this.stopNotCommitted(outcome);
     } finally {
       hold.release();
     }
+    // A `→ linked` chosen while the stop ran superseded this `none`: its
+    // converge was refused under the hold, and the stop has since taken the
+    // host down. Now that nothing holds the host starts, bring it up.
+    if (
+      result.kind === "superseded" &&
+      result.view.desired.mode === "linked" &&
+      this.lanesActive()
+    ) {
+      void this.convergeIfDown(result.view.desired.rev);
+    }
+    return result;
+  }
+
+  /**
+   * `commitNone`'s commit, once the stop succeeded or found only a terminal's
+   * run (`not-service-run`). Runs on the chain.
+   */
+  private async commitNoneAfterStop(
+    stop: HostLifecycleStopChoice,
+    stopped: "stopped" | "not-service-run",
+    observed: HostLifecyclePolicyRead,
+  ): Promise<HostLifecycleSetResult> {
+    // A second `→ none` whose stop queued behind this one's on the lane:
+    // the first already committed, so there is nothing left to do.
+    if (!this.lanesActive()) {
+      return { kind: "applied", view: await this.getView() };
+    }
+    // The stop is irreversible; the policy is not written yet. Re-read: a
+    // newer choice written while the stop ran (the CLI, or this app - the
+    // chain was free meanwhile) must not be overwritten by this older one.
+    const after = await this.store.readPolicy();
+    if (after.rev !== observed.rev && after.mode !== "none") {
+      log.info("[host-lifecycle] none superseded by a newer policy", {
+        mode: after.mode,
+        rev: after.rev,
+        reason: "superseded",
+      });
+      return { kind: "superseded", view: await this.getView() };
+    }
+    // Already `none` on disk (a CLI `none` applied from here, or one the CLI
+    // wrote while the stop ran): the choice is recorded, nothing to write.
+    if (after.mode !== "none") {
+      try {
+        await this.store.writePolicy("none");
+      } catch (error) {
+        return this.writeFailed("none", error);
+      }
+      // Only for this write: an `after` that already says `none` was
+      // written by the CLI, whose own `lifecycle set` ran the refresh.
+      this.refreshDefinitionAfterWrite(after.mode, "none");
+    }
+    await this.store.removeOwnPresence();
+    this.landed = null;
+    this.noneCommitted = true;
+    this.controller.quiesce();
+    log.info("[host-lifecycle] none committed", {
+      mode: "none",
+      reason:
+        stopped === "not-service-run"
+          ? "not-service-run"
+          : stop === "force"
+            ? "stopped-forced"
+            : "stopped-idle",
+    });
+    return { kind: "applied", view: await this.getView() };
   }
 
   private async stopNotCommitted(
-    outcome: Exclude<StopHostOutcome, { readonly kind: "stopped" }>,
+    outcome: Exclude<
+      StopHostOutcome,
+      { readonly kind: "stopped" | "not-service-run" }
+    >,
   ): Promise<HostLifecycleSetResult> {
     const view = await this.getView();
     switch (outcome.kind) {
@@ -545,9 +764,6 @@ export class HostLifecycleService {
           message: "The host stop was withdrawn before it ran.",
           view,
         };
-      // The host still runs, so `none` is not committed; the CLI's message
-      // says where it came from and how to end it.
-      case "not-service-run":
       case "failed":
         return {
           kind: "failed",
@@ -603,7 +819,8 @@ export class HostLifecycleService {
    * The quit path's verdict: `handoff` for an update-install quit, or the quit
    * prompt's `keep` / `stop`. Held until `releaseQuitVerdict`, so no mode
    * change or observed CLI write overwrites what the supervisor must enforce
-   * once the app is gone.
+   * once the app is gone. A write that fails is retried by the next
+   * observation, like every presence that did not land (U9).
    */
   writeQuitVerdict(
     onExit: DesktopPresenceOnExit,
@@ -612,7 +829,7 @@ export class HostLifecycleService {
       if (!this.lanesActive()) return "no-local-host";
       this.quitVerdict = onExit;
       const read = await this.store.readPolicy();
-      return this.publishPresence(onExit, read.rev);
+      return this.publishPresence(onExit, read);
     });
   }
 
@@ -626,18 +843,19 @@ export class HostLifecycleService {
       this.quitVerdict = null;
       if (!this.lanesActive()) return;
       const read = await this.store.readPolicy();
-      await this.publishPresence(presenceVerdictForMode(read.mode), read.rev);
+      await this.publishPresence(presenceVerdictForMode(read.mode), read);
     });
   }
 
   private async publishPresence(
     onExit: DesktopPresenceOnExit,
-    rev: number,
+    policy: PolicyStamp,
   ): Promise<QuitVerdictWriteOutcome> {
+    const rev = policy.rev;
     try {
       const outcome = await this.store.writePresence(onExit, rev);
       if (outcome === "written") {
-        this.presenceRev = rev;
+        this.landed = { onExit, rev, mode: policy.mode };
         if (this.presenceFailures > 0) {
           log.info("[host-lifecycle] presence written after retry", {
             onExit,

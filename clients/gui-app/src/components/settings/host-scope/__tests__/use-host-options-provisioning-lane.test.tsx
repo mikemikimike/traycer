@@ -80,6 +80,7 @@ const IDLE_CONTROLLER_STATUS: HostControllerStatus = {
   localAttempt: null,
   removedByUser: false,
   checkedAt: "2026-05-15T00:00:00Z",
+  lastEnsureFailure: null,
 };
 
 function controllerStatusWithLane(
@@ -114,7 +115,8 @@ function makeHostManagement(kind: MutationKind | null): IHostManagement {
     registerService: notImplemented("registerService"),
     deregisterService: notImplemented("deregisterService"),
     registryCheck: notImplemented("registryCheck"),
-    freePortAndRestart: (input) => Promise.resolve(input),
+    freePortAndRestart: (input) =>
+      Promise.resolve({ kind: "applied" as const, ...input }),
     runDoctorRepairQueued: () => Promise.resolve({ kind: "applied" as const }),
     freePortAndRestartIfIdle: () =>
       Promise.resolve({

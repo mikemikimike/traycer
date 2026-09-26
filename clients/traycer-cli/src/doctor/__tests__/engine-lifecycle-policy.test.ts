@@ -37,12 +37,15 @@ const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 
 let workHome: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   workHome = mkdtempSync(join(tmpdir(), "traycer-doctor-lifecycle-test-"));
   osHome.current = workHome;
   process.env.HOME = workHome;
   process.env.USERPROFILE = workHome;
   vi.resetModules();
+  // Proves the redirect before any case can touch a host file.
+  const { hostHomeDir } = await import("../../store/paths");
+  expect(hostHomeDir("production").startsWith(workHome)).toBe(true);
 });
 
 afterEach(() => {
@@ -303,6 +306,28 @@ describe("runDoctor host lifecycle policy issues", () => {
       ),
     ).toBeUndefined();
     expect(result.lifecycle.policy.mode).toBe("background");
+  });
+
+  // T19: `HOST_LIFECYCLE_POLICY_NOT_ENFORCED` (engine.ts:1007) requires
+  // `hostProcessAlive` as well as a non-background mode and a
+  // non-enforcing supervisor. A non-background mode with no running host
+  // (no pid.json) must never fire the issue, even beside a non-enforcing
+  // supervisor record - there is no live host to restart.
+  it("HOST_LIFECYCLE_POLICY_NOT_ENFORCED never fires for a linked mode with no running host", async () => {
+    stageQuietEnvironment("stopped");
+    // No pid.json: no running host.
+    writePolicy("linked");
+    writeSupervisor({ pid: 999_999, capabilities: [] });
+
+    const result = await runDoctorHere();
+
+    expect(
+      result.issues.find(
+        (candidate) => candidate.code === "HOST_LIFECYCLE_POLICY_NOT_ENFORCED",
+      ),
+    ).toBeUndefined();
+    expect(result.lifecycle.policy.mode).toBe("linked");
+    expect(result.lifecycle.supervisor.enforcesLifecyclePolicy).toBe(false);
   });
 
   it("populates result.lifecycle on every run, whatever the policy state", async () => {

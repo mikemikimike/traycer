@@ -3,6 +3,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -10,19 +11,36 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   cliInvocationRecordPath,
   parseCliInvocationRecord,
 } from "@traycer/protocol/config/cli-invocation-record";
+
+// F15/T21 isolation: `resolveServiceCliInvocation`'s real staging path
+// (`stageWellKnownCliBinary`) reaches `ensureCliInstallHomeDir`, whose body
+// - defined INSIDE the real `store/paths` module - calls that module's OWN
+// internal `cliInstallHomeDir`, not the override the mock factory below
+// installs for external importers. A plain ESM closure reference is not
+// rerouted by `vi.mock`, so that internal call would otherwise resolve
+// through the REAL `os.homedir()` and create a directory under this
+// worktree's actual `~/.traycer`. Redirecting `homedir()` itself closes that
+// gap for every caller, mocked-export or not.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: mkdtempSyncForHome } = await import("node:fs");
+  const { join: joinForHome } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = mkdtempSyncForHome(
+      joinForHome(
+        actual.tmpdir(),
+        "traycer-windows-definition-refresh-os-home-",
+      ),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
 
 // Test isolation: `cliInstallHomeDir`/`hostHomeDir` normally resolve through
 // the real `os.homedir()`. `hostHomeDir` in particular is the invocation
@@ -56,7 +74,11 @@ const runCommandForBytesMock = vi.hoisted(() => ({
     | ((
         command: string,
         args: readonly string[],
-      ) => Promise<{ stdout: Buffer; exitCode: number }>)
+      ) => Promise<{
+        stdout: Buffer;
+        exitCode: number;
+        stderr: string;
+      }>)
     | null,
 }));
 vi.mock("../../process-runner", async (importOriginal) => {
@@ -75,9 +97,10 @@ vi.mock("../../process-runner", async (importOriginal) => {
 });
 
 afterAll(async () => {
-  vi.unstubAllEnvs();
-  setWindowsTaskUserSidReaderForTests(null);
   await rm(TEST_STORE_ROOT, { recursive: true, force: true });
+  if (osHome.current !== "") {
+    await rm(osHome.current, { recursive: true, force: true });
+  }
 });
 
 import {
@@ -86,11 +109,15 @@ import {
   inspectWindowsServiceDefinition,
   refreshWindowsServiceDefinition,
   setWindowsDefinitionDepsForTests,
-  setWindowsTaskUserSidReaderForTests,
   type ProcessRunner,
 } from "../windows";
 import { windowsTaskName, type ServiceLabel } from "../../label";
-import { cliInstallHomeDir, hostHomeDir } from "../../../store/paths";
+import {
+  cliInstallHomeDir,
+  cliManifestPath,
+  hostHomeDir,
+} from "../../../store/paths";
+import { wellKnownCliBinaryPath } from "../../../store/well-known-cli";
 import type { CliInvocation } from "../../cli-binary";
 
 /**
@@ -123,26 +150,11 @@ function labelFor(id: string): ServiceLabel {
   };
 }
 
-// `buildTaskXml` (both this file's own fixtures via `buildScheduledTaskXml`,
-// and production's `write()` when `redefineTask` is true) resolves the Task
-// XML <UserId> from USERDOMAIN/USERNAME and throws when neither is set - the
-// sandboxed test environment has neither.
-beforeAll(() => {
-  vi.stubEnv("USERDOMAIN", "");
-  vi.stubEnv("USERNAME", "traycer-test-user");
-  // Hermeticity (SSH-USERDOMAIN-WORKGROUP): `resolveTaskUserId` now prefers
-  // a real SID from `whoami /user`, and its environment fallback also reads
-  // `COMPUTERNAME`/`USERDNSDOMAIN`. This file's own `<UserId>` comparisons
-  // are self-referential (both sides call `buildScheduledTaskXml` with the
-  // same env in the same test), so a real COMPUTERNAME or SID would not
-  // desync them - but stubbing both empty and forcing the SID reader to
-  // `null` keeps every case exercising the SAME environment-fallback branch
-  // (bare `traycer-test-user`) this file's comments describe, on every
-  // machine.
-  vi.stubEnv("COMPUTERNAME", "");
-  vi.stubEnv("USERDNSDOMAIN", "");
-  setWindowsTaskUserSidReaderForTests(() => null);
-});
+// The `<UserId>` this file's fixture XML carries. The builder takes it from
+// its caller (the install resolves it in front of its install edge;
+// `windows-task-user-id.test.ts` covers that resolution), and no refresh here
+// resolves one, so a constant is the whole identity this file needs.
+const TEST_TASK_USER_ID = "traycer-test-user";
 
 const DIRECT_CLI_COMMAND = "C:\\Program Files\\Traycer\\traycer.exe";
 // `[...cli.args, "host", "start"].map(quoteWindowsArg).join(" ")` for
@@ -254,11 +266,13 @@ describe("W1: the CLI itself is the task action (direct-action, launcher-less)",
       command: DIRECT_CLI_COMMAND,
       args: [],
     };
+    const queriedXml = execTaskXml(DIRECT_CLI_COMMAND, DIRECT_ARGUMENTS_LINE);
     setWindowsDefinitionDepsForTests({
       queryTaskXml: async () => ({
         kind: "xml",
-        xml: execTaskXml(DIRECT_CLI_COMMAND, DIRECT_ARGUMENTS_LINE),
+        xml: queriedXml,
       }),
+      predictCli: async () => resolvedCli,
       resolveCli: async () => resolvedCli,
     });
 
@@ -301,8 +315,108 @@ describe("W1: the CLI itself is the task action (direct-action, launcher-less)",
     }
     expect(call.command).not.toBe("taskkill");
 
+    // The registered task redefined, not replaced: its own XML with only the
+    // `<Exec>` swapped for the launcher action. This row used to expect a
+    // fresh `buildScheduledTaskXml` - F17's defect, a refresh that dropped
+    // whatever the registered task carried (`<Enabled>`, battery and other
+    // user settings); the F17 describe below pins those carrying over.
+    const newExecBlock = buildScheduledTaskXml(
+      { label, cli: resolvedCli },
+      TEST_TASK_USER_ID,
+    ).match(/<Exec>[\s\S]*?<\/Exec>/)?.[0];
+    if (newExecBlock === undefined) throw new Error("unreachable");
     expect(xmlCapture.text).toBe(
-      buildScheduledTaskXml({ label, cli: resolvedCli }),
+      queriedXml.replace(/<Exec>[\s\S]*?<\/Exec>/, newExecBlock),
+    );
+  });
+});
+
+/** A minimal-but-full Scheduled Task XML with a direct-action `<Exec>` PLUS a
+ * `<Settings>` block carrying values a fresh `buildScheduledTaskXml` would
+ * never emit - the user-disabled task with battery customisations F17
+ * exists to preserve. */
+function execTaskXmlWithSettings(
+  command: string,
+  argumentsLine: string,
+): string {
+  const escapedCommand = command.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const escapedArgs = argumentsLine
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Settings>
+    <Enabled>false</Enabled>
+    <DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>${escapedCommand}</Command>
+      <Arguments>${escapedArgs}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+`;
+}
+
+describe("F17: refresh's /Create XML carries over the queried task's Settings, replacing only <Exec>", () => {
+  it("W1 direct-action, task disabled + battery-customised: the written XML === the queried XML with only its <Exec> body replaced", async () => {
+    const label = labelFor("f17-preserve-settings");
+    const resolvedCli: CliInvocation = {
+      command: DIRECT_CLI_COMMAND,
+      args: [],
+    };
+    const queriedXml = execTaskXmlWithSettings(
+      DIRECT_CLI_COMMAND,
+      DIRECT_ARGUMENTS_LINE,
+    );
+    setWindowsDefinitionDepsForTests({
+      queryTaskXml: async () => ({ kind: "xml", xml: queriedXml }),
+      predictCli: async () => resolvedCli,
+      resolveCli: async () => resolvedCli,
+    });
+
+    const state = await inspectWindowsServiceDefinition(label);
+    expect(state).toEqual({
+      kind: "stale",
+      form: "direct-action",
+      appliesAt: "next-start",
+    });
+
+    const calls: RecordedCall[] = [];
+    const xmlCapture = { text: null as string | null };
+    const result = await refreshWindowsServiceDefinition(
+      label,
+      recordingRunner(calls, xmlCapture),
+    );
+    expect(result).toEqual({
+      kind: "refreshed",
+      form: "direct-action",
+      appliesAt: "next-start",
+    });
+
+    // The new `<Exec>` block, exactly as production's own emitter produces
+    // it - not a re-implementation of its shape or quoting.
+    const freshXml = buildScheduledTaskXml(
+      { label, cli: resolvedCli },
+      TEST_TASK_USER_ID,
+    );
+    const newExecBlock = freshXml.match(/<Exec>[\s\S]*?<\/Exec>/)?.[0];
+    if (newExecBlock === undefined) throw new Error("unreachable");
+    const expectedXml = queriedXml.replace(
+      /<Exec>[\s\S]*?<\/Exec>/,
+      newExecBlock,
+    );
+
+    expect(xmlCapture.text).toBe(expectedXml);
+    expect(xmlCapture.text).toContain("<Enabled>false</Enabled>");
+    expect(xmlCapture.text).toContain(
+      "<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>",
+    );
+    expect(xmlCapture.text).toContain(
+      "<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>",
     );
   });
 });
@@ -317,8 +431,12 @@ describe("W2: the task action already runs the wscript launcher, but the launche
     setWindowsDefinitionDepsForTests({
       queryTaskXml: async () => ({
         kind: "xml",
-        xml: buildScheduledTaskXml({ label, cli: resolvedCli }),
+        xml: buildScheduledTaskXml(
+          { label, cli: resolvedCli },
+          TEST_TASK_USER_ID,
+        ),
       }),
+      predictCli: async () => resolvedCli,
       resolveCli: async () => resolvedCli,
     });
     await mkdir(dirname(launcherVbsPath(label)), { recursive: true });
@@ -361,8 +479,12 @@ describe("current: no writes, no runner calls", () => {
     setWindowsDefinitionDepsForTests({
       queryTaskXml: async () => ({
         kind: "xml",
-        xml: buildScheduledTaskXml({ label, cli: resolvedCli }),
+        xml: buildScheduledTaskXml(
+          { label, cli: resolvedCli },
+          TEST_TASK_USER_ID,
+        ),
       }),
+      predictCli: async () => resolvedCli,
       resolveCli: async () => resolvedCli,
     });
     await mkdir(dirname(launcherVbsPath(label)), { recursive: true });
@@ -392,6 +514,9 @@ describe("not-registered and unrecognized", () => {
     const label = labelFor("w-not-registered");
     setWindowsDefinitionDepsForTests({
       queryTaskXml: async () => ({ kind: "absent" }),
+      predictCli: async () => {
+        throw new Error("must not be called: no task means nothing to predict");
+      },
       resolveCli: async () => {
         throw new Error("must not be called: no task means nothing to resolve");
       },
@@ -416,6 +541,9 @@ describe("not-registered and unrecognized", () => {
         kind: "xml",
         xml: execTaskXml("C:\\Windows\\System32\\notepad.exe", "readme.txt"),
       }),
+      predictCli: async () => {
+        throw new Error("must not be called before the action is recognised");
+      },
       resolveCli: async () => {
         throw new Error("must not be called before the action is recognised");
       },
@@ -457,6 +585,7 @@ describe("cli-invocation.json (the invocation record)", () => {
         kind: "xml",
         xml: execTaskXml(DIRECT_CLI_COMMAND, DIRECT_ARGUMENTS_LINE),
       }),
+      predictCli: async () => resolvedCli,
       resolveCli: async () => resolvedCli,
     });
     const recordPath = cliInvocationRecordPath(hostHomeDir(label.environment));
@@ -501,6 +630,7 @@ describe("cli-invocation.json (the invocation record)", () => {
         kind: "xml",
         xml: execTaskXml(oldCli.command, DIRECT_ARGUMENTS_LINE),
       }),
+      predictCli: async () => newCli,
       resolveCli: async () => newCli,
     });
 
@@ -521,6 +651,155 @@ describe("cli-invocation.json (the invocation record)", () => {
     expect(newVbs.equals(currentVbsBytes(newCli, label))).toBe(true);
 
     await rm(standaloneCliDir, { recursive: true, force: true });
+  });
+});
+
+/** Recursively lists every regular file under `root` as
+ * `"<relative path>:<byte length>:<base64 bytes>"`, sorted - a content
+ * snapshot cheap enough to diff before/after a call that must not write
+ * anything. Missing `root` snapshots as empty, not an error. */
+async function snapshotFilesRecursively(
+  root: string,
+): Promise<readonly string[]> {
+  const out: string[] = [];
+  async function walk(dir: string, prefix: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full, rel);
+      } else {
+        const bytes = await readFile(full);
+        out.push(`${rel}:${bytes.length}:${bytes.toString("base64")}`);
+      }
+    }
+  }
+  await walk(root, "");
+  return [...out].sort();
+}
+
+/**
+ * F15/T21 fixture: a CLI manifest naming a real, executable, non-slot binary
+ * - so the REAL `resolveServiceCliInvocation` (deps left at their default via
+ * `setWindowsDefinitionDepsForTests(null)`) has something to resolve - plus a
+ * launcher file already current for the SLOT invocation staging would
+ * produce. On the fix, planning predicts that same slot path without ever
+ * calling `stageWellKnownCliBinary`; on head, staging runs during planning
+ * and writes the slot for real.
+ */
+async function setupF15Fixture(
+  label: ServiceLabel,
+): Promise<{ readonly sourceDir: string }> {
+  const sourceDir = await mkdtemp(
+    join(tmpdir(), "traycer-f15-manifest-source-"),
+  );
+  const sourceBinaryPath = join(sourceDir, "traycer-source-binary");
+  await writeFile(sourceBinaryPath, "#!/bin/sh\necho ok\n", { mode: 0o755 });
+  if (process.platform !== "win32") await chmod(sourceBinaryPath, 0o755);
+
+  const manifest = {
+    version: "1.0.0",
+    installedAt: new Date(0).toISOString(),
+    binaryPath: sourceBinaryPath,
+    source: "manual",
+    pendingUpgrade: null,
+  };
+  const manifestPath = cliManifestPath(label.environment);
+  await mkdir(dirname(manifestPath), { recursive: true });
+  await writeFile(manifestPath, JSON.stringify(manifest));
+
+  const predictedCli: CliInvocation = {
+    command: wellKnownCliBinaryPath(label.environment),
+    args: [],
+  };
+  await mkdir(dirname(launcherVbsPath(label)), { recursive: true });
+  await writeFile(launcherVbsPath(label), currentVbsBytes(predictedCli, label));
+
+  return { sourceDir };
+}
+
+describe("F15 + T21: planning predicts the slot invocation without staging", () => {
+  it("inspect: a current task action, predicted-current launcher -> {kind: 'current'} with NO filesystem writes (head stages the slot during planning)", async () => {
+    const label = labelFor("f15-inspect-no-stage");
+    setWindowsDefinitionDepsForTests(null);
+    const { sourceDir } = await setupF15Fixture(label);
+    const queriedXml = buildScheduledTaskXml(
+      { label, cli: { command: DIRECT_CLI_COMMAND, args: [] } },
+      TEST_TASK_USER_ID,
+    );
+    runCommandForBytesMock.impl = async () => ({
+      stdout: Buffer.from(`﻿${queriedXml}`, "utf16le"),
+      exitCode: 0,
+      stderr: "",
+    });
+
+    const cliInstallHomeBefore = await snapshotFilesRecursively(
+      cliInstallHomeDir(label.environment),
+    );
+    const hostHomeBefore = await snapshotFilesRecursively(
+      hostHomeDir(label.environment),
+    );
+
+    const state = await inspectWindowsServiceDefinition(label);
+
+    expect(state).toEqual({ kind: "current" });
+    const slotPath = wellKnownCliBinaryPath(label.environment);
+    await expect(stat(slotPath)).rejects.toThrow();
+    expect(
+      await snapshotFilesRecursively(cliInstallHomeDir(label.environment)),
+    ).toEqual(cliInstallHomeBefore);
+    expect(
+      await snapshotFilesRecursively(hostHomeDir(label.environment)),
+    ).toEqual(hostHomeBefore);
+
+    await rm(sourceDir, { recursive: true, force: true });
+  });
+
+  it("refresh: same fixture -> {kind: 'current'}, zero runner calls, NO filesystem writes (head stages the slot during planning)", async () => {
+    const label = labelFor("f15-refresh-no-stage");
+    setWindowsDefinitionDepsForTests(null);
+    const { sourceDir } = await setupF15Fixture(label);
+    const queriedXml = buildScheduledTaskXml(
+      { label, cli: { command: DIRECT_CLI_COMMAND, args: [] } },
+      TEST_TASK_USER_ID,
+    );
+    runCommandForBytesMock.impl = async () => ({
+      stdout: Buffer.from(`﻿${queriedXml}`, "utf16le"),
+      exitCode: 0,
+      stderr: "",
+    });
+
+    const cliInstallHomeBefore = await snapshotFilesRecursively(
+      cliInstallHomeDir(label.environment),
+    );
+    const hostHomeBefore = await snapshotFilesRecursively(
+      hostHomeDir(label.environment),
+    );
+
+    const calls: RecordedCall[] = [];
+    const result = await refreshWindowsServiceDefinition(
+      label,
+      recordingRunner(calls, { text: null }),
+    );
+
+    expect(result).toEqual({ kind: "current" });
+    expect(calls).toEqual([]);
+    const slotPath = wellKnownCliBinaryPath(label.environment);
+    await expect(stat(slotPath)).rejects.toThrow();
+    expect(
+      await snapshotFilesRecursively(cliInstallHomeDir(label.environment)),
+    ).toEqual(cliInstallHomeBefore);
+    expect(
+      await snapshotFilesRecursively(hostHomeDir(label.environment)),
+    ).toEqual(hostHomeBefore);
+
+    await rm(sourceDir, { recursive: true, force: true });
   });
 });
 
@@ -550,6 +829,7 @@ describe("schtasks /Query /XML decode (reachable without the queryTaskXml seam)"
       runCommandForBytesMock.impl = async () => ({
         stdout: encode(UNRECOGNIZED_XML),
         exitCode: 0,
+        stderr: "",
       });
 
       const state = await inspectWindowsServiceDefinition(label);
@@ -561,15 +841,67 @@ describe("schtasks /Query /XML decode (reachable without the queryTaskXml seam)"
     },
   );
 
-  it("a non-zero schtasks exit reads as not-registered, not a decode failure", async () => {
+  // F18: this row used to read EVERY non-zero exit as not-registered - the
+  // defect: an access denial or any other `/Query` failure then passed for
+  // "nothing to refresh". A non-zero exit is still never decoded, but only
+  // stderr that names a missing task reads as not-registered (the F18
+  // describe below); a silent failure names nothing, so it is reported.
+  it("a non-zero schtasks exit with no stderr is not decoded, and is reported rather than read as not-registered", async () => {
     const label = labelFor("w-decode-nonzero-exit");
     runCommandForBytesMock.impl = async () => ({
       stdout: Buffer.alloc(0),
       exitCode: 1,
+      stderr: "",
     });
 
     const state = await inspectWindowsServiceDefinition(label);
 
+    expect(state).toEqual({
+      kind: "unrecognized",
+      reason: "schtasks /Query failed (exit 1)",
+    });
+  });
+});
+
+// F18: a non-zero `schtasks /Query` exit should not ALWAYS mean "no such
+// task" - an access denial is a real failure the refresh must surface, not
+// silently swallow as "nothing to refresh". Only stderr that actually NAMES
+// a missing task may still read as not-registered.
+describe("F18: schtasks /Query non-zero exit disambiguated by stderr", () => {
+  it("access denied (exit 1): inspect is 'unrecognized' naming schtasks /Query, refresh rejects SERVICE_DEFINITION_REFRESH_FAILED - head misreads this as not-registered", async () => {
+    const label = labelFor("w-f18-access-denied");
+    runCommandForBytesMock.impl = async () => ({
+      stdout: Buffer.alloc(0),
+      exitCode: 1,
+      stderr: "ERROR: Access is denied.\r\n",
+    });
+
+    const state = await inspectWindowsServiceDefinition(label);
+    expect(state).toEqual({
+      kind: "unrecognized",
+      reason: expect.stringContaining("schtasks /Query"),
+    });
+
+    const { CLI_ERROR_CODES, CliError } =
+      await import("../../../runner/errors");
+    const error = await refreshWindowsServiceDefinition(
+      label,
+      recordingRunner([], { text: null }),
+    ).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(CliError);
+    if (!(error instanceof CliError)) throw new Error("unreachable");
+    expect(error.code).toBe(CLI_ERROR_CODES.SERVICE_DEFINITION_REFRESH_FAILED);
+  });
+
+  it("control: 'cannot find the file specified' (exit 1) still reads as not-registered", async () => {
+    const label = labelFor("w-f18-missing-task-control");
+    runCommandForBytesMock.impl = async () => ({
+      stdout: Buffer.alloc(0),
+      exitCode: 1,
+      stderr: "ERROR: The system cannot find the file specified.\r\n",
+    });
+
+    const state = await inspectWindowsServiceDefinition(label);
     expect(state).toEqual({ kind: "not-registered" });
   });
 });

@@ -112,8 +112,8 @@ export const WINDOWS_RESTART_SEQUENCE_TIMEOUT_MS =
   WINDOWS_SCHTASKS_END_TIMEOUT_MS +
   // The kill step is a bounded scan-then-kill loop, not a single pass, so its
   // worst case scales with the round bound. Leaving this as one scan + one
-  // kill would understate the sequence and let the caller's SIGKILL land
-  // mid-restart - the exact failure the outer budget below exists to prevent.
+  // kill would understate the sequence, and a caller that sized a timeout
+  // from it would SIGKILL a slow-but-successful restart mid-way.
   // Scans and kills are counted separately because the loop confirms with a
   // final scan it does not kill from: N+1 scans, N kills.
   (WINDOWS_KILL_CONVERGENCE_ROUNDS + 1) * WINDOWS_PROCESS_SCAN_TIMEOUT_MS +
@@ -121,25 +121,3 @@ export const WINDOWS_RESTART_SEQUENCE_TIMEOUT_MS =
   WINDOWS_SCHTASKS_RUN_TIMEOUT_MS +
   WINDOWS_START_SPAWN_VERIFY_MS +
   WINDOWS_SCHTASKS_QUERY_TIMEOUT_MS;
-
-/**
- * Budget for a full `traycer host restart` subprocess as invoked by Desktop
- * (Settings, tray, and the native-menu respawn path all route through this
- * one constant). `host restart` runs stop-then-start, and a caller-side
- * timeout shorter than the platform's own worst-case sequence SIGKILLs the
- * CLI mid-restart - after stop succeeds but before start runs - leaving the
- * host down. That is exactly what a desktop-side 10s cap against macOS's 32s
- * stop-grace used to do.
- *
- * Derived as the max of every platform's worst case plus margin, not just
- * macOS's: on macOS the stop phase alone waits up to `SHUTDOWN_FORCE_EXIT_MS
- * + STOP_EXIT_GRACE_MARGIN_MS`; on Windows the four-step sequence above can
- * legitimately take `WINDOWS_RESTART_SEQUENCE_TIMEOUT_MS`, which is larger.
- * A budget sized only for macOS would SIGKILL a slow-but-successful Windows
- * restart during its final `schtasks /Run` step - the same class of bug this
- * constant exists to prevent, just on the other platform.
- */
-export const HOST_RESTART_SUBPROCESS_TIMEOUT_MS = Math.max(
-  SHUTDOWN_FORCE_EXIT_MS + STOP_EXIT_GRACE_MARGIN_MS + 60_000,
-  WINDOWS_RESTART_SEQUENCE_TIMEOUT_MS + 30_000,
-);

@@ -5,6 +5,7 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { formatDarwinProcessStartIdentity } from "../../host/lifecycle/process-start-identity";
 import {
   SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1,
   parseSupervisorRecord,
@@ -38,6 +39,8 @@ const VALID_RECORD: SupervisorRecord = {
   cliVersion: "1.4.0",
   capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
   startedAt: "2026-08-17T12:00:00.000Z",
+  startIdentity: null,
+  admittedAs: null,
 };
 
 describe("serialize / parse round-trip", () => {
@@ -191,6 +194,53 @@ describe("unknown extra keys are ignored", () => {
   });
 });
 
+describe("startIdentity (F11)", () => {
+  const ID = formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026");
+
+  it("serializes startIdentity into the record's text", () => {
+    const text = serializeSupervisorRecord({
+      ...VALID_RECORD,
+      startIdentity: ID,
+    });
+    const raw: unknown = JSON.parse(text);
+    expect(raw).toHaveProperty("startIdentity", ID);
+  });
+
+  it("round-trips a record carrying a startIdentity", () => {
+    const record: SupervisorRecord = { ...VALID_RECORD, startIdentity: ID };
+    expect(
+      parseSupervisorRecordText(serializeSupervisorRecord(record)),
+    ).toEqual(record);
+  });
+
+  it("a record with no startIdentity key parses with startIdentity null (legacy)", () => {
+    const withoutStartIdentity = {
+      v: VALID_RECORD.v,
+      pid: VALID_RECORD.pid,
+      cliVersion: VALID_RECORD.cliVersion,
+      capabilities: VALID_RECORD.capabilities,
+      startedAt: VALID_RECORD.startedAt,
+    };
+    const parsed = parseSupervisorRecord(withoutStartIdentity);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.startIdentity).toBeNull();
+  });
+
+  it("startIdentity: null parses to null", () => {
+    const record = { ...VALID_RECORD, startIdentity: null };
+    const parsed = parseSupervisorRecord(record);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.startIdentity).toBeNull();
+  });
+
+  it('startIdentity: "garbage" (not a valid identity) still parses as a record, with startIdentity null', () => {
+    const record = { ...VALID_RECORD, startIdentity: "garbage" };
+    const parsed = parseSupervisorRecord(record);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.startIdentity).toBeNull();
+  });
+});
+
 describe("supervisorRecordHasCapability", () => {
   it("is false for a null record", () => {
     expect(
@@ -235,5 +285,85 @@ describe("supervisorRecordHasCapability", () => {
     expect(
       supervisorRecordHasCapability(record, "some-unknown-capability"),
     ).toBe(true);
+  });
+});
+
+// F4 (lifecycle side): "the desktop leaves a host that a person started in a
+// terminal untouched; the mode governs the service run only." `admittedAs`
+// is how the supervisor records which kind of start it admitted -
+// `"service"` (a mode-governed run: launchd/systemd/Scheduled Task, or an
+// unattended CLI start) or `"foreground"` (a person's own terminal) - so a
+// reader can tell the two apart. Optional on the wire like `startIdentity`:
+// absent, `null` or unrecognized parses to `null` and never rejects the
+// record. These tests read the parsed value with `toHaveProperty` rather
+// than a typed field access, and construct raw literals rather than typed
+// `SupervisorRecord` values, so they run unmodified once the type gains the
+// field - vitest does not type-check.
+describe("admittedAs (F4)", () => {
+  it("parses admittedAs 'service'", () => {
+    const raw = { ...VALID_RECORD, admittedAs: "service" };
+    const parsed = parseSupervisorRecord(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed).toHaveProperty("admittedAs", "service");
+  });
+
+  it("parses admittedAs 'foreground'", () => {
+    const raw = { ...VALID_RECORD, admittedAs: "foreground" };
+    const parsed = parseSupervisorRecord(raw);
+    expect(parsed).not.toBeNull();
+    expect(parsed).toHaveProperty("admittedAs", "foreground");
+  });
+
+  const invalidAdmittedAsCases: ReadonlyArray<{
+    readonly name: string;
+    readonly withKey: boolean;
+    readonly value: unknown;
+  }> = [
+    { name: "absent", withKey: false, value: undefined },
+    { name: "null", withKey: true, value: null },
+    { name: "an unrecognized string", withKey: true, value: "granted" },
+    { name: "a number", withKey: true, value: 42 },
+  ];
+
+  for (const testCase of invalidAdmittedAsCases) {
+    it(`reads ${testCase.name} admittedAs as null without rejecting the record`, () => {
+      let raw: Record<string, unknown> = {
+        ...VALID_RECORD,
+        admittedAs: testCase.value,
+      };
+      if (!testCase.withKey) {
+        const { admittedAs: _omitted, ...withoutAdmittedAs } = raw;
+        raw = withoutAdmittedAs;
+      }
+      const parsed = parseSupervisorRecord(raw);
+      expect(parsed).not.toBeNull();
+      expect(parsed).toHaveProperty("admittedAs", null);
+    });
+  }
+
+  it("serializeSupervisorRecord writes a concrete admittedAs value", () => {
+    const text = serializeSupervisorRecord({
+      ...VALID_RECORD,
+      admittedAs: "foreground",
+    });
+    const raw: unknown = JSON.parse(text);
+    expect(raw).toHaveProperty("admittedAs", "foreground");
+  });
+
+  it("serializeSupervisorRecord writes admittedAs null", () => {
+    const text = serializeSupervisorRecord({
+      ...VALID_RECORD,
+      admittedAs: null,
+    });
+    const raw: unknown = JSON.parse(text);
+    expect(raw).toHaveProperty("admittedAs", null);
+  });
+
+  it("round-trips a record carrying admittedAs", () => {
+    const record = { ...VALID_RECORD, admittedAs: "service" as const };
+    const text = serializeSupervisorRecord(record);
+    const parsed = parseSupervisorRecordText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed).toHaveProperty("admittedAs", "service");
   });
 });

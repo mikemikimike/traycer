@@ -1,7 +1,16 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // `host install` (Host Update Layer Redesign Tech Plan, "Lock-scope
 // restructure" + "--no-service-register" + "--if-idle"): stage/verify/
@@ -13,6 +22,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // installer boundary and the service lifecycle, mirroring host-update.
 // test.ts's mock style. The genuine two-process lock-contention coverage
 // lives in host-install-lock.test.ts.
+
+// HOME is redirected to a private temp dir BEFORE anything reads it: the
+// command runs the REAL update-attempt segment, which takes its lock and
+// reads its attempt record under `hostHomeDir()`, and `store/paths` binds
+// `homedir()` at module load. Without this every row took (and read) this
+// machine's REAL `~/.traycer/host` lock. The dir is made inside the
+// `node:os` factory, so it exists before the first module that asks for
+// `homedir()` is evaluated.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-host-install-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
 
 const mocks = vi.hoisted(() => ({
   callOrder: [] as string[],
@@ -30,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   provisionInstalledHostCredentialMock: vi.fn(),
   gateStoreFormatFloorMock: vi.fn(),
   readInstalledFloorOperandsMock: vi.fn(),
+  publishHostStartAdoptionMock: vi.fn(),
 }));
 
 vi.mock("../../installer", () => ({
@@ -183,6 +213,24 @@ vi.mock("../../host/credential-provisioning", () => ({
   },
 }));
 
+// Not otherwise reached by this suite's fixtures (`sampleLifecycleHandle()`
+// has no `setHostStartAdoptionPublisher`, so `commitHostInstallSourceWithAttempt`
+// never registers a publisher) - mocked here only so a fixture that DOES
+// wire one up (T2, below) never reaches the real handshake, which waits for
+// a service-manager child ack that never comes, against the operator's real
+// `~/.traycer` home.
+vi.mock("../../host/host-start-adoption", () => ({
+  publishHostStartAdoption: (
+    ...callArgs: Parameters<typeof mocks.publishHostStartAdoptionMock>
+  ) => {
+    mocks.publishHostStartAdoptionMock(...callArgs);
+    return Promise.resolve({
+      waitForSpawn: async () => undefined,
+      cancel: async () => undefined,
+    });
+  },
+}));
+
 vi.mock("../../store/cli-lock", () => ({
   withCliLock: async (
     _opts: unknown,
@@ -212,6 +260,16 @@ import {
   type StagedHostInstallSource,
 } from "../../installer";
 import type { ServiceInstallLifecycleHandle } from "../../service/install-lifecycle";
+import { hostHomeDir } from "../../store/paths";
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 function sampleRecord(version: string): HostInstallRecord {
   return {
@@ -458,6 +516,44 @@ describe("buildHostInstallCommand", () => {
       "auth-resolve",
       "credential-provision",
     ]);
+  });
+
+  // T2: every existing fixture in this file passes `lifecycleOrigin:
+  // "terminal"` (`baseArgs`'s default), so nothing here pins that an
+  // explicit `--lifecycle-origin desktop` actually reaches the publisher
+  // `commitHostInstallSourceWithAttempt` registers on the lifecycle handle.
+  it("threads lifecycleOrigin: desktop into the host-start adoption publisher registered on the lifecycle handle", async () => {
+    mocks.stageHostInstallSourceMock.mockResolvedValue(sampleStaged());
+    const setHostStartAdoptionPublisherMock = vi.fn();
+    mocks.createServiceInstallLifecycleMock.mockReturnValue({
+      ...sampleLifecycleHandle(),
+      lifecycle: {
+        ...sampleLifecycleHandle().lifecycle,
+        setHostStartAdoptionPublisher: setHostStartAdoptionPublisherMock,
+      },
+    });
+    mocks.commitHostInstallSourceMock.mockResolvedValue({
+      record: sampleRecord("2.0.0"),
+      previous: sampleRecord("1.0.0"),
+      installGeneration: "id:install-2.0.0",
+    });
+
+    const command = buildHostInstallCommand(
+      baseArgs({ lifecycleOrigin: "desktop" }),
+    );
+    await command(fakeCtx());
+
+    expect(setHostStartAdoptionPublisherMock).toHaveBeenCalledTimes(1);
+    const registeredPublisher = setHostStartAdoptionPublisherMock.mock
+      .calls[0]?.[0] as (serviceLabel: string) => Promise<unknown>;
+    expect(typeof registeredPublisher).toBe("function");
+
+    await registeredPublisher("ai.traycer.host");
+
+    expect(mocks.publishHostStartAdoptionMock).toHaveBeenCalledTimes(1);
+    expect(mocks.publishHostStartAdoptionMock.mock.calls[0]?.[3]).toBe(
+      "desktop",
+    );
   });
 
   it("consults the store-format floor with the explicit --release target before staging, and refuses without staging anything when the floor refuses", async () => {

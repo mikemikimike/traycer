@@ -5,10 +5,9 @@ import type {
 } from "@traycer-clients/shared/platform/runner-host";
 import { hostLifecycleViewQueryKey } from "@/hooks/runner/use-runner-host-lifecycle-query";
 import {
-  Analytics,
-  AnalyticsEvent,
-  type AnalyticsHostLifecycleSource,
-} from "@/lib/analytics";
+  hostLifecycleModeSetAnalyticsFor,
+  type HostLifecycleWindowSource,
+} from "@/lib/host/host-lifecycle-mode-set-analytics";
 import { runnerMutationKeys } from "@/lib/query-keys/runner-mutation-keys";
 import { toastFromRunnerError } from "@/lib/runner-error-toast";
 import { useRunnerHostOrNull } from "@/providers/use-runner-host";
@@ -16,7 +15,7 @@ import { useRunnerHostOrNull } from "@/providers/use-runner-host";
 export interface HostLifecycleSetInput {
   readonly request: HostLifecycleSetRequest;
   /** Which surface committed it, for `host_lifecycle_mode_set`. */
-  readonly source: AnalyticsHostLifecycleSource;
+  readonly source: HostLifecycleWindowSource;
 }
 
 /**
@@ -28,16 +27,24 @@ export interface HostLifecycleSetInput {
  * are OUTCOMES, not errors: the calling surface renders them inline. Only a
  * rejected IPC call reaches `onError`.
  *
- * `host_lifecycle_mode_set` fires on `applied` alone, with enums only.
+ * `host_lifecycle_mode_set` is reported for the WRITE, with enums only: the
+ * `applied` reply and main's change push both carry it, and whichever lands
+ * first reports it (`HostLifecycleModeSetAnalytics`).
  */
 export function useRunnerHostLifecycleSetMutation() {
   const runnerHost = useRunnerHostOrNull();
   const queryClient = useQueryClient();
+  const hostLifecycle = runnerHost === null ? null : runnerHost.hostLifecycle;
   return useMutation({
     mutationKey: runnerMutationKeys.hostLifecycleSet(),
+    onMutate: (input: HostLifecycleSetInput) => {
+      if (hostLifecycle === null) return;
+      hostLifecycleModeSetAnalyticsFor(hostLifecycle).expect(
+        input.request.mode,
+        input.source,
+      );
+    },
     mutationFn: (input: HostLifecycleSetInput) => {
-      const hostLifecycle =
-        runnerHost === null ? null : runnerHost.hostLifecycle;
       if (hostLifecycle === null) {
         throw new Error("The host lifecycle is only set in the desktop app.");
       }
@@ -48,13 +55,17 @@ export function useRunnerHostLifecycleSetMutation() {
         hostLifecycleViewQueryKey(runnerHost),
         result.view,
       );
-      if (result.kind !== "applied") return;
-      Analytics.getInstance().track(AnalyticsEvent.HostLifecycleModeSet, {
-        mode: input.request.mode,
-        source: input.source,
-      });
+      if (hostLifecycle === null) return;
+      hostLifecycleModeSetAnalyticsFor(hostLifecycle).settle(
+        input.source,
+        result.kind === "applied" ? result.view : null,
+      );
     },
-    onError: (error) =>
-      toastFromRunnerError(error, "Couldn't change what happens to the host"),
+    onError: (error, input) => {
+      if (hostLifecycle !== null) {
+        hostLifecycleModeSetAnalyticsFor(hostLifecycle).withdraw(input.source);
+      }
+      toastFromRunnerError(error, "Couldn't change what happens to the host");
+    },
   });
 }

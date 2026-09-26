@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import electronLog from "electron-log";
 import { sandboxHome } from "../../__tests__/sandbox-home";
 
 // Host Update Layer Redesign Tech Plan - Ticket: "Desktop main: HostController
@@ -279,6 +280,7 @@ import {
   streamBundledTraycerCliJson,
   TraycerCliError,
   type NdjsonEvent,
+  type StreamTraycerCliResult,
 } from "../../cli/traycer-cli";
 import { prereleaseUpdatesEnabled } from "../../app/update-preferences";
 import {
@@ -300,6 +302,7 @@ import {
   type HostControllerHostLifecycle,
 } from "../host-controller";
 import {
+  HOST_NOT_SERVICE_RUN_MESSAGE,
   HOST_REMOVED_BY_USER_MESSAGE,
   type LifecycleAdmissionBlock,
   type LocalAttemptFacts,
@@ -308,6 +311,7 @@ import {
   type ReprovisionGuardVerdict,
 } from "../host-controller-types";
 import { getHostFsLayout, cliLockPath } from "../host-paths";
+import type { SupervisorRunRead } from "../host-lifecycle-policy";
 import { DEV_DESKTOP_SLOT_ENV } from "../dev-desktop-slot";
 import { acquireDesktopCliLock } from "../desktop-cli-lock";
 import {
@@ -342,6 +346,11 @@ const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 const ORIGINAL_DEV_DESKTOP_SLOT = process.env[DEV_DESKTOP_SLOT_ENV];
 let workHome: string;
 
+// RM: the terminal-started-host reader every `newController*` helper below
+// threads into `HostController` as `supervisorRun`. Reset to the
+// no-supervisor default in `beforeEach`; RM's own tests override it.
+const readSupervisorRunMock = vi.fn<() => Promise<SupervisorRunRead>>();
+
 beforeEach(() => {
   workHome = mkdtempSync(join(tmpdir(), "traycer-host-controller-"));
   sandboxHome(workHome);
@@ -375,6 +384,12 @@ beforeEach(() => {
   vi.mocked(unregisterHostLoginItemGuarded).mockResolvedValue(true);
   vi.mocked(probeHostActivityBusy).mockResolvedValue(false);
   vi.mocked(resolveBundledCliPath).mockResolvedValue(null);
+  readSupervisorRunMock.mockReset();
+  readSupervisorRunMock.mockResolvedValue({
+    state: "not-running",
+    supervisorPid: null,
+    admittedAs: null,
+  });
 });
 
 afterEach(() => {
@@ -461,6 +476,7 @@ function newControllerWithLifecycle(
     reachabilityProbe,
     desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
     desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+    supervisorRun: { readSupervisorRun: readSupervisorRunMock },
   });
 }
 
@@ -487,6 +503,7 @@ function newControllerWithLockTiming(
     reachabilityProbe,
     desktopLockWaitMs,
     desktopLockPollIntervalMs,
+    supervisorRun: { readSupervisorRun: readSupervisorRunMock },
   });
 }
 
@@ -5550,7 +5567,9 @@ describe("platform matrix", () => {
     // Route pin: the removal streams `host uninstall --all` (the Windows
     // kill loop can outlive the run path's flat timeout) and never runs it.
     expect(streamBundledTraycerCliJson).toHaveBeenCalledWith(
-      expect.objectContaining({ args: ["host", "uninstall", "--all"] }),
+      expect.objectContaining({
+        args: ["host", "uninstall", "--all", "--lifecycle-origin", "desktop"],
+      }),
     );
     expect(runBundledTraycerCliJson).not.toHaveBeenCalledWith(
       expect.arrayContaining(["uninstall"]),
@@ -5669,11 +5688,221 @@ describe("platform matrix", () => {
     // Route pin: `uninstallHost` streams `host uninstall --all` for the same
     // reason `deregisterService` and `removeTraycer` do.
     expect(streamBundledTraycerCliJson).toHaveBeenCalledWith(
-      expect.objectContaining({ args: ["host", "uninstall", "--all"] }),
+      expect.objectContaining({
+        args: ["host", "uninstall", "--all", "--lifecycle-origin", "desktop"],
+      }),
     );
     expect(runBundledTraycerCliJson).not.toHaveBeenCalledWith(
       expect.arrayContaining(["uninstall"]),
     );
+  });
+});
+
+describe("RM: Remove Traycer and uninstall --all refuse first over a terminal-started host", () => {
+  function uninstallSpawnCount(): number {
+    return vi
+      .mocked(streamBundledTraycerCliJson)
+      .mock.calls.filter(([opts]) => opts.args.includes("uninstall")).length;
+  }
+
+  it("C1: removeTraycer refuses first over a non-packaged terminal-started host - no sentinel, no CLI spawn", async () => {
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 4242,
+      admittedAs: "foreground",
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    expect(await isHostRemovedByUser()).toBe(false);
+    expect(uninstallSpawnCount()).toBe(0);
+  });
+
+  it("C2: removeTraycer refuses first over a packaged-macOS terminal-started host - no login-item unregister, no CLI spawn", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(true);
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 4242,
+      admittedAs: "foreground",
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    expect(await isHostRemovedByUser()).toBe(false);
+    expect(unregisterHostLoginItemGuarded).not.toHaveBeenCalled();
+    expect(uninstallSpawnCount()).toBe(0);
+  });
+
+  it("C3: removeTraycer's packaged-macOS race - a foreground supervisor appears between the pre-lane check and the contender - still refuses, and the sentinel backstop clears", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(true);
+    readSupervisorRunMock
+      .mockResolvedValueOnce({
+        state: "enforcing",
+        supervisorPid: 9001,
+        admittedAs: "service",
+      })
+      .mockResolvedValue({
+        state: "enforcing",
+        supervisorPid: 4242,
+        admittedAs: "foreground",
+      });
+    const controller = newController("production");
+    expect(await isHostRemovedByUser()).toBe(false);
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    expect(unregisterHostLoginItemGuarded).not.toHaveBeenCalled();
+    expect(uninstallSpawnCount()).toBe(0);
+    expect(await isHostRemovedByUser()).toBe(false);
+  });
+
+  it("C4: removeTraycer's non-packaged race backstop - the CLI itself refuses not-service-run after the desktop-side checks passed - still resolves deferred, and the sentinel backstop clears", async () => {
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 9001,
+      admittedAs: "service",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+    const controller = newController("production");
+    expect(await isHostRemovedByUser()).toBe(false);
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    expect(await isHostRemovedByUser()).toBe(false);
+  });
+
+  it("C5: uninstallHost(true) refuses first over a packaged-macOS terminal-started host - no login-item unregister, no CLI spawn", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(true);
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 4242,
+      admittedAs: "foreground",
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.uninstallHost(true);
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    expect(unregisterHostLoginItemGuarded).not.toHaveBeenCalled();
+    expect(uninstallSpawnCount()).toBe(0);
+  });
+
+  it("K1: removeTraycer proceeds over a non-packaged host with no supervisor running", async () => {
+    readSupervisorRunMock.mockResolvedValue({
+      state: "not-running",
+      supervisorPid: null,
+      admittedAs: null,
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: { removedInstallDir: true, serviceUninstalled: true },
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome.kind).toBe("ok");
+    expect(await isHostRemovedByUser()).toBe(true);
+    expect(uninstallSpawnCount()).toBe(1);
+  });
+
+  it("K2: removeTraycer proceeds over a packaged-macOS host running as a service", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(true);
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 9001,
+      admittedAs: "service",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: { removedInstallDir: true, serviceUninstalled: true },
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome.kind).toBe("ok");
+    expect(unregisterHostLoginItemGuarded).toHaveBeenCalledTimes(1);
+    expect(uninstallSpawnCount()).toBe(1);
+    expect(await isHostRemovedByUser()).toBe(true);
+  });
+
+  it("K3: uninstallHost(true) proceeds over a packaged-macOS host running as a service", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(true);
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 9001,
+      admittedAs: "service",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: { removedInstallDir: true, serviceUninstalled: true },
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.uninstallHost(true);
+
+    expect(outcome.kind).toBe("ok");
+    expect(unregisterHostLoginItemGuarded).toHaveBeenCalledTimes(1);
+    expect(uninstallSpawnCount()).toBe(1);
+  });
+
+  it("K4: removeTraycer proceeds over a legacy supervisor record with no attested admission - only an attested foreground run is refused desktop-side", async () => {
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 4242,
+      admittedAs: null,
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: { removedInstallDir: true, serviceUninstalled: true },
+    });
+    const controller = newController("production");
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome.kind).toBe("ok");
+    expect(uninstallSpawnCount()).toBe(1);
+  });
+
+  it("C4b: removeTraycer's non-packaged race backstop leaves an already-set sentinel alone", async () => {
+    readSupervisorRunMock.mockResolvedValue({
+      state: "enforcing",
+      supervisorPid: 9001,
+      admittedAs: "service",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+    const controller = newController("production");
+    await markHostRemovedByUser();
+
+    const outcome = await controller.removeTraycer();
+
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    expect(await isHostRemovedByUser()).toBe(true);
   });
 });
 
@@ -6228,6 +6457,301 @@ describe("convergeReady E_HOST_BUSY classification (fixup B8)", () => {
       kind: "busy",
       continuation: "retry-with-force",
       message: expect.stringContaining("work in progress"),
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R6 (F4): "the desktop leaves a host that a person started in a terminal
+// untouched." The CLI refuses a desktop-origin mutation with
+// `E_HOST_NOT_SERVICE_RUN` when a terminal-started (foreground) supervisor
+// runs the host, and every Desktop-owned CLI mutation route funnels its
+// subprocess error through the ONE classifier table,
+// `classifyMutationSubprocessError`. That table must map this code to
+// `{kind: "deferred", message: HOST_NOT_SERVICE_RUN_MESSAGE}` - never
+// `failed` (which reads as a bug) and never `busy` (which offers a Force
+// continuation the person never gets to use, since Force would still hit
+// the same CLI refusal). Not yet classified: today it falls to the
+// catch-all `{kind: "failed", message: err.message}`, so every row below is
+// red on current bytes, and `HOST_NOT_SERVICE_RUN_MESSAGE` does not exist
+// yet either (the import resolves `undefined`, which cannot equal the
+// `err.message` a `failed` outcome actually carries).
+//
+// One test per verb that reaches the table via a genuinely different code
+// path, per T08's addendum: ensure, apply, install, activate, recover,
+// respawn (manual restart) and free-port. `activateInstalled(true, true)`
+// is driven with no staged update so it takes `activateInstalledCliOwned`
+// (`isPackagedMacOwned()` is false for `newController`), never the
+// packaged-Mac activation cycle T03 owns around host-controller.ts:2529.
+// ---------------------------------------------------------------------------
+describe("E_HOST_NOT_SERVICE_RUN classification (R6)", () => {
+  function expectDeferredNotServiceRun(outcome: unknown): void {
+    expect(outcome).toEqual({
+      kind: "deferred",
+      message: HOST_NOT_SERVICE_RUN_MESSAGE,
+    });
+    if (typeof outcome === "object" && outcome !== null && "kind" in outcome) {
+      expect((outcome as { kind: unknown }).kind).not.toBe("failed");
+      expect((outcome as { kind: unknown }).kind).not.toBe("busy");
+    }
+    expect(
+      vi
+        .mocked(electronLog.info)
+        .mock.calls.some(
+          ([, fields]) =>
+            typeof fields === "object" &&
+            fields !== null &&
+            (fields as Record<string, unknown>).reason === "not-service-run" &&
+            (fields as Record<string, unknown>).code ===
+              "E_HOST_NOT_SERVICE_RUN",
+        ),
+    ).toBe(true);
+    expect(electronLog.warn).not.toHaveBeenCalled();
+  }
+
+  beforeEach(() => {
+    vi.mocked(electronLog.info).mockClear();
+    vi.mocked(electronLog.warn).mockClear();
+  });
+
+  it("ensure: convergeReady's CLI-owned install branch defers on E_HOST_NOT_SERVICE_RUN", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+
+    expectDeferredNotServiceRun(outcome);
+  });
+
+  it("apply: applyStaged('manual', false) defers on E_HOST_NOT_SERVICE_RUN", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    writeStagedRecord("production", "1.8.0", "1.8.0");
+    vi.mocked(runBundledTraycerCliJson).mockResolvedValue(
+      availableSnapshotFixture("1.8.0", ["1.8.0"]),
+    );
+    vi.mocked(streamBundledTraycerCliJson).mockImplementation(async (opts) => {
+      if (opts.args.includes("download")) return { data: {} };
+      throw new TraycerCliError(
+        "E_HOST_NOT_SERVICE_RUN",
+        "not a service-run host",
+      );
+    });
+
+    const outcome = await controller.applyStaged("manual", false);
+
+    expectDeferredNotServiceRun(outcome);
+  });
+
+  it("install: installVersion defers on E_HOST_NOT_SERVICE_RUN", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+
+    const outcome = await controller.installVersion("1.8.0", false);
+
+    expectDeferredNotServiceRun(outcome);
+  });
+
+  it("activate: activateInstalled(true, true) with no staged update defers on E_HOST_NOT_SERVICE_RUN (CLI-owned only, never the packaged-Mac cycle)", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    writePidMetadata("production", { version: "1.7.0", pid: process.pid });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+
+    const outcome = await controller.activateInstalled(true, true);
+
+    expectDeferredNotServiceRun(outcome);
+  });
+
+  it("recover: recoverIfDown defers on E_HOST_NOT_SERVICE_RUN", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    removePidMetadata("production");
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValue(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+
+    const outcome = await controller.recoverIfDown();
+
+    expectDeferredNotServiceRun(outcome);
+  });
+
+  it("respawn: the manual restart's CLI recovery cycle defers on E_HOST_NOT_SERVICE_RUN", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+
+    const outcome = await controller.respawn({ kind: "background" }, "force");
+
+    expectDeferredNotServiceRun(outcome);
+  });
+
+  it("free-port: freePortAndRestart defers on E_HOST_NOT_SERVICE_RUN", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError("E_HOST_NOT_SERVICE_RUN", "not a service-run host"),
+    );
+
+    const outcome = await controller.freePortAndRestart(null, null, {
+      kind: "background",
+    });
+
+    expectDeferredNotServiceRun(outcome);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R8 (F4): `HostControllerStatus.lastEnsureFailure` - the last ensure's CLI
+// failure, surfaced for Doctor/Settings to show without another failing
+// round-trip. Absent today (`undefined`), so every row here is red on
+// current bytes.
+// ---------------------------------------------------------------------------
+describe("HostControllerStatus.lastEnsureFailure (R8)", () => {
+  it("a failed convergeReady with a TraycerCliError records {message, code}", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError(
+        "E_SERVICE_REGISTRATION_DISABLED",
+        "service registration is disabled",
+      ),
+    );
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+    expect(outcome.kind).toBe("failed");
+
+    const status = await controller.getStatus();
+    expect(status.lastEnsureFailure).toEqual({
+      message: "service registration is disabled",
+      code: "E_SERVICE_REGISTRATION_DISABLED",
+    });
+  });
+
+  it("a subsequent convergeReady that resolves ok clears lastEnsureFailure", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError(
+        "E_SERVICE_REGISTRATION_DISABLED",
+        "service registration is disabled",
+      ),
+    );
+    await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+    expect((await controller.getStatus()).lastEnsureFailure).not.toBeNull();
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+    expect(outcome.kind).toBe("ok");
+
+    expect((await controller.getStatus()).lastEnsureFailure).toBeNull();
+  });
+
+  it("a getStatus that finds the host reachable reports lastEnsureFailure null despite an earlier failure", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new TraycerCliError(
+        "E_SERVICE_REGISTRATION_DISABLED",
+        "service registration is disabled",
+      ),
+    );
+    await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+    expect((await controller.getStatus()).lastEnsureFailure).not.toBeNull();
+
+    // A supervisor (or a later successful action outside this controller
+    // instance) brought the host back up: `getStatus`'s own reachability
+    // read now finds it live.
+    writePidMetadata("production", {
+      version: "1.7.0",
+      pid: process.pid,
+    });
+
+    const status = await controller.getStatus();
+    expect(status.runningRuntimeVersion).not.toBeNull();
+    expect(status.lastEnsureFailure).toBeNull();
+  });
+
+  it("a failed ensure with no CLI code records code: null", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
+      new Error("ECONNRESET"),
+    );
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+    expect(outcome.kind).toBe("failed");
+
+    const status = await controller.getStatus();
+    expect(status.lastEnsureFailure).toEqual({
+      message: "ECONNRESET",
+      code: null,
     });
   });
 });
@@ -7131,6 +7655,7 @@ describe("respawn (fixup B14)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -7175,6 +7700,7 @@ describe("hostLifecycle wiring on success (fixup C2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -7206,6 +7732,7 @@ describe("hostLifecycle wiring on success (fixup C2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -7240,6 +7767,7 @@ describe("hostLifecycle wiring on success (fixup C2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -9541,6 +10069,55 @@ describe("respawn: if-idle mode (MIX-OLD-SUPERVISOR)", () => {
     expect(ifIdleOutcome).toEqual({ kind: "ok", value: { activated: true } });
     expect(seenArgv).toEqual([RESTART_FORCE_ARGV, RESTART_IF_IDLE_ARGV]);
   });
+
+  it("a force respawn submitted while a same-intent if-idle respawn is still gated on its E_HOST_BUSY outcome is not short-circuited by a wrong generation bump on busy", async () => {
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: "1.7.0",
+      runtimeVersion: "1.7.0",
+    });
+    const busyGate = deferred<void>();
+    const seenArgv: (readonly string[])[] = [];
+    vi.mocked(streamBundledTraycerCliJson).mockImplementation(async (opts) => {
+      seenArgv.push(opts.args);
+      if (opts.args.includes("--if-idle")) {
+        await busyGate.promise;
+        throw new TraycerCliError("E_HOST_BUSY", "host busy");
+      }
+      return { data: { activated: true } };
+    });
+
+    // `generationAtSubmit` is sampled synchronously at the TOP of `respawn`
+    // (host-controller.ts:5228), before either call's body runs - so
+    // submitting force here, WHILE if-idle is still gated on `busyGate`,
+    // captures the SAME baseline generation for both. Both calls share the
+    // controller's single `mutationTail`, so force's own body cannot start
+    // until if-idle's has fully settled - meaning force's generation check
+    // (:5256) always runs strictly AFTER if-idle's busy handling
+    // (:5283-5285) has had its chance to (wrongly) bump
+    // `respawnGeneration`. The sibling test above submits force only after
+    // if-idle has already settled, so it cannot tell a correct "no bump on
+    // busy" from a buggy "bump regardless of outcome" - this one can: a
+    // wrong bump would make force see `respawnGeneration !==
+    // generationAtSubmit` and short-circuit to a fabricated `{kind: "ok",
+    // value: {activated: true}}` without ever issuing its own CLI restart.
+    const ifIdle = controller.respawn({ kind: "background" }, "if-idle");
+    await vi.waitFor(() => {
+      expect(seenArgv).toHaveLength(1);
+    });
+    const force = controller.respawn({ kind: "background" }, "force");
+    busyGate.resolve(undefined);
+
+    const [ifIdleOutcome, forceOutcome] = await Promise.all([ifIdle, force]);
+
+    expect(ifIdleOutcome).toEqual({
+      kind: "busy",
+      continuation: "retry-with-force",
+      message: expect.stringContaining("work in progress"),
+    });
+    expect(forceOutcome).toEqual({ kind: "ok", value: { activated: true } });
+    expect(seenArgv).toEqual([RESTART_IF_IDLE_ARGV, RESTART_FORCE_ARGV]);
+  });
 });
 
 // Packaged macOS recovery must use the same attempt-aware CLI restart lane as
@@ -10101,6 +10678,7 @@ describe("CLI-owned service start attestation (closing A2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -10138,6 +10716,7 @@ describe("CLI-owned service start attestation (closing A2)", () => {
       reachabilityProbe: async () => false,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -10170,6 +10749,7 @@ describe("CLI-owned service start attestation (closing A2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     vi.mocked(streamBundledTraycerCliJson).mockRejectedValueOnce(
       new Error("ensure failed after side effects"),
@@ -10193,6 +10773,7 @@ describe("CLI-owned service start attestation (closing A2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     writeInstallRecord("production", {
       version: "1.7.0",
@@ -10221,6 +10802,7 @@ describe("CLI-owned service start attestation (closing A2)", () => {
       reachabilityProbe: async () => true,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: { readSupervisorRun: readSupervisorRunMock },
     });
     vi.mocked(streamBundledTraycerCliJson).mockImplementation(async (opts) => {
       if (opts.args.includes("install")) {
@@ -10797,5 +11379,462 @@ describe("streamBundled progress ownership: mutationEpoch (fixup E)", () => {
     expect(progresses).toEqual([
       expect.objectContaining({ stage: "restart", percent: 10 }),
     ]);
+  });
+});
+
+// R-C/R-D (T08): the packaged-Mac park kickstart, and the CLI-owned
+// `--defer-if-parked` gap.
+//
+// Today, packaged Mac + host DOWN + a standing (nonterminal) attempt record:
+// `convergeReadyPackagedMac`'s `host ensure --no-service-register` reports a
+// noop, so it proceeds to `runLockedMacActivationCycle`, which acquires the
+// desktop contender under `admission: "desktop-activation-maintenance"`.
+// `dispositionFor` (`clients/shared/host-update/contender.ts`) refuses that
+// admission unconditionally for ANY nonterminal record - there is no
+// `dispositionForAttempt` override for it, unlike `supervisor-relaunch-
+// maintenance` - so `desktopContenderRefusal` returns `deferred` immediately,
+// before `registerHostLoginItem` or any further CLI call ever runs. The host
+// stays down.
+//
+// T08's fix (not yet landed) inserts a two-tier fallback ahead of that
+// refusal: (1) shell `host service start` through the bundled CLI (which
+// judges the park CLI-side under `supervisor-relaunch-maintenance`); (2) if
+// THAT specifically fails `E_SERVICE_CONTROL_FAILED` (the job is not
+// loaded), fall back to `registerHostLoginItem` under a desktop-local
+// supervisor-relaunch admission, judged against the install record on disk
+// - never `host stamp-runtime`. `E_HOST_UPDATE_ATTEMPT_ACTIVE` /
+// `E_CLI_LOCK_BUSY` from the first tier still defer, with nothing
+// registered.
+//
+// Separately, `activateInstalledCliOwned` (the CLI-owned platforms' plain
+// `activateInstalled`) shells `host restart` / `host restart --if-idle`
+// with NO `--defer-if-parked` flag at all, and never reads
+// `result.deferredForParkedActivation` from the JSON `host restart` answers
+// (`commands/host-restart.ts:205-230`) - unlike `runCliRecoveryServiceCycle`,
+// which already does both. So a CLI-owned activate against a parked record
+// always calls `waitForHostReady` and reports `{activated:true}` regardless
+// of what the CLI actually did.
+describe("R-C/R-D: the packaged-Mac park kickstart, and CLI-owned --defer-if-parked", () => {
+  const RC_INSTALLED_VERSION = "2.0.0";
+
+  function argvHasConsecutive(
+    argv: readonly string[],
+    needle: readonly string[],
+  ): boolean {
+    for (let i = 0; i + needle.length <= argv.length; i += 1) {
+      if (needle.every((token, j) => argv[i + j] === token)) return true;
+    }
+    return false;
+  }
+
+  function allCliArgvCalls(): readonly (readonly string[])[] {
+    const runCalls = vi
+      .mocked(runBundledTraycerCliJson)
+      .mock.calls.map((call) => call[0] as readonly string[]);
+    const streamCalls = vi
+      .mocked(streamBundledTraycerCliJson)
+      .mock.calls.map(
+        (call) => (call[0] as { readonly args: readonly string[] }).args,
+      );
+    return [...runCalls, ...streamCalls];
+  }
+
+  function serviceStartWasCalled(): boolean {
+    return allCliArgvCalls().some((argv) =>
+      argvHasConsecutive(argv, ["service", "start"]),
+    );
+  }
+
+  function serviceStartArgv(): readonly string[] | undefined {
+    return allCliArgvCalls().find((argv) =>
+      argvHasConsecutive(argv, ["service", "start"]),
+    );
+  }
+
+  function stampRuntimeWasCalled(): boolean {
+    return vi
+      .mocked(runBundledTraycerCliJson)
+      .mock.calls.some((call) =>
+        (call[0] as readonly string[]).includes("stamp-runtime"),
+      );
+  }
+
+  function rcAttemptRecordFields(overrides: {
+    readonly phase: HostUpdateAttemptPhase;
+    readonly execution: HostUpdateAttemptExecution;
+    readonly continuation: "resume-apply" | "activate" | null;
+    readonly targetVersion: string;
+    readonly claim?: Record<string, unknown>;
+  }): Record<string, unknown> {
+    const fields: Record<string, unknown> = {
+      schemaVersion: 2,
+      attemptId: "rc-attempt-1",
+      generation: 1,
+      sequence: 1,
+      trigger: "manual",
+      targetVersion: overrides.targetVersion,
+      phase: overrides.phase,
+      execution: overrides.execution,
+      continuation: overrides.continuation,
+      progress: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+      error: null,
+    };
+    if (overrides.claim !== undefined) fields.claim = overrides.claim;
+    return fields;
+  }
+
+  function rcWriteAttemptRecord(fields: Record<string, unknown>): void {
+    const layout = getHostFsLayout("production");
+    mkdirSync(layout.rootDir, { recursive: true });
+    writeFileSync(
+      updateAttemptRecordPath(layout.rootDir),
+      JSON.stringify(fields),
+    );
+  }
+
+  function rcReadAttemptRecordBytes(): string {
+    const layout = getHostFsLayout("production");
+    return readFileSync(updateAttemptRecordPath(layout.rootDir), "utf8");
+  }
+
+  // Host down: no reachability, no pid metadata written.
+  function stageParkedHostDown(): HostController {
+    return stageParkedHostDownMutable().controller;
+  }
+
+  // Same world, but reachability is a live flag this test can flip - and a
+  // `comeUp()` helper that flips it AND writes a live pid.json in one call -
+  // so a row can simulate the host actually starting mid-cycle (inside a CLI
+  // stub or a `registerHostLoginItem` mock), the way T08's real fix expects
+  // to observe it: `readRunningRuntimeVersion`/`publishReachableHostSnapshot`
+  // read the reachability probe and pid.json AFTER the start attempt, not
+  // before.
+  function stageParkedHostDownMutable(): {
+    readonly controller: HostController;
+    readonly comeUp: () => void;
+  } {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(true);
+    let reachable = false;
+    const controller = newControllerWithReachability(
+      "production",
+      async () => reachable,
+    );
+    writeInstallRecord("production", {
+      version: RC_INSTALLED_VERSION,
+      runtimeVersion: RC_INSTALLED_VERSION,
+    });
+    return {
+      controller,
+      comeUp: () => {
+        reachable = true;
+        writePidMetadata("production", {
+          version: RC_INSTALLED_VERSION,
+          pid: process.pid,
+        });
+        vi.mocked(waitForHostReady).mockResolvedValue({
+          ready: true,
+          version: RC_INSTALLED_VERSION,
+          pid: process.pid,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          reason: "ready",
+        });
+      },
+    };
+  }
+
+  function stageEnsureNoopAnd(
+    serviceStart: () => Promise<StreamTraycerCliResult<unknown>>,
+  ): void {
+    vi.mocked(streamBundledTraycerCliJson).mockImplementation(async (opts) => {
+      if (opts.args.includes("ensure")) {
+        return {
+          data: {
+            action: "noop",
+            version: RC_INSTALLED_VERSION,
+            runtimeVersion: RC_INSTALLED_VERSION,
+          },
+        };
+      }
+      if (argvHasConsecutive(opts.args, ["service", "start"])) {
+        return serviceStart();
+      }
+      return { data: {} };
+    });
+    vi.mocked(runBundledTraycerCliJson).mockImplementation(async (args) => {
+      if (argvHasConsecutive(args, ["service", "start"])) {
+        return serviceStart();
+      }
+      return {};
+    });
+  }
+
+  it("(r1) linked teardown, job loaded: `waiting-for-work` starts through `host service start`", async () => {
+    const { controller, comeUp } = stageParkedHostDownMutable();
+    rcWriteAttemptRecord(
+      rcAttemptRecordFields({
+        phase: "waiting-for-work",
+        execution: "parked",
+        continuation: "resume-apply",
+        targetVersion: "9.9.9",
+      }),
+    );
+    const beforeBytes = rcReadAttemptRecordBytes();
+    stageEnsureNoopAnd(async () => {
+      comeUp();
+      return { data: {} };
+    });
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+    expect(outcome.kind).toBe("ok");
+    expect(serviceStartWasCalled()).toBe(true);
+    expect(registerHostLoginItem).not.toHaveBeenCalled();
+    expect(rcReadAttemptRecordBytes()).toBe(beforeBytes);
+    // The bundled-spawn helper appends `--lifecycle-origin desktop` to every
+    // start-capable command it sends (`withDesktopLifecycleOrigin`) - the
+    // `host service start` call this row's fix makes is no exception.
+    expect(
+      argvHasConsecutive(serviceStartArgv() ?? [], [
+        "--lifecycle-origin",
+        "desktop",
+      ]),
+    ).toBe(true);
+  });
+
+  it("(r2) install lease stopped the host, job booted out: `host service start` refuses E_SERVICE_CONTROL_FAILED, falls back to the login-item register", async () => {
+    const { controller, comeUp } = stageParkedHostDownMutable();
+    rcWriteAttemptRecord(
+      rcAttemptRecordFields({
+        phase: "waiting-for-work",
+        execution: "parked",
+        continuation: "resume-apply",
+        targetVersion: "9.9.9",
+      }),
+    );
+    const beforeBytes = rcReadAttemptRecordBytes();
+    stageEnsureNoopAnd(async () => {
+      throw new TraycerCliError(
+        "E_SERVICE_CONTROL_FAILED",
+        "the job is not loaded",
+      );
+    });
+    vi.mocked(registerHostLoginItem).mockImplementation(async () => {
+      comeUp();
+      return "enabled";
+    });
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+
+    expect(outcome.kind).toBe("ok");
+    expect(registerHostLoginItem).toHaveBeenCalledTimes(1);
+    expect(stampRuntimeWasCalled()).toBe(false);
+    expect(rcReadAttemptRecordBytes()).toBe(beforeBytes);
+  });
+
+  it("(r6) mode none: a quiesced controller's background convergeReady defers with zero spawns", async () => {
+    const controller = stageParkedHostDown();
+    rcWriteAttemptRecord(
+      rcAttemptRecordFields({
+        phase: "waiting-for-work",
+        execution: "parked",
+        continuation: "resume-apply",
+        targetVersion: "9.9.9",
+      }),
+    );
+    controller.quiesce();
+    expect(controller.automaticIntentsSuspended).toBe(true);
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+
+    expect(outcome.kind).toBe("deferred");
+    expect(runBundledTraycerCliJson).not.toHaveBeenCalled();
+    expect(streamBundledTraycerCliJson).not.toHaveBeenCalled();
+    expect(registerHostLoginItem).not.toHaveBeenCalled();
+  });
+
+  it("(r3) control: a waiting-to-activate park with a MISMATCHED claim keeps the kickstart arm refused", async () => {
+    const controller = stageParkedHostDown();
+    rcWriteAttemptRecord(
+      rcAttemptRecordFields({
+        phase: "waiting-to-activate",
+        execution: "parked",
+        continuation: "activate",
+        targetVersion: RC_INSTALLED_VERSION,
+        claim: {
+          installedVersion: RC_INSTALLED_VERSION,
+          installGeneration:
+            "mismatched-generation-does-not-match-install-record",
+          stageFingerprint: null,
+          allowDowngrade: false,
+          acceptStoreFormatLoss: false,
+        },
+      }),
+    );
+    stageEnsureNoopAnd(async () => {
+      throw new TraycerCliError(
+        "E_HOST_UPDATE_ATTEMPT_ACTIVE",
+        "a host update attempt is active",
+      );
+    });
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+
+    expect(outcome.kind).toBe("deferred");
+    expect(registerHostLoginItem).not.toHaveBeenCalled();
+  });
+
+  it("(r4) control: the same mismatched park keeps the register arm refused when `host service start` fails E_SERVICE_CONTROL_FAILED", async () => {
+    const controller = stageParkedHostDown();
+    rcWriteAttemptRecord(
+      rcAttemptRecordFields({
+        phase: "waiting-to-activate",
+        execution: "parked",
+        continuation: "activate",
+        targetVersion: RC_INSTALLED_VERSION,
+        claim: {
+          installedVersion: RC_INSTALLED_VERSION,
+          installGeneration:
+            "mismatched-generation-does-not-match-install-record",
+          stageFingerprint: null,
+          allowDowngrade: false,
+          acceptStoreFormatLoss: false,
+        },
+      }),
+    );
+    stageEnsureNoopAnd(async () => {
+      throw new TraycerCliError(
+        "E_SERVICE_CONTROL_FAILED",
+        "the job is not loaded",
+      );
+    });
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+
+    expect(outcome.kind).not.toBe("ok");
+    expect(registerHostLoginItem).not.toHaveBeenCalled();
+  });
+
+  it("(r5) control: an `applying` record keeps everything refused, nothing registered", async () => {
+    const controller = stageParkedHostDown();
+    rcWriteAttemptRecord(
+      rcAttemptRecordFields({
+        phase: "applying",
+        execution: "active",
+        continuation: null,
+        targetVersion: "9.9.9",
+      }),
+    );
+    stageEnsureNoopAnd(async () => {
+      throw new TraycerCliError(
+        "E_SERVICE_CONTROL_FAILED",
+        "the job is not loaded",
+      );
+    });
+
+    const outcome = await controller.convergeReady(
+      false,
+      { kind: "background" },
+      "keep-installed",
+    );
+
+    expect(outcome.kind).toBe("deferred");
+    expect(registerHostLoginItem).not.toHaveBeenCalled();
+  });
+
+  it("(o1) CLI-owned activateInstalled: the `host restart` argv includes --defer-if-parked", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(false);
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: RC_INSTALLED_VERSION,
+      runtimeVersion: null,
+    });
+    writePidMetadata("production", {
+      version: RC_INSTALLED_VERSION,
+      pid: process.pid,
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: {
+        restarted: true,
+        installGeneration: null,
+        runtimeVersion: "1.0.0",
+        runtimeWasNull: true,
+      },
+    });
+    vi.mocked(runBundledTraycerCliJson).mockImplementation(async (args) => {
+      if (args.includes("available")) {
+        return availableSnapshotFixture(RC_INSTALLED_VERSION, [
+          RC_INSTALLED_VERSION,
+        ]);
+      }
+      if (args.includes("stamp-runtime")) {
+        return { outcome: "stamped" };
+      }
+      return {};
+    });
+
+    await controller.activateInstalled(false, true);
+
+    expect(streamBundledTraycerCliJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: expect.arrayContaining(["--defer-if-parked"]),
+      }),
+    );
+  });
+
+  it("(o2) CLI-owned activateInstalled: a `deferredForParkedActivation` restart result is `deferred`, with no readiness wait", async () => {
+    vi.mocked(hostManagesHostLoginItem).mockResolvedValue(false);
+    const controller = newController("production");
+    writeInstallRecord("production", {
+      version: RC_INSTALLED_VERSION,
+      runtimeVersion: null,
+    });
+    writePidMetadata("production", {
+      version: RC_INSTALLED_VERSION,
+      pid: process.pid,
+    });
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: {
+        restarted: false,
+        deferredForParkedActivation: true,
+        installGeneration: null,
+        runtimeVersion: null,
+        runtimeWasNull: false,
+      },
+    });
+    vi.mocked(runBundledTraycerCliJson).mockImplementation(async (args) => {
+      if (args.includes("available")) {
+        return availableSnapshotFixture(RC_INSTALLED_VERSION, [
+          RC_INSTALLED_VERSION,
+        ]);
+      }
+      return {};
+    });
+
+    const outcome = await controller.activateInstalled(false, true);
+
+    expect(outcome.kind).toBe("deferred");
+    expect(waitForHostReady).not.toHaveBeenCalled();
   });
 });

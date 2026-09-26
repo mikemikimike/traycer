@@ -9,15 +9,19 @@ import {
 } from "@traycer/protocol/host/lifecycle/schemas";
 import {
   isValidLocalHostWebsocketUrl,
-  publishedHostProcessGone,
+  publishedHostProcessGoneAsync,
   readHostPidMetadata,
   removeHostPidMetadata,
   type HostPidMetadata,
 } from "../../host/pid-metadata";
 import { isProcessAlive } from "../../store/cli-lock";
-import { getPublishedProcessIdentityVerdict } from "../../store/process-identity";
+import {
+  getPublishedProcessIdentityVerdict,
+  verifyProcessIdentityAsync,
+} from "../../store/process-identity";
 import { callHostRpcAtEndpoint } from "../../internal/host-rpc";
 import { createCliLogger, type ILogger } from "../../logger";
+import { reportBoundedWait } from "../../runner/bounded-wait-progress";
 import type { Environment } from "../../runner/environment";
 
 // Cooperative shutdown of a Desktop-managed host, through the host's own
@@ -110,8 +114,10 @@ export async function requestCooperativeShutdownReporting(
     return { kind: "no-metadata" };
   }
   // Exited, or a recycled pid: either way there is no host to claim against,
-  // and dialling the record's endpoint would only answer "unreachable".
-  if (publishedHostProcessGone(metadata)) {
+  // and dialling the record's endpoint would only answer "unreachable". Async:
+  // the host supervisor's lifecycle teardown runs this on its own event loop,
+  // where a synchronous Windows `tasklist` / PowerShell spawn would freeze it.
+  if (await publishedHostProcessGoneAsync(metadata)) {
     return { kind: "no-host" };
   }
   onHostAddressed?.();
@@ -134,6 +140,7 @@ export async function requestCooperativeShutdownReporting(
    */
   const releaseClaim = async (token: string | null): Promise<void> => {
     if (token === null) return;
+    reportBoundedWait("releasing the host's shutdown claim");
     try {
       await callHostRpcAtEndpoint(
         "lifecycle.releaseShutdown",
@@ -160,7 +167,11 @@ export async function requestCooperativeShutdownReporting(
   // shut down cleanly. `lifecycle.releaseShutdown` is the abort leg of the
   // contract; not calling it is the bug.
   let grantedToken: string | null = null;
+  // Each RPC below and the exit wait after them is a bounded wait of its own,
+  // and one stand-down stacks up to three RPCs inside a single controller
+  // call; each reports as it begins (bounded-wait-progress.ts).
   try {
+    reportBoundedWait("asking the host to shut down");
     const claimed = await callHostRpcAtEndpoint(
       "lifecycle.claimShutdown",
       { transitionId, ttl: CLAIM_TTL_MS, intent },
@@ -170,6 +181,7 @@ export async function requestCooperativeShutdownReporting(
       return { kind: "busy" };
     }
     grantedToken = claimed.granted.token;
+    reportBoundedWait("confirming the host's shutdown");
     const committed = await callHostRpcAtEndpoint(
       "lifecycle.commitShutdown",
       { token: claimed.granted.token },
@@ -198,6 +210,7 @@ export async function requestCooperativeShutdownReporting(
     });
     return { kind: "unreachable", cause };
   }
+  reportBoundedWait("waiting for the host to exit");
   const exited = await waitForCooperativeExit(metadata.pid);
   if (!exited) {
     return { kind: "hung", pid: metadata.pid };
@@ -205,17 +218,32 @@ export async function requestCooperativeShutdownReporting(
   return { kind: "stopped" };
 }
 
+// Polled with the ASYNC liveness read: this wait runs inside the host
+// supervisor's lifecycle teardown for up to `EXIT_TIMEOUT_MS`, and the
+// synchronous probe is a `tasklist` spawn per poll on Windows - the
+// supervisor's loop would be frozen for most of the wait. `indeterminate`
+// (the probe failed) is not an exit, exactly as the synchronous
+// `isProcessAlive` read it.
 async function waitForCooperativeExit(pid: number): Promise<boolean> {
   const deadline = Date.now() + EXIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) return true;
+    if (await processExited(pid)) return true;
     await new Promise<void>((resolve) => {
       setTimeout(resolve, EXIT_POLL_MS);
     });
   }
   // The process may have exited during the last poll sleep, right as the
   // deadline elapsed.
-  return !isProcessAlive(pid);
+  return processExited(pid);
+}
+
+async function processExited(pid: number): Promise<boolean> {
+  const verdict = await verifyProcessIdentityAsync({
+    pid,
+    startedAtMs: null,
+    startIdentity: null,
+  });
+  return verdict === "dead";
 }
 
 export type ForcedShutdownOutcome =

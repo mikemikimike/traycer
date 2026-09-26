@@ -11,9 +11,10 @@ import {
   type ProcessStartIdentity,
 } from "@traycer/protocol/host/lifecycle";
 import {
-  ownProcessStartIdentity,
-  ownProcessStartTimeMs,
+  ownProcessStartIdentityAsync,
+  ownProcessStartTimeMsAsync,
   verifyProcessIdentity,
+  verifyProcessIdentityAsync,
   type ProcessIdentityVerdict,
 } from "./process-identity";
 
@@ -473,7 +474,7 @@ async function tryRecoverCrashedBreakLock(
   if (read.kind !== "present") return false;
   const payload = parseBreakLockPayload(read.raw);
   if (payload !== null) {
-    const identity = verifyProcessIdentity({
+    const identity = await verifyProcessIdentityAsync({
       pid: payload.pid,
       startedAtMs: payload.processStartedAtMs,
       startIdentity: payload.processStartIdentity,
@@ -498,8 +499,8 @@ async function acquireBreakLock(
   const payload: BreakLockPayload = {
     pid: process.pid,
     startedAt: nowIso(),
-    processStartedAtMs: ownProcessStartTimeMs(),
-    processStartIdentity: ownProcessStartIdentity(),
+    processStartedAtMs: await ownProcessStartTimeMsAsync(),
+    processStartIdentity: await ownProcessStartIdentityAsync(),
     token,
   };
   if ((await createBreakLockFile(breakLockPath, payload)) === "created") {
@@ -695,7 +696,7 @@ export async function probeLockBreakArbitration(
       ? null
       : { pid: payload.pid, startedAt: payload.startedAt };
   if (payload !== null) {
-    const identity = verifyProcessIdentity({
+    const identity = await verifyProcessIdentityAsync({
       pid: payload.pid,
       startedAtMs: payload.processStartedAtMs,
       startIdentity: payload.processStartIdentity,
@@ -821,10 +822,16 @@ export async function rewriteLockLivenessIfToken(
 }
 
 /**
- * Conservative holder liveness used by both acquisition and read-side
- * projections. A supervisor that died is not stale while a detached POSIX
- * actuator group survives. On platforms where Node cannot prove the group
- * gone, `retainOnPublisherDeath` fails closed rather than guessing.
+ * Conservative holder liveness used by read-side projections. A supervisor
+ * that died is not stale while a detached POSIX actuator group survives. On
+ * platforms where Node cannot prove the group gone, `retainOnPublisherDeath`
+ * fails closed rather than guessing.
+ *
+ * SYNCHRONOUS: on Windows the publisher read is a `tasklist` spawn plus a
+ * PowerShell one, blocking the calling thread for seconds on a loaded machine.
+ * Only for a one-shot command; anything that lives on - the host supervisor,
+ * Electron main, and acquisition itself, which runs in both - takes
+ * {@link verifyLockHolderLivenessAsync}.
  */
 export function verifyLockHolderLiveness(
   holder: LockMetadata,
@@ -832,6 +839,26 @@ export function verifyLockHolderLiveness(
   return lockHolderLivenessGivenPublisher(
     holder,
     verifyProcessIdentity({
+      pid: holder.pid,
+      startedAtMs: holder.processStartedAtMs,
+      startIdentity: holder.processStartIdentity,
+    }),
+  );
+}
+
+/**
+ * {@link verifyLockHolderLiveness} without blocking the event loop: the same
+ * verdict, from the async publisher read. What acquisition uses: the lock is
+ * taken by long-lived processes too (the host supervisor's lifecycle
+ * teardown, Electron main), and a contended acquisition re-judges the holder
+ * on every poll.
+ */
+export async function verifyLockHolderLivenessAsync(
+  holder: LockMetadata,
+): Promise<ProcessIdentityVerdict> {
+  return lockHolderLivenessGivenPublisher(
+    holder,
+    await verifyProcessIdentityAsync({
       pid: holder.pid,
       startedAtMs: holder.processStartedAtMs,
       startIdentity: holder.processStartIdentity,
@@ -1046,7 +1073,7 @@ async function acquireLockAtPath(
         // age ceiling here - a genuinely alive, genuinely
         // identity-verified holder is never broken out from under itself
         // no matter how long its operation takes.
-        const identity = verifyLockHolderLiveness(holder);
+        const identity = await verifyLockHolderLivenessAsync(holder);
         shouldBreak = identity === "dead" || identity === "alive-different";
       } else {
         // Empty or corrupt lock file - no PID to probe. A crashed holder
@@ -1092,16 +1119,21 @@ async function acquireLockAtPath(
   }
 }
 
-function newAcquisitionMetadata(reason: string): LockMetadata {
+async function newAcquisitionMetadata(reason: string): Promise<LockMetadata> {
+  // Cached own-process reads, so an acquisition costs no spawn once warm.
+  // Async, because the FIRST acquisition in a process fills that cache: a
+  // synchronous fill would block a long-lived caller's event loop on a `ps`
+  // (macOS) or PowerShell (Windows) spawn.
+  const processStartedAtMs = await ownProcessStartTimeMsAsync();
+  const processStartIdentity = await ownProcessStartIdentityAsync();
   return {
     pid: process.pid,
     reason,
     startedAt: nowIso(),
     hostname: hostnameSafe(),
     token: randomUUID(),
-    // Cached own-process reads: an acquisition must not cost a spawn.
-    processStartedAtMs: ownProcessStartTimeMs(),
-    processStartIdentity: ownProcessStartIdentity(),
+    processStartedAtMs,
+    processStartIdentity,
   };
 }
 
@@ -1110,7 +1142,7 @@ export async function acquireLock(
 ): Promise<AcquireLockOutcome> {
   return acquireLockAtPath(
     opts.lockPath,
-    newAcquisitionMetadata(opts.reason),
+    await newAcquisitionMetadata(opts.reason),
     opts.waitMs,
     opts.pollIntervalMs,
   );

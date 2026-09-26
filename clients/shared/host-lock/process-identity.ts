@@ -15,6 +15,10 @@ import {
   type ProcessStartIdentity,
   type ProcessStartIdentityMatch,
 } from "@traycer/protocol/host/lifecycle";
+import {
+  probeProcessLivenessAsync,
+  type ProcessLivenessVerdict,
+} from "@traycer/protocol/config/process-liveness";
 
 // Cross-platform process liveness + identity probing. Shared by the CLI's
 // `cli-lock` hardening (holder identity - Host Update Layer Redesign Tech
@@ -37,8 +41,9 @@ function isErrnoException(value: unknown): value is NodeJS.ErrnoException {
 // "alive" or "dead" - a probe failure must never itself become break
 // evidence (Tech Plan's "only positive evidence" rule). Only `"alive"`
 // and `"dead"` are positive evidence; `"indeterminate"` means the probe
-// established neither.
-export type ProcessLivenessVerdict = "alive" | "dead" | "indeterminate";
+// established neither. ONE type with the asynchronous probe, which lives in
+// the protocol package so its credentials lock can share it.
+export type { ProcessLivenessVerdict };
 
 // Cross-platform process-liveness probe. POSIX uses `process.kill(pid, 0)`;
 // Windows uses `tasklist /FI "PID eq <pid>" /NH /FO CSV` and asserts the
@@ -370,13 +375,21 @@ function processIdentityVerdictOf(
 // Windows it is a PowerShell spawn with a timeout, which a loaded machine can
 // outlast - not about the process, and caching it made one slow boot probe
 // cost a desktop its presence record, and with it Linked's crash guarantee,
-// for its whole life (F-WIN-2). The ASYNC read retries instead: a failure is
-// remembered for `OWN_START_IDENTITY_RETRY_MS`, so callers asking in a loop do
-// not spawn a probe each, and the next async read after that probes again.
-// The SYNCHRONOUS read still probes at most once per process: it blocks its
-// caller's event loop (a PowerShell spawn on Windows), and its callers - lock
-// acquisition among them - must not cost a spawn per call. It answers from
-// whatever the cache holds, so a stamp the async read found later reaches it.
+// for its whole life (F-WIN-2). The ASYNC read retries instead: an async
+// failure is remembered for `OWN_START_IDENTITY_RETRY_MS`, so callers asking
+// in a loop do not spawn a probe each, and the next async read after that
+// probes again. The SYNCHRONOUS read still probes at most once per process: it
+// blocks its caller's event loop (a PowerShell spawn on Windows), and its
+// callers - lock acquisition among them - must not cost a spawn per call. It
+// answers from whatever the cache holds, so a stamp the async read found later
+// reaches it.
+//
+// A SYNC failure does not open the async window. Its bound is a third of the
+// async read's (5 s against 15 s), so it says nothing about whether the async
+// read would succeed - and the caller that most needs the stamp asks the async
+// read right after a sync one failed: a supervisor whose admission's lock
+// acquisition probed (and timed out) moments before it stamps its run state.
+// Suppressing that read left the run uninheritable for the supervisor's life.
 //
 // Once a stamp is cached it is never replaced, so "what we wrote" and "what
 // we are" stay one value: the only transition is from no stamp to the stamp.
@@ -399,13 +412,20 @@ function settleOwnStartIdentity(
 ): ProcessStartIdentity | null {
   ownStartIdentityProbed = true;
   if (cachedOwnStartIdentity !== null) return cachedOwnStartIdentity;
-  if (identity === null) {
-    ownStartIdentityFailedAtMs = Date.now();
-    return null;
-  }
+  if (identity === null) return null;
   cachedOwnStartIdentity = identity;
   ownStartIdentityFailedAtMs = null;
   return identity;
+}
+
+// The async read's own settlement: a failure here, and only here, opens the
+// retry window (see the cache comment above).
+function settleOwnStartIdentityAsync(
+  identity: ProcessStartIdentity | null,
+): ProcessStartIdentity | null {
+  const settled = settleOwnStartIdentity(identity);
+  if (settled === null) ownStartIdentityFailedAtMs = Date.now();
+  return settled;
 }
 
 /**
@@ -442,8 +462,8 @@ export function ownProcessStartIdentityAsync(): Promise<ProcessStartIdentity | n
   if (ownStartIdentityAsyncRead !== null) return ownStartIdentityAsyncRead;
   if (ownStartIdentityFailureIsFresh()) return Promise.resolve(null);
   const read = asyncProcessStartIdentityReader(process.pid).then(
-    (identity) => settleOwnStartIdentity(identity),
-    () => settleOwnStartIdentity(null),
+    (identity) => settleOwnStartIdentityAsync(identity),
+    () => settleOwnStartIdentityAsync(null),
   );
   const settled = read.finally(() => {
     if (ownStartIdentityAsyncRead === settled) ownStartIdentityAsyncRead = null;
@@ -453,12 +473,15 @@ export function ownProcessStartIdentityAsync(): Promise<ProcessStartIdentity | n
 }
 
 // Test-only seam: forget this process's own identity - a cached stamp and a
-// remembered failure alike - so a suite can drive the cache from empty.
+// remembered failure alike, and the cached start time - so a suite can drive
+// the caches from empty.
 export function __resetOwnStartIdentityForTest(): void {
   cachedOwnStartIdentity = null;
   ownStartIdentityProbed = false;
   ownStartIdentityFailedAtMs = null;
   ownStartIdentityAsyncRead = null;
+  cachedOwnStartTimeMs = "unread";
+  ownStartTimeAsyncRead = null;
 }
 
 // A token recorded under our own pid still needs an identity check, not
@@ -515,13 +538,19 @@ export function verifyProcessIdentity(
 }
 
 // Same verdict as `verifyProcessIdentity`, without blocking the event loop.
-// The synchronous form shells out via `execFileSync` (a 3s timeout and up to
-// three retries on POSIX), which is fine for a lock acquisition that is
-// about to block anyway but not for a caller that judges MANY tokens in a
-// row before doing any work - `registry/download-cache.ts` sweeps every
-// entry in the download cache before a download is allowed to start, and a
-// cache holding a handful of distinct stale owners could otherwise burn tens
-// of seconds of wall clock with the process wedged and emitting nothing.
+// The synchronous form shells out via `execFileSync` - `ps` on macOS; on
+// Windows `tasklist` (3s timeout) and PowerShell (5s) - and blocks the whole
+// process for as long as that takes. That is acceptable only in a one-shot
+// command with nothing else to do meanwhile (`host doctor`'s lock report). It
+// is NOT acceptable in a lock acquisition: a contended acquisition re-judges
+// its holder on every poll, and the lock is taken inside long-lived processes
+// - the host supervisor, Electron main - whose event loop must keep serving
+// while they wait (the wait itself is an async sleep, not a block). Nor in a
+// caller that judges MANY tokens in a row before doing any work -
+// `registry/download-cache.ts` sweeps every entry in the download cache before
+// a download is allowed to start, and a cache holding a handful of distinct
+// stale owners could otherwise burn tens of seconds of wall clock with the
+// process wedged and emitting nothing. All of those take this form.
 export async function verifyProcessIdentityAsync(
   token: ProcessIdentityToken,
 ): Promise<ProcessIdentityVerdict> {
@@ -549,7 +578,7 @@ let processStartTimeReader: (pid: number) => number | null =
   readProcessStartTimeMsImpl;
 let asyncProcessLivenessReader: (
   pid: number,
-) => Promise<ProcessLivenessVerdict> = probeProcessLivenessAsyncImpl;
+) => Promise<ProcessLivenessVerdict> = probeProcessLivenessAsync;
 
 // Test-only seam - pass `null` to restore the default reader. Returns the
 // previous reader so tests can save/restore symmetrically.
@@ -565,8 +594,7 @@ export function __setAsyncProcessLivenessReaderForTest(
   next: ((pid: number) => Promise<ProcessLivenessVerdict>) | null,
 ): (pid: number) => Promise<ProcessLivenessVerdict> {
   const previous = asyncProcessLivenessReader;
-  asyncProcessLivenessReader =
-    next === null ? probeProcessLivenessAsyncImpl : next;
+  asyncProcessLivenessReader = next === null ? probeProcessLivenessAsync : next;
   return previous;
 }
 
@@ -581,12 +609,44 @@ export function readProcessStartTimeMs(pid: number): number | null {
 // spawn per acquisition - and the update-progress marker lock now
 // acquires several times per `host update`. Reads the raw reader, not the
 // test seam: the seam models OTHER processes' probes.
+//
+// ONE cache for both twins below: whichever reads first fills it, and the
+// other answers from it without a spawn, so the two can never disagree.
 let cachedOwnStartTimeMs: number | null | "unread" = "unread";
-export function ownProcessStartTimeMs(): number | null {
-  if (cachedOwnStartTimeMs === "unread") {
-    cachedOwnStartTimeMs = readProcessStartTimeMsImpl(process.pid);
-  }
+let ownStartTimeAsyncRead: Promise<number | null> | null = null;
+
+function settleOwnStartTimeMs(startedAtMs: number | null): number | null {
+  if (cachedOwnStartTimeMs === "unread") cachedOwnStartTimeMs = startedAtMs;
   return cachedOwnStartTimeMs;
+}
+
+/**
+ * This process's own start time. SYNCHRONOUS on a cold cache (a spawn that
+ * blocks the event loop): for a one-shot command. A long-lived caller - lock
+ * acquisition among them - takes {@link ownProcessStartTimeMsAsync}.
+ */
+export function ownProcessStartTimeMs(): number | null {
+  if (cachedOwnStartTimeMs !== "unread") return cachedOwnStartTimeMs;
+  return settleOwnStartTimeMs(readProcessStartTimeMsImpl(process.pid));
+}
+
+/**
+ * {@link ownProcessStartTimeMs} through the ASYNC probe, sharing its cache.
+ * Concurrent callers share one probe. Like the synchronous twin it reads at
+ * most once per process: a failed read is cached as `null` - start time is a
+ * best-effort field, and the identity stamp is what verdicts rest on.
+ */
+export function ownProcessStartTimeMsAsync(): Promise<number | null> {
+  if (cachedOwnStartTimeMs !== "unread") {
+    return Promise.resolve(cachedOwnStartTimeMs);
+  }
+  if (ownStartTimeAsyncRead !== null) return ownStartTimeAsyncRead;
+  const read = readProcessStartTimeMsAsyncImpl(process.pid).then(
+    (startedAtMs) => settleOwnStartTimeMs(startedAtMs),
+    () => settleOwnStartTimeMs(null),
+  );
+  ownStartTimeAsyncRead = read;
+  return read;
 }
 
 function readProcessStartTimeMsImpl(pid: number): number | null {
@@ -594,6 +654,15 @@ function readProcessStartTimeMsImpl(pid: number): number | null {
   return process.platform === "win32"
     ? readWindowsProcessStartTimeMs(pid)
     : readPosixProcessStartTimeMs(pid);
+}
+
+async function readProcessStartTimeMsAsyncImpl(
+  pid: number,
+): Promise<number | null> {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  return process.platform === "win32"
+    ? readWindowsProcessStartTimeMsAsync(pid)
+    : readPosixProcessStartTimeMsAsync(pid);
 }
 
 function readPosixProcessStartTimeMs(pid: number): number | null {
@@ -604,7 +673,7 @@ function readPosixProcessStartTimeMs(pid: number): number | null {
   ) {
     let stdout: string;
     try {
-      stdout = execFileSync("ps", ["-p", String(pid), "-o", "etime="], {
+      stdout = execFileSync("ps", posixProcessStartTimeArgs(pid), {
         encoding: "utf8",
         timeout: 3000,
         stdio: ["ignore", "pipe", "pipe"],
@@ -622,6 +691,38 @@ function readPosixProcessStartTimeMs(pid: number): number | null {
     if (startedAtMs !== null) return startedAtMs;
   }
   return null;
+}
+
+// `readPosixProcessStartTimeMs` without blocking: the same probe and retries.
+async function readPosixProcessStartTimeMsAsync(
+  pid: number,
+): Promise<number | null> {
+  for (
+    let retry = 0;
+    retry <= POSIX_PROCESS_START_TIME_MAX_RETRIES;
+    retry += 1
+  ) {
+    const stdout = await execFileOutput(
+      "ps",
+      posixProcessStartTimeArgs(pid),
+      3000,
+      undefined,
+    );
+    if (stdout === null) return null;
+    const elapsedSeconds = parseElapsedSeconds(stdout.trim());
+    if (elapsedSeconds === null) return null;
+    const startedAtMs = processStartTimeMsFromElapsedSeconds(
+      elapsedSeconds,
+      Date.now(),
+      uptime(),
+    );
+    if (startedAtMs !== null) return startedAtMs;
+  }
+  return null;
+}
+
+function posixProcessStartTimeArgs(pid: number): string[] {
+  return ["-p", String(pid), "-o", "etime="];
 }
 
 function processStartTimeMsFromElapsedSeconds(
@@ -672,24 +773,41 @@ function parseElapsedSeconds(etime: string): number | null {
 function readWindowsProcessStartTimeMs(pid: number): number | null {
   let stdout: string;
   try {
-    stdout = execFileSync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString("o")`,
-      ],
-      {
-        encoding: "utf8",
-        windowsHide: true,
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    stdout = execFileSync("powershell", windowsProcessStartTimeArgs(pid), {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   } catch {
     return null;
   }
+  return parseWindowsProcessStartTime(stdout);
+}
+
+// `readWindowsProcessStartTimeMs` without blocking: the same script.
+async function readWindowsProcessStartTimeMsAsync(
+  pid: number,
+): Promise<number | null> {
+  const stdout = await execFileOutput(
+    "powershell",
+    windowsProcessStartTimeArgs(pid),
+    5000,
+    undefined,
+  );
+  return stdout === null ? null : parseWindowsProcessStartTime(stdout);
+}
+
+function windowsProcessStartTimeArgs(pid: number): string[] {
+  return [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString("o")`,
+  ];
+}
+
+function parseWindowsProcessStartTime(stdout: string): number | null {
   const parsed = Date.parse(stdout.trim());
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -1069,32 +1187,6 @@ function execFileOutput(
       (err, stdout) => resolve(err === null ? stdout : null),
     );
   });
-}
-
-async function probeProcessLivenessAsyncImpl(
-  pid: number,
-): Promise<ProcessLivenessVerdict> {
-  if (!Number.isInteger(pid) || pid <= 0) return "dead";
-  if (process.platform !== "win32") {
-    try {
-      process.kill(pid, 0);
-      return "alive";
-    } catch (err) {
-      const code = isErrnoException(err) ? err.code : null;
-      if (code === "EPERM") return "alive";
-      return code === "ESRCH" ? "dead" : "indeterminate";
-    }
-  }
-  const stdout = await execFileOutput(
-    "tasklist",
-    ["/FI", `PID eq ${pid}`, "/NH", "/FO", "CSV"],
-    3_000,
-    undefined,
-  );
-  if (stdout === null) return "indeterminate";
-  const trimmed = stdout.trim();
-  if (trimmed.length === 0 || trimmed.startsWith("INFO:")) return "dead";
-  return trimmed.includes(`"${pid}"`) ? "alive" : "dead";
 }
 
 // Exported for tests so the fixed-format parser can be exercised directly

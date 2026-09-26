@@ -13,6 +13,8 @@ import { readHostStagedRecord } from "../manifest/host-staged";
 import { hostHomeDir, hostStagedDir } from "../store/paths";
 import { resolveChatStoreSurveyRoots } from "../host/chat-store-survey-roots";
 import { assertHostNotBusy } from "../host/busy-check";
+import { refuseDesktopDisruptionOfForegroundRun } from "../host/foreground-host-run";
+import type { HostStartOrigin } from "../host/lifecycle-origin";
 import {
   assertHostStoreFormatFloor,
   storeFormatFloorTargetVersion,
@@ -73,6 +75,13 @@ export interface ApplyHostOptions {
   // POSIX swap). Rejected on Windows, where the service stop is load-
   // bearing for releasing file handles the rename needs.
   readonly noService: boolean;
+  /**
+   * Who asked: `--lifecycle-origin`, as `host/update-mutation.ts`'s facade
+   * received it. Under `desktop`, a foreground run (a `traycer host start` in
+   * a terminal) refuses the apply before the busy gate
+   * (`refuseDesktopDisruptionOfForegroundRun`).
+   */
+  readonly lifecycleOrigin: HostStartOrigin;
   readonly onProgress: (info: ProgressInfo) => void;
   /** See `commitInstallFromSource` for the final-actuator contract. */
   readonly verifyMutationCapability: () => Promise<void>;
@@ -354,6 +363,18 @@ export async function applyHost(
     logger,
   });
 
+  // Past every no-op decision and BEFORE the busy gate, `--force` included: a
+  // desktop apply never stops a host a person started in a terminal, and a
+  // busy probe here would only turn that refusal into a busy prompt whose
+  // `--force` answer kills it. The stage stays where it is for the next apply.
+  // `noService` stops nothing and is not refused.
+  if (!opts.noService) {
+    await refuseDesktopDisruptionOfForegroundRun(
+      "host apply",
+      opts.environment,
+      opts.lifecycleOrigin,
+    );
+  }
   if (!opts.noService && !opts.force) {
     await assertHostNotBusy(opts.environment);
   }

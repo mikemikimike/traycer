@@ -295,7 +295,9 @@ export const WINDOWS_RUN_SPAWN_EDGE_BOUND_MS =
 /**
  * The longest Windows `installService` can run from its install edge, in front
  * of the launcher write and `/Create`, to the launch: the staging writes
- * (local files), `/Create`, then the verified `/Run` - 30s + 45s = 75s.
+ * (local files), `/Create`, then the verified `/Run` - 30s + 45s = 75s. The
+ * task's `<UserId>` SID read (a synchronous `whoami`, 10s) runs in front of the
+ * edge; after it, it cost the grant 10s this bound did not count.
  */
 export const WINDOWS_INSTALL_SPAWN_EDGE_BOUND_MS =
   WINDOWS_SCHTASKS_CREATE_TIMEOUT_MS + WINDOWS_RUN_SPAWN_EDGE_BOUND_MS;
@@ -352,8 +354,8 @@ export const SUPERVISOR_SPAWN_ACK_MARGIN_MS = 10_000;
  *
  * Everything a call does BEFORE its first edge - ownership probes, a Desktop
  * host's cooperative stand-down, the Windows stop ladder, the Linux install's
- * `loginctl enable-linger` - is off the grant's clock, which is what makes
- * this bound finite at all.
+ * `loginctl enable-linger`, the Windows install's `<UserId>` SID read - is off
+ * the grant's clock, which is what makes this bound finite at all.
  */
 export const HOST_START_ADOPTION_SPAWN_EDGE_BOUND_MS = Math.max(
   LAUNCHCTL_INSTALL_SPAWN_EDGE_BOUND_MS,
@@ -404,10 +406,16 @@ export function finiteDurationMs(name: string, value: number): number {
  *
  *   macOS install, kickstart times out              90s     -> 140s     the cap
  *   Windows install, verify fails, then `/Query`    85.25s  -> 135.25s
- *   Windows restart, same, then the stop-intent     64.75s  -> 114.75s
+ *   Windows restart, same, then the stop-intent     69.75s  -> 119.75s
  *     retirement probe (`withStopIntent`: 1.5s
- *     activity probe + 8s process identity)
- *   Linux install, `enable --now` times out         62s     -> 112s
+ *     activity probe + 13s process identity -
+ *     `tasklist` 3s, the start-identity read 5s,
+ *     the denied-read fallback 5s)
+ *   Linux install, `enable --now` runs its whole    62s     -> 112s
+ *     job timeout and returns (one that TIMES OUT
+ *     rolls the unit back - `disable --now` and
+ *     `daemon-reload`, 10s each - and throws at
+ *     82s, cancelling the lease at the throw)
  *   Windows start / relaunch, verify fails          55.25s  -> 105.25s
  *   Linux start / restart / relaunch job            52s     -> 102s
  *   macOS restart / relaunch (`kickstart -k`)       40s     ->  90s
@@ -430,7 +438,9 @@ export function finiteDurationMs(name: string, value: number): number {
  * only make a call end LATER - the safe direction the next paragraph
  * describes:
  *   - Untimed local work: file writes, authority re-checks against a held
- *     lock, each child's exit after its timeout fires. So the macOS install
+ *     lock, each child's exit after its timeout fires (one that ignores the
+ *     timeout's SIGTERM is SIGKILLed `PROCESS_TIMEOUT_KILL_GRACE_MS`, 2s,
+ *     later - `service/process-runner.ts`). So the macOS install
  *     ends at <= 140s plus that fs/exit latency, and a supervisor its
  *     timed-out kickstart launched at the very edge can miss the window by it.
  *   - An ADOPTED capability (a child run with `--attempt-adoption`). Its

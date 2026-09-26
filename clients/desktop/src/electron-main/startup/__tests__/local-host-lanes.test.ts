@@ -51,11 +51,27 @@ describe("startLocalHostLanes", () => {
     expect(started).toEqual([]);
   });
 
+  // T34: an independently written literal, not `[...LOCAL_HOST_LANE_NAMES]` -
+  // that self-referential expectation passes no matter what order (or which
+  // names) production actually declares, since it compares the list to
+  // itself rather than to a fact this test states on its own.
+  const EXPECTED_LANE_ORDER: readonly LocalHostLaneName[] = [
+    "host-update-menu-state",
+    "host-watcher",
+    "health-monitor",
+    "substrate-owner-backfill",
+    "pending-login-item-revision-monitor",
+    "competing-registration-repair",
+    "registry-probe",
+    "cli-reconcile",
+    "registry-periodic-refresh",
+  ];
+
   it("starts every lane exactly once, in declared order, when managed", () => {
     const calls: LocalHostLaneName[] = [];
     const started = startLocalHostLanes("managed", recordingStarters(calls));
-    expect(calls).toEqual([...LOCAL_HOST_LANE_NAMES]);
-    expect(started).toEqual([...LOCAL_HOST_LANE_NAMES]);
+    expect(calls).toEqual(EXPECTED_LANE_ORDER);
+    expect(started).toEqual(EXPECTED_LANE_ORDER);
     expect(new Set(calls).size).toBe(LOCAL_HOST_LANE_NAMES.length);
   });
 });

@@ -1,5 +1,8 @@
 import { log } from "../app/logger";
-import { HostRecoveryDeferredError } from "../startup/host-health-respawn";
+import {
+  HostRecoveryDeferredError,
+  HostRecoveryNotServiceRunError,
+} from "../startup/host-health-respawn";
 import {
   canReachHostWebsocketUrl,
   readPidMetadata,
@@ -131,8 +134,30 @@ const UNREACHABLE_WARN_MS = 600_000;
  * judged on the next tick rather than at the end of the window - the same
  * rule, and the same defect, as the lifecycle's cached identity verdict
  * (DESKTOP-DEAD-HOST-CACHED-ALIVE).
+ *
+ * Nor does it outlive a clock that stepped backward: see
+ * `isInsideAliveRecheckWindow`.
  */
 const ALIVE_RECHECK_INTERVAL_MS = 120_000;
+
+/**
+ * Whether `now` still falls inside an `ALIVE_RECHECK_INTERVAL_MS` wait that
+ * ends at `deadline`.
+ *
+ * The deadlines are wall-clock (`Date.now()` plus the interval), so a clock
+ * stepped backward after one was set (an NTP correction, a resumed VM) would
+ * stretch the wait by the size of the step. Existence is not identity, so for
+ * all of that time a pid the OS reissued to another process would keep the
+ * shield coasting `busy` or keep recovery suppressed. A wait with more than a
+ * whole interval left began after `now`, which a forward-running clock cannot
+ * produce, so it reads as expired - the negative-age rule `HostLifecycle`'s
+ * cached identity verdict applies (`readIdentityVerdict`). A smaller step,
+ * one that leaves `now` after the instant the wait began, still stretches it,
+ * but by less than the time already waited, so no wait outlasts two intervals.
+ */
+function isInsideAliveRecheckWindow(deadline: number, now: number): boolean {
+  return now < deadline && deadline - now <= ALIVE_RECHECK_INTERVAL_MS;
+}
 
 export interface HostHealthMonitorDeps {
   readonly host: IpcHostLifecycle;
@@ -174,6 +199,14 @@ export interface HostHealthMonitorDeps {
   readonly readLiveness:
     | ((pidMetadataFile: string) => Promise<HostProcessLiveness>)
     | undefined;
+  /**
+   * The live supervisor's pid when its record's start identity checks out
+   * (`HostLifecyclePolicyStore.readIdentifiedSupervisorPid`), or `null`.
+   * After a recovery the CLI refused because the host is a person's `traycer
+   * host start` in a terminal, the monitor latches this pid and asks for no
+   * recovery while it still answers the same.
+   */
+  readonly readLiveSupervisorPid: () => Promise<number | null>;
 }
 
 export interface HostHealthMonitor {
@@ -240,8 +273,29 @@ export function startHostHealthMonitor(
   // so without this the shield would spawn a `ps` (or `tasklist` +
   // `powershell`) every other tick for as long as the stall lasts.
   let nextLivenessCheckAt = 0;
+  // The supervisor of a terminal-started run a recovery was refused over
+  // (`HostRecoveryNotServiceRunError`), or `null`. While
+  // `readLiveSupervisorPid` still names it, that run is present and not this
+  // app's: no recovery is asked for - no governor grant, no CLI, no retry
+  // ladder. The first read that names anything else ends the hold and
+  // recovery owns the host again.
+  let terminalRunSupervisorPid: number | null = null;
 
   const isDisposed = (): boolean => disposed || deps.host.isDisposed;
+
+  /** Whether the terminal run a recovery was refused over still runs. */
+  const terminalRunHolds = async (): Promise<boolean> => {
+    const held = terminalRunSupervisorPid;
+    if (held === null) return false;
+    // A read that throws is not evidence the run ended.
+    const live = await deps.readLiveSupervisorPid().catch(() => held);
+    if (live === held) return true;
+    terminalRunSupervisorPid = null;
+    log.info("[host-health] terminal host run ended - resuming recovery", {
+      supervisorPid: held,
+    });
+    return false;
+  };
 
   const reloadRecoverySnapshot = async (): Promise<boolean> => {
     const surfaced = await deps.host.reloadSnapshotFromDisk();
@@ -269,6 +323,12 @@ export function startHostHealthMonitor(
       recoveryPending = true;
       return;
     }
+    // Present, and not ours: the terminal run a recovery was refused over.
+    if (await terminalRunHolds()) {
+      recoveryPending = true;
+      return;
+    }
+    if (isDisposed()) return;
     // The governor owns both the liveness gate and the budget; it re-reads
     // pid.json itself so this is a real decision point, not a formality.
     const decision = await governor.requestRespawn("health-monitor");
@@ -334,7 +394,7 @@ export function startHostHealthMonitor(
     const longStall = unreachableForMs >= UNREACHABLE_WARN_MS;
     if (
       longStall &&
-      now < nextLivenessCheckAt &&
+      isInsideAliveRecheckWindow(nextLivenessCheckAt, now) &&
       probeProcessExistenceWithoutSpawn(snapshot.pid) === "exists"
     ) {
       return true;
@@ -411,7 +471,7 @@ export function startHostHealthMonitor(
         // was about still exists. Lock-deferred and failed respawns leave
         // this at 0 and so still retry on the next tick.
         if (
-          Date.now() < nextRecoveryAttemptAt &&
+          isInsideAliveRecheckWindow(nextRecoveryAttemptAt, Date.now()) &&
           probeProcessExistenceWithoutSpawn(metadata.pid) === "exists"
         ) {
           return;
@@ -530,6 +590,23 @@ export function startHostHealthMonitor(
         // restart that did not happen.
         governor.releaseGrant();
         recoveryPending = true;
+        return;
+      }
+      if (err instanceof HostRecoveryNotServiceRunError) {
+        // Refused before anything was touched, so the grant goes back as for
+        // a lock deferral. The hold is keyed on the supervisor running now;
+        // with none identified (it ended in between, or its record carries
+        // no start identity - which the CLI's refusal also needs) there is
+        // nothing to hold on, and the next recovery asks again.
+        governor.releaseGrant();
+        recoveryPending = true;
+        terminalRunSupervisorPid = await deps
+          .readLiveSupervisorPid()
+          .catch(() => null);
+        log.info(
+          "[host-health] host started in a terminal - leaving it alone until it ends",
+          { supervisorPid: terminalRunSupervisorPid },
+        );
         return;
       }
       // A failed respawn already surfaced through the lifecycle's error

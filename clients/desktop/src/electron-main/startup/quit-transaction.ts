@@ -1,5 +1,8 @@
 import type { DesktopPresenceOnExit } from "@traycer/protocol/config/desktop-presence";
-import type { HostLifecycleMode } from "@traycer/protocol/config/host-lifecycle-policy";
+import {
+  refreshOnModeChange,
+  type HostLifecycleMode,
+} from "@traycer/protocol/config/host-lifecycle-policy";
 import type {
   HostLifecycleSetRequest,
   HostLifecycleSetResult,
@@ -14,6 +17,8 @@ import type {
 import { log } from "../app/logger";
 import type { AutomaticIntentHold } from "../host/host-controller";
 import type {
+  LifecycleAdmissionBlock,
+  ServiceDefinitionRefreshSpawn,
   StopHostMode,
   StopHostOutcome,
   StopHostRequest,
@@ -31,10 +36,11 @@ import type { HostQuitPrompt } from "../ipc/runner-ipc-bridge";
 // `before-quit` pass main has not authorized lands here. The first pass
 // creates ONE transaction; a repeat joins it; Cancel disposes it.
 //
-// The reason is fixed before any prompt, from the updater's `installingUpdate`
-// flag:
+// The reason is fixed before any prompt, from whether a relaunch is intended -
+// the updater's `installingUpdate` flag, or the macOS move to /Applications
+// that relaunches the moved copy:
 //
-//   update-install  presence `handoff` FIRST, then the existing update drain
+//   relaunch        presence `handoff` FIRST, then the existing update drain
 //                   and renderer projection drain, unchanged. Never a host
 //                   stop: a relaunch-intended quit keeps the host (D6), and
 //                   `handoff` - not a timeout - is what tells the supervisor.
@@ -49,6 +55,13 @@ import type { HostQuitPrompt } from "../ipc/runner-ipc-bridge";
 //                     stop-if-idle       `host stop --if-idle` with no prompt;
 //                                        E_HOST_BUSY asks ("busy"), an
 //                                        unknown outcome asks ("initial").
+//                   No prompt is shown for a host that is not running: there
+//                   is nothing to keep or stop, and the quit goes on.
+//                   A host a person started in a terminal is left alone in
+//                   every mode: the mode governs the service run only, so no
+//                   prompt, no stop, presence `keep`. A stop that reaches one
+//                   anyway (`not-service-run`: the record predates the field)
+//                   leaves `keep` too, and is never asked again.
 //
 // A Stop chosen over an idle list runs `--if-idle` too; E_HOST_BUSY there
 // asks again ("busy-retry": something started meanwhile). Both busy rounds'
@@ -56,12 +69,28 @@ import type { HostQuitPrompt } from "../ipc/runner-ipc-bridge";
 // own caller and never reaches a prompt; `HostController` logs its code.
 //
 // Force happens only under Linked or after the user pressed Stop on a list
-// that disclosed busy work (R5). The one deadline is a budget over VISIBLE
-// stopping time (15 s): it pauses while a modal is up, and a stop still queued
-// on the mutation lane when it runs out is withdrawn - never spawned later.
-// An admitted CLI child is detached with file-backed stdio and finishes after
-// the app exits; the presence verdict covers whatever the deadline cut off.
+// that disclosed busy work (R5). Presence `stop` is what the supervisor
+// enforces once the app is gone - forcing whatever it then finds running - so
+// an idle-only stop writes `keep` BEFORE it runs, and the work it does not end
+// (a busy host, a parked update, a stop cut off by the deadline, a crash while
+// the busy-retry question is up) is never forced without disclosure. Only once
+// it has ENDED `stopped` is `stop` written: the verdict outlives the host, and
+// status and doctor show it as what the user chose.
+// "Remember my choice" is applied only when the quit commits, after its stop
+// has settled: a Cancel leaves the mode as it was, and the mode write's
+// service refresh never queues ahead of the stop.
+//
+// The one deadline is a budget over VISIBLE stopping time (15 s): it pauses
+// while a modal is up, and a stop still queued on the mutation lane when it
+// runs out is withdrawn - never spawned later. An admitted CLI child is
+// detached with file-backed stdio and finishes after the app exits; the
+// presence verdict covers whatever the deadline cut off.
 // `awaitMutationLaneIdle` is never used here: it only times out a wait.
+//
+// A relaunch that arrives mid-quit takes it over, unless a stop is already
+// committed. Stop-if-idle's automatic stop, still queued, is withdrawn and the
+// relaunch takes over at once; while the lane runs a stop, the relaunch
+// follows it, so its `handoff` never stands over a running stop.
 
 /** Visible "Stopping host…" budget for one quit (lifecycle mechanics R4). */
 export const QUIT_STOP_DEADLINE_MS = 15_000;
@@ -73,7 +102,7 @@ export const QUIT_STOP_DEADLINE_MS = 15_000;
  */
 export const QUIT_STOPPING_REVEAL_DELAY_MS = 1_000;
 
-export type QuitReason = "update-install" | "user";
+export type QuitReason = "relaunch" | "user";
 
 /** Where a decision came from, for its INFO line. */
 export type HostQuitDecisionSource = "renderer" | "native" | "tray";
@@ -96,6 +125,9 @@ export interface QuitTransactionController {
   stopHost(request: StopHostRequest): Promise<StopHostOutcome>;
   holdAutomaticIntents(): AutomaticIntentHold;
   quiesce(): void;
+  spawnServiceDefinitionRefresh(): Promise<ServiceDefinitionRefreshSpawn>;
+  /** The exclusive mutation lane's running job, read synchronously. */
+  readonly lifecycleAdmissionBlock: LifecycleAdmissionBlock | null;
 }
 
 /** The hooks the existing update-install sequence takes from the transaction. */
@@ -105,9 +137,26 @@ export interface UpdateInstallQuitHooks {
 }
 
 export interface QuitTransactionDeps {
-  readonly isInstallingUpdate: () => boolean;
+  /**
+   * This quit hands over to a relaunch: an update install, or the macOS move
+   * to /Applications relaunching the moved copy.
+   */
+  readonly isRelaunchIntended: () => boolean;
   readonly lifecycle: QuitTransactionLifecycle;
   readonly controller: QuitTransactionController;
+  /**
+   * Whether a local host is running, read fresh. Resolves, never rejects: a
+   * read that cannot tell says `true`, so a live host is never skipped.
+   */
+  readonly isLocalHostRunning: () => Promise<boolean>;
+  /**
+   * Whether the running host was started by a person in a terminal (its
+   * supervisor admitted `foreground`), read fresh. Resolves, never rejects: a
+   * read that cannot tell - a record from a CLI that predates the field
+   * included - says `false`, and the CLI's refusal of a desktop stop over that
+   * run (`not-service-run`) is the backstop.
+   */
+  readonly isForegroundHostRun: () => Promise<boolean>;
   /**
    * The host quit modal round-trip (`RunnerIpcBridge.requestHostQuitDecision`).
    * Rejects when no renderer can answer - none listening, no servicing ack,
@@ -165,6 +214,12 @@ interface AnsweredDecision {
   readonly source: HostQuitDecisionSource;
 }
 
+/** "Remember my choice", held until the quit commits. */
+interface PendingRemember {
+  readonly mode: "background" | "linked";
+  readonly source: HostQuitDecisionSource;
+}
+
 /** The context a decision is applied in. */
 interface DecisionContext {
   /** The policy mode in force for this quit. */
@@ -193,15 +248,14 @@ export class QuitTransactions {
     const active = this.active;
     if (active === null) {
       this.start(
-        this.deps.isInstallingUpdate() ? "update-install" : "user",
+        this.deps.isRelaunchIntended() ? "relaunch" : "user",
         this.takePreset(),
       );
       return "prevent";
     }
     const verdict = active.join();
     if (verdict === "supersede") {
-      active.supersede();
-      this.start("update-install", null);
+      this.handOverToRelaunch(active);
       return "prevent";
     }
     return verdict;
@@ -230,12 +284,26 @@ export class QuitTransactions {
   }
 
   private start(reason: QuitReason, preset: HostQuitDecision | null): void {
-    const transaction = new QuitTransaction(this.deps, reason, preset, () => {
-      if (this.active === transaction) this.active = null;
-    });
+    const transaction = new QuitTransaction(
+      this.deps,
+      reason,
+      preset,
+      () => {
+        if (this.active === transaction) this.active = null;
+      },
+      () => {
+        if (this.active === transaction) this.handOverToRelaunch(transaction);
+      },
+    );
     this.active = transaction;
     log.info("[host-quit] quit transaction started", { reason });
     void transaction.run();
+  }
+
+  /** A relaunch takes this user quit over: it ends, and the relaunch's starts. */
+  private handOverToRelaunch(transaction: QuitTransaction): void {
+    transaction.supersede();
+    this.start("relaunch", null);
   }
 }
 
@@ -246,26 +314,41 @@ class QuitTransaction {
   readonly reason: QuitReason;
   private readonly preset: HostQuitDecision | null;
   private readonly onEnded: () => void;
+  /** Hand this quit to the relaunch whose takeover waited for its stop. */
+  private readonly onRelaunchTakeover: () => void;
 
   /** The transaction ended without quitting (Cancel, a failure, supersede). */
   private ended = false;
-  /** An update install took over this user quit. */
+  /** A relaunch took over this user quit. */
   private superseded = false;
+  /**
+   * A relaunch arrived while this quit's automatic stop was in flight. It
+   * takes over once that stop settles (`join`).
+   */
+  private relaunchTakeoverPending = false;
   /** The quit is authorized; only the final pass is left. */
   private quitting = false;
   /** A stop the user (or Linked) committed to is running. */
   private stopCommitted = false;
-  /** The update path's `handoff` write has settled. */
+  /** The relaunch path's `handoff` write has settled. */
   private handoffSettled = false;
-  /** A second update pass arrived before the handoff settled. */
+  /** A second relaunch pass arrived before the handoff settled. */
   private releaseAfterHandoff = false;
   /** Something was shown to the renderer this quit, so it hears the ending. */
   private announced = false;
   /** The modal request the latest decision answered, for the state events. */
   private requestId: string | null = null;
   private hold: AutomaticIntentHold | null = null;
+  /** The policy mode this user quit read, for the remembered mode's refresh. */
+  private policyMode: HostLifecycleMode | null = null;
+  private pendingRemember: PendingRemember | null = null;
   private remainingMs: number;
   private currentStop: AbortController | null = null;
+  /**
+   * The controller's own promise for the stop last submitted, until it
+   * settles - which may be after the deadline gave up waiting for it.
+   */
+  private inFlightStop: Promise<StopHostOutcome> | null = null;
   private readonly nativeDialog = new AbortController();
   /** A stopping phase is on (published and not yet ended). */
   private stopping = false;
@@ -276,18 +359,20 @@ class QuitTransaction {
     reason: QuitReason,
     preset: HostQuitDecision | null,
     onEnded: () => void,
+    onRelaunchTakeover: () => void,
   ) {
     this.deps = deps;
     this.reason = reason;
     this.preset = preset;
     this.onEnded = onEnded;
+    this.onRelaunchTakeover = onRelaunchTakeover;
     this.remainingMs = deps.deadlineMs;
   }
 
   async run(): Promise<void> {
     try {
-      if (this.reason === "update-install") {
-        await this.runUpdateInstall();
+      if (this.reason === "relaunch") {
+        await this.runRelaunch();
       } else {
         await this.runUser();
       }
@@ -301,7 +386,7 @@ class QuitTransaction {
       });
       if (this.superseded || this.ended || this.quitting) return;
       if (this.stopCommitted) {
-        this.commitQuit();
+        await this.commitQuit();
       } else {
         this.stayOpen("failed");
       }
@@ -310,12 +395,12 @@ class QuitTransaction {
 
   /** A repeat `before-quit` pass while this transaction runs. */
   join(): JoinVerdict {
-    if (this.reason === "update-install") {
+    if (this.reason === "relaunch") {
       // The existing second pass: the updater re-fires `quit()` and it is let
       // through - once the `handoff` verdict is on disk, so a fast re-quit can
       // never leave the launch verdict (Linked: `stop`) standing over an
       // update the supervisor must wait out.
-      if (!this.deps.isInstallingUpdate()) return "prevent";
+      if (!this.deps.isRelaunchIntended()) return "prevent";
       if (this.handoffSettled) {
         this.quitting = true;
         return "allow";
@@ -327,29 +412,56 @@ class QuitTransaction {
       !this.quitting &&
       !this.ended &&
       !this.stopCommitted &&
-      this.deps.isInstallingUpdate()
+      this.deps.isRelaunchIntended()
     ) {
-      return "supersede";
+      // Stop-if-idle's automatic stop, if one is in flight, is still queued:
+      // the supersede withdraws it and it never spawns. What the lane runs
+      // ahead of it is the update sequence's to drain, under its own bound.
+      if (this.inFlightStop === null || !this.laneRunsStop()) {
+        return "supersede";
+      }
+      // The lane runs a stop. Admitted, ours runs to its outcome as the
+      // user's quit asked, and the relaunch follows it - `handoff` is never
+      // written while a spawned stop runs. The lane cannot say whose stop it
+      // runs, so ours is withdrawn too: still queued behind another, it never
+      // spawns, and the wait is the running stop's.
+      if (!this.relaunchTakeoverPending) {
+        this.relaunchTakeoverPending = true;
+        this.currentStop?.abort();
+        log.info("[host-quit] relaunch waits for the host stop", {
+          reason: "host-stop-in-flight",
+        });
+      }
     }
     return "prevent";
   }
 
+  /** Whether the mutation lane is running a host stop right now. */
+  private laneRunsStop(): boolean {
+    const block = this.deps.controller.lifecycleAdmissionBlock;
+    return (
+      block !== null &&
+      block.kind === "mutation" &&
+      block.lane.kind === "stopHost"
+    );
+  }
+
   /**
-   * An update install took over this user quit before any stop was committed:
-   * its pending question is withdrawn, a stop still queued is withdrawn, and
-   * it ends silently - the update's transaction owns the quit from here.
+   * A relaunch took over this user quit before any stop was committed: its
+   * pending question is withdrawn, a stop still queued is withdrawn, and it
+   * ends silently - the relaunch's transaction owns the quit from here.
    */
   supersede(): void {
     // Ended too: a continuation still awaiting (a verdict write, a remembered
-    // mode) must neither quit nor stay open on the update's behalf.
+    // mode) must neither quit nor stay open on the relaunch's behalf.
     this.superseded = true;
     this.ended = true;
-    log.info("[host-quit] quit superseded", { reason: "update-install" });
+    log.info("[host-quit] quit superseded", { reason: "relaunch" });
     this.endStopping();
     this.currentStop?.abort();
     this.nativeDialog.abort();
     this.deps.withdrawDecision(
-      new Error("Host quit decision superseded by an update install"),
+      new Error("Host quit decision superseded by a relaunch"),
     );
     this.releaseHold();
     if (this.announced) {
@@ -358,9 +470,9 @@ class QuitTransaction {
     this.onEnded();
   }
 
-  // ---- update-install ------------------------------------------------------
+  // ---- relaunch ------------------------------------------------------------
 
-  private async runUpdateInstall(): Promise<void> {
+  private async runRelaunch(): Promise<void> {
     await this.writeVerdict("handoff");
     this.handoffSettled = true;
     if (this.releaseAfterHandoff) {
@@ -380,7 +492,7 @@ class QuitTransaction {
         this.deps.authorizeQuitAfterFlush();
       },
       stayOpen: () => {
-        this.stayOpen("update-install-failed");
+        this.stayOpen("relaunch-failed");
       },
     });
   }
@@ -400,13 +512,25 @@ class QuitTransaction {
     const policy = await this.readPolicy();
     if (this.superseded) return;
     const mode = policy.mode;
+    this.policyMode = mode;
     if (mode === "none") {
       // No local host lanes (or a CLI-written `none` pending the next
       // launch): nothing to keep or stop.
       log.info("[host-quit] quit", { mode, reason: "no-local-host" });
-      this.commitQuit();
+      await this.commitQuit();
       return;
     }
+    // A host a person started in a terminal is theirs: the mode governs the
+    // service run only. Nothing is asked and nothing is stopped - the tray's
+    // stop included - and nothing is remembered, since nothing was decided.
+    if (await this.deps.isForegroundHostRun()) {
+      if (this.superseded) return;
+      log.info("[host-quit] quit", { mode, reason: "foreground-run" });
+      await this.writeVerdict("keep");
+      await this.commitQuit();
+      return;
+    }
+    if (this.superseded) return;
     if (this.preset !== null) {
       await this.applyDecision(
         { mode, promptMode: null, round: "none" },
@@ -417,7 +541,7 @@ class QuitTransaction {
     switch (mode) {
       case "background":
         log.info("[host-quit] quit", { mode, reason: "host-kept" });
-        this.commitQuit();
+        await this.commitQuit();
         return;
       case "linked":
         await this.runLinked();
@@ -456,7 +580,12 @@ class QuitTransaction {
       outcome = await this.runStop("force");
     }
     this.logStopOutcome("linked", outcome);
-    this.commitQuit();
+    // The host was started in a terminal: not the service's run, so not the
+    // mode's to stop - it is kept, and the supervisor must not enforce `stop`.
+    if (outcome.kind === "not-service-run") {
+      await this.writeVerdict("keep");
+    }
+    await this.commitQuit();
   }
 
   /**
@@ -469,10 +598,18 @@ class QuitTransaction {
     this.beginStopping(true);
     const outcome = await this.runStop("if-idle");
     if (this.superseded) return;
+    if (this.relaunchTakeoverPending) {
+      if (outcome.kind !== "deadline") {
+        this.logStopOutcome("stop-if-idle", outcome);
+      }
+      await this.handOverAfterStop();
+      return;
+    }
     switch (outcome.kind) {
       case "stopped":
         this.logStopOutcome("stop-if-idle", outcome);
-        this.commitQuit();
+        await this.writeVerdict("stop");
+        await this.commitQuit();
         return;
       case "host-busy":
         // The first thing this quit shows: nothing "started meanwhile".
@@ -486,7 +623,7 @@ class QuitTransaction {
       case "not-service-run":
         await this.writeVerdict("keep");
         this.logStopOutcome("stop-if-idle", outcome);
-        this.commitQuit();
+        await this.commitQuit();
         return;
       case "lock-busy":
       case "update-active":
@@ -497,19 +634,57 @@ class QuitTransaction {
     }
   }
 
+  /**
+   * The relaunch that arrived while the lane ran a stop, with Stop-if-idle's
+   * automatic stop in flight, takes this quit over once ours has settled -
+   * past the deadline if it must: a stop's child is running, and the
+   * relaunch's `handoff` must not stand over it.
+   */
+  private async handOverAfterStop(): Promise<void> {
+    const running = this.inFlightStop;
+    if (running !== null) {
+      this.logStopOutcome("stop-if-idle", await running);
+    }
+    this.onRelaunchTakeover();
+  }
+
   private async prompt(
     mode: HostQuitDecisionMode,
     round: HostQuitDecisionRequest["round"],
   ): Promise<void> {
+    // Only a dead host skips the question: there is nothing to keep or stop,
+    // so neither the modal nor main's own dialog is shown for it.
+    if (!(await this.isLocalHostRunning())) {
+      if (this.superseded) return;
+      log.info("[host-quit] quit", { mode, round, reason: "host-not-running" });
+      await this.writeVerdict("keep");
+      await this.commitQuit();
+      return;
+    }
+    if (this.superseded) return;
     const answered = await this.ask({ mode, round });
     if (this.superseded) return;
     await this.applyDecision({ mode, promptMode: mode, round }, answered);
   }
 
+  private async isLocalHostRunning(): Promise<boolean> {
+    try {
+      return await this.deps.isLocalHostRunning();
+    } catch {
+      return true;
+    }
+  }
+
   private async ask(prompt: HostQuitPrompt): Promise<AnsweredDecision> {
     // A prompt ends the stopping phase: it shows its own window (or dialog),
-    // and the pause in the deadline budget is not stopping time.
+    // and the pause in the deadline budget is not stopping time. Every window
+    // that showed the stop's progress hears it end, since only the most
+    // recent one gets the question - or none, when main asks natively.
+    const wasStopping = this.stopping;
     this.endStopping();
+    if (wasStopping) {
+      this.deps.publishState({ requestId: this.requestId, phase: "prompting" });
+    }
     try {
       const response = await this.deps.requestDecision(prompt);
       this.announced = true;
@@ -563,17 +738,27 @@ class QuitTransaction {
     });
     switch (decision.kind) {
       case "cancel":
+        // Cancel ignores the checkbox: nothing this quit was asked is kept.
+        this.pendingRemember = null;
         this.stayOpen("cancelled");
         return;
       case "keep":
+        this.pendingRemember = decision.remember
+          ? { mode: "background", source: answered.source }
+          : null;
         await this.writeVerdict("keep");
-        if (decision.remember) await this.remember("background", answered);
-        this.commitQuit();
+        await this.commitQuit();
         return;
       case "stop": {
+        this.pendingRemember = decision.remember
+          ? { mode: "linked", source: answered.source }
+          : null;
         this.stopCommitted = true;
-        await this.writeVerdict("stop");
-        if (decision.remember) await this.remember("linked", answered);
+        // Only a forced stop may leave `stop` for the supervisor: it forces
+        // what it finds. An idle-only stop that does not finish - refused,
+        // cut off, or still asking busy-retry when the app dies - leaves the
+        // host running, as the user was told it would.
+        await this.writeVerdict(forced ? "stop" : "keep");
         this.beginStopping(!forced);
         const outcome = await this.runStop(forced ? "force" : "if-idle");
         if (
@@ -582,38 +767,64 @@ class QuitTransaction {
           context.promptMode !== null
         ) {
           // Something started between the idle list and the stop: show the
-          // new list once more; that round's Stop is the force.
+          // new list once more; that round's Stop is the force. Its answer
+          // replaces this one's "Remember", and its Cancel drops it.
           this.stopCommitted = false;
           await this.prompt(context.promptMode, "busy-retry");
           return;
         }
         this.logStopOutcome(context.mode, outcome);
-        this.commitQuit();
+        // A completed idle-only stop leaves the user's Stop as the standing
+        // verdict; a forced one already wrote it. A host started in a
+        // terminal is kept whatever was chosen: the stop never reached it.
+        if (!forced && outcome.kind === "stopped") {
+          await this.writeVerdict("stop");
+        } else if (forced && outcome.kind === "not-service-run") {
+          await this.writeVerdict("keep");
+        }
+        await this.commitQuit();
         return;
       }
     }
   }
 
   /**
-   * "Remember my choice": Keep → Background, Stop → Linked. Applied after the
-   * verdict is written - the lifecycle service holds a quit verdict over a
-   * mode change, so the choice being remembered cannot overwrite the one
-   * being made.
+   * "Remember my choice": Keep → Background, Stop → Linked, for the decision
+   * this quit commits with - after its stop has settled, never before, so a
+   * Cancel (the busy-retry round's included) leaves the mode as it was, and
+   * the refresh a parking mode write queues on the exclusive lane never runs
+   * ahead of the stop. The verdict is already written and the lifecycle
+   * service holds it over a mode change, so the choice being remembered
+   * cannot overwrite the one being made.
+   *
+   * The lane may still hold the stop here (the deadline cut it off), and the
+   * refresh the write queues behind it never spawns once the app is gone, so
+   * a parking mode also gets a detached refresh that outlives the app.
    */
-  private async remember(
-    mode: "background" | "linked",
-    answered: AnsweredDecision,
-  ): Promise<void> {
+  private async applyRemember(): Promise<void> {
+    const pending = this.pendingRemember;
+    this.pendingRemember = null;
+    if (pending === null) return;
+    const { mode } = pending;
     let outcome: string;
     try {
       outcome = (await this.deps.lifecycle.setMode({ mode, stop: null })).kind;
     } catch (error) {
       outcome = error instanceof Error ? error.name : "failed";
     }
+    let refresh: ServiceDefinitionRefreshSpawn | "not-needed" = "not-needed";
+    if (
+      outcome === "applied" &&
+      this.policyMode !== null &&
+      refreshOnModeChange(this.policyMode, mode)
+    ) {
+      refresh = await this.deps.controller.spawnServiceDefinitionRefresh();
+    }
     log.info("[host-quit] lifecycle mode remembered", {
       mode,
-      source: answered.source === "tray" ? "tray" : "quit-modal",
+      source: pending.source === "tray" ? "tray" : "quit-modal",
       reason: outcome,
+      refresh,
     });
   }
 
@@ -633,14 +844,17 @@ class QuitTransaction {
     this.currentStop = withdrawal;
     const startedAt = Date.now();
     const deadline = deadlineAfter(this.remainingMs);
-    const outcome = await Promise.race<StopRun>([
-      this.deps.controller.stopHost({
-        mode,
-        spawn: "detached",
-        withdrawal: withdrawal.signal,
-      }),
-      deadline.reached,
-    ]);
+    const stop = this.deps.controller.stopHost({
+      mode,
+      spawn: "detached",
+      withdrawal: withdrawal.signal,
+    });
+    this.inFlightStop = stop;
+    const settle = (): void => {
+      if (this.inFlightStop === stop) this.inFlightStop = null;
+    };
+    void stop.then(settle, settle);
+    const outcome = await Promise.race<StopRun>([stop, deadline.reached]);
     deadline.cancel();
     this.currentStop = null;
     this.remainingMs -= Date.now() - startedAt;
@@ -664,13 +878,20 @@ class QuitTransaction {
 
   // ---- endings -------------------------------------------------------------
 
-  private commitQuit(): void {
+  private async commitQuit(): Promise<void> {
     if (this.quitting || this.ended) return;
+    if (this.relaunchTakeoverPending) {
+      // A relaunch arrived after the deadline gave up on Stop-if-idle's
+      // stop, while its `keep` was being written: it takes over instead.
+      await this.handOverAfterStop();
+      return;
+    }
     this.quitting = true;
     this.endStopping();
     // Permanent from here: nothing may bring the host back while the app
     // leaves.
     this.deps.controller.quiesce();
+    await this.applyRemember();
     this.releaseHold();
     this.deps.publishState({ requestId: this.requestId, phase: "quitting" });
     this.deps.authorizeQuitAfterFlush();

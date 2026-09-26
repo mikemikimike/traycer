@@ -1,6 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  readHostInstallRecordAtPath,
+  type HostInstallRecord,
+} from "@traycer/protocol/config/installation";
+import { encodeInstallGeneration } from "../host-version/install-generation";
+import {
   commitAttemptMutation,
   commitExecutorOnlyAttemptMutation,
   discardAttemptRecordForUninstall,
@@ -84,9 +89,12 @@ export type UpdateMaintenanceExemption =
    * one), boots out its LaunchAgent, writes a `{pending, writtenAt}` marker,
    * and swaps the bundle in `/Applications`. It never writes `install/`,
    * never promotes staged bytes, and never stamps an install identity - so
-   * the record it steps over stays exactly as it was, and the next
-   * `host ensure` reconciles it under `attempt-executor` with the full
-   * recovery path.
+   * the record it steps over stays exactly as it was. Nothing reconciles it
+   * on the next launch: no `host ensure` runs under `attempt-executor`. The
+   * park stands for its own continuation, and the next launch's start of the
+   * host it stopped is admitted as the supervisor's relaunch is
+   * (`withSupervisorRelaunchContender`), from the desktop's packaged-macOS
+   * `convergeReady` - so only a park that relaunch admits comes back up.
    *
    * **With a durable nonterminal attempt it therefore ALLOWS**, on the same
    * reasoning as `host-uninstall-maintenance` and stated in full on that arm
@@ -150,14 +158,19 @@ export type UpdateMaintenanceExemption =
    * exceptions, and the exceptions are an upgrade applied by
    * `dispositionForAttempt`, never a different base answer:
    *
-   *  - `waiting-for-work` and `waiting-to-activate` ALLOW. A park has no
-   *    holder mid-segment: resuming one is a claim that takes this same
-   *    attempt lock, so while this contender holds it and reads a park,
-   *    nobody is inside a swap. The teardown only STOPS the host - the one
-   *    edge `recoveryActionFor` already calls safe for both shapes
-   *    (`stop-only` / `restart-current`) - and it never writes the record, so
-   *    the park stands untouched for the next supervisor start to resume
-   *    through `supervisor-relaunch-maintenance`.
+   *  - `waiting-for-work` ALLOWS, and `waiting-to-activate` allows exactly
+   *    where `supervisor-relaunch-maintenance` would admit the start that
+   *    brings the host back (`withLifecycleTeardownContender` requires the
+   *    same install reader). A park has no holder mid-segment: resuming one
+   *    is a claim that takes this same attempt lock, so while this contender
+   *    holds it and reads a park, nobody is inside a swap. The teardown only
+   *    STOPS the host - the one edge `recoveryActionFor` already calls safe
+   *    for both shapes - and it never writes the record, so the park stands
+   *    untouched for the next supervisor start to resume through
+   *    `supervisor-relaunch-maintenance`. A park that start would refuse -
+   *    no claim, no readable install, or an install that no longer matches
+   *    it - is refused here too: stopping it would leave a host no start
+   *    could ever bring back, while leaving it up is recoverable.
    *  - Every ACTIVE phase refuses, including the placed-byte ones a
    *    supervisor relaunch admits: a teardown must never run inside a swap,
    *    and an active record may have a live holder momentarily outside the
@@ -197,6 +210,38 @@ export interface SupervisorRelaunchInstalledIdentity {
  */
 export type SupervisorRelaunchIdentityReader =
   () => Promise<SupervisorRelaunchInstalledIdentity | null>;
+
+/**
+ * The identity every reader above returns, from an install record.
+ *
+ * ONE mapping for every client that admits a start over a park - the CLI's
+ * supervisor relaunch and `host ensure`, and the desktop's packaged-macOS
+ * start - so no two of them can disagree about whether the same record admits
+ * the same start. `installGeneration` is the RECORD's encoding, never a
+ * rebuilt literal: it is compared byte-for-byte with the baseline the park's
+ * claim recorded, and a disagreement fails CLOSED, with nothing red anywhere.
+ */
+export function supervisorRelaunchInstalledIdentityOf(
+  record: HostInstallRecord,
+): SupervisorRelaunchInstalledIdentity {
+  return {
+    installedVersion: record.version,
+    installGeneration: encodeInstallGeneration(record),
+  };
+}
+
+/**
+ * Read the install record at `installRecordPath` - the same schema read the
+ * CLI makes - and map it with {@link supervisorRelaunchInstalledIdentityOf}.
+ * `null` when there is no record; a malformed one throws, which refuses the
+ * admission it was read for.
+ */
+export async function readSupervisorRelaunchInstalledIdentityAt(
+  installRecordPath: string,
+): Promise<SupervisorRelaunchInstalledIdentity | null> {
+  const record = await readHostInstallRecordAtPath(installRecordPath);
+  return record === null ? null : supervisorRelaunchInstalledIdentityOf(record);
+}
 
 /**
  * The compatibility bridge while legacy update execution remains selected.
@@ -881,6 +926,71 @@ export async function withSupervisorRelaunchContender<T>(
 }
 
 /**
+ * Whether the supervisor's own relaunch would be admitted over the record
+ * standing now - the question a start that found that supervisor alive has
+ * to answer before it leaves the host to it. A live supervisor re-admits
+ * each relaunch under `supervisor-relaunch-maintenance`, and one refused
+ * exits with no host, so "a supervisor is alive" alone is not "the host is
+ * coming back".
+ *
+ * Read under the lock `capability` proves the caller holds (its own segment,
+ * or the parent segment an adopted child works inside), so no contender
+ * changes the record between this answer and the caller's next act. An
+ * absent or terminal record admits; a faulted one, or a capability that is
+ * not live, does not.
+ */
+export async function supervisorRelaunchAdmitsStandingRecord(
+  capability: UpdateMutationCapability,
+  readInstalledIdentity: SupervisorRelaunchIdentityReader,
+): Promise<boolean> {
+  if (!issuedCapabilities.has(capability)) return false;
+  const state = capabilityStates.get(capability);
+  if (state === undefined) return false;
+  const live = await verifyUpdateMutationCapability(
+    capability,
+    state.hostHomeDir,
+  );
+  if (live.kind !== "live") return false;
+  const record = await readUpdateAttemptRecord(state.hostHomeDir);
+  if (record.kind === "absent") return true;
+  if (record.kind !== "valid") return false;
+  if (record.value.execution === "terminal") return true;
+  return (
+    (await dispositionForAttempt(
+      "supervisor-relaunch-maintenance",
+      record.value,
+      readInstalledIdentity,
+    )) === "allow"
+  );
+}
+
+/**
+ * The supervisor's lifecycle teardown admission - stopping its own host over
+ * a standing park (`lifecycleTeardownDisposition`).
+ *
+ * Its own entry point for the reason {@link withSupervisorRelaunchContender}
+ * is one: over `waiting-to-activate` the teardown is admitted only where that
+ * relaunch would be, which is decided against the live install record, so
+ * the reader is required HERE. Through `withUpdateContender` the reader is
+ * `null`, and a `null` reader only ever refuses.
+ */
+export async function withLifecycleTeardownContender<T>(
+  options: Omit<WithUpdateContenderOptions, "admission"> & {
+    readonly readInstalledIdentity: SupervisorRelaunchIdentityReader;
+  },
+  run: (
+    capability: UpdateMutationCapability,
+    context: UpdateContenderExecutionContext,
+  ) => Promise<T>,
+): Promise<UpdateContenderOutcome<T>> {
+  return withUpdateContenderInternal(
+    { ...options, admission: "lifecycle-teardown-maintenance" },
+    (capability, context) => run(capability, context),
+    options.readInstalledIdentity,
+  );
+}
+
+/**
  * Internal executor bridge. It forces executor admission and hands the
  * revocable completion closure only to the trusted CLI bridge; generic shadow
  * and maintenance callers cannot obtain it through the public barrel.
@@ -1336,7 +1446,7 @@ async function dispositionForAttempt(
 ): Promise<ActiveAttemptDisposition> {
   const base = dispositionFor(admission);
   if (admission === "lifecycle-teardown-maintenance") {
-    return lifecycleTeardownDisposition(activeAttempt);
+    return lifecycleTeardownDisposition(activeAttempt, readInstalledIdentity);
   }
   if (admission !== "supervisor-relaunch-maintenance") return base;
   return supervisorRelaunchDisposition(activeAttempt, readInstalledIdentity);
@@ -1348,18 +1458,24 @@ async function dispositionForAttempt(
  *
  * The two phases are spelled out rather than read through `isParkedPhase`,
  * so a future parked phase does not silently join this exemption - it has to
- * make its own case here. No install-identity read is needed, unlike the
- * relaunch's `waiting-to-activate` arm: that one STARTS bytes and must prove
- * they are the attempt's; this one only stops the host, and the park's bytes,
- * claim and baseline are left exactly as they were.
+ * make its own case here.
+ *
+ * `waiting-to-activate` is judged by the relaunch's own arm, with the same
+ * install reader. The teardown itself only stops the host and leaves the
+ * park's bytes, claim and baseline exactly as they were - but a host it stops
+ * comes back only through a start, and every start over this park is that
+ * arm's to admit. A park it refuses (no claim, no readable install, an
+ * install that moved since the park) would stay down with nothing able to
+ * start it, and the reconciler that could resolve the park runs inside that
+ * host. `waiting-for-work` needs no read: the relaunch admits it outright.
  */
-function lifecycleTeardownDisposition(
+async function lifecycleTeardownDisposition(
   record: HostUpdateAttemptRecord,
-): ActiveAttemptDisposition {
-  return record.phase === "waiting-for-work" ||
-    record.phase === "waiting-to-activate"
-    ? "allow"
-    : "refuse";
+  readInstalledIdentity: SupervisorRelaunchIdentityReader | null,
+): Promise<ActiveAttemptDisposition> {
+  if (record.phase === "waiting-for-work") return "allow";
+  if (record.phase !== "waiting-to-activate") return "refuse";
+  return supervisorRelaunchDisposition(record, readInstalledIdentity);
 }
 
 /**

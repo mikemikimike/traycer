@@ -49,8 +49,8 @@ describe("decideVerdict", () => {
     expect(
       decideVerdict({
         hasLocalEntry: false,
-        hasStatusClient: true,
         dialable: true,
+        canAsk: true,
         freshData: { busy: true, busySessionCount: 1, busyBreakdown: null },
         freshError: true,
         timedOut: true,
@@ -59,40 +59,62 @@ describe("decideVerdict", () => {
     ).toEqual({ kind: "no-local-host" });
   });
 
-  it("an entry with no client and a dialable directory row reads unknown/no-connection", () => {
+  it("an entry that cannot be dialed reads not-running at once, whatever else is known", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: false,
+        dialable: false,
+        canAsk: false,
+        freshData: null,
+        freshError: false,
+        timedOut: false,
+        statusMinor: null,
+      }),
+    ).toEqual({ kind: "not-running" });
+    expect(
+      decideVerdict({
+        hasLocalEntry: true,
+        dialable: false,
+        canAsk: true,
+        freshData: null,
+        freshError: true,
+        timedOut: true,
+        statusMinor: 6,
+      }),
+    ).toEqual({ kind: "not-running" });
+  });
+
+  it("a dialable entry this renderer cannot ask reads unknown/no-connection, before any timeout", () => {
+    expect(
+      decideVerdict({
+        hasLocalEntry: true,
         dialable: true,
+        canAsk: false,
         freshData: null,
         freshError: false,
         timedOut: false,
         statusMinor: null,
       }),
     ).toEqual({ kind: "unknown", reason: "no-connection" });
-  });
-
-  it("an entry with no client and a non-dialable row reads unknown/unreachable", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: false,
-        dialable: false,
+        dialable: true,
+        canAsk: false,
         freshData: null,
-        freshError: false,
-        timedOut: false,
+        freshError: true,
+        timedOut: true,
         statusMinor: null,
       }),
-    ).toEqual({ kind: "unknown", reason: "unreachable" });
+    ).toEqual({ kind: "unknown", reason: "no-connection" });
   });
 
   it("fresh data beats a freshError/timedOut that raced it - busy", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: true,
         dialable: true,
+        canAsk: true,
         freshData: {
           busy: true,
           busySessionCount: 3,
@@ -110,12 +132,31 @@ describe("decideVerdict", () => {
     });
   });
 
+  it("fresh data read before readiness dropped still stands", () => {
+    expect(
+      decideVerdict({
+        hasLocalEntry: true,
+        dialable: true,
+        canAsk: false,
+        freshData: { busy: false, busySessionCount: 0, busyBreakdown: null },
+        freshError: false,
+        timedOut: false,
+        statusMinor: 6,
+      }),
+    ).toEqual({
+      kind: "idle",
+      busySessionCount: 0,
+      breakdown: null,
+      statusMinor: 6,
+    });
+  });
+
   it("fresh data with busy=false reads idle, carrying the same facts", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: true,
         dialable: true,
+        canAsk: true,
         freshData: { busy: false, busySessionCount: 0, busyBreakdown: null },
         freshError: false,
         timedOut: false,
@@ -133,8 +174,8 @@ describe("decideVerdict", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: true,
         dialable: true,
+        canAsk: true,
         freshData: null,
         freshError: true,
         timedOut: false,
@@ -147,8 +188,8 @@ describe("decideVerdict", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: true,
         dialable: true,
+        canAsk: true,
         freshData: null,
         freshError: false,
         timedOut: true,
@@ -161,8 +202,8 @@ describe("decideVerdict", () => {
     expect(
       decideVerdict({
         hasLocalEntry: true,
-        hasStatusClient: true,
         dialable: true,
+        canAsk: true,
         freshData: null,
         freshError: false,
         timedOut: false,
@@ -205,12 +246,20 @@ vi.mock("@/hooks/host/use-host-directory-list-query", () => ({
 type HostClientResolver = (
   hostId: string | null,
 ) => HostClient<HostRpcRegistry> | null;
-const clientForHostIdMock = vi.hoisted((): { current: HostClientResolver } => ({
-  current: () => null,
-}));
+const clientForHostIdMock = vi.hoisted(
+  (): {
+    current: HostClientResolver;
+    calls: Array<string | null>;
+  } => ({
+    current: () => null,
+    calls: [],
+  }),
+);
 vi.mock("@/hooks/host/use-host-client-for-host-id", () => ({
-  useHostClientForHostId: (hostId: string | null) =>
-    clientForHostIdMock.current(hostId),
+  useHostClientForHostId: (hostId: string | null) => {
+    clientForHostIdMock.calls.push(hostId);
+    return clientForHostIdMock.current(hostId);
+  },
 }));
 
 interface FakeStatusQueryData {
@@ -226,10 +275,18 @@ interface FakeStatusQueryState {
   readonly errorUpdatedAt: number;
 }
 
+interface RecordedHostQueryArgs {
+  readonly client: HostClient<HostRpcRegistry> | null;
+  readonly method: string;
+  readonly params: unknown;
+  readonly options: Record<string, unknown>;
+}
+
 const statusQueryMock = vi.hoisted(
   (): {
     current: FakeStatusQueryState;
     refetch: Mock;
+    lastArgs: RecordedHostQueryArgs | null;
   } => ({
     current: {
       data: undefined,
@@ -238,19 +295,25 @@ const statusQueryMock = vi.hoisted(
       errorUpdatedAt: 0,
     },
     refetch: vi.fn(),
+    lastArgs: null,
   }),
 );
 vi.mock("@/hooks/host/use-host-query", () => ({
-  useHostQuery: (): Pick<
+  useHostQuery: (
+    args: RecordedHostQueryArgs,
+  ): Pick<
     UseQueryResult<FakeStatusQueryData, HostRpcError>,
     "data" | "dataUpdatedAt" | "isError" | "errorUpdatedAt" | "refetch"
-  > => ({
-    data: statusQueryMock.current.data,
-    dataUpdatedAt: statusQueryMock.current.dataUpdatedAt,
-    isError: statusQueryMock.current.isError,
-    errorUpdatedAt: statusQueryMock.current.errorUpdatedAt,
-    refetch: statusQueryMock.refetch,
-  }),
+  > => {
+    statusQueryMock.lastArgs = args;
+    return {
+      data: statusQueryMock.current.data,
+      dataUpdatedAt: statusQueryMock.current.dataUpdatedAt,
+      isError: statusQueryMock.current.isError,
+      errorUpdatedAt: statusQueryMock.current.errorUpdatedAt,
+      refetch: statusQueryMock.refetch,
+    };
+  },
 }));
 
 function localEntry(hostId: string): HostDirectoryEntry {
@@ -281,19 +344,41 @@ afterEach(() => {
   hostBindingMock.current = null;
   directoryListMock.current = { data: undefined };
   clientForHostIdMock.current = () => null;
+  clientForHostIdMock.calls = [];
   statusQueryMock.current = {
     data: undefined,
     dataUpdatedAt: 0,
     isError: false,
     errorUpdatedAt: 0,
   };
+  statusQueryMock.lastArgs = null;
   statusQueryMock.refetch.mockClear();
   resetNegotiatedManifests();
 });
 
-/** A stub `HostClient` - only its identity as "a non-null client" matters here. */
+/**
+ * A stub `HostClient` with no readiness signals at all - the client shape a
+ * NOT-ready render sees (signed out, credentials refreshing). Only its
+ * identity as "a non-null client" matters where readiness is not in play.
+ */
 function fakeClient(): HostClient<HostRpcRegistry> {
   return {} as HostClient<HostRpcRegistry>;
+}
+
+/**
+ * A "ready" `HostClient`: it answers `useReactiveHostReadiness`'s three probes
+ * the way a real production requester does, bound to `hostId` and the given
+ * directory entry.
+ */
+function readyClient(
+  hostId: string,
+  entry: HostDirectoryEntry,
+): HostClient<HostRpcRegistry> {
+  return {
+    getActiveHostId: () => hostId,
+    getRequestContextUserId: () => "user-1",
+    getActiveHost: () => entry,
+  } as HostClient<HostRpcRegistry>;
 }
 
 describe("useLocalHostQuitStatus", () => {
@@ -310,7 +395,7 @@ describe("useLocalHostQuitStatus", () => {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
     clientForHostIdMock.current = (hostId) =>
-      hostId === "host-a" ? fakeClient() : null;
+      hostId === "host-a" ? readyClient(hostId, localEntry(hostId)) : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
 
@@ -332,7 +417,7 @@ describe("useLocalHostQuitStatus", () => {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
     clientForHostIdMock.current = (hostId) =>
-      hostId === "host-a" ? fakeClient() : null;
+      hostId === "host-a" ? readyClient(hostId, localEntry(hostId)) : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
 
@@ -358,7 +443,7 @@ describe("useLocalHostQuitStatus", () => {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
     clientForHostIdMock.current = (hostId) =>
-      hostId === "host-a" ? fakeClient() : null;
+      hostId === "host-a" ? readyClient(hostId, localEntry(hostId)) : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
 
@@ -381,7 +466,7 @@ describe("useLocalHostQuitStatus", () => {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
     clientForHostIdMock.current = (hostId) =>
-      hostId === "host-a" ? fakeClient() : null;
+      hostId === "host-a" ? readyClient(hostId, localEntry(hostId)) : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
 
@@ -403,7 +488,7 @@ describe("useLocalHostQuitStatus", () => {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
     clientForHostIdMock.current = (hostId) =>
-      hostId === "host-a" ? fakeClient() : null;
+      hostId === "host-a" ? readyClient(hostId, localEntry(hostId)) : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
     expect(result.current.verdict).toEqual({ kind: "checking" });
@@ -418,11 +503,42 @@ describe("useLocalHostQuitStatus", () => {
     });
   });
 
-  it("no host client but a dialable local directory entry reads unknown/no-connection", () => {
+  // Production `useHostClientForHostId` always returns SOME client for a
+  // directory entry, so these drive a real client shape: the entry's
+  // dialability and the client's readiness, not client nullness, are what
+  // tell the hook it cannot ask.
+
+  it("F24/T44: no live entry, a dead/booting directory row - reads not-running immediately and after the timeout bound", () => {
+    vi.useFakeTimers();
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    directoryListMock.current = { data: [nonDialableLocalEntry("host-a")] };
+    // production always returns a client for a directory entry; this one is
+    // bound to the booting entry itself, so its `getActiveHost` naturally
+    // reports the null websocketUrl a real requester would see.
+    clientForHostIdMock.current = (hostId) =>
+      hostId === "host-a"
+        ? readyClient(hostId, nonDialableLocalEntry(hostId))
+        : null;
+
+    const { result } = renderHook(() => useLocalHostQuitStatus(true));
+
+    expect(result.current.verdict).toEqual({ kind: "not-running" });
+    expect(result.current.localHostId).toBe("host-a");
+
+    act(() => {
+      vi.advanceTimersByTime(HOST_QUIT_STATUS_BOUND_MS);
+    });
+
+    expect(result.current.verdict).toEqual({ kind: "not-running" });
+  });
+
+  it("F24/T44: a dialable entry but a not-ready client (signed out / credentials refreshing) reads unknown/no-connection without waiting for the timeout", () => {
+    vi.useFakeTimers();
     hostBindingMock.current = {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
-    clientForHostIdMock.current = () => null;
+    clientForHostIdMock.current = (hostId) =>
+      hostId === "host-a" ? fakeClient() : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
 
@@ -430,19 +546,14 @@ describe("useLocalHostQuitStatus", () => {
       kind: "unknown",
       reason: "no-connection",
     });
-  });
 
-  it("no host client and a non-dialable local directory entry reads unknown/unreachable", () => {
-    hostBindingMock.current = {
-      directory: { getLocalEntry: () => nonDialableLocalEntry("host-a") },
-    };
-    clientForHostIdMock.current = () => null;
-
-    const { result } = renderHook(() => useLocalHostQuitStatus(true));
+    act(() => {
+      vi.advanceTimersByTime(HOST_QUIT_STATUS_BOUND_MS);
+    });
 
     expect(result.current.verdict).toEqual({
       kind: "unknown",
-      reason: "unreachable",
+      reason: "no-connection",
     });
   });
 
@@ -504,7 +615,7 @@ describe("useLocalHostQuitStatus", () => {
       directory: { getLocalEntry: () => localEntry("host-a") },
     };
     clientForHostIdMock.current = (hostId) =>
-      hostId === "host-a" ? fakeClient() : null;
+      hostId === "host-a" ? readyClient(hostId, localEntry(hostId)) : null;
 
     const { result } = renderHook(() => useLocalHostQuitStatus(true));
     expect(result.current.verdict.kind).toBe("busy");
@@ -521,5 +632,60 @@ describe("useLocalHostQuitStatus", () => {
     // lands - and it asked for that fresh one.
     expect(result.current.verdict).toEqual({ kind: "checking" });
     expect(statusQueryMock.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  describe("T44: useHostQuery is called with this host's client, never the app-wide one", () => {
+    it("a live local entry resolves the client for that host id, by identity", () => {
+      const clientA = readyClient("host-a", localEntry("host-a"));
+      const appWideClient = readyClient("app-wide", localEntry("app-wide"));
+      hostBindingMock.current = {
+        directory: { getLocalEntry: () => localEntry("host-a") },
+      };
+      clientForHostIdMock.current = (hostId) =>
+        hostId === null ? appWideClient : clientA;
+
+      renderHook(() => useLocalHostQuitStatus(true));
+
+      expect(statusQueryMock.lastArgs?.client).toBe(clientA);
+      expect(statusQueryMock.lastArgs?.method).toBe("host.status");
+      expect(statusQueryMock.lastArgs?.params).toEqual({});
+      expect(statusQueryMock.lastArgs?.options).toMatchObject({
+        enabled: true,
+        staleTime: 0,
+        refetchOnMount: "always",
+        poll: true,
+      });
+      expect(clientForHostIdMock.calls).toContain("host-a");
+      expect(clientForHostIdMock.calls).not.toContain(null);
+    });
+
+    it("active:false disables the query even with a resolvable client", () => {
+      const clientA = readyClient("host-a", localEntry("host-a"));
+      hostBindingMock.current = {
+        directory: { getLocalEntry: () => localEntry("host-a") },
+      };
+      clientForHostIdMock.current = () => clientA;
+
+      renderHook(() => useLocalHostQuitStatus(false));
+
+      expect(statusQueryMock.lastArgs?.options).toMatchObject({
+        enabled: false,
+      });
+    });
+
+    it("no local entry at all never falls back to the app-wide client", () => {
+      const appWideClient = readyClient("app-wide", localEntry("app-wide"));
+      hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+      directoryListMock.current = { data: [] };
+      clientForHostIdMock.current = (hostId) =>
+        hostId === null ? appWideClient : null;
+
+      renderHook(() => useLocalHostQuitStatus(true));
+
+      expect(statusQueryMock.lastArgs?.client).toBeNull();
+      expect(statusQueryMock.lastArgs?.options).toMatchObject({
+        enabled: false,
+      });
+    });
   });
 });

@@ -1,7 +1,11 @@
 import type { HostLifecycleMode } from "@traycer/protocol/config/host-lifecycle-policy";
 import { log } from "../app/logger";
 import type { JsonFileStore } from "../app/json-file-store";
-import type { RegistryManagedWindow, WindowRegistry } from "./window-registry";
+import type {
+  RegistryManagedWindow,
+  WindowRegistry,
+  WindowRegistryRecord,
+} from "./window-registry";
 
 // Close-to-tray on Windows and Linux (host-lifecycle-modes D5, T06). Under a
 // mode whose quit does something to the host - Linked stops it, Ask and
@@ -38,6 +42,12 @@ import type { RegistryManagedWindow, WindowRegistry } from "./window-registry";
 //                                          it is the quit, as
 //                                          `window-all-closed` would have been.
 //
+// "Hidden" is only a window this intercept hid (`HiddenToTrayWindows`), never
+// one inferred from visibility: a window still loading is created
+// `show: false` until `ready-to-show`, and it keeps the app alive as it did
+// before close-to-tray existed - the close of the last visible window beside
+// it is not intercepted at all.
+//
 // macOS is untouched: a closed window never quits the app there.
 
 /** The modes whose quit policy acts on the host (D5). */
@@ -68,10 +78,14 @@ export function lastWindowCloseAction(input: {
 export interface CloseToTrayWindows {
   /** Whether the window is still registered and not destroyed. */
   isLive(windowId: string): boolean;
-  /** Other live windows the user can still reach (visible or minimized). */
+  /**
+   * Other live windows that keep the app open: every one this intercept has
+   * not hidden - visible, minimized, or still loading.
+   */
   otherOpenWindowCount(windowId: string): number;
-  /** Other live windows that are hidden (an earlier close-to-tray). */
+  /** Other live windows this intercept hid (an earlier close-to-tray). */
   otherHiddenWindowCount(windowId: string): number;
+  /** Hide it to the tray, and remember that it was. */
   hide(windowId: string): void;
   /** Close it again; the intercept lets that one close through. */
   close(windowId: string): void;
@@ -83,10 +97,50 @@ export interface CloseToTrayManagedWindow extends RegistryManagedWindow {
   isMinimized(): boolean;
 }
 
+/** The window state that tells whether a window hidden to the tray still is. */
+export interface HiddenToTrayCandidate {
+  isDestroyed(): boolean;
+  isVisible(): boolean;
+  isMinimized(): boolean;
+}
+
 /**
- * The registry's windows as the intercept sees them. A minimized window is
- * still open (the taskbar restores it); a hidden one is not - it is an
- * earlier close-to-tray.
+ * The windows the close-to-tray intercept itself hid, by registry id - the
+ * only windows that count as hidden. One per process, shared by the intercept
+ * and the quit's stopping reveal.
+ */
+export class HiddenToTrayWindows {
+  private readonly ids = new Set<string>();
+
+  add(windowId: string): void {
+    this.ids.add(windowId);
+  }
+
+  /**
+   * Whether `window` (registered as `windowId`, or `null` when it is not) is
+   * still hidden to the tray: this intercept hid it, and it has been neither
+   * shown again (the tray's Show, a quit prompt) nor destroyed since. An
+   * entry that no longer holds is dropped.
+   */
+  holds(windowId: string, window: HiddenToTrayCandidate | null): boolean {
+    if (!this.ids.has(windowId)) return false;
+    if (
+      window === null ||
+      window.isDestroyed() ||
+      window.isVisible() ||
+      window.isMinimized()
+    ) {
+      this.ids.delete(windowId);
+      return false;
+    }
+    return true;
+  }
+}
+
+/**
+ * The registry's windows as the intercept sees them: a window is hidden only
+ * if `hiddenToTray` holds it, and every other live one - visible, minimized
+ * (the taskbar restores it), or still loading - is open.
  */
 export function registryCloseToTrayWindows<
   TWindow extends CloseToTrayManagedWindow,
@@ -95,28 +149,31 @@ export function registryCloseToTrayWindows<
     WindowRegistry<TWindow>,
     "records" | "getWindowById" | "closeById"
   >,
+  hiddenToTray: HiddenToTrayWindows,
 ): CloseToTrayWindows {
-  const others = (windowId: string): TWindow[] =>
+  const others = (windowId: string): WindowRegistryRecord<TWindow>[] =>
     registry
       .records()
       .filter(
         (record) =>
           record.windowId !== windowId && !record.window.isDestroyed(),
-      )
-      .map((record) => record.window);
-  const reachable = (window: TWindow): boolean =>
-    window.isVisible() || window.isMinimized();
+      );
+  const hidden = (record: WindowRegistryRecord<TWindow>): boolean =>
+    hiddenToTray.holds(record.windowId, record.window);
   return {
     isLive: (windowId) => {
       const window = registry.getWindowById(windowId);
       return window !== null && !window.isDestroyed();
     },
     otherOpenWindowCount: (windowId) =>
-      others(windowId).filter(reachable).length,
+      others(windowId).filter((record) => !hidden(record)).length,
     otherHiddenWindowCount: (windowId) =>
-      others(windowId).filter((window) => !reachable(window)).length,
+      others(windowId).filter(hidden).length,
     hide: (windowId) => {
-      registry.getWindowById(windowId)?.hide();
+      const window = registry.getWindowById(windowId);
+      if (window === null) return;
+      window.hide();
+      hiddenToTray.add(windowId);
     },
     close: (windowId) => {
       void registry.closeById(windowId);

@@ -39,7 +39,7 @@ const CHILD_PROCESS_MODULE_SPECIFIERS = new Set([
   "node:child_process",
 ]);
 
-const GUARDED_NAMES = new Set(["execFileSync", "execSync"]);
+const GUARDED_NAMES = new Set(["execFileSync", "execSync", "spawnSync"]);
 
 function oneIndexedLine(sourceFile: ts.SourceFile, node: ts.Node): number {
   return (
@@ -56,46 +56,92 @@ function staticPropertyNameText(name: ts.PropertyName): string | null {
   return null;
 }
 
-function objectLiteralHasStdioProperty(
+function expressionCapturesStderr(node: ts.Expression): boolean {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text === "pipe" || node.text === "ignore";
+  }
+  if (!ts.isArrayLiteralExpression(node)) return false;
+  const stderr = node.elements[2];
+  if (stderr === undefined) return false;
+  if (
+    ts.isStringLiteral(stderr) ||
+    ts.isNoSubstitutionTemplateLiteral(stderr)
+  ) {
+    return stderr.text === "pipe" || stderr.text === "ignore";
+  }
+  return false;
+}
+
+function objectLiteralHasCapturedStdio(
   literal: ts.ObjectLiteralExpression,
 ): boolean {
   return literal.properties.some((property) => {
-    if (
-      ts.isPropertyAssignment(property) ||
-      ts.isShorthandPropertyAssignment(property) ||
-      ts.isMethodDeclaration(property) ||
-      ts.isGetAccessor(property) ||
-      ts.isSetAccessor(property)
-    ) {
-      return staticPropertyNameText(property.name) === "stdio";
-    }
-    return false;
+    if (!ts.isPropertyAssignment(property)) return false;
+    if (staticPropertyNameText(property.name) !== "stdio") return false;
+    return expressionCapturesStderr(property.initializer);
   });
 }
 
-/** Does `call` carry an object-literal argument (anywhere in its argument
- * list) with an `stdio` property - the shape every hardened site in this
- * repo uses (`{ encoding: "utf8", ..., stdio: ["ignore", "pipe", "pipe"] }`)? */
+/** Does `call` carry an object-literal argument whose `stdio` value captures
+ * or discards stderr (`"pipe"` / `"ignore"`, or an array whose index 2 is
+ * one of those)? `"inherit"`, `undefined`, and `["ignore","pipe","inherit"]`
+ * all still copy the child's stderr into ours (G4 / F9). */
 function callHasStdioOptionsObject(call: ts.CallExpression): boolean {
   return call.arguments.some(
     (argument) =>
       ts.isObjectLiteralExpression(argument) &&
-      objectLiteralHasStdioProperty(argument),
+      objectLiteralHasCapturedStdio(argument),
   );
 }
 
-/** Is `expr` the callee of a call to `execFileSync`/`execSync`, either as a
- * bare identifier (`execFileSync(...)`, reached via a NON-renamed named
- * import or a same-name local) or a property access (`cp.execFileSync(...)`,
- * `child_process.execSync(...)`) - the form a namespace/default import of
- * `child_process` produces, and which this structural match catches without
- * needing to resolve what the object expression is bound to? */
-function guardedCalleeName(expr: ts.Expression): string | null {
+function collectGuardedAliases(sourceFile: ts.SourceFile): Set<string> {
+  const aliases = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer !== undefined &&
+      ts.isIdentifier(node.initializer) &&
+      GUARDED_NAMES.has(node.initializer.text)
+    ) {
+      aliases.add(node.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return aliases;
+}
+
+/** Is `expr` a call to `execFileSync`/`execSync`/`spawnSync`, including
+ * `cp.execFileSync(...)`, `execFileSync.call(...)`, `cp["execFileSync"](...)`,
+ * and a same-file alias (`const run = execFileSync; run(...)`)? */
+function guardedCalleeName(
+  expr: ts.Expression,
+  aliases: ReadonlySet<string>,
+): string | null {
+  if (ts.isParenthesizedExpression(expr)) {
+    return guardedCalleeName(expr.expression, aliases);
+  }
   if (ts.isIdentifier(expr)) {
-    return GUARDED_NAMES.has(expr.text) ? expr.text : null;
+    if (GUARDED_NAMES.has(expr.text) || aliases.has(expr.text))
+      return expr.text;
+    return null;
   }
   if (ts.isPropertyAccessExpression(expr)) {
+    if (expr.name.text === "call" || expr.name.text === "apply") {
+      return guardedCalleeName(expr.expression, aliases);
+    }
     return GUARDED_NAMES.has(expr.name.text) ? expr.name.text : null;
+  }
+  if (ts.isElementAccessExpression(expr)) {
+    const arg = expr.argumentExpression;
+    if (
+      arg !== undefined &&
+      (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) &&
+      GUARDED_NAMES.has(arg.text)
+    ) {
+      return arg.text;
+    }
   }
   return null;
 }
@@ -128,10 +174,11 @@ export function checkExecSyncStdio(
   const violations: ExecSyncStdioViolation[] = [];
   let totalCallSites = 0;
   let callSitesWithStdio = 0;
+  const aliases = collectGuardedAliases(sourceFile);
 
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node)) {
-      const guardedName = guardedCalleeName(node.expression);
+      const guardedName = guardedCalleeName(node.expression, aliases);
       if (guardedName !== null) {
         totalCallSites += 1;
         const hasStdio = callHasStdioOptionsObject(node);

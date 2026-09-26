@@ -89,6 +89,7 @@ import {
   DESKTOP_LOCK_WAIT_MS,
   HostController,
   type HostControllerHostLifecycle,
+  type HostControllerSupervisorRun,
 } from "../../host/host-controller";
 import { __resetHostRemovalStateForTest } from "../../host/host-removal-state";
 import {
@@ -134,6 +135,14 @@ function fakeHostLifecycle(): HostControllerHostLifecycle {
   };
 }
 
+const NO_SUPERVISOR_RUN: HostControllerSupervisorRun = {
+  readSupervisorRun: async () => ({
+    state: "not-running",
+    supervisorPid: null,
+    admittedAs: null,
+  }),
+};
+
 /** A controller whose host is down: no pid record, endpoint unreachable. */
 function newDownController(): HostController {
   return new HostController({
@@ -142,6 +151,7 @@ function newDownController(): HostController {
     reachabilityProbe: async () => false,
     desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
     desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+    supervisorRun: NO_SUPERVISOR_RUN,
   });
 }
 

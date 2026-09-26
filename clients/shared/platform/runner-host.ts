@@ -724,10 +724,25 @@ export type HostLifecycleSupervisorState =
   | "not-running";
 
 /**
+ * How the running supervisor's run was started, as its `supervisor.json`
+ * records it (`admittedAs`; the protocol's `SupervisorRunAdmittedAs`):
+ * `service` - by the service manager (login, a relaunch, or this app or a
+ * `traycer host` command starting the service), the run the mode governs;
+ * `foreground` - by a person running `traycer host start` in a terminal. The
+ * mode does not govern that run, and this app leaves it alone: it never
+ * stops, restarts or updates over it (the CLI refuses those with
+ * `E_HOST_NOT_SERVICE_RUN`).
+ */
+export type HostLifecycleRunAdmission = "service" | "foreground";
+
+/**
  * What still stands between the desired mode and the running one:
  * `restart-app` - entering or leaving `none` ("takes effect at next launch");
- * `restart-host` - an older supervisor is running ("restart the host to
- * apply"); `none` - nothing is pending.
+ * `restart-host` - the running host does not apply the mode until it
+ * restarts: an older supervisor ("restart the host to apply"), or, under a
+ * mode the supervisor enforces, a host started in a terminal
+ * (`applied.admittedAs === "foreground"`), which only the person who started
+ * it can restart - this app never does; `none` - nothing is pending.
  */
 export type HostLifecyclePending = "none" | "restart-app" | "restart-host";
 
@@ -747,6 +762,13 @@ export interface HostLifecycleView {
   readonly applied: {
     readonly localHostCapability: LocalHostCapability;
     readonly supervisor: HostLifecycleSupervisorState;
+    /**
+     * How the running supervisor's run was started, read with `supervisor`
+     * from the same record: `null` unless `supervisor` is `enforcing`, and
+     * `null` too for a supervisor from a CLI that predates the field, which
+     * says nothing either way.
+     */
+    readonly admittedAs: HostLifecycleRunAdmission | null;
   };
   readonly pending: HostLifecyclePending;
 }
@@ -859,8 +881,13 @@ export interface HostQuitDecisionResponse {
  * anything (Stop-if-idle's silent attempt, a Stop chosen over an idle list);
  * `false` for Linked and for a forced stop. A surface names the work being
  * ended only when it is `false`.
+ *
+ * `prompting` ends the `stopping` phase with the same `requestId` when main
+ * asks the person next - in the most recent window only, or natively. Every
+ * other window that showed that stop's progress takes it down; the quit goes
+ * on until `quitting` or `cancelled`.
  */
-export type HostQuitPhase = "stopping" | "quitting" | "cancelled";
+export type HostQuitPhase = "stopping" | "prompting" | "quitting" | "cancelled";
 
 export type HostQuitStateEvent =
   | {
@@ -870,7 +897,7 @@ export type HostQuitStateEvent =
     }
   | {
       readonly requestId: string | null;
-      readonly phase: "quitting" | "cancelled";
+      readonly phase: "prompting" | "quitting" | "cancelled";
     };
 
 /**
@@ -1909,10 +1936,27 @@ export interface HostRemovalState {
   readonly removedByUser: boolean;
 }
 
-// Result of the in-app "Remove Traycer" action. The desktop stops + removes
-// the host service, the host install, and (on macOS) the SMAppService login
-// item, while preserving all `~/.traycer` user data.
-export interface TraycerUninstallResult {
+/**
+ * A host write that did not run, for a reason another click cannot fix: a
+ * host a person started in a terminal (which Traycer leaves alone), host
+ * starts suspended on a machine that runs no local host, another Traycer
+ * process holding the lock. Not a failure - a surface announces `message` as
+ * information, and nothing the route would have changed has changed.
+ */
+export interface HostMutationDeclined {
+  readonly kind: "declined";
+  readonly message: string;
+}
+
+// Result of the in-app "Remove Traycer" action: `removed`, or `declined` with
+// nothing removed and the removed-by-user mark left as it was.
+export type TraycerUninstallResult = TraycerRemoved | HostMutationDeclined;
+
+// A completed "Remove Traycer". The desktop stops + removes the host service,
+// the host install, and (on macOS) the SMAppService login item, while
+// preserving all `~/.traycer` user data.
+export interface TraycerRemoved {
+  readonly kind: "removed";
   readonly removedHost: boolean;
   /**
    * The deregistration was PERFORMED and nothing contradicted it - NOT that
@@ -2190,6 +2234,26 @@ export interface HostControllerStatus {
   readonly reachable: boolean;
   readonly removedByUser: boolean;
   readonly checkedAt: string;
+  /**
+   * The last ensure (a converge: launch, background or one a person asked
+   * for) that ended `failed`, with the CLI's message and error code, or
+   * `null`. Desktop main owns its lifetime: set by every failed ensure and
+   * cleared by the next one that ends `ok`, or once the host is reachable, so
+   * a surface can show why the host is not up without keeping a copy of its
+   * own that outlives the failure.
+   */
+  readonly lastEnsureFailure: HostEnsureFailure | null;
+}
+
+/** See `HostControllerStatus.lastEnsureFailure`. */
+export interface HostEnsureFailure {
+  /** The CLI's message, for the window; main logs the code, never this. */
+  readonly message: string;
+  /**
+   * The CLI's error code (`E_SERVICE_REGISTRATION_DISABLED`, ...), or `null`
+   * for a failure that carried none.
+   */
+  readonly code: string | null;
 }
 
 // Pre-commit busy (CLI-owned apply/pin refused before the stop):
@@ -2269,7 +2333,10 @@ export interface ServiceRegistrationOk {
 
 export type ApplyStagedTrigger = "launch" | "manual";
 
-export interface HostUninstallResult {
+export type HostUninstallResult = HostUninstalled | HostMutationDeclined;
+
+export interface HostUninstalled {
+  readonly kind: "uninstalled";
   readonly removedInstallDir: boolean;
   /**
    * The deregistration was PERFORMED and nothing contradicted it - NOT that
@@ -2306,6 +2373,15 @@ export interface FreePortAndRestartInput {
   readonly pid: number | null;
   readonly processName: string | null;
 }
+
+/** The queued free-port repair ran; carries the input it was confirmed with. */
+export interface FreePortAndRestartApplied extends FreePortAndRestartInput {
+  readonly kind: "applied";
+}
+
+export type FreePortAndRestartResult =
+  | FreePortAndRestartApplied
+  | HostMutationDeclined;
 
 export type HostTrayCommand =
   | { readonly kind: "openSettingsHost" }
@@ -2527,6 +2603,8 @@ export interface IHostManagement {
   // In-app "Remove Traycer" (Settings → General → Danger Zone). Marks the
   // device as removed-by-user (suppressing auto-reinstall), tears down the
   // host service + install + macOS login item, and preserves all user data.
+  // `declined` - over a host a person started in a terminal, for one - means
+  // none of that happened.
   readonly uninstallTraycer: () => Promise<TraycerUninstallResult>;
   // Reads the persisted removal sentinel so the renderer can short-circuit to
   // the removed surface before attempting any provisioning.
@@ -2599,7 +2677,7 @@ export interface IHostManagement {
    */
   readonly freePortAndRestart: (
     input: FreePortAndRestartInput & { readonly expectedHostId: string },
-  ) => Promise<FreePortAndRestartInput>;
+  ) => Promise<FreePortAndRestartResult>;
   /**
    * The refusing twin, for the Doctor sheet a person is WATCHING.
    *

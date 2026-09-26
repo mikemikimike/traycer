@@ -17,6 +17,7 @@ import type {
   ConvergeReadyOk,
   ConvergeReadyVersionPolicy,
   HostControllerStatus,
+  HostRespawnMode,
   InstallVersionOk,
   LifecycleAdmissionBlock,
   LocalHostMutationIntent,
@@ -42,6 +43,7 @@ export const FAKE_HOST_CONTROLLER_STATUS: HostControllerStatus = {
   reachable: true,
   localAttempt: null,
   removedByUser: false,
+  lastEnsureFailure: null,
   checkedAt: "2026-01-01T00:00:00.000Z",
 };
 
@@ -49,6 +51,16 @@ export class FakeHostController implements IpcHostController {
   /** Lets the one suite that cares (`requestHostRespawn`) assert without a
    * real controller instance. */
   respawnCalls = 0;
+  /**
+   * Every `(intent, mode)` pair `respawn` was called with, in order - so a
+   * caller that mis-wires its mode (e.g. passes `"if-idle"` where the row
+   * requires `"force"`) is observable. `respawnCalls` above only counts
+   * invocations; it cannot tell `"force"` from `"if-idle"`.
+   */
+  readonly respawnCallArgs: Array<{
+    readonly intent: LocalHostMutationIntent;
+    readonly mode: HostRespawnMode;
+  }> = [];
 
   readonly lifecycleAdmissionBlock: LifecycleAdmissionBlock | null = null;
   async getStatus(): Promise<HostControllerStatus> {
@@ -91,8 +103,12 @@ export class FakeHostController implements IpcHostController {
   async deregisterService(): Promise<MutationOutcome<ServiceRegistrationOk>> {
     return { kind: "ok", value: { registered: false } };
   }
-  async respawn(): Promise<MutationOutcome<ActivateInstalledOk>> {
+  async respawn(
+    intent: LocalHostMutationIntent,
+    mode: HostRespawnMode,
+  ): Promise<MutationOutcome<ActivateInstalledOk>> {
     this.respawnCalls += 1;
+    this.respawnCallArgs.push({ intent, mode });
     return { kind: "ok", value: { activated: true } };
   }
   async recoverIfDown(): Promise<

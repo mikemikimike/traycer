@@ -19,8 +19,13 @@ import type {
   ActivateInstalledOk,
   ApplyStagedOk,
   HostControllerStatus,
+  HostLifecyclePending,
+  HostLifecycleRunAdmission,
+  HostLifecycleView,
+  IHostLifecycleHost,
   IHostManagement,
   IRunnerHost,
+  LocalHostCapability,
   MutationOutcome,
 } from "@traycer-clients/shared/platform/runner-host";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
@@ -57,6 +62,7 @@ const UP_TO_DATE_STATUS: HostControllerStatus = {
   localAttempt: null,
   removedByUser: false,
   checkedAt: "2026-05-15T00:00:00Z",
+  lastEnsureFailure: null,
 };
 
 const READY_STATUS: HostControllerStatus = {
@@ -90,7 +96,9 @@ function makeManagement(overrides: Overrides): IHostManagement {
     registerService: vi.fn(notImplemented("registerService")),
     deregisterService: vi.fn(notImplemented("deregisterService")),
     registryCheck: vi.fn(notImplemented("registryCheck")),
-    freePortAndRestart: vi.fn((input) => Promise.resolve(input)),
+    freePortAndRestart: vi.fn((input) =>
+      Promise.resolve({ kind: "applied" as const, ...input }),
+    ),
     runDoctorRepairQueued: vi.fn(() =>
       Promise.resolve({ kind: "applied" as const }),
     ),
@@ -150,6 +158,92 @@ function makeHost(management: IHostManagement | null): IRunnerHost {
     hostManagement: management,
     hostTray: null,
   });
+}
+
+/** Overrides just `hostLifecycle` on an already-built fake host (P1-B). */
+function withHostLifecycle(
+  host: IRunnerHost,
+  hostLifecycle: IHostLifecycleHost,
+): IRunnerHost {
+  const proto = Object.getPrototypeOf(host) as object;
+  return Object.assign(Object.create(proto) as IRunnerHost, host, {
+    hostLifecycle,
+  });
+}
+
+interface FakeHostLifecycleForBanner extends IHostLifecycleHost {
+  push(next: HostLifecycleView): void;
+}
+
+/** `get()` resolves the current view; `onChange` records the ONE handler
+ * a consumer registers, and `push` re-plays it exactly as main's own
+ * lifecycle-change push does. */
+function createFakeHostLifecycleForBanner(
+  initial: HostLifecycleView,
+): FakeHostLifecycleForBanner {
+  let current = initial;
+  let handler: ((view: HostLifecycleView) => void) | null = null;
+  return {
+    get: () => Promise.resolve(current),
+    set: () =>
+      Promise.reject(new Error("hostLifecycle.set not used by this suite")),
+    onChange: (nextHandler) => {
+      handler = nextHandler;
+      return {
+        dispose: () => {
+          handler = null;
+        },
+      };
+    },
+    quit: null,
+    push: (next) => {
+      current = next;
+      handler?.(next);
+    },
+  };
+}
+
+function lifecycleView(
+  admittedAs: HostLifecycleRunAdmission | null,
+): HostLifecycleView {
+  return {
+    desired: { mode: "ask", rev: 1, updatedBy: null, updatedAt: null },
+    applied: {
+      localHostCapability: "managed",
+      supervisor: "enforcing",
+      admittedAs,
+    },
+    pending: "none",
+  };
+}
+
+const HOST_UPDATE_FOREGROUND_SENTENCE =
+  "Update ready. A host you started in a terminal is running; stop it to finish the update.";
+
+/**
+ * T08's P1-in-`none` ruling: the sentence above is true only when THIS APP
+ * can finish the update itself
+ * (`applied.localHostCapability === "managed" && pending !== "restart-app"`).
+ * Otherwise a foreground run gets this one instead - the constant this names
+ * (`HOST_FOREGROUND_UPDATE_READY_SELF_SERVE` or similar) does not exist yet,
+ * so the literal is asserted directly.
+ */
+const HOST_UPDATE_FOREGROUND_SELF_SERVE_SENTENCE =
+  "Update ready. A host you started in a terminal is running; update it yourself.";
+
+function foregroundLifecycleView(overrides: {
+  readonly localHostCapability: LocalHostCapability;
+  readonly pending: HostLifecyclePending;
+}): HostLifecycleView {
+  return {
+    desired: { mode: "ask", rev: 1, updatedBy: null, updatedAt: null },
+    applied: {
+      localHostCapability: overrides.localHostCapability,
+      supervisor: "enforcing",
+      admittedAs: "foreground",
+    },
+    pending: overrides.pending,
+  };
 }
 
 function renderBanner(host: IRunnerHost): QueryClient {
@@ -584,5 +678,165 @@ describe("HostUpdateBanner (Host Update Layer Redesign, D4)", () => {
     const management = makeManagement({ status: READY_STATUS });
     renderBanner(makeHost(management));
     expect(await findHostUpdateBanner()).toBeTruthy();
+  });
+
+  describe("P1-B — a foreground-admitted host cannot finish an update over itself", () => {
+    it("[P1-B1, RED] update-ready + admittedAs:'foreground' replaces the action with the stop-it sentence", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(lifecycleView("foreground")),
+      );
+      renderBanner(host);
+      await findHostUpdateBanner();
+
+      // The lifecycle view is read after mount, so wait for the sentence
+      // before asserting what it replaced.
+      expect(
+        await screen.findByText(HOST_UPDATE_FOREGROUND_SENTENCE),
+      ).toBeTruthy();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+      expect(screen.getByTestId("host-update-banner-snooze")).toBeTruthy();
+      expect(management.applyStaged).not.toHaveBeenCalled();
+    });
+
+    it("[P1-B2, RED] activation debt + admittedAs:'foreground' replaces the restart action with the same sentence", async () => {
+      const management = makeManagement({
+        status: { ...UP_TO_DATE_STATUS, activation: "pendingActivation" },
+      });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(lifecycleView("foreground")),
+      );
+      renderBanner(host);
+      await screen.findByTestId("host-update-banner-snooze");
+
+      expect(
+        await screen.findByText(HOST_UPDATE_FOREGROUND_SENTENCE),
+      ).toBeTruthy();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+      expect(screen.getByTestId("host-update-banner-snooze")).toBeTruthy();
+      expect(management.activateInstalled).not.toHaveBeenCalled();
+    });
+
+    it("[P1-B3, RED] a later push with admittedAs:null brings the action back reading 'Update now'", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const hostLifecycle = createFakeHostLifecycleForBanner(
+        lifecycleView("foreground"),
+      );
+      const host = withHostLifecycle(makeHost(management), hostLifecycle);
+      renderBanner(host);
+      await findHostUpdateBanner();
+
+      expect(
+        await screen.findByText(HOST_UPDATE_FOREGROUND_SENTENCE),
+      ).toBeTruthy();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+
+      act(() => {
+        hostLifecycle.push(lifecycleView(null));
+      });
+
+      expect(
+        await screen.findByRole("button", { name: /Update now/i }),
+      ).toBeTruthy();
+    });
+
+    it("[GREEN control] update-ready + admittedAs:null renders today's 'Update now' action, no sentence", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(lifecycleView(null)),
+      );
+      renderBanner(host);
+
+      expect(
+        await screen.findByRole("button", { name: /Update now/i }),
+      ).toBeTruthy();
+      expect(screen.queryByText(HOST_UPDATE_FOREGROUND_SENTENCE)).toBeNull();
+    });
+  });
+
+  describe("T08's P1-in-'none' ruling — the foreground sentence is true only when this app can finish the update itself", () => {
+    it("[RED N1] booted in none (localHostCapability:'none', pending:'none'): the self-serve sentence, not the P1 one, with no action", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(
+          foregroundLifecycleView({
+            localHostCapability: "none",
+            pending: "none",
+          }),
+        ),
+      );
+      renderBanner(host);
+      await screen.findByTestId("host-update-banner-foreground");
+
+      expect(screen.queryByText(HOST_UPDATE_FOREGROUND_SENTENCE)).toBeNull();
+      expect(
+        screen.getByText(HOST_UPDATE_FOREGROUND_SELF_SERVE_SENTENCE),
+      ).toBeTruthy();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+    });
+
+    it("[RED N2] a committed '→ none' this session (localHostCapability:'managed', pending:'restart-app'): same three assertions", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(
+          foregroundLifecycleView({
+            localHostCapability: "managed",
+            pending: "restart-app",
+          }),
+        ),
+      );
+      renderBanner(host);
+      await screen.findByTestId("host-update-banner-foreground");
+
+      expect(screen.queryByText(HOST_UPDATE_FOREGROUND_SENTENCE)).toBeNull();
+      expect(
+        screen.getByText(HOST_UPDATE_FOREGROUND_SELF_SERVE_SENTENCE),
+      ).toBeTruthy();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+    });
+
+    it("[GREEN M1] managed + pending:'none': the P1 sentence, not the self-serve one", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(
+          foregroundLifecycleView({
+            localHostCapability: "managed",
+            pending: "none",
+          }),
+        ),
+      );
+      renderBanner(host);
+      await screen.findByTestId("host-update-banner-foreground");
+
+      expect(screen.getByText(HOST_UPDATE_FOREGROUND_SENTENCE)).toBeTruthy();
+      expect(
+        screen.queryByText(HOST_UPDATE_FOREGROUND_SELF_SERVE_SENTENCE),
+      ).toBeNull();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+    });
+
+    it("[GREEN M2] managed + pending:'restart-host' (T05's restart-to-apply): the P1 sentence still shows", async () => {
+      const management = makeManagement({ status: READY_STATUS });
+      const host = withHostLifecycle(
+        makeHost(management),
+        createFakeHostLifecycleForBanner(
+          foregroundLifecycleView({
+            localHostCapability: "managed",
+            pending: "restart-host",
+          }),
+        ),
+      );
+      renderBanner(host);
+      await screen.findByTestId("host-update-banner-foreground");
+
+      expect(screen.getByText(HOST_UPDATE_FOREGROUND_SENTENCE)).toBeTruthy();
+      expect(screen.queryByTestId("host-update-banner-action")).toBeNull();
+    });
   });
 });

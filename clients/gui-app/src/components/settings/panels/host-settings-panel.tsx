@@ -47,6 +47,7 @@ import type {
   HostDoctorIssue as BridgeDoctorIssue,
   HostInstalledRecord,
   IHostManagement,
+  DoctorRepairDispatch,
   DoctorRepairIntent,
 } from "@traycer-clients/shared/platform/runner-host";
 import { use, type ReactNode } from "react";
@@ -361,6 +362,30 @@ type LocalDoctorFixOutcome =
   | { readonly applied: true; readonly declinedMessage: null }
   | { readonly applied: false; readonly declinedMessage: string };
 
+/**
+ * A refusing dispatch's answer as this sheet's outcome. `lane-busy`,
+ * `host-changed` and a `deferred` outcome all mean the repair did not run for
+ * a reason that is information rather than a failure - another actor holds
+ * the lane, the host was replaced, or the lane itself refused the intent
+ * (this app committed `none`, or the host was started in a terminal) - so
+ * each is a declined notice carrying its own message, never "Fix failed".
+ * Anything else that is not `ok` did fail.
+ */
+function settleDoctorDispatch(
+  dispatch: DoctorRepairDispatch,
+): LocalDoctorFixOutcome {
+  if (dispatch.kind !== "dispatched") {
+    return { applied: false, declinedMessage: dispatch.message };
+  }
+  if (dispatch.outcome.kind === "deferred") {
+    return { applied: false, declinedMessage: dispatch.outcome.message };
+  }
+  if (dispatch.outcome.kind !== "ok") {
+    throw new Error(dispatch.outcome.message);
+  }
+  return { applied: true, declinedMessage: null };
+}
+
 // Tripwire, never called: the query above is `enabled` only with a bridge.
 function skipInstalledRecord(): Promise<HostInstalledRecord | null> {
   return Promise.reject(new Error("host management bridge unavailable"));
@@ -473,13 +498,7 @@ function useLocalDoctorFixMutation(
           ...input,
           expectedHostId: localHostId ?? "",
         });
-        if (dispatch.kind !== "dispatched") {
-          return { applied: false, declinedMessage: dispatch.message };
-        }
-        if (dispatch.outcome.kind !== "ok") {
-          throw new Error(dispatch.outcome.message);
-        }
-        return { applied: true, declinedMessage: null };
+        return settleDoctorDispatch(dispatch);
       }
       const repair = doctorRepairIntentFor(issue.fixAction);
       if (repair !== null && localHostId !== null) {
@@ -487,13 +506,7 @@ function useLocalDoctorFixMutation(
           repair,
           expectedHostId: localHostId,
         });
-        if (dispatch.kind !== "dispatched") {
-          return { applied: false, declinedMessage: dispatch.message };
-        }
-        if (dispatch.outcome.kind !== "ok") {
-          throw new Error(dispatch.outcome.message);
-        }
-        return { applied: true, declinedMessage: null };
+        return settleDoctorDispatch(dispatch);
       }
       // `localHostId` is null when this page's host is not this machine, and
       // an empty id is refused by every host that can name itself - the right

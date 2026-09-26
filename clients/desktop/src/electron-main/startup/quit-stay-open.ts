@@ -1,3 +1,5 @@
+import type { HiddenToTrayWindows } from "../windows/close-to-tray";
+
 /**
  * The window registry reads a quit makes to keep the app reachable and its
  * progress visible. `WindowRegistry` satisfies it; tests pass a real one.
@@ -5,7 +7,11 @@
 export interface QuitWindowRegistry {
   records(): readonly {
     readonly windowId: string;
-    readonly window: { isDestroyed(): boolean; isVisible(): boolean };
+    readonly window: {
+      isDestroyed(): boolean;
+      isVisible(): boolean;
+      isMinimized(): boolean;
+    };
   }[];
   getMruRecord(): { readonly windowId: string } | null;
   /** Shows the window when hidden, then focuses it; `false` if it is gone. */
@@ -46,27 +52,35 @@ export function ensureReachableAfterStayOpen(deps: {
 /**
  * A stop still running `QUIT_STOPPING_REVEAL_DELAY_MS` after "stopping" was
  * published must not be a silent hang: when no window is visible - a
- * close-to-tray hid the last one - the MRU window is shown and focused, so
- * the stopping progress renders there. With no window at all (macOS after
- * the last close) nothing is created: a renderer is never booted mid-quit,
- * and the tray's "Stopping host…" line carries the state.
+ * close-to-tray hid the last one - a window the close-to-tray hid is shown
+ * and focused, the MRU one when it is among them, so the stopping progress
+ * renders there. A window still loading is never forced up (it shows itself
+ * at `ready-to-show`, and forcing it would show an unpainted frame). With no
+ * window at all (macOS after the last close) nothing is created: a renderer
+ * is never booted mid-quit, and the tray's "Stopping host…" line carries the
+ * state.
  *
  * Returns whether it showed a window.
  */
 export function revealHiddenWindowForStopping(
   windows: QuitWindowRegistry,
+  hiddenToTray: HiddenToTrayWindows,
 ): boolean {
-  const visible = windows
+  const live = windows
     .records()
-    .filter(
-      (record) => !record.window.isDestroyed() && record.window.isVisible(),
-    ).length;
-  if (visible > 0) {
+    .filter((record) => !record.window.isDestroyed());
+  if (live.some((record) => record.window.isVisible())) {
     return false;
   }
+  const hidden = live.filter((record) =>
+    hiddenToTray.holds(record.windowId, record.window),
+  );
   const mru = windows.getMruRecord();
-  if (mru === null) {
+  const target =
+    hidden.find((record) => mru !== null && record.windowId === mru.windowId) ??
+    hidden.at(0);
+  if (target === undefined) {
     return false;
   }
-  return windows.focusById(mru.windowId);
+  return windows.focusById(target.windowId);
 }

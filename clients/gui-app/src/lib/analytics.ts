@@ -397,11 +397,15 @@ export type AnalyticsHostLifecycleMode =
   | "linked"
   | "none";
 
-/** Which renderer surface committed a lifecycle mode. */
+/**
+ * Who wrote a lifecycle mode: a renderer surface, or `cli` for a
+ * `traycer host lifecycle set` the desktop observed.
+ */
 export type AnalyticsHostLifecycleSource =
   | "settings"
   | "quit-modal"
-  | "no-host-card";
+  | "no-host-card"
+  | "cli";
 
 export type AnalyticsTheme =
   | "mode:dark"
@@ -2182,7 +2186,7 @@ const EVENT_EXACT_PROPERTY_VALUES = new Map<string, ReadonlySet<string>>([
   ...eventValueEntries(
     [AnalyticsEvent.HostLifecycleModeSet],
     "source",
-    new Set(["settings", "quit-modal", "no-host-card"]),
+    new Set(["settings", "quit-modal", "no-host-card", "cli"]),
   ),
   ...eventValueEntries(
     [AnalyticsEvent.HostQuitDecision],

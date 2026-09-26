@@ -29,9 +29,14 @@ import {
  * `compareProcessStartIdentity`; its `"unknown"` answer is never evidence of
  * death.
  *
- * Malformed reads as absent, like every record in this directory. Unknown
- * keys are ignored; an `onExit` outside the vocabulary is not, because a
- * reader must never act on a verdict it does not know.
+ * Unknown keys are ignored; an `onExit` outside the vocabulary is not, because
+ * a reader must never act on a verdict it does not know. A record that is
+ * there but does not parse (torn, a `v` or an `onExit` this reader does not
+ * know) or cannot be read is NOT read as absent: a newer desktop beside an
+ * older supervisor writes exactly such a record, and its desktop is running.
+ * The supervisor's observer reads it as `indeterminate` - no evidence either
+ * way, so it neither starts the crash grace nor stops the host - and only a
+ * missing file as the desktop gone.
  */
 
 const DESKTOP_PRESENCE_FILENAME = "desktop-presence.json";

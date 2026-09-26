@@ -13,6 +13,7 @@ import {
   HOST_START_ADOPTION_ACK_WAIT_MS,
   HOST_START_ADOPTION_MAX_AGE_MS,
 } from "../service/spawn-edge-bounds";
+import { SpawnAcknowledgementTimeoutError } from "../service/spawn-edge";
 import { hostHomeDir } from "../store/paths";
 import { parseHostStartOrigin, type HostStartOrigin } from "./lifecycle-origin";
 import type { WithCliUpdateContenderOptions } from "./update-contender";
@@ -209,7 +210,7 @@ export async function publishHostStartAdoption(
         }
         await waitForAdoptionPoll();
       }
-      throw new Error("host-start supervisor did not acknowledge its spawn");
+      throw new SpawnAcknowledgementTimeoutError();
     },
     cancel: async (): Promise<void> => {
       // Do not delete a later service edge's proof if this holder happens to

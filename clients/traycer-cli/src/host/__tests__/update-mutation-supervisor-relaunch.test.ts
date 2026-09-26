@@ -1,10 +1,56 @@
+import { rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { withUpdateContender } from "@traycer-clients/shared/host-update";
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
 import type { SupervisorRecord } from "@traycer/protocol/config/supervisor-record";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it: this
+// file's own `store/paths` mock below only replaces `hostHomeDir` - it is
+// NOT isolation on its own, because `createCliLogger` (through
+// `store/paths.ts`'s `cliLogPath`) and the protocol path helpers still
+// resolve `homedir()` for real. `node:os.homedir()` itself must be
+// redirected first.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(
+        actual.tmpdir(),
+        "traycer-update-mutation-supervisor-relaunch-test-home-",
+      ),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(async () => {
+  expect(osHome.current).not.toBe("");
+  expect(homedir()).toBe(osHome.current);
+  const paths =
+    await vi.importActual<typeof import("../../store/paths")>(
+      "../../store/paths",
+    );
+  expect(paths.hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+  expect(paths.cliLogPath("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 // `startHostServiceWithAttempt` (host/update-mutation.ts) is the one place
 // every service start passes through - the fix for CRASH-RELAUNCH-ENSURE-RACE.
@@ -52,6 +98,8 @@ function sampleSupervisorRecord(pid: number): SupervisorRecord {
     cliVersion: "1.0.0",
     capabilities: [],
     startedAt: new Date().toISOString(),
+    startIdentity: null,
+    admittedAs: null,
   };
 }
 
@@ -108,7 +156,7 @@ interface FakeControllerCalls {
 function fakeController(): {
   readonly controller: Pick<
     ServiceController,
-    "start" | "hostStartAdoptionLabel"
+    "start" | "status" | "hostStartAdoptionLabel"
   >;
   readonly calls: FakeControllerCalls;
 } {
@@ -128,6 +176,11 @@ function fakeController(): {
         // inert for the control rows, while still proving the facade never
         // even reaches `controller.start` for the live-supervisor row.
       },
+      // Read only after a start whose proof no supervisor acknowledged, and
+      // no start here reaches the spawn edge that would publish one.
+      status: async () => {
+        throw new Error("status is not read by these rows");
+      },
       hostStartAdoptionLabel: async () => {
         calls.hostStartAdoptionLabel += 1;
         return "ai.traycer.host.agent";
@@ -139,7 +192,10 @@ function fakeController(): {
 
 async function runFacade(
   hostHomeDir: string,
-  controller: Pick<ServiceController, "start" | "hostStartAdoptionLabel">,
+  controller: Pick<
+    ServiceController,
+    "start" | "status" | "hostStartAdoptionLabel"
+  >,
 ) {
   return withUpdateContender(
     {
@@ -231,13 +287,15 @@ describe("startHostServiceWithAttempt - CRASH-RELAUNCH-ENSURE-RACE", () => {
     expect(calls.start).toBe(1);
   });
 
-  // A parked supervisor is one that exits (per the lifecycle policy) before
-  // it ever reaches admission - so it never wrote `supervisor.json` /
-  // `supervisor-run.json` in the first place. This is mechanically the same
-  // "no record" shape as the post-swap row above, named separately because
-  // it is the specific case `--defer-if-parked` starts must be untouched by:
-  // nothing here can gate on a record that was never written.
-  it("a parked supervisor exits before admission and writes no record, so --defer-if-parked starts are untouched", async () => {
+  // The facade's half of "a parked supervisor never gates a start": with no
+  // record on disk this start is not gated, and it goes through the adoption
+  // proof (`hostStartAdoptionLabel` is `runWithHostStartAdoption`'s first
+  // call) before the manager's start. That a parked supervisor never writes a
+  // record is decided in `host start`, before `publishSupervisorRecords`, and
+  // is pinned there: `host-start.test.ts`, "supervisor.json lifecycle across
+  // outcomes" > "is never written when the lifecycle policy parks the start".
+  // No supervisor parks here - this row used to claim one did.
+  it("with no supervisor record on disk, the start is not gated: it publishes its adoption proof and starts", async () => {
     const hostHomeDir = await freshHome();
     homeRef.current = hostHomeDir;
     const { controller, calls } = fakeController();

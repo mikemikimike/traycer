@@ -97,16 +97,22 @@ const bytesOptions = {
 };
 
 describe("runCommandForBytes", () => {
-  it("resolves { stdout: Buffer, exitCode } on a non-zero exit, rather than rejecting", async () => {
+  it("resolves { stdout: Buffer, stderr, exitCode } on a non-zero exit, rather than rejecting", async () => {
     const result = await runCommandForBytes(
       process.execPath,
-      ["-e", 'process.stdout.write("partial-output"); process.exit(3)'],
+      [
+        "-e",
+        'process.stdout.write("partial-output"); process.stderr.write("ERROR: Access is denied."); process.exit(3)',
+      ],
       bytesOptions,
     );
 
     expect(result.exitCode).toBe(3);
     expect(Buffer.isBuffer(result.stdout)).toBe(true);
     expect(result.stdout.toString("utf8")).toBe("partial-output");
+    // What tells a missing task from every other `/Query` failure
+    // (`queryScheduledTaskXml`): an exit code alone cannot.
+    expect(result.stderr).toBe("ERROR: Access is denied.");
   });
 
   it("resolves stdout as raw bytes, not a UTF-8-decoded string (the whole reason this function exists)", async () => {

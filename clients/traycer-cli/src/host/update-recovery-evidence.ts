@@ -15,6 +15,7 @@ import { HostRpcError } from "@traycer-clients/shared/host-transport/host-messen
 import { callHostRpcAtEndpoint } from "../internal/host-rpc";
 import { readHostInstallRecord } from "../manifest/host-install";
 import { readHostStagedRecord } from "../manifest/host-staged";
+import { reportBoundedWait } from "../runner/bounded-wait-progress";
 import type { Environment } from "../runner/environment";
 import { getPublishedProcessIdentityVerdict } from "../store/process-identity";
 import {
@@ -202,6 +203,10 @@ export async function observeAttemptRecoveryEvidence(
   // The running leg is typed AGAINST the install record (D9), so the record
   // this observation already read is what classifies it - never a second
   // `install.json` read that could disagree with the installed leg beside it.
+  //
+  // Each read below can spend a full host RPC, and `host update-verify` makes
+  // four in a row; each reports as it begins (bounded-wait-progress.ts).
+  reportBoundedWait("reading the running host's state");
   const runningBefore = await readRunningObservation(
     environment,
     installed.runtime,
@@ -209,6 +214,7 @@ export async function observeAttemptRecoveryEvidence(
   );
   // A host restart while collecting evidence is itself an ambiguity. Re-read
   // the live RPC/metadata proof rather than comparing just the release string.
+  reportBoundedWait("reading the running host's state again");
   const runningAfter = await readRunningObservation(
     environment,
     installed.runtime,

@@ -1,11 +1,53 @@
+import { rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   withUpdateContender,
   type UpdateMutationCapability,
 } from "@traycer-clients/shared/host-update";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it: the
+// `store/paths` mock below only overrides `hostHomeDir` - it is NOT
+// isolation on its own, because `createCliLogger` (through
+// `store/paths.ts`'s `cliLogPath`) and the protocol path helpers still
+// resolve `homedir()` for real. `node:os.homedir()` itself must be
+// redirected first.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-stop-if-idle-stop-intent-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(async () => {
+  expect(osHome.current).not.toBe("");
+  const paths =
+    await vi.importActual<typeof import("../../store/paths")>(
+      "../../store/paths",
+    );
+  expect(paths.hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+  expect(paths.cliLogPath("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 // `host stop --if-idle` through the REAL `withStopIntent` decorator: a busy
 // host must refuse before the decorator announces anything, because the stop

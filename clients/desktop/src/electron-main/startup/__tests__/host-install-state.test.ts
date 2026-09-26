@@ -28,6 +28,7 @@ function statusWith(installedVersion: string | null): HostControllerStatus {
     reachable: false,
     localAttempt: null,
     removedByUser: false,
+    lastEnsureFailure: null,
     checkedAt: "2026-08-05T00:00:00.000Z",
   };
 }

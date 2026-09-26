@@ -17,6 +17,7 @@ import { useRunnerHostLifecycleSetMutation } from "@/hooks/runner/use-runner-hos
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { isPaid } from "@/lib/auth/traycer-subscription-content";
 import {
+  HOST_FOREGROUND_RESTART_TO_APPLY_REASON,
   HOST_LIFECYCLE_FOOTNOTE_SET_COMMAND,
   HOST_LIFECYCLE_FOOTNOTE_START_COMMAND,
   HOST_LIFECYCLE_MODE_ORDER,
@@ -30,9 +31,11 @@ import {
   hostLifecycleCardSubtitle,
   hostLifecycleModeName,
   hostLifecycleOptionCopy,
+  hostLifecycleSetRefusalCopy,
   hostMachineNoun,
   type HostLifecycleOptionCopy,
 } from "@/lib/host/host-lifecycle-copy";
+import { isForegroundHostRun } from "@/lib/host/host-foreground-run";
 import { useAuthStore } from "@/stores/auth/auth-store";
 
 /**
@@ -97,7 +100,9 @@ function HostLifecycleCard(): ReactNode {
             });
             return;
           }
-          if (result.kind !== "applied") setInlineError(result.message);
+          if (result.kind !== "applied") {
+            setInlineError(hostLifecycleSetRefusalCopy(result.reason));
+          }
         },
       },
     );
@@ -240,14 +245,19 @@ function HostLifecycleOption(props: {
 
 /**
  * Desired vs applied, shown only while they differ: "Set to Linked · restart
- * the host to apply" (an older supervisor is running and enforces nothing), or
- * "Set to No local host · takes effect at next launch" (entering or leaving
- * `none` is restart-to-apply for the app itself).
+ * the host to apply" (an older supervisor is running and enforces nothing, or
+ * a host started in a terminal is), or "Set to No local host · takes effect at
+ * next launch" (entering or leaving `none` is restart-to-apply for the app
+ * itself).
+ *
+ * A host started in a terminal is the person's to restart, never this app's,
+ * so its Restart host is disabled with the reason instead of offered.
  */
 function HostLifecycleAppliedLine(props: {
   readonly view: HostLifecycleView;
 }): ReactNode {
   const [restartRequested, setRestartRequested] = useState(false);
+  const reasonId = useId();
   const { view } = props;
   if (view.pending === "none") return null;
   const name = hostLifecycleModeName(view.desired.mode);
@@ -261,6 +271,7 @@ function HostLifecycleAppliedLine(props: {
       </p>
     );
   }
+  const foreground = isForegroundHostRun(view);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <p
@@ -273,7 +284,8 @@ function HostLifecycleAppliedLine(props: {
         type="button"
         variant="outline"
         size="sm"
-        disabled={restartRequested}
+        disabled={restartRequested || foreground}
+        aria-describedby={foreground ? reasonId : undefined}
         onClick={() => {
           setRestartRequested(true);
         }}
@@ -281,6 +293,15 @@ function HostLifecycleAppliedLine(props: {
       >
         {HOST_LIFECYCLE_RESTART_HOST_LABEL}
       </Button>
+      {foreground ? (
+        <p
+          id={reasonId}
+          className="w-full text-ui-xs text-muted-foreground"
+          data-testid="host-lifecycle-restart-host-reason"
+        >
+          {HOST_FOREGROUND_RESTART_TO_APPLY_REASON}
+        </p>
+      ) : null}
       {/* `service`: this line means the running supervisor predates lifecycle
           enforcement, and the cooperative `host.restart` would only have that
           old supervisor respawn its child (MIX-OLD-SUPERVISOR). */}

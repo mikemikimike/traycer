@@ -615,6 +615,9 @@ export class RunnerIpcBridge {
     readyWindowIds: this.appLifecycleReadyWindowIds,
     serviceAckTimeoutMs: QUIT_REQUEST_SERVICE_ACK_TIMEOUT_MS,
     messages: QUIT_INTERCEPTION_MESSAGES,
+    revealTarget: (windowId) => {
+      this.windowRegistry.focusById(windowId);
+    },
     onAbandoned: null,
   });
   /**
@@ -633,6 +636,9 @@ export class RunnerIpcBridge {
       readyWindowIds: this.hostQuitListeningWindowIds,
       serviceAckTimeoutMs: QUIT_REQUEST_SERVICE_ACK_TIMEOUT_MS,
       messages: HOST_QUIT_DECISION_MESSAGES,
+      revealTarget: (windowId) => {
+        this.windowRegistry.focusById(windowId);
+      },
       onAbandoned: (waiter) => {
         this.publishHostQuitState({
           requestId: waiter.requestId,
@@ -1027,6 +1033,7 @@ export class RunnerIpcBridge {
    * caller provides the already-aggregated snapshot; this method only targets
    * the MRU renderer and fails closed when that renderer is not ready, cannot
    * receive the event, or never acknowledges that it has started servicing it.
+   * The target is shown and focused first (`RendererDecisionRequests`).
    */
   requestQuitDecision(snapshot: UnsyncedEditsSnapshot): Promise<QuitDecision> {
     return this.quitDecisions.request(
@@ -1045,29 +1052,20 @@ export class RunnerIpcBridge {
    * reported a listening modal, with the same servicing-ack budget and the
    * same rejection when the renderer resets, the window closes or the bridge
    * is disposed. A rejection means "no renderer can answer"; the transaction
-   * then asks natively.
-   *
-   * The target is shown and focused first: after a close-to-tray the MRU
-   * window is hidden, and a modal in a hidden window is a quit nobody can
-   * answer.
+   * then asks natively. The target is shown and focused first, as for every
+   * quit-time question (`RendererDecisionRequests`).
    */
   requestHostQuitDecision(
     prompt: HostQuitPrompt,
   ): Promise<HostQuitDecisionResponse> {
     return this.hostQuitDecisions.request(
       this.windowRegistry.getMruRecord(),
-      (windowId, requestId) => {
-        this.windowRegistry.focusById(windowId);
-        return this.safeSendToWindow(
-          windowId,
-          RunnerHostEvent.hostQuitRequest,
-          {
-            requestId,
-            mode: prompt.mode,
-            round: prompt.round,
-          } satisfies HostQuitDecisionRequest,
-        );
-      },
+      (windowId, requestId) =>
+        this.safeSendToWindow(windowId, RunnerHostEvent.hostQuitRequest, {
+          requestId,
+          mode: prompt.mode,
+          round: prompt.round,
+        } satisfies HostQuitDecisionRequest),
     );
   }
 

@@ -99,6 +99,15 @@ export interface DefaultHostReadinessPresentation {
    */
   readonly lastProgress: MutationProgress | null;
   readonly provisioningError: Error | null;
+  /**
+   * The last failed ensure's own message while it is settled - main's
+   * `HostControllerStatus.lastEnsureFailure`, withheld while an ensure is in
+   * flight (`settledEnsureFailureMessage`). Unlike `provisioningError` it
+   * covers the ensures this renderer did not start (the launch ensure and its
+   * retry ladder), and main clears it, so it never outlives the failure.
+   * Rendered verbatim in the settled failure bodies only.
+   */
+  readonly ensureFailure: string | null;
   readonly provisioning: boolean;
   readonly removed: boolean;
   readonly hostBusy: boolean;
@@ -296,6 +305,7 @@ const EMPTY_DEFAULT_HOST_PRESENTATION: DefaultHostReadinessPresentation = {
   progress: null,
   lastProgress: null,
   provisioningError: null,
+  ensureFailure: null,
   provisioning: false,
   removed: false,
   hostBusy: false,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, rename, rm } from "node:fs/promises";
+import { link, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -26,6 +26,7 @@ import {
   serializeSupervisorRecord,
   supervisorRecordPath,
   type SupervisorRecord,
+  type SupervisorRunAdmittedAs,
 } from "@traycer/protocol/config/supervisor-record";
 import {
   isProcessStartIdentity,
@@ -56,7 +57,9 @@ import { writeTextAtomically } from "./lifecycle-probe";
  * `invalid` and `unreadable` are kept apart from `absent` ONLY so `host
  * doctor` can name a broken file. Every decision treats all three alike: the
  * policy as Background, a presence as not there, a supervisor record as an
- * old supervisor.
+ * old supervisor. The one exception is run-ownership inheritance
+ * (`readInheritableRunOwnership`), which inherits only on an `absent`
+ * `supervisor.json`.
  */
 export type LifecycleRecordRead<T> =
   | { readonly kind: "absent" }
@@ -124,9 +127,11 @@ export function effectiveModeOf(
  * all restarts the counter at 1.
  *
  * Not serialized against a concurrent desktop write. Both writers are driven
- * by a person changing a setting, the file is replaced whole, and the loser
- * of such a race is simply the older choice - which is exactly what `rev`
- * lets every reader recognise.
+ * by a person changing a setting and the file is replaced whole, so the loser
+ * of such a race is simply the older choice. Both writers compute `rev` as
+ * "the one on disk + 1" with no compare-and-swap, so the two records of such
+ * a race can carry the SAME `rev` with different modes: `rev` alone cannot
+ * tell them apart, and a reader detecting a change compares `(rev, mode)`.
  */
 export async function writeHostLifecyclePolicyFromCli(
   environment: Environment,
@@ -267,9 +272,11 @@ export interface ObservedDesktopPresence {
  *
  * PRIVATE to this CLI, and deliberately not folded into `supervisor.json`:
  * that record is the desktop's contract (does the running supervisor enforce
- * the policy at all?), and nothing outside this CLI reads who owns a run. A
- * separate file keeps the shared record exactly the shape its protocol parser
- * defines.
+ * the policy at all, and may the desktop act on its run?), and nothing
+ * outside this CLI reads who owns a run. A separate file keeps the shared
+ * record exactly the shape its protocol parser defines; the one fact the
+ * desktop needs from `admission` - a terminal's run or the service's - is
+ * published there as `admittedAs` (`writeSupervisorRecords`).
  *
  * Written at admission (and, from T04, whenever the policy observer changes
  * one of these facts); removed with `supervisor.json` on every supervisor
@@ -380,24 +387,50 @@ export interface InheritedRunOwnership {
  * saw a live presence, started `adopted: false`, and a Linked host whose
  * desktop died during an update ran unowned indefinitely.
  *
+ * The condition is the owed exit's own footprint on disk - the run state kept
+ * and `supervisor.json` gone - not merely a predecessor that is gone. A
+ * supervisor that never reached its exit (killed, crashed, ended with the
+ * logon session, OOM) leaves `supervisor.json` beside its run state, and so
+ * does one whose own removal failed (`removeSupervisorRecords` keeps it then).
+ * That run ended without owing anyone a successor, and the next unattended
+ * start - a logon trigger, or the service manager's relaunch after a crash -
+ * is a new run that has to observe its own desktop.
+ *
  * Carried over only when ALL hold, and `null` otherwise:
  *
  * - the file parses and says `adopted: true`;
- * - it records a start identity, and the supervisor it names is provably gone
- *   by pid + that identity (`dead`, or its pid now runs something else). A
- *   live or unverifiable predecessor is not a predecessor: a second
- *   supervisor may still be running, and its run is its own.
+ * - it carries the owed mark (`markSupervisorRunOwed`), which only an exit
+ *   that owes a successor writes. The file alone proves nothing: a SIGKILL,
+ *   a power loss or a Windows session end leaves it behind too, and that run
+ *   is over - a later start must not inherit its Linked `stop`;
+ * - it records a start identity;
+ * - `supervisor.json` is `absent`. Any record there refuses, whichever pid it
+ *   names, and so do `invalid` and `unreadable`: this is the one decision
+ *   that does not read them as absent, because each is a shape the owed exit
+ *   never leaves. The successor calls this before it publishes its own
+ *   `supervisor.json`, so a record found here is never the reader's own;
+ * - the supervisor the run state names is provably gone by pid + that
+ *   identity (`dead`, or its pid now runs something else). A live or
+ *   unverifiable predecessor is not a predecessor: a second supervisor may
+ *   still be running, and its run is its own.
  *
  * Never throws; every failure is `null`, which degrades to an unowned run -
- * the behaviour before this existed.
+ * the behaviour before this existed. An unowned run is adopted again by the
+ * first live presence its observer sees.
  */
 export async function readInheritableRunOwnership(
   environment: Environment,
 ): Promise<InheritedRunOwnership | null> {
-  const read = await readSupervisorRunState(environment);
+  const read = await readLifecycleRecord(
+    supervisorRunStatePath(environment),
+    parseOwedSupervisorRunStateText,
+  );
   if (read.kind !== "valid") return null;
   const predecessor = read.record;
   if (!predecessor.adopted || predecessor.supervisorStartIdentity === null) {
+    return null;
+  }
+  if ((await readSupervisorRecord(environment)).kind !== "absent") {
     return null;
   }
   try {
@@ -413,18 +446,107 @@ export async function readInheritableRunOwnership(
   return { adopted: true, lastPresence: predecessor.lastPresence };
 }
 
+/**
+ * The key an owed exit adds to the run state it keeps. On disk only: the
+ * run-state parser strips it, so no reader but inheritance ever sees it, and
+ * a successor's own publish replaces the whole file without it.
+ */
+const owedRunStateMarkSchema = z.object({ owesSuccessor: z.literal(true) });
+
+/** A kept run state that also carries the owed mark, or `null`. */
+function parseOwedSupervisorRunStateText(
+  text: string,
+): SupervisorRunState | null {
+  const record = parseSupervisorRunStateText(text);
+  if (record === null) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return owedRunStateMarkSchema.safeParse(value).success ? record : null;
+}
+
+/**
+ * Mark the run state an exit that owes a successor keeps (77, 76), so the
+ * successor may continue it (`readInheritableRunOwnership`). Only while the
+ * file still names `supervisorPid`: a successor that already published owns
+ * the file, and its record is never touched.
+ *
+ * The same one-winner claim `removeSupervisorRecords` uses: rename to a
+ * private name, rewrite only a record that is ours, and restore it only while
+ * the canonical name is still vacant, so a record written in between wins.
+ * Best-effort: an unmarked file is a run that is not continued, which is the
+ * safe way to fail.
+ */
+export async function markSupervisorRunOwed(
+  environment: Environment,
+  supervisorPid: number,
+): Promise<void> {
+  const path = supervisorRunStatePath(environment);
+  const claimed = `${path}.${process.pid}.${randomUUID()}.owed`;
+  try {
+    await rename(path, claimed);
+  } catch {
+    // Absent (this supervisor never published) or not renameable.
+    return;
+  }
+  try {
+    const read = await readRegularFileNoFollow(claimed);
+    const record =
+      read.kind === "text" ? parseSupervisorRunStateText(read.text) : null;
+    if (record !== null && record.supervisorPid === supervisorPid) {
+      await writeFile(
+        claimed,
+        `${JSON.stringify({ ...record, owesSuccessor: true }, null, 2)}\n`,
+      );
+    }
+  } catch {
+    // Left as it was: restored below unmarked.
+  }
+  try {
+    await link(claimed, path);
+  } catch {
+    // The canonical name was taken in between: that newer record wins.
+  }
+  await rm(claimed, { force: true }).catch(() => undefined);
+}
+
 // ---- the supervisor's own records -------------------------------------------
 
 /** What the supervisor publishes about itself at admission. */
 export interface SupervisorRecords {
-  readonly record: SupervisorRecord;
+  /**
+   * `supervisor.json`, less the two fields the writer stamps from the run
+   * state: the start identity and `admittedAs`.
+   */
+  readonly record: Omit<SupervisorRecord, "startIdentity" | "admittedAs">;
   readonly runState: SupervisorRunState;
+}
+
+/**
+ * The public half of a run's admission (`SupervisorRecord.admittedAs`): a
+ * granted or unattended start is the service manager's, and a foreground one
+ * is a person's `traycer host start` in a terminal.
+ */
+export function supervisorRunAdmittedAs(
+  admission: SupervisorRunAdmission,
+): SupervisorRunAdmittedAs {
+  return admission === "foreground" ? "foreground" : "service";
 }
 
 /**
  * Publish `supervisor.json` and `supervisor-run.json`. The run state first:
  * `supervisor.json` is what tells a reader a capable supervisor is running,
  * so it lands only once the facts that reader will want next are on disk.
+ *
+ * `supervisor.json` carries the run state's `supervisorStartIdentity` and the
+ * public half of its admission, so the two records can never name the
+ * supervisor, or how its run was started, differently: a reader that is not
+ * allowed `supervisor-run.json` (the desktop) checks the recorded pid is still
+ * that process, and whether a person started it in a terminal, from the
+ * public record alone.
  */
 export async function writeSupervisorRecords(
   environment: Environment,
@@ -436,7 +558,11 @@ export async function writeSupervisorRecords(
   );
   await writeTextAtomically(
     supervisorRecordPath(hostHomeDir(environment)),
-    serializeSupervisorRecord(records.record),
+    serializeSupervisorRecord({
+      ...records.record,
+      startIdentity: records.runState.supervisorStartIdentity,
+      admittedAs: supervisorRunAdmittedAs(records.runState.admission),
+    }),
   );
 }
 
@@ -451,6 +577,13 @@ export async function writeSupervisorRecords(
  *   (`readInheritableRunOwnership`).
  *   With `supervisor.json` gone, no reader attributes the kept file to a
  *   running supervisor: `readHostLifecycleSnapshot` pairs the two by pid.
+ *
+ * "Run state kept, `supervisor.json` gone" is therefore the owed exit's
+ * footprint, and `readInheritableRunOwnership` inherits only from it. `all`
+ * must never leave that shape behind, which fixes its order: the run state
+ * first, and `supervisor.json` only once the run state is gone. A failure or
+ * a kill in between leaves both files, or `supervisor.json` alone - never an
+ * inheritable run.
  */
 export type SupervisorRecordRemoval = "all" | "keep-run-state";
 
@@ -469,41 +602,52 @@ export type SupervisorRecordRemoval = "all" | "keep-run-state";
  * rename to a private name, check the owner, and restore a record that is not
  * ours only while the canonical name is still vacant, so a record written in
  * between is never overwritten. Best-effort: a failure leaves a stale record,
- * which readers tell apart by the recorded pid and start identity.
+ * which readers tell apart by the recorded pid and start identity. For `all`
+ * a run state that could not be removed keeps `supervisor.json` beside it
+ * (see `SupervisorRecordRemoval`).
  */
 export async function removeSupervisorRecords(
   environment: Environment,
   supervisorPid: number,
   removal: SupervisorRecordRemoval,
 ): Promise<void> {
+  if (removal === "all") {
+    const runState = await removeIfOwned(
+      supervisorRunStatePath(environment),
+      (text) =>
+        parseSupervisorRunStateText(text)?.supervisorPid === supervisorPid,
+    );
+    if (runState === "left") return;
+  }
   await removeIfOwned(
     supervisorRecordPath(hostHomeDir(environment)),
     (text) => parseSupervisorRecordText(text)?.pid === supervisorPid,
   );
-  if (removal === "keep-run-state") return;
-  await removeIfOwned(
-    supervisorRunStatePath(environment),
-    (text) =>
-      parseSupervisorRunStateText(text)?.supervisorPid === supervisorPid,
-  );
 }
+
+/**
+ * `left` - the canonical name could not be claimed, so a record of ours may
+ * still be there. `cleared` - nothing of ours is there any more: it was
+ * removed, it was absent, or what is there belongs to someone else.
+ */
+type OwnedRecordRemoval = "cleared" | "left";
 
 async function removeIfOwned(
   path: string,
   owned: (text: string) => boolean,
-): Promise<void> {
+): Promise<OwnedRecordRemoval> {
   const claimed = `${path}.${process.pid}.${randomUUID()}.release`;
   try {
     await rename(path, claimed);
-  } catch {
-    // Absent (the common case for a supervisor that never published) or not
-    // renameable: nothing of ours to remove.
-    return;
+  } catch (cause) {
+    // Absent - the common case for a supervisor that never published - is
+    // nothing of ours to remove. Anything else left the record where it was.
+    return isMissingFile(cause) ? "cleared" : "left";
   }
   const read = await readRegularFileNoFollow(claimed).catch(() => null);
   if (read !== null && read.kind === "text" && owned(read.text)) {
     await rm(claimed, { force: true }).catch(() => undefined);
-    return;
+    return "cleared";
   }
   try {
     await link(claimed, path);
@@ -511,4 +655,9 @@ async function removeIfOwned(
     // The canonical name was taken in between: that newer record wins.
   }
   await rm(claimed, { force: true }).catch(() => undefined);
+  return "cleared";
+}
+
+function isMissingFile(cause: unknown): boolean {
+  return cause instanceof Error && "code" in cause && cause.code === "ENOENT";
 }

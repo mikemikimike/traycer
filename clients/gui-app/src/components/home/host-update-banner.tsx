@@ -19,6 +19,7 @@ import type {
 import { useRunnerHostControllerStatusQuery } from "@/hooks/runner/use-runner-host-controller-status-query";
 import { useRunnerApplyStaged } from "@/hooks/runner/use-runner-apply-staged-mutation";
 import { useRunnerActivateInstalled } from "@/hooks/runner/use-runner-activate-installed-mutation";
+import { useLocalHostForegroundUpdateLine } from "@/hooks/host/use-local-host-foreground-update-line";
 import {
   HOST_UPDATE_BANNER_SNOOZE_MS,
   isHostUpdateBannerSnoozed,
@@ -142,6 +143,7 @@ function HostUpdateBannerInner(props: HostUpdateBannerInnerProps) {
 
   const statusQuery = useRunnerHostControllerStatusQuery();
   const status = statusQuery.data;
+  const foregroundUpdateLine = useLocalHostForegroundUpdateLine();
 
   // The DURABLE attempt, which outranks the two-lane controller status below
   // whenever it has something to say. The controller lane knows this client
@@ -379,6 +381,7 @@ function HostUpdateBannerInner(props: HostUpdateBannerInnerProps) {
           terminalOutcome={terminalOutcome}
           isPending={isPending}
           showUpdate={showUpdate}
+          foregroundUpdateLine={foregroundUpdateLine}
           offeredVersion={offeredVersion}
           installedVersion={installedVersion}
           percent={percent}
@@ -531,6 +534,7 @@ interface BannerBodyProps {
   readonly terminalOutcome: TerminalOutcomeState | null;
   readonly isPending: boolean;
   readonly showUpdate: boolean;
+  readonly foregroundUpdateLine: string | null;
   readonly offeredVersion: string | null;
   readonly installedVersion: string | null;
   readonly percent: number | null;
@@ -579,6 +583,7 @@ function BannerBody(props: BannerBodyProps) {
       return (
         <UpdateOrDebtContent
           showUpdate={props.showUpdate}
+          foregroundUpdateLine={props.foregroundUpdateLine}
           offeredVersion={props.offeredVersion}
           installedVersion={props.installedVersion}
           isPending={props.isPending}
@@ -955,6 +960,16 @@ function TerminalOutcomeContent(props: TerminalOutcomeContentProps) {
 
 interface UpdateOrDebtContentProps {
   readonly showUpdate: boolean;
+  /**
+   * A host started in a terminal is running: what the offer says instead, or
+   * `null` (`hostForegroundUpdateLine`). The desktop cannot finish an update
+   * over it (the CLI refuses apply and activation with
+   * `E_HOST_NOT_SERVICE_RUN`), so Update now / Restart host are withheld
+   * until main pushes a view without it, and the line names what does finish
+   * it - the person stopping that run, or, where this app updates no local
+   * host, the person updating it.
+   */
+  readonly foregroundUpdateLine: string | null;
   readonly offeredVersion: string | null;
   readonly installedVersion: string | null;
   readonly isPending: boolean;
@@ -964,6 +979,20 @@ interface UpdateOrDebtContentProps {
 }
 
 function UpdateOrDebtContent(props: UpdateOrDebtContentProps) {
+  if (props.foregroundUpdateLine !== null) {
+    return (
+      <>
+        <ArrowDownToLine className="size-3.5 shrink-0" aria-hidden />
+        <span
+          className="min-w-0 flex-1"
+          data-testid="host-update-banner-foreground"
+        >
+          {props.foregroundUpdateLine}
+        </span>
+        <SnoozeButton onSnooze={props.onSnooze} />
+      </>
+    );
+  }
   return (
     <>
       <ArrowDownToLine className="size-3.5 shrink-0" aria-hidden />
@@ -1012,18 +1041,24 @@ function UpdateOrDebtContent(props: UpdateOrDebtContentProps) {
         ) : null}
         {props.showUpdate ? "Update now" : "Restart host"}
       </Button>
-      <Button
-        type="button"
-        variant="info-ghost"
-        size="icon-xs"
-        aria-label="Remind me later"
-        data-testid="host-update-banner-snooze"
-        className="text-current"
-        onClick={props.onSnooze}
-      >
-        <X className="size-3" aria-hidden />
-      </Button>
+      <SnoozeButton onSnooze={props.onSnooze} />
     </>
+  );
+}
+
+function SnoozeButton(props: { readonly onSnooze: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="info-ghost"
+      size="icon-xs"
+      aria-label="Remind me later"
+      data-testid="host-update-banner-snooze"
+      className="text-current"
+      onClick={props.onSnooze}
+    >
+      <X className="size-3" aria-hidden />
+    </Button>
   );
 }
 

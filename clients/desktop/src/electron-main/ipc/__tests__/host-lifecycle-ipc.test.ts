@@ -155,7 +155,11 @@ const VIEW: HostLifecycleView = {
     updatedBy: null,
     updatedAt: null,
   },
-  applied: { localHostCapability: "managed", supervisor: "not-running" },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
   pending: "none",
 };
 
@@ -286,6 +290,12 @@ describe("registerHostLifecycleIpc", () => {
     expect(service.listeners.size).toBe(0);
     service.emit(VIEW);
     expect(bridge.fanOuts).toHaveLength(0);
+  });
+
+  it("registers get and set even when the local host capability is none - the surface stays live so a `none` desktop can still switch modes back", () => {
+    const { bridge } = install("none");
+    expect(bridge.invokes.has(RunnerHostInvoke.hostLifecycleGet)).toBe(true);
+    expect(bridge.invokes.has(RunnerHostInvoke.hostLifecycleSet)).toBe(true);
   });
 
   it("answers the sync capability channel with the applied capability", () => {

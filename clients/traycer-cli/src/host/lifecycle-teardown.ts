@@ -27,7 +27,7 @@ import type { HostPidMetadata } from "./pid-metadata";
 //
 // | Step | Action | Outcome |
 // | ---- | ------ | ------- |
-// | 1 | Take the CLI lifecycle lock as a `lifecycle-teardown-maintenance` contender, bounded wait (admitted over a park, refused over an active attempt) | busy / refused -> retry next tick, nothing latched or touched |
+// | 1 | Take the CLI lifecycle lock as a `lifecycle-teardown-maintenance` contender, bounded wait (admitted over `waiting-for-work`, and over a park only where a start could resume it; refused over an active attempt) | busy / refused -> retry next tick, nothing latched or touched |
 // | 2 | Inside the lock, re-read both records (not yet committed only) | rule no longer due -> stand down, nothing latched |
 // | 3 | Commit: latch `shuttingDown` + `markShutdownRequested()` | the relaunch loop can no longer bring the host back |
 // | 4 | Address: this supervisor's live child, and `pid.json` only if it names that child | no live child -> step 7 |

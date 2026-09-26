@@ -296,7 +296,8 @@ type ApplyDefaultedOptions =
   | "onWillCommitStaged"
   | "onWillDisruptHost"
   | "hooks"
-  | "acceptStoreFormatLoss";
+  | "acceptStoreFormatLoss"
+  | "lifecycleOrigin";
 const applyHost = (
   options: Omit<ApplyOptions, ApplyDefaultedOptions> &
     Partial<Pick<ApplyOptions, ApplyDefaultedOptions>>,
@@ -310,6 +311,7 @@ const applyHost = (
     onWillDisruptHost: options.onWillDisruptHost ?? null,
     hooks: options.hooks ?? NO_INSTALL_PHASE_HOOKS,
     acceptStoreFormatLoss: options.acceptStoreFormatLoss ?? false,
+    lifecycleOrigin: options.lifecycleOrigin ?? "terminal",
   });
 
 const ENV: Environment = "production";

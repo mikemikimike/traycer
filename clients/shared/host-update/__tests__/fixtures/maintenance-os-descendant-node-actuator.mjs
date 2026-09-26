@@ -53,39 +53,20 @@ function publishSync(path, content) {
 }
 
 async function descendant() {
-  if (!termResistant) {
-    process.once("SIGTERM", () => {
-      void publish(
-        join(barrierDir, "descendant-exited"),
-        String(process.pid),
-      ).then(() => process.exit(0));
-    });
-  } else {
-    // The supervisor must escalate a real, TERM-resistant descendant to
-    // SIGKILL and still keep the C envelope published until the reap. There
-    // is deliberately no release-barrier exit path in this mode.
-    //
-    // `once` is wrong here: after it fires, Node removes the listener, and
-    // with no SIGTERM listener left libuv restores SIG_DFL. The supervisor's
-    // reap sends two SIGTERMs in quick succession - one to the group, one
-    // directly to this pid - and a second TERM landing after the reset killed
-    // the process the test calls "TERM-resistant", before the async barrier
-    // write had run (the test then timed out waiting for the barrier) or
-    // after it (the test passed with the descendant already dead). `on` keeps
-    // a listener registered for every SIGTERM that follows, so the default
-    // disposition is never restored. The publish is synchronous and atomic:
-    // the barrier is complete before this handler returns, so its appearance
-    // means the handler ran to the end, not that a write was merely queued.
-    let termReceived = false;
-    process.on("SIGTERM", () => {
-      if (termReceived) return;
-      termReceived = true;
-      publishSync(
-        join(barrierDir, "descendant-term-received"),
-        String(Date.now()),
-      );
-    });
-  }
+  let termReceived = false;
+  process.on("SIGTERM", () => {
+    if (termReceived) return;
+    termReceived = true;
+    if (!termResistant) {
+      publishSync(join(barrierDir, "descendant-exited"), String(process.pid));
+      process.exit(0);
+      return;
+    }
+    publishSync(
+      join(barrierDir, "descendant-term-received"),
+      String(Date.now()),
+    );
+  });
   await publish(join(barrierDir, "descendant-ready"), String(process.pid));
   if (termResistant) {
     setInterval(() => undefined, 1_000);

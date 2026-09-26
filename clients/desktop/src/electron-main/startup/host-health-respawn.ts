@@ -1,9 +1,24 @@
 import type { IpcHostController } from "../ipc/runner-ipc-bridge";
-import { HOST_REMOVED_BY_USER_MESSAGE } from "../host/host-controller-types";
+import {
+  HOST_NOT_SERVICE_RUN_MESSAGE,
+  HOST_REMOVED_BY_USER_MESSAGE,
+} from "../host/host-controller-types";
 
 export class HostRecoveryDeferredError extends Error {
   constructor() {
     super("Host recovery deferred while another Traycer process owns the lock");
+  }
+}
+
+/**
+ * The recovery's restart was refused because the running host is a person's
+ * `traycer host start` in a terminal (`E_HOST_NOT_SERVICE_RUN`): present, and
+ * not this app's. Nothing was touched, and nothing this app does will change
+ * that until the terminal run ends, so the monitor stops asking.
+ */
+export class HostRecoveryNotServiceRunError extends Error {
+  constructor() {
+    super("Host recovery refused: a host started in a terminal is running");
   }
 }
 
@@ -20,6 +35,11 @@ export class HostRecoveryDeferredError extends Error {
 // recovery; the former must re-arm the monitor after its snapshot was
 // demoted. A distinct error lets the monitor preserve that retry ownership
 // without logging expected lock contention as a generic recovery failure.
+//
+// It also resolves "deferred" when the host is a terminal's `traycer host
+// start` (`HOST_NOT_SERVICE_RUN_MESSAGE`). That one is neither terminal nor
+// retryable: the monitor leaves the run alone until it is gone, so it gets its
+// own error.
 export async function respawnIfDown(
   hostController: IpcHostController,
 ): Promise<void> {
@@ -35,6 +55,9 @@ export async function respawnIfDown(
   }
   if (outcome.kind === "deferred") {
     if (outcome.message === HOST_REMOVED_BY_USER_MESSAGE) return;
+    if (outcome.message === HOST_NOT_SERVICE_RUN_MESSAGE) {
+      throw new HostRecoveryNotServiceRunError();
+    }
     throw new HostRecoveryDeferredError();
   }
   throw new Error(outcome.message);

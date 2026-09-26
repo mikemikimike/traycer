@@ -73,14 +73,18 @@ export interface MenuControllerOptions {
     hostUpdateVersion: string | null,
   ) => boolean;
   readonly checkForUpdates: () => Promise<void>;
-  // Whether this instance runs the local-host lanes, and when that may have
-  // changed (`none` committed this session). Feeds `MenuState.offerRestartHost`.
+  // Whether this instance runs the local-host lanes, whether the running host
+  // is a terminal's, and when either may have changed (`none` committed this
+  // session, a foreground run started or ended). Feeds
+  // `MenuState.offerRestartHost`.
   readonly localHostLanes: MenuLocalHostLanes;
 }
 
 /** The slice of `HostLifecycleService` the menu reads. */
 export interface MenuLocalHostLanes {
   localHostLanesActive(): boolean;
+  /** The running host's supervisor was admitted `foreground`. */
+  localHostRunIsForeground(): boolean;
   onChange(listener: () => void): () => void;
 }
 
@@ -217,7 +221,9 @@ export class MenuController {
       canCheckForUpdates: !isDevBuild,
       canOpenDevTools,
       hostUpdateAvailableVersion: this.hostUpdateAvailableVersion,
-      offerRestartHost: this.options.localHostLanes.localHostLanesActive(),
+      offerRestartHost:
+        this.options.localHostLanes.localHostLanesActive() &&
+        !this.options.localHostLanes.localHostRunIsForeground(),
     };
   }
 

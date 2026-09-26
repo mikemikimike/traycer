@@ -661,11 +661,20 @@ export function createBytesOnlyInstallLifecycle(
   hooks: InstallPhaseHooks,
 ): InstallHostLifecycle {
   let verifyMutationCapability = async (): Promise<void> => {};
+  // The same publisher seam `createServiceInstallLifecycle` carries, and for
+  // the same start: the Windows restore below is a service start, and one
+  // with no proof reads as unattended - under a parking mode with no live
+  // desktop the supervisor it launches parks, and a host that was running
+  // before this install is left stopped.
+  let publishHostStartAdoption: HostStartAdoptionPublisher = async () => {};
   let hostWasRunning = false;
   return {
     swapLockRecovery: swapLockRecoveryFor(label),
     setMutationVerifier: (verify) => {
       verifyMutationCapability = verify;
+    },
+    setHostStartAdoptionPublisher: (publish) => {
+      publishHostStartAdoption = publish;
     },
     beforeSwap: async (): Promise<void> => {
       if (process.platform !== "win32") return;
@@ -691,8 +700,15 @@ export function createBytesOnlyInstallLifecycle(
     restartAfterAbortedSwap: async (): Promise<void> => {
       if (!hostWasRunning) return;
       await withServiceMutationAuthority(verifyMutationCapability, () =>
-        controller.start(label),
-      );
+        runWithPublishedHostStartAdoption(
+          publishHostStartAdoption,
+          controller,
+          label,
+          () => controller.start(label),
+        ),
+      ).catch((cause: unknown) => {
+        throw reportRelaunchRefusedAfterInstallStop(label, cause);
+      });
     },
     beforeSwapCommit: () => hooks.beforeSwapCommit(),
     afterSwap: () => hooks.afterSwap(),

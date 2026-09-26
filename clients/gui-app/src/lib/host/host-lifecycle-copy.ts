@@ -1,6 +1,12 @@
-import type { HostLifecycleMode } from "@traycer-clients/shared/platform/runner-host";
+import type {
+  HostLifecycleMode,
+  HostLifecycleSetFailure,
+  HostLifecycleStopRefusal,
+  HostLifecycleView,
+} from "@traycer-clients/shared/platform/runner-host";
 import type { HostBusyBreakdownV2 } from "@traycer/protocol/host/status/index";
 import { busyWorkPhrase } from "@/components/host/host-restart-copy";
+import { isForegroundHostRun } from "@/lib/host/host-foreground-run";
 import { isMac, isWindows } from "@/lib/keybindings/platform";
 
 /**
@@ -129,6 +135,87 @@ export function hostLifecycleModePromise(
 }
 
 /**
+ * A host a person started in a terminal: the mode does not govern it, so the
+ * lines that state the mode's promise say this instead, whatever the mode. The
+ * tray's words too ("Host: running · started in a terminal").
+ */
+export const HOST_STARTED_IN_A_TERMINAL = "started in a terminal";
+
+/**
+ * The Overview line after the running state: the mode's promise, or
+ * {@link HOST_STARTED_IN_A_TERMINAL} during a foreground run, which no mode
+ * governs - `none` included, since that host is running all the same.
+ */
+export function hostLifecycleRunLine(view: HostLifecycleView): string | null {
+  if (isForegroundHostRun(view)) return HOST_STARTED_IN_A_TERMINAL;
+  return hostLifecycleModePromise(view.desired.mode);
+}
+
+/**
+ * Why a Restart is disabled during a foreground run: the app never restarts
+ * a host it did not start. `…_TO_APPLY` is the restart-to-apply line's.
+ */
+export const HOST_FOREGROUND_RESTART_TO_APPLY_REASON =
+  "A host started in a terminal is running; restart it yourself to apply.";
+export const HOST_FOREGROUND_RESTART_REASON =
+  "A host started in a terminal is running; restart it yourself.";
+
+/**
+ * What stands in for an update's Update now / Restart during a foreground run:
+ * the desktop cannot finish an update over it (the CLI refuses apply, install
+ * and the activation restart with `E_HOST_NOT_SERVICE_RUN`), and it clears by
+ * itself once that run ends and main pushes the next view.
+ */
+export const HOST_FOREGROUND_UPDATE_READY =
+  "Update ready. A host you started in a terminal is running; stop it to finish the update.";
+
+/**
+ * {@link HOST_FOREGROUND_UPDATE_READY}'s sibling for when stopping that run
+ * would NOT finish the update: this app starts and updates no local host in
+ * `none` (booted in it, or `→ none` committed this session), so the person
+ * who started the run updates it too.
+ */
+export const HOST_FOREGROUND_UPDATE_READY_UNMANAGED =
+  "Update ready. A host you started in a terminal is running; update it yourself.";
+
+/**
+ * What an update surface says in place of its Update now / Restart / Install
+ * during a foreground run, or `null` when there is none. The home banner, the
+ * Overview's version card, update card and version rows all read this one
+ * picker, so they cannot disagree about which sentence is true: "stop it to
+ * finish the update" holds only while this app finishes local updates - it
+ * manages the local host (`applied.localHostCapability`) and is not leaving
+ * that for `none` at the next launch (`pending`). The controls themselves are
+ * withheld in every mode: the CLI refuses them over a run it did not start,
+ * whatever the mode.
+ */
+export function hostForegroundUpdateLine(
+  view: HostLifecycleView | undefined,
+): string | null {
+  if (view === undefined || !isForegroundHostRun(view)) return null;
+  return view.applied.localHostCapability === "managed" &&
+    view.pending !== "restart-app"
+    ? HOST_FOREGROUND_UPDATE_READY
+    : HOST_FOREGROUND_UPDATE_READY_UNMANAGED;
+}
+
+/**
+ * Why registering the OS service is withheld during a foreground run: the CLI
+ * refuses a registration while that run is live, and the run is the person's
+ * to stop. Once it is stopped, registering works as ever.
+ */
+export const HOST_FOREGROUND_REGISTER_SERVICE_REASON =
+  "A host you started in a terminal is running; stop it, then register the service.";
+
+/**
+ * Why Remove Traycer is withheld during a foreground run: removing the host
+ * would stop a run this app did not start, so the CLI refuses it
+ * (`E_HOST_NOT_SERVICE_RUN`) and the person stops that run first.
+ */
+export const HOST_FOREGROUND_REMOVE_TRAYCER_REASON =
+  "A host you started in a terminal is running; stop it, then remove Traycer.";
+
+/**
  * The no-local-host card, on a desktop launched in `none`: "This machine runs
  * without a local host. Add a remote host, or run `traycer host install` on
  * the machine that should host your work (for WSL, inside the distro)." Split
@@ -159,11 +246,14 @@ export const HOST_QUIT_DESCRIPTION_BUSY_RETRY =
   "Something started on the host while it was stopping, so it was left running. Keep it running, or stop it now and end this work.";
 export const HOST_QUIT_DESCRIPTION_IDLE =
   "Quitting Traycer can keep the host running so your phone can still reach it, or stop it now.";
-/** True in both orders: the ordinary stop settles and then Traycer quits, but a
- * terminal-started host the service stop cannot reach (`not-service-run`) is
- * ended by its own supervisor after Traycer has already quit. */
+/**
+ * Says only what Traycer does. Whether the host ends, and when, depends on how
+ * it was started: a service-run host is stopped here, but a terminal-started
+ * one is not the service's to stop (`not-service-run`), so this line promises
+ * nothing about the host either way.
+ */
 export const HOST_QUIT_DESCRIPTION_STOPPING =
-  "Traycer quits and the host stops.";
+  "Traycer quits once the stop has run.";
 export const HOST_QUIT_DESCRIPTION_CHECKING =
   "Traycer is asking this machine's host what it is running.";
 
@@ -199,12 +289,49 @@ export const HOST_NONE_CONFIRM_TITLE_IDLE = "Stop the host on this machine?";
 export const HOST_NONE_CONFIRM_DESCRIPTION =
   "Traycer will stop this machine's host and connect only to remote hosts from the next launch.";
 export const HOST_NONE_CONFIRM_STOP_LABEL = "Stop host";
+/**
+ * The `→ none` confirm during a foreground run. Main commits `none` then and
+ * refuses the stop (`not-service-run`), so this form offers no Stop and says
+ * the terminal host is left alone.
+ */
+export const HOST_NONE_CONFIRM_TITLE_FOREGROUND = "Switch to No local host?";
+export const HOST_NONE_CONFIRM_DESCRIPTION_FOREGROUND =
+  "A host started in a terminal is running. Traycer won't stop it: it keeps running until you stop it there. From the next launch, Traycer connects only to remote hosts.";
+export const HOST_NONE_CONFIRM_SWITCH_LABEL = "Switch";
 export const HOST_LIFECYCLE_SUPERSEDED_TITLE = "Nothing was changed";
 export const HOST_LIFECYCLE_SUPERSEDED_DESCRIPTION =
   "The setting was changed from the command line while this was open, so that choice stands and the host was not stopped.";
 
 export const HOST_LIFECYCLE_READ_FAILED =
   "Couldn't read this setting. Try again, or change it from the command line with `traycer host lifecycle set <mode>`.";
+
+/**
+ * What a surface says when main did not apply a lifecycle change, chosen by
+ * the reason alone. The result's `message` is never shown: it is often the
+ * CLI's instruction to its own caller ("Re-run with --force", a lock file's
+ * path) or an error string that can carry a home path, and main logs it.
+ *
+ * `write-failed` does not say "nothing was changed": on the `→ none` path it
+ * follows a stop that already ran.
+ */
+export function hostLifecycleSetRefusalCopy(
+  reason: HostLifecycleStopRefusal | HostLifecycleSetFailure,
+): string {
+  switch (reason) {
+    case "host-busy":
+      return "The host has work in progress, so it was left running. Stop host again to end that work.";
+    case "lock-busy":
+      return "Another Traycer process is managing the host right now, so nothing was changed. Try again in a moment.";
+    case "update-active":
+      return "The host is installing an update, so nothing was changed. Try again once it finishes.";
+    case "stop-failed":
+      return "The host couldn't be stopped, so nothing was changed. If you started it from a terminal, stop it there, then try again.";
+    case "write-failed":
+      return "Couldn't save this setting. Try again, or change it from the command line with `traycer host lifecycle set <mode>`.";
+    case "confirmation-required":
+      return "Turning off the local host stops Traycer Host. Confirm the stop to continue.";
+  }
+}
 export const HOST_LIFECYCLE_RESTART_HOST_LABEL = "Restart host";
 
 /** The card's footnote, split so the two commands render as code. */
@@ -264,14 +391,17 @@ function busyLead(
 }
 
 function idleLead(breakdown: HostBusyBreakdownV2 | null): string {
-  const extrasRunning =
+  // "Nothing is running" is a claim about the shells and wakes too, so it is
+  // made only when the host counted both and both are zero. Any other idle
+  // host - shells or wakes running, or a count it did not report - says what
+  // its idle verdict does cover, and the sentence after it says the rest.
+  const nothingRunning =
     breakdown !== null &&
-    ((breakdown.shells ?? 0) > 0 || (breakdown.scheduledWakes ?? 0) > 0);
-  // "Nothing is running" would contradict the shells named right after it,
-  // so an idle host with shells or wakes says what is idle instead.
-  return extrasRunning
-    ? "No agents or terminals are working on this host right now."
-    : "Nothing is running on this host right now.";
+    breakdown.shells === 0 &&
+    breakdown.scheduledWakes === 0;
+  return nothingRunning
+    ? "Nothing is running on this host right now."
+    : "No agents or terminals are working on this host right now.";
 }
 
 function extrasSentence(

@@ -190,6 +190,7 @@ const UP_TO_DATE_STATUS: HostControllerStatus = {
   localAttempt: null,
   removedByUser: false,
   checkedAt: "2026-05-15T00:00:00Z",
+  lastEnsureFailure: null,
 };
 
 function makeManagement(): IHostManagement {
@@ -213,7 +214,9 @@ function makeManagement(): IHostManagement {
     registerService: vi.fn(notImplemented("registerService")),
     deregisterService: vi.fn(notImplemented("deregisterService")),
     registryCheck: vi.fn(notImplemented("registryCheck")),
-    freePortAndRestart: vi.fn((input) => Promise.resolve(input)),
+    freePortAndRestart: vi.fn((input) =>
+      Promise.resolve({ kind: "applied" as const, ...input }),
+    ),
     runDoctorRepairQueued: vi.fn(() =>
       Promise.resolve({ kind: "applied" as const }),
     ),
@@ -1022,6 +1025,7 @@ describe("HostUpdateBanner — bound arm (Ticket 06 subject E)", () => {
           onRestart={null}
           onForceUpdate={null}
           cliFloorBlocked={false}
+          foregroundHeldFinish={null}
           // Panel-level in production (`useHostUpdateCompletion`); this
           // failed attempt is not dismissed, which is the only half of the
           // completion the card itself reads (`completion.dismissed`).

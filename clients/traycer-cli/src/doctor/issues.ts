@@ -255,6 +255,12 @@ export const DOCTOR_ISSUE_CODES = {
   // own name is not one a Traycer emitter wrote (or cannot be read), so the
   // refresh leaves it alone. A full re-registration replaces it.
   HOST_SERVICE_DEFINITION_UNRECOGNIZED: "HOST_SERVICE_DEFINITION_UNRECOGNIZED",
+  // The registered service is switched off by its owner (Windows: the task is
+  // disabled in Task Scheduler), so nothing starts the host: `host ensure`
+  // refuses to re-register over that choice
+  // (`E_SERVICE_REGISTRATION_DISABLED`). Enabling the task, or a full
+  // re-registration, repairs it.
+  HOST_SERVICE_REGISTRATION_DISABLED: "HOST_SERVICE_REGISTRATION_DISABLED",
 } as const;
 
 export type DoctorIssueCode =

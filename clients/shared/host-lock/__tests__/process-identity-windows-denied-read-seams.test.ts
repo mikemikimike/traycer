@@ -62,6 +62,24 @@ describe("matchLiveProcessStartIdentity: the WMI tolerance edge", () => {
     );
   });
 
+  it("WMI exactly 1 microsecond earlier than the recorded token compares as same", () => {
+    __setProcessStartIdentityReaderForTest(() => null);
+    __setWindowsDeniedReadCreationReaderForTest(() => RECORDED_MICROS - 1);
+
+    expect(matchLiveProcessStartIdentity(ARBITRARY_PID, RECORDED_TOKEN)).toBe(
+      "same",
+    );
+  });
+
+  it("WMI 2 microseconds earlier than the recorded token compares as different", () => {
+    __setProcessStartIdentityReaderForTest(() => null);
+    __setWindowsDeniedReadCreationReaderForTest(() => RECORDED_MICROS - 2);
+
+    expect(matchLiveProcessStartIdentity(ARBITRARY_PID, RECORDED_TOKEN)).toBe(
+      "different",
+    );
+  });
+
   it("a non-Windows recorded token never consults the fallback, and stays unknown", () => {
     __setProcessStartIdentityReaderForTest(() => null);
     const fallback = vi.fn((): number | null => RECORDED_MICROS);

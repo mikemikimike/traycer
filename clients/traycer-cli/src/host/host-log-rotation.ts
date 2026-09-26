@@ -7,7 +7,10 @@ import {
   hostLogOldestBackupPath,
   hostLogPath,
 } from "../store/paths";
-import { publishedHostProcessGone, readHostPidMetadata } from "./pid-metadata";
+import {
+  publishedHostProcessGoneAsync,
+  readHostPidMetadata,
+} from "./pid-metadata";
 
 /**
  * Generation rotation for `host.log`: `host.log` -> `host.log.1` ->
@@ -227,8 +230,10 @@ async function hostIsLive(environment: Environment): Promise<boolean> {
   // process is not a host holding this log's fd, and skipping the rotation
   // for it would let an oversized log of a stopped host grow unbounded. A
   // record this cannot prove gone (no stamp, a refused probe) keeps the
-  // skip - the safe direction for a live host's session.
-  return !publishedHostProcessGone(metadata);
+  // skip - the safe direction for a live host's session. Async: this runs
+  // in the host supervisor before every spawn, where a synchronous `ps` /
+  // PowerShell spawn would freeze its event loop.
+  return !(await publishedHostProcessGoneAsync(metadata));
 }
 
 /**

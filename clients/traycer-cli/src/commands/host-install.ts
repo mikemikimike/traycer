@@ -6,6 +6,7 @@ import {
   type InstallSourceArg,
 } from "../installer";
 import { assertHostNotBusy } from "../host/busy-check";
+import { refuseDesktopDisruptionOfForegroundRun } from "../host/foreground-host-run";
 import {
   formatCredentialProvisionNote,
   maybeProvisionCredential,
@@ -141,7 +142,8 @@ export interface HostInstallArgs {
   readonly attemptAdoption: string | null;
   /**
    * `--lifecycle-origin`, recorded in the adoption proof the post-swap start
-   * publishes (`host/lifecycle-origin.ts`). Informational only.
+   * publishes (`host/lifecycle-origin.ts`). `desktop` also refuses to replace
+   * a host started in a terminal (`refuseDesktopDisruptionOfForegroundRun`).
    */
   readonly lifecycleOrigin: HostStartOrigin;
 }
@@ -310,6 +312,17 @@ export function buildHostInstallCommand(args: HostInstallArgs): CommandFn {
             capability,
             contenderOptions,
             async () => {
+              // A desktop install never replaces a host a person started in a
+              // terminal: refused before the busy probe and the commit's stop,
+              // and the catch below scrubs the staged download. Bytes-only
+              // (`--no-service-register`) stops nothing and is not refused.
+              if (!args.noServiceRegister) {
+                await refuseDesktopDisruptionOfForegroundRun(
+                  "host install",
+                  ctx.runtime.environment,
+                  args.lifecycleOrigin,
+                );
+              }
               if (args.ifIdle) {
                 await assertHostNotBusy(ctx.runtime.environment);
               }

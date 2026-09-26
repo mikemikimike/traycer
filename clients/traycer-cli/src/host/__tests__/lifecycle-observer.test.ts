@@ -1,21 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { rmSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DesktopPresence } from "@traycer/protocol/config/desktop-presence";
 import type {
   HostLifecycleMode,
   HostLifecyclePolicy,
 } from "@traycer/protocol/config/host-lifecycle-policy";
+import type { SpawnFreeProcessExistence } from "@traycer-clients/shared/host-lock/process-identity";
 import type { ILogger, LogFields } from "../../logger";
 import type { Environment } from "../../runner/environment";
 import type {
   DesktopPresenceLiveness,
   LifecycleRecordRead,
   ObservedDesktopPresence,
+  SupervisorRunAdmission,
 } from "../lifecycle-files";
 import {
   applyLifecycleTick,
   evaluateStopRule,
   LIFECYCLE_OBSERVER_POLL_MS,
   LIFECYCLE_PRESENCE_CRASH_GRACE_MS,
+  LIFECYCLE_PRESENCE_ALIVE_REUSE_MS,
+  runIsAdoptable,
   startLifecycleObserver,
   type HostHomeWatch,
   type LifecycleObserverHandle,
@@ -27,6 +32,32 @@ import type {
   LifecycleTeardown,
   TeardownAttemptResult,
 } from "../lifecycle-teardown";
+import { hostHomeDir } from "../../store/paths";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, so without this the suite
+// would resolve this machine's REAL `~/.traycer`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-lifecycle-observer-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 const GRACE = LIFECYCLE_PRESENCE_CRASH_GRACE_MS;
 
@@ -47,6 +78,9 @@ function state(
     mode: "background",
     rev: null,
     condition: null,
+    // F4 observer: constant for the run, defaulted to the admission every
+    // existing (pre-F4) fixture here implicitly assumed.
+    admission: "granted" as SupervisorRunAdmission,
     ...overrides,
   };
 }
@@ -331,6 +365,77 @@ describe("applyLifecycleTick", () => {
   });
 });
 
+describe("runIsAdoptable (F4 observer)", () => {
+  it("a foreground run is never adoptable; granted and unattended are", () => {
+    // Red on head: `runIsAdoptable` does not exist yet.
+    expect(runIsAdoptable("foreground")).toBe(false);
+    expect(runIsAdoptable("granted")).toBe(true);
+    expect(runIsAdoptable("unattended")).toBe(true);
+  });
+});
+
+describe("applyLifecycleTick - F4 observer admission gate", () => {
+  it("a foreground run never adopts, even with a live 'stop' presence", () => {
+    // Red on head: `applyLifecycleTick` has no notion of `admission` and
+    // adopts on any live presence regardless of how the run was admitted.
+    const result = applyLifecycleTick(
+      state({ admission: "foreground" }),
+      { mode: "linked", rev: 1, presence: presence(10, "stop", "alive") },
+      0,
+      GRACE,
+    );
+    expect(result.state.adopted).toBe(false);
+  });
+
+  it("a foreground run initially adopted (a live Linked desktop at start) is un-adopted on the first tick", () => {
+    // Red on head: `applyLifecycleTick` only ever sets `adopted` to `true`
+    // once seen (or leaves a `true` initial value alone) - it never clears
+    // one that should never have been set for a `foreground` run.
+    const result = applyLifecycleTick(
+      state({ admission: "foreground", adopted: true }),
+      { mode: "linked", rev: 1, presence: presence(10, "stop", "dead") },
+      0,
+      GRACE,
+    );
+    expect(result.state.adopted).toBe(false);
+  });
+
+  it("granted and unattended runs still adopt on a live presence (control)", () => {
+    for (const admission of ["granted", "unattended"] as const) {
+      const result = applyLifecycleTick(
+        state({ admission }),
+        { mode: "linked", rev: 1, presence: presence(10, "stop", "alive") },
+        0,
+        GRACE,
+      );
+      expect(result.state.adopted).toBe(true);
+    }
+  });
+});
+
+describe("applyLifecycleTick - F14 indeterminate vs absent presence", () => {
+  it("an 'indeterminate' observation (an invalid/unreadable record) answers unknown, never fires, and keeps lastPresence", () => {
+    // Red on head: `LifecycleTickObservation.presence` has no `"indeterminate"`
+    // member yet, so head's `presence === null` / `.liveness` logic does not
+    // recognize this at all and does not preserve `lastPresence`.
+    const adoptedStopState = state({
+      adopted: true,
+      mode: "linked",
+      lastPresence: presence(10, "stop", "dead"),
+      condition: { sinceMs: 0, presencePid: 10 },
+    });
+    const result = applyLifecycleTick(
+      adoptedStopState,
+      { mode: "linked", rev: 1, presence: "indeterminate" },
+      100,
+      GRACE,
+    );
+    expect(result.verdict).toBe("unknown");
+    expect(result.teardownDue).toBe(false);
+    expect(result.state.lastPresence).toEqual(presence(10, "stop", "dead"));
+  });
+});
+
 // ---- runner ----------------------------------------------------------------
 
 const ENVIRONMENT: Environment = "dev";
@@ -390,6 +495,8 @@ interface Rig {
     presence: LifecycleRecordRead<DesktopPresence>;
     liveness: DesktopPresenceLiveness;
   };
+  readonly existence: { value: SpawnFreeProcessExistence };
+  readonly probeCalls: { count: number };
   readonly teardownResults: TeardownAttemptResult[];
   readonly watch: {
     installs: number;
@@ -412,6 +519,8 @@ function rig(input: {
   readonly presence: LifecycleRecordRead<DesktopPresence>;
   readonly liveness: DesktopPresenceLiveness;
   readonly watchAvailable: boolean;
+  readonly admission: SupervisorRunAdmission;
+  readonly existence: SpawnFreeProcessExistence;
 }): Rig {
   const lines: LogLine[] = [];
   const published: Array<{ adopted: boolean; pid: number | null }> = [];
@@ -430,6 +539,10 @@ function rig(input: {
     presence: input.presence,
     liveness: input.liveness,
   };
+  const existence: { value: SpawnFreeProcessExistence } = {
+    value: input.existence,
+  };
+  const probeCalls = { count: 0 };
   const watch: Rig["watch"] = {
     installs: 0,
     onChange: null,
@@ -458,11 +571,17 @@ function rig(input: {
       watch.failed = false;
       return handle;
     },
+    // F5: red on head - `LifecycleObserverRuntime` has no `processExists`
+    // seam yet, so this is simply ignored by production code today.
+    processExists: (_pid: number) => existence.value,
   };
   const readsImpl: LifecycleRecordReads = {
     readPolicy: async () => reads.policy,
     readPresence: async () => reads.presence,
-    probePresence: async () => reads.liveness,
+    probePresence: async () => {
+      probeCalls.count += 1;
+      return reads.liveness;
+    },
   };
   const teardown: LifecycleTeardown = {
     committed: () => committed,
@@ -483,6 +602,9 @@ function rig(input: {
     nowIso: () => "2026-01-01T00:00:00.000Z",
     pollMs: LIFECYCLE_OBSERVER_POLL_MS,
     graceMs: GRACE,
+    // F4 stop/observer: red on head - `LifecycleObserverInput` has no
+    // top-level `admission` field yet, so this is simply ignored.
+    admission: input.admission,
     initial: { adopted: input.initialAdopted, lastPresence: null },
     publishRunState: async (facts) => {
       published.push({
@@ -504,6 +626,8 @@ function rig(input: {
     tick: () => tickFn(),
     clock,
     reads,
+    existence,
+    probeCalls,
     teardownResults,
     watch,
     cancelled,
@@ -527,6 +651,191 @@ async function runTick(r: Rig): Promise<void> {
   await r.settle();
 }
 
+describe("startLifecycleObserver - F4 observer admission gate", () => {
+  it("a foreground run's presence dying past the grace never attempts a teardown", async () => {
+    // Red on head: `rig`'s `admission: "granted"` is ignored by production
+    // (`LifecycleObserverInput` has no `admission` field), so a `foreground`
+    // run here adopts and tears down exactly like a `granted` one.
+    const r = rig({
+      initialAdopted: false,
+      mode: "linked",
+      presence: presenceRecord(10, "stop"),
+      liveness: "alive",
+      watchAvailable: true,
+      admission: "foreground",
+      existence: "gone",
+    });
+    await runTick(r);
+    r.reads.liveness = "dead";
+    await runTick(r);
+    r.reads.presence = { kind: "absent" };
+    r.clock.now += GRACE * 5;
+    await runTick(r);
+    expect(r.attempts.count).toBe(0);
+    expect(r.published.some((p) => p.adopted === true)).toBe(false);
+  });
+
+  it("a foreground run initially adopted (host-start.ts's own publish beside a live Linked desktop) is un-adopted on the first tick", async () => {
+    // Red on head: production only ever moves `adopted` from false to true,
+    // sticky - it never un-adopts an initial value it was handed.
+    const r = rig({
+      initialAdopted: true,
+      mode: "linked",
+      presence: presenceRecord(10, "stop"),
+      liveness: "dead",
+      watchAvailable: true,
+      admission: "foreground",
+      existence: "gone",
+    });
+    await runTick(r);
+    expect(r.published.at(-1)).toEqual({ adopted: false, pid: 10 });
+    r.clock.now += GRACE * 5;
+    await runTick(r);
+    expect(r.attempts.count).toBe(0);
+  });
+
+  it("granted and unattended runs still adopt and attempt after the grace (control)", async () => {
+    for (const admission of ["granted", "unattended"] as const) {
+      const r = rig({
+        initialAdopted: false,
+        mode: "linked",
+        presence: presenceRecord(10, "stop"),
+        liveness: "alive",
+        watchAvailable: true,
+        admission,
+        existence: "gone",
+      });
+      await runTick(r);
+      r.reads.liveness = "dead";
+      await runTick(r);
+      r.clock.now += GRACE * 5;
+      await runTick(r);
+      expect(r.attempts.count).toBe(1);
+    }
+  });
+});
+
+describe("startLifecycleObserver - F5 presence-probe reuse", () => {
+  it("background and none modes never probe presence", async () => {
+    for (const mode of ["background", "none"] as const) {
+      // Red on head: `observe()` unconditionally calls `reads.probePresence`
+      // whenever a presence record parses, regardless of mode.
+      const r = rig({
+        initialAdopted: false,
+        mode,
+        presence: presenceRecord(10, "stop"),
+        liveness: "alive",
+        watchAvailable: true,
+        admission: "granted",
+        existence: "exists",
+      });
+      await runTick(r);
+      r.clock.now += 1_000;
+      await runTick(r);
+      r.clock.now += 1_000;
+      await runTick(r);
+      r.clock.now += 1_000;
+      await runTick(r);
+      expect(r.probeCalls.count).toBe(0);
+    }
+  });
+
+  it("an alive verdict is reused for the same pid+identity while runtime.processExists() === 'exists', within the reuse window", async () => {
+    // Red on head: `LifecycleObserverRuntime` has no `processExists` seam and
+    // `observe()` always re-probes, so this counts 4, not 1.
+    const r = rig({
+      initialAdopted: false,
+      mode: "linked",
+      presence: presenceRecord(10, "stop"),
+      liveness: "alive",
+      watchAvailable: true,
+      admission: "granted",
+      existence: "exists",
+    });
+    await runTick(r);
+    r.clock.now += 1_000;
+    await runTick(r);
+    r.clock.now += 2_000;
+    await runTick(r);
+    r.clock.now += 3_000;
+    await runTick(r);
+    expect(r.probeCalls.count).toBe(1);
+  });
+
+  it("re-probes once LIFECYCLE_PRESENCE_ALIVE_REUSE_MS has elapsed since the last probe (control-ish, exercises the constant)", async () => {
+    const r = rig({
+      initialAdopted: false,
+      mode: "linked",
+      presence: presenceRecord(10, "stop"),
+      liveness: "alive",
+      watchAvailable: true,
+      admission: "granted",
+      existence: "exists",
+    });
+    await runTick(r);
+    expect(r.probeCalls.count).toBe(1);
+    r.clock.now += LIFECYCLE_PRESENCE_ALIVE_REUSE_MS;
+    await runTick(r);
+    expect(r.probeCalls.count).toBe(2);
+  });
+
+  it("existence 'gone' or 'unknown' forces a fresh probe every tick, never reusing an alive verdict", async () => {
+    for (const existence of ["gone", "unknown"] as const) {
+      const r = rig({
+        initialAdopted: false,
+        mode: "linked",
+        presence: presenceRecord(10, "stop"),
+        liveness: "alive",
+        watchAvailable: true,
+        admission: "granted",
+        existence,
+      });
+      await runTick(r);
+      r.clock.now += 1_000;
+      await runTick(r);
+      r.clock.now += 1_000;
+      await runTick(r);
+      expect(r.probeCalls.count).toBe(3);
+    }
+  });
+
+  it("a new pid forces a fresh probe even inside the reuse window", async () => {
+    const r = rig({
+      initialAdopted: false,
+      mode: "linked",
+      presence: presenceRecord(10, "stop"),
+      liveness: "alive",
+      watchAvailable: true,
+      admission: "granted",
+      existence: "exists",
+    });
+    await runTick(r);
+    expect(r.probeCalls.count).toBe(1);
+    r.reads.presence = presenceRecord(11, "stop");
+    r.clock.now += 1_000;
+    await runTick(r);
+    expect(r.probeCalls.count).toBe(2);
+  });
+
+  it("dead and indeterminate verdicts are never reused - each tick probes again", async () => {
+    for (const liveness of ["dead", "indeterminate"] as const) {
+      const r = rig({
+        initialAdopted: false,
+        mode: "linked",
+        presence: presenceRecord(10, "stop"),
+        liveness,
+        watchAvailable: true,
+        admission: "granted",
+        existence: "exists",
+      });
+      await runTick(r);
+      r.clock.now += 1_000;
+      await runTick(r);
+      expect(r.probeCalls.count).toBe(2);
+    }
+  });
+});
+
 describe("startLifecycleObserver", () => {
   it("adopts late and republishes run state once", async () => {
     const r = rig({
@@ -535,6 +844,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     await runTick(r);
     // Never seen alive: dead presence does not adopt, nothing is torn down.
@@ -554,6 +865,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.clock.now = 1_000;
     await runTick(r);
@@ -568,29 +881,67 @@ describe("startLifecycleObserver", () => {
     expect(r.reconfirmResults).toEqual([true]);
   });
 
-  it("a record that goes missing after adoption still fires", async () => {
+  it("a record that goes missing (absent) after adoption still fires", async () => {
+    // F14: rewritten from the pre-F14 pin, which looped absent -> invalid ->
+    // unreadable and asserted all three still fired. That was the defect: an
+    // `invalid` or `unreadable` record is not evidence the desktop is gone,
+    // only that this read could not confirm either way, and treating it as
+    // `gone` fires a teardown on a read failure, not on absence. Only a
+    // genuinely ABSENT record reads as gone here now; the invalid/unreadable
+    // cases get their own dedicated reds below ("F14 indeterminate records
+    // never fire").
     const r = rig({
       initialAdopted: true,
       mode: "linked",
       presence: presenceRecord(10, "stop"),
       liveness: "alive",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     await runTick(r);
     r.reads.liveness = "dead";
     await runTick(r);
-    for (const missing of [
-      { kind: "absent" },
-      { kind: "invalid" },
-      { kind: "unreadable", cause: "EACCES" },
-    ] as const) {
-      r.reads.presence = missing;
-      r.clock.now += 1;
-      await runTick(r);
-    }
+    r.reads.presence = { kind: "absent" };
+    r.clock.now += 1;
+    await runTick(r);
     r.clock.now += GRACE;
     await runTick(r);
     expect(r.attempts.count).toBe(1);
+  });
+
+  it("F14 indeterminate records (invalid/unreadable) never fire, past the grace, with no 'stop rule holds' line", async () => {
+    for (const missing of [
+      { kind: "invalid" },
+      { kind: "unreadable", cause: "EACCES" },
+    ] as const) {
+      // Red on head: an invalid/unreadable presence read collapses to `null`
+      // in `observe()` today, which reads exactly like `gone` and fires the
+      // teardown after the grace - it must instead answer `unknown` and never
+      // fire.
+      const r = rig({
+        initialAdopted: true,
+        mode: "linked",
+        presence: presenceRecord(10, "stop"),
+        liveness: "alive",
+        watchAvailable: true,
+        admission: "granted",
+        existence: "gone",
+      });
+      await runTick(r);
+      r.reads.liveness = "dead";
+      await runTick(r);
+      r.reads.presence = missing;
+      r.clock.now += GRACE * 5;
+      const linesBefore = r.lines.length;
+      await runTick(r);
+      expect(r.attempts.count).toBe(0);
+      expect(
+        r.lines
+          .slice(linesBefore)
+          .some((line) => line.message.includes("stop rule holds")),
+      ).toBe(false);
+    }
   });
 
   it("indeterminate probes never fire", async () => {
@@ -600,6 +951,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "indeterminate",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.clock.now = 0;
     await runTick(r);
@@ -616,6 +969,8 @@ describe("startLifecycleObserver", () => {
         presence: presenceRecord(10, onExit),
         liveness: "dead",
         watchAvailable: true,
+        admission: "granted",
+        existence: "gone",
       });
       await runTick(r);
       r.clock.now = GRACE * 5;
@@ -629,6 +984,8 @@ describe("startLifecycleObserver", () => {
         presence: presenceRecord(10, "stop"),
         liveness: "dead",
         watchAvailable: true,
+        admission: "granted",
+        existence: "gone",
       });
       await runTick(r);
       r.clock.now = GRACE * 5;
@@ -641,6 +998,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     await runTick(flip);
     flip.reads.policy = policyRecord("background", 2);
@@ -663,6 +1022,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.reads.policy = { kind: "unreadable", cause: "EIO" };
     await runTick(r);
@@ -678,6 +1039,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: false,
+      admission: "granted",
+      existence: "gone",
     });
     expect(r.watch.installs).toBe(0);
     await runTick(r);
@@ -693,6 +1056,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "keep"),
       liveness: "alive",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     expect(r.watch.installs).toBe(1);
     await runTick(r);
@@ -710,6 +1075,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "alive",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.watch.onChange?.();
     await r.settle();
@@ -723,6 +1090,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.clock.now = 0;
     await runTick(r);
@@ -751,6 +1120,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     await runTick(r);
     r.clock.now = GRACE;
@@ -785,6 +1156,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "keep"),
       liveness: "alive",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.setCommitted(true);
     r.teardownResults.push({ kind: "retry", reason: "host-survived" });
@@ -802,6 +1175,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     await runTick(r);
     r.clock.now = GRACE;
@@ -825,6 +1200,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "dead",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     await runTick(r);
     r.clock.now = GRACE;
@@ -857,6 +1234,8 @@ describe("startLifecycleObserver", () => {
       presence: presenceRecord(10, "stop"),
       liveness: "alive",
       watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
     });
     r.handle.nudge();
     await r.settle();
@@ -866,5 +1245,36 @@ describe("startLifecycleObserver", () => {
     r.handle.nudge();
     await r.settle();
     expect(r.published.length).toBe(publishes);
+  });
+
+  it("T6: while gated inside the lock, a fresh reconfirm that sees the desktop come back alive cancels - no commit", async () => {
+    // Green on head: the reconfirm closure passed to `teardown.attempt` is a
+    // fresh `observeAndApply()`, not the stale observation that triggered the
+    // attempt, so a desktop that reappears while the attempt is gated inside
+    // the lock is seen and the teardown stands down.
+    const r = rig({
+      initialAdopted: true,
+      mode: "linked",
+      presence: presenceRecord(10, "stop"),
+      liveness: "dead",
+      watchAvailable: true,
+      admission: "granted",
+      existence: "gone",
+    });
+    await runTick(r);
+    r.clock.now = GRACE;
+    let release: () => void = () => undefined;
+    r.gateAttempt.promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    r.tick();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(r.attempts.count).toBe(1);
+    // The desktop reappears while the attempt is gated inside the lock.
+    r.reads.liveness = "alive";
+    release();
+    await r.settle();
+    expect(r.reconfirmResults).toEqual([false]);
+    expect(r.completes.count).toBe(0);
   });
 });

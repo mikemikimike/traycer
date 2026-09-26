@@ -1,4 +1,38 @@
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
+
+/**
+ * How long a child that `execFile`'s timeout signalled has to exit before it
+ * is SIGKILLed.
+ *
+ * `execFile`'s timeout sends SIGTERM and destroys the child's stdio, but its
+ * callback fires only on the child's `close`, and that needs the child to
+ * EXIT. A child that ignores SIGTERM therefore held the promise open for as
+ * long as it ran - a timeout that did not time out
+ * (`process-runner-timeout-escalation.test.ts`). The stdio destroy already
+ * frees a call whose grandchild holds the pipes; this escalation frees one
+ * whose child outlives the signal.
+ */
+export const PROCESS_TIMEOUT_KILL_GRACE_MS = 2_000;
+
+/**
+ * Arm the SIGKILL that follows `execFile`'s own timeout signal, and return the
+ * disarm the completion callback calls first. A call with no timeout
+ * (`timeoutMs <= 0`, which `execFile` reads as "none") arms nothing.
+ */
+function armTimeoutKillEscalation(
+  child: ChildProcess,
+  timeoutMs: number,
+): () => void {
+  if (timeoutMs <= 0) return () => undefined;
+  const timer = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Already gone: its `close` settles the call.
+    }
+  }, timeoutMs + PROCESS_TIMEOUT_KILL_GRACE_MS);
+  return () => clearTimeout(timer);
+}
 
 export interface RunResult {
   readonly stdout: string;
@@ -33,6 +67,8 @@ export function runCommand(
     // child that DID run and overflowed `maxBuffer`
     // (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`), which must stay a run failure.
     let spawned = false;
+    // Assigned once `execFile` returns; the callback always runs later.
+    let disarmEscalation: () => void = () => undefined;
     const child = execFile(
       command,
       [...args],
@@ -45,6 +81,7 @@ export function runCommand(
         encoding: "utf8",
       },
       (err, stdout, stderr) => {
+        disarmEscalation();
         const stdoutStr = String(stdout);
         const stderrStr = String(stderr);
         if (err === null) {
@@ -121,11 +158,17 @@ export function runCommand(
     child.once("spawn", () => {
       spawned = true;
     });
+    disarmEscalation = armTimeoutKillEscalation(child, options.timeoutMs);
   });
 }
 
 export interface RunBytesResult {
   readonly stdout: Buffer;
+  /**
+   * The child's stderr, decoded as UTF-8 (lossy): diagnostic text for the
+   * caller that must tell one failure from another, never parsed as data.
+   */
+  readonly stderr: string;
   readonly exitCode: number;
 }
 
@@ -142,7 +185,9 @@ export function runCommandForBytes(
   options: Omit<RunOptions, "tolerateNonZeroExit">,
 ): Promise<RunBytesResult> {
   return new Promise((resolve, reject) => {
-    execFile(
+    // Assigned once `execFile` returns; the callback always runs later.
+    let disarmEscalation: () => void = () => undefined;
+    const child = execFile(
       command,
       [...args],
       {
@@ -153,18 +198,21 @@ export function runCommandForBytes(
         maxBuffer: 4 * 1024 * 1024,
         encoding: "buffer",
       },
-      (err, stdout) => {
+      (err, stdout, stderr) => {
+        disarmEscalation();
+        const stderrText = stderr.toString("utf8");
         if (err === null) {
-          resolve({ stdout, exitCode: 0 });
+          resolve({ stdout, stderr: stderrText, exitCode: 0 });
           return;
         }
         if (typeof err.code === "number") {
-          resolve({ stdout, exitCode: err.code });
+          resolve({ stdout, stderr: stderrText, exitCode: err.code });
           return;
         }
         reject(err);
       },
     );
+    disarmEscalation = armTimeoutKillEscalation(child, options.timeoutMs);
   });
 }
 
@@ -227,7 +275,9 @@ export class ProcessSpawnError extends ProcessRunError {
  * (`killed` with a `signal`). A child that traps SIGTERM and exits with a code
  * of its own reads as an ordinary {@link ProcessRunError}, a genuine failure.
  * That is right for `launchctl` and `systemctl`, which do not trap it, and is
- * why this is not a general-purpose timeout class for any binary.
+ * why this is not a general-purpose timeout class for any binary. One that
+ * ignores SIGTERM past {@link PROCESS_TIMEOUT_KILL_GRACE_MS} is SIGKILLed and
+ * reads as a timeout (`killed via SIGKILL`).
  */
 export class ProcessTimeoutError extends ProcessRunError {
   public readonly timeoutMs: number;

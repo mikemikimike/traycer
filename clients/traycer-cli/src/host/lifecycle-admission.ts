@@ -16,7 +16,9 @@ import {
 // mechanics, "Start admission and run ownership").
 //
 // ONE question, asked once per supervisor, before its first attempt writes
-// anything: may an UNATTENDED start run? Everything else runs:
+// anything: may an UNATTENDED start run? (Asked again only when that first
+// answer rested on a proof the gate could not use - see
+// `lifecycleGateSettledParkRule`.) Everything else runs:
 //
 // | Admission          | Policy mode        | Presence             | Result |
 // | ------------------ | ------------------ | -------------------- | ------ |
@@ -146,7 +148,36 @@ export async function admitSupervisorLifecycle(
         }
       : null;
   const verdict = decideUnattendedStart(mode, presence?.liveness ?? null);
-  return verdict === "park"
-    ? { kind: "park", mode }
-    : { kind: "run", consumed, presence };
+  if (verdict === "run") return { kind: "run", consumed, presence };
+  // About to park: ask for a proof ONCE more. The presence probe above can
+  // take seconds (`tasklist` and PowerShell on Windows), and an explicit start
+  // that published its proof during it launched nothing of its own - its
+  // service manager saw THIS supervisor running and did nothing (`systemctl
+  // start` on an active unit, a plain `kickstart`, `/Run` under IgnoreNew).
+  // This supervisor is the only process that can still honour that start;
+  // parking over it left the starter waiting out its whole acknowledgement
+  // for a spawn that never came.
+  const late = await deps.consumeAdoption(
+    input.environment,
+    input.serviceLaunch.serviceLabel,
+    input.serviceLaunch.adoptionNonce,
+  );
+  if (late.kind !== "absent") return { kind: "run", consumed: late, presence };
+  return { kind: "park", mode };
+}
+
+/**
+ * Whether a gate that answered `run` with this consumed proof has settled the
+ * park rule for the rest of the run. `null` (the gate had nothing to judge:
+ * Background, or not a labelled service launch), `absent` (the rule was
+ * asked and said run) and a grant (which always runs) settle it. A proof that
+ * was refused, lost or unreadable does not: the rule was never asked, and a
+ * later attempt that finds no proof must ask it (`runHostStart`).
+ */
+export function lifecycleGateSettledParkRule(
+  consumed: HostStartAdoptionConsumeResult | null,
+): boolean {
+  return (
+    consumed === null || consumed.kind === "absent" || consumed.kind === "grant"
+  );
 }

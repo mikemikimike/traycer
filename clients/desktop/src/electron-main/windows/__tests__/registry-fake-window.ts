@@ -9,15 +9,22 @@ export class RegistryFakeWindow implements CloseToTrayManagedWindow {
     (event: { preventDefault(): void }) => void
   >();
   private destroyed = false;
-  private visible = true;
+  private visible: boolean;
   hideCalls = 0;
   closeCalls = 0;
   showCalls = 0;
   focusCalls = 0;
   minimized = false;
 
-  constructor(webContentsId: number) {
+  /**
+   * F30/T33: `shown: false` is a still-loading window - not visible, not
+   * minimized, never hidden (distinct from one that WAS visible and got
+   * `.hide()`d). Explicit and required: every caller states which one it
+   * means.
+   */
+  constructor(webContentsId: number, shown: boolean) {
     this.webContents = { id: webContentsId };
+    this.visible = shown;
   }
   onClose(listener: (event: { preventDefault(): void }) => void): void {
     this.closeListeners.add(listener);
@@ -94,10 +101,20 @@ export interface RegistryRig {
   readonly createWindow: Mock<() => RegistryFakeWindow>;
 }
 
-export function registryRig(): RegistryRig {
+/**
+ * `shownQueue` supplies each created window's `shown` state, in creation
+ * order; a window created past the end of the queue is `shown: true` (the
+ * ordinary, already-loaded case every existing caller wants). Pass `[]` for
+ * that default; pass `false` at an index to make that one window a
+ * still-loading one (F30/T33).
+ */
+export function registryRig(shownQueue: readonly boolean[]): RegistryRig {
   const created: RegistryFakeWindow[] = [];
+  const queue = [...shownQueue];
   const createWindow = vi.fn(() => {
-    const window = new RegistryFakeWindow(created.length + 1);
+    const next = queue.shift();
+    const shown = next === undefined ? true : next;
+    const window = new RegistryFakeWindow(created.length + 1, shown);
     created.push(window);
     return window;
   });

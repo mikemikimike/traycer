@@ -34,10 +34,14 @@ import {
 //
 // `ACTIVITY_PROBE_TIMEOUT_MS`, clients/shared/host-client/host-activity-probe.ts:14
 const WINDOWS_RESTART_ACTIVITY_PROBE_TIMEOUT_MS = 1_500;
-// The `tasklist` liveness probe's timeout, clients/shared/host-lock/process-identity.ts:761
+// The async `tasklist` liveness probe's timeout, clients/shared/host-lock/process-identity.ts:1103-1107
 const WINDOWS_RESTART_TASKLIST_LIVENESS_TIMEOUT_MS = 3_000;
-// The `powershell` process-start-time probe's timeout, clients/shared/host-lock/process-identity.ts:783
+// The `powershell` start-identity read's timeout (`WINDOWS_START_IDENTITY_TIMEOUT_MS`), clients/shared/host-lock/process-identity.ts:837
 const WINDOWS_RESTART_POWERSHELL_START_TIME_TIMEOUT_MS = 5_000;
+// The denied-read fallback's timeout, run after a start-identity read that
+// came back empty against a recorded Windows identity
+// (`observeProcessStartAsync`), clients/shared/host-lock/process-identity.ts:1036-1039
+const WINDOWS_RESTART_DENIED_READ_FALLBACK_TIMEOUT_MS = 5_000;
 
 // Every bound the window is derived from, so a change to any one of them
 // cannot silently widen or narrow the window without a value pin here
@@ -234,26 +238,28 @@ describe("host-start adoption window — the lease-end invariant", () => {
     expect(windowsRunLeaseEndMs).toBeLessThanOrEqual(LEASE_END_CAP_MS);
   });
 
-  it("Windows restart: the run-bound failure tail plus the stop-intent retirement probe, INSIDE the controller call — lease end 114_750", () => {
+  it("Windows restart: the run-bound failure tail plus the stop-intent retirement probe, INSIDE the controller call — lease end 119_750", () => {
     // Every Windows throw after `/Run` is marked registration-committed, so
     // the lease wait follows the tail. `restart`'s `withStopIntent` decorator
     // (service/index.ts ~:560-569) runs `retireIntentIfHostSurvived` ->
     // `findLiveIncumbentHost` (host/incumbent-check.ts ~:52-86) on a throw,
-    // BEFORE rethrowing - an activity probe plus a two-part process-identity
-    // read, both still inside the controller call that the lease-end clock
-    // measures from.
+    // BEFORE rethrowing - an activity probe plus a three-part process-identity
+    // read (liveness, start identity, and the denied-read fallback when the
+    // identity read comes back empty), all still inside the controller call
+    // that the lease-end clock measures from.
     const windowsRestartTailMs =
       WINDOWS_RESTART_ACTIVITY_PROBE_TIMEOUT_MS +
       WINDOWS_RESTART_TASKLIST_LIVENESS_TIMEOUT_MS +
-      WINDOWS_RESTART_POWERSHELL_START_TIME_TIMEOUT_MS;
+      WINDOWS_RESTART_POWERSHELL_START_TIME_TIMEOUT_MS +
+      WINDOWS_RESTART_DENIED_READ_FALLBACK_TIMEOUT_MS;
     const windowsRestartLeaseEndMs =
       WINDOWS_RUN_SPAWN_EDGE_BOUND_MS +
       WINDOWS_START_SPAWN_POLL_MS +
       WINDOWS_SCHTASKS_QUERY_TIMEOUT_MS +
       windowsRestartTailMs +
       HOST_START_ADOPTION_ACK_WAIT_MS;
-    expect(windowsRestartTailMs).toBe(9_500);
-    expect(windowsRestartLeaseEndMs).toBe(114_750);
+    expect(windowsRestartTailMs).toBe(14_500);
+    expect(windowsRestartLeaseEndMs).toBe(119_750);
     expect(windowsRestartLeaseEndMs).toBeLessThanOrEqual(LEASE_END_CAP_MS);
   });
 
@@ -320,7 +326,8 @@ describe("host-start adoption window — the lease-end invariant", () => {
   const windowsRestartTailMs =
     WINDOWS_RESTART_ACTIVITY_PROBE_TIMEOUT_MS +
     WINDOWS_RESTART_TASKLIST_LIVENESS_TIMEOUT_MS +
-    WINDOWS_RESTART_POWERSHELL_START_TIME_TIMEOUT_MS;
+    WINDOWS_RESTART_POWERSHELL_START_TIME_TIMEOUT_MS +
+    WINDOWS_RESTART_DENIED_READ_FALLBACK_TIMEOUT_MS;
 
   const LEASE_END_ROWS = [
     [

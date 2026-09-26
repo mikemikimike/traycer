@@ -38,6 +38,7 @@ function fakeStatus(
     reachable: true,
     localAttempt,
     removedByUser: false,
+    lastEnsureFailure: null,
     checkedAt: new Date().toISOString(),
   };
 }

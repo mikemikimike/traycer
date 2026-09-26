@@ -8,6 +8,7 @@ import type {
   HostQuitDecisionResponse,
   HostQuitStateEvent,
   HostRegistryUpdateState,
+  HostServiceRestartResult,
   IHostQuitDecisionHost,
   ITokenStore,
   LocalHostSnapshot,
@@ -684,7 +685,7 @@ function buildFakeBridge(
         errorMessage: null,
         includePreReleases: false,
       }),
-      freePortAndRestart: async (input) => input,
+      freePortAndRestart: async (input) => ({ kind: "applied", ...input }),
       runDoctorRepairQueued: async () => ({ kind: "applied" as const }),
       freePortAndRestartIfIdle: async () => ({
         kind: "dispatched",
@@ -1249,7 +1250,11 @@ describe("DesktopRunnerHost.hostLifecycle", () => {
         updatedBy: "desktop",
         updatedAt: "2026-01-01T00:00:00.000Z",
       },
-      applied: { localHostCapability: "managed", supervisor: "enforcing" },
+      applied: {
+        localHostCapability: "managed",
+        supervisor: "enforcing",
+        admittedAs: null,
+      },
       pending: "none",
     };
     const setResult: HostLifecycleSetResult = { kind: "applied", view };
@@ -1354,7 +1359,11 @@ describe("DesktopRunnerHost.localHostCapability", () => {
         updatedBy: "cli",
         updatedAt: "2026-01-01T00:00:00.000Z",
       },
-      applied: { localHostCapability: "none", supervisor: "not-running" },
+      applied: {
+        localHostCapability: "none",
+        supervisor: "not-running",
+        admittedAs: null,
+      },
       pending: "none",
     };
     const get = vi.fn(async () => view);
@@ -1413,5 +1422,44 @@ describe("DesktopRunnerHost.localHostCapability", () => {
     expect(host.hostTray).not.toBeNull();
     expect(host.workspaceFolders.canPickNatively).toBe(true);
     expect(host.hostLifecycle).not.toBeNull();
+  });
+
+  it("restartHostServiceIfHostIdle delegates to the bridge's OWN method, not the (same-shaped-input) restartHostIfIdle", async () => {
+    const fake = buildFakeBridge(null);
+    const bridge: DesktopPreloadBridge = {
+      ...fake.bridge,
+      localHostCapability: "managed",
+    };
+    const host = new DesktopRunnerHost({
+      bridge,
+      signInUrl: "https://auth.example.invalid/sign-in",
+    });
+    if (host.hostManagement === null) {
+      throw new Error("expected hostManagement to be non-null");
+    }
+
+    // `restartHostIfIdle` and `restartHostServiceIfHostIdle` share the exact
+    // same input shape (`{expectedHostId}`), only their RETURN types differ
+    // - so wiring the service passthrough to the wrong sibling method still
+    // type-checks. Distinguishable resolved values (rather than the same
+    // fixture) is what makes a swap observable.
+    const restartHostIfIdle = vi.fn(async () => {
+      throw new Error("restartHostIfIdle must not be called here");
+    });
+    const restartHostServiceIfHostIdle = vi.fn(
+      // `host-busy` exists only on the service restart's result.
+      async (): Promise<HostServiceRestartResult> => ({ kind: "host-busy" }),
+    );
+    fake.bridge.hostManagement.restartHostIfIdle = restartHostIfIdle;
+    fake.bridge.hostManagement.restartHostServiceIfHostIdle =
+      restartHostServiceIfHostIdle;
+
+    const input = { expectedHostId: "host-1" };
+    const result =
+      await host.hostManagement.restartHostServiceIfHostIdle(input);
+
+    expect(restartHostServiceIfHostIdle).toHaveBeenCalledWith(input);
+    expect(restartHostIfIdle).not.toHaveBeenCalled();
+    expect(result).toEqual({ kind: "host-busy" });
   });
 });

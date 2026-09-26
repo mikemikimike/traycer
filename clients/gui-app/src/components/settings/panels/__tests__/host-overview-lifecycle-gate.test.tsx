@@ -142,6 +142,7 @@ const LOCAL_CONTROLLER_STATUS_BASE: HostControllerStatus = {
   localAttempt: null,
   removedByUser: false,
   checkedAt: "2026-08-27T00:00:00.000Z",
+  lastEnsureFailure: null,
 };
 
 function scopeFrom(

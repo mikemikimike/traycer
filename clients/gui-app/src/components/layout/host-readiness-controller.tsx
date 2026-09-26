@@ -14,6 +14,7 @@ import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
 import { AppHeader } from "@/components/layout/header/app-header";
 import { HostBootCard } from "@/components/centered-card";
 import { HostBootSurface } from "@/components/host/host-boot-surface";
+import { HostEnsureFailureMessage } from "@/components/host/host-ensure-failure-message";
 import { LocalBootstrapAttempts } from "@/components/host/local-bootstrap-attempts";
 import {
   BootstrapLogDisclosure,
@@ -69,6 +70,7 @@ import {
   NO_LOCAL_HOST_INSTALL_COMMAND,
   NO_LOCAL_HOST_RUN_HERE_APPLIED,
   NO_LOCAL_HOST_RUN_HERE_LABEL,
+  hostLifecycleSetRefusalCopy,
 } from "@/lib/host/host-lifecycle-copy";
 import { appLogger, describeLogError } from "@/lib/logger";
 import {
@@ -425,6 +427,7 @@ function presentationFromLifecycle(args: {
     progress: args.lifecycle.provisioning.progress,
     lastProgress: args.lifecycle.provisioning.lastProgress,
     provisioningError: args.lifecycle.provisioning.error,
+    ensureFailure: args.lifecycle.provisioning.ensureFailure,
     provisioning: args.lifecycle.provisioning.isProvisioning,
     removed: args.lifecycle.provisioning.removed,
     hostBusy: args.lifecycle.provisioning.hostBusy,
@@ -957,7 +960,9 @@ function DesktopNoLocalHostFallback(props: {
                 },
                 {
                   onSuccess: (result) => {
-                    if (result.kind === "failed") setFailure(result.message);
+                    if (result.kind === "failed") {
+                      setFailure(hostLifecycleSetRefusalCopy(result.reason));
+                    }
                   },
                 },
               );
@@ -982,9 +987,11 @@ function provisioningErrorFallback(
     // The same heading the narrator's settled cold-start face uses: both cards
     // say "this machine's host didn't start", and they say it identically.
     title: "Traycer Host didn't start",
-    message:
-      presentation.provisioningError?.message ??
-      "Could not start Traycer Host.",
+    // The failure's own words, in the body with the narrator's settled arm's
+    // clamp rather than the card's message slot: a CLI message can run long.
+    // Main's record first - it is the same failure when this card's Retry
+    // produced it, and the only one when a launch ensure did.
+    message: null,
     // THE DIAGNOSTICS, and this card had none. It is drawn when this machine's
     // install just failed, and it WINS over the window narrator on that state
     // (`gateCardReadiness`) - which meant the narrator's settled arm, the one
@@ -997,6 +1004,13 @@ function provisioningErrorFallback(
     // card has a real action row that already carries `Open settings`.
     body: (
       <LocalHostBodyShell>
+        <HostEnsureFailureMessage
+          message={
+            presentation.ensureFailure ??
+            presentation.provisioningError?.message ??
+            "Could not start Traycer Host."
+          }
+        />
         <LocalBootstrapAttempts />
         <BootstrapLogDisclosure
           onConfigureShell={presentation.configureShell}

@@ -1,16 +1,47 @@
 import {
   afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
   it,
   vi,
 } from "vitest";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { hostHomeDir } from "../../../store/paths";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, so without this the suite
+// would resolve this machine's REAL `~/.traycer`. A partial `store/paths`
+// mock (this file's existing `cliInstallHomeDir` override, below) is NOT
+// isolation on its own - every other export of that module, `hostHomeDir`
+// among them, still resolves under the real home unless `node:os.homedir()`
+// itself is redirected first.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-windows-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 import {
   buildScheduledTaskXml,
@@ -562,6 +593,18 @@ describe("Windows service stale host cleanup", () => {
     // `not.toContain("$PID")` assertion flips).
   });
 
+  const SMART_QUOTES = ["\u2018", "\u2019", "\u201A", "\u201B"];
+
+  it.each(SMART_QUOTES)(
+    "doubles PowerShell single-quote %s in the slot process-table scan $hostPaths literal",
+    (quoteChar: string) => {
+      const script = buildWindowsSlotProcessTableScanScript(
+        `C:\\Users\\O${quoteChar}Brien\\.traycer\\host\\staging`,
+      );
+      expect(script).toContain(`${quoteChar}${quoteChar}`);
+    },
+  );
+
   it("validates each parent edge against CreationDate from the same snapshot", () => {
     // Windows keeps the creator's id in `ParentProcessId` after the parent
     // exits, and may hand that id to an unrelated process. An edge is only
@@ -894,7 +937,10 @@ describe("Windows service stale host cleanup", () => {
       command === "powershell.exe" ? success("[]") : success("");
     const controller = createWindowsController(runner, noTimingDeps);
 
-    await controller.uninstall({ label: serviceLabelFor("staging") });
+    await controller.uninstall({
+      label: serviceLabelFor("staging"),
+      leaveForegroundRun: null,
+    });
 
     expect(mocks.removeHostPidMetadata).toHaveBeenCalledWith("staging");
   });
@@ -2632,7 +2678,10 @@ describe("killHostProcessTree convergence loop", () => {
       const controller = createWindowsController(runner, unattributedDeps);
 
       await expect(
-        controller.uninstall({ label: serviceLabelFor("staging") }),
+        controller.uninstall({
+          label: serviceLabelFor("staging"),
+          leaveForegroundRun: null,
+        }),
       ).rejects.toMatchObject({ code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED });
 
       expect(
@@ -3148,6 +3197,53 @@ describe("computeWindowsHostKillSet and the kill self-protection it drives", () 
     expect(
       computeWindowsHostKillSet(rowsOf(rows), 200, nothingRemembered).kill,
     ).toEqual([100, 400]);
+  });
+
+  describe("F26: seedSlotMatches gates whether slot-matched rows outside the placed root are seeded", () => {
+    it("seedSlotMatches:false seeds only the placed root's subtree, sparing an unrelated slot-matched row (F26 pure - red on head, which seeds every slot-matched row unconditionally)", () => {
+      const rows: TableRowInput[] = [
+        // The excluded supervisor.
+        { processId: 100, parentProcessId: 1, slot: false },
+        // The placed root - a host child spawned by the supervisor - and its child.
+        { processId: 200, parentProcessId: 100, slot: false },
+        { processId: 201, parentProcessId: 200, slot: false },
+        // An unrelated slot-matched row: some other process (e.g. a text
+        // editor with the host's log open) whose command line happens to
+        // match the slot's paths, hanging off an unrelated explorer pid.
+        { processId: 900, parentProcessId: 300, slot: true },
+      ];
+      const killSet = computeWindowsTreeKillSet(
+        rowsOf(rows),
+        {
+          placedRoot: 200,
+          excludedPids: new Set([100]),
+          seedSlotMatches: false,
+        },
+        nothingRemembered,
+      );
+      expect(killSet.kill).toContain(200);
+      expect(killSet.kill).toContain(201);
+      expect(killSet.kill).not.toContain(900);
+    });
+
+    it("seedSlotMatches:true (callerOnlyKillScope/computeWindowsHostKillSet's shape) still seeds every slot-matched row (control)", () => {
+      const rows: TableRowInput[] = [
+        { processId: 100, parentProcessId: 1, slot: false },
+        { processId: 200, parentProcessId: 100, slot: false },
+        { processId: 201, parentProcessId: 200, slot: false },
+        { processId: 900, parentProcessId: 300, slot: true },
+      ];
+      const killSet = computeWindowsTreeKillSet(
+        rowsOf(rows),
+        {
+          placedRoot: 200,
+          excludedPids: new Set([100]),
+          seedSlotMatches: true,
+        },
+        nothingRemembered,
+      );
+      expect(killSet.kill).toContain(900);
+    });
   });
 
   // Direct algebra pins for the three subtraction terms, each isolating one
@@ -4021,6 +4117,13 @@ describe("computeWindowsHostKillSet and the kill self-protection it drives", () 
   });
 });
 
+// The task's `<UserId>` is its caller's to resolve: `installService` reads it
+// (`resolveTaskUserId`, covered by `windows-task-user-id.test.ts`) in front of
+// its install edge and hands it to the builder, so an install needs one even
+// where staging is stubbed. A fixed SID keeps these blocks off the machine's
+// own identity.
+const TEST_TASK_USER_SID = "S-1-5-21-1000-2000-3000-1001";
+
 describe("Scheduled Task XML identity", () => {
   it("names Traycer as the task Author", () => {
     // Probed live on Windows 11: a task registered from this XML without an
@@ -4028,41 +4131,17 @@ describe("Scheduled Task XML identity", () => {
     // Scheduler UI - anonymous provenance for the one entry that starts a
     // background process at every login. Same defect class as the macOS
     // "sh from Unknown Developer" login item, one field cheaper to fix.
-    const prevDomain = process.env.USERDOMAIN;
-    const prevUser = process.env.USERNAME;
-    const prevComputer = process.env.COMPUTERNAME;
-    const prevDnsDomain = process.env.USERDNSDOMAIN;
-    process.env.USERDOMAIN = "TESTBOX";
-    process.env.USERNAME = "testuser";
-    // Hermeticity (SSH-USERDOMAIN-WORKGROUP): `resolveTaskUserId` now
-    // prefers a real SID from `whoami /user`, and its environment fallback
-    // also reads COMPUTERNAME/USERDNSDOMAIN - none of which this test
-    // asserts on, but a real COMPUTERNAME or SID on a Windows dev machine
-    // must not be allowed to throw off `buildScheduledTaskXml`'s <UserId>
-    // resolution underneath it.
-    process.env.COMPUTERNAME = "";
-    process.env.USERDNSDOMAIN = "";
-    setWindowsTaskUserSidReaderForTests(() => null);
-    try {
-      const xml = buildScheduledTaskXml({
+    const xml = buildScheduledTaskXml(
+      {
         label: serviceLabelFor("staging"),
         cli: {
           command: "C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe",
           args: [],
         },
-      });
-      expect(xml).toContain("<Author>Traycer</Author>");
-    } finally {
-      if (prevDomain === undefined) delete process.env.USERDOMAIN;
-      else process.env.USERDOMAIN = prevDomain;
-      if (prevUser === undefined) delete process.env.USERNAME;
-      else process.env.USERNAME = prevUser;
-      if (prevComputer === undefined) delete process.env.COMPUTERNAME;
-      else process.env.COMPUTERNAME = prevComputer;
-      if (prevDnsDomain === undefined) delete process.env.USERDNSDOMAIN;
-      else process.env.USERDNSDOMAIN = prevDnsDomain;
-      setWindowsTaskUserSidReaderForTests(null);
-    }
+      },
+      TEST_TASK_USER_SID,
+    );
+    expect(xml).toContain("<Author>Traycer</Author>");
   });
 
   it("suppresses a second instance, which is what lets the post-swap relaunch converge with a waiting supervisor", () => {
@@ -4106,43 +4185,19 @@ describe("Scheduled Task XML identity", () => {
     // `runTaskAndVerifyStart` is documented as verifying its own `/Run` so
     // callers "never baseline after it and mistake IgnoreNew's suppressed
     // second run for a failed repair".
-    const prevDomain = process.env.USERDOMAIN;
-    const prevUser = process.env.USERNAME;
-    const prevComputer = process.env.COMPUTERNAME;
-    const prevDnsDomain = process.env.USERDNSDOMAIN;
-    process.env.USERDOMAIN = "TESTBOX";
-    process.env.USERNAME = "testuser";
-    // Hermeticity (SSH-USERDOMAIN-WORKGROUP): `resolveTaskUserId` now
-    // prefers a real SID from `whoami /user`, and its environment fallback
-    // also reads COMPUTERNAME/USERDNSDOMAIN - none of which this test
-    // asserts on, but a real COMPUTERNAME or SID on a Windows dev machine
-    // must not be allowed to throw off `buildScheduledTaskXml`'s <UserId>
-    // resolution underneath it.
-    process.env.COMPUTERNAME = "";
-    process.env.USERDNSDOMAIN = "";
-    setWindowsTaskUserSidReaderForTests(() => null);
-    try {
-      const xml = buildScheduledTaskXml({
+    const xml = buildScheduledTaskXml(
+      {
         label: serviceLabelFor("staging"),
         cli: {
           command: "C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe",
           args: [],
         },
-      });
-      expect(xml).toContain(
-        "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
-      );
-    } finally {
-      if (prevDomain === undefined) delete process.env.USERDOMAIN;
-      else process.env.USERDOMAIN = prevDomain;
-      if (prevUser === undefined) delete process.env.USERNAME;
-      else process.env.USERNAME = prevUser;
-      if (prevComputer === undefined) delete process.env.COMPUTERNAME;
-      else process.env.COMPUTERNAME = prevComputer;
-      if (prevDnsDomain === undefined) delete process.env.USERDNSDOMAIN;
-      else process.env.USERDNSDOMAIN = prevDnsDomain;
-      setWindowsTaskUserSidReaderForTests(null);
-    }
+      },
+      TEST_TASK_USER_SID,
+    );
+    expect(xml).toContain(
+      "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+    );
   });
 
   it("declares NO execution time limit, which is what lets a supervisor wait out an update segment", async () => {
@@ -4163,41 +4218,17 @@ describe("Scheduled Task XML identity", () => {
     // P3D, which is where the docblock's old "measured in days" came from; a
     // change to any explicit duration would bound a healthy wait, and this row
     // is what makes that arrive as a red test rather than as a support ticket.
-    const prevDomain = process.env.USERDOMAIN;
-    const prevUser = process.env.USERNAME;
-    const prevComputer = process.env.COMPUTERNAME;
-    const prevDnsDomain = process.env.USERDNSDOMAIN;
-    process.env.USERDOMAIN = "TESTBOX";
-    process.env.USERNAME = "testuser";
-    // Hermeticity (SSH-USERDOMAIN-WORKGROUP): `resolveTaskUserId` now
-    // prefers a real SID from `whoami /user`, and its environment fallback
-    // also reads COMPUTERNAME/USERDNSDOMAIN - none of which this test
-    // asserts on, but a real COMPUTERNAME or SID on a Windows dev machine
-    // must not be allowed to throw off `buildScheduledTaskXml`'s <UserId>
-    // resolution underneath it.
-    process.env.COMPUTERNAME = "";
-    process.env.USERDNSDOMAIN = "";
-    setWindowsTaskUserSidReaderForTests(() => null);
-    try {
-      const xml = buildScheduledTaskXml({
+    const xml = buildScheduledTaskXml(
+      {
         label: serviceLabelFor("staging"),
         cli: {
           command: "C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe",
           args: [],
         },
-      });
-      expect(xml).toContain("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>");
-    } finally {
-      if (prevDomain === undefined) delete process.env.USERDOMAIN;
-      else process.env.USERDOMAIN = prevDomain;
-      if (prevUser === undefined) delete process.env.USERNAME;
-      else process.env.USERNAME = prevUser;
-      if (prevComputer === undefined) delete process.env.COMPUTERNAME;
-      else process.env.COMPUTERNAME = prevComputer;
-      if (prevDnsDomain === undefined) delete process.env.USERDNSDOMAIN;
-      else process.env.USERDNSDOMAIN = prevDnsDomain;
-      setWindowsTaskUserSidReaderForTests(null);
-    }
+      },
+      TEST_TASK_USER_SID,
+    );
+    expect(xml).toContain("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>");
   });
 });
 
@@ -4246,11 +4277,13 @@ describe("Windows startService post-/Run spawn verification", () => {
     mocks.removeHostPidMetadata.mockResolvedValue(undefined);
     setWindowsStartEvidenceDepsForTests(null);
     setWindowsTaskInstallDepsForTests(null);
+    setWindowsTaskUserSidReaderForTests(() => TEST_TASK_USER_SID);
   });
 
   afterEach(() => {
     setWindowsStartEvidenceDepsForTests(null);
     setWindowsTaskInstallDepsForTests(null);
+    setWindowsTaskUserSidReaderForTests(null);
   });
 
   it("surfaces Last Run Result when /Run is accepted but nothing spawns", async () => {
@@ -5166,6 +5199,78 @@ describe("Windows controller — installService launcher-restore behavior", () =
   });
 });
 
+// P4 fact row: `installService` never reads the CURRENTLY-registered task's
+// XML before it rewrites it. It builds the `/Create /F` document fresh from
+// `buildTaskXmlForUser` every time, so a task the user disabled in Task
+// Scheduler (`<Enabled>false</Enabled>` in the LIVE definition
+// `schtasks /Query /XML` would show) is silently re-enabled by any
+// re-register - `installService` has no code path that ever looks at that
+// live XML at all. This is GREEN on head: it records the current fact the P4
+// ruling must change, not a bug in this codepath itself.
+describe("Windows controller — installService fact: /Create's XML is built fresh, never from the queried task", () => {
+  beforeEach(() => {
+    vi.stubEnv("USERDOMAIN", "TESTBOX");
+    vi.stubEnv("USERNAME", "testuser");
+    vi.stubEnv("COMPUTERNAME", "");
+    vi.stubEnv("USERDNSDOMAIN", "");
+    setWindowsTaskUserSidReaderForTests(() => null);
+    setWindowsTaskInstallDepsForTests(null);
+    setWindowsStartEvidenceDepsForTests(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    setWindowsTaskUserSidReaderForTests(null);
+    setWindowsTaskInstallDepsForTests(null);
+    setWindowsStartEvidenceDepsForTests(null);
+  });
+
+  it("the queried task being disabled changes nothing about the fresh /Create XML", async () => {
+    const label = serviceLabelFor("win-fact-fresh-xml-ignores-queried-state");
+    const seen = { createXml: null as string | null };
+    const runner: ProcessRunner = async (command, args) => {
+      if (command === "schtasks" && args[0] === "/Create") {
+        const xmlPath = args[args.indexOf("/XML") + 1];
+        // `stageTaskDefinition` writes UTF-16LE (what `schtasks /Create /XML`
+        // itself requires), so decode the same way to compare text, not bytes.
+        seen.createXml = readFileSync(xmlPath as string).toString("utf16le");
+        // Fail /Run deliberately so the test never needs spawn-evidence
+        // polling - the XML this row asserts on is already captured by the
+        // time /Create returns.
+        return success("");
+      }
+      if (command === "schtasks" && args[0] === "/Run") {
+        throw new ProcessRunError(
+          "schtasks /Run exited with code 1: ERROR: The attempted operation is not supported for a task that is disabled.",
+          command,
+          args,
+          1,
+          "",
+          "ERROR: The attempted operation is not supported for a task that is disabled.",
+        );
+      }
+      return success("");
+    };
+
+    // `installService` never queries the live task at all - there is no
+    // fixture to "make the queried task disabled" with, because nothing in
+    // this codepath ever reads `schtasks /Query /XML` for the task it is
+    // about to overwrite. That absence IS the fact this row records.
+    await createWindowsController(runner, noTimingDeps)
+      .install({
+        label,
+        cli: { command: "C:\\traycer.exe", args: [] },
+        enableLinger: false,
+      })
+      .catch(() => undefined);
+
+    expect(seen.createXml).not.toBeNull();
+    expect(seen.createXml as string).not.toContain("<Enabled>false</Enabled>");
+    expect(seen.createXml as string).toContain("<Enabled>true</Enabled>");
+    await rm(hiddenHostLauncherPathForTest(label), { force: true });
+  });
+});
+
 describe("Windows controller — spawn-edge placement", () => {
   function stageEvidenceForImmediateStart(): void {
     setWindowsStartEvidenceDepsForTests({
@@ -5184,9 +5289,14 @@ describe("Windows controller — spawn-edge placement", () => {
     });
   }
 
+  beforeEach(() => {
+    setWindowsTaskUserSidReaderForTests(() => TEST_TASK_USER_SID);
+  });
+
   afterEach(() => {
     setWindowsStartEvidenceDepsForTests(null);
     setWindowsTaskInstallDepsForTests(null);
+    setWindowsTaskUserSidReaderForTests(null);
   });
 
   // The publish spy and the runner push into ONE shared log, in the order
@@ -5431,7 +5541,7 @@ describe("computeWindowsTreeKillSet: a supervisor killing its own host child", (
   it("kills the placed root and every descendant, never the supervisor or its other children", () => {
     const killSet = computeWindowsTreeKillSet(
       table,
-      { placedRoot: 300, excludedPids: new Set([200]) },
+      { placedRoot: 300, excludedPids: new Set([200]), seedSlotMatches: false },
       nothingRemembered,
     );
     expect(killSet.kill).toEqual([300, 310, 320]);
@@ -5442,7 +5552,11 @@ describe("computeWindowsTreeKillSet: a supervisor killing its own host child", (
   it("without a placed root the whole supervisor branch is spared", () => {
     const killSet = computeWindowsTreeKillSet(
       table,
-      { placedRoot: null, excludedPids: new Set([200]) },
+      {
+        placedRoot: null,
+        excludedPids: new Set([200]),
+        seedSlotMatches: false,
+      },
       nothingRemembered,
     );
     expect(killSet.kill).toEqual([]);
@@ -5455,7 +5569,7 @@ describe("computeWindowsTreeKillSet: a supervisor killing its own host child", (
     ]);
     const killSet = computeWindowsTreeKillSet(
       cyclic,
-      { placedRoot: 300, excludedPids: new Set([200]) },
+      { placedRoot: 300, excludedPids: new Set([200]), seedSlotMatches: false },
       nothingRemembered,
     );
     expect(killSet.kill).not.toContain(200);
@@ -5482,7 +5596,11 @@ describe("computeWindowsTreeKillSet: a supervisor killing its own host child", (
       expect(computeWindowsHostKillSet(rows, 200, nothingRemembered)).toEqual(
         computeWindowsTreeKillSet(
           rows,
-          { placedRoot: null, excludedPids: new Set([200]) },
+          {
+            placedRoot: null,
+            excludedPids: new Set([200]),
+            seedSlotMatches: true,
+          },
           nothingRemembered,
         ),
       );
@@ -5544,6 +5662,45 @@ describe("killSupervisedHostTree", () => {
     const killed = killedPids(calls);
     expect(killed.sort((a, b) => a - b)).toEqual([ROOT, CHILD]);
     expect(killed).not.toContain(supervisor);
+  });
+
+  it("F26 integration: kills only the root's subtree, sparing an unrelated slot-matched process (red on head, which kills it too)", async () => {
+    const scanWithBystander: TableRowInput[] = [
+      { processId: 0, parentProcessId: 0, slot: false },
+      { processId: supervisor, parentProcessId: 1, slot: false, created: 10 },
+      {
+        processId: ROOT,
+        parentProcessId: supervisor,
+        slot: false,
+        created: 5_000,
+      },
+      { processId: CHILD, parentProcessId: ROOT, slot: false, created: 6_000 },
+      // A bystander process that happens to match the slot's paths (e.g. a
+      // text editor with host.log open), hanging off an unrelated pid -
+      // never a descendant of the supervisor or the root.
+      { processId: 700_001, parentProcessId: 1, slot: true, created: 4_000 },
+    ];
+    // The confirming scan: the bystander is gone too (its "kill" - which
+    // never should have been attempted - is modeled as having landed), so
+    // the loop converges after one round and the test can assert on WHICH
+    // pids were targeted rather than on a thrown "still running" refusal.
+    const drainedWithBystander: TableRowInput[] = [
+      { processId: 0, parentProcessId: 0, slot: false },
+      { processId: supervisor, parentProcessId: 1, slot: false, created: 10 },
+    ];
+    const { runner, calls } = scriptedRunner([
+      scanWithBystander,
+      drainedWithBystander,
+    ]);
+    await killSupervisedHostTree(
+      "staging",
+      ROOT,
+      async () => undefined,
+      runner,
+      noTimingDeps,
+    );
+    const killed = killedPids(calls);
+    expect(killed).not.toContain(700_001);
   });
 
   it("does not seed a root that is not the supervisor's child at first sight", async () => {

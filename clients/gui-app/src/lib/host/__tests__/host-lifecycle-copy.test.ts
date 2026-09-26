@@ -292,6 +292,9 @@ describe("hostQuitCountsLine", () => {
       const { hostQuitCountsLine } =
         await import("@/lib/host/host-lifecycle-copy");
 
+      // A null breakdown never satisfies the "nothing is running" precondition
+      // (breakdown !== null && shells === 0 && scheduledWakes === 0), so the
+      // lead is the neutral one even though the host is idle.
       expect(
         hostQuitCountsLine({
           busy: false,
@@ -300,7 +303,7 @@ describe("hostQuitCountsLine", () => {
           statusMinor: null,
         }),
       ).toBe(
-        "Nothing is running on this host right now. Shells and scheduled wakes: unknown on this host version.",
+        "No agents or terminals are working on this host right now. Shells and scheduled wakes: unknown on this host version.",
       );
     });
 
@@ -336,6 +339,8 @@ describe("hostQuitCountsLine", () => {
       const { hostQuitCountsLine } =
         await import("@/lib/host/host-lifecycle-copy");
 
+      // Both counts are null (not 0), so the "nothing is running" lead does
+      // not apply even though the breakdown object itself is non-null.
       expect(
         hostQuitCountsLine({
           busy: false,
@@ -344,7 +349,7 @@ describe("hostQuitCountsLine", () => {
           statusMinor: null,
         }),
       ).toBe(
-        "Nothing is running on this host right now. Shells and scheduled wakes: unknown on this host version.",
+        "No agents or terminals are working on this host right now. Shells and scheduled wakes: unknown on this host version.",
       );
     });
 
@@ -360,7 +365,7 @@ describe("hostQuitCountsLine", () => {
           statusMinor: 5,
         }),
       ).toBe(
-        "Nothing is running on this host right now. Shells and scheduled wakes: unknown on this host version.",
+        "No agents or terminals are working on this host right now. Shells and scheduled wakes: unknown on this host version.",
       );
     });
 
@@ -368,6 +373,8 @@ describe("hostQuitCountsLine", () => {
       const { hostQuitCountsLine } =
         await import("@/lib/host/host-lifecycle-copy");
 
+      // Same null-count reasoning as the two cases above: both counts are
+      // null, not 0.
       expect(
         hostQuitCountsLine({
           busy: false,
@@ -376,7 +383,7 @@ describe("hostQuitCountsLine", () => {
           statusMinor: 6,
         }),
       ).toBe(
-        "Nothing is running on this host right now. Shells and scheduled wakes: not reported by this host.",
+        "No agents or terminals are working on this host right now. Shells and scheduled wakes: not reported by this host.",
       );
     });
   });
@@ -457,6 +464,8 @@ describe("hostQuitCountsLine", () => {
       const { hostQuitCountsLine } =
         await import("@/lib/host/host-lifecycle-copy");
 
+      // shells is null (not 0), so the "nothing is running" lead does not
+      // apply even though scheduledWakes is a known, reported 0.
       expect(
         hostQuitCountsLine({
           busy: false,
@@ -465,7 +474,7 @@ describe("hostQuitCountsLine", () => {
           statusMinor: 6,
         }),
       ).toBe(
-        "Nothing is running on this host right now. Shells: not reported by this host.",
+        "No agents or terminals are working on this host right now. Shells: not reported by this host.",
       );
     });
   });
@@ -484,5 +493,85 @@ describe("hostQuitCountsLine", () => {
       "No agents or terminals are working on this host right now. Also on this host: 1 shell, 1 scheduled wake.",
     );
     expect(line.includes("  ")).toBe(false);
+  });
+
+  describe("idle lead - post-fix rule (breakdown !== null && shells === 0 && scheduledWakes === 0)", () => {
+    it("(a) breakdown null, statusMinor 5: neutral lead, unknown-on-this-host-version extras", async () => {
+      const { hostQuitCountsLine } =
+        await import("@/lib/host/host-lifecycle-copy");
+
+      expect(
+        hostQuitCountsLine({
+          busy: false,
+          busySessionCount: 0,
+          breakdown: null,
+          statusMinor: 5,
+        }),
+      ).toBe(
+        "No agents or terminals are working on this host right now. Shells and scheduled wakes: unknown on this host version.",
+      );
+    });
+
+    it("(b) breakdown null, statusMinor 6: neutral lead, not-reported extras", async () => {
+      const { hostQuitCountsLine } =
+        await import("@/lib/host/host-lifecycle-copy");
+
+      expect(
+        hostQuitCountsLine({
+          busy: false,
+          busySessionCount: 0,
+          breakdown: null,
+          statusMinor: 6,
+        }),
+      ).toBe(
+        "No agents or terminals are working on this host right now. Shells and scheduled wakes: not reported by this host.",
+      );
+    });
+
+    it("(c) shells null, wakes 0: neutral lead (shells is not settled at 0)", async () => {
+      const { hostQuitCountsLine } =
+        await import("@/lib/host/host-lifecycle-copy");
+
+      expect(
+        hostQuitCountsLine({
+          busy: false,
+          busySessionCount: 0,
+          breakdown: breakdown({ shells: null, scheduledWakes: 0 }),
+          statusMinor: 6,
+        }),
+      ).toBe(
+        "No agents or terminals are working on this host right now. Shells: not reported by this host.",
+      );
+    });
+
+    it("(d) shells 0, wakes null: neutral lead (wakes is not settled at 0)", async () => {
+      const { hostQuitCountsLine } =
+        await import("@/lib/host/host-lifecycle-copy");
+
+      expect(
+        hostQuitCountsLine({
+          busy: false,
+          busySessionCount: 0,
+          breakdown: breakdown({ shells: 0, scheduledWakes: null }),
+          statusMinor: 6,
+        }),
+      ).toBe(
+        "No agents or terminals are working on this host right now. Scheduled wakes: not reported by this host.",
+      );
+    });
+
+    it("(e) both 0: the 'Nothing is running' lead, no extras - control", async () => {
+      const { hostQuitCountsLine } =
+        await import("@/lib/host/host-lifecycle-copy");
+
+      expect(
+        hostQuitCountsLine({
+          busy: false,
+          busySessionCount: 0,
+          breakdown: breakdown({ shells: 0, scheduledWakes: 0 }),
+          statusMinor: 6,
+        }),
+      ).toBe("Nothing is running on this host right now.");
+    });
   });
 });

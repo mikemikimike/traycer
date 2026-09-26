@@ -190,7 +190,12 @@ afterEach(async () => {
   __resetHeldInProcessForTest();
   for (const pid of supervisedPids.splice(0)) {
     try {
-      process.kill(pid, "SIGTERM");
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Not a group leader, or already gone.
+    }
+    try {
+      process.kill(pid, "SIGKILL");
     } catch {
       // The actuator normally exits through its release barrier; cleanup is
       // best effort when an assertion fails before that point.
@@ -635,10 +640,13 @@ describe("withUpdateContender - canonical first-run boundary", () => {
     // what it sees.
     process.kill(rebound.descendantPid, "SIGTERM");
     const probeEnd = Math.min(Date.now() + 200, graceStartedAt + 2_000);
-    do {
+    let probes = 0;
+    while (Date.now() < probeEnd) {
       expect(() => process.kill(rebound.descendantPid, 0)).not.toThrow();
+      probes += 1;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    } while (Date.now() < probeEnd);
+    }
+    expect(probes).toBeGreaterThan(0);
     forgetChild(blocked);
     await waitForFile(join(barrierDir, "descendant-killed"), 10_000);
     await waitForFile(join(barrierDir, "group-absent"), 10_000);

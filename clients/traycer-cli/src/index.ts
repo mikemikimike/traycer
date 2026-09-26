@@ -93,9 +93,11 @@ import {
 import { buildHostRestartCommand } from "./commands/host-restart";
 import { runHostStart, type RunHostStartOptions } from "./commands/host-start";
 import { readHostStartAdoptionNonce } from "./host/host-start-adoption";
+import { LIFECYCLE_ORIGIN_COMMANDS } from "@traycer/protocol/config/lifecycle-origin-commands";
 import {
   HOST_START_ORIGINS,
   hostStartOriginFromOption,
+  type HostStartOrigin,
 } from "./host/lifecycle-origin";
 import {
   acknowledgeRelocationEntry,
@@ -225,18 +227,64 @@ function attemptAdoptionOption(): Option {
  * runner's envelope instead of a silently mislabelled start.
  *
  * Registered on every command Desktop invokes that can start the host, and on
- * `host stop`, which starts nothing but is on Desktop's same invocation path.
- * On `host restart` and `host free-port-and-restart` the relaunch is always
- * recorded as `maintenance` whatever this says: a restart brings back a run
- * that already existed.
+ * `host stop` and `host uninstall`, which start nothing but are on Desktop's
+ * same invocation path (`host uninstall` refuses a desktop request over a host
+ * a person started in a terminal) - exactly `LIFECYCLE_ORIGIN_COMMANDS`, which
+ * `assertLifecycleOriginCommands` checks. On `host restart` and
+ * `host free-port-and-restart` the relaunch is always recorded as
+ * `maintenance` whatever this says: a restart brings back a run that already
+ * existed.
+ *
+ * `maintenance` is not a choice. Only those relaunch legs may record it, and
+ * a `granted` + `maintenance` start is one that continues its predecessor's
+ * run (`continuesPredecessorRun`) - a caller able to name it could make an
+ * ordinary start inherit a Linked stop it never asked for.
  */
 function lifecycleOriginOption(): Option {
   return new Option(
     "--lifecycle-origin <origin>",
-    "Internal: who is asking for this host start (desktop, terminal, maintenance)",
+    "Internal: who is asking for this host start (desktop, terminal)",
   )
-    .choices(HOST_START_ORIGINS)
+    .choices(COMMAND_LINE_HOST_START_ORIGINS)
     .hideHelp();
+}
+
+const COMMAND_LINE_HOST_START_ORIGINS: readonly HostStartOrigin[] =
+  HOST_START_ORIGINS.filter((origin) => origin !== "maintenance");
+
+/**
+ * The commands carrying `--lifecycle-origin` must be exactly
+ * `LIFECYCLE_ORIGIN_COMMANDS`, the list Traycer Desktop reads to decide where
+ * to append `--lifecycle-origin desktop`. Commander rejects an unknown option,
+ * so a listed command without the flag would fail every Desktop call to it,
+ * and a flagged command off the list would record Desktop's starts as
+ * `terminal`. Checked on every program build - every CLI test builds one - so
+ * a drift on either side fails the first test that runs, never a user's start.
+ */
+function assertLifecycleOriginCommands(program: Command): void {
+  const expected = new Set(
+    LIFECYCLE_ORIGIN_COMMANDS.map((path) => path.join(" ")),
+  );
+  const registered = new Set<string>();
+  const visit = (command: Command, path: readonly string[]): void => {
+    for (const child of command.commands) {
+      const childPath = [...path, child.name()];
+      if (
+        child.options.some((option) => option.long === "--lifecycle-origin")
+      ) {
+        registered.add(childPath.join(" "));
+      }
+      visit(child, childPath);
+    }
+  };
+  visit(program, []);
+  const missing = [...expected].filter((path) => !registered.has(path));
+  const extra = [...registered].filter((path) => !expected.has(path));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(
+      `--lifecycle-origin registrations differ from LIFECYCLE_ORIGIN_COMMANDS (missing: ${missing.join(", ") || "none"}; unlisted: ${extra.join(", ") || "none"})`,
+    );
+  }
 }
 
 /**
@@ -605,6 +653,7 @@ export function buildProgramWithAgentRoles(
   // raw prose onto an NDJSON stream.
   applyRunnerErrorRouting(program);
   installHostUpdateVersionParser(program);
+  assertLifecycleOriginCommands(program);
   return program;
 }
 
@@ -1298,6 +1347,7 @@ function registerHostCommands(program: Command): void {
         ifIdle: opts.ifIdle === true,
         force: opts.force === true,
         deferIfParked: opts.deferIfParked === true,
+        lifecycleOrigin: hostStartOriginFromOption(opts.lifecycleOrigin),
       }),
   );
 
@@ -1322,6 +1372,7 @@ function registerHostCommands(program: Command): void {
       buildHostStopCommand({
         force: opts.force === true,
         ifIdle: opts.ifIdle === true,
+        lifecycleOrigin: hostStartOriginFromOption(opts.lifecycleOrigin),
       }),
   );
 
@@ -1923,10 +1974,12 @@ function registerHostCommands(program: Command): void {
           "Neither mode touches your data or credentials under ~/.traycer.",
           "",
         ].join("\n"),
-      ),
+      )
+      .addOption(lifecycleOriginOption()),
     (opts) =>
       buildHostUninstallCommand({
         all: opts.all === true,
+        lifecycleOrigin: hostStartOriginFromOption(opts.lifecycleOrigin),
       }),
   );
 
@@ -2060,6 +2113,7 @@ function registerHostCommands(program: Command): void {
         pid,
         port,
         deferIfParked: opts.deferIfParked === true,
+        lifecycleOrigin: hostStartOriginFromOption(opts.lifecycleOrigin),
       });
     },
   );

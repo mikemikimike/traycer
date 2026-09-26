@@ -19,12 +19,14 @@ const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 
 let workHome: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   workHome = mkdtempSync(join(tmpdir(), "traycer-lifecycle-files-test-"));
   osHome.current = workHome;
   process.env.HOME = workHome;
   process.env.USERPROFILE = workHome;
   vi.resetModules();
+  const { hostHomeDir } = await import("../../store/paths");
+  expect(hostHomeDir("production").startsWith(workHome)).toBe(true);
 });
 
 afterEach(() => {
@@ -41,6 +43,7 @@ afterEach(() => {
   rmSync(workHome, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.doUnmock("../../store/process-identity");
+  vi.doUnmock("node:fs/promises");
 });
 
 const ENVIRONMENT = "production";
@@ -279,6 +282,54 @@ describe("writeSupervisorRecords / removeSupervisorRecords", () => {
       removeSupervisorRecords(ENVIRONMENT, process.pid, "all"),
     ).resolves.toBeUndefined();
   });
+
+  // T11: a writer landing a NEWER record at the canonical path between the
+  // claim-rename and the restore-link must win; the restore must not clobber
+  // it. `link()` throws when the destination already exists, which is what
+  // makes the claimed-owner's `link` a no-op restore here.
+  it("restores only while the canonical name is still vacant", async () => {
+    const newerRunState = {
+      v: 1 as const,
+      supervisorPid: process.pid + 2,
+      supervisorStartIdentity: null,
+      admission: "foreground" as const,
+      origin: null,
+      adopted: false,
+      lastPresence: null,
+      updatedAt: "2026-09-24T00:05:00.000Z",
+    };
+    const newerRunStateText = `${JSON.stringify(newerRunState, null, 2)}\n`;
+
+    vi.doMock("node:fs/promises", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs/promises")>();
+      return {
+        ...actual,
+        link: async (existingPath: string, newPath: string) => {
+          if (newPath.endsWith("supervisor-run.json")) {
+            await actual.writeFile(newPath, newerRunStateText);
+          }
+          return actual.link(existingPath, newPath);
+        },
+      };
+    });
+
+    const {
+      writeSupervisorRecords,
+      removeSupervisorRecords,
+      supervisorRunStatePath,
+      readSupervisorRunState,
+    } = await import("../lifecycle-files");
+
+    const otherPid = process.pid + 1;
+    await writeSupervisorRecords(ENVIRONMENT, buildRecords(otherPid));
+
+    await removeSupervisorRecords(ENVIRONMENT, process.pid, "all");
+
+    const fs = await import("node:fs/promises");
+    const runStatePath = supervisorRunStatePath(ENVIRONMENT);
+    expect(await fs.readFile(runStatePath, "utf8")).toBe(newerRunStateText);
+    expect((await readSupervisorRunState(ENVIRONMENT)).kind).toBe("valid");
+  });
 });
 
 describe("parseSupervisorRunStateText", () => {
@@ -443,13 +494,21 @@ describe("probeDesktopPresenceLiveness", () => {
 });
 
 describe("removeSupervisorRecords keep-run-state", () => {
+  // T5: a valid start identity (`isProcessStartIdentity`) is required, or the
+  // run-state record fails to parse and the byte-equality assertion below
+  // would hold whether or not `keep-run-state` actually skipped the removal.
   it("removes supervisor.json only and leaves supervisor-run.json byte-identical", async () => {
     const {
       writeSupervisorRecords,
       removeSupervisorRecords,
       readSupervisorRecord,
+      readSupervisorRunState,
       supervisorRunStatePath,
     } = await import("../lifecycle-files");
+    const { readProcessStartIdentity } =
+      await import("../../store/process-identity");
+    const identity = await readProcessStartIdentity(process.pid);
+    if (identity === null) throw new Error("cannot read own start identity");
     await writeSupervisorRecords(ENVIRONMENT, {
       record: {
         v: 1,
@@ -461,7 +520,7 @@ describe("removeSupervisorRecords keep-run-state", () => {
       runState: {
         v: 1,
         supervisorPid: process.pid,
-        supervisorStartIdentity: "ident",
+        supervisorStartIdentity: identity,
         admission: "unattended",
         origin: null,
         adopted: true,
@@ -469,6 +528,7 @@ describe("removeSupervisorRecords keep-run-state", () => {
         updatedAt: "2026-09-24T00:00:00.000Z",
       },
     });
+    expect((await readSupervisorRunState(ENVIRONMENT)).kind).toBe("valid");
     const fs = await import("node:fs/promises");
     const runStatePath = supervisorRunStatePath(ENVIRONMENT);
     const before = await fs.readFile(runStatePath, "utf8");
@@ -478,6 +538,224 @@ describe("removeSupervisorRecords keep-run-state", () => {
     expect((await readSupervisorRecord(ENVIRONMENT)).kind).toBe("absent");
     expect(await fs.readFile(runStatePath, "utf8")).toBe(before);
   });
+});
+
+describe("markSupervisorRunOwed", () => {
+  // A record the run-state parser accepts: the mark never rewrites a record
+  // it cannot parse (a malformed start identity fails the schema).
+  function runState(supervisorPid: number): SupervisorRecords["runState"] {
+    return {
+      v: 1,
+      supervisorPid,
+      supervisorStartIdentity: null,
+      admission: "unattended",
+      origin: null,
+      adopted: true,
+      lastPresence: null,
+      updatedAt: "2026-09-24T00:00:00.000Z",
+    };
+  }
+
+  function supervisorRecord(pid: number): SupervisorRecords["record"] {
+    return {
+      v: 1,
+      pid,
+      cliVersion: "0.0.0-test",
+      capabilities: ["lifecycle-policy-v1"],
+      startedAt: "2026-09-24T00:00:00.000Z",
+    };
+  }
+
+  it("marks the run state this supervisor published, keeping every field", async () => {
+    const {
+      writeSupervisorRecords,
+      markSupervisorRunOwed,
+      readSupervisorRunState,
+      supervisorRunStatePath,
+    } = await import("../lifecycle-files");
+    await writeSupervisorRecords(ENVIRONMENT, {
+      record: supervisorRecord(4242),
+      runState: runState(4242),
+    });
+
+    await markSupervisorRunOwed(ENVIRONMENT, 4242);
+
+    const fs = await import("node:fs/promises");
+    const raw: unknown = JSON.parse(
+      await fs.readFile(supervisorRunStatePath(ENVIRONMENT), "utf8"),
+    );
+    expect(raw).toMatchObject({ owesSuccessor: true });
+    const read = await readSupervisorRunState(ENVIRONMENT);
+    expect(read).toEqual({ kind: "valid", record: runState(4242) });
+  });
+
+  it("leaves a successor's run state byte-identical: a record naming another pid is not this exit's to mark", async () => {
+    const {
+      writeSupervisorRecords,
+      markSupervisorRunOwed,
+      supervisorRunStatePath,
+    } = await import("../lifecycle-files");
+    await writeSupervisorRecords(ENVIRONMENT, {
+      record: supervisorRecord(5151),
+      runState: runState(5151),
+    });
+    const fs = await import("node:fs/promises");
+    const path = supervisorRunStatePath(ENVIRONMENT);
+    const before = await fs.readFile(path, "utf8");
+
+    await markSupervisorRunOwed(ENVIRONMENT, 4242);
+
+    expect(await fs.readFile(path, "utf8")).toBe(before);
+    expect(
+      (await fs.readdir(dirname(path))).filter((name) =>
+        name.endsWith(".owed"),
+      ),
+    ).toEqual([]);
+  });
+
+  it("is a no-op when there is no run state", async () => {
+    const { markSupervisorRunOwed, supervisorRunStatePath } =
+      await import("../lifecycle-files");
+    await markSupervisorRunOwed(ENVIRONMENT, 4242);
+    const fs = await import("node:fs/promises");
+    await expect(
+      fs.stat(supervisorRunStatePath(ENVIRONMENT)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+describe("writeSupervisorRecords stamps supervisor.json's startIdentity from the run state (F11)", () => {
+  async function readRawSupervisorRecordJson(): Promise<unknown> {
+    const { supervisorRecordPath } =
+      await import("@traycer/protocol/config/supervisor-record");
+    const { hostHomeDir } = await import("../../store/paths");
+    const fs = await import("node:fs/promises");
+    const text = await fs.readFile(
+      supervisorRecordPath(hostHomeDir(ENVIRONMENT)),
+      "utf8",
+    );
+    const raw: unknown = JSON.parse(text);
+    return raw;
+  }
+
+  it("stamps supervisor.json's startIdentity from runState.supervisorStartIdentity", async () => {
+    const { writeSupervisorRecords } = await import("../lifecycle-files");
+    const identity = "darwin:Sun Jul 6 12:00:00 2026";
+    await writeSupervisorRecords(ENVIRONMENT, {
+      record: {
+        v: 1,
+        pid: process.pid,
+        cliVersion: "0.0.0-test",
+        capabilities: ["lifecycle-policy-v1"],
+        startedAt: "2026-09-24T00:00:00.000Z",
+      },
+      runState: {
+        v: 1,
+        supervisorPid: process.pid,
+        supervisorStartIdentity: identity,
+        admission: "foreground",
+        origin: null,
+        adopted: false,
+        lastPresence: null,
+        updatedAt: "2026-09-24T00:00:00.000Z",
+      },
+    });
+
+    expect(await readRawSupervisorRecordJson()).toHaveProperty(
+      "startIdentity",
+      identity,
+    );
+  });
+
+  it("stamps a null startIdentity, with the key present", async () => {
+    const { writeSupervisorRecords } = await import("../lifecycle-files");
+    await writeSupervisorRecords(ENVIRONMENT, {
+      record: {
+        v: 1,
+        pid: process.pid,
+        cliVersion: "0.0.0-test",
+        capabilities: ["lifecycle-policy-v1"],
+        startedAt: "2026-09-24T00:00:00.000Z",
+      },
+      runState: {
+        v: 1,
+        supervisorPid: process.pid,
+        supervisorStartIdentity: null,
+        admission: "foreground",
+        origin: null,
+        adopted: false,
+        lastPresence: null,
+        updatedAt: "2026-09-24T00:00:00.000Z",
+      },
+    });
+
+    const raw = await readRawSupervisorRecordJson();
+    expect(raw).toHaveProperty("startIdentity", null);
+  });
+});
+
+// F4 (lifecycle side): "the desktop leaves a host that a person started in a
+// terminal untouched; the mode governs the service run only." `admittedAs`
+// on `supervisor.json` is how a reader (the desktop) tells a mode-governed
+// run from a person's own terminal start, stamped from the run state's
+// `admission` this CLI already tracks privately: `granted` and `unattended`
+// both collapse to `"service"` (a labelled, mode-governed start - an
+// explicit admission proof or a service-manager relaunch), and `foreground`
+// stays `"foreground"` (never parked). Read via raw JSON / `toHaveProperty`
+// so this runs unmodified on current bytes, where the field does not exist
+// yet - vitest does not type-check.
+describe("writeSupervisorRecords stamps supervisor.json's admittedAs from the run state's admission (F4)", () => {
+  async function readRawSupervisorRecordJson(): Promise<unknown> {
+    const { supervisorRecordPath } =
+      await import("@traycer/protocol/config/supervisor-record");
+    const { hostHomeDir } = await import("../../store/paths");
+    const fs = await import("node:fs/promises");
+    const text = await fs.readFile(
+      supervisorRecordPath(hostHomeDir(ENVIRONMENT)),
+      "utf8",
+    );
+    const raw: unknown = JSON.parse(text);
+    return raw;
+  }
+
+  const admissionCases: ReadonlyArray<{
+    readonly admission: "granted" | "unattended" | "foreground";
+    readonly expectedAdmittedAs: "service" | "foreground";
+  }> = [
+    { admission: "granted", expectedAdmittedAs: "service" },
+    { admission: "unattended", expectedAdmittedAs: "service" },
+    { admission: "foreground", expectedAdmittedAs: "foreground" },
+  ];
+
+  for (const testCase of admissionCases) {
+    it(`stamps admittedAs "${testCase.expectedAdmittedAs}" from admission "${testCase.admission}"`, async () => {
+      const { writeSupervisorRecords } = await import("../lifecycle-files");
+      await writeSupervisorRecords(ENVIRONMENT, {
+        record: {
+          v: 1,
+          pid: process.pid,
+          cliVersion: "0.0.0-test",
+          capabilities: ["lifecycle-policy-v1"],
+          startedAt: "2026-09-24T00:00:00.000Z",
+        },
+        runState: {
+          v: 1,
+          supervisorPid: process.pid,
+          supervisorStartIdentity: null,
+          admission: testCase.admission,
+          origin: null,
+          adopted: false,
+          lastPresence: null,
+          updatedAt: "2026-09-24T00:00:00.000Z",
+        },
+      });
+
+      expect(await readRawSupervisorRecordJson()).toHaveProperty(
+        "admittedAs",
+        testCase.expectedAdmittedAs,
+      );
+    });
+  }
 });
 
 describe("readInheritableRunOwnership", () => {
@@ -498,11 +776,25 @@ describe("readInheritableRunOwnership", () => {
     readonly startIdentity: string | null;
   }
 
+  /**
+   * A predecessor that exited owing a successor, made the way the supervisor
+   * makes it: both records published, then the owed mark its exit writes
+   * (`markSupervisorRunOwed`), then `removeSupervisorRecords(...,
+   * "keep-run-state")` - the run state kept and marked, `supervisor.json`
+   * gone. Without the mark the kept file alone proves nothing (a SIGKILL
+   * leaves one too), which `readInheritableRunOwnership` must refuse
+   * (`lifecycle-files-owed-exit.test.ts`) - so every row here that inherits,
+   * or that refuses for some OTHER reason, starts from this footprint.
+   */
   async function writePredecessor(input: {
     readonly adopted: boolean;
     readonly identity: string | null;
   }): Promise<void> {
-    const { writeSupervisorRecords } = await import("../lifecycle-files");
+    const {
+      writeSupervisorRecords,
+      markSupervisorRunOwed,
+      removeSupervisorRecords,
+    } = await import("../lifecycle-files");
     await writeSupervisorRecords(ENVIRONMENT, {
       record: {
         v: 1,
@@ -527,6 +819,12 @@ describe("readInheritableRunOwnership", () => {
         updatedAt: "2026-09-24T00:00:00.000Z",
       },
     });
+    await markSupervisorRunOwed(ENVIRONMENT, PREDECESSOR_PID);
+    await removeSupervisorRecords(
+      ENVIRONMENT,
+      PREDECESSOR_PID,
+      "keep-run-state",
+    );
   }
 
   function mockProbe(
@@ -626,5 +924,121 @@ describe("readInheritableRunOwnership", () => {
     writeFileSync(path, "not json {");
     expect(await readInheritableRunOwnership(ENVIRONMENT)).toBeNull();
     expect(calls).toHaveLength(0);
+  });
+
+  /** `supervisor.json` naming `pid`, through the real serializer - never
+   * hand-written JSON. */
+  async function writeSupervisorJsonNaming(pid: number): Promise<void> {
+    const { serializeSupervisorRecord } =
+      await import("@traycer/protocol/config/supervisor-record");
+    const { supervisorRecordPath } =
+      await import("@traycer/protocol/config/supervisor-record");
+    const { hostHomeDir } = await import("../../store/paths");
+    const path = supervisorRecordPath(hostHomeDir(ENVIRONMENT));
+    writeFileSync(
+      path,
+      serializeSupervisorRecord({
+        v: 1,
+        pid,
+        cliVersion: "0.0.0-test",
+        capabilities: ["lifecycle-policy-v1"],
+        startedAt: "2026-09-24T00:00:00.000Z",
+        startIdentity: null,
+        admittedAs: null,
+      }),
+    );
+  }
+
+  // F2-INHERIT (A)1: an owed exit removes `supervisor.json` on its way out
+  // (`removeSupervisorRecords(..., "keep-run-state")`); a predecessor that
+  // was killed, crashed or lost its session never reaches that step and
+  // leaves BOTH files, still naming itself. `readInheritableRunOwnership`
+  // must not inherit from that shape.
+  it("a predecessor killed before its exit (supervisor.json still names it) is not inherited", async () => {
+    mockProbe([], "dead");
+    const identity = await validIdentity();
+    await writePredecessor({ adopted: true, identity });
+    await writeSupervisorJsonNaming(PREDECESSOR_PID);
+    const { readInheritableRunOwnership } = await import("../lifecycle-files");
+    expect(await readInheritableRunOwnership(ENVIRONMENT)).toBeNull();
+  });
+
+  // F2-INHERIT (A)3: a `supervisor.json` naming a DIFFERENT pid than the
+  // run state's predecessor is just as much evidence the predecessor never
+  // reached its own exit cleanup (a second supervisor's live record, or a
+  // stale one from a third process) - never inherited either.
+  it("a supervisor.json naming a pid other than the run state's predecessor is not inherited either", async () => {
+    mockProbe([], "dead");
+    const identity = await validIdentity();
+    await writePredecessor({ adopted: true, identity });
+    await writeSupervisorJsonNaming(PREDECESSOR_PID + 1);
+    const { readInheritableRunOwnership } = await import("../lifecycle-files");
+    expect(await readInheritableRunOwnership(ENVIRONMENT)).toBeNull();
+  });
+
+  // F2-INHERIT (A)4: a stop exit that DID reach `removeSupervisorRecords`
+  // but whose run-state half of the removal failed (`rename` rejects) is the
+  // same observable shape as a never-attempted removal: `supervisor.json`
+  // gone, `supervisor-run.json` left behind. Nothing a successor may inherit
+  // survives it either.
+  it("a stop exit whose run-state removal failed leaves nothing a successor inherits", async () => {
+    const identity = await validIdentity();
+    const { writeSupervisorRecords, supervisorRunStatePath } =
+      await import("../lifecycle-files");
+    await writeSupervisorRecords(ENVIRONMENT, {
+      record: {
+        v: 1,
+        pid: PREDECESSOR_PID,
+        cliVersion: "0.0.0-test",
+        capabilities: ["lifecycle-policy-v1"],
+        startedAt: "2026-09-24T00:00:00.000Z",
+      },
+      runState: {
+        v: 1,
+        supervisorPid: PREDECESSOR_PID,
+        supervisorStartIdentity: identity,
+        admission: "unattended",
+        origin: null,
+        adopted: true,
+        lastPresence: {
+          pid: 777,
+          onExit: "stop",
+          liveness: "alive",
+          observedAt: "2026-09-24T00:00:00.000Z",
+        },
+        updatedAt: "2026-09-24T00:00:00.000Z",
+      },
+    });
+    const runStatePath = supervisorRunStatePath(ENVIRONMENT);
+
+    vi.doMock("node:fs/promises", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs/promises")>();
+      return {
+        ...actual,
+        rename: (oldPath: string, newPath: string) => {
+          if (oldPath === runStatePath) {
+            const busy = new Error("resource busy");
+            return Promise.reject(Object.assign(busy, { code: "EBUSY" }));
+          }
+          return actual.rename(oldPath, newPath);
+        },
+      };
+    });
+    vi.resetModules();
+    const { removeSupervisorRecords: removeSupervisorRecordsUnderFailure } =
+      await import("../lifecycle-files");
+
+    // `supervisor.json` removes cleanly; `supervisor-run.json`'s rename
+    // rejects, so `removeIfOwned` gives up and leaves it in place.
+    await removeSupervisorRecordsUnderFailure(
+      ENVIRONMENT,
+      PREDECESSOR_PID,
+      "all",
+    );
+
+    mockProbe([], "dead");
+    vi.resetModules();
+    const { readInheritableRunOwnership } = await import("../lifecycle-files");
+    expect(await readInheritableRunOwnership(ENVIRONMENT)).toBeNull();
   });
 });

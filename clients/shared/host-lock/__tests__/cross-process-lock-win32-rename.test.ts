@@ -498,6 +498,82 @@ describe("rewriteLockLivenessIfToken - persistent EPERM (A3)", () => {
   });
 });
 
+describe("rewriteLockLivenessIfToken - ENOENT is not retried (T55)", () => {
+  it("surfaces ENOENT after one rename call", async () => {
+    const dir = await freshDir();
+    const lockPath = join(dir, "host.lock");
+    const outcome = await acquireLock({
+      lockPath,
+      reason: "test",
+      waitMs: 0,
+      pollIntervalMs: 10,
+    });
+    expect(outcome.kind).toBe("acquired");
+    if (outcome.kind !== "acquired") return;
+    const { handle } = outcome;
+
+    stubWin32Platform();
+    fsPromisesMockState.armedRenameFailure = {
+      path: lockPath,
+      code: "ENOENT",
+      remaining: Number.POSITIVE_INFINITY,
+      onFailure: null,
+    };
+
+    const next: LockMetadata = { ...handle.metadata, pid: process.pid + 1 };
+    const rewritten = await rewriteLockLivenessIfToken(
+      lockPath,
+      ownedToken(handle.metadata),
+      next,
+    );
+    expect(rewritten).toBe(false);
+    expect(fsPromisesMockState.renameCallCountByDestination.get(lockPath)).toBe(
+      1,
+    );
+    await handle.release();
+  });
+});
+
+describe("rewriteLockLivenessIfToken - EBUSY and EACCES retry like EPERM (T55)", () => {
+  it.each(["EBUSY", "EACCES"] as const)(
+    "retries past a transient %s and rebinds liveness metadata",
+    async (code) => {
+      const dir = await freshDir();
+      const lockPath = join(dir, "host.lock");
+      const outcome = await acquireLock({
+        lockPath,
+        reason: "test",
+        waitMs: 0,
+        pollIntervalMs: 10,
+      });
+      expect(outcome.kind).toBe("acquired");
+      if (outcome.kind !== "acquired") return;
+      const { handle } = outcome;
+      const newPid = process.pid + 1;
+      const next: LockMetadata = { ...handle.metadata, pid: newPid };
+
+      stubWin32Platform();
+      fsPromisesMockState.armedRenameFailure = {
+        path: lockPath,
+        code,
+        remaining: 2,
+        onFailure: null,
+      };
+
+      const rewritten = await rewriteLockLivenessIfToken(
+        lockPath,
+        ownedToken(handle.metadata),
+        next,
+      );
+      expect(rewritten).toBe(true);
+      expect(
+        fsPromisesMockState.renameCallCountByDestination.get(lockPath),
+      ).toBe(3);
+      await handle.release();
+    },
+  );
+});
+
 describe("rewriteLockLivenessIfToken - off win32 (A4, control)", () => {
   it("does not retry a transient rename failure off win32", async () => {
     const dir = await freshDir();

@@ -310,6 +310,7 @@ const UNAVAILABLE_DEFAULT_HOST_CONTROLLER: HostReadinessController = {
     progress: null,
     lastProgress: null,
     provisioningError: null,
+    ensureFailure: null,
     provisioning: false,
     removed: false,
     hostBusy: false,

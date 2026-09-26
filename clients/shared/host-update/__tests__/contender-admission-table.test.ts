@@ -9,6 +9,7 @@ import type {
   HostUpdateAttemptRecord,
 } from "../record";
 import {
+  withLifecycleTeardownContender,
   withSupervisorRelaunchContender,
   withUpdateContender,
   withUpdateExecutorCompletionSegment,
@@ -262,6 +263,12 @@ async function enter(
       run,
     );
   }
+  if (admission === "lifecycle-teardown-maintenance") {
+    return withLifecycleTeardownContender(
+      { ...base, readInstalledIdentity: async () => INSTALLED },
+      run,
+    );
+  }
   return withUpdateContender({ ...base, admission }, run);
 }
 
@@ -486,7 +493,7 @@ const LIFECYCLE_TEARDOWN_TABLE: ShapeTable = {
   applying: "refuse",
   "waiting-for-work": "ran",
   "waiting-to-activate-claim": "ran",
-  "waiting-to-activate-claimless": "ran",
+  "waiting-to-activate-claimless": "refuse",
   restarting: "refuse",
   verifying: "refuse",
   faulted: "record-fail-closed",
@@ -506,11 +513,7 @@ describe("lifecycle-teardown-maintenance x record shapes", () => {
     });
   }
 
-  it.each([
-    "waiting-for-work",
-    "waiting-to-activate-claim",
-    "waiting-to-activate-claimless",
-  ] as const)(
+  it.each(["waiting-for-work", "waiting-to-activate-claim"] as const)(
     "over the %s park the callback sees that record as activeAttempt and the file is untouched",
     async (shape) => {
       const hostHomeDir = await freshHome();
@@ -531,4 +534,103 @@ describe("lifecycle-teardown-maintenance x record shapes", () => {
       expect(await readFile(path, "utf8")).toBe(before);
     },
   );
+
+  // R-B: a claimless `waiting-to-activate` is refused, not admitted - the
+  // teardown judges the park the same way `supervisor-relaunch-maintenance`
+  // would, which fails closed with no baseline to prove the installed
+  // generation is this attempt's. The record is left standing untouched:
+  // refusing takes no lock-holding write, only the read that decided it.
+  it("over the waiting-to-activate-claimless park: refused, the file is untouched", async () => {
+    const hostHomeDir = await freshHome();
+    await seed(hostHomeDir, "waiting-to-activate-claimless");
+    const path = updateAttemptRecordPath(hostHomeDir);
+    const before = await readFile(path, "utf8");
+
+    const outcome = await enter(
+      hostHomeDir,
+      "lifecycle-teardown-maintenance",
+      () => undefined,
+    );
+
+    expect(cellOf(outcome)).toBe("refuse");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+
+  // R-B: a claim whose installGeneration disagrees with the installed
+  // identity is the same "not this attempt's bytes" failure as no claim at
+  // all - refused, never admitted just because a claim object is present.
+  it("over a waiting-to-activate park whose claim generation disagrees with the installed identity: refused", async () => {
+    const hostHomeDir = await freshHome();
+    await mkdir(hostHomeDir, { recursive: true });
+    await writeFile(
+      updateAttemptRecordPath(hostHomeDir),
+      `${JSON.stringify(
+        record({
+          phase: "waiting-to-activate",
+          execution: "parked",
+          continuation: "activate",
+          claim: {
+            ...CLAIM,
+            installGeneration: "mismatched-generation-does-not-match-installed",
+          },
+        }),
+      )}\n`,
+    );
+
+    const outcome = await enter(
+      hostHomeDir,
+      "lifecycle-teardown-maintenance",
+      () => undefined,
+    );
+
+    expect(cellOf(outcome)).toBe("refuse");
+  });
+
+  // R-B: an installed-identity read that fails (no readable install record)
+  // is unverifiable, not "assume the park is fine" - refused, the same
+  // answer `supervisorRelaunchDisposition` gives `installed === null`.
+  it("over a matching waiting-to-activate-claim park, when the installed-identity reader returns null: refused", async () => {
+    const hostHomeDir = await freshHome();
+    await seed(hostHomeDir, "waiting-to-activate-claim");
+
+    const outcome = await withLifecycleTeardownContender(
+      {
+        hostHomeDir,
+        reason: "admission-table",
+        waitMs: 0,
+        pollIntervalMs: 10,
+        readInstalledIdentity: async () => null,
+      },
+      async () => "ran",
+    );
+
+    expect(cellOf(outcome)).toBe("refuse");
+  });
+
+  // R-B: the reader is not optional plumbing - entering through the raw
+  // `withUpdateContender` (no reader supplied at all, the shape every
+  // pre-existing admission still uses) must fail CLOSED over a
+  // `waiting-to-activate` park, exactly like a supplied-but-failing reader
+  // above. `dispositionForAttempt` reads `readInstalledIdentity === null` as
+  // "no reader was SUPPLIED", which `lifecycleTeardownDisposition` must
+  // refuse rather than treat as license to admit unconditionally - the exact
+  // regression this whole file's `waiting-to-activate-claimless` cell change
+  // exists to catch.
+  it("entered through the raw withUpdateContender (no reader) over waiting-to-activate-claim: refused", async () => {
+    const hostHomeDir = await freshHome();
+    await seed(hostHomeDir, "waiting-to-activate-claim");
+
+    const outcome = await withUpdateContender(
+      {
+        hostHomeDir,
+        reason: "admission-table",
+        waitMs: 0,
+        pollIntervalMs: 10,
+        admission: "lifecycle-teardown-maintenance",
+      },
+      async () => "ran",
+    );
+
+    expect(cellOf(outcome)).toBe("refuse");
+  });
 });

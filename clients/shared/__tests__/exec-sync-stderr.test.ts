@@ -78,6 +78,7 @@ function runWorker(
 ): WorkerRun {
   const result = spawnSync("bun", ["run", scriptPath], {
     encoding: "utf8",
+    timeout: 15_000,
     env: {
       ...process.env,
       // Fake `ps` first on PATH: whatever the worker (or the production code

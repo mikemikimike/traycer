@@ -4,6 +4,7 @@ import type {
   HostQuitDecisionResponse,
 } from "@traycer-clients/shared/platform/runner-host";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
+import { hostLifecycleModeSetAnalyticsFor } from "@/lib/host/host-lifecycle-mode-set-analytics";
 import { runnerMutationKeys } from "@/lib/query-keys/runner-mutation-keys";
 import { toastFromRunnerError } from "@/lib/runner-error-toast";
 import { useRunnerHostOrNull } from "@/providers/use-runner-host";
@@ -31,20 +32,28 @@ export interface HostQuitRespondInput {
 /**
  * Sends the quit modal's one answer to main's held-open quit, and records it.
  *
- * `host_quit_decision` carries enums and booleans only. A remembered Keep or
- * Stop is also a lifecycle mode change - main writes Background or Linked - so
- * it additionally reports `host_lifecycle_mode_set` from the quit modal.
- * Both fire only once main has the answer.
+ * `host_quit_decision` carries enums and booleans only, and fires once main
+ * has the answer. A remembered Keep or Stop also asks main to write
+ * Background or Linked; that is reported as `host_lifecycle_mode_set` only
+ * when main's change push shows the mode written, so this registers the
+ * expectation before the answer is sent (`HostLifecycleModeSetAnalytics`).
  */
 export function useRunnerHostQuitRespondMutation() {
   const runnerHost = useRunnerHostOrNull();
+  const hostLifecycle = runnerHost === null ? null : runnerHost.hostLifecycle;
   return useMutation({
     mutationKey: runnerMutationKeys.hostQuitRespond(),
+    onMutate: (input: HostQuitRespondInput) => {
+      const decision = input.response.decision;
+      if (hostLifecycle === null || decision.kind === "cancel") return;
+      if (!decision.remember) return;
+      hostLifecycleModeSetAnalyticsFor(hostLifecycle).expect(
+        decision.kind === "keep" ? "background" : "linked",
+        "quit-modal",
+      );
+    },
     mutationFn: (input: HostQuitRespondInput) => {
-      const quit =
-        runnerHost === null || runnerHost.hostLifecycle === null
-          ? null
-          : runnerHost.hostLifecycle.quit;
+      const quit = hostLifecycle === null ? null : hostLifecycle.quit;
       if (quit === null) {
         throw new Error("Quit prompts are only answered in the desktop app.");
       }
@@ -61,13 +70,13 @@ export function useRunnerHostQuitRespondMutation() {
         forced: decision.kind === "stop" ? decision.force : false,
         remembered,
       });
-      if (decision.kind === "cancel" || !decision.remember) return;
-      Analytics.getInstance().track(AnalyticsEvent.HostLifecycleModeSet, {
-        mode: decision.kind === "keep" ? "background" : "linked",
-        source: "quit-modal",
-      });
     },
-    onError: (error) =>
-      toastFromRunnerError(error, "Couldn't answer the quit prompt"),
+    onError: (error) => {
+      // Main never had the answer, so it writes nothing.
+      if (hostLifecycle !== null) {
+        hostLifecycleModeSetAnalyticsFor(hostLifecycle).withdraw("quit-modal");
+      }
+      toastFromRunnerError(error, "Couldn't answer the quit prompt");
+    },
   });
 }

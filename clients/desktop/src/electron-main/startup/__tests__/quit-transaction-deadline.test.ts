@@ -101,6 +101,7 @@ vi.mock("../../app/update-preferences", async (importOriginal) => {
 import {
   spawnDetachedBundledTraycerCliJson,
   streamBundledTraycerCliJson,
+  TraycerCliError,
 } from "../../cli/traycer-cli";
 import { HostController } from "../../host/host-controller";
 import {
@@ -116,9 +117,16 @@ const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 const ORIGINAL_DEV_DESKTOP_SLOT = process.env[DEV_DESKTOP_SLOT_ENV];
 const DEADLINE_MS = 200;
+// F31 (Phase E): the relaunch-supersede path never races the stop's own
+// deadline budget - these tests keep it out of the way entirely.
+const LONG_DEADLINE_MS = 30_000;
 const VIEW: HostLifecycleView = {
   desired: { mode: "linked", rev: 1, updatedBy: "desktop", updatedAt: null },
-  applied: { localHostCapability: "managed", supervisor: "not-running" },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
   pending: "none",
 };
 let workHome: string;
@@ -171,6 +179,15 @@ function newController(): HostController {
     reachabilityProbe: async () => true,
     desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
     desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+    // No supervisor run: the quit's stop is the service host's, never a
+    // terminal-started one this app leaves alone.
+    supervisorRun: {
+      readSupervisorRun: async () => ({
+        state: "not-running",
+        supervisorPid: null,
+        admittedAs: null,
+      }),
+    },
   });
 }
 
@@ -215,24 +232,44 @@ function detachedStopCalls(): number {
   return vi.mocked(spawnDetachedBundledTraycerCliJson).mock.calls.length;
 }
 
+/** F31/T04: every detached spawn's args, in call order - the marker pins. */
+function detachedArgs(): readonly (readonly string[])[] {
+  return vi
+    .mocked(spawnDetachedBundledTraycerCliJson)
+    .mock.calls.map(([opts]) => [...opts.args]);
+}
+
 interface Quitter {
   readonly txs: QuitTransactions;
   readonly authorized: () => number;
   readonly outcomes: StopHostOutcome[];
+  readonly verdicts: string[];
+  readonly updateSeqCalls: () => number;
+  /** F31 (Phase E): flip the relaunch on for a later `onBeforeQuit()` pass. */
+  setRelaunchIntended(value: boolean): void;
 }
 
 function newQuitter(
   controller: HostController,
-  mode: "linked" | "ask",
+  mode: "linked" | "ask" | "stop-if-idle",
   answer: () => Promise<HostQuitDecisionResponse>,
+  deadlineMs: number,
 ): Quitter {
   const outcomes: StopHostOutcome[] = [];
+  const verdicts: string[] = [];
   let authorized = 0;
+  let relaunchIntended = false;
+  let updateSeqCalls = 0;
   const txs = new QuitTransactions({
-    isInstallingUpdate: () => false,
+    isRelaunchIntended: () => relaunchIntended,
+    isLocalHostRunning: () => Promise.resolve(true),
+    isForegroundHostRun: async () => false,
     lifecycle: {
       readQuitPolicy: async () => ({ mode, rev: 1 }),
-      writeQuitVerdict: async () => "written",
+      writeQuitVerdict: async (onExit) => {
+        verdicts.push(onExit);
+        return "written";
+      },
       releaseQuitVerdict: async () => undefined,
       setMode: async () => ({ kind: "applied", view: VIEW }),
     },
@@ -246,13 +283,23 @@ function newQuitter(
       quiesce: () => {
         controller.quiesce();
       },
+      spawnServiceDefinitionRefresh: () =>
+        controller.spawnServiceDefinitionRefresh(),
+      // F31 (Phase E): forwards the REAL controller's getter, so `join()`'s
+      // admission check is proved against the real mutation lane, not a
+      // fake that could drift from what `host-controller.ts` actually does.
+      get lifecycleAdmissionBlock() {
+        return controller.lifecycleAdmissionBlock;
+      },
     },
     requestDecision: answer,
     withdrawDecision: () => undefined,
     askNatively: async () => ({ kind: "keep", remember: false }),
     publishState: () => undefined,
     unsyncedEditsGate: async () => "proceed",
-    runUpdateInstallSequence: async () => undefined,
+    runUpdateInstallSequence: async () => {
+      updateSeqCalls += 1;
+    },
     authorizeQuitAfterFlush: () => {
       authorized += 1;
     },
@@ -261,9 +308,18 @@ function newQuitter(
     revealStopping: () => undefined,
     setStoppingIndicator: () => undefined,
     revealDelayMs: 1_000,
-    deadlineMs: DEADLINE_MS,
+    deadlineMs,
   });
-  return { txs, authorized: () => authorized, outcomes };
+  return {
+    txs,
+    authorized: () => authorized,
+    outcomes,
+    verdicts,
+    updateSeqCalls: () => updateSeqCalls,
+    setRelaunchIntended: (value) => {
+      relaunchIntended = value;
+    },
+  };
 }
 
 async function blockLaneWithInstall(
@@ -297,9 +353,14 @@ describe("quit deadline withdrawal (real HostController)", () => {
   it("a Linked stop still queued at the deadline: authorize fires, and the stop is NEVER spawned once the lane frees", async () => {
     const real = newController();
     const blocker = await blockLaneWithInstall(real);
-    const quitter = newQuitter(real, "linked", () => {
-      throw new Error("linked never prompts");
-    });
+    const quitter = newQuitter(
+      real,
+      "linked",
+      () => {
+        throw new Error("linked never prompts");
+      },
+      DEADLINE_MS,
+    );
 
     quitter.txs.onBeforeQuit();
     await sleep(DEADLINE_MS / 2);
@@ -323,9 +384,14 @@ describe("quit deadline withdrawal (real HostController)", () => {
 
   it("positive control: a stop admitted before the deadline is spawned exactly once (detached, if-idle)", async () => {
     const real = newController();
-    const quitter = newQuitter(real, "linked", () => {
-      throw new Error("linked never prompts");
-    });
+    const quitter = newQuitter(
+      real,
+      "linked",
+      () => {
+        throw new Error("linked never prompts");
+      },
+      DEADLINE_MS,
+    );
     quitter.txs.onBeforeQuit();
     await vi.waitFor(() => {
       expect(quitter.authorized()).toBe(1);
@@ -348,9 +414,14 @@ describe("quit deadline withdrawal (real HostController)", () => {
       stderrPath: "/tmp/stop.log",
       completion: neverCompletes,
     });
-    const quitter = newQuitter(real, "linked", () => {
-      throw new Error("linked never prompts");
-    });
+    const quitter = newQuitter(
+      real,
+      "linked",
+      () => {
+        throw new Error("linked never prompts");
+      },
+      DEADLINE_MS,
+    );
     quitter.txs.onBeforeQuit();
     await sleep(DEADLINE_MS / 2);
     expect(quitter.authorized()).toBe(0);
@@ -368,7 +439,7 @@ describe("quit deadline withdrawal (real HostController)", () => {
         decision: { kind: "stop", force: true, remember: false },
       };
     };
-    const quitter = newQuitter(real, "ask", answer);
+    const quitter = newQuitter(real, "ask", answer, DEADLINE_MS);
     quitter.txs.onBeforeQuit();
     await vi.waitFor(
       () => {
@@ -385,5 +456,178 @@ describe("quit deadline withdrawal (real HostController)", () => {
       }),
     );
     expect(quitter.outcomes).toEqual([{ kind: "stopped", forced: true }]);
+  });
+});
+
+// F31 (Phase E): proves `join()`'s admission check against the REAL
+// `HostController.lifecycleAdmissionBlock`, not a fake that could drift from
+// what the lane actually reports.
+describe("F31: only an admitted stop defers the relaunch (real HostController)", () => {
+  it("stop-if-idle, queued behind a held non-stop lane job: the relaunch supersedes at once, before the lane frees", async () => {
+    const real = newController();
+    const blocker = await blockLaneWithInstall(real);
+    const quitter = newQuitter(
+      real,
+      "stop-if-idle",
+      () => {
+        throw new Error("stop-if-idle's silent attempt never prompts");
+      },
+      LONG_DEADLINE_MS,
+    );
+
+    quitter.txs.onBeforeQuit();
+    await sleep(50);
+    // Queued behind the held install job: never admitted.
+    expect(quitter.authorized()).toBe(0);
+    expect(detachedStopCalls()).toBe(0);
+
+    quitter.setRelaunchIntended(true);
+    expect(quitter.txs.onBeforeQuit()).toBe("prevent");
+    await sleep(50);
+
+    // RED expected today: `join()` waits for the stop to settle regardless
+    // of admission, so neither exists yet while the install still holds
+    // the lane.
+    expect(quitter.verdicts).toContain("handoff");
+    expect(quitter.updateSeqCalls()).toBe(1);
+    expect(detachedStopCalls()).toBe(0);
+
+    await blocker.release();
+    await sleep(100);
+    // The quit's own stop, now admitted, sees itself already superseded and
+    // settles `withdrawn` - it never spawns.
+    expect(quitter.outcomes).toEqual([{ kind: "withdrawn" }]);
+    expect(detachedStopCalls()).toBe(0);
+  });
+
+  it("stop-if-idle, admitted: the relaunch waits for the running stop, then handoff and the update sequence follow", async () => {
+    const real = newController();
+    const stopGate = deferred<{ data: unknown }>();
+    vi.mocked(spawnDetachedBundledTraycerCliJson).mockResolvedValue({
+      pid: 4242,
+      stdoutPath: "/tmp/stop.ndjson",
+      stderrPath: "/tmp/stop.log",
+      completion: stopGate.promise,
+    });
+    const quitter = newQuitter(
+      real,
+      "stop-if-idle",
+      () => {
+        throw new Error("stop-if-idle's silent attempt never prompts");
+      },
+      LONG_DEADLINE_MS,
+    );
+
+    quitter.txs.onBeforeQuit();
+    await vi.waitFor(() => {
+      expect(detachedStopCalls()).toBe(1);
+    });
+    // Admitted: really running, with its own CLI child still in flight.
+    expect(quitter.authorized()).toBe(0);
+
+    quitter.setRelaunchIntended(true);
+    expect(quitter.txs.onBeforeQuit()).toBe("prevent");
+    await sleep(50);
+    expect(quitter.verdicts).not.toContain("handoff");
+    expect(quitter.updateSeqCalls()).toBe(0);
+
+    stopGate.resolve({ data: {} });
+    await sleep(100);
+    expect(quitter.outcomes).toEqual([{ kind: "stopped", forced: false }]);
+    expect(quitter.verdicts).toContain("handoff");
+    expect(quitter.updateSeqCalls()).toBe(1);
+  });
+});
+
+// Phase G / T04: `--lifecycle-origin desktop` is the marker every forced
+// desktop-originated `host stop` carries (real HostController, real
+// detached spawner) - the argv T08 will assert supervisor `admittedAs`
+// against once T04 lands the CLI side. Pinned GREEN now, ahead of the
+// ablation that removes `withDesktopLifecycleOrigin` from
+// `runDetachedBundled`.
+describe("marker pins: every detached `host stop` spawn carries --lifecycle-origin desktop", () => {
+  function rejectThenResolve(): void {
+    let calls = 0;
+    vi.mocked(spawnDetachedBundledTraycerCliJson).mockImplementation(
+      async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            pid: 4242,
+            stdoutPath: "/tmp/stop.ndjson",
+            stderrPath: "/tmp/stop.log",
+            completion: Promise.reject(
+              new TraycerCliError("E_HOST_BUSY", "busy"),
+            ),
+          };
+        }
+        return {
+          pid: 4343,
+          stdoutPath: "/tmp/stop2.ndjson",
+          stderrPath: "/tmp/stop2.log",
+          completion: Promise.resolve({}),
+        };
+      },
+    );
+  }
+
+  it("tray preset quitAndStopHost(false, ...), mode ask: exactly one detached spawn, --force with the marker", async () => {
+    const real = newController();
+    const quitter = newQuitter(
+      real,
+      "ask",
+      () => {
+        throw new Error("the tray preset never prompts");
+      },
+      DEADLINE_MS,
+    );
+    quitter.txs.quitAndStopHost(false, () => {
+      quitter.txs.onBeforeQuit();
+    });
+    await vi.waitFor(() => {
+      expect(quitter.authorized()).toBe(1);
+    });
+    expect(detachedArgs()).toEqual([
+      ["host", "stop", "--force", "--lifecycle-origin", "desktop"],
+    ]);
+  });
+
+  it("Linked: if-idle (marker) rejects E_HOST_BUSY, force (marker) escalates", async () => {
+    const real = newController();
+    rejectThenResolve();
+    const quitter = newQuitter(
+      real,
+      "linked",
+      () => {
+        throw new Error("linked never prompts");
+      },
+      DEADLINE_MS,
+    );
+    quitter.txs.onBeforeQuit();
+    await vi.waitFor(() => {
+      expect(quitter.authorized()).toBe(1);
+    });
+    expect(detachedArgs()).toEqual([
+      ["host", "stop", "--if-idle", "--lifecycle-origin", "desktop"],
+      ["host", "stop", "--force", "--lifecycle-origin", "desktop"],
+    ]);
+  });
+
+  it("Stop-if-idle: the silent if-idle (marker) rejects E_HOST_BUSY, the busy round's Stop forces (marker)", async () => {
+    const real = newController();
+    rejectThenResolve();
+    const answer = async (): Promise<HostQuitDecisionResponse> => ({
+      requestId: "req-1",
+      decision: { kind: "stop", force: false, remember: false },
+    });
+    const quitter = newQuitter(real, "stop-if-idle", answer, DEADLINE_MS);
+    quitter.txs.onBeforeQuit();
+    await vi.waitFor(() => {
+      expect(quitter.authorized()).toBe(1);
+    });
+    expect(detachedArgs()).toEqual([
+      ["host", "stop", "--if-idle", "--lifecycle-origin", "desktop"],
+      ["host", "stop", "--force", "--lifecycle-origin", "desktop"],
+    ]);
   });
 });

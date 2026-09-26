@@ -54,6 +54,15 @@ interface SpawnCall {
 
 const spawnCalls: SpawnCall[] = [];
 let spawnedChild: FakeDetachedChild | null = null;
+// Set by a test to simulate a REAL spawn failure (e.g. ENOENT): Node emits
+// `error` on the child on the next tick after `spawn()` returns, not after
+// whatever the caller does next. Firing it from inside the mock itself,
+// synchronously with the child's creation, reproduces that timing - unlike
+// a test-driven `emit()` issued after the whole async spawn helper has
+// already resolved, which cannot tell "listener attached before the
+// production code's `await`s" from "listener attached after" (see the
+// `error`-surfacing test below).
+let nextSpawnErrorMessage: string | null = null;
 
 vi.mock("node:child_process", () => {
   const spawn = (
@@ -64,6 +73,11 @@ vi.mock("node:child_process", () => {
     spawnCalls.push({ command, args, options });
     const child = new FakeDetachedChild();
     spawnedChild = child;
+    if (nextSpawnErrorMessage !== null) {
+      const message = nextSpawnErrorMessage;
+      nextSpawnErrorMessage = null;
+      process.nextTick(() => child.emit("error", new Error(message)));
+    }
     return child;
   };
   const execFile = (): void => {
@@ -78,6 +92,7 @@ beforeEach(async () => {
   vi.resetModules();
   spawnCalls.length = 0;
   spawnedChild = null;
+  nextSpawnErrorMessage = null;
   outputDir = await mkdtemp(join(tmpdir(), "traycer-cli-detached-"));
 });
 
@@ -199,23 +214,28 @@ describe("spawnDetachedBundledTraycerCliJson", () => {
 
   it("surfaces a spawn error event through completion, not synchronously", async () => {
     const mod = await loadModule();
+    // A real ENOENT fires as an `error` event on the NEXT TICK after
+    // `spawn()` returns - not after the caller has gone on to do more
+    // async work. Scheduling it from inside the spawn mock itself, rather
+    // than emitting it by hand once `spawnDetachedBundledTraycerCliJson`
+    // has already resolved, is what actually exercises the production
+    // ordering: the `error` listener must be attached in the same
+    // synchronous stretch as `spawn`, before the `await stderrFile.close()`
+    // that follows it. An emitter `error` with no listener throws, so this
+    // also proves a listener was there in time - not just that a fake
+    // emitted-later event was eventually observed.
+    nextSpawnErrorMessage = "spawn ENOENT";
+
     const run = await mod.spawnDetachedBundledTraycerCliJson<unknown>({
       args: ["host", "stop"],
       outputDir,
       outputStem: "stop",
     });
 
-    const settled = run.completion.then(
+    const failure: unknown = await run.completion.then(
       () => null,
       (error: unknown) => error,
     );
-    // An emitter `error` with no listener would throw here; the production
-    // code attached one before its first await.
-    expect(() =>
-      requireChild().emit("error", new Error("spawn ENOENT")),
-    ).not.toThrow();
-
-    const failure = await settled;
     expect(failure).toBeInstanceOf(mod.TraycerCliError);
     if (!(failure instanceof mod.TraycerCliError)) {
       throw new Error("expected a TraycerCliError");

@@ -1,26 +1,20 @@
+import { LIFECYCLE_ORIGIN_COMMANDS } from "@traycer/protocol/config/lifecycle-origin-commands";
+
 /**
  * The bundled-CLI commands that can START the host, and so take the hidden
- * `--lifecycle-origin` flag the CLI (T03) carries into its adoption proof.
+ * `--lifecycle-origin` flag the CLI (T03) carries into its adoption proof -
+ * plus `host uninstall`, which starts nothing but refuses the desktop's
+ * Remove Traycer over a host a person started in a terminal.
  *
- * EXACTLY these eight, and never the rest. The CLI registers the flag on
- * these commands only, and Commander REJECTS an unknown option: passing it to
- * `host download`, `host uninstall`, `host service uninstall`,
- * `host update-verify`, `host stamp-runtime`, `host purge-stage` or any read
- * command would make that command fail at runtime - a failure a mocked-CLI
- * suite cannot see, which is why the set is pinned by its own test over the
- * spawner's arguments.
+ * EXACTLY the protocol's list, and never the rest: the CLI registers the flag
+ * on those commands only and checks its registrations against the same list,
+ * and Commander REJECTS an unknown option - passing it to `host download`,
+ * `host service uninstall`, `host update-verify`, `host stamp-runtime`,
+ * `host purge-stage` or any read command would make that command fail at
+ * runtime.
  */
 export const DESKTOP_LIFECYCLE_ORIGIN_COMMANDS: readonly (readonly string[])[] =
-  [
-    ["host", "ensure"],
-    ["host", "install"],
-    ["host", "apply"],
-    ["host", "service", "install"],
-    ["host", "service", "start"],
-    ["host", "restart"],
-    ["host", "free-port-and-restart"],
-    ["host", "stop"],
-  ];
+  LIFECYCLE_ORIGIN_COMMANDS;
 
 const LIFECYCLE_ORIGIN_FLAG = "--lifecycle-origin";
 

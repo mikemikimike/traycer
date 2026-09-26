@@ -24,6 +24,7 @@ function renderCard() {
       expanded={false}
       recurrenceLocked={false}
       fixPendingCode={null}
+      foregroundRun={false}
       onFix={vi.fn()}
       onToggle={vi.fn()}
     />,
@@ -76,6 +77,7 @@ describe("<HostDoctorIssueCard /> service-refresh (M1)", () => {
         expanded={false}
         recurrenceLocked={false}
         fixPendingCode={null}
+        foregroundRun={false}
         onFix={vi.fn()}
         onToggle={vi.fn()}
       />,
@@ -91,6 +93,7 @@ describe("<HostDoctorIssueCard /> service-refresh (M1)", () => {
         expanded
         recurrenceLocked={false}
         fixPendingCode={null}
+        foregroundRun={false}
         onFix={vi.fn()}
         onToggle={vi.fn()}
       />,

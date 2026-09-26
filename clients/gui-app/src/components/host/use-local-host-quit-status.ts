@@ -7,6 +7,7 @@ import {
 import { useHostClientForHostId } from "@/hooks/host/use-host-client-for-host-id";
 import { useHostDirectoryList } from "@/hooks/host/use-host-directory-list-query";
 import { useHostQuery } from "@/hooks/host/use-host-query";
+import { useReactiveHostReadiness } from "@/hooks/host/use-reactive-host-readiness";
 import { useHostBinding, type HostRpcRegistry } from "@/lib/host";
 import type { HostQuitUnknownReason } from "@/lib/host/host-lifecycle-copy";
 import { readNegotiatedMethodVersion } from "@/lib/host/read-negotiated-method-version";
@@ -35,13 +36,21 @@ export interface HostQuitStatusFacts {
  *   the one the host gives now.
  * - `no-local-host` - this machine has no host entry at all, so there is
  *   nothing to keep or stop.
- * - `unknown` - there is a host, but its list could not be read.
+ * - `not-running` - this machine has a host, but it is not serving: the
+ *   directory's entry for it cannot be dialed (down, starting or restarting -
+ *   the entry cannot say which). There is no list to read, and the answers
+ *   the modal gives for it (keep, or an idle-only stop the host refuses if it
+ *   is in fact busy) cannot end work.
+ * - `unknown` - the host is serving, but its list could not be read: this
+ *   renderer cannot put the question (`no-connection`: signed out, or its
+ *   credentials are refreshing), or the host did not answer (`unreachable`).
  * - `busy` / `idle` - the host's own `busy` verdict. The two extra counts
  *   (shells, scheduled wakes) never change it.
  */
 export type HostQuitVerdict =
   | { readonly kind: "checking" }
   | { readonly kind: "no-local-host" }
+  | { readonly kind: "not-running" }
   | { readonly kind: "unknown"; readonly reason: HostQuitUnknownReason }
   | ({ readonly kind: "busy" | "idle" } & HostQuitStatusFacts);
 
@@ -79,6 +88,11 @@ export function useLocalHostQuitStatus(active: boolean): LocalHostQuitStatus {
   // `useHostClientForHostId(null)` follows the app-wide host - exactly the
   // client this read must never use - so the id guard rides with the client.
   const statusClient = localHostId !== null ? client : null;
+  // The same readiness `useHostQuery` gates on: a client that cannot execute
+  // never sends the read, so waiting for its answer would only run out the
+  // clock and report a question that was never put as a host that did not
+  // answer.
+  const readiness = useReactiveHostReadiness(statusClient);
   // When the current question was asked. An answer counts only if it landed
   // at or after this instant.
   const [since, setSince] = useState(() => Date.now());
@@ -110,8 +124,8 @@ export function useLocalHostQuitStatus(active: boolean): LocalHostQuitStatus {
 
   const verdict = decideVerdict({
     hasLocalEntry: localEntry !== null,
-    hasStatusClient: statusClient !== null,
     dialable: looksDialable(localEntry),
+    canAsk: statusClient !== null && readiness.canExecute,
     freshData:
       statusQuery.data !== undefined && statusQuery.dataUpdatedAt >= since
         ? statusQuery.data
@@ -144,8 +158,10 @@ function negotiatedStatusMinor(hostId: string): number | null {
 
 interface VerdictInput {
   readonly hasLocalEntry: boolean;
-  readonly hasStatusClient: boolean;
+  /** The entry has an address to dial (`looksDialable`). */
   readonly dialable: boolean;
+  /** This renderer can send the host a request (readiness `canExecute`). */
+  readonly canAsk: boolean;
   readonly freshData: {
     readonly busy: boolean;
     readonly busySessionCount: number | null;
@@ -157,19 +173,17 @@ interface VerdictInput {
 }
 
 /**
- * Ordered: no entry is settled absence; a dialable host with no client is a
+ * Ordered: no entry is settled absence; an entry with no address is a host
+ * that is not serving, decided at once rather than after a read that could
+ * never be sent; a fresh answer beats everything after it, including a
+ * timeout that raced it; a serving host this renderer cannot ask is a
  * question we could not put (signed out, credentials refreshing), never
- * absence; a fresh answer beats a timeout that raced it; a failed or
- * overdue read is "can't tell", never idle.
+ * absence and never a host that did not answer; a failed or overdue read is
+ * "can't tell", never idle.
  */
 export function decideVerdict(input: VerdictInput): HostQuitVerdict {
   if (!input.hasLocalEntry) return { kind: "no-local-host" };
-  if (!input.hasStatusClient) {
-    return {
-      kind: "unknown",
-      reason: input.dialable ? "no-connection" : "unreachable",
-    };
-  }
+  if (!input.dialable) return { kind: "not-running" };
   if (input.freshData !== null) {
     return {
       kind: input.freshData.busy ? "busy" : "idle",
@@ -178,6 +192,7 @@ export function decideVerdict(input: VerdictInput): HostQuitVerdict {
       statusMinor: input.statusMinor,
     };
   }
+  if (!input.canAsk) return { kind: "unknown", reason: "no-connection" };
   if (input.freshError || input.timedOut) {
     return { kind: "unknown", reason: "unreachable" };
   }

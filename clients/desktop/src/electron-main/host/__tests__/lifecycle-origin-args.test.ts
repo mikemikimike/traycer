@@ -13,11 +13,11 @@ const STARTING_COMMANDS: readonly (readonly string[])[] = [
   ["host", "restart"],
   ["host", "free-port-and-restart"],
   ["host", "stop"],
+  ["host", "uninstall"],
 ];
 
 const UNTOUCHED_COMMANDS: readonly (readonly string[])[] = [
   ["host", "download"],
-  ["host", "uninstall"],
   ["host", "service", "uninstall"],
   ["host", "update-verify"],
   ["host", "stamp-runtime"],
@@ -28,8 +28,8 @@ const UNTOUCHED_COMMANDS: readonly (readonly string[])[] = [
 ];
 
 describe("DESKTOP_LIFECYCLE_ORIGIN_COMMANDS", () => {
-  it("names exactly the eight start-capable commands", () => {
-    expect(DESKTOP_LIFECYCLE_ORIGIN_COMMANDS.length).toBe(8);
+  it("names exactly the nine start-capable commands", () => {
+    expect(DESKTOP_LIFECYCLE_ORIGIN_COMMANDS.length).toBe(9);
     expect(DESKTOP_LIFECYCLE_ORIGIN_COMMANDS).toEqual(STARTING_COMMANDS);
   });
 });

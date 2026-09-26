@@ -108,24 +108,14 @@ describe("HostDirectoryService with hasLocalHost: false and a persisted local ho
     expect(directory.getLocalHostId()).toBeNull();
   });
 
-  it("getLocalEntry() returns null", async () => {
-    window.localStorage.setItem(
-      LAST_LOCAL_HOST_ID_STORAGE_KEY,
-      PERSISTED_LOCAL_HOST_ID,
-    );
-    const host = makeHost(false, null);
-    const directory = makeDirectory({
-      authContextId: null,
-      credentialGeneration: null,
-      runnerHost: host,
-      localHostIdSeeder: null,
-      remoteFetcher: null,
-    });
-
-    await directory.start();
-
-    expect(directory.getLocalEntry()).toBeNull();
-  });
+  // No standalone "getLocalEntry() returns null" test: `makeHost(false,
+  // null)` never delivers a snapshot, and `localEntry` starts life `null` and
+  // is only ever assigned inside the snapshot handler
+  // (`host-directory-service.ts:424`), so that check would hold trivially
+  // even with every `hasLocalHost` gate reverted. The test below is the real
+  // proof — it pushes a snapshot that WOULD populate `localEntry` and asserts
+  // the gate still yields null; reverting `host-directory-service.ts:424` to
+  // an unconditional `toLocalEntry(snapshot)` turns it red.
 
   it("publishes the registry's twin of the persisted id under its REGISTRY (remote) kind, not rewritten into a booting-local placeholder", async () => {
     window.localStorage.setItem(

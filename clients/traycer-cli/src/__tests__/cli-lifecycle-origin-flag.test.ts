@@ -1,5 +1,8 @@
+import { rmSync } from "node:fs";
 import {
+  afterAll,
   afterEach,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -17,6 +20,7 @@ import * as hostRestartModule from "../commands/host-restart";
 import * as hostStopModule from "../commands/host-stop";
 import * as serviceInstallModule from "../commands/service-install";
 import * as serviceStartModule from "../commands/service-start";
+import { hostHomeDir } from "../store/paths";
 
 const loggerMock = vi.hoisted(() => ({
   debug: vi.fn(),
@@ -33,6 +37,31 @@ vi.mock("../logger", () => ({
   errorFromUnknown: (value: unknown) =>
     value instanceof Error ? value : new Error(String(value)),
 }));
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, so without this the suite
+// would resolve this machine's REAL `~/.traycer`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-cli-lifecycle-origin-flag-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 // `--lifecycle-origin` (`host/lifecycle-origin.ts`) is registered on exactly
 // the eight start-capable commands. On five of them it reaches the command
@@ -212,4 +241,93 @@ describe("--lifecycle-origin on the eight start-capable commands", () => {
       expect(spy).not.toHaveBeenCalled();
     });
   }
+});
+
+// F19c: `maintenance` is an INTERNAL classification the relaunch legs of
+// `host update` / `host restart` stamp themselves - never something an
+// external caller (a person, a script, Desktop) is entitled to assert
+// through the flag. `HOST_START_ORIGINS` today backs both the wire
+// vocabulary AND `.choices()` for this flag, so `maintenance` is currently
+// accepted from argv on every command in `ORIGIN_FLAG_CASES`. The fix drops
+// it from the flag's own choices, leaving it reachable only from the
+// internal relaunch legs that set it without going through this option.
+describe("--lifecycle-origin maintenance is not a legal external value (F19c)", () => {
+  let exitSpy: MockInstance;
+  beforeEach(() => {
+    exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((code: string | number | null | undefined): never => {
+        throw new Error(`__test_exit_${code ?? 0}`);
+      });
+  });
+  afterEach(() => {
+    process.exitCode = undefined;
+    exitSpy.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  it("`host ensure --lifecycle-origin maintenance` is refused by Commander before the builder runs", async () => {
+    const spy = vi
+      .spyOn(hostEnsureModule, "buildHostEnsureCommand")
+      .mockImplementation(stubCommand);
+    const err = await parseCommand(
+      ["host", "ensure"],
+      ["--lifecycle-origin", "maintenance"],
+    ).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+    expect(err).toBeInstanceOf(CommanderError);
+    if (err instanceof CommanderError) {
+      expect(err.code).toBe("commander.invalidArgument");
+    }
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("F4-B: `host stop` forwards --lifecycle-origin to buildHostStopCommand", () => {
+  let exitSpy: MockInstance;
+  beforeEach(() => {
+    exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((code: string | number | null | undefined): never => {
+        throw new Error(`__test_exit_${code ?? 0}`);
+      });
+  });
+  afterEach(() => {
+    process.exitCode = undefined;
+    exitSpy.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  // F4-B: `host stop --if-idle --lifecycle-origin desktop` must reach
+  // `buildHostStopCommand` as `lifecycleOrigin: "desktop"`. Head never
+  // forwards the flag to this builder, so the test is red.
+  it("`host stop --if-idle --lifecycle-origin desktop` reaches the builder as lifecycleOrigin: 'desktop'", async () => {
+    const spy = vi
+      .spyOn(hostStopModule, "buildHostStopCommand")
+      .mockImplementation(stubCommand);
+    await parseCommand(
+      ["host", "stop"],
+      ["--if-idle", "--lifecycle-origin", "desktop"],
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      lifecycleOrigin: "desktop",
+    });
+  });
+
+  // F4-B: plain `host stop --force`, with no --lifecycle-origin, must reach
+  // the builder as lifecycleOrigin: "terminal" (DEFAULT_HOST_START_ORIGIN).
+  // Head never forwards the flag, so the test is red.
+  it("`host stop --force` with no --lifecycle-origin reaches the builder as lifecycleOrigin: 'terminal'", async () => {
+    const spy = vi
+      .spyOn(hostStopModule, "buildHostStopCommand")
+      .mockImplementation(stubCommand);
+    await parseCommand(["host", "stop"], ["--force"]);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      lifecycleOrigin: "terminal",
+    });
+  });
 });

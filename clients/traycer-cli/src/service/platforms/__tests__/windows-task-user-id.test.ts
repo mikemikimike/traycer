@@ -6,8 +6,9 @@ import type { CliInvocation } from "../../cli-binary";
 // SSH-USERDOMAIN-WORKGROUP: an OpenSSH session on a workgroup machine sets
 // `USERDOMAIN=WORKGROUP`, and schtasks rejects `WORKGROUP\<name>` from EVERY
 // session - `host install` over ssh used to emit exactly that and then fail
-// to register. `resolveTaskUserId` (via `buildScheduledTaskXml`, the
-// `buildTaskXml`/`buildScheduledTaskXml` export used across this suite) now
+// to register. `resolveTaskUserId` (exported as `resolveScheduledTaskUserId`;
+// the install resolves it in front of its install edge and hands the result
+// to `buildScheduledTaskXml`, exactly as each case below does) now
 // prefers the account SID from `whoami /user`, and only falls back to an
 // environment-derived name - never `WORKGROUP\<name>` - when no SID can be
 // read. See `windows.ts`'s `resolveTaskUserId` docblock for the full
@@ -55,8 +56,11 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
   });
 
   it("U1: a readable SID wins over every env field, including an ssh WORKGROUP domain", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     const sid = "S-1-5-21-1-2-3-1001";
     setWindowsTaskUserSidReaderForTests(() => sid);
     stubUserIdEnv({
@@ -66,10 +70,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
       USERNAME: "alice",
     });
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       `<UserId>${sid}</UserId>`,
@@ -79,8 +83,11 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
   });
 
   it("U2: no SID, ssh WORKGROUP domain: falls back to COMPUTERNAME, never WORKGROUP\\alice", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(() => null);
     stubUserIdEnv({
       USERDOMAIN: "WORKGROUP",
@@ -89,10 +96,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
       USERNAME: "alice",
     });
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>BOX\\alice</UserId>",
@@ -102,8 +109,11 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
   });
 
   it("U3: no SID, interactive logon (USERDOMAIN === COMPUTERNAME): unchanged BOX\\alice", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(() => null);
     stubUserIdEnv({
       USERDOMAIN: "BOX",
@@ -112,10 +122,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
       USERNAME: "alice",
     });
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>BOX\\alice</UserId>",
@@ -124,8 +134,11 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
   });
 
   it("U4: no SID, a domain logon (USERDNSDOMAIN set): unchanged CORP\\alice", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(() => null);
     stubUserIdEnv({
       USERDOMAIN: "CORP",
@@ -134,10 +147,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
       USERNAME: "alice",
     });
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>CORP\\alice</UserId>",
@@ -146,8 +159,11 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
   });
 
   it("U5: no SID, no COMPUTERNAME: falls back to USERDOMAIN, then to a bare name", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(() => null);
     stubUserIdEnv({
       USERDOMAIN: "CORP",
@@ -156,10 +172,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
       USERNAME: "alice",
     });
 
-    const withDomain = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const withDomain = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
     expect(userIdsIn(withDomain)).toEqual([
       "<UserId>CORP\\alice</UserId>",
       "<UserId>CORP\\alice</UserId>",
@@ -171,10 +187,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
       COMPUTERNAME: "",
       USERNAME: "alice",
     });
-    const bare = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const bare = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
     expect(userIdsIn(bare)).toEqual([
       "<UserId>alice</UserId>",
       "<UserId>alice</UserId>",
@@ -182,8 +198,11 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
   });
 
   it("U6: no SID, no USERNAME: fails closed with SERVICE_INSTALL_FAILED", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(() => null);
     stubUserIdEnv({
       USERDOMAIN: "",
@@ -194,10 +213,10 @@ describe("Windows Task XML <UserId>: SID-first, env fallback never names WORKGRO
 
     let caught: unknown = null;
     try {
-      buildScheduledTaskXml({
-        label: serviceLabelFor("staging"),
-        cli: sampleCli(),
-      });
+      buildScheduledTaskXml(
+        { label: serviceLabelFor("staging"), cli: sampleCli() },
+        resolveScheduledTaskUserId(),
+      );
     } catch (error) {
       caught = error;
     }
@@ -279,8 +298,11 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
   });
 
   it("U7a: a well-formed csv row resolves the SID from whoami, called exactly once with the System32 path", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(null);
     vi.stubEnv("SystemRoot", "C:\\Windows");
     vi.stubEnv("SYSTEMROOT", "C:\\Windows");
@@ -292,10 +314,10 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
     });
     execFileSyncImpl = () => '"box\\alice","S-1-5-21-1-2-3-1001"\r\n';
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>S-1-5-21-1-2-3-1001</UserId>",
@@ -310,8 +332,11 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
   });
 
   it("U7b: execFileSync throwing a non-zero-exit error falls back to the env form", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(null);
     stubUserIdEnv({
       USERDOMAIN: "WORKGROUP",
@@ -323,21 +348,30 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
       throw new WhoamiNonZeroExitError(1);
     };
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>BOX\\alice</UserId>",
       "<UserId>BOX\\alice</UserId>",
     ]);
     expect(xml).not.toContain("WORKGROUP\\alice");
+    expect(execFileSyncCalls).toEqual([
+      {
+        file: "C:\\Windows\\System32\\whoami.exe",
+        args: ["/user", "/fo", "csv", "/nh"],
+      },
+    ]);
   });
 
   it("U7c: execFileSync throwing a timeout error falls back to the env form", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(null);
     stubUserIdEnv({
       USERDOMAIN: "WORKGROUP",
@@ -349,21 +383,30 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
       throw new WhoamiTimeoutError("ETIMEDOUT", "SIGTERM");
     };
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>BOX\\alice</UserId>",
       "<UserId>BOX\\alice</UserId>",
     ]);
     expect(xml).not.toContain("WORKGROUP\\alice");
+    expect(execFileSyncCalls).toEqual([
+      {
+        file: "C:\\Windows\\System32\\whoami.exe",
+        args: ["/user", "/fo", "csv", "/nh"],
+      },
+    ]);
   });
 
   it("U7d: garbage stdout with no SID falls back to the env form", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(null);
     stubUserIdEnv({
       USERDOMAIN: "WORKGROUP",
@@ -373,21 +416,30 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
     });
     execFileSyncImpl = () => "INFO: blah\r\n";
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>BOX\\alice</UserId>",
       "<UserId>BOX\\alice</UserId>",
     ]);
     expect(xml).not.toContain("WORKGROUP\\alice");
+    expect(execFileSyncCalls).toEqual([
+      {
+        file: "C:\\Windows\\System32\\whoami.exe",
+        args: ["/user", "/fo", "csv", "/nh"],
+      },
+    ]);
   });
 
   it("U7e: empty stdout falls back to the env form", async () => {
-    const { buildScheduledTaskXml, setWindowsTaskUserSidReaderForTests } =
-      await import("../windows");
+    const {
+      buildScheduledTaskXml,
+      resolveScheduledTaskUserId,
+      setWindowsTaskUserSidReaderForTests,
+    } = await import("../windows");
     setWindowsTaskUserSidReaderForTests(null);
     stubUserIdEnv({
       USERDOMAIN: "WORKGROUP",
@@ -397,15 +449,21 @@ describe("Windows Task XML <UserId>: the real whoami SID reader (U7)", () => {
     });
     execFileSyncImpl = () => "";
 
-    const xml = buildScheduledTaskXml({
-      label: serviceLabelFor("staging"),
-      cli: sampleCli(),
-    });
+    const xml = buildScheduledTaskXml(
+      { label: serviceLabelFor("staging"), cli: sampleCli() },
+      resolveScheduledTaskUserId(),
+    );
 
     expect(userIdsIn(xml)).toEqual([
       "<UserId>BOX\\alice</UserId>",
       "<UserId>BOX\\alice</UserId>",
     ]);
     expect(xml).not.toContain("WORKGROUP\\alice");
+    expect(execFileSyncCalls).toEqual([
+      {
+        file: "C:\\Windows\\System32\\whoami.exe",
+        args: ["/user", "/fo", "csv", "/nh"],
+      },
+    ]);
   });
 });

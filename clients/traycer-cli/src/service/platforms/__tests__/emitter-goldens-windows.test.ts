@@ -69,39 +69,29 @@ const windowsCli: CliInvocation = {
   args: [],
 };
 
-beforeEach(async () => {
-  vi.stubEnv("USERDOMAIN", "");
-  vi.stubEnv("USERNAME", "golden-user");
+beforeEach(() => {
   vi.stubEnv("SystemRoot", "C:\\Windows");
   vi.stubEnv("SYSTEMROOT", "C:\\Windows");
-  // Hermeticity (SSH-USERDOMAIN-WORKGROUP): `resolveTaskUserId` now prefers
-  // a real SID from `whoami /user`, and its environment fallback also reads
-  // `COMPUTERNAME`/`USERDNSDOMAIN`. On a Windows dev machine, a real
-  // COMPUTERNAME or a readable SID would change the resolved `<UserId>` and
-  // this golden would stop matching the checked-in file. Stub both env
-  // vars empty and force the SID reader to `null` so this suite's
-  // `<UserId>` stays the bare `golden-user` the golden file was written
-  // against, regardless of what machine runs it.
-  vi.stubEnv("COMPUTERNAME", "");
-  vi.stubEnv("USERDNSDOMAIN", "");
-  const { setWindowsTaskUserSidReaderForTests } = await import("../windows");
-  setWindowsTaskUserSidReaderForTests(() => null);
 });
 
-afterEach(async () => {
+afterEach(() => {
   vi.unstubAllEnvs();
-  const { setWindowsTaskUserSidReaderForTests } = await import("../windows");
-  setWindowsTaskUserSidReaderForTests(null);
 });
+
+// The `<UserId>` the golden file was written against. The builder takes it
+// from its caller - the install resolves it (`resolveTaskUserId`, covered by
+// `windows-task-user-id.test.ts`) in front of its install edge - so no machine
+// identity can reach this golden.
+const GOLDEN_TASK_USER_ID = "golden-user";
 
 describe("Windows: buildScheduledTaskXml and buildWindowsHiddenHostLauncher (win32 path semantics)", () => {
   it("matches emitter-goldens/task.xml byte-for-byte", async () => {
     const { buildScheduledTaskXml } = await import("../windows");
 
-    const xml = buildScheduledTaskXml({
-      label: productionLabel,
-      cli: windowsCli,
-    });
+    const xml = buildScheduledTaskXml(
+      { label: productionLabel, cli: windowsCli },
+      GOLDEN_TASK_USER_ID,
+    );
 
     expect(xml).toBe(golden("task.xml"));
   });

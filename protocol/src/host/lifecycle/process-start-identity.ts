@@ -339,17 +339,19 @@ export function parseWindowsDeniedReadFallbackOutput(
  * epoch microseconds, converted with the text's OWN offset; `null` when it is
  * not one.
  *
- * WMI formats `CreationDate` from the stored FILETIME with one bias, the
- * current one, applied to the local fields and printed as the offset, so
- * subtracting the text's own offset recovers the exact UTC instant - across a
- * DST change too, and whichever bias WMI chose, since the fields and the
- * offset were produced together. A converted `DateTime` (what
- * `Get-CimInstance` returns, and what `ToUniversalTime()` then reads) instead
- * re-applies the DST rule in force at the fields' wall-clock time to fields
- * built with the current bias, and lands an hour off for a process created on
- * the other side of a change - a false "different" for a live holder. Hence
- * the raw text from `Get-WmiObject`, and no local-time conversion on either
- * side.
+ * WMI formats `CreationDate` from the stored FILETIME with one bias, applied
+ * to the local fields and printed as the offset, so subtracting the text's own
+ * offset recovers the exact UTC instant - across a DST change too, and
+ * whichever bias WMI chose, since the fields and the offset were produced
+ * together. Measured on Windows Server in the New Zealand zone, across its
+ * 2026-09-27 change (T08 round 1): `Get-WmiObject` printed every process at
+ * the zone's STANDARD bias, daylight time in force or not, so a process born
+ * in daylight time reads as a local time the zone skips; `ToDmtfDateTime` over
+ * the CIM `DateTime` printed the daylight bias for the same process. Both
+ * parse here to the one instant, and so does the converted `DateTime`'s
+ * `ToUniversalTime()`: the converted value is not an hour off either. The raw
+ * text is read because it needs no local-time conversion on either side, not
+ * because a conversion would be wrong.
  */
 export function parseWindowsWmiCreationDate(dmtf: string): number | null {
   const match =

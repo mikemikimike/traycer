@@ -124,6 +124,7 @@ import {
   DESKTOP_LOCK_WAIT_MS,
   HostController,
   type HostControllerHostLifecycle,
+  type HostControllerSupervisorRun,
 } from "../host-controller";
 import {
   AUTOMATIC_INTENTS_HELD_MESSAGE,
@@ -138,6 +139,12 @@ import { getHostFsLayout } from "../host-paths";
 import { DEV_DESKTOP_SLOT_ENV } from "../dev-desktop-slot";
 import { __resetHostRemovalStateForTest } from "../host-removal-state";
 import { withDesktopLifecycleOrigin } from "../lifecycle-origin-args";
+import {
+  formatDarwinProcessStartIdentity,
+  type ProcessStartIdentity,
+} from "@traycer/protocol/host/lifecycle/process-start-identity";
+import { HostLifecyclePolicyStore } from "../host-lifecycle-policy";
+import { HostLifecycleService } from "../host-lifecycle-transitions";
 
 const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
@@ -217,6 +224,14 @@ function fakeHostLifecycle(): HostControllerHostLifecycle {
   };
 }
 
+const NO_SUPERVISOR_RUN: HostControllerSupervisorRun = {
+  readSupervisorRun: async () => ({
+    state: "not-running",
+    supervisorPid: null,
+    admittedAs: null,
+  }),
+};
+
 function newController(
   reachabilityProbe: (websocketUrl: string) => Promise<boolean>,
 ): HostController {
@@ -226,6 +241,7 @@ function newController(
     reachabilityProbe,
     desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
     desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+    supervisorRun: NO_SUPERVISOR_RUN,
   });
 }
 
@@ -592,10 +608,118 @@ describe("stopHost spawn form", () => {
   });
 });
 
+// T31: `stopHost` is never coalesced - every request carries its own mode
+// (and withdrawal), so a force must not join an if-idle that is about to be
+// refused, or vice versa. Prove it with the mechanism (two spawns, two
+// distinct outcomes), not just an end state a coalesced pair could also
+// produce by accident.
+describe("T31: stopHost is never coalesced", () => {
+  it("a force stop submitted while an if-idle stop is still in flight is not coalesced into it", async () => {
+    const controller = newReachableController();
+    const idleGate = deferred<{ data: unknown }>();
+    vi.mocked(streamBundledTraycerCliJson).mockImplementation(async (opts) => {
+      if (opts.args.includes("--if-idle")) return idleGate.promise;
+      return { data: { forced: true } };
+    });
+
+    const idleStop = controller.stopHost(
+      stopRequest("if-idle", "attached", null),
+    );
+    await vi.waitFor(() => {
+      expect(streamCallsWith("stop")).toBe(1);
+    });
+
+    // Submitted while the if-idle stop is still pending on the lane.
+    const forceStop = controller.stopHost(
+      stopRequest("force", "attached", null),
+    );
+    await settle();
+    // Still only one spawn: the force stop queues behind the if-idle one on
+    // the exclusive mutation lane - it must not be swallowed into it.
+    expect(streamCallsWith("stop")).toBe(1);
+
+    idleGate.resolve({ data: { forced: false } });
+
+    const [idleOutcome, forceOutcome] = await Promise.all([
+      idleStop,
+      forceStop,
+    ]);
+    expect(idleOutcome).toEqual({ kind: "stopped", forced: false });
+    expect(forceOutcome).toEqual({ kind: "stopped", forced: true });
+    expect(streamCalls().filter((args) => args.includes("stop"))).toEqual([
+      ["host", "stop", "--if-idle", "--lifecycle-origin", "desktop"],
+      ["host", "stop", "--force", "--lifecycle-origin", "desktop"],
+    ]);
+  });
+});
+
+describe("spawnServiceDefinitionRefresh", () => {
+  it('spawns detached with exactly `host service refresh` (never --lifecycle-origin: "refresh" is not a start-capable command) and resolves "spawned"', async () => {
+    const controller = newReachableController();
+    const outcome = await controller.spawnServiceDefinitionRefresh();
+    expect(outcome).toBe("spawned");
+    expect(detachedCalls()).toBe(1);
+    expect(spawnDetachedBundledTraycerCliJson).toHaveBeenCalledWith({
+      args: ["host", "service", "refresh"],
+      outputDir: join(getHostFsLayout("production").rootDir, "desktop-cli"),
+      outputStem: "refresh",
+    });
+  });
+
+  it('a spawn that throws resolves "failed", never rejects', async () => {
+    const controller = newReachableController();
+    vi.mocked(spawnDetachedBundledTraycerCliJson).mockRejectedValueOnce(
+      new Error("ENOENT"),
+    );
+    await expect(controller.spawnServiceDefinitionRefresh()).resolves.toBe(
+      "failed",
+    );
+  });
+
+  it("spawns without waiting for an in-flight detached stop still held by the lane", async () => {
+    const controller = newReachableController();
+    const stopCompletion = deferred<unknown>();
+    vi.mocked(spawnDetachedBundledTraycerCliJson).mockImplementation(
+      async (opts) => {
+        if (opts.args.includes("stop")) {
+          return {
+            pid: 4242,
+            stdoutPath: "/tmp/stop.ndjson",
+            stderrPath: "/tmp/stop.log",
+            completion: stopCompletion.promise,
+          };
+        }
+        return {
+          pid: 4343,
+          stdoutPath: "/tmp/refresh.ndjson",
+          stderrPath: "/tmp/refresh.log",
+          completion: Promise.resolve({}),
+        };
+      },
+    );
+    // Detached stop occupies the mutation lane and never settles here.
+    const stopOutcome = controller.stopHost(
+      stopRequest("if-idle", "detached", null),
+    );
+
+    const refreshOutcome = await controller.spawnServiceDefinitionRefresh();
+
+    expect(refreshOutcome).toBe("spawned");
+    expect(
+      vi
+        .mocked(spawnDetachedBundledTraycerCliJson)
+        .mock.calls.some(([opts]) => opts.args.includes("refresh")),
+    ).toBe(true);
+
+    stopCompletion.resolve({ kind: "stopped" });
+    await stopOutcome;
+  });
+});
+
 // ---- automatic-intent suspension ---------------------------------------------
 
 describe("quiesce", () => {
-  it("defers a background converge with zero spawns, while a user-repair converge still spawns", async () => {
+  it("defers a background converge with zero spawns", async () => {
     const controller = newReachableController();
     writeInstallRecord("1.7.0");
     vi.mocked(streamBundledTraycerCliJson).mockResolvedValue(ENSURE_NOOP);
@@ -605,8 +729,16 @@ describe("quiesce", () => {
     const background = await converge(controller, BACKGROUND);
     expect(background.kind).toBe("deferred");
     expect(totalSpawns()).toBe(0);
+  });
 
-    // Positive control: the same quiesced controller, an explicit repair.
+  // F22: an explicit start after an in-session `none` brings the host back
+  // unmanaged, so a user-repair converge must ALSO stay off the CLI while
+  // quiesced (see the "F22" describe below) - this positive control moved
+  // onto a FRESH, unsuspended controller instead of the quiesced one above.
+  it("positive control: a fresh, unsuspended controller's user-repair converge still spawns", async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue(ENSURE_NOOP);
     await converge(controller, userRepair());
     expect(streamCallsWith("ensure")).toBe(1);
   });
@@ -642,7 +774,7 @@ describe("quiesce", () => {
     expect(streamCallsWith("restart")).toBe(1);
   });
 
-  it('defers applyStaged("launch") with zero spawns, while applyStaged("manual") is not suspended', async () => {
+  it('defers applyStaged("launch") with zero spawns', async () => {
     const controller = newReachableController();
     writeInstallRecord("1.7.0");
     writeStagedRecord();
@@ -659,14 +791,30 @@ describe("quiesce", () => {
     const launch = await controller.applyStaged("launch", false);
     expect(launch.kind).toBe("deferred");
     expect(totalSpawns()).toBe(0);
+  });
 
-    // Positive control: an explicit "Update now" on the same quiesced controller.
+  // F22: an explicit "Update now" is a start-capable intent too, so it must
+  // ALSO stay off the CLI while quiesced (see the "F22" describe below) -
+  // this positive control moved onto a FRESH, unsuspended controller.
+  it('positive control: a fresh, unsuspended controller applies applyStaged("manual")', async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    writeStagedRecord();
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: {
+        outcome: "applied",
+        record: { version: "1.8.0" },
+        runningActivated: true,
+        installGeneration: null,
+      },
+    });
+
     const manual = await controller.applyStaged("manual", false);
     expect(manual.kind).toBe("ok");
     expect(streamCallsWith("apply")).toBe(1);
   });
 
-  it("defers the implicit activateInstalled(false, false) with zero spawns, while the explicit form is not suspended", async () => {
+  it("defers the implicit activateInstalled(false, false) with zero spawns", async () => {
     const controller = newReachableController();
     writeInstallRecord("1.7.0");
     vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
@@ -677,7 +825,18 @@ describe("quiesce", () => {
     const implicit = await controller.activateInstalled(false, false);
     expect(implicit.kind).toBe("deferred");
     expect(totalSpawns()).toBe(0);
+  });
 
+  // F22: the explicit form (a person clicking Restart/Update) is a
+  // start-capable intent too, so it must ALSO stay off the CLI while
+  // quiesced (see the "F22" describe below) - this positive control moved
+  // onto a FRESH, unsuspended controller.
+  it("positive control: a fresh, unsuspended controller's explicit activateInstalled(false, true) still spawns restart", async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: { activated: true },
+    });
     await controller.activateInstalled(false, true);
     expect(streamCallsWith("restart")).toBe(1);
   });
@@ -829,6 +988,18 @@ describe("suspended background converge names its cause", () => {
 
 // ---- deferMutationsUntil -----------------------------------------------------
 
+// T24(a): the barrier itself is the invariant, not a race against a real
+// timer - `enqueueMutation`'s job body cannot run until `mutationTail`
+// settles, and `mutationTail` cannot settle until the barrier does, however
+// long that takes. So the negative needs no wall-clock wait at all: draining
+// a handful of microtask ticks proves as much as 30ms of real time did,
+// without a chance of passing vacuously under load.
+async function drainMicrotasks(): Promise<void> {
+  for (let tick = 0; tick < 10; tick += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe("deferMutationsUntil", () => {
   it("holds a converge off the CLI until the barrier resolves", async () => {
     const controller = newReachableController();
@@ -838,12 +1009,23 @@ describe("deferMutationsUntil", () => {
     controller.deferMutationsUntil(barrier.promise);
 
     const pending = converge(controller, BACKGROUND);
-    await settle();
-    expect(streamCallsWith("ensure")).toBe(0);
+    await drainMicrotasks();
+    // Admission, not spawns: `mutationStatus` (and so `lifecycleAdmissionBlock`)
+    // is set SYNCHRONOUSLY on the job's first line, before any fs I/O - see
+    // `enqueueLaneJob`. That makes this deterministic in both directions: held,
+    // there is no admission no matter how long we wait; ablated, the job is
+    // admitted within a couple of microtasks, well before it could reach the
+    // CLI's own fs reads. A spawn-count check alone cannot tell "still blocked"
+    // from "unblocked but not there yet", which is why the earlier version of
+    // this test passed vacuously under the deferMutationsUntil-no-op mutation.
+    expect(controller.lifecycleAdmissionBlock).toBeNull();
+    expect(totalSpawns()).toBe(0);
 
     barrier.resolve();
+    await vi.waitFor(() => {
+      expect(streamCallsWith("ensure")).toBe(1);
+    });
     await pending;
-    expect(streamCallsWith("ensure")).toBe(1);
   });
 
   it("a rejected barrier releases the lane too", async () => {
@@ -851,15 +1033,21 @@ describe("deferMutationsUntil", () => {
     writeInstallRecord("1.7.0");
     vi.mocked(streamBundledTraycerCliJson).mockResolvedValue(ENSURE_NOOP);
     const barrier = deferred<void>();
+    // Consumed regardless of whether deferMutationsUntil is ablated, so the
+    // reject below never surfaces as an unhandled rejection either way.
+    barrier.promise.catch(() => undefined);
     controller.deferMutationsUntil(barrier.promise);
 
     const pending = converge(controller, BACKGROUND);
-    await settle();
-    expect(streamCallsWith("ensure")).toBe(0);
+    await drainMicrotasks();
+    expect(controller.lifecycleAdmissionBlock).toBeNull();
+    expect(totalSpawns()).toBe(0);
 
     barrier.reject(new Error("presence record write failed"));
+    await vi.waitFor(() => {
+      expect(streamCallsWith("ensure")).toBe(1);
+    });
     await pending;
-    expect(streamCallsWith("ensure")).toBe(1);
   });
 
   it("positive control: without a barrier the same converge spawns immediately", async () => {
@@ -868,6 +1056,108 @@ describe("deferMutationsUntil", () => {
     vi.mocked(streamBundledTraycerCliJson).mockResolvedValue(ENSURE_NOOP);
     await converge(controller, BACKGROUND);
     expect(streamCallsWith("ensure")).toBe(1);
+  });
+});
+
+// ---- T24: the launch presence lands before the first CLI spawn -----------
+
+function fakeLifecycleRecordWatch(): {
+  watchLifecycleRecords: () => Promise<void>;
+  onLifecycleRecordsChanged: (listener: () => void) => () => void;
+} {
+  return {
+    watchLifecycleRecords: () => Promise.resolve(),
+    onLifecycleRecordsChanged: () => () => undefined,
+  };
+}
+
+function requireIdentity(
+  value: ProcessStartIdentity | null,
+): ProcessStartIdentity {
+  if (value === null) throw new Error("test fixture: identity was null");
+  return value;
+}
+
+const T24_OWN_IDENTITY = requireIdentity(
+  formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+);
+
+describe("T24: the launch presence lands before the first CLI spawn", () => {
+  it("holds a converge submitted right after holdLaneOnLaunchPresence() until the presence write's identity read settles, and the presence is already on disk at the first spawn", async () => {
+    const layout = getHostFsLayout("production");
+    const identityGate = deferred<ProcessStartIdentity | null>();
+    const store = new HostLifecyclePolicyStore({
+      hostHomeDir: layout.rootDir,
+      pidMetadataFile: layout.pidMetadataFile,
+      ownPid: process.pid,
+      readOwnStartIdentity: () => identityGate.promise,
+      now: () => new Date("2026-09-24T10:00:00.000Z"),
+    });
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    const presenceExistsAtFirstSpawn: boolean[] = [];
+    vi.mocked(streamBundledTraycerCliJson).mockImplementation(async () => {
+      if (presenceExistsAtFirstSpawn.length === 0) {
+        presenceExistsAtFirstSpawn.push((await store.readPresence()) !== null);
+      }
+      return ENSURE_NOOP;
+    });
+    const service = new HostLifecycleService({
+      store,
+      controller,
+      records: fakeLifecycleRecordWatch(),
+      localHostCapability: "managed",
+      pollIntervalMs: 3_600_000,
+    });
+
+    const launchPresence = service.holdLaneOnLaunchPresence();
+    const convergePromise = converge(controller, BACKGROUND);
+    // Admission, not spawns - see the T24(a) note: `lifecycleAdmissionBlock`
+    // is set synchronously on the job's first line, before any fs I/O, so a
+    // drained microtask queue is enough to prove nothing was admitted while
+    // the identity gate (which we control and never resolves on its own) is
+    // still held.
+    await drainMicrotasks();
+    expect(controller.lifecycleAdmissionBlock).toBeNull();
+    expect(totalSpawns()).toBe(0);
+
+    identityGate.resolve(T24_OWN_IDENTITY);
+    await launchPresence;
+    await convergePromise;
+
+    expect(totalSpawns()).toBeGreaterThan(0);
+    expect(presenceExistsAtFirstSpawn).toEqual([true]);
+    service.dispose();
+  });
+
+  it("positive control: with localHostCapability 'none' nothing is held and no presence is ever written", async () => {
+    const layout = getHostFsLayout("production");
+    const identityGate = deferred<ProcessStartIdentity | null>();
+    const store = new HostLifecyclePolicyStore({
+      hostHomeDir: layout.rootDir,
+      pidMetadataFile: layout.pidMetadataFile,
+      ownPid: process.pid,
+      readOwnStartIdentity: () => identityGate.promise,
+      now: () => new Date("2026-09-24T10:00:00.000Z"),
+    });
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue(ENSURE_NOOP);
+    const service = new HostLifecycleService({
+      store,
+      controller,
+      records: fakeLifecycleRecordWatch(),
+      localHostCapability: "none",
+      pollIntervalMs: 3_600_000,
+    });
+
+    const launchPresence = service.holdLaneOnLaunchPresence();
+    await launchPresence;
+    expect(await store.readPresence()).toBeNull();
+
+    await converge(controller, BACKGROUND);
+    expect(streamCallsWith("ensure")).toBe(1);
+    service.dispose();
   });
 });
 
@@ -884,13 +1174,13 @@ const START_CAPABLE_COMMANDS: readonly (readonly string[])[] = [
   ["host", "restart"],
   ["host", "free-port-and-restart"],
   ["host", "stop"],
+  // Starts nothing, but refuses Remove Traycer over a terminal's host.
+  ["host", "uninstall"],
 ];
 
 const NON_START_COMMANDS: readonly (readonly string[])[] = [
   ["host", "download", "1.8.0"],
   ["host", "download", "--automatic"],
-  ["host", "uninstall"],
-  ["host", "uninstall", "--all"],
   ["host", "service", "uninstall"],
   ["host", "service", "status"],
   ["host", "update-verify", "--attempt-id", "attempt-1"],
@@ -1038,19 +1328,228 @@ describe("--lifecycle-origin desktop over the controller's real spawns", () => {
       "host restart",
       "host free-port-and-restart",
       "host stop",
+      "host uninstall",
     ]) {
       expect(observed.has(key)).toBe(true);
       const carriers = spawned.filter((args) => commandKey(args) === key);
       expect(carriers.every((args) => hasOrigin(args))).toBe(true);
     }
-    for (const key of [
-      "host service uninstall",
-      "host uninstall",
-      "host stamp-runtime",
-    ]) {
+    for (const key of ["host service uninstall", "host stamp-runtime"]) {
       expect(observed.has(key)).toBe(true);
       const carriers = spawned.filter((args) => commandKey(args) === key);
       expect(carriers.some((args) => hasOrigin(args))).toBe(false);
     }
+  });
+});
+
+// ---- F22: explicit start-capable intents while suspended --------------------
+//
+// An in-session `none` (`quiesce`) or a reversible hold
+// (`holdAutomaticIntents`) must refuse every intent that can bring the local
+// host BACK, whether that intent is automatic or explicit: once the host is
+// suspended, no click and no queued job may start it again until either the
+// hold releases or the app restarts. Only `stopHost`, `refreshServiceDefinition`
+// and `uninstallHost` - which never start anything - stay unaffected.
+
+/** What a narrowing check over an F22 case's outcome needs, and nothing more. */
+interface DeferrableOutcome {
+  readonly kind: string;
+  readonly message?: string;
+}
+
+/** The 8 explicit, start-capable intents F22 must refuse while suspended. */
+const F22_QUIESCED_CASES: readonly {
+  readonly label: string;
+  readonly run: (controller: HostController) => Promise<DeferrableOutcome>;
+}[] = [
+  {
+    label: "respawn(userRepair(), force)",
+    run: (controller) => controller.respawn(userRepair(), "force"),
+  },
+  {
+    label: "respawn(background, if-idle)",
+    run: (controller) => controller.respawn(BACKGROUND, "if-idle"),
+  },
+  {
+    label: "convergeReady(userRepair())",
+    run: (controller) => converge(controller, userRepair()),
+  },
+  {
+    label: "registerService(userRepair())",
+    run: (controller) => controller.registerService(userRepair()),
+  },
+  {
+    label: "freePortAndRestart(null, null, userRepair())",
+    run: (controller) =>
+      controller.freePortAndRestart(null, null, userRepair()),
+  },
+  {
+    label: 'installVersion("1.8.0", false)',
+    run: (controller) => controller.installVersion("1.8.0", false),
+  },
+  {
+    label: 'applyStaged("manual", false)',
+    run: (controller) => controller.applyStaged("manual", false),
+  },
+  {
+    label: "activateInstalled(false, true)",
+    run: (controller) => controller.activateInstalled(false, true),
+  },
+];
+
+describe("F22: explicit start-capable intents are refused while the local host is suspended", () => {
+  it.each(F22_QUIESCED_CASES)(
+    "after quiesce(), $label does not reach the CLI",
+    async ({ run }) => {
+      const controller = newReachableController();
+      writeInstallRecord("1.7.0");
+      writeStagedRecord();
+      controller.quiesce();
+
+      const outcome = await run(controller);
+      expect(outcome.kind).toBe("deferred");
+      expect(outcome.message).toBe(AUTOMATIC_INTENTS_QUIESCED_MESSAGE);
+      expect(totalSpawns()).toBe(0);
+    },
+  );
+
+  it("under a hold, an explicit restart is refused with the HELD message, and runs once released", async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    vi.mocked(streamBundledTraycerCliJson).mockResolvedValue({
+      data: { activated: true },
+    });
+    const hold = controller.holdAutomaticIntents();
+
+    const held = await controller.respawn(userRepair(), "force");
+    expect(held.kind).toBe("deferred");
+    if (held.kind !== "deferred") throw new Error("expected deferred");
+    expect(held.message).toBe(AUTOMATIC_INTENTS_HELD_MESSAGE);
+    expect(totalSpawns()).toBe(0);
+
+    hold.release();
+
+    // Positive control: released, the identical explicit restart runs.
+    await controller.respawn(userRepair(), "force");
+    expect(streamCallsWith("restart")).toBe(1);
+  });
+
+  it("an explicit restart queued before quiesce is refused at the lane head", async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    const installGate = deferred<{ data: unknown }>();
+    vi.mocked(streamBundledTraycerCliJson).mockImplementation(async (opts) => {
+      if (opts.args.includes("install")) return installGate.promise;
+      return { data: { activated: true } };
+    });
+    const install = controller.installVersion("1.8.0", true);
+    await vi.waitFor(() => {
+      expect(streamCallsWith("install")).toBe(1);
+    });
+
+    // Submitted BEFORE any suspension, so it passes the submission check and
+    // waits its turn on the lane behind the install.
+    const respawnPromise = controller.respawn(userRepair(), "force");
+    await settle();
+    expect(streamCallsWith("restart")).toBe(0);
+
+    controller.quiesce();
+    installGate.resolve({
+      data: { version: "1.8.0", installGeneration: null },
+    });
+    await install;
+
+    const respawned = await respawnPromise;
+    expect(respawned.kind).toBe("deferred");
+    expect(streamCallsWith("restart")).toBe(0);
+  });
+
+  it("after quiesce(), stop, service refresh and uninstall still run", async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    controller.quiesce();
+
+    await controller.stopHost(stopRequest("if-idle", "attached", null));
+    expect(streamCallsWith("stop")).toBe(1);
+
+    await controller.refreshServiceDefinition();
+    expect(runCalls().filter((args) => args.includes("refresh")).length).toBe(
+      1,
+    );
+
+    await controller.uninstallHost(false);
+    expect(
+      streamCalls().filter((args) => args.includes("uninstall")).length,
+    ).toBe(1);
+  });
+
+  it("the HELD message does not call an explicit start automatic", () => {
+    expect(AUTOMATIC_INTENTS_HELD_MESSAGE).not.toMatch(/automatic/i);
+  });
+});
+
+// ---- T28: the lane-head recheck covers every host-start intent, not just
+// convergeReady - applyStaged("launch"), the implicit activateInstalled and
+// recoverIfDown must each refuse an intent queued BEFORE quiesce() once it
+// reaches the head of the lane, not just at submission. `recoverIfDown`
+// refuses at submission while `mutationStatus !== null`, so its lane is held
+// with `deferMutationsUntil` (a barrier ahead of the lane) rather than an
+// in-flight install, which would make `mutationStatus` non-null and refuse it
+// before it ever reaches the lane.
+
+describe("T28: applyStaged/activateInstalled/recoverIfDown recheck suspension at the lane head", () => {
+  it('applyStaged("launch") queued before quiesce is deferred and spawns no apply', async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    writeStagedRecord();
+    const gate = deferred<void>();
+    controller.deferMutationsUntil(gate.promise);
+
+    const applyPromise = controller.applyStaged("launch", false);
+    await settle();
+    expect(streamCallsWith("apply")).toBe(0);
+
+    controller.quiesce();
+    gate.resolve();
+
+    const applied = await applyPromise;
+    expect(applied.kind).toBe("deferred");
+    expect(streamCallsWith("apply")).toBe(0);
+  });
+
+  it("the implicit activateInstalled(false, false) queued before quiesce is deferred and spawns no restart", async () => {
+    const controller = newReachableController();
+    writeInstallRecord("1.7.0");
+    const gate = deferred<void>();
+    controller.deferMutationsUntil(gate.promise);
+
+    const activatePromise = controller.activateInstalled(false, false);
+    await settle();
+    expect(streamCallsWith("restart")).toBe(0);
+
+    controller.quiesce();
+    gate.resolve();
+
+    const activated = await activatePromise;
+    expect(activated.kind).toBe("deferred");
+    expect(streamCallsWith("restart")).toBe(0);
+  });
+
+  it("recoverIfDown() queued before quiesce is deferred and spawns no restart", async () => {
+    const controller = newController(async () => false);
+    writeInstallRecord("1.7.0");
+    const gate = deferred<void>();
+    controller.deferMutationsUntil(gate.promise);
+
+    const recoverPromise = controller.recoverIfDown();
+    await settle();
+    expect(streamCallsWith("restart")).toBe(0);
+
+    controller.quiesce();
+    gate.resolve();
+
+    const recovered = await recoverPromise;
+    expect(recovered.kind).toBe("deferred");
+    expect(streamCallsWith("restart")).toBe(0);
   });
 });

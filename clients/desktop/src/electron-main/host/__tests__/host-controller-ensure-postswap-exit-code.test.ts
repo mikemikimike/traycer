@@ -153,6 +153,7 @@ import {
   DESKTOP_LOCK_WAIT_MS,
   HostController,
   type HostControllerHostLifecycle,
+  type HostControllerSupervisorRun,
 } from "../host-controller";
 import { __resetHostRemovalStateForTest } from "../host-removal-state";
 import { hostManagesHostLoginItem } from "../../app/host-login-item";
@@ -216,6 +217,14 @@ function fakeHostLifecycle(): HostControllerHostLifecycle {
   };
 }
 
+const NO_SUPERVISOR_RUN: HostControllerSupervisorRun = {
+  readSupervisorRun: async () => ({
+    state: "not-running",
+    supervisorPid: null,
+    admittedAs: null,
+  }),
+};
+
 function newController(): HostController {
   return new HostController({
     environment: "production",
@@ -223,6 +232,7 @@ function newController(): HostController {
     reachabilityProbe: async () => true,
     desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
     desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+    supervisorRun: NO_SUPERVISOR_RUN,
   });
 }
 

@@ -126,6 +126,7 @@ function fakeStatus(
     activation,
     reachable: true,
     removedByUser,
+    lastEnsureFailure: null,
     checkedAt: new Date().toISOString(),
   };
 }

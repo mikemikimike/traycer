@@ -13,6 +13,8 @@ import type {
 } from "../../../ipc-contracts/host-quit-types";
 import type { AutomaticIntentHold } from "../../host/host-controller";
 import type {
+  LifecycleAdmissionBlock,
+  MutationKind,
   StopHostOutcome,
   StopHostRequest,
 } from "../../host/host-controller-types";
@@ -38,7 +40,11 @@ vi.mock("../../app/logger", () => ({
 
 const VIEW: HostLifecycleView = {
   desired: { mode: "ask", rev: 1, updatedBy: "desktop", updatedAt: null },
-  applied: { localHostCapability: "managed", supervisor: "not-running" },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
   pending: "none",
 };
 
@@ -66,10 +72,27 @@ type PromptScript =
   /** The renderer path rejects (no listening window); main asks natively. */
   | { readonly via: "native"; readonly decision: HostQuitDecision }
   /** The renderer is asked and never answers until the question is withdrawn. */
-  | { readonly via: "pending" };
+  | { readonly via: "pending" }
+  /**
+   * T32: the renderer answers, but only after `delayMs` (a real `setTimeout`,
+   * so it works under fake timers) - modeling a prompt that stays up for a
+   * while before the person answers it.
+   */
+  | {
+      readonly via: "renderer-after";
+      readonly delayMs: number;
+      readonly decision: HostQuitDecision;
+    };
 
-/** A scripted stop: an outcome, or a stop that runs until withdrawn. */
-type StopScript = StopHostOutcome | "hang" | "deferred";
+/**
+ * A scripted stop: an outcome, a stop that runs until withdrawn, or (lane
+ * mode only) one that, once ADMITTED onto the lane, hangs until the test
+ * settles it via `resolveStop` (F31: an admitted stop with a hanging child).
+ */
+type StopScript = StopHostOutcome | "hang" | "deferred" | "lane-hang";
+
+/** F31: the two lane job kinds the F31 corner tests hold ahead of the quit. */
+type LaneHeldJobKind = "install" | "stopHost";
 
 interface Scenario {
   readonly mode: HostLifecycleMode;
@@ -79,6 +102,37 @@ interface Scenario {
   readonly prompts: readonly PromptScript[];
   readonly deadlineMs: number;
   readonly revealDelayMs: number;
+  /**
+   * F7(a-lane): model the ONE exclusive lane `setMode(linked)`'s
+   * `refreshServiceDefinition` job and `stopHost`'s own job share
+   * (`host-lifecycle-transitions.ts:422-449`, `host-controller.ts:3146`).
+   * When true, `setMode` and `stopHost` are driven through a FIFO lane
+   * instead of their default scripted behavior.
+   */
+  readonly lane: boolean;
+  /**
+   * F31: a job of this kind occupies the lane's head BEFORE the quit
+   * starts, running until the test calls `releaseLane()`. Models another
+   * lane job (an "install", or a `stopHost` from an unrelated `→ none`
+   * commit) that is already running when the quit's own stop is enqueued
+   * behind it - so the quit's stop is merely QUEUED, never ADMITTED, until
+   * released. `null` means no held job (the quit's own stop, if any, is
+   * admitted immediately).
+   */
+  readonly laneHeld: LaneHeldJobKind | null;
+  /**
+   * F24: whether a local host is reachable right now. Not on
+   * `QuitTransactionDeps` at head - vitest does not type-check fixtures,
+   * and head's transaction never reads it, so it has no effect there.
+   */
+  readonly isLocalHostRunning: boolean;
+  /**
+   * F4: the running local host was started in a terminal (supervisor
+   * `admittedAs: foreground`), not the service. Not on `QuitTransactionDeps`
+   * at head - vitest does not type-check fixtures, and head's transaction
+   * never reads it, so it has no effect there.
+   */
+  readonly foregroundRun: boolean;
 }
 
 const DEFAULT_SCENARIO: Scenario = {
@@ -89,6 +143,10 @@ const DEFAULT_SCENARIO: Scenario = {
   prompts: [],
   deadlineMs: 5_000,
   revealDelayMs: 1_000,
+  lane: false,
+  laneHeld: null,
+  isLocalHostRunning: true,
+  foregroundRun: false,
 };
 
 interface Rig {
@@ -112,7 +170,13 @@ interface Rig {
     reveal: number;
   };
   hooks(): UpdateInstallQuitHooks;
-  /** Settle the oldest `deferred` stop. */
+  /** F7(a-lane): how many `stopHost` lane jobs actually spawned (not withdrawn). */
+  laneSpawned(): number;
+  /** F31: release the `laneHeld` job, letting whatever is queued behind it run. */
+  releaseLane(): void;
+  /** F31 (Phase E): the fake's own `lifecycleAdmissionBlock`, for the test to assert directly. */
+  admissionBlock(): LifecycleAdmissionBlock | null;
+  /** Settle the oldest `deferred` or `lane-hang` stop. */
   resolveStop(outcome: StopHostOutcome): void;
   /** Resolve the next held-back verdict write. */
   releaseVerdictWrites(): void;
@@ -152,6 +216,54 @@ function buildRig(scenario: Scenario): Rig {
   const updateSequenceWaiters: Array<() => void> = [];
   const deferredStops: Array<(outcome: StopHostOutcome) => void> = [];
 
+  // F7(a-lane): a minimal FIFO lane. `enqueue` runs `job` only once every
+  // job enqueued before it has settled, mirroring the exclusive mutation
+  // lane `setMode(linked)`'s refresh and `stopHost` share.
+  //
+  // F31: also tracks the RUNNING job's kind, set in the same synchronous
+  // stretch as the job starts and cleared once it settles - mirroring
+  // production's `mutationStatus` (host-controller.ts:1394, then :1410) -
+  // and exposed to the controller fake as `lifecycleAdmissionBlock`.
+  let laneTail: Promise<void> = Promise.resolve();
+  let runningLaneKind: MutationKind | null = null;
+  const enqueueOnLane = <T>(
+    kind: MutationKind,
+    job: () => Promise<T>,
+  ): Promise<T> => {
+    const run = laneTail.then(async () => {
+      runningLaneKind = kind;
+      try {
+        return await job();
+      } finally {
+        runningLaneKind = null;
+      }
+    });
+    laneTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+  let laneSpawnedCount = 0;
+  let releaseHeldLane: (() => void) | null = null;
+  if (scenario.lane && scenario.laneHeld !== null) {
+    const held = new Promise<void>((resolve) => {
+      releaseHeldLane = resolve;
+    });
+    void enqueueOnLane(scenario.laneHeld, () => held);
+  }
+  const currentAdmissionBlock = (): LifecycleAdmissionBlock | null => {
+    if (runningLaneKind === null) return null;
+    return {
+      kind: "mutation",
+      lane: {
+        kind: runningLaneKind,
+        progress: null,
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+  };
+
   const rig: Rig = {
     events,
     stopRequests,
@@ -172,6 +284,13 @@ function buildRig(scenario: Scenario): Rig {
       if (hooks === null) throw new Error("update sequence not started");
       return hooks;
     },
+    laneSpawned: () => laneSpawnedCount,
+    releaseLane: () => {
+      if (releaseHeldLane === null) throw new Error("no held lane job");
+      releaseHeldLane();
+      releaseHeldLane = null;
+    },
+    admissionBlock: () => currentAdmissionBlock(),
     holdVerdictWrites: () => {
       verdictGate = new Promise<void>((resolve) => {
         openVerdictGate = resolve;
@@ -185,7 +304,9 @@ function buildRig(scenario: Scenario): Rig {
       for (const resolve of updateSequenceWaiters.splice(0)) resolve();
     },
     txs: new QuitTransactions({
-      isInstallingUpdate: () => state.installing,
+      isRelaunchIntended: () => state.installing,
+      isLocalHostRunning: () => Promise.resolve(scenario.isLocalHostRunning),
+      isForegroundHostRun: () => Promise.resolve(scenario.foregroundRun),
       lifecycle: {
         readQuitPolicy: () => {
           counts.readPolicy += 1;
@@ -206,6 +327,15 @@ function buildRig(scenario: Scenario): Rig {
         setMode: (request): Promise<HostLifecycleSetResult> => {
           setModeRequests.push(request);
           events.push(`setMode:${request.mode}:${String(request.stop)}`);
+          if (scenario.lane && request.mode === "linked") {
+            // Models host-lifecycle-transitions.ts:422-449: a mode write
+            // that parks queues a 400ms refresh job on the exclusive lane,
+            // fire-and-forget (setMode's own promise does not wait on it).
+            void enqueueOnLane(
+              "refreshService",
+              () => new Promise<void>((resolve) => setTimeout(resolve, 400)),
+            );
+          }
           return Promise.resolve({ kind: "applied", view: VIEW });
         },
       },
@@ -213,14 +343,48 @@ function buildRig(scenario: Scenario): Rig {
         stopHost: (request) => {
           stopRequests.push(request);
           events.push(`stop:${request.mode}:${request.spawn}`);
+          if (scenario.lane) {
+            // Models host-controller.ts:3146: stopHost enqueues on the same
+            // exclusive lane and checks withdrawal.aborted at the lane head.
+            const laneScript = stopScripts.shift();
+            return enqueueOnLane(
+              "stopHost",
+              async (): Promise<StopHostOutcome> => {
+                if (request.withdrawal?.aborted === true) {
+                  return { kind: "withdrawn" };
+                }
+                laneSpawnedCount += 1;
+                if (laneScript === "lane-hang") {
+                  // F31: admitted and running, with a hanging child - held
+                  // until the test settles it via `resolveStop`.
+                  return new Promise<StopHostOutcome>((resolve) => {
+                    deferredStops.push((outcome) => {
+                      events.push("stop:settled");
+                      resolve(outcome);
+                    });
+                  });
+                }
+                return { kind: "stopped", forced: request.mode === "force" };
+              },
+            );
+          }
           const script = stopScripts.shift();
           if (script === undefined) {
             throw new Error("test fixture: no scripted stop outcome");
           }
           if (script === "deferred") {
             return new Promise<StopHostOutcome>((resolve) => {
-              deferredStops.push(resolve);
+              // F31: an admitted CLI child settling - `resolveStop` invokes
+              // this, so "stop:settled" always precedes whatever the
+              // outcome's own promise reaction does next.
+              deferredStops.push((outcome) => {
+                events.push("stop:settled");
+                resolve(outcome);
+              });
             });
+          }
+          if (script === "lane-hang") {
+            throw new Error("test fixture: lane-hang requires scenario.lane");
           }
           if (script !== "hang") return Promise.resolve(script);
           // Like the real controller: a queued stop resolves `withdrawn` once
@@ -242,6 +406,21 @@ function buildRig(scenario: Scenario): Rig {
         quiesce: () => {
           events.push("quiesce");
         },
+        // F7(c): not on `QuitTransactionController` at head - vitest does
+        // not type-check fixtures, and head's `remember()` never calls it.
+        // The fix reads it to spawn a detached refresh once a stop is
+        // remembered, instead of the parked-mode refresh queued on the lane.
+        spawnServiceDefinitionRefresh: (): Promise<"spawned" | "failed"> => {
+          events.push("refresh:detached");
+          return Promise.resolve("spawned");
+        },
+        // F31: not on `QuitTransactionController` at head - vitest does not
+        // type-check fixtures, and head's `join()` never reads it. The fix
+        // reads it to tell an ADMITTED stop (the lane's running job is
+        // `stopHost`) from one merely queued behind something else.
+        get lifecycleAdmissionBlock(): LifecycleAdmissionBlock | null {
+          return currentAdmissionBlock();
+        },
       },
       requestDecision: (prompt) => {
         prompts.push(prompt);
@@ -256,6 +435,15 @@ function buildRig(scenario: Scenario): Rig {
         if (script.via === "pending") {
           return new Promise<HostQuitDecisionResponse>((_resolve, reject) => {
             pendingReject = reject;
+          });
+        }
+        if (script.via === "renderer-after") {
+          requestSeq += 1;
+          const requestId = `req-${requestSeq}`;
+          return new Promise<HostQuitDecisionResponse>((resolve) => {
+            setTimeout(() => {
+              resolve({ requestId, decision: script.decision });
+            }, script.delayMs);
           });
         }
         requestSeq += 1;
@@ -429,7 +617,10 @@ describe("user quit: linked", () => {
     });
   }
 
-  it("not-service-run: verdict stop, no force escalation (that host is the terminal's), authorize anyway", async () => {
+  // F4: that host is the terminal's - the service stop reached nothing, so
+  // the standing verdict corrects to `keep` once the stop settles, exactly
+  // like F2's "stopped" correction, never `stop`.
+  it("not-service-run: verdict keep after the stop settles, no force escalation (that host is the terminal's), authorize anyway", async () => {
     const rig = buildRig(
       scenario({ mode: "linked", stops: [NOT_SERVICE_RUN] }),
     );
@@ -439,6 +630,7 @@ describe("user quit: linked", () => {
       "verdict:stop",
       "state:stopping:null:idleOnly=false",
       "stop:if-idle:detached",
+      "verdict:keep",
       ...QUITTING_TAIL,
       "state:quitting:null",
       "authorize",
@@ -474,7 +666,7 @@ describe("user quit: ask", () => {
     expect(rig.setModeRequests).toEqual([]);
   });
 
-  it("keep with remember: verdict keep, THEN mode background", async () => {
+  it("keep with remember: verdict keep, THEN (at commit) mode background - no refresh (parking to background never refreshes)", async () => {
     const rig = buildRig(
       scenario({
         mode: "ask",
@@ -488,15 +680,17 @@ describe("user quit: ask", () => {
       ...USER_START,
       ASK_PROMPT,
       "verdict:keep",
+      "quiesce",
       "setMode:background:null",
-      ...QUITTING_TAIL,
+      "holdRelease",
       "state:quitting:req-1",
       "authorize",
     ]);
     expect(rig.setModeRequests).toEqual([{ mode: "background", stop: null }]);
+    expect(rig.events).not.toContain("refresh:detached");
   });
 
-  it("stop{force, remember}: verdict stop, THEN mode linked, then the force stop", async () => {
+  it("stop{force, remember}: verdict stop, the force stop, THEN mode linked and its refresh", async () => {
     const rig = buildRig(
       scenario({
         mode: "ask",
@@ -510,14 +704,19 @@ describe("user quit: ask", () => {
       }),
     );
     await quit(rig);
+    // F7: "Remember" is applied at commit, after the stop settles - not
+    // right after the verdict - and a mode change that parks the host
+    // (ask -> linked) is followed by a detached service-definition refresh.
     expect(rig.events).toEqual([
       ...USER_START,
       ASK_PROMPT,
       "verdict:stop",
-      "setMode:linked:null",
       "state:stopping:req-1:idleOnly=false",
       "stop:force:detached",
-      ...QUITTING_TAIL,
+      "quiesce",
+      "setMode:linked:null",
+      "refresh:detached",
+      "holdRelease",
       "state:quitting:req-1",
       "authorize",
     ]);
@@ -593,9 +792,13 @@ describe("user quit: ask", () => {
     expect(rig.events).toEqual([
       ...USER_START,
       ASK_PROMPT,
-      "verdict:stop",
+      // F2: the FIRST round is idle-only (force:false) - it writes `keep`,
+      // never `stop`, since it may not end anything. Only the busy-retry
+      // round's forced stop commits `stop`.
+      "verdict:keep",
       "state:stopping:req-1:idleOnly=true",
       "stop:if-idle:detached",
+      "state:prompting:req-1",
       "prompt:ask:busy-retry",
       "verdict:stop",
       "state:stopping:req-2:idleOnly=false",
@@ -606,7 +809,7 @@ describe("user quit: ask", () => {
     ]);
   });
 
-  it("stop then busy then Keep on the retry: verdicts stop then keep, one if-idle stop only", async () => {
+  it("stop then busy then Keep on the retry: verdicts keep then keep, one if-idle stop only", async () => {
     const rig = buildRig(
       scenario({
         mode: "ask",
@@ -622,7 +825,9 @@ describe("user quit: ask", () => {
     );
     await quit(rig);
     const verdicts = rig.events.filter((event) => event.startsWith("verdict:"));
-    expect(verdicts).toEqual(["verdict:stop", "verdict:keep"]);
+    // F2: the idle-only Stop round writes `keep`, not `stop` - it never
+    // finished anything before the busy-retry round Cancel/Keep took over.
+    expect(verdicts).toEqual(["verdict:keep", "verdict:keep"]);
     expect(rig.stopRequests.map((r) => r.mode)).toEqual(["if-idle"]);
     expect(rig.counts.authorize).toBe(1);
     expect(rig.counts.stayOpen).toBe(0);
@@ -705,6 +910,10 @@ describe("user quit: stop-if-idle", () => {
       ...USER_START,
       "state:stopping:null:idleOnly=true",
       "stop:if-idle:detached",
+      // F2 (Phase C): the silent stop's genuinely successful outcome now
+      // writes `verdict:stop` before commit, so a Windows supervisor tree
+      // that outlives the stop is never adopted under a stale `keep`.
+      "verdict:stop",
       ...QUITTING_TAIL,
       "state:quitting:null",
       "authorize",
@@ -731,7 +940,8 @@ describe("user quit: stop-if-idle", () => {
     expect(rig.counts.authorize).toBe(1);
     // Answered with force:false, but the busy round's Stop is the force
     // regardless: its own second stopping state is not idle-only.
-    expect(rig.states[1]).toEqual({
+    // states[1] is the "prompting" state ending the silent stopping phase.
+    expect(rig.states[2]).toEqual({
       requestId: "req-1",
       phase: "stopping",
       idleOnly: false,
@@ -1012,15 +1222,19 @@ describe("tray preset: quitAndStopHost", () => {
     });
   }
 
-  it("remember sets the mode to linked after the verdict", async () => {
+  it("remember sets the mode to linked after the verdict AND after the stop settles", async () => {
     const rig = buildRig(scenario({ mode: "background", stops: [FORCE_STOP] }));
     trayQuit(rig, true);
     await flush();
     const verdictAt = rig.events.indexOf("verdict:stop");
+    const stopAt = rig.events.indexOf("stop:force:detached");
     const modeAt = rig.events.indexOf("setMode:linked:null");
     expect(verdictAt).toBeGreaterThan(-1);
-    expect(modeAt).toBeGreaterThan(verdictAt);
-    expect(rig.events.indexOf("stop:force:detached")).toBeGreaterThan(modeAt);
+    expect(stopAt).toBeGreaterThan(verdictAt);
+    // F7: "Remember" is applied only once the decision is final, at commit -
+    // after the stop has settled, not right after the verdict.
+    expect(modeAt).toBeGreaterThan(stopAt);
+    expect(rig.events.indexOf("authorize")).toBeGreaterThan(modeAt);
   });
 
   it("a busy force under the tray preset does not re-prompt: it quits", async () => {
@@ -1208,11 +1422,9 @@ describe("reasons", () => {
     for (const installing of [false, true]) {
       const rig = buildRig(scenario({ installing }));
       await quit(rig);
-      reasons.push(
-        rig.events[0] === "verdict:handoff" ? "update-install" : "user",
-      );
+      reasons.push(rig.events[0] === "verdict:handoff" ? "relaunch" : "user");
     }
-    expect(reasons).toEqual(["user", "update-install"]);
+    expect(reasons).toEqual(["user", "relaunch"]);
   });
 });
 
@@ -1313,5 +1525,1086 @@ describe("stopping phase: indicator and delayed reveal", () => {
     await settle();
     vi.advanceTimersByTime(REVEAL_MS * 3);
     expect(rig.counts.reveal).toBe(0);
+  });
+});
+
+// F2 (R5): an idle-only Stop (force:false) never leaves the on-disk
+// presence verdict as `stop` unless the stop is actually forced/committed.
+// On head, `applyDecision`'s "stop" branch writes `verdict:stop` eagerly,
+// before `runStop` even settles, for EVERY decision.kind==="stop" - forced
+// or not, and regardless of the eventual outcome.
+describe("F2: an idle-only Stop never leaves presence stop (R5)", () => {
+  const IDLE_ONLY_OUTCOMES: ReadonlyArray<readonly [string, StopHostOutcome]> =
+    [
+      ["lock-busy", { kind: "lock-busy", message: "cli lock held" }],
+      ["update-active", { kind: "update-active", message: "updating" }],
+      ["failed", { kind: "failed", message: "boom" }],
+      ["not-service-run", NOT_SERVICE_RUN],
+      ["withdrawn", { kind: "withdrawn" }],
+      // "stopped" is NOT idle-only-forever: Phase C requires `verdict:stop`
+      // to land after a genuinely successful stop, so it moves out of this
+      // negative loop into its own dedicated tests below.
+    ];
+
+  function lastVerdictBeforeAuthorize(
+    events: readonly string[],
+  ): string | undefined {
+    const authorizeIndex = events.indexOf("authorize");
+    const upTo =
+      authorizeIndex === -1 ? events : events.slice(0, authorizeIndex);
+    const verdicts = upTo.filter((event) => event.startsWith("verdict:"));
+    return verdicts.at(-1);
+  }
+
+  describe("ask, initial round, stop{force:false,remember:false}", () => {
+    for (const [label, outcome] of IDLE_ONLY_OUTCOMES) {
+      it(`${label}: no verdict:stop, last verdict before authorize is verdict:keep`, async () => {
+        const rig = buildRig(
+          scenario({
+            mode: "ask",
+            stops: [outcome],
+            prompts: [
+              {
+                via: "renderer",
+                decision: { kind: "stop", force: false, remember: false },
+              },
+            ],
+          }),
+        );
+        await quit(rig);
+        expect(rig.events).not.toContain("verdict:stop");
+        expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+      });
+    }
+
+    it("deadline: a hang stop with a small deadlineMs, no verdict:stop, last verdict before authorize is verdict:keep", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: ["hang"],
+          deadlineMs: 30,
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: false },
+            },
+          ],
+        }),
+      );
+      rig.txs.onBeforeQuit();
+      await flush();
+      await new Promise<void>((resolve) => setTimeout(resolve, 80));
+      await flush();
+      expect(rig.events).not.toContain("verdict:stop");
+      expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+    });
+  });
+
+  describe("named case: stop-if-idle silent stop update-active, then the renderer's automatic stop{force:false,remember:false}", () => {
+    for (const [label, outcome] of IDLE_ONLY_OUTCOMES) {
+      it(`second if-idle stop ${label}: no verdict:stop, last verdict before authorize is verdict:keep`, async () => {
+        const rig = buildRig(
+          scenario({
+            mode: "stop-if-idle",
+            stops: [{ kind: "update-active", message: "updating" }, outcome],
+            prompts: [
+              {
+                via: "renderer",
+                decision: { kind: "stop", force: false, remember: false },
+              },
+            ],
+          }),
+        );
+        await quit(rig);
+        expect(rig.prompts).toEqual([
+          { mode: "stop-if-idle", round: "initial" },
+        ]);
+        expect(rig.events).not.toContain("verdict:stop");
+        expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+      });
+    }
+  });
+
+  // Phase C (F2 follow-up): a non-forced stop still writes `keep` BEFORE it
+  // runs (crash-window and non-stopped-outcome protection unchanged), but
+  // once its outcome is genuinely `stopped`, `verdict:stop` must be written
+  // AFTER it settles and before `authorize` - otherwise a Windows supervisor
+  // tree that outlives the stop can be adopted by a later indeterminate
+  // start under a stale `keep`.
+  describe("a genuinely successful stop still writes verdict:stop, after it settles", () => {
+    it("ask, stop{force:false}, idle stop stopped: verdict:keep then verdict:stop, straddling the stop; verdict:stop is last before authorize", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [IDLE_STOP],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: false },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      const keepIndex = rig.events.indexOf("verdict:keep");
+      const stopRequestIndex = rig.events.indexOf("stop:if-idle:detached");
+      const stopVerdictIndex = rig.events.indexOf("verdict:stop");
+      expect(keepIndex).toBeGreaterThan(-1);
+      expect(stopRequestIndex).toBeGreaterThan(-1);
+      expect(stopVerdictIndex).toBeGreaterThan(-1);
+      expect(keepIndex).toBeLessThan(stopRequestIndex);
+      expect(stopRequestIndex).toBeLessThan(stopVerdictIndex);
+      expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:stop");
+    });
+
+    it("stop-if-idle SILENT automatic stop, stopped: verdict:stop after the stop request and before authorize (no prompt, no verdict:keep needed)", async () => {
+      const rig = buildRig(
+        scenario({ mode: "stop-if-idle", stops: [IDLE_STOP] }),
+      );
+      await quit(rig);
+      expect(rig.prompts).toEqual([]);
+      const stopRequestIndex = rig.events.indexOf("stop:if-idle:detached");
+      const stopVerdictIndex = rig.events.indexOf("verdict:stop");
+      expect(stopRequestIndex).toBeGreaterThan(-1);
+      expect(stopVerdictIndex).toBeGreaterThan(-1);
+      expect(stopRequestIndex).toBeLessThan(stopVerdictIndex);
+      expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:stop");
+    });
+
+    it("named case: stop-if-idle initial round after update-active, answered stop{force:false}, second stop stopped: verdict:keep precedes the second stop, verdict:stop is last before authorize", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "stop-if-idle",
+          stops: [{ kind: "update-active", message: "updating" }, IDLE_STOP],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: false },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      expect(rig.prompts).toEqual([{ mode: "stop-if-idle", round: "initial" }]);
+      const keepIndex = rig.events.indexOf("verdict:keep");
+      const stopVerdictIndex = rig.events.indexOf("verdict:stop");
+      expect(keepIndex).toBeGreaterThan(-1);
+      expect(stopVerdictIndex).toBeGreaterThan(-1);
+      expect(keepIndex).toBeLessThan(stopVerdictIndex);
+      expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:stop");
+    });
+  });
+
+  describe("crash window: a pending busy-retry prompt must not be preceded by verdict:stop", () => {
+    it("stop{force:false} then BUSY: the latest verdict:* before prompt:ask:busy-retry is verdict:keep, and no verdict:stop exists", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [BUSY],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: false },
+            },
+            { via: "pending" },
+          ],
+        }),
+      );
+      rig.txs.onBeforeQuit();
+      await flush();
+      expect(rig.events).toContain("prompt:ask:busy-retry");
+      const retryIndex = rig.events.indexOf("prompt:ask:busy-retry");
+      const before = rig.events.slice(0, retryIndex);
+      expect(before).not.toContain("verdict:stop");
+      const verdictsBefore = before.filter((event) =>
+        event.startsWith("verdict:"),
+      );
+      expect(verdictsBefore.at(-1)).toBe("verdict:keep");
+    });
+  });
+
+  describe("controls (green on head too)", () => {
+    it("ask stop{force:true} with lock-busy: verdict:stop is the last verdict before authorize", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [{ kind: "lock-busy", message: "cli lock held" }],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: true, remember: false },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:stop");
+    });
+
+    it("linked with lock-busy: verdict:stop is the last verdict before authorize", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "linked",
+          stops: [{ kind: "lock-busy", message: "cli lock held" }],
+        }),
+      );
+      await quit(rig);
+      expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:stop");
+    });
+  });
+});
+
+// F4: "the desktop leaves a host that a person started in a terminal
+// untouched; the mode governs the service run only." A `not-service-run`
+// stop outcome means the service stop reached nothing - the terminal's host
+// is still running, exactly as told, so the standing verdict must be `keep`,
+// never `stop`. On head, `runLinked()` writes `stop` unconditionally before
+// running, and `applyDecision`'s "stop" case only corrects a FORCED write
+// back to `keep` when the outcome is `stopped` - `not-service-run` is left
+// standing as whatever was written before the stop ran.
+describe("F4: a not-service-run stop leaves keep, quits, never re-prompts", () => {
+  function lastVerdictBeforeAuthorize(
+    events: readonly string[],
+  ): string | undefined {
+    const authorizeIndex = events.indexOf("authorize");
+    const upTo =
+      authorizeIndex === -1 ? events : events.slice(0, authorizeIndex);
+    const verdicts = upTo.filter((event) => event.startsWith("verdict:"));
+    return verdicts.at(-1);
+  }
+
+  /** No `verdict:stop` from the point the not-service-run stop request fired. */
+  function noStopVerdictAfter(
+    events: readonly string[],
+    stopRequestEvent: string,
+  ): void {
+    const stopIndex = events.indexOf(stopRequestEvent);
+    expect(stopIndex).toBeGreaterThan(-1);
+    expect(events.slice(stopIndex + 1)).not.toContain("verdict:stop");
+  }
+
+  it("Linked, if-idle -> not-service-run: keep, no re-prompt, authorize", async () => {
+    const rig = buildRig(
+      scenario({ mode: "linked", stops: [NOT_SERVICE_RUN] }),
+    );
+    await quit(rig);
+    expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+    noStopVerdictAfter(rig.events, "stop:if-idle:detached");
+    expect(rig.counts.authorize).toBe(1);
+    expect(rig.prompts).toEqual([]);
+  });
+
+  it("Linked, if-idle host-busy then force -> not-service-run: keep, no re-prompt, authorize", async () => {
+    const rig = buildRig(
+      scenario({ mode: "linked", stops: [BUSY, NOT_SERVICE_RUN] }),
+    );
+    await quit(rig);
+    expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+    noStopVerdictAfter(rig.events, "stop:force:detached");
+    expect(rig.counts.authorize).toBe(1);
+    expect(rig.prompts).toEqual([]);
+  });
+
+  it("Stop-if-idle: silent if-idle host-busy, busy round Stop (forced), force -> not-service-run: keep, no re-prompt after, authorize", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "stop-if-idle",
+        stops: [BUSY, NOT_SERVICE_RUN],
+        prompts: [
+          {
+            via: "renderer",
+            decision: { kind: "stop", force: false, remember: false },
+          },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.prompts).toEqual([{ mode: "stop-if-idle", round: "busy" }]);
+    expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+    noStopVerdictAfter(rig.events, "stop:force:detached");
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("Ask: initial round Stop(force:false), host-busy busy-retry round Stop (forced) -> not-service-run: keep, no third prompt, authorize", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        stops: [BUSY, NOT_SERVICE_RUN],
+        prompts: [
+          {
+            via: "renderer",
+            decision: { kind: "stop", force: false, remember: false },
+          },
+          {
+            via: "renderer",
+            decision: { kind: "stop", force: false, remember: false },
+          },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.prompts).toEqual([
+      { mode: "ask", round: "initial" },
+      { mode: "ask", round: "busy-retry" },
+    ]);
+    expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+    noStopVerdictAfter(rig.events, "stop:force:detached");
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("tray preset quitAndStopHost(false, ...), mode ask -> not-service-run: keep, no prompt, authorize", async () => {
+    const rig = buildRig(scenario({ mode: "ask", stops: [NOT_SERVICE_RUN] }));
+    rig.txs.quitAndStopHost(false, () => {
+      rig.events.push("requestQuit");
+      rig.txs.onBeforeQuit();
+    });
+    await flush();
+    expect(lastVerdictBeforeAuthorize(rig.events)).toBe("verdict:keep");
+    noStopVerdictAfter(rig.events, "stop:force:detached");
+    expect(rig.counts.authorize).toBe(1);
+    expect(rig.prompts).toEqual([]);
+  });
+
+  it("Ask, initial round Stop(force:false) -> if-idle -> not-service-run: exactly one verdict, keep, then authorize (pin)", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        stops: [NOT_SERVICE_RUN],
+        prompts: [
+          {
+            via: "renderer",
+            decision: { kind: "stop", force: false, remember: false },
+          },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.events.filter((event) => event.startsWith("verdict:"))).toEqual([
+      "verdict:keep",
+    ]);
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  // Stop-if-idle's own silent not-service-run case ("keep, no prompt,
+  // authorize") is already fully pinned by
+  // describe("user quit: stop-if-idle") > it("auto not-service-run: NO
+  // prompt (asking would only be refused again), verdict keep, authorize") -
+  // not duplicated here.
+});
+
+// F4 (Part 2): a foreground run (the host was started in a terminal, not
+// the service) is skipped ENTIRELY - no prompt, no stop, nothing remembered.
+// On head, `QuitTransactionDeps` has no `isForegroundHostRun` at all, so
+// every mode still runs its normal prompt/stop path against that host.
+describe("F4: a foreground run is left untouched", () => {
+  it("a) Ask: no prompt, no stop, verdict keep, authorize", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        foregroundRun: true,
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.prompts).toEqual([]);
+    expect(rig.stopRequests).toEqual([]);
+    expect(rig.events.filter((event) => event.startsWith("verdict:"))).toEqual([
+      "verdict:keep",
+    ]);
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("b) Linked: no stop spawned, no verdict:stop, verdict keep, authorize", async () => {
+    const rig = buildRig(
+      scenario({ mode: "linked", foregroundRun: true, stops: [IDLE_STOP] }),
+    );
+    await quit(rig);
+    expect(rig.stopRequests).toEqual([]);
+    expect(rig.events).not.toContain("verdict:stop");
+    expect(rig.events.filter((event) => event.startsWith("verdict:"))).toEqual([
+      "verdict:keep",
+    ]);
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("c) Stop-if-idle: the silent stop never runs, verdict keep, no prompt, authorize", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "stop-if-idle",
+        foregroundRun: true,
+        stops: [IDLE_STOP],
+      }),
+    );
+    await quit(rig);
+    expect(rig.stopRequests).toEqual([]);
+    expect(rig.prompts).toEqual([]);
+    expect(rig.events.filter((event) => event.startsWith("verdict:"))).toEqual([
+      "verdict:keep",
+    ]);
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("d) tray preset quitAndStopHost(true, ...), mode ask: no stop, verdict keep, authorize, nothing remembered", async () => {
+    const rig = buildRig(
+      scenario({ mode: "ask", foregroundRun: true, stops: [FORCE_STOP] }),
+    );
+    rig.txs.quitAndStopHost(true, () => {
+      rig.events.push("requestQuit");
+      rig.txs.onBeforeQuit();
+    });
+    await flush();
+    expect(rig.stopRequests).toEqual([]);
+    expect(rig.events.filter((event) => event.startsWith("verdict:"))).toEqual([
+      "verdict:keep",
+    ]);
+    expect(rig.counts.authorize).toBe(1);
+    // No decision was made about THIS host - "Remember my choice" must not
+    // apply to it. Today, the tray preset forces a stop regardless and, on
+    // its "stopped" outcome, remembers Linked - `setModeRequests` will hold
+    // {mode:"linked", stop:null} once the RED confirms this.
+    expect(rig.setModeRequests).toEqual([]);
+  });
+
+  it("e) Background, no preset: no stop, no verdict:stop, authorize (control)", async () => {
+    const rig = buildRig(scenario({ mode: "background", foregroundRun: true }));
+    await quit(rig);
+    expect(rig.stopRequests).toEqual([]);
+    expect(rig.events).not.toContain("verdict:stop");
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("f) mode none: unchanged, quits, no verdict (control)", async () => {
+    const rig = buildRig(scenario({ mode: "none", foregroundRun: true }));
+    await quit(rig);
+    expect(rig.events.filter((event) => event.startsWith("verdict:"))).toEqual(
+      [],
+    );
+    expect(rig.counts.authorize).toBe(1);
+  });
+
+  it("g) foregroundRun:false, Ask: the modal is still asked (guard)", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        foregroundRun: false,
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.prompts).toEqual([{ mode: "ask", round: "initial" }]);
+    expect(rig.counts.authorize).toBe(1);
+  });
+});
+
+// F7: "Remember" (a mode change to Linked) must be applied only once the
+// stop decision is FINAL - after the stop itself has settled - never before
+// it, and never for a round a later answer superseded. On head,
+// `applyDecision`'s "stop" case calls `this.remember(...)` BEFORE
+// `runStop(...)`, unconditionally, for every remembered Stop answer.
+describe("F7: Remember is applied only once the decision is final", () => {
+  function indexOf(events: readonly string[], event: string): number {
+    const index = events.indexOf(event);
+    expect(index).toBeGreaterThan(-1);
+    return index;
+  }
+
+  describe("(a) order: setMode:linked comes after the stop settles, before authorize", () => {
+    it("ask stop{force:false,remember:true} with an idle stop", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [IDLE_STOP],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: true },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      const stopIndex = indexOf(rig.events, "stop:if-idle:detached");
+      const setModeIndex = indexOf(rig.events, "setMode:linked:null");
+      const authorizeIndex = indexOf(rig.events, "authorize");
+      expect(setModeIndex).toBeGreaterThan(stopIndex);
+      expect(setModeIndex).toBeLessThan(authorizeIndex);
+    });
+
+    it("ask stop{force:true,remember:true} with a force stop", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [FORCE_STOP],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: true, remember: true },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      const stopIndex = indexOf(rig.events, "stop:force:detached");
+      const setModeIndex = indexOf(rig.events, "setMode:linked:null");
+      const authorizeIndex = indexOf(rig.events, "authorize");
+      expect(setModeIndex).toBeGreaterThan(stopIndex);
+      expect(setModeIndex).toBeLessThan(authorizeIndex);
+    });
+
+    it("the tray preset quitAndStopHost(true, ...) from background", async () => {
+      const rig = buildRig(
+        scenario({ mode: "background", stops: [FORCE_STOP] }),
+      );
+      rig.txs.quitAndStopHost(true, () => {
+        rig.events.push("requestQuit");
+        rig.txs.onBeforeQuit();
+      });
+      await flush();
+      const stopIndex = indexOf(rig.events, "stop:force:detached");
+      const setModeIndex = indexOf(rig.events, "setMode:linked:null");
+      const authorizeIndex = indexOf(rig.events, "authorize");
+      expect(setModeIndex).toBeGreaterThan(stopIndex);
+      expect(setModeIndex).toBeLessThan(authorizeIndex);
+    });
+  });
+
+  it("(a-lane) budget mechanism: remembering before the stop starves it behind the refresh job on the shared lane", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        lane: true,
+        deadlineMs: 100,
+        prompts: [
+          {
+            via: "renderer",
+            decision: { kind: "stop", force: false, remember: true },
+          },
+        ],
+      }),
+    );
+    rig.txs.onBeforeQuit();
+    await new Promise<void>((resolve) => setTimeout(resolve, 600));
+    await flush();
+    expect(rig.laneSpawned()).toBe(1);
+  });
+
+  describe("(b) cancel: a remembered choice on a superseded round is never applied", () => {
+    it("stop{force:false,remember:true} then BUSY then Cancel: setModeRequests is empty, verdict released", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [BUSY],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: true },
+            },
+            { via: "renderer", decision: { kind: "cancel" } },
+          ],
+        }),
+      );
+      await quit(rig);
+      expect(rig.setModeRequests).toEqual([]);
+      expect(rig.events).toContain("releaseVerdict");
+    });
+  });
+
+  describe("(b') the final decision's remember wins", () => {
+    it("stop{f:false,r:true} then stop{f:false,r:false} (BUSY, then FORCE_STOP): setModeRequests is empty", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [BUSY, FORCE_STOP],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: true },
+            },
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: false },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      expect(rig.setModeRequests).toEqual([]);
+    });
+
+    it("stop{f:false,r:false} then stop{f:false,r:true} (BUSY, then FORCE_STOP): exactly one setMode:linked AFTER stop:force:detached", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: [BUSY, FORCE_STOP],
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: false },
+            },
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: true },
+            },
+          ],
+        }),
+      );
+      await quit(rig);
+      expect(rig.setModeRequests).toEqual([{ mode: "linked", stop: null }]);
+      const forceStopIndex = indexOf(rig.events, "stop:force:detached");
+      const setModeIndex = indexOf(rig.events, "setMode:linked:null");
+      expect(setModeIndex).toBeGreaterThan(forceStopIndex);
+    });
+  });
+
+  describe("(c) detached refresh: remembering spawns a detached refresh, not the parked-mode lane job", () => {
+    it("tray preset remember=true from background, an admitted stop that never settles, a small deadline: refresh:detached appears exactly once, before authorize", async () => {
+      const rig = buildRig(
+        scenario({ mode: "background", stops: ["deferred"], deadlineMs: 30 }),
+      );
+      rig.txs.quitAndStopHost(true, () => {
+        rig.events.push("requestQuit");
+        rig.txs.onBeforeQuit();
+      });
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      await flush();
+      expect(
+        rig.events.filter((event) => event === "refresh:detached"),
+      ).toHaveLength(1);
+      const refreshIndex = indexOf(rig.events, "refresh:detached");
+      const authorizeIndex = indexOf(rig.events, "authorize");
+      expect(refreshIndex).toBeLessThan(authorizeIndex);
+    });
+
+    it("control: Keep + remember (to background) never spawns a detached refresh", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          prompts: [
+            { via: "renderer", decision: { kind: "keep", remember: true } },
+          ],
+        }),
+      );
+      await quit(rig);
+      expect(rig.events).not.toContain("refresh:detached");
+    });
+
+    it("ask, Stop+Remember, a deferred stop that outlives the deadline: setMode:linked comes after the deadline, refresh:detached comes after setMode and before authorize", async () => {
+      const rig = buildRig(
+        scenario({
+          mode: "ask",
+          stops: ["deferred"],
+          deadlineMs: 30,
+          prompts: [
+            {
+              via: "renderer",
+              decision: { kind: "stop", force: false, remember: true },
+            },
+          ],
+        }),
+      );
+      rig.txs.onBeforeQuit();
+      await flush();
+      await new Promise<void>((resolve) => setTimeout(resolve, 80));
+      await flush();
+      // F2: the deadline cuts off an idle-only attempt - never `stop`.
+      expect(rig.events).toContain("verdict:keep");
+      const stopRequestedIndex = indexOf(rig.events, "stop:if-idle:detached");
+      const setModeIndex = indexOf(rig.events, "setMode:linked:null");
+      const refreshIndex = indexOf(rig.events, "refresh:detached");
+      const authorizeIndex = indexOf(rig.events, "authorize");
+      expect(setModeIndex).toBeGreaterThan(stopRequestedIndex);
+      expect(refreshIndex).toBeGreaterThan(setModeIndex);
+      expect(authorizeIndex).toBeGreaterThan(refreshIndex);
+    });
+  });
+});
+
+// F24 (main side): a dead local host is never prompted or stopped against.
+// On head, `QuitTransactionDeps` has no `isLocalHostRunning` gate at all, so
+// Ask still prompts and Stop-if-idle still re-prompts on an unrelated
+// outcome even when there is no local host to reach.
+describe("F24: a dead local host is never prompted (main)", () => {
+  function noPromptOrStopEvents(events: readonly string[]): void {
+    expect(events.some((event) => event.startsWith("prompt:"))).toBe(false);
+    expect(events.some((event) => event.startsWith("native:"))).toBe(false);
+    expect(events.some((event) => event.startsWith("stop:"))).toBe(false);
+  }
+
+  it("ask, host down: no prompt, no native, no stop, verdict:keep, then authorize", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        isLocalHostRunning: false,
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    noPromptOrStopEvents(rig.events);
+    expect(rig.events).toContain("verdict:keep");
+    expect(rig.events.at(-1)).toBe("authorize");
+  });
+
+  it("stop-if-idle, host down: the silent stop returns update-active, but no re-prompt happens; verdict:keep, then authorize", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "stop-if-idle",
+        isLocalHostRunning: false,
+        stops: [{ kind: "update-active", message: "updating" }],
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.events.some((event) => event.startsWith("prompt:"))).toBe(false);
+    expect(rig.events).toContain("verdict:keep");
+    expect(rig.events.at(-1)).toBe("authorize");
+  });
+
+  it("control: host up means the prompt happens", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        isLocalHostRunning: true,
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(rig.events).toContain("prompt:ask:initial");
+  });
+});
+
+// F31: an update-install takeover must never overlap a stop still in
+// flight. On head, `join()`'s supersede check only looks at `stopCommitted`,
+// which `runStopIfIdle`'s SILENT if-idle attempt never sets - so `supersede()`
+// (and the new transaction's `verdict:handoff` / `runUpdateInstallSequence`)
+// proceeds immediately, while the old admitted stop is still running.
+describe("F31: update-install takeover never overlaps a stop in flight", () => {
+  it("admitted: a deferred silent stop is not overlapped - no handoff/updateSeq until it settles, then the update relaunches", async () => {
+    const rig = buildRig(
+      scenario({ mode: "stop-if-idle", lane: true, stops: ["lane-hang"] }),
+    );
+    rig.txs.onBeforeQuit();
+    await flush();
+    // Admitted: really running on the lane, not merely queued.
+    expect(rig.admissionBlock()).toEqual({
+      kind: "mutation",
+      lane: expect.objectContaining({ kind: "stopHost" }),
+    });
+
+    rig.state.installing = true;
+    expect(rig.txs.onBeforeQuit()).toBe("prevent");
+    await flush();
+    expect(rig.events).not.toContain("verdict:handoff");
+    expect(rig.events).not.toContain("updateSeq");
+
+    rig.resolveStop(IDLE_STOP);
+    await flush();
+
+    const settledIndex = rig.events.indexOf("stop:settled");
+    const handoffIndex = rig.events.indexOf("verdict:handoff");
+    const updateSeqIndex = rig.events.indexOf("updateSeq");
+    expect(settledIndex).toBeGreaterThan(-1);
+    expect(handoffIndex).toBeGreaterThan(settledIndex);
+    expect(updateSeqIndex).toBeGreaterThan(handoffIndex);
+
+    rig.hooks().authorizeQuit();
+    expect(rig.events.at(-1)).toBe("authorize");
+  });
+
+  it("admitted variant: the settled outcome is BUSY - no prompt, then handoff and updateSeq", async () => {
+    const rig = buildRig(
+      scenario({ mode: "stop-if-idle", lane: true, stops: ["lane-hang"] }),
+    );
+    rig.txs.onBeforeQuit();
+    await flush();
+    expect(rig.admissionBlock()).toEqual({
+      kind: "mutation",
+      lane: expect.objectContaining({ kind: "stopHost" }),
+    });
+
+    rig.state.installing = true;
+    rig.txs.onBeforeQuit();
+    await flush();
+    // The admitted stop is still running: the relaunch must not go too far
+    // and write handoff before it settles.
+    expect(rig.events).not.toContain("verdict:handoff");
+
+    rig.resolveStop(BUSY);
+    await flush();
+
+    expect(rig.prompts).toEqual([]);
+    expect(rig.events).toContain("verdict:handoff");
+    expect(rig.events).toContain("updateSeq");
+  });
+
+  it("queued: a hang stop is aborted, resolves withdrawn, and handoff follows", async () => {
+    const rig = buildRig(scenario({ mode: "stop-if-idle", stops: ["hang"] }));
+    rig.txs.onBeforeQuit();
+    await flush();
+
+    rig.state.installing = true;
+    rig.txs.onBeforeQuit();
+    await flush();
+
+    expect(rig.stopRequests[0].withdrawal?.aborted).toBe(true);
+    expect(rig.events).toContain("verdict:handoff");
+  });
+});
+
+// F31 (Phase D): `join()`'s defer must track ADMISSION, not mere presence of
+// an in-flight stop. On the current tree, ANY `inFlightStop` (queued or
+// admitted) makes the relaunch wait for it to settle before writing
+// `handoff` - so a stop still queued behind an unrelated lane job (an
+// "install", or another commit's `stopHost`) blocks the relaunch exactly as
+// long as an admitted one would, even though nothing of the quit's is
+// actually running yet. The fix reads `controller.lifecycleAdmissionBlock`:
+// only a RUNNING `stopHost` job defers; a merely QUEUED one is aborted and
+// superseded at once.
+describe("F31: only an admitted stop defers the relaunch", () => {
+  it("queued behind a long job: the relaunch supersedes at once, without waiting for the job ahead", async () => {
+    const rig = buildRig(
+      scenario({ mode: "stop-if-idle", lane: true, laneHeld: "install" }),
+    );
+    rig.txs.onBeforeQuit();
+    await flush();
+    // The quit's silent stop is queued behind the held install job - never
+    // admitted yet.
+    expect(rig.laneSpawned()).toBe(0);
+
+    rig.state.installing = true;
+    expect(rig.txs.onBeforeQuit()).toBe("prevent");
+    await flush();
+
+    // RED on the current tree: `join()` waits for `inFlightStop` to settle
+    // regardless of admission, so neither of these exists yet.
+    expect(rig.events).toContain("verdict:handoff");
+    expect(rig.events).toContain("updateSeq");
+    expect(rig.stopRequests[0]?.withdrawal?.aborted).toBe(true);
+    // Still queued: the install has not released the lane.
+    expect(rig.laneSpawned()).toBe(0);
+
+    rig.releaseLane();
+    await flush();
+
+    // The quit's own stop, now admitted, sees its withdrawal already
+    // aborted and settles `withdrawn` - it never spawns.
+    expect(rig.laneSpawned()).toBe(0);
+  });
+
+  it("admitted still defers: while the quit's OWN stop is running on the lane, the relaunch waits for it", async () => {
+    const rig = buildRig(
+      scenario({ mode: "stop-if-idle", lane: true, stops: ["lane-hang"] }),
+    );
+    rig.txs.onBeforeQuit();
+    await flush();
+    // Nothing ahead of it: admitted and running immediately.
+    expect(rig.laneSpawned()).toBe(1);
+
+    rig.state.installing = true;
+    expect(rig.txs.onBeforeQuit()).toBe("prevent");
+    await flush();
+    expect(rig.events).not.toContain("verdict:handoff");
+    expect(rig.events).not.toContain("updateSeq");
+
+    rig.resolveStop(IDLE_STOP);
+    await flush();
+
+    const settledIndex = rig.events.indexOf("stop:settled");
+    const handoffIndex = rig.events.indexOf("verdict:handoff");
+    const updateSeqIndex = rig.events.indexOf("updateSeq");
+    expect(settledIndex).toBeGreaterThan(-1);
+    expect(handoffIndex).toBeGreaterThan(settledIndex);
+    expect(updateSeqIndex).toBeGreaterThan(handoffIndex);
+  });
+
+  it("stop-behind-stop corner: a held stopHost job (not the quit's) still defers - the wait is bounded by its release", async () => {
+    const rig = buildRig(
+      scenario({ mode: "stop-if-idle", lane: true, laneHeld: "stopHost" }),
+    );
+    rig.txs.onBeforeQuit();
+    await flush();
+    // Queued behind the held (unrelated) stopHost job.
+    expect(rig.laneSpawned()).toBe(0);
+
+    rig.state.installing = true;
+    expect(rig.txs.onBeforeQuit()).toBe("prevent");
+    await flush();
+    // The lane's running kind IS "stopHost" (the held job's), so the
+    // admission check alone cannot tell it apart from the quit's own -
+    // it still defers.
+    expect(rig.events).not.toContain("verdict:handoff");
+    expect(rig.events).not.toContain("updateSeq");
+
+    rig.releaseLane();
+    await flush();
+
+    // The quit's own stop, now admitted, sees its withdrawal already
+    // aborted (queued stops are aborted at `join()` regardless of what's
+    // ahead) and settles `withdrawn` without spawning; the wait was bounded
+    // by the held job's release, not by the quit's own stop settling.
+    expect(rig.laneSpawned()).toBe(0);
+    expect(rig.events).toContain("verdict:handoff");
+    expect(rig.events).toContain("updateSeq");
+  });
+});
+
+// F25 (main side): a stopping phase that ends because main is about to
+// prompt must publish an end-of-stopping "prompting" state - not just stop
+// silently, which leaves a renderer showing "Stopping host…" over a modal
+// that is about to appear. On head, `ask()` calls `endStopping()` (the
+// LOCAL indicator/reveal-timer bookkeeping only) before asking, but never
+// calls `deps.publishState(...)` for it, so no "state:prompting:*" event is
+// ever produced - the rig's formatter already prints one correctly
+// (`state:${event.phase}:${event.requestId}`, same as "quitting"/"cancelled"),
+// it is simply never called with `phase: "prompting"`.
+describe("F25 (main side): prompting ends a stopping phase", () => {
+  function indexOf(events: readonly string[], event: string): number {
+    return events.indexOf(event);
+  }
+
+  it("stop-if-idle: silent stop BUSY, busy prompt answered Keep - state:prompting:null between stopping and the prompt", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "stop-if-idle",
+        stops: [BUSY],
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    const stoppingIndex = indexOf(
+      rig.events,
+      "state:stopping:null:idleOnly=true",
+    );
+    const promptingIndex = indexOf(rig.events, "state:prompting:null");
+    const promptIndex = indexOf(rig.events, "prompt:stop-if-idle:busy");
+    expect(stoppingIndex).toBeGreaterThan(-1);
+    expect(promptingIndex).toBeGreaterThan(stoppingIndex);
+    expect(promptingIndex).toBeLessThan(promptIndex);
+  });
+
+  it("ask, stop{force:false} then BUSY: state:prompting:<req-id> between that request's stopping and the busy-retry prompt", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        stops: [BUSY, FORCE_STOP],
+        prompts: [
+          {
+            via: "renderer",
+            decision: { kind: "stop", force: false, remember: false },
+          },
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    const stoppingIndex = indexOf(
+      rig.events,
+      "state:stopping:req-1:idleOnly=true",
+    );
+    const promptingIndex = indexOf(rig.events, "state:prompting:req-1");
+    const retryPromptIndex = indexOf(rig.events, "prompt:ask:busy-retry");
+    expect(stoppingIndex).toBeGreaterThan(-1);
+    expect(promptingIndex).toBeGreaterThan(stoppingIndex);
+    expect(promptingIndex).toBeLessThan(retryPromptIndex);
+  });
+
+  it("native path: prompting is published before the native dialog is asked", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "stop-if-idle",
+        stops: [BUSY],
+        prompts: [
+          { via: "native", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    const promptingIndex = indexOf(rig.events, "state:prompting:null");
+    const nativeIndex = indexOf(rig.events, "native:stop-if-idle:busy");
+    expect(promptingIndex).toBeGreaterThan(-1);
+    expect(promptingIndex).toBeLessThan(nativeIndex);
+  });
+
+  it("control: an Ask initial with nothing stopping before it publishes no prompting state", async () => {
+    const rig = buildRig(
+      scenario({
+        mode: "ask",
+        prompts: [
+          { via: "renderer", decision: { kind: "keep", remember: false } },
+        ],
+      }),
+    );
+    await quit(rig);
+    expect(
+      rig.events.some((event) => event.startsWith("state:prompting")),
+    ).toBe(false);
+  });
+});
+
+// T32 (test-gap, green on head): the force stop's OWN deadline budget is
+// whatever remains of the overall `deadlineMs` after the silent if-idle
+// attempt spent its share - not the full deadline again. `runStop` tracks
+// this via `this.remainingMs -= Date.now() - startedAt`.
+describe("T32: the force stop's withdrawal deadline is the remaining budget, not a fresh one", () => {
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 30; i += 1) await Promise.resolve();
+  }
+
+  it("silent if-idle spends 0.6D; the busy prompt stays up for 10D; the force stop's withdrawal aborts at 0.4D after IT started, not before", async () => {
+    vi.useFakeTimers();
+    const D = 1_000;
+    const rig = buildRig(
+      scenario({
+        mode: "stop-if-idle",
+        stops: ["deferred", "hang"],
+        deadlineMs: D,
+        prompts: [
+          {
+            via: "renderer-after",
+            delayMs: 10 * D,
+            decision: { kind: "stop", force: false, remember: false },
+          },
+        ],
+      }),
+    );
+    rig.txs.onBeforeQuit();
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(0.6 * D);
+    rig.resolveStop(BUSY);
+    await settle();
+
+    // The busy prompt is up (nothing requested yet - the deadline budget is
+    // paused while it waits, no matter how long the person takes to answer).
+    expect(rig.stopRequests.map((r) => r.mode)).toEqual(["if-idle"]);
+
+    await vi.advanceTimersByTimeAsync(10 * D);
+    await settle();
+
+    // The force stop IS requested once the 10D prompt is finally answered -
+    // not skipped, and not measured against the paused deadline budget.
+    expect(rig.stopRequests.map((r) => r.mode)).toEqual(["if-idle", "force"]);
+    // The busy round's Stop is the force, whatever `force` the decision said.
+    const withdrawal = rig.stopRequests[1].withdrawal;
+    expect(withdrawal).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(0.4 * D - 1);
+    expect(withdrawal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(withdrawal?.aborted).toBe(true);
+    expect(rig.counts.authorize).toBe(1);
   });
 });

@@ -41,6 +41,9 @@ export interface RendererDecisionTarget {
  * - MRU targeting: the caller passes the target; it must be in
  *   `readyWindowIds` (a window that advertised it can answer), or the request
  *   fails closed at once.
+ * - The target is revealed (shown and focused) before the request is sent:
+ *   after a close-to-tray the most recent window is hidden, and a question
+ *   answered in a hidden window is one the person never sees.
  * - One request per window: a newer request rejects the window's older one.
  * - A servicing ack within `serviceAckTimeoutMs`, or the request fails - a
  *   renderer that received the request but is frozen, or has no handler,
@@ -56,6 +59,7 @@ export class RendererDecisionRequests<TDecision> {
   private readonly readyWindowIds: ReadonlySet<string>;
   private readonly serviceAckTimeoutMs: number;
   private readonly messages: RendererDecisionMessages;
+  private readonly revealTarget: (windowId: string) => void;
   private readonly onAbandoned:
     | ((waiter: RendererDecisionWaiter<TDecision>) => void)
     | null;
@@ -64,6 +68,8 @@ export class RendererDecisionRequests<TDecision> {
     readonly readyWindowIds: ReadonlySet<string>;
     readonly serviceAckTimeoutMs: number;
     readonly messages: RendererDecisionMessages;
+    /** Show and focus the target window; called right before each send. */
+    readonly revealTarget: (windowId: string) => void;
     /**
      * Called for every request main gives up on (ack timeout, superseded,
      * window reset or closed, disposed, withdrawn) before its caller hears,
@@ -77,6 +83,7 @@ export class RendererDecisionRequests<TDecision> {
     this.readyWindowIds = options.readyWindowIds;
     this.serviceAckTimeoutMs = options.serviceAckTimeoutMs;
     this.messages = options.messages;
+    this.revealTarget = options.revealTarget;
     this.onAbandoned = options.onAbandoned;
   }
 
@@ -115,6 +122,7 @@ export class RendererDecisionRequests<TDecision> {
         reject,
         serviceTimer,
       });
+      this.revealTarget(target.windowId);
       if (send(target.windowId, requestId)) {
         return;
       }

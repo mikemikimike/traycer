@@ -1069,6 +1069,11 @@ type LinuxDefinitionPlan =
       readonly form: ServiceDefinitionForm;
       readonly appliesAt: ServiceDefinitionAppliesAt;
       readonly unitText: string;
+      /**
+       * The file already IS `unitText`, and only systemd has not loaded it
+       * (`NeedDaemonReload=yes`): the refresh reloads and writes nothing.
+       */
+      readonly reloadOnly: boolean;
     };
 
 /**
@@ -1141,16 +1146,59 @@ async function planLinuxDefinition(
   // deterministic for a given label and invocation, so "current" means
   // exactly what `host service install` would write today - the launcher
   // script and every directive (a changed `TimeoutStopSec` is drift too).
-  if (text === unitText) return { kind: "current" };
+  //
+  // The FILE is only half of it. A rewrite whose `daemon-reload` failed
+  // leaves the current text on disk and the old unit loaded, and a
+  // `Restart=` respawn runs what systemd loaded - so the file alone would call
+  // that unit current, the retry its own error asks for would do nothing, and
+  // doctor would stay silent. systemd says which it is.
+  if (text === unitText) {
+    if (!(await unitNeedsDaemonReload(label))) return { kind: "current" };
+    return {
+      kind: "stale",
+      form: registered.form,
+      appliesAt: "next-start",
+      unitText,
+      reloadOnly: true,
+    };
+  }
   return {
     kind: "stale",
     form: registered.form,
     appliesAt: "next-start",
     unitText,
+    reloadOnly: false,
   };
 }
 
-/** Read-only: what a refresh would find. No write, no `systemctl`. */
+/**
+ * Whether the user manager holds an older load of this unit than its file
+ * (`NeedDaemonReload=yes`). Read-only, and never an error: a manager that
+ * cannot be asked is judged by the file, as before - a refresh could not
+ * reload it either, and doctor reports an unreachable manager on its own.
+ */
+async function unitNeedsDaemonReload(label: ServiceLabel): Promise<boolean> {
+  try {
+    const shown = await runCommand(
+      "systemctl",
+      ["--user", "show", "-p", "NeedDaemonReload", "--value", unitName(label)],
+      {
+        env: undefined,
+        cwd: undefined,
+        timeoutMs: SYSTEMCTL_CALL_TIMEOUT_MS,
+        tolerateNonZeroExit: true,
+      },
+    );
+    return shown.exitCode === 0 && shown.stdout.trim() === "yes";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read-only: what a refresh would find. No write, and one read-only
+ * `systemctl show`.
+ */
 export async function inspectLinuxServiceDefinition(
   label: ServiceLabel,
 ): Promise<ServiceDefinitionState> {
@@ -1160,13 +1208,15 @@ export async function inspectLinuxServiceDefinition(
 }
 
 /**
- * Rewrite a stale unit and `daemon-reload`. That is the whole write: no
+ * Rewrite a stale unit and `daemon-reload` - or only reload, when the file is
+ * already current and systemd has not loaded it. That is the whole write: no
  * `enable`, `start`, `restart` or `disable`, no grant and no rollback.
  * `daemon-reload` re-reads unit files without touching running processes
  * (PROBE-RELOAD-LNX: `MainPID` unchanged, the running process still the old
  * argv, `ExecStart` the new one, and a `Restart=` respawn running the new
  * one), so the host keeps running and the new launcher applies from its next
- * start. A current unit costs one file read and zero `systemctl` calls.
+ * start. A current unit costs one file read and one read-only `systemctl
+ * show`, and no mutating call.
  *
  * `run` must be the authority-verifying runner the controller uses.
  */
@@ -1190,11 +1240,13 @@ export async function refreshLinuxServiceDefinition(
   }
   const manifestPath = serviceManifestPath(label);
   try {
-    await replaceDefinitionFile(
-      manifestPath,
-      plan.unitText,
-      await existingFileMode(manifestPath),
-    );
+    if (!plan.reloadOnly) {
+      await replaceDefinitionFile(
+        manifestPath,
+        plan.unitText,
+        await existingFileMode(manifestPath),
+      );
+    }
   } catch (cause) {
     if (isServiceMutationAuthorityError(cause)) throw cause;
     throw serviceDefinitionRefreshFailed({
@@ -1216,7 +1268,7 @@ export async function refreshLinuxServiceDefinition(
     // one, and what the user manager loads at its next start - so it stays.
     throw serviceDefinitionRefreshFailed({
       subject: unitName(label),
-      reason: `the unit file was rewritten, but systemd could not reload it (${describeCause(cause)}), so a restart before the next login would still run the old launcher`,
+      reason: `the unit file ${plan.reloadOnly ? "is current" : "was rewritten"}, but systemd could not reload it (${describeCause(cause)}), so a restart before the next login would still run the old launcher`,
       remedy: SERVICE_REFRESH_COMMAND,
     });
   }

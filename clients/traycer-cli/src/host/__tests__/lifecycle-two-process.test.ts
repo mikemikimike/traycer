@@ -1,8 +1,43 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { rmSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { hostHomeDir } from "../../store/paths";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, so without this the suite
+// would resolve this machine's REAL `~/.traycer`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-lifecycle-two-process-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 import {
   parseDesktopPresenceText,
   serializeDesktopPresence,
@@ -105,6 +140,9 @@ async function buildRig(input: {
       return () => undefined;
     },
     watchHostHome: () => null,
+    // F5: red - `LifecycleObserverRuntime` has no `processExists` seam yet,
+    // so this is simply ignored by production code today.
+    processExists: () => "gone",
   };
   let ended = false;
   const child: OwnedHostChild = {
@@ -182,6 +220,8 @@ async function buildRig(input: {
     nowIso: () => "2026-01-01T00:00:00.000Z",
     pollMs: LIFECYCLE_OBSERVER_POLL_MS,
     graceMs: GRACE,
+    // A desktop-started service run: the kind a desktop can own and stop.
+    admission: "granted",
     initial: { adopted: input.initialAdopted, lastPresence: null },
     publishRunState: async (facts) => {
       adopted.value = facts.adopted;

@@ -8,6 +8,7 @@ import { QuitTransactions } from "../../startup/quit-transaction";
 import {
   CloseToTray,
   createCloseToTrayNoticeOnce,
+  HiddenToTrayWindows,
   lastWindowCloseAction,
   registryCloseToTrayWindows,
   parseCloseToTrayNoticeState,
@@ -572,13 +573,17 @@ describe("createCloseToTrayNoticeOnce", () => {
 
 const VIEW: HostLifecycleView = {
   desired: { mode: "ask", rev: 1, updatedBy: "desktop", updatedAt: null },
-  applied: { localHostCapability: "managed", supervisor: "not-running" },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
   pending: "none",
 };
 
 describe("window-creation count (real WindowRegistry)", () => {
   it("Windows/Linux, no tray, Ask: closing the last window keeps it alive through a cancelled quit - createWindow called exactly once in total", async () => {
-    const { registry, created, createWindow } = registryRig();
+    const { registry, created, createWindow } = registryRig([]);
     const windowId = await registry.create({
       initialRoute: null,
       beforeLoad: null,
@@ -590,7 +595,9 @@ describe("window-creation count (real WindowRegistry)", () => {
     let stayedOpen = 0;
     let nativeAsks = 0;
     const txs = new QuitTransactions({
-      isInstallingUpdate: () => false,
+      isRelaunchIntended: () => false,
+      isLocalHostRunning: () => Promise.resolve(true),
+      isForegroundHostRun: async () => false,
       lifecycle: {
         readQuitPolicy: async () => ({ mode: "ask", rev: 1 }),
         writeQuitVerdict: async () => "written",
@@ -601,6 +608,8 @@ describe("window-creation count (real WindowRegistry)", () => {
         stopHost: async () => ({ kind: "stopped", forced: false }),
         holdAutomaticIntents: () => ({ release: () => undefined }),
         quiesce: () => undefined,
+        spawnServiceDefinitionRefresh: async () => "spawned",
+        lifecycleAdmissionBlock: null,
       },
       // No renderer can answer: the native dialog, answered Cancel.
       requestDecision: () => Promise.reject(new Error("no listening window")),
@@ -636,7 +645,7 @@ describe("window-creation count (real WindowRegistry)", () => {
       hasTray: () => Promise.resolve(false),
       isQuitting: () => quitting,
       readQuitMode: async () => "ask",
-      windows: registryCloseToTrayWindows(registry),
+      windows: registryCloseToTrayWindows(registry, new HiddenToTrayWindows()),
       requestQuit: () => {
         txs.onBeforeQuit();
       },
@@ -664,7 +673,7 @@ describe("window-creation count (real WindowRegistry)", () => {
   });
 
   it("control: under Background the same close DOES destroy the window (the count assertion can fail)", async () => {
-    const { registry, created, createWindow } = registryRig();
+    const { registry, created, createWindow } = registryRig([]);
     const windowId = await registry.create({
       initialRoute: null,
       beforeLoad: null,
@@ -675,7 +684,7 @@ describe("window-creation count (real WindowRegistry)", () => {
       hasTray: () => Promise.resolve(false),
       isQuitting: () => false,
       readQuitMode: async () => "background",
-      windows: registryCloseToTrayWindows(registry),
+      windows: registryCloseToTrayWindows(registry, new HiddenToTrayWindows()),
       requestQuit: () => undefined,
       showNoticeOnce: () => undefined,
     });
@@ -690,7 +699,7 @@ describe("window-creation count (real WindowRegistry)", () => {
   });
 
   it("tray + Linked: the last window is hidden, stays registered, and is never recreated", async () => {
-    const { registry, created, createWindow } = registryRig();
+    const { registry, created, createWindow } = registryRig([]);
     const windowId = await registry.create({
       initialRoute: null,
       beforeLoad: null,
@@ -701,7 +710,7 @@ describe("window-creation count (real WindowRegistry)", () => {
       hasTray: () => Promise.resolve(true),
       isQuitting: () => false,
       readQuitMode: async () => "linked",
-      windows: registryCloseToTrayWindows(registry),
+      windows: registryCloseToTrayWindows(registry, new HiddenToTrayWindows()),
       requestQuit: () => undefined,
       showNoticeOnce: () => undefined,
     });
@@ -722,7 +731,7 @@ describe("registryCloseToTrayWindows (real WindowRegistry)", () => {
     readonly rig: RegistryRig;
     readonly ids: readonly [string, string];
   }> {
-    const rig = registryRig();
+    const rig = registryRig([]);
     const first = await rig.registry.create({
       initialRoute: null,
       beforeLoad: null,
@@ -737,13 +746,14 @@ describe("registryCloseToTrayWindows (real WindowRegistry)", () => {
   function closerFor(
     registry: RegistryRig["registry"],
     mode: HostLifecycleMode,
+    hidden: HiddenToTrayWindows,
   ): CloseToTray {
     return new CloseToTray({
       platform: "linux",
       hasTray: () => Promise.resolve(true),
       isQuitting: () => false,
       readQuitMode: async () => mode,
-      windows: registryCloseToTrayWindows(registry),
+      windows: registryCloseToTrayWindows(registry, hidden),
       requestQuit: () => undefined,
       showNoticeOnce: () => undefined,
     });
@@ -755,34 +765,58 @@ describe("registryCloseToTrayWindows (real WindowRegistry)", () => {
     rig.created[1].hide();
     const event = closeEvent();
     expect(
-      closerFor(rig.registry, "linked").interceptClose(ids[0], event),
+      closerFor(
+        rig.registry,
+        "linked",
+        new HiddenToTrayWindows(),
+      ).interceptClose(ids[0], event),
     ).toBe(false);
     expect(event.prevented).toBe(0);
   });
 
-  it("a hidden (not minimized) other window counts as HIDDEN, not open: the close is intercepted", async () => {
+  it("a window hidden TO THE TRAY (not minimized) counts as HIDDEN, not open: the close is intercepted", async () => {
     const { rig, ids } = await twoWindows();
-    rig.created[1].hide();
-    const adapter = registryCloseToTrayWindows(rig.registry);
+    const hidden = new HiddenToTrayWindows();
+    const adapter = registryCloseToTrayWindows(rig.registry, hidden);
+    adapter.hide(ids[1]);
     expect(adapter.otherOpenWindowCount(ids[0])).toBe(0);
     expect(adapter.otherHiddenWindowCount(ids[0])).toBe(1);
     const event = closeEvent();
     expect(
-      closerFor(rig.registry, "linked").interceptClose(ids[0], event),
+      closerFor(rig.registry, "linked", hidden).interceptClose(ids[0], event),
     ).toBe(true);
     expect(event.prevented).toBe(1);
   });
 
+  it("a bare window.hide() (not through the adapter) does NOT count as hidden to the tray", async () => {
+    const { rig, ids } = await twoWindows();
+    rig.created[1].hide();
+    const adapter = registryCloseToTrayWindows(
+      rig.registry,
+      new HiddenToTrayWindows(),
+    );
+    // Not visible and not minimized, but never hidden BY this mechanism -
+    // still an open window (a still-loading window is the other case this
+    // protects, F30/T33).
+    expect(adapter.otherOpenWindowCount(ids[0])).toBe(1);
+    expect(adapter.otherHiddenWindowCount(ids[0])).toBe(0);
+  });
+
   it("a visible other window counts as open (positive control)", async () => {
     const { rig, ids } = await twoWindows();
-    const adapter = registryCloseToTrayWindows(rig.registry);
+    const adapter = registryCloseToTrayWindows(
+      rig.registry,
+      new HiddenToTrayWindows(),
+    );
     expect(adapter.otherOpenWindowCount(ids[0])).toBe(1);
     expect(adapter.otherHiddenWindowCount(ids[0])).toBe(0);
   });
 
   it("a force-closed or destroyed window counts as neither, and isLive is false", async () => {
     const { rig, ids } = await twoWindows();
-    const adapter = registryCloseToTrayWindows(rig.registry);
+    const hidden = new HiddenToTrayWindows();
+    const adapter = registryCloseToTrayWindows(rig.registry, hidden);
+    adapter.hide(ids[1]);
     await rig.registry.forceCloseById(ids[1]);
     expect(adapter.otherOpenWindowCount(ids[0])).toBe(0);
     expect(adapter.otherHiddenWindowCount(ids[0])).toBe(0);
@@ -801,13 +835,35 @@ describe("registryCloseToTrayWindows (real WindowRegistry)", () => {
 
   it("hide and close reach the real window", async () => {
     const { rig, ids } = await twoWindows();
-    const adapter = registryCloseToTrayWindows(rig.registry);
+    const adapter = registryCloseToTrayWindows(
+      rig.registry,
+      new HiddenToTrayWindows(),
+    );
     adapter.hide(ids[1]);
     expect(rig.created[1].hideCalls).toBe(1);
     expect(rig.created[0].hideCalls).toBe(0);
     adapter.close(ids[1]);
     expect(rig.created[1].closeCalls).toBe(1);
     expect(rig.created[0].closeCalls).toBe(0);
+  });
+
+  it("a window hidden to the tray, then show()n again (the tray's Show), counts as open again", async () => {
+    const { rig, ids } = await twoWindows();
+    const hidden = new HiddenToTrayWindows();
+    const adapter = registryCloseToTrayWindows(rig.registry, hidden);
+    adapter.hide(ids[1]);
+    expect(adapter.otherHiddenWindowCount(ids[0])).toBe(1);
+
+    // The tray's Show (or any other show()) - not through the adapter.
+    rig.created[1].show();
+
+    expect(adapter.otherOpenWindowCount(ids[0])).toBe(1);
+    expect(adapter.otherHiddenWindowCount(ids[0])).toBe(0);
+    const event = closeEvent();
+    expect(
+      closerFor(rig.registry, "linked", hidden).interceptClose(ids[0], event),
+    ).toBe(false);
+    expect(event.prevented).toBe(0);
   });
 });
 
@@ -816,7 +872,7 @@ describe("reopen after a native Cancel (composition, counted by window creation)
     readonly createWindow: number;
     readonly windows: number;
   }> {
-    const { registry, createWindow } = registryRig();
+    const { registry, createWindow } = registryRig([]);
     const windowId = await registry.create({
       initialRoute: null,
       beforeLoad: null,
@@ -826,7 +882,9 @@ describe("reopen after a native Cancel (composition, counted by window creation)
     expect(createWindow).toHaveBeenCalledTimes(1);
     let stayedOpen = 0;
     const txs = new QuitTransactions({
-      isInstallingUpdate: () => false,
+      isRelaunchIntended: () => false,
+      isLocalHostRunning: () => Promise.resolve(true),
+      isForegroundHostRun: async () => false,
       lifecycle: {
         readQuitPolicy: async () => ({ mode: "ask", rev: 1 }),
         writeQuitVerdict: async () => "written",
@@ -837,6 +895,8 @@ describe("reopen after a native Cancel (composition, counted by window creation)
         stopHost: async () => ({ kind: "stopped", forced: false }),
         holdAutomaticIntents: () => ({ release: () => undefined }),
         quiesce: () => undefined,
+        spawnServiceDefinitionRefresh: async () => "spawned",
+        lifecycleAdmissionBlock: null,
       },
       requestDecision: () => Promise.reject(new Error("no window")),
       withdrawDecision: () => undefined,
@@ -891,5 +951,100 @@ describe("reopen after a native Cancel (composition, counted by window creation)
       createWindow: 1,
       windows: 0,
     });
+  });
+});
+
+// F30: a still-loading window (`shown: false` - never shown, never hidden)
+// must count as OPEN, not hidden. "Hidden" is only a window HiddenToTrayWindows
+// itself hid; a loading window was never hidden through that adapter, so it
+// reads as open regardless of its visible/minimized state.
+describe("F30: a loading (show:false) window is not hidden", () => {
+  async function twoWindowsOneLoading(): Promise<{
+    readonly rig: RegistryRig;
+    readonly aId: string;
+  }> {
+    const rig = registryRig([true, false]);
+    const aId = await rig.registry.create({
+      initialRoute: null,
+      beforeLoad: null,
+    });
+    await rig.registry.create({ initialRoute: null, beforeLoad: null });
+    return { rig, aId };
+  }
+
+  it("Background with a tray: closing shown A while B is still loading - interceptClose is false, 0 preventDefault, 0 requestQuit", async () => {
+    const { rig, aId } = await twoWindowsOneLoading();
+    let requestQuitCalls = 0;
+    const closer = new CloseToTray({
+      platform: "linux",
+      hasTray: () => Promise.resolve(true),
+      isQuitting: () => false,
+      readQuitMode: async () => "background",
+      windows: registryCloseToTrayWindows(
+        rig.registry,
+        new HiddenToTrayWindows(),
+      ),
+      requestQuit: () => {
+        requestQuitCalls += 1;
+      },
+      showNoticeOnce: () => undefined,
+    });
+    const event = closeEvent();
+    const intercepted = closer.interceptClose(aId, event);
+    await flush();
+    expect(intercepted).toBe(false);
+    expect(event.prevented).toBe(0);
+    expect(requestQuitCalls).toBe(0);
+  });
+
+  it("Linked with a tray: closing shown A while B is still loading - interceptClose is false and A is not hidden", async () => {
+    const { rig, aId } = await twoWindowsOneLoading();
+    const closer = new CloseToTray({
+      platform: "linux",
+      hasTray: () => Promise.resolve(true),
+      isQuitting: () => false,
+      readQuitMode: async () => "linked",
+      windows: registryCloseToTrayWindows(
+        rig.registry,
+        new HiddenToTrayWindows(),
+      ),
+      requestQuit: () => undefined,
+      showNoticeOnce: () => undefined,
+    });
+    const event = closeEvent();
+    const intercepted = closer.interceptClose(aId, event);
+    await flush();
+    expect(intercepted).toBe(false);
+    expect(rig.created[0].hideCalls).toBe(0);
+  });
+
+  it("control: B hidden by an EARLIER close-to-tray (Linked with a tray), then the mode becomes background and A closes: requestQuit is 1", async () => {
+    const rig = registryRig([true, true]);
+    const aId = await rig.registry.create({
+      initialRoute: null,
+      beforeLoad: null,
+    });
+    const bId = await rig.registry.create({
+      initialRoute: null,
+      beforeLoad: null,
+    });
+    const hidden = new HiddenToTrayWindows();
+    registryCloseToTrayWindows(rig.registry, hidden).hide(bId);
+    let requestQuitCalls = 0;
+    const closer = new CloseToTray({
+      platform: "linux",
+      hasTray: () => Promise.resolve(true),
+      isQuitting: () => false,
+      readQuitMode: async () => "background",
+      windows: registryCloseToTrayWindows(rig.registry, hidden),
+      requestQuit: () => {
+        requestQuitCalls += 1;
+      },
+      showNoticeOnce: () => undefined,
+    });
+    const event = closeEvent();
+    closer.interceptClose(aId, event);
+    await flush();
+    expect(requestQuitCalls).toBe(1);
   });
 });

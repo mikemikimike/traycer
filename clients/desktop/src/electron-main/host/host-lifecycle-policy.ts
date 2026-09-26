@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { link, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import {
+  probeProcessExistenceWithoutSpawn,
+  verifyProcessIdentityAsync,
+  type ProcessIdentityVerdict,
+} from "@traycer-clients/shared/host-lock/process-identity";
 import { readRegularFileNoFollow } from "@traycer-clients/shared/host-update";
 import { renameWithWindowsRetry } from "@traycer/protocol/config/credentials-fs";
 import {
@@ -24,9 +29,13 @@ import {
   SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1,
   supervisorRecordHasCapability,
   supervisorRecordPath,
+  type SupervisorRecord,
 } from "@traycer/protocol/config/supervisor-record";
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
-import type { HostLifecycleSupervisorState } from "../../ipc-contracts/host-lifecycle-types";
+import type {
+  HostLifecycleRunAdmission,
+  HostLifecycleSupervisorState,
+} from "../../ipc-contracts/host-lifecycle-types";
 import { log } from "../app/logger";
 import { readPidMetadataState } from "./host-lifecycle";
 
@@ -35,11 +44,14 @@ import { readPidMetadataState } from "./host-lifecycle";
 // this desktop's presence record, and the supervisor record (read only).
 //
 // Nothing here caches a record. The CLI is a co-writer of the policy, so every
-// decision re-reads the file it decides on (R12, "never hydrate once"); the
-// only memoized value is this process's own start identity, which cannot
-// change. Reads never throw: a torn, malformed or unreadable file reads as
-// absent, which for the policy means Background - the mode every install had
-// before this record existed.
+// decision re-reads the file it decides on (R12, "never hydrate once"). Two
+// values are memoized: this process's own start identity, which cannot
+// change, and the identity verdict on the process `supervisor.json` names,
+// keyed by that record's pid and identity and kept only while the pid's
+// spawn-free existence agrees with it, and for at most
+// `SUPERVISOR_VERDICT_REUSE_MS`. Reads never throw: a torn, malformed or
+// unreadable file reads as absent, which for the policy means Background - the
+// mode every install had before this record existed.
 
 /** One read of the policy file, as every decision in this module sees it. */
 export interface HostLifecyclePolicyRead {
@@ -76,6 +88,52 @@ export interface HostLifecyclePolicyStoreOptions {
 
 const salvagedRevSchema = z.object({ rev: z.number().int().nonnegative() });
 
+/**
+ * The longest a full identity probe's verdict on the supervisor record's
+ * process is reused, however long the spawn-free existence probe keeps
+ * agreeing with it.
+ *
+ * Existence is not identity: once a supervisor dies without removing its
+ * record, the OS may hand its pid to another process - on Windows, commonly
+ * within seconds - and from then on that pid `exists`. Without an age bound
+ * the cached `alive-same` would outlive the supervisor for as long as the
+ * stranger runs, and `→ linked` would trust a supervisor that is gone. With
+ * it, a reused pid reads as the supervisor for at most this long after the
+ * last full probe; the view, refreshed every 15 s, shows the truth within one
+ * refresh after that.
+ *
+ * 60 s is four view refreshes per full probe. A full probe spawns `ps`
+ * (macOS) or `tasklist` and PowerShell (Windows): the start-identity read
+ * alone measured 193-227 ms on a Windows VM, and over 4 s for a desktop
+ * running at BelowNormal against load (`OWN_WINDOWS_START_IDENTITY_TIMEOUT_MS`
+ * in the shared process-identity module). The desktop's other cached verdicts
+ * pay the same probe at 120 s (`IDENTITY_VERDICT_REUSE_MS`,
+ * `ALIVE_RECHECK_INTERVAL_MS`); this one is tighter because a wrong answer here
+ * leaves the host down under `linked` rather than delaying a respawn.
+ */
+const SUPERVISOR_VERDICT_REUSE_MS = 60_000;
+
+/** One read of the supervisor record, as `readSupervisorRun` returns it. */
+export interface SupervisorRunRead {
+  readonly state: HostLifecycleSupervisorState;
+  /** The live supervisor's pid; `null` unless `state` is `enforcing`. */
+  readonly supervisorPid: number | null;
+  /**
+   * How its run was started; `null` unless `state` is `enforcing`, and for a
+   * record written before the field existed.
+   */
+  readonly admittedAs: HostLifecycleRunAdmission | null;
+}
+
+/** A full identity probe's verdict on the process a supervisor record names. */
+interface SupervisorVerdictMemo {
+  /** The record's pid and start identity: a new record is probed afresh. */
+  readonly key: string;
+  readonly verdict: ProcessIdentityVerdict;
+  /** When the full probe that gave `verdict` began (the store's clock). */
+  readonly probedAtMs: number;
+}
+
 export class HostLifecyclePolicyStore {
   readonly policyPath: string;
   readonly presencePath: string;
@@ -84,6 +142,14 @@ export class HostLifecyclePolicyStore {
   private readonly ownPid: number;
   private readonly readOwnStartIdentity: () => Promise<ProcessStartIdentity | null>;
   private readonly now: () => Date;
+  /**
+   * `readSupervisorState` runs on every view refresh - each watcher edge and
+   * poll tick - and a full probe spawns `ps` (macOS) or `tasklist` and
+   * PowerShell (Windows). The verdict is kept while the spawn-free existence
+   * probe agrees with it, for at most `SUPERVISOR_VERDICT_REUSE_MS`; see
+   * `supervisorRecordIsStale`.
+   */
+  private supervisorVerdict: SupervisorVerdictMemo | null = null;
 
   constructor(options: HostLifecyclePolicyStoreOptions) {
     this.policyPath = hostLifecyclePolicyPath(options.hostHomeDir);
@@ -115,10 +181,13 @@ export class HostLifecyclePolicyStore {
    *
    * Not serialized against a concurrent CLI write, for the reason
    * `writeHostLifecyclePolicyFromCli` gives: both writers are a person
-   * changing a setting, the file is replaced whole, and the loser of such a
-   * race is simply the older choice, which `rev` lets every reader recognise.
-   * Throws when the write fails; the caller reports it and commits nothing
-   * else.
+   * changing a setting, and the file is replaced whole, so the file always
+   * holds one whole choice. `rev` alone does not name that choice: each
+   * writer writes one past the `rev` it read, so two racing writes can land
+   * at the SAME `rev` with different modes. A reader that follows changes
+   * compares `(rev, mode)` (`HostLifecycleService.observe`), never `rev`
+   * alone. Throws when the write fails; the caller reports it and commits
+   * nothing else.
    */
   async writePolicy(mode: HostLifecycleMode): Promise<HostLifecyclePolicy> {
     const previous = await this.readPolicy();
@@ -141,23 +210,122 @@ export class HostLifecyclePolicyStore {
   }
 
   /**
-   * Whether the running supervisor enforces the policy. `supervisor.json`
-   * exists only while a capable supervisor runs; without it, a host that is
+   * Whether the running supervisor enforces the policy. A capable
+   * supervisor's `supervisor.json` says so while that supervisor lives
+   * (`readLiveSupervisorRecord`); without a live one, a host that is
    * nonetheless running (`pid.json` present) is under an older supervisor.
    */
   async readSupervisorState(): Promise<HostLifecycleSupervisorState> {
+    return (await this.readSupervisorRun()).state;
+  }
+
+  /**
+   * `readSupervisorState`, with the live supervisor's pid and how its run was
+   * started (`admittedAs`) read from the same record. Both are `null` unless
+   * the state is `enforcing`; `admittedAs` is `null` too for a record written
+   * before the field existed. Never throws.
+   */
+  async readSupervisorRun(): Promise<SupervisorRunRead> {
+    const record = await this.readLiveSupervisorRecord();
+    if (record !== null) {
+      return {
+        state: "enforcing",
+        supervisorPid: record.pid,
+        admittedAs: record.admittedAs,
+      };
+    }
+    const pid = await readPidMetadataState(this.pidMetadataFile);
+    return {
+      state: pid.kind === "absent" ? "not-running" : "not-enforcing",
+      supervisorPid: null,
+      admittedAs: null,
+    };
+  }
+
+  /**
+   * The live supervisor's pid, only when its record carries a start identity
+   * and the process at that pid still has it - `null` for anything else, a
+   * record from before the field included.
+   *
+   * The health monitor's hold key (`E_HOST_NOT_SERVICE_RUN`: leave that run
+   * alone until it is gone). It asks for exactly the evidence the CLI's own
+   * refusal needs - `readLiveSupervisorRun` refuses only over a supervisor
+   * whose recorded identity is `current` - so a hold is never keyed on a pid
+   * that only liveness vouches for, which a reissued pid would keep forever.
+   */
+  async readIdentifiedSupervisorPid(): Promise<number | null> {
+    const record = await this.readLiveSupervisorRecord();
+    return record !== null && record.startIdentity !== null ? record.pid : null;
+  }
+
+  /**
+   * `supervisor.json` when it describes a running, capable supervisor: the
+   * capability advertised, and the process it names not provably gone (F11).
+   * The record is removed only on a clean exit, so one a killed supervisor
+   * left behind (SIGKILL, power loss, a Windows session end) is checked
+   * against the process it names - otherwise `→ linked` would read a dead
+   * supervisor as enforcing and never bring the host up.
+   */
+  private async readLiveSupervisorRecord(): Promise<SupervisorRecord | null> {
     const text = await readTextOrNull(this.supervisorPath);
     const record = text === null ? null : parseSupervisorRecordText(text);
     if (
-      supervisorRecordHasCapability(
+      record === null ||
+      !supervisorRecordHasCapability(
         record,
         SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1,
-      )
+      ) ||
+      (await this.supervisorRecordIsStale(record))
     ) {
-      return "enforcing";
+      return null;
     }
-    const pid = await readPidMetadataState(this.pidMetadataFile);
-    return pid.kind === "absent" ? "not-running" : "not-enforcing";
+    return record;
+  }
+
+  /**
+   * Whether `record` provably no longer describes a running supervisor: its
+   * pid is dead, or the pid is alive but its start identity differs from the
+   * one the supervisor recorded (the OS handed the pid to another process -
+   * after a reboot, typically). Positive evidence only: a probe that cannot
+   * tell keeps the record's word, and a record written before `startIdentity`
+   * existed is judged on its pid's liveness alone.
+   *
+   * A previous full probe's verdict on the same record is reused for less than
+   * `SUPERVISOR_VERDICT_REUSE_MS`, and only while the spawn-free existence
+   * probe agrees with it - the pid still `exists` for a live verdict, is still
+   * `gone` for a dead one. Existence never stands in for identity
+   * (`probeProcessExistenceWithoutSpawn`): a pid the OS reissued `exists` too,
+   * which is what the age bound is for. Anything else - a new record, an
+   * expired verdict, a clock that stepped backward - takes the full probe.
+   */
+  private async supervisorRecordIsStale(
+    record: SupervisorRecord,
+  ): Promise<boolean> {
+    const key = `${record.pid}:${record.startIdentity ?? ""}`;
+    const nowMs = this.now().getTime();
+    const memo = this.supervisorVerdict;
+    const reusable =
+      memo !== null &&
+      memo.key === key &&
+      // A backward clock step makes the age negative; that re-probes too.
+      nowMs - memo.probedAtMs >= 0 &&
+      nowMs - memo.probedAtMs < SUPERVISOR_VERDICT_REUSE_MS &&
+      (memo.verdict === "dead"
+        ? probeProcessExistenceWithoutSpawn(record.pid) === "gone"
+        : probeProcessExistenceWithoutSpawn(record.pid) === "exists");
+    let verdict: ProcessIdentityVerdict;
+    if (reusable) {
+      verdict = memo.verdict;
+    } else {
+      verdict = await verifyProcessIdentityAsync({
+        pid: record.pid,
+        startedAtMs: null,
+        startIdentity: record.startIdentity,
+      });
+      // Stamped with when the probe began, so the bound counts its duration.
+      this.supervisorVerdict = { key, verdict, probedAtMs: nowMs };
+    }
+    return verdict === "dead" || verdict === "alive-different";
   }
 
   async readPresence(): Promise<DesktopPresence | null> {

@@ -32,12 +32,15 @@ interface UnpromptedStopping {
  * would skip the preload's servicing ack, and main would ask natively.
  *
  * Main sends a request to the most recent window only, and fans `stopping` /
- * `quitting` / `cancelled` out to every window. A phase naming a request this
- * window never received is ignored, except `requestId: null` - a stop no
- * prompt preceded (Linked, or Stop-if-idle's automatic attempt) - which every
- * window shows, because the person may be looking at any of them. Its
- * `idleOnly` says whether that stop can end work at all: Stop-if-idle's
- * attempt cannot, so its progress names none, busy host or not.
+ * `prompting` / `quitting` / `cancelled` out to every window. A phase naming
+ * a request this window never received is ignored, except `requestId: null` -
+ * a stop no prompt preceded (Linked, or Stop-if-idle's automatic attempt) -
+ * which every window shows, because the person may be looking at any of
+ * them. Its `idleOnly` says whether that stop can end work at all:
+ * Stop-if-idle's attempt cannot, so its progress names none, busy host or
+ * not. `prompting` ends that progress everywhere when main asks next, so a
+ * window that never gets the question is not left locked while the person
+ * answers it elsewhere.
  */
 export function HostQuitDecisionBridge(): ReactNode {
   const runnerHost = useRunnerHostOrNull();
@@ -73,6 +76,23 @@ export function HostQuitDecisionBridge(): ReactNode {
                 stopping: true,
                 idleOnly: event.idleOnly,
               }
+            : current,
+        );
+        return;
+      }
+      if (event.phase === "prompting") {
+        // Main is asking next - in the most recent window only, or natively -
+        // so the stop this phase names is over: every window showing its
+        // progress takes it down. Nothing else about the quit changes.
+        if (event.requestId === null) {
+          setUnpromptedStopping(null);
+          return;
+        }
+        setActive((current) =>
+          current !== null &&
+          current.stopping &&
+          current.request.requestId === event.requestId
+            ? null
             : current,
         );
         return;

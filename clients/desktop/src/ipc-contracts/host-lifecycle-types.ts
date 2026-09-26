@@ -9,6 +9,7 @@ export type {
 
 export type {
   HostLifecyclePending,
+  HostLifecycleRunAdmission,
   HostLifecycleSetFailure,
   HostLifecycleSetRequest,
   HostLifecycleSetResult,

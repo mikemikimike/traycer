@@ -2,7 +2,12 @@ import { CLI_ERROR_CODES, cliError } from "../runner/errors";
 import type { Environment } from "../runner/environment";
 import type { CommandFn, CommandResult } from "../runner/runner";
 import { createServiceController, serviceLabelFor } from "../service";
-import { findForegroundHostRun } from "../host/foreground-host-run";
+import {
+  findForegroundHostRun,
+  foregroundRunRefusal,
+  refuseForegroundHostRun,
+} from "../host/foreground-host-run";
+import type { HostStartOrigin } from "../host/lifecycle-origin";
 import { clearStopIntent } from "../host/stop-intent";
 import { withCliUpdateContender } from "../host/update-contender";
 import type { WithCliUpdateContenderOptions } from "../host/update-contender";
@@ -33,37 +38,54 @@ import { stopHostServiceWithAttempt } from "../host/update-mutation";
 // apply/install/activation critical section and kill the process it
 // just started - the stop itself executes inside the lock, short-held,
 // and linearizes after a foreign holder releases.
+//
+// A host started by `traycer host start` in a terminal (a `foreground` run)
+// is not the service's, and this command leaves it alone unless a person at
+// a terminal says otherwise:
+// - A plain or `--if-idle` stop asks the service manager, which does not own
+//   that host, so it is refused FIRST inside the lock - before the busy
+//   probe, the stop intent, `controller.stop()` or any kill. Not after: the
+//   service stop is not harmless to it - Windows' tree kill matches the slot's
+//   install path the terminal host runs from, and the `--if-idle` busy probe
+//   dials the terminal host itself, whose `E_HOST_BUSY` the desktop's Linked
+//   quit answers with `--force`.
+// - A DESKTOP-origin stop is refused first under `--force` too: the app's quit
+//   or crash never tears down a terminal-started host, and a force sent from
+//   the app's quit modal is still the app's quit. The desktop reads
+//   `E_HOST_NOT_SERVICE_RUN` as `not-service-run` and quits with the host kept.
+// - A terminal `--force` is the person's explicit act and kills it directly.
+//
+// The check before the stop writes nothing, so a refusal there leaves every
+// file - a stop intent another actor wrote included - exactly as it was.
 /**
- * A plain or `--if-idle` stop asks the SERVICE manager, and a host started by
- * `traycer host start` in a terminal is not the service's: the stop reached
- * nothing, and the command used to print "requested stop for service …" with
- * exit 0 while that host ran on. Checked after the stop, inside the same
- * lock, so what it reports is what the stop actually left running.
+ * The same refusal, checked again AFTER a plain or `--if-idle` stop, inside
+ * the same lock. The lock admits no new spawn while it is held (every host
+ * spawn is admitted under this update-attempt lock), so the first check's
+ * answer normally stands; this one covers a foreground run the first check
+ * could not yet confirm - a host still coming up, an endpoint that did not
+ * answer - and the service stop did not end. What this command reports is
+ * what the stop actually left running.
  *
- * The stop intent the stop announced is withdrawn first. Left behind, it
- * would tell the foreground supervisor that its child's next exit was asked
- * for, and a crash in the freshness window would not be relaunched.
+ * Only here is a stop intent withdrawn: the one this stop announced, inside
+ * this lock. Left behind, it would tell the foreground supervisor that its
+ * child's next exit was asked for, and a crash in the freshness window would
+ * not be relaunched.
  */
 async function refuseIfForegroundHostSurvived(
   environment: Environment,
+  origin: HostStartOrigin,
 ): Promise<void> {
   const foreground = await findForegroundHostRun(environment);
   if (foreground === null) return;
   await clearStopIntent(environment);
-  throw cliError({
-    code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN,
-    message: `host stop: the running host was started in a terminal (supervisor pid ${String(foreground.supervisorPid)}) and is not run by the service; stop it there with Ctrl-C, or pass --force`,
-    details: {
-      supervisorPid: foreground.supervisorPid,
-      hostPid: foreground.hostPid,
-    },
-    exitCode: 1,
-  });
+  throw foregroundRunRefusal("host stop", foreground, origin);
 }
 
 export interface HostStopArgs {
   readonly force: boolean;
   readonly ifIdle: boolean;
+  /** Who asked: `desktop` for every stop the app issues. */
+  readonly lifecycleOrigin: HostStartOrigin;
 }
 
 export function buildHostStopCommand(args: HostStopArgs): CommandFn {
@@ -91,6 +113,13 @@ export function buildHostStopCommand(args: HostStopArgs): CommandFn {
       admission: "service-maintenance",
     };
     await withCliUpdateContender(contenderOptions, async (capability) => {
+      if (!args.force || args.lifecycleOrigin === "desktop") {
+        await refuseForegroundHostRun(
+          "host stop",
+          ctx.runtime.environment,
+          args.lifecycleOrigin,
+        );
+      }
       await stopHostServiceWithAttempt(
         capability,
         contenderOptions,
@@ -100,7 +129,10 @@ export function buildHostStopCommand(args: HostStopArgs): CommandFn {
         args.ifIdle ? "if-idle" : "unconditional",
       );
       if (!args.force) {
-        await refuseIfForegroundHostSurvived(ctx.runtime.environment);
+        await refuseIfForegroundHostSurvived(
+          ctx.runtime.environment,
+          args.lifecycleOrigin,
+        );
       }
     });
     return {

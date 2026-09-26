@@ -208,7 +208,9 @@ describe("withStopIntent", () => {
       }),
     );
 
-    await expect(controller.uninstall({ label })).rejects.toThrow("EPERM");
+    await expect(
+      controller.uninstall({ label, leaveForegroundRun: null }),
+    ).rejects.toThrow("EPERM");
 
     expect(mocks.writes).toEqual(["uninstall"]);
     expect(mocks.clears).toEqual([]);
@@ -224,7 +226,9 @@ describe("withStopIntent", () => {
       }),
     );
 
-    await expect(controller.uninstall({ label })).rejects.toThrow("refused");
+    await expect(
+      controller.uninstall({ label, leaveForegroundRun: null }),
+    ).rejects.toThrow("refused");
 
     expect(mocks.clears).toEqual(["production"]);
   });

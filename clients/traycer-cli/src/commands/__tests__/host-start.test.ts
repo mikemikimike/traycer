@@ -1,11 +1,20 @@
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { constants as osConstants } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { CliError, CLI_ERROR_CODES } from "../../runner/errors";
 import {
   continuesPredecessorRun,
@@ -47,6 +56,12 @@ import {
   writeStopIntent,
 } from "../../host/stop-intent";
 import type { StopIntentIdentity } from "../../host/stop-intent";
+import { serviceLabelFor, withStopIntent } from "../../service";
+import type { ServiceController } from "../../service";
+import {
+  readInheritableRunOwnership,
+  writeSupervisorRecords,
+} from "../../host/lifecycle-files";
 import type {
   DesktopPresenceLiveness,
   LifecycleRecordRead,
@@ -55,6 +70,7 @@ import type {
 import type { DesktopPresence } from "@traycer/protocol/config/desktop-presence";
 import type { HostPidMetadata } from "../../host/pid-metadata";
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
+import { readProcessStartIdentity } from "../../store/process-identity";
 import type { PublishedProcessIdentityVerdict } from "../../store/process-identity";
 import {
   LIFECYCLE_OBSERVER_POLL_MS,
@@ -78,6 +94,36 @@ import type {
   HostStartAdoptionConsumeResult,
   HostStartAdoptionGrant,
 } from "../../host/host-start-adoption";
+import * as hostStartAdoptionModule from "../../host/host-start-adoption";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, and a row below writes a
+// real stop intent under `hostHomeDir("dev")` and then removes that tree.
+// Without this it wrote into - and `rmSync`ed - this machine's REAL
+// `~/.traycer/host/dev-runs/<slot>`. The dir is made inside the `node:os`
+// factory, so it exists before the first module that asks for `homedir()`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-host-start-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+// Fail loudly, before any row runs, if the redirect above ever stops taking.
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 // `traycer host start --environment <ch>` is the single supervisor entry
 // point. There is one launch path: read the environment's
@@ -566,7 +612,7 @@ function makeRunStubs(
       // Unset, a granted-maintenance or unattended start reads the real
       // `supervisor-run.json` and probes whatever pid it names.
       inheritRunOwnership: async () => null,
-      ownStartIdentity: () => null,
+      ownStartIdentity: async () => null,
       cliVersion: "0.0.0-test",
       // Same hazard class again: unset, an admitted run arms a REAL 5s
       // interval and an `fs.watch` on the developer's real host home. The
@@ -578,6 +624,10 @@ function makeRunStubs(
         nowMs: () => 0,
         scheduleTicks: () => () => undefined,
         watchHostHome: () => null,
+        // T7/T8 gap-fill: pins the runtime's processExists seam so a
+        // teardown-owed-exit test can assert on it without arming a real
+        // observer. Head has no such field; harmless until it does.
+        processExists: () => "gone",
       },
       teardown: {
         platform: "linux",
@@ -1885,6 +1935,10 @@ describe("runHostStart - Windows requested-kill arm (O-WIN-1)", () => {
     const slot = `owin1-nonconsuming-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await withDevDesktopSlot(slot, async () => {
       const devHome = hostHomeDir("dev");
+      // The tree the `finally` removes must be this row's own slot under the
+      // redirected HOME - never a real dev-runs root.
+      expect(devHome.startsWith(osHome.current)).toBe(true);
+      expect(devHome).toMatch(/dev-runs[\\/]owin1-/);
       try {
         const { child, recorded, deps } = makeRunStubs(
           sampleRecord(exec),
@@ -2210,6 +2264,80 @@ describe("runHostStart - a Windows console stop is left to the host, then forced
     expect(recorded.spawnCalls).toHaveLength(1);
   });
 
+  // T8: `exitSupervisor` awaits an in-flight console-stop force
+  // (`consoleStopForce`, host-start.ts:1419) before it calls `deps.exit`.
+  // Gates `removePidMetadataIfUnchanged` on a deferred so the wait is
+  // proved by blocking, not just by call order.
+  it("T8: exitSupervisor waits for an in-flight console-stop force to settle the record before exiting", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const win32Deps = withLifecyclePlatform(deps, "win32");
+    const originalSpawn = win32Deps.spawn;
+    if (originalSpawn === undefined) {
+      throw new Error("test spawn dependency missing");
+    }
+    const rig = makeConsoleStopRig(win32Deps, child);
+    rig.pidRecord = hostPidRecord(CHILD_PID);
+    rig.verifyVerdict = "dead";
+
+    // A holder, not a `let`: TypeScript does not see the executor's
+    // assignment and would narrow a `let` to `null` at the release below.
+    const purge: { release: (() => void) | null } = { release: null };
+    const purgeGate = new Promise<void>((resolve) => {
+      purge.release = resolve;
+    });
+    const baseLifecycle = rig.deps.lifecycle;
+    const baseTeardown = baseLifecycle?.teardown;
+    if (baseLifecycle === undefined || baseTeardown === undefined) {
+      throw new Error("test teardown dependency missing");
+    }
+    const gatedRemovePidMetadataIfUnchanged =
+      baseTeardown.removePidMetadataIfUnchanged;
+    const gatedDeps: Partial<RunHostStartDeps> = {
+      ...rig.deps,
+      lifecycle: {
+        ...baseLifecycle,
+        teardown: {
+          ...baseTeardown,
+          removePidMetadataIfUnchanged: async (environment, instance) => {
+            await purgeGate;
+            return gatedRemovePidMetadataIfUnchanged(environment, instance);
+          },
+        },
+      },
+    };
+
+    void runHostStart(
+      { environment: "production", cwd: null },
+      {
+        ...gatedDeps,
+        spawn: (command, args, options) => {
+          originalSpawn(command, args, options);
+          setImmediate(() => {
+            process.emit("SIGINT");
+            const run = rig.escalateRun;
+            if (run === null) {
+              throw new Error("escalateAfter was never called");
+            }
+            run();
+          });
+          return asChildProcess(child);
+        },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(rig.verifyPublishedInstanceCalls).toHaveLength(1);
+    });
+    // The record settle is gated: exit must not have happened yet.
+    await flush();
+    expect(recorded.exited).toBeNull();
+
+    purge.release?.();
+    await waitForExit(recorded);
+    expect(recorded.exited).toBe(0);
+    expect(rig.removePidMetadataCalls).toEqual([hostPidRecord(CHILD_PID)]);
+  });
+
   it.each([
     [
       "a record naming another pid is left alone",
@@ -2530,38 +2658,30 @@ describe("service manifests never leak a flag `host start` does not have", () =>
   it("Windows Scheduled Task XML and its hidden launcher", async () => {
     const { buildScheduledTaskXml, buildWindowsHiddenHostLauncher } =
       await import("../../service/platforms/windows");
-    const prevUsername = process.env.USERNAME;
-    process.env.USERNAME = "testuser";
-    const restoreUsername = () => {
-      if (prevUsername === undefined) delete process.env.USERNAME;
-      else process.env.USERNAME = prevUsername;
+    const cli = {
+      command: "C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe",
+      args: [],
     };
-    try {
-      const cli = {
-        command: "C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe",
-        args: [],
-      };
-      const label = {
-        id: "ai.traycer.host.prod",
-        displayName: "Traycer Host",
-        environment: "production" as const,
-        devSlot: null,
-      };
-      const xml = buildScheduledTaskXml({ label, cli });
-      const launcher = buildWindowsHiddenHostLauncher(cli, label);
-      // The task must launch the GUI script host, not the console CLI, or
-      // Task Scheduler flashes a window on every login.
-      expect(xml).toContain("<Hidden>true</Hidden>");
-      expect(xml).toContain("wscript.exe");
-      expect(xml).toContain("host-start-hidden.vbs");
-      expect(xml).not.toContain(
-        "<Command>C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe</Command>",
-      );
-      for (const flag of REMOVED_FLAGS) {
-        expect(`${xml}\n${launcher}`).not.toContain(flag);
-      }
-    } finally {
-      restoreUsername();
+    const label = {
+      id: "ai.traycer.host.prod",
+      displayName: "Traycer Host",
+      environment: "production" as const,
+      devSlot: null,
+    };
+    // The install resolves the task's `<UserId>` and hands it to the builder;
+    // any fixed identity serves a check of the XML's launch shape.
+    const xml = buildScheduledTaskXml({ label, cli }, "testuser");
+    const launcher = buildWindowsHiddenHostLauncher(cli, label);
+    // The task must launch the GUI script host, not the console CLI, or
+    // Task Scheduler flashes a window on every login.
+    expect(xml).toContain("<Hidden>true</Hidden>");
+    expect(xml).toContain("wscript.exe");
+    expect(xml).toContain("host-start-hidden.vbs");
+    expect(xml).not.toContain(
+      "<Command>C:\\Users\\test\\.traycer\\cli\\bin\\traycer.exe</Command>",
+    );
+    for (const flag of REMOVED_FLAGS) {
+      expect(`${xml}\n${launcher}`).not.toContain(flag);
     }
   });
 });
@@ -5988,7 +6108,15 @@ describe("runHostStart - supervisor.json lifecycle across outcomes", () => {
     expect(published.has(process.pid)).toBe(false);
   });
 
-  it("is written then removed on a throw path after a successful attempt already published it", async () => {
+  it("is written then removed via exitSupervisor(69) when relaunch target resolution CliErrors after a successful attempt already published it", async () => {
+    // Despite the describe title mentioning a "throw path", this scenario's
+    // failure is a `CliError` (HOST_NOT_INSTALLED, exitCode 69), which
+    // `resolveHostStartTarget`'s catch logs/markers and then hands to
+    // `exitSupervisor(err.exitCode)` (host-start.ts, the CliError branch) -
+    // NOT the separate unexpected-error branch that calls
+    // `releaseLifecycleResources("all")` directly and re-`throw`s without
+    // ever reaching `exitSupervisor`/`deps.exit`. This test exercises only
+    // the former; nothing here reaches that latter release code path.
     const { recorded, deps } = makeRunStubs(sampleRecord(exec), null);
     const published = new Set<number>();
     const writeCalls: SupervisorRecords[] = [];
@@ -6029,6 +6157,60 @@ describe("runHostStart - supervisor.json lifecycle across outcomes", () => {
     // relaunch attempt that the exhausted budget refuses to retry.
     expect(scripted.children).toHaveLength(1);
     expect(recorded.exited).toBe(69);
+    expect(writeCalls).toHaveLength(1);
+    expect(removeCalls).toEqual([process.pid]);
+    expect(published.has(process.pid)).toBe(false);
+  });
+});
+
+describe("runHostStart - published run records survive across the relaunch ladder, not just at the end (T14)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+
+  it("keeps supervisor.json published across spawn 2 and spawn 3 of a crash relaunch ladder", async () => {
+    const { recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const published = new Set<number>();
+    const writeCalls: SupervisorRecords[] = [];
+    const removeCalls: number[] = [];
+    const tracking = withPidTrackingLifecycle(
+      deps,
+      published,
+      writeCalls,
+      removeCalls,
+    );
+    // Three crashing attempts (1 initial + 2 relaunches), so this exercises
+    // spawn 2 and spawn 3 of the ladder before the crash budget gives up.
+    const scripted = withScriptedAttempts(tracking, [
+      { code: 9, signal: null },
+    ]);
+    const originalSpawn = scripted.deps.spawn;
+    if (originalSpawn === undefined) {
+      throw new Error("test spawn dependency missing");
+    }
+    const publishedAtSpawn: boolean[] = [];
+    const withSpawnSnapshots: Partial<RunHostStartDeps> = {
+      ...scripted.deps,
+      spawn: (command, args, options) => {
+        publishedAtSpawn.push(published.has(process.pid));
+        return originalSpawn(command, args, options);
+      },
+    };
+
+    await runUntilExit(
+      () =>
+        runHostStart(
+          { environment: "production", cwd: null },
+          { ...withSpawnSnapshots, maxRelaunches: 2 },
+        ),
+      recorded,
+    );
+
+    expect(scripted.children).toHaveLength(3);
+    expect(publishedAtSpawn).toHaveLength(3);
+    // Published once, before attempt 1's own spawn, and never lost across
+    // the relaunches - specifically still present when spawn 2 and spawn 3
+    // (indices 1 and 2) fire, not merely by the time the ladder ends.
+    expect(publishedAtSpawn[1]).toBe(true);
+    expect(publishedAtSpawn[2]).toBe(true);
     expect(writeCalls).toHaveLength(1);
     expect(removeCalls).toEqual([process.pid]);
     expect(published.has(process.pid)).toBe(false);
@@ -6188,6 +6370,10 @@ function makeLifecycleRig(
             failed: () => false,
           };
         },
+        // T7/T8 gap-fill: pins the runtime's processExists seam so a
+        // teardown-owed-exit test can assert on it without arming a real
+        // observer. Head has no such field; harmless until it does.
+        processExists: () => "gone",
       },
       teardown: {
         platform: "linux",
@@ -6280,10 +6466,23 @@ describe("runHostStart - lifecycle observer and teardown", () => {
     expect(recorded.lifecycleRecordRemovals).toEqual([process.pid]);
   });
 
+  // F4: a foreground (ungranted) run is never adoptable (runIsAdoptable in
+  // lifecycle-observer.ts), so this scenario needs a desktop-GRANTED
+  // service run to reach the adopted path it exercises.
   it("adopts on a live presence, then stops the host after the grace under a stop verdict", async () => {
     const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
     const rig = makeLifecycleRig(deps, child, "linked");
-    await startAndArm(rig);
+    const granting: Partial<RunHostStartDeps> = {
+      ...rig.deps,
+      admitHostStartSpawn: async (_options, run, _beside, handoff) => {
+        handoff.onGranted("desktop");
+        return { kind: "ran", result: await run() };
+      },
+    };
+    void runHostStart(FOREGROUND_START, granting);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
 
     rig.presence.record = desktopPresence(777, "stop");
     rig.presence.liveness = "alive";
@@ -6350,10 +6549,22 @@ describe("runHostStart - lifecycle observer and teardown", () => {
     await waitForExit(recorded);
   });
 
+  // F4: a foreground (ungranted) run is never adoptable, so this scenario
+  // needs a desktop-GRANTED service run to reach the adopted/teardown path.
   it("a committed teardown owns the exit code: 0 even when a restart intent would exit 77", async () => {
     const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
     const rig = makeLifecycleRig(deps, child, "linked");
-    await startAndArm(rig);
+    const granting: Partial<RunHostStartDeps> = {
+      ...rig.deps,
+      admitHostStartSpawn: async (_options, run, _beside, handoff) => {
+        handoff.onGranted("desktop");
+        return { kind: "ran", result: await run() };
+      },
+    };
+    void runHostStart(FOREGROUND_START, granting);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
     rig.presence.record = desktopPresence(777, "stop");
     rig.presence.liveness = "alive";
     await fireTick(rig);
@@ -6370,10 +6581,22 @@ describe("runHostStart - lifecycle observer and teardown", () => {
     expect(recorded.lifecycleRecordRemovalScopes).toEqual(["all"]);
   });
 
+  // F4: a foreground (ungranted) run is never adoptable, so this scenario
+  // needs a desktop-GRANTED service run to reach the adopted/teardown path.
   it("a busy lock on the first due tick touches nothing and latches nothing; the next tick completes", async () => {
     const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
     const rig = makeLifecycleRig(deps, child, "linked");
-    await startAndArm(rig);
+    const granting: Partial<RunHostStartDeps> = {
+      ...rig.deps,
+      admitHostStartSpawn: async (_options, run, _beside, handoff) => {
+        handoff.onGranted("desktop");
+        return { kind: "ran", result: await run() };
+      },
+    };
+    void runHostStart(FOREGROUND_START, granting);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
     rig.presence.record = desktopPresence(777, "stop");
     rig.presence.liveness = "alive";
     await fireTick(rig);
@@ -6401,6 +6624,192 @@ describe("runHostStart - lifecycle observer and teardown", () => {
     expect(rig.teardown.lockCalls).toBe(2);
     expect(rig.teardown.cooperative).toHaveLength(1);
     expect(recorded.exited).toBe(0);
+  });
+});
+
+describe("runHostStart - observer admission gating (F4a)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+  const GRACE = LIFECYCLE_PRESENCE_CRASH_GRACE_MS;
+
+  // F4a: the observer must receive the run's admission and never adopt or
+  // tear down a genuinely foreground (unlabelled, ungranted) start, even
+  // once a desktop presence record goes alive-then-dead past the crash
+  // grace. Head wires no admission into the observer, so this run is
+  // adopted and torn down like any other - the test is red on head.
+  it("a foreground start's observer never tears its host down, even past the crash grace", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const rig = makeLifecycleRig(deps, child, "linked");
+    await startAndArm(rig);
+
+    rig.presence.record = desktopPresence(777, "stop");
+    rig.presence.liveness = "alive";
+    await fireTick(rig);
+    rig.presence.liveness = "dead";
+    rig.clock.now = 1_000;
+    await fireTick(rig);
+    rig.clock.now = 1_000 + GRACE;
+    await fireTick(rig);
+
+    // The mechanism: a foreground run is never adopted (the observer's first
+    // alive tick must not republish `adopted: true` the way it does today -
+    // that republish is the real source of `owner=desktop` in `host status`
+    // for a terminal run), every write still carries admission "foreground",
+    // no teardown ran on any platform fake, the child was never stopped by
+    // the observer, and the adoption log line never fired.
+    expect(
+      recorded.lifecycleRecordWrites.some(
+        (write) => write.runState.adopted === true,
+      ),
+    ).toBe(false);
+    expect(
+      recorded.lifecycleRecordWrites.every(
+        (write) => write.runState.admission === "foreground",
+      ),
+    ).toBe(true);
+    expect(rig.teardown.cooperative).toEqual([]);
+    expect(rig.teardown.lockCalls).toBe(0);
+    expect(recorded.exited).toBeNull();
+    expect(
+      recorded.loggerInfos.some(
+        (entry) =>
+          entry.message ===
+          "Host supervisor run is now owned by a live desktop",
+      ),
+    ).toBe(false);
+
+    // Let the supervisor leave so its signal handlers are released.
+    child.emit("exit", 0, null);
+    await waitForExit(recorded);
+  });
+
+  // Control (green on head): the same scenario as a granted desktop start
+  // IS torn down and DOES get adopted - admission gating must not disturb
+  // this path.
+  it("control: the same scenario as a granted desktop start is torn down", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const rig = makeLifecycleRig(deps, child, "linked");
+    const granting: Partial<RunHostStartDeps> = {
+      ...rig.deps,
+      admitHostStartSpawn: async (_options, run, _beside, handoff) => {
+        handoff.onGranted("desktop");
+        return { kind: "ran", result: await run() };
+      },
+    };
+    void runHostStart(FOREGROUND_START, granting);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
+
+    rig.presence.record = desktopPresence(777, "stop");
+    rig.presence.liveness = "alive";
+    await fireTick(rig);
+    rig.presence.liveness = "dead";
+    rig.clock.now = 1_000;
+    await fireTick(rig);
+    rig.clock.now = 1_000 + GRACE;
+    await fireTick(rig);
+    await waitForExit(recorded);
+
+    expect(
+      recorded.lifecycleRecordWrites.some(
+        (write) => write.runState.adopted === true,
+      ),
+    ).toBe(true);
+    expect(rig.teardown.lockCalls).toBe(1);
+    expect(recorded.exited).toBe(0);
+  });
+});
+
+describe("runHostStart - exitSupervisor waits for a committed teardown (T7)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+  const GRACE = LIFECYCLE_PRESENCE_CRASH_GRACE_MS;
+
+  // T7: a committed teardown that could not finish on its own tick
+  // (cooperative busy, then the forced stop hung) must still be the one to
+  // purge `pid.json`, and `exitSupervisor` (host-start.ts:1420-1430) must
+  // wait for that purge before it calls `deps.exit` - even when nothing
+  // scheduled a further tick and the child ends on its own between polls.
+  it("a committed teardown that retried once still purges before deps.exit, when the child ends with no tick running", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const rig = makeLifecycleRig(deps, child, "linked");
+    const baseLifecycle = rig.deps.lifecycle;
+    const baseTeardown = baseLifecycle?.teardown;
+    const baseExit = rig.deps.exit;
+    if (
+      baseLifecycle === undefined ||
+      baseTeardown === undefined ||
+      baseExit === undefined
+    ) {
+      throw new Error("test dependency missing");
+    }
+    const order: string[] = [];
+    const customized: Partial<RunHostStartDeps> = {
+      ...rig.deps,
+      exit: (code) => {
+        order.push("exit");
+        return baseExit(code);
+      },
+      admitHostStartSpawn: async (_options, run, _beside, handoff) => {
+        handoff.onGranted("desktop");
+        return { kind: "ran", result: await run() };
+      },
+      lifecycle: {
+        ...baseLifecycle,
+        teardown: {
+          ...baseTeardown,
+          // Cooperative refuses busy, then the forced stop hangs: one full
+          // attempt commits but cannot complete, so it retries.
+          requestCooperativeShutdown: async (_environment, operation, kind) => {
+            rig.teardown.cooperative.push(`${operation}:${kind}`);
+            return { kind: "busy", holder: null };
+          },
+          forceStopPublishedHost: async () => ({ kind: "hung", pid: 4242 }),
+          removePidMetadataIfUnchanged: async (_environment, instance) => {
+            order.push("purge");
+            rig.teardown.removed.push(instance.pid);
+            rig.teardown.pidRecord = null;
+            return true;
+          },
+        },
+      },
+    };
+
+    void runHostStart(FOREGROUND_START, customized);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
+
+    rig.presence.record = desktopPresence(777, "stop");
+    rig.presence.liveness = "alive";
+    await fireTick(rig);
+    rig.presence.liveness = "dead";
+    rig.clock.now = 1_000;
+    await fireTick(rig);
+    rig.clock.now = 1_000 + GRACE;
+    await fireTick(rig);
+
+    // The first committed attempt could not finish: cooperative busy, then
+    // the forced stop hung, so the actuator retried without completing or
+    // touching the child.
+    expect(rig.teardown.cooperative).toEqual([
+      "lifecycle-presence-stop:shutdown",
+    ]);
+    expect(rig.teardown.lockCalls).toBe(1);
+    expect(order).toEqual([]);
+    expect(recorded.exited).toBeNull();
+
+    // No tick is running: the host ends on its own between polls.
+    child.emit("exit", 0, null);
+    await waitForExit(recorded);
+
+    // The purge (committed's step 7, taken without the lock since the child
+    // has already ended) happens before exitSupervisor calls deps.exit, and
+    // a teardown-owned exit is always 0.
+    expect(order).toEqual(["purge", "exit"]);
+    expect(recorded.exited).toBe(0);
+    // The second attempt needed no fresh lock: committed + an ended child
+    // skips straight to the unlocked purge step.
+    expect(rig.teardown.lockCalls).toBe(1);
   });
 });
 
@@ -6589,4 +6998,530 @@ describe("runHostStart - run-state removal scope and successor inheritance", () 
       await waitForExit(recorded);
     },
   );
+
+  /** A `ServiceController` whose `stop` resolves without touching any file -
+   * every other member is unused by `withStopIntent(...).stop(...)` and
+   * throws if that ever stops being true. */
+  function fakeStopOnlyController(): ServiceController {
+    const notUsed = (): Promise<never> => {
+      throw new Error("not used in this test");
+    };
+    return {
+      install: notUsed,
+      uninstall: notUsed,
+      status: notUsed,
+      stop: async () => undefined,
+      start: notUsed,
+      restart: notUsed,
+      hostStartAdoptionLabel: notUsed,
+      stopForRestart: notUsed,
+      relaunchAfterRestart: notUsed,
+      takeoverDesktopRegistration: notUsed,
+      retireCompetingRegistration: notUsed,
+    };
+  }
+
+  /** Spawns a real, briefly-alive process; reads its real identity while it
+   * is alive, then kills it and awaits the real exit - so a predecessor
+   * "supervisor" pid genuinely reads as dead. */
+  async function spawnAndKillRealPredecessor(): Promise<{
+    readonly pid: number;
+    readonly identity: string;
+  }> {
+    const proc = spawn("sleep", ["5"]);
+    const pid = await new Promise<number>((resolve, reject) => {
+      proc.once("spawn", () => {
+        if (proc.pid === undefined) {
+          reject(new Error("spawned process has no pid"));
+          return;
+        }
+        resolve(proc.pid);
+      });
+      proc.once("error", reject);
+    });
+    const identity = readProcessStartIdentity(pid);
+    if (identity === null) {
+      throw new Error("cannot read spawned predecessor's start identity");
+    }
+    const exited = new Promise<void>((resolve) => {
+      proc.once("exit", () => resolve());
+    });
+    proc.kill("SIGKILL");
+    await exited;
+    return { pid, identity };
+  }
+
+  async function writePredecessorRunRecords(
+    pid: number,
+    identity: string,
+  ): Promise<void> {
+    await writeSupervisorRecords("production", {
+      record: {
+        v: 1,
+        pid,
+        cliVersion: "0.0.0-test",
+        capabilities: ["lifecycle-policy-v1"],
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+      runState: {
+        v: 1,
+        supervisorPid: pid,
+        supervisorStartIdentity: identity,
+        admission: "unattended",
+        origin: null,
+        adopted: true,
+        lastPresence: INHERITED_OBSERVATION,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+  }
+
+  const CONTINUES_DESKTOP_OWNED_RUN_MESSAGE =
+    "Host supervisor continues a desktop-owned run across its relaunch";
+
+  // F2-INHERIT (B)1: a supervisor killed by a stop whose cleanup never ran
+  // (the Windows shape - `stop` ends the process directly, so the
+  // supervisor's own `exitSupervisor`/`releaseLifecycleResources` never
+  // fires) leaves BOTH `supervisor.json` and `supervisor-run.json`, still
+  // naming itself. The real `readInheritableRunOwnership`, wired through
+  // `withInheritance`, must not let the next unattended admission inherit
+  // `adopted: true` from that shape.
+  it("after a stop that killed the supervisor (its cleanup skipped), an unattended admission with an indeterminate probe does not inherit adopted: true", async () => {
+    const { pid, identity } = await spawnAndKillRealPredecessor();
+    await writePredecessorRunRecords(pid, identity);
+
+    await withStopIntent(fakeStopOnlyController()).stop(
+      serviceLabelFor("production"),
+      { force: false },
+    );
+
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const rig = makeLifecycleRig(deps, child, "linked");
+    rig.presence.record = desktopPresence(777, "stop");
+    rig.presence.liveness = "indeterminate";
+    const inheriting = withInheritance(rig, readInheritableRunOwnership);
+    void runHostStart(LABELLED_START, inheriting);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
+
+    expect(recorded.lifecycleRecordWrites[0]?.runState.adopted).toBe(false);
+    expect(recorded.lifecycleRecordWrites[0]?.runState.admission).toBe(
+      "unattended",
+    );
+    expect(
+      recorded.loggerInfos.some(
+        (entry) => entry.message === CONTINUES_DESKTOP_OWNED_RUN_MESSAGE,
+      ),
+    ).toBe(false);
+
+    child.emit("exit", 0, null);
+    await waitForExit(recorded);
+  });
+
+  // Control: the SAME wiring and pre-state, minus `supervisor.json` and the
+  // stop intent - the owed-exit shape (77/76:
+  // `removeSupervisorRecords(..., "keep-run-state")` removed `supervisor.json`
+  // and kept `supervisor-run.json`) - still inherits.
+  it("the same wiring over the owed-exit shape (run state kept, supervisor.json removed) still inherits", async () => {
+    const { pid, identity } = await spawnAndKillRealPredecessor();
+    const { supervisorRunStatePath } =
+      await import("../../host/lifecycle-files");
+    // Write both, then do exactly what an owed exit does - mark the run
+    // state, then `removeSupervisorRecords(..., "keep-run-state")` -
+    // `supervisor.json` gone, `supervisor-run.json` kept and marked.
+    await writeSupervisorRecords("production", {
+      record: {
+        v: 1,
+        pid,
+        cliVersion: "0.0.0-test",
+        capabilities: ["lifecycle-policy-v1"],
+        startedAt: "2026-01-01T00:00:00.000Z",
+      },
+      runState: {
+        v: 1,
+        supervisorPid: pid,
+        supervisorStartIdentity: identity,
+        admission: "unattended",
+        origin: null,
+        adopted: true,
+        lastPresence: INHERITED_OBSERVATION,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    // In the order the owed exit's `removeRecords` binding runs them: the
+    // mark first (only an exit that owes a successor writes it), then the
+    // `keep-run-state` removal.
+    const { markSupervisorRunOwed, removeSupervisorRecords } =
+      await import("../../host/lifecycle-files");
+    await markSupervisorRunOwed("production", pid);
+    await removeSupervisorRecords("production", pid, "keep-run-state");
+    // Confirm the control's own shape before asserting on the run under test.
+    const fs = await import("node:fs/promises");
+    await expect(
+      fs.readFile(supervisorRunStatePath("production"), "utf8"),
+    ).resolves.not.toBe("");
+
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const rig = makeLifecycleRig(deps, child, "linked");
+    rig.presence.record = desktopPresence(777, "stop");
+    rig.presence.liveness = "indeterminate";
+    const inheriting = withInheritance(rig, readInheritableRunOwnership);
+    void runHostStart(LABELLED_START, inheriting);
+    await vi.waitFor(() => {
+      expect(rig.ticker.fn).not.toBeNull();
+    });
+
+    expect(recorded.lifecycleRecordWrites[0]?.runState.adopted).toBe(true);
+    expect(recorded.lifecycleRecordWrites[0]?.runState.admission).toBe(
+      "unattended",
+    );
+    expect(
+      recorded.loggerInfos.some(
+        (entry) => entry.message === CONTINUES_DESKTOP_OWNED_RUN_MESSAGE,
+      ),
+    ).toBe(true);
+
+    child.emit("exit", 0, null);
+    await waitForExit(recorded);
+  });
+});
+
+// ---------------------------------------------------------------- F20 / F32 / U3
+
+/**
+ * Models `defaultRunDeps.admitHostStartSpawn` (host-start.ts:671-716) exactly
+ * enough to exercise F20: `handoff.consumed ?? ` a call to the SAME consume
+ * fake the lifecycle gate itself uses; a non-absent/non-grant result throws
+ * (host-start.ts:690-692); a grant honours `onGranted` and runs; `absent`
+ * just runs. The park rule is asked only by the gate
+ * (`lifecycle-admission.ts`), never by this callback - which is the bug.
+ */
+function modeledAdmitHostStartSpawn(
+  consumeAdoptionFake: RunHostStartDeps["lifecycle"]["consumeAdoption"],
+  seen: {
+    admits: number;
+    consumedSeen: Array<HostStartAdoptionConsumeResult | null>;
+  },
+): RunHostStartDeps["admitHostStartSpawn"] {
+  return async (options, run, _onAdmittedBeside, handoff) => {
+    seen.admits += 1;
+    seen.consumedSeen.push(handoff.consumed);
+    const serviceLabel =
+      "serviceLabel" in options ? options.serviceLabel : null;
+    const adoptionNonce =
+      "adoptionNonce" in options ? options.adoptionNonce : null;
+    // Production consumes a proof only for a labelled start; an unlabelled
+    // one has none to consume and reads as `absent`.
+    const adoption =
+      handoff.consumed ??
+      (serviceLabel === null
+        ? { kind: "absent" as const }
+        : await consumeAdoptionFake(
+            options.environment,
+            serviceLabel,
+            adoptionNonce,
+          ));
+    if (adoption.kind !== "absent" && adoption.kind !== "grant") {
+      throw new Error(adoption.reason);
+    }
+    if (adoption.kind === "grant") {
+      handoff.onGranted(adoption.grant.origin);
+      return { kind: "ran", result: await run() };
+    }
+    return { kind: "ran", result: await run() };
+  };
+}
+
+describe("runHostStart - the lifecycle gate is not re-asked on a same-run relaunch (F20)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+
+  it("spawns unattended on attempt 2 without ever asking the park rule, when attempt 1's own proof was refused", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    let consumeCalls = 0;
+    const consumeAdoptionFake: RunHostStartDeps["lifecycle"]["consumeAdoption"] =
+      async () => {
+        consumeCalls += 1;
+        // Attempt 1's own admission consumes a proof that is neither absent
+        // nor a grant (refused/lost/error, per `HostStartAdoptionConsumeResult`
+        // in host-start-adoption.ts); attempt 2 consumes its OWN, fresh proof.
+        return consumeCalls === 1
+          ? { kind: "refused", reason: "test-refused" }
+          : { kind: "absent" };
+      };
+    let readPresenceCalls = 0;
+    const withLinked = withLifecyclePolicy(
+      deps,
+      "linked",
+      consumeAdoptionFake,
+      async () => {
+        readPresenceCalls += 1;
+        return { kind: "absent" };
+      },
+      async () => "dead",
+    );
+    const seen = {
+      admits: 0,
+      consumedSeen: [] as Array<HostStartAdoptionConsumeResult | null>,
+    };
+    const tracking: Partial<RunHostStartDeps> = {
+      ...withChildExit(withLinked, child, 0, null),
+      maxRelaunches: 1,
+      admitHostStartSpawn: modeledAdmitHostStartSpawn(
+        consumeAdoptionFake,
+        seen,
+      ),
+    };
+
+    await runUntilExit(() => runHostStart(LABELLED_START, tracking), recorded);
+
+    // With no proof and dead/absent presence, `decideUnattendedStart`
+    // (lifecycle-admission.ts) parks: no attempt should ever reach a spawn,
+    // and the park rule must be asked again for attempt 2's own `absent`
+    // verdict, not just for the gate's one pre-loop ask.
+    expect(recorded.spawnCalls).toHaveLength(0);
+    expect(
+      recorded.loggerInfos.some(
+        (entry) =>
+          entry.message === "Host supervisor parked by lifecycle policy",
+      ),
+    ).toBe(true);
+    expect(recorded.exited).toBe(0);
+    expect(seen.admits).toBe(1);
+    expect(readPresenceCalls).toBe(1);
+  });
+
+  it("spawns unattended on attempt 2 even though presence has gone alive by the second ask", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    let consumeCalls = 0;
+    const consumeAdoptionFake: RunHostStartDeps["lifecycle"]["consumeAdoption"] =
+      async () => {
+        consumeCalls += 1;
+        return consumeCalls === 1
+          ? { kind: "lost", reason: "test-lost" }
+          : { kind: "absent" };
+      };
+    const withLinked = withLifecyclePolicy(
+      deps,
+      "linked",
+      consumeAdoptionFake,
+      async () => ({
+        kind: "valid",
+        record: {
+          v: 1,
+          pid: 4242,
+          processStartIdentity: "pid:4242:alive",
+          onExit: "stop",
+          policyRev: 1,
+          writtenAt: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+      async () => "alive",
+    );
+    const seen = {
+      admits: 0,
+      consumedSeen: [] as Array<HostStartAdoptionConsumeResult | null>,
+    };
+    const tracking: Partial<RunHostStartDeps> = {
+      ...withChildExit(withLinked, child, 0, null),
+      maxRelaunches: 1,
+      admitHostStartSpawn: modeledAdmitHostStartSpawn(
+        consumeAdoptionFake,
+        seen,
+      ),
+    };
+
+    await runUntilExit(() => runHostStart(LABELLED_START, tracking), recorded);
+
+    expect(recorded.spawnCalls).toHaveLength(1);
+    expect(consumeCalls).toBe(2);
+    expect(recorded.exited).toBe(0);
+    // Attempt 2's own admission must see ITS OWN `absent` verdict, not the
+    // `null` a same-run relaunch gets today (host-start.ts:1993/2000).
+    expect(seen.consumedSeen[1]?.kind).toBe("absent");
+  });
+});
+
+describe("runHostStart - admission for a probed service-labelled launch (F32)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+
+  it("records admission as unattended for a service-labelled probe launch with no grant", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const status = new PassThrough();
+    Object.assign(child, { stdio: [null, null, null, status] });
+    const originalSpawn = deps.spawn;
+    if (originalSpawn === undefined) {
+      throw new Error("test spawn dependency missing");
+    }
+
+    const invoke = () =>
+      runHostStart(
+        {
+          environment: "production",
+          cwd: null,
+          serviceLabel: "ai.traycer.host.fallback",
+        },
+        {
+          ...deps,
+          readLiveProbeContextForServiceLabel: async () => ({
+            kind: "authorised" as const,
+            context: {
+              transitionId: "transition-1",
+              probeNonce: "nonce-1",
+              serviceLabel: "ai.traycer.host.fallback",
+            },
+          }),
+          spawn: (command, args, options) => {
+            const spawned = originalSpawn(command, args, options);
+            setImmediate(() => {
+              status.end();
+              child.emit("exit", 0, null);
+            });
+            return spawned;
+          },
+        },
+      );
+
+    await runUntilExit(invoke, recorded);
+
+    // A launch WITH a service label AND an authorised probe context has
+    // `serviceStarted` false (host-start.ts:971) - but it is still a
+    // labelled service launch, and with no adoption grant its run must be
+    // recorded as `unattended` (parkable), never `foreground` (never
+    // parked; `lifecycle-files.ts`'s `SupervisorRunAdmission` doc).
+    expect(recorded.lifecycleRecordWrites).toHaveLength(1);
+    expect(recorded.lifecycleRecordWrites[0]?.runState.admission).toBe(
+      "unattended",
+    );
+  });
+});
+
+// ---------------------------------------------------------------- T1
+
+describe("defaultRunHostStartDeps.admitHostStartSpawn - a handed-off grant is honoured without re-consuming (T1)", () => {
+  it("acknowledges and runs on the gate's handed-off grant, never calling consumeHostStartAdoption itself", async () => {
+    const { grant, abandonCalls, acknowledgeSpawnCalls } =
+      makeFakeGrant("desktop");
+    const onGrantedCalls: Array<HostStartOrigin | null> = [];
+    const consumeSpy = vi.spyOn(
+      hostStartAdoptionModule,
+      "consumeHostStartAdoption",
+    );
+    const child = asChildProcess(makeStubChild());
+
+    const result = await defaultRunHostStartDeps.admitHostStartSpawn(
+      {
+        environment: "production",
+        cwd: null,
+        serviceLabel: "ai.traycer.host.fallback",
+        adoptionNonce: null,
+      },
+      async () => child,
+      () => undefined,
+      {
+        consumed: { kind: "grant", grant },
+        onGranted: (origin) => onGrantedCalls.push(origin),
+      },
+    );
+
+    // The gate already consumed the proof to decide the park rule
+    // (`lifecycle-admission.ts`); this admission must use THAT result, not
+    // consume a second, fresh proof of its own.
+    expect(consumeSpy).not.toHaveBeenCalled();
+    expect(onGrantedCalls).toEqual(["desktop"]);
+    expect(acknowledgeSpawnCalls).toHaveLength(1);
+    expect(abandonCalls).toHaveLength(1);
+    expect(result).toEqual({ kind: "ran", result: child });
+
+    consumeSpy.mockRestore();
+  });
+});
+
+describe("runHostStart - the run state records this supervisor's own start identity (T4)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+
+  it("stamps supervisorStartIdentity from lifecycle.ownStartIdentity() into the published run state", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const TOKEN: ProcessStartIdentity = "linux:test-own-identity-token";
+    const baseLifecycle = deps.lifecycle;
+    if (baseLifecycle === undefined) {
+      throw new Error("test lifecycle dependency missing");
+    }
+    const tracking: Partial<RunHostStartDeps> = withChildExit(
+      {
+        ...deps,
+        lifecycle: {
+          ...baseLifecycle,
+          ownStartIdentity: async () => TOKEN,
+        },
+      },
+      child,
+      0,
+      null,
+    );
+
+    await runUntilExit(
+      () => runHostStart({ environment: "production", cwd: null }, tracking),
+      recorded,
+    );
+
+    expect(recorded.lifecycleRecordWrites).toHaveLength(1);
+    expect(
+      recorded.lifecycleRecordWrites[0]?.runState.supervisorStartIdentity,
+    ).toBe(TOKEN);
+  });
+});
+
+describe("runHostStart - a proof published during a slow presence probe (U3, settling)", () => {
+  const exec = "/opt/traycer/host/install/traycer-host";
+
+  it("honours a late grant instead of parking", async () => {
+    const { child, recorded, deps } = makeRunStubs(sampleRecord(exec), null);
+    const { grant } = makeFakeGrant("desktop");
+    let consumeCalls = 0;
+    const consumeAdoptionFake: RunHostStartDeps["lifecycle"]["consumeAdoption"] =
+      async () => {
+        consumeCalls += 1;
+        // The gate's own first ask is `absent`; a second ask - one only the
+        // FIXED code would ever make, after the slow presence probe below
+        // resolves - models an explicit starter's proof landing while that
+        // probe was in flight.
+        return consumeCalls === 1
+          ? { kind: "absent" }
+          : { kind: "grant", grant };
+      };
+    const tracking = withChildExit(
+      withLifecyclePolicy(
+        deps,
+        "linked",
+        consumeAdoptionFake,
+        async () => ({
+          kind: "valid",
+          record: {
+            v: 1,
+            pid: 4242,
+            processStartIdentity: "pid:4242:dead",
+            onExit: "stop",
+            policyRev: 1,
+            writtenAt: "2026-01-01T00:00:00.000Z",
+          },
+        }),
+        async () => "dead",
+      ),
+      child,
+      0,
+      null,
+    );
+
+    await runUntilExit(() => runHostStart(LABELLED_START, tracking), recorded);
+
+    expect(
+      recorded.loggerInfos.some(
+        (entry) =>
+          entry.message === "Host supervisor parked by lifecycle policy",
+      ),
+    ).toBe(false);
+    expect(recorded.spawnCalls).toHaveLength(1);
+    expect(consumeCalls).toBe(2);
+  });
 });

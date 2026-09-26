@@ -23,6 +23,10 @@ interface FakeWatcherHandle {
   readonly directory: string;
   readonly listener: WatchListener;
   readonly close: () => void;
+  /** The `FSWatcher`-shaped emitter itself, so a test can drive `.emit("error", ...)`
+   * on it directly - `installWatcher`'s own `error` handler is registered
+   * on this exact object via `.on("error", ...)`. */
+  readonly emitter: EventEmitter;
 }
 
 const fsState = vi.hoisted(() => ({
@@ -39,6 +43,7 @@ vi.mock("node:fs", async (importOriginal) => {
       directory,
       listener,
       close: () => undefined,
+      emitter,
     });
     return Object.assign(emitter, { close: (): void => undefined });
   };
@@ -198,6 +203,31 @@ describe("HostLifecycle.onLifecycleRecordsChanged", () => {
     await lifecycle.watchLifecycleRecords();
     expect(fsState.watchers).toHaveLength(1);
     expect(dirname(fsState.pidFile)).toBe(fsState.watchers[0]?.directory);
+  });
+
+  it("re-installs a fresh watcher on the next watchLifecycleRecords() call after the current one errors (TU11)", async () => {
+    // The transitions poll calls `watchLifecycleRecords()` on every tick as
+    // its own repair for a watcher that silently died (see the doc comment
+    // on `watchLifecycleRecords` and `installWatcher`'s `error` handler,
+    // which nulls `this.watcher` so a later `installWatcher()` no longer
+    // short-circuits). Nothing exercised that repair before this test: an
+    // `error` with `this.watcher` left non-null would leave the lifecycle
+    // records permanently unwatched for the rest of the process.
+    const { lifecycle } = await newLifecycle();
+    await lifecycle.watchLifecycleRecords();
+    expect(fsState.watchers).toHaveLength(1);
+
+    fsState.watchers[0]?.emitter.emit("error", new Error("simulated EMFILE"));
+
+    await lifecycle.watchLifecycleRecords();
+    expect(fsState.watchers).toHaveLength(2);
+    expect(dirname(fsState.pidFile)).toBe(fsState.watchers[1]?.directory);
+
+    // The re-installed watcher is live: a records edge on IT still notifies.
+    const listener = vi.fn();
+    lifecycle.onLifecycleRecordsChanged(listener);
+    fsState.watchers[1]?.listener("change", "lifecycle-policy.json");
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

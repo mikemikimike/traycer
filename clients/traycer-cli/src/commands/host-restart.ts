@@ -6,6 +6,8 @@ import {
 import { writePostFinalizeMarkerFile } from "./cli-finalize-upgrade";
 import { assertHostNotBusy } from "../host/busy-check";
 import { attestInstallRuntime } from "../host/attested-install-runtime";
+import { refuseForegroundHostRun } from "../host/foreground-host-run";
+import type { HostStartOrigin } from "../host/lifecycle-origin";
 import { CLI_ERROR_CODES, cliError } from "../runner/errors";
 import type { CommandFn, CommandResult } from "../runner/runner";
 import {
@@ -103,10 +105,22 @@ import {
 // lock that guards the stop/restart below. It also removes the second copy of
 // the policy: which phases are recoverable is `recoveryActionFor`'s call in
 // shared, and no caller re-derives it.
+//
+// ## A desktop request over a terminal-started host
+//
+// A host started by `traycer host start` in a terminal (a `foreground` run) is
+// not the service's, and the app never tears it down: Linked governs the
+// service-run host only. A DESKTOP-origin restart - plain, `--if-idle` or
+// `--force` - is refused `E_HOST_NOT_SERVICE_RUN` first inside the lock,
+// before the busy probe, the stop, the finalize or the relaunch
+// (`refuseForegroundHostRun`, shared with `host stop` and
+// `host free-port-and-restart`). A terminal restart is unchanged.
 export interface HostRestartArgs {
   readonly ifIdle: boolean;
   readonly force: boolean;
   readonly deferIfParked: boolean;
+  /** Who asked: `desktop` for every restart the app issues. */
+  readonly lifecycleOrigin: HostStartOrigin;
 }
 
 export function buildHostRestartCommand(args: HostRestartArgs): CommandFn {
@@ -133,6 +147,13 @@ export function buildHostRestartCommand(args: HostRestartArgs): CommandFn {
         admission: "recovery-maintenance",
       },
       async (capability, _cliLock, contenderContext) => {
+        if (args.lifecycleOrigin === "desktop") {
+          await refuseForegroundHostRun(
+            "host restart",
+            ctx.runtime.environment,
+            args.lifecycleOrigin,
+          );
+        }
         if (args.ifIdle) {
           await assertHostNotBusy(ctx.runtime.environment);
         }

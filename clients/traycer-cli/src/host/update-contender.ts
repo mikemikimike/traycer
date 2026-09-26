@@ -1,13 +1,18 @@
 import {
+  supervisorRelaunchInstalledIdentityOf,
   verifyUpdateMutationCapability,
+  withLifecycleTeardownContender,
+  withSupervisorRelaunchContender,
   withUpdateContender,
   withUpdateContenderAdoption,
+  type SupervisorRelaunchInstalledIdentity,
   type UpdateContenderAdmission,
   type UpdateContenderExecutionContext,
   type UpdateContenderOutcome,
   type UpdateMutationCapability,
 } from "@traycer-clients/shared/host-update";
 import type { UpdateMutationCapabilityAdoption } from "@traycer-clients/shared/host-update";
+import { readHostInstallRecord } from "../manifest/host-install";
 import type { Environment } from "../runner/environment";
 import { CLI_ERROR_CODES, cliError } from "../runner/errors";
 import {
@@ -129,6 +134,100 @@ export async function withCliUpdateExecutionSegment<T>(
     run,
   );
 
+  return unwrapContenderOutcome(options, outcome);
+}
+
+/**
+ * The installed identity the supervisor-relaunch admission judges a parked
+ * activation against (`supervisorRelaunchDisposition`): the install record's
+ * version and generation, read under the attempt lock, or `null` when there
+ * is no readable record.
+ *
+ * ONE reader for both callers of that admission - the supervisor's own
+ * relaunch (`host start`) and provisioning's start of the installed bytes
+ * (`host ensure`) - so the two can never disagree about whether the same
+ * record admits the same start.
+ */
+export async function readSupervisorRelaunchInstalledIdentity(
+  environment: Environment,
+): Promise<SupervisorRelaunchInstalledIdentity | null> {
+  // The CLI's own read, for its error on a malformed record; the mapping is
+  // the shared one the desktop's packaged-macOS start uses too.
+  const record = await readHostInstallRecord(environment);
+  return record === null ? null : supervisorRelaunchInstalledIdentityOf(record);
+}
+
+export interface WithCliSupervisorRelaunchSegmentOptions {
+  readonly environment: Environment;
+  readonly reason: string;
+  readonly waitMs: number;
+  readonly pollIntervalMs: number;
+}
+
+/**
+ * An execution segment admitted the way the supervisor's own relaunch is
+ * (`withSupervisorRelaunchContender`): a standing attempt record admits it
+ * exactly when that record would admit the supervisor spawning the installed
+ * bytes - parked for work, parked on an activation of the installed
+ * generation, or interrupted in a phase whose own next act is that start -
+ * and refuses it otherwise, as `host ensure`'s shadow admission does.
+ *
+ * For a caller whose mutation IS that start and nothing more. The
+ * disposition is the shared one, decided against the shared reader above, so
+ * it is never re-derived here.
+ */
+export async function withCliSupervisorRelaunchSegment<T>(
+  options: WithCliSupervisorRelaunchSegmentOptions,
+  run: (
+    capability: UpdateMutationCapability,
+    context: UpdateContenderExecutionContext,
+  ) => Promise<T>,
+): Promise<T> {
+  const outcome = await withSupervisorRelaunchContender(
+    {
+      hostHomeDir: hostHomeDir(options.environment),
+      reason: options.reason,
+      waitMs: options.waitMs,
+      pollIntervalMs: options.pollIntervalMs,
+      readInstalledIdentity: () =>
+        readSupervisorRelaunchInstalledIdentity(options.environment),
+    },
+    run,
+  );
+  return unwrapContenderOutcome(
+    { ...options, admission: "supervisor-relaunch-maintenance" },
+    outcome,
+  );
+}
+
+/**
+ * The supervisor's lifecycle teardown lock (`withLifecycleTeardownContender`)
+ * with the CLI lock inside it, as `withCliUpdateContender` takes both. Over
+ * `waiting-to-activate` it is admitted exactly where the relaunch above
+ * would be, judged by the same reader: a teardown never stops a host no
+ * start could bring back.
+ */
+export async function withCliLifecycleTeardownSegment<T>(
+  options: WithCliUpdateContenderOptions,
+  run: (
+    capability: UpdateMutationCapability,
+    cliLock: CliLockHandle,
+  ) => Promise<T>,
+): Promise<T> {
+  const outcome = await withLifecycleTeardownContender(
+    {
+      hostHomeDir: options.hostHomeDir ?? hostHomeDir(options.environment),
+      reason: options.reason,
+      waitMs: options.waitMs,
+      pollIntervalMs: options.pollIntervalMs,
+      readInstalledIdentity: () =>
+        readSupervisorRelaunchInstalledIdentity(options.environment),
+    },
+    (capability) =>
+      withCliAttemptMutation(capability, options, (cliLock) =>
+        run(capability, cliLock),
+      ),
+  );
   return unwrapContenderOutcome(options, outcome);
 }
 

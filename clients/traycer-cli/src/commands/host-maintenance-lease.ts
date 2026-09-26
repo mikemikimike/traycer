@@ -143,6 +143,14 @@ type LeaseResponse =
       readonly kind: "root-executed";
       readonly value: unknown;
     }
+  // The executor was dispatched and then threw: something may have been done,
+  // unlike `refused` (`scripts/desktop-install-cloud.js` tells them apart).
+  | {
+      readonly v: number;
+      readonly id: string;
+      readonly kind: "executor-failed";
+      readonly message: string;
+    }
   | { readonly v: number; readonly id: string; readonly kind: "released" }
   | {
       readonly v: number;
@@ -274,17 +282,27 @@ async function serveMaintenanceLease(
               kind: "executed",
             });
           } else {
-            const value = await superviseRootMaintenanceExecutor(
-              request.executor,
-              capability,
-              contenderOptions,
-            );
-            writeProtocol({
-              v: HOST_MAINTENANCE_LEASE_PROTOCOL_VERSION,
-              id: request.id,
-              kind: "root-executed",
-              value,
-            });
+            try {
+              const value = await superviseRootMaintenanceExecutor(
+                request.executor,
+                capability,
+                contenderOptions,
+              );
+              writeProtocol({
+                v: HOST_MAINTENANCE_LEASE_PROTOCOL_VERSION,
+                id: request.id,
+                kind: "root-executed",
+                value,
+              });
+            } catch (err) {
+              writeProtocol({
+                v: HOST_MAINTENANCE_LEASE_PROTOCOL_VERSION,
+                id: request.id,
+                kind: "executor-failed",
+                message: err instanceof Error ? err.message : String(err),
+              });
+              return "stop";
+            }
           }
         } catch (err) {
           writeProtocol({

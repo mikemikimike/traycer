@@ -98,6 +98,10 @@ afterEach(() => {
   resetNegotiatedManifests();
   scopeOverrides.current = {};
   hostBindingMock.current = null;
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.info).mockClear();
+  vi.mocked(toast.message).mockClear();
 });
 
 const OVERVIEW_METHODS = [
@@ -564,16 +568,20 @@ describe("Overview doctor — a local fix re-runs Doctor only when applied", () 
     });
     // The card passes its own `run` as `onApplied`, so the SAME `host.doctor`
     // handler that answered the mount also answers this re-run — mount plus
-    // one, not zero and not a loop.
+    // one, not zero and not a loop. `doctorCalls.count` increments inside the
+    // RPC handler, before the report commits via `setReport` — so the DOM
+    // check must be part of the SAME `waitFor` as the count, not a
+    // synchronous assertion right after it, or an interval tick landing
+    // between the two turns this red on a correct fixture.
     await waitFor(() => {
       expect(doctorCalls.count).toBe(2);
+      expect(
+        screen.queryByTestId("host-doctor-issue-SERVICE_NOT_REGISTERED"),
+      ).toBeNull();
+      expect(
+        screen.queryByTestId("host-doctor-fix-SERVICE_NOT_REGISTERED"),
+      ).toBeNull();
     });
-    expect(
-      screen.queryByTestId("host-doctor-issue-SERVICE_NOT_REGISTERED"),
-    ).toBeNull();
-    expect(
-      screen.queryByTestId("host-doctor-fix-SERVICE_NOT_REGISTERED"),
-    ).toBeNull();
   });
 
   it("a declined local fix does not re-run Doctor", async () => {
@@ -640,10 +648,15 @@ describe("Overview doctor — a local fix re-runs Doctor only when applied", () 
       expect(runDoctorRepairIfIdle).toHaveBeenCalledTimes(1);
     });
     // A thrown `mutationFn` lands in `onError`, never `onSuccess` — so
-    // `onApplied` cannot fire on this arm either. Wait for the failure toast
-    // to settle before checking the count stayed put.
+    // `onApplied` cannot fire on this arm either. Wait for THIS test's own
+    // failure toast (exact args), not merely "some `toast.error` happened" —
+    // the mock is process-wide and an earlier test's call would otherwise
+    // satisfy the wait.
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith(
+        "Fix failed",
+        expect.objectContaining({ description: "CLI exited nonzero." }),
+      );
     });
     expect(doctorCalls.count).toBe(1);
   });
@@ -689,10 +702,15 @@ describe("Overview doctor — a local fix re-runs Doctor only when applied", () 
         expectedHostId: "host-local",
       });
     });
+    // Same reasoning as the register-service arm above: the DOM check rides
+    // inside the same `waitFor` as the count, so an interval tick between
+    // the two can't turn this red on a correct fixture.
     await waitFor(() => {
       expect(doctorCalls.count).toBe(2);
+      expect(
+        screen.queryByTestId("host-doctor-issue-PORT_CONFLICT"),
+      ).toBeNull();
     });
-    expect(screen.queryByTestId("host-doctor-issue-PORT_CONFLICT")).toBeNull();
   });
 });
 

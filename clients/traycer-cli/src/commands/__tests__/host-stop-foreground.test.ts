@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -99,7 +100,7 @@ import {
   ownProcessStartIdentity,
   isProcessAlive,
 } from "../../store/process-identity";
-import { CLI_ERROR_CODES } from "../../runner/errors";
+import { CLI_ERROR_CODES, cliError } from "../../runner/errors";
 
 const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
@@ -244,12 +245,15 @@ function fakeCtx(): CommandContext {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   workHome = mkdtempSync(join(tmpdir(), "traycer-host-stop-foreground-test-"));
   osHome.current = workHome;
   process.env.HOME = workHome;
   process.env.USERPROFILE = workHome;
   vi.resetModules();
+  // Proves the redirect before any case can touch a host file.
+  const { hostHomeDir } = await import("../../store/paths");
+  expect(hostHomeDir("production").startsWith(workHome)).toBe(true);
   mocks.controllerCalls = [];
   mocks.findLiveIncumbentHostMock.mockReset();
   mocks.findLiveIncumbentHostMock.mockResolvedValue(null);
@@ -278,15 +282,19 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
 
     const { buildHostStopCommand } = await import("../host-stop");
     await expect(
-      buildHostStopCommand({ force: false, ifIdle: false })(fakeCtx()),
+      buildHostStopCommand({
+        force: false,
+        ifIdle: false,
+        lifecycleOrigin: "terminal",
+      })(fakeCtx()),
     ).rejects.toMatchObject({
       code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN,
       exitCode: 1,
       message: `host stop: the running host was started in a terminal (supervisor pid ${String(process.pid)}) and is not run by the service; stop it there with Ctrl-C, or pass --force`,
       details: { supervisorPid: process.pid, hostPid: LIVE_INCUMBENT_HOST.pid },
     });
-    // The service WAS asked to stop first - the refusal is not a short-circuit.
-    expect(mocks.controllerCalls).toEqual(["stop"]);
+    // The refusal fires FIRST, before the service is ever asked to stop.
+    expect(mocks.controllerCalls).toEqual([]);
   });
 
   it("--if-idle over the same live foreground run rejects E_HOST_NOT_SERVICE_RUN too", async () => {
@@ -295,27 +303,80 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
 
     const { buildHostStopCommand } = await import("../host-stop");
     await expect(
-      buildHostStopCommand({ force: false, ifIdle: true })(fakeCtx()),
+      buildHostStopCommand({
+        force: false,
+        ifIdle: true,
+        lifecycleOrigin: "terminal",
+      })(fakeCtx()),
     ).rejects.toMatchObject({
       code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN,
       details: { supervisorPid: process.pid, hostPid: LIVE_INCUMBENT_HOST.pid },
     });
-    expect(mocks.assertIdleMock).toHaveBeenCalledWith("production");
-    expect(mocks.controllerCalls).toEqual(["stop"]);
+    // The refusal fires before the busy probe or the controller are ever reached.
+    expect(mocks.assertIdleMock).not.toHaveBeenCalled();
+    expect(mocks.controllerCalls).toEqual([]);
   });
 
-  it("clears the stop intent the stop announced, once the foreground refusal fires", async () => {
+  it("a refusal before the stop leaves a stop intent it did not write exactly as it was", async () => {
     writeLiveForegroundRun();
     mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
     writeStopIntentFile();
-    expect(existsSync(stopIntentPath())).toBe(true);
+    const bytesBefore = readFileSync(stopIntentPath(), "utf8");
 
     const { buildHostStopCommand } = await import("../host-stop");
     await expect(
-      buildHostStopCommand({ force: false, ifIdle: false })(fakeCtx()),
+      buildHostStopCommand({
+        force: false,
+        ifIdle: false,
+        lifecycleOrigin: "terminal",
+      })(fakeCtx()),
     ).rejects.toMatchObject({ code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN });
 
+    expect(existsSync(stopIntentPath())).toBe(true);
+    expect(readFileSync(stopIntentPath(), "utf8")).toBe(bytesBefore);
+  });
+
+  it("the post-stop re-check still refuses and withdraws the intent THIS stop wrote", async () => {
+    writeLiveForegroundRun();
+    mocks.findLiveIncumbentHostMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(LIVE_INCUMBENT_HOST);
     expect(existsSync(stopIntentPath())).toBe(false);
+
+    const { buildHostStopCommand } = await import("../host-stop");
+    await expect(
+      buildHostStopCommand({
+        force: false,
+        ifIdle: false,
+        lifecycleOrigin: "terminal",
+      })(fakeCtx()),
+    ).rejects.toMatchObject({
+      code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN,
+      details: { supervisorPid: process.pid, hostPid: LIVE_INCUMBENT_HOST.pid },
+    });
+
+    // The first check passed (no live incumbent yet), so the stop actually ran...
+    expect(mocks.controllerCalls).toEqual(["stop"]);
+    // ...but the post-stop re-check caught the still-live foreground host and
+    // withdrew the intent that stop just wrote.
+    expect(existsSync(stopIntentPath())).toBe(false);
+  });
+
+  it("a desktop-origin refusal's message offers no --force remedy", async () => {
+    writeLiveForegroundRun();
+    mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
+
+    const { buildHostStopCommand } = await import("../host-stop");
+    await expect(
+      buildHostStopCommand({
+        force: false,
+        ifIdle: false,
+        lifecycleOrigin: "desktop",
+      })(fakeCtx()),
+    ).rejects.toMatchObject({
+      code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN,
+      message: `host stop: the running host was started in a terminal (supervisor pid ${String(process.pid)}) and is not run by the service; stop it there with Ctrl-C`,
+    });
   });
 
   it("--force is never refused, even over the same live foreground run", async () => {
@@ -323,14 +384,90 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
     mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
 
     const { buildHostStopCommand } = await import("../host-stop");
-    const result = await buildHostStopCommand({ force: true, ifIdle: false })(
-      fakeCtx(),
-    );
+    const result = await buildHostStopCommand({
+      force: true,
+      ifIdle: false,
+      lifecycleOrigin: "terminal",
+    })(fakeCtx());
     expect(result.data).toMatchObject({ stopped: true, forced: true });
     expect(mocks.controllerCalls).toEqual(["stop"]);
     // The refusal is skipped outright for --force: the foreground check never
     // even runs, so the incumbent host is never consulted.
     expect(mocks.findLiveIncumbentHostMock).not.toHaveBeenCalled();
+  });
+
+  describe("F4 stop: the foreground check runs FIRST, before any busy probe or controller call", () => {
+    it("(i) --if-idle with lifecycleOrigin 'desktop' rejects E_HOST_NOT_SERVICE_RUN having never probed busy - red on head, which probes and rejects busy", async () => {
+      writeLiveForegroundRun();
+      mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
+      mocks.assertIdleMock.mockRejectedValue(
+        cliError({
+          code: CLI_ERROR_CODES.HOST_BUSY,
+          message: "busy",
+          details: null,
+          exitCode: 1,
+        }),
+      );
+
+      const { buildHostStopCommand } = await import("../host-stop");
+      await expect(
+        buildHostStopCommand({
+          force: false,
+          ifIdle: true,
+          lifecycleOrigin: "desktop",
+        })(fakeCtx()),
+      ).rejects.toMatchObject({ code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN });
+      expect(mocks.assertIdleMock).not.toHaveBeenCalled();
+      expect(mocks.controllerCalls).toEqual([]);
+    });
+
+    it("(ii) a non-force stop (--if-idle or plain) over an idle terminal host rejects E_HOST_NOT_SERVICE_RUN having never called the controller - red on head, which stops first", async () => {
+      for (const ifIdle of [true, false]) {
+        mocks.controllerCalls = [];
+        writeLiveForegroundRun();
+        mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
+        mocks.assertIdleMock.mockResolvedValue(undefined);
+
+        const { buildHostStopCommand } = await import("../host-stop");
+        await expect(
+          buildHostStopCommand({
+            force: false,
+            ifIdle,
+            lifecycleOrigin: "terminal",
+          })(fakeCtx()),
+        ).rejects.toMatchObject({ code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN });
+        expect(mocks.controllerCalls).toEqual([]);
+      }
+    });
+
+    it("(iii) --force with lifecycleOrigin 'desktop' rejects E_HOST_NOT_SERVICE_RUN having never called the controller - red on head, which force-stops", async () => {
+      writeLiveForegroundRun();
+      mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
+
+      const { buildHostStopCommand } = await import("../host-stop");
+      await expect(
+        buildHostStopCommand({
+          force: true,
+          ifIdle: false,
+          lifecycleOrigin: "desktop",
+        })(fakeCtx()),
+      ).rejects.toMatchObject({ code: CLI_ERROR_CODES.HOST_NOT_SERVICE_RUN });
+      expect(mocks.controllerCalls).toEqual([]);
+    });
+
+    it("(control) --force with lifecycleOrigin 'terminal' still stops", async () => {
+      writeLiveForegroundRun();
+      mocks.findLiveIncumbentHostMock.mockResolvedValue(LIVE_INCUMBENT_HOST);
+
+      const { buildHostStopCommand } = await import("../host-stop");
+      const result = await buildHostStopCommand({
+        force: true,
+        ifIdle: false,
+        lifecycleOrigin: "terminal",
+      })(fakeCtx());
+      expect(result.data).toMatchObject({ stopped: true, forced: true });
+      expect(mocks.controllerCalls).toEqual(["stop"]);
+    });
   });
 
   describe("controls: no refusal, and any stop intent is left exactly as the stop wrote it", () => {
@@ -348,6 +485,7 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
       const result = await buildHostStopCommand({
         force: false,
         ifIdle: false,
+        lifecycleOrigin: "terminal",
       })(fakeCtx());
 
       expect(result.data).toMatchObject({ stopped: true, forced: false });
@@ -369,6 +507,7 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
       const result = await buildHostStopCommand({
         force: false,
         ifIdle: false,
+        lifecycleOrigin: "terminal",
       })(fakeCtx());
 
       expect(result.data).toMatchObject({ stopped: true, forced: false });
@@ -389,6 +528,7 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
       const result = await buildHostStopCommand({
         force: false,
         ifIdle: false,
+        lifecycleOrigin: "terminal",
       })(fakeCtx());
 
       expect(result.data).toMatchObject({ stopped: true, forced: false });
@@ -404,6 +544,7 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
       const result = await buildHostStopCommand({
         force: false,
         ifIdle: false,
+        lifecycleOrigin: "terminal",
       })(fakeCtx());
 
       expect(result.data).toMatchObject({ stopped: true, forced: false });
@@ -418,6 +559,7 @@ describe("host stop - foreground-run refusal (OBS-HOST-STOP-FOREGROUND)", () => 
       const result = await buildHostStopCommand({
         force: false,
         ifIdle: false,
+        lifecycleOrigin: "terminal",
       })(fakeCtx());
 
       expect(result.data).toMatchObject({ stopped: true, forced: false });

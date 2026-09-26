@@ -2,6 +2,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn, type SpawnOptions } from "node:child_process";
+import { powershellSingleQuoted } from "@traycer-clients/shared/platform/powershell-quote";
 import { clearPendingUpgrade, readCliManifest } from "../manifest/cli-manifest";
 import type { Environment } from "../runner/environment";
 import { isErrnoException } from "../runner/errors";
@@ -309,10 +310,7 @@ exit 0
 }
 
 function psString(value: string): string {
-  // Single-quoted PowerShell strings are literal; escape embedded
-  // single quotes by doubling them. The helper paths come from
-  // process.pid / tmpdir() / manifest fields so this is defensive.
-  return `'${value.replace(/'/g, "''")}'`;
+  return powershellSingleQuoted(value);
 }
 
 // POSIX helper. We don't strictly need a detached helper on POSIX

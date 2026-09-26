@@ -16,6 +16,10 @@ import {
   takeoverDesktopRegistrationWithAttempt,
 } from "../host/update-mutation";
 import { attestInstallRuntime } from "../host/attested-install-runtime";
+import {
+  refuseDesktopDisruptionOfForegroundRun,
+  refuseForegroundHostRun,
+} from "../host/foreground-host-run";
 import type { HostStartOrigin } from "../host/lifecycle-origin";
 import {
   formatCredentialProvisionNote,
@@ -44,7 +48,10 @@ export interface ServiceInstallArgs {
   readonly attemptAdoption: string | null;
   /**
    * `--lifecycle-origin`, recorded in the adoption proof the registration's
-   * start publishes (`host/lifecycle-origin.ts`). Informational only.
+   * start publishes (`host/lifecycle-origin.ts`). `desktop` also refuses a
+   * `--takeover` over a host started in a terminal
+   * (`refuseDesktopDisruptionOfForegroundRun`); a plain registration over one
+   * is refused whatever the origin.
    */
   readonly lifecycleOrigin: HostStartOrigin;
 }
@@ -81,6 +88,32 @@ export function buildServiceInstallCommand(
     const locked = await withCliUpdateContender(
       contenderOptions,
       async (capability) => {
+        // First, before any probe, launcher, plist, unit, task or claim, and
+        // under the lock that keeps the answer true: a new host is spawned
+        // only under this same lock.
+        //
+        // A plain registration over a host a person started in a terminal
+        // cannot complete, whoever asks: the service's supervisor declines to
+        // that host as the incumbent (`runHostStart`), and this command would
+        // wait out the spawn acknowledgement and fail with the registration
+        // already written. It refuses instead.
+        //
+        // A takeover's cooperative claim follows `pid.json`, so it would stop
+        // that host as readily as the Desktop agent's. A desktop takeover
+        // leaves it alone and refuses; a terminal's is unchanged.
+        if (args.takeover) {
+          await refuseDesktopDisruptionOfForegroundRun(
+            "host service install",
+            ctx.runtime.environment,
+            args.lifecycleOrigin,
+          );
+        } else {
+          await refuseForegroundHostRun(
+            "host service install",
+            ctx.runtime.environment,
+            args.lifecycleOrigin,
+          );
+        }
         const label = serviceLabelFor(ctx.runtime.environment);
         const cli = await resolveServiceCliInvocation({
           environment: ctx.runtime.environment,

@@ -634,6 +634,7 @@ describe("<MenuCommandListener />", () => {
       localAttempt: null,
       removedByUser: false,
       checkedAt: "2026-05-15T00:00:00Z",
+      lastEnsureFailure: null,
     };
     const management = makeHostManagementFixture(status);
     const baseHost = createRunnerHost(menu);
@@ -686,6 +687,7 @@ describe("<MenuCommandListener />", () => {
       localAttempt: null,
       removedByUser: false,
       checkedAt: "2026-05-15T00:00:00Z",
+      lastEnsureFailure: null,
     };
     const management = makeHostManagementFixture(status);
     const baseHost = createRunnerHost(menu);
@@ -738,6 +740,7 @@ describe("<MenuCommandListener />", () => {
       localAttempt: null,
       removedByUser: false,
       checkedAt: "2026-05-15T00:00:00Z",
+      lastEnsureFailure: null,
     };
     const management = makeHostManagementFixture(status);
     const runnerHost: FakeRunnerHost = Object.assign(createRunnerHost(menu), {
@@ -786,6 +789,7 @@ describe("<MenuCommandListener />", () => {
       localAttempt: null,
       removedByUser: false,
       checkedAt: "2026-08-12T00:00:00Z",
+      lastEnsureFailure: null,
     });
     const runnerHost = Object.assign(createRunnerHost(menu), {
       requestHostRespawn,

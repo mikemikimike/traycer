@@ -86,6 +86,7 @@ import { RunnerHostProvider } from "@/providers/runner-host-provider";
 import { createFakeRunnerHost } from "../../../../../__tests__/create-fake-runner-host";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import {
+  HOST_QUIT_DESCRIPTION_STOPPING,
   HOST_QUIT_HOST_CHANGED_DESCRIPTION,
   HOST_QUIT_HOST_CHANGED_TITLE,
 } from "@/lib/host/host-lifecycle-copy";
@@ -135,7 +136,11 @@ function renderBridge(quit: FakeQuit): void {
       get: () =>
         Promise.resolve({
           desired: { mode: "ask", rev: 1, updatedBy: null, updatedAt: null },
-          applied: { localHostCapability: "managed", supervisor: "enforcing" },
+          applied: {
+            localHostCapability: "managed",
+            supervisor: "enforcing",
+            admittedAs: null,
+          },
           pending: "none",
         }),
       set: () => {
@@ -533,7 +538,7 @@ describe("<HostQuitDecisionBridge /> - respond payloads", () => {
 });
 
 describe("<HostQuitDecisionBridge /> - analytics", () => {
-  it("host_quit_decision fires on a real respond, and host_lifecycle_mode_set fires additionally when remember was checked", async () => {
+  it("host_quit_decision fires on a real respond; host_lifecycle_mode_set does not fire from the respond alone (it belongs to the lifecycle push)", async () => {
     const trackSpy = vi
       .spyOn(Analytics.getInstance(), "track")
       .mockImplementation(() => true);
@@ -574,9 +579,9 @@ describe("<HostQuitDecisionBridge /> - analytics", () => {
         }),
       );
     });
-    expect(trackSpy).toHaveBeenCalledWith(
+    expect(trackSpy).not.toHaveBeenCalledWith(
       AnalyticsEvent.HostLifecycleModeSet,
-      expect.objectContaining({ mode: "linked", source: "quit-modal" }),
+      expect.anything(),
     );
   });
 
@@ -719,7 +724,7 @@ describe("<HostQuitDecisionBridge /> - phase transitions", () => {
 
     const dialog = await screen.findByTestId("host-quit-dialog");
     expect(dialog.dataset.quitState).toBe("stopping");
-    expect(dialog.textContent).toContain("Traycer quits and the host stops.");
+    expect(dialog.textContent).toContain(HOST_QUIT_DESCRIPTION_STOPPING);
     expect(screen.getByTestId("host-quit-stopping")).not.toBeNull();
     expect(screen.queryByTestId("host-quit-counts")).toBeNull();
     expect(screen.getByTestId("host-quit-stop")).toHaveProperty(
@@ -798,7 +803,7 @@ describe("<HostQuitDecisionBridge /> - phase transitions", () => {
 
     const dialog = await screen.findByTestId("host-quit-dialog");
     expect(dialog.dataset.quitState).toBe("stopping");
-    expect(dialog.textContent).toContain("Traycer quits and the host stops.");
+    expect(dialog.textContent).toContain(HOST_QUIT_DESCRIPTION_STOPPING);
     expect(screen.getByTestId("host-quit-stopping")).not.toBeNull();
   });
 
@@ -1147,4 +1152,118 @@ describe("<HostQuitDecisionBridge /> - no CLI text ever reaches the dialog", () 
       });
     }
   }
+});
+
+// F25: a new `HostQuitStateEvent` phase, `"prompting"`, is not in the shared
+// type at head (only "stopping" | "quitting" | "cancelled"). The bridge's
+// `onQuitState` branches only on `phase === "stopping"`; anything else
+// (including a future "prompting") falls into the same `else` as
+// "quitting"/"cancelled" and unconditionally clears BOTH `active` and
+// `unpromptedStopping`, with no `requestId` correlation at all. That is
+// wrong for "prompting": it must end only the phase it names, never an
+// unrelated active request another window (or an earlier round) is still
+// showing.
+describe("<HostQuitDecisionBridge /> - F25: end-of-stopping phase when main prompts", () => {
+  it("a window that never received a request: stopping renders, then prompting({requestId:null}) leaves nothing rendered", async () => {
+    const quit = createFakeQuit();
+    renderBridge(quit);
+    expect(screen.queryByTestId("host-quit-stopping")).toBeNull();
+
+    act(() => {
+      quit.fireState({ requestId: null, phase: "stopping", idleOnly: true });
+    });
+    await screen.findByTestId("host-quit-stopping");
+
+    act(() => {
+      quit.fireState({
+        requestId: null,
+        phase: "prompting",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("host-quit-stopping")).toBeNull();
+    });
+    expect(screen.queryByTestId("host-quit-dialog")).toBeNull();
+  });
+
+  it("an active request X in its stopping state, then prompting for X, leaves the dialog gone", async () => {
+    const quit = createFakeQuit();
+    localHostQuitStatusMock.current = {
+      localHostId: "host-a",
+      verdict: {
+        kind: "busy",
+        busySessionCount: 1,
+        breakdown: null,
+        statusMinor: 6,
+      },
+      liveLocalHostIdNow: () => "host-a",
+      recheck: vi.fn(),
+    };
+    renderBridge(quit);
+    act(() => {
+      quit.fireRequest(initialAskRequest());
+    });
+    await screen.findByTestId("host-quit-dialog");
+    act(() => {
+      quit.fireState({
+        requestId: "req-1",
+        phase: "stopping",
+        idleOnly: false,
+      });
+    });
+
+    act(() => {
+      quit.fireState({
+        requestId: "req-1",
+        phase: "prompting",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("host-quit-dialog")).toBeNull();
+    });
+  });
+
+  it("prompting for an UNRELATED requestId leaves an active stopping X alone", async () => {
+    const quit = createFakeQuit();
+    localHostQuitStatusMock.current = {
+      localHostId: "host-a",
+      verdict: {
+        kind: "busy",
+        busySessionCount: 1,
+        breakdown: null,
+        statusMinor: 6,
+      },
+      liveLocalHostIdNow: () => "host-a",
+      recheck: vi.fn(),
+    };
+    renderBridge(quit);
+    act(() => {
+      quit.fireRequest(initialAskRequest());
+    });
+    const dialogBefore = await screen.findByTestId("host-quit-dialog");
+    expect(dialogBefore.dataset.quitState).toBe("busy");
+    act(() => {
+      quit.fireState({
+        requestId: "req-1",
+        phase: "stopping",
+        idleOnly: false,
+      });
+    });
+    const dialogStopping = screen.getByTestId("host-quit-dialog");
+    expect(dialogStopping.dataset.quitState).toBe("stopping");
+
+    act(() => {
+      quit.fireState({
+        requestId: null,
+        phase: "prompting",
+      });
+    });
+
+    // "Alone" means unchanged - still showing X's stopping state, not
+    // reverted to the pre-stopping "busy" verdict.
+    const dialogAfter = screen.getByTestId("host-quit-dialog");
+    expect(dialogAfter.dataset.quitState).toBe("stopping");
+  });
 });

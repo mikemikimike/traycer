@@ -14,6 +14,12 @@ import type {
   HostRespawnMode,
   LifecycleAdmissionBlock,
   LocalHostMutationIntent,
+  RemoveTraycerOk,
+  UninstallOk,
+} from "../../host/host-controller-types";
+import {
+  AUTOMATIC_INTENTS_QUIESCED_MESSAGE,
+  HOST_NOT_SERVICE_RUN_MESSAGE,
 } from "../../host/host-controller-types";
 import { sandboxHome } from "../../__tests__/sandbox-home";
 import { TraycerCliError } from "../../cli/traycer-cli";
@@ -266,6 +272,8 @@ interface HandlerBridge {
         port: number | undefined,
         intent: LocalHostMutationIntent,
       ) => Promise<GuardedMutationOutcome<{ readonly activated: boolean }>>;
+      removeTraycer: () => Promise<MutationOutcome<RemoveTraycerOk>>;
+      uninstallHost: (all: boolean) => Promise<MutationOutcome<UninstallOk>>;
     };
   };
 }
@@ -310,6 +318,25 @@ function makeBridge(): HandlerBridge {
           Promise.resolve({
             kind: "ok" as const,
             value: { activated: true },
+          }),
+        removeTraycer: () =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: {
+              removedHost: true,
+              deregisteredService: true,
+              serviceRegistrationRetained: null,
+              removedLoginItem: true,
+            },
+          }),
+        uninstallHost: () =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: {
+              removedInstallDir: true,
+              deregisteredService: true,
+              serviceRegistrationRetained: null,
+            },
           }),
       },
     },
@@ -2088,8 +2115,9 @@ describe("maintenance identity + doctorRepairIfIdle IPC", () => {
       bridge,
       invoke.traycerDoctorRepairQueued,
     );
-    const respawn = vi.fn((_intent: LocalHostMutationIntent) =>
-      Promise.resolve({ kind: "ok" as const, value: { activated: true } }),
+    const respawn = vi.fn(
+      (_intent: LocalHostMutationIntent, _mode: HostRespawnMode) =>
+        Promise.resolve({ kind: "ok" as const, value: { activated: true } }),
     );
     bridge.options.hostController.respawn = respawn;
 
@@ -2097,6 +2125,11 @@ describe("maintenance identity + doctorRepairIfIdle IPC", () => {
       handler(null, { repair: "restart", expectedHostId: LIVE_HOST_ID }),
     ).resolves.toEqual({ kind: "applied" });
     expect(respawn).toHaveBeenCalledTimes(1);
+    // A queued restart is admitted through the same user-repair intent as a
+    // confirmed Force restart, so it must pass the controller "force" too -
+    // the fake here ignores mode entirely, so a flipped call site would
+    // stay invisible without this assertion.
+    expect(respawn.mock.calls[0]?.[1]).toBe("force");
 
     const [intent] = respawn.mock.calls[0] ?? [];
     if (intent?.kind !== "user-repair") {
@@ -2465,6 +2498,426 @@ describe("maintenance identity + doctorRepairIfIdle IPC", () => {
         expectedHostId: LIVE_HOST_ID,
       }),
     ).rejects.toThrow("refresh failed");
+  });
+
+  describe("queued Doctor repair: a deferral declines, never fails", () => {
+    const DEFERRAL_CASES: ReadonlyArray<{
+      readonly label: string;
+      readonly repair:
+        | "converge-ready"
+        | "converge-latest"
+        | "register-service";
+      readonly message: string;
+    }> = [
+      {
+        label: "converge-ready / committed-none deferral",
+        repair: "converge-ready",
+        message: AUTOMATIC_INTENTS_QUIESCED_MESSAGE,
+      },
+      {
+        label: "converge-ready / terminal-started host deferral",
+        repair: "converge-ready",
+        message: HOST_NOT_SERVICE_RUN_MESSAGE,
+      },
+      {
+        label: "converge-latest / committed-none deferral",
+        repair: "converge-latest",
+        message: AUTOMATIC_INTENTS_QUIESCED_MESSAGE,
+      },
+      {
+        label: "converge-latest / terminal-started host deferral",
+        repair: "converge-latest",
+        message: HOST_NOT_SERVICE_RUN_MESSAGE,
+      },
+      {
+        label: "register-service / committed-none deferral",
+        repair: "register-service",
+        message: AUTOMATIC_INTENTS_QUIESCED_MESSAGE,
+      },
+    ];
+
+    it.each(DEFERRAL_CASES)(
+      "$label resolves declined, not a rejection",
+      async ({ repair, message }) => {
+        writeEnrollment(LIVE_HOST_ID);
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        const convergeReady = vi.fn(() =>
+          Promise.resolve({ kind: "deferred" as const, message }),
+        );
+        const registerService = vi.fn(() =>
+          Promise.resolve({ kind: "deferred" as const, message }),
+        );
+        const respawn = vi.fn(() =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: { activated: true },
+          }),
+        );
+        const refreshServiceDefinition = vi.fn(() =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: { result: "current" as const, appliesAt: null },
+          }),
+        );
+        bridge.options.hostController.convergeReady = convergeReady;
+        bridge.options.hostController.registerService = registerService;
+        bridge.options.hostController.respawn = respawn;
+        bridge.options.hostController.refreshServiceDefinition =
+          refreshServiceDefinition;
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerDoctorRepairQueued,
+        );
+
+        await expect(
+          handler(null, { repair, expectedHostId: LIVE_HOST_ID }),
+        ).resolves.toEqual({ kind: "declined", message });
+
+        if (repair === "register-service") {
+          expect(registerService).toHaveBeenCalledTimes(1);
+          expect(convergeReady).not.toHaveBeenCalled();
+        } else {
+          expect(convergeReady).toHaveBeenCalledTimes(1);
+          expect(registerService).not.toHaveBeenCalled();
+        }
+        expect(respawn).not.toHaveBeenCalled();
+        expect(refreshServiceDefinition).not.toHaveBeenCalled();
+      },
+    );
+
+    it("refresh-service resolves declined, not a rejection, on the controller's lock-contention deferral", async () => {
+      writeEnrollment(LIVE_HOST_ID);
+      const invoke = RunnerHostInvoke;
+      const bridge = makeBridge();
+      // `LOCK_BUSY_MESSAGE` in host-controller.ts:180 - module-private, hence
+      // the literal here rather than an import.
+      const message = "Another Traycer process is managing the host.";
+      const refreshServiceDefinition = vi.fn(() =>
+        Promise.resolve({ kind: "deferred" as const, message }),
+      );
+      const convergeReady = vi.fn(() =>
+        Promise.resolve({ kind: "ok" as const, value: null }),
+      );
+      const registerService = vi.fn(() =>
+        Promise.resolve({ kind: "ok" as const, value: null }),
+      );
+      const respawn = vi.fn(() =>
+        Promise.resolve({
+          kind: "ok" as const,
+          value: { activated: true },
+        }),
+      );
+      bridge.options.hostController.refreshServiceDefinition =
+        refreshServiceDefinition;
+      bridge.options.hostController.convergeReady = convergeReady;
+      bridge.options.hostController.registerService = registerService;
+      bridge.options.hostController.respawn = respawn;
+      const handler = await registerHandler(
+        bridge,
+        invoke.traycerDoctorRepairQueued,
+      );
+
+      await expect(
+        handler(null, {
+          repair: "refresh-service",
+          expectedHostId: LIVE_HOST_ID,
+        }),
+      ).resolves.toEqual({ kind: "declined", message });
+      expect(refreshServiceDefinition).toHaveBeenCalledTimes(1);
+      expect(convergeReady).not.toHaveBeenCalled();
+      expect(registerService).not.toHaveBeenCalled();
+      expect(respawn).not.toHaveBeenCalled();
+    });
+  });
+
+  // T05 DECL: a `deferred` controller outcome is not a failure. Three
+  // main-process routes resolve every `deferred` to a typed
+  // `{kind: "declined", message}` with the outcome's exact message, never
+  // rejecting; every other non-ok outcome still rejects, as today. The
+  // success shape also gains a discriminant.
+  describe("DECL: uninstall, Remove Traycer and queued free-port resolve a deferral as declined", () => {
+    const DEFERRAL_MESSAGES: ReadonlyArray<{
+      readonly label: string;
+      readonly message: string;
+    }> = [
+      {
+        label: "committed-none deferral",
+        message: AUTOMATIC_INTENTS_QUIESCED_MESSAGE,
+      },
+      {
+        label: "terminal-started host deferral",
+        message: HOST_NOT_SERVICE_RUN_MESSAGE,
+      },
+    ];
+
+    describe("Remove Traycer (traycerAppUninstall)", () => {
+      it.each(DEFERRAL_MESSAGES)(
+        "$label resolves declined, and skips the registry refresh",
+        async ({ message }) => {
+          const invoke = RunnerHostInvoke;
+          const bridge = makeBridge();
+          bridge.options.hostController.removeTraycer = vi.fn(() =>
+            Promise.resolve({ kind: "deferred" as const, message }),
+          );
+          const handler = await registerHandler(
+            bridge,
+            invoke.traycerAppUninstall,
+          );
+
+          await expect(handler(null, undefined)).resolves.toEqual({
+            kind: "declined",
+            message,
+          });
+          expect(
+            bundledCliCalls.some(
+              (call) => call[0] === "host" && call[1] === "available",
+            ),
+          ).toBe(false);
+        },
+      );
+
+      it("an ok outcome resolves { kind: 'removed', ...the four fields }", async () => {
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.removeTraycer = () =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: {
+              removedHost: true,
+              deregisteredService: true,
+              serviceRegistrationRetained: null,
+              removedLoginItem: true,
+            },
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerAppUninstall,
+        );
+
+        await expect(handler(null, undefined)).resolves.toEqual({
+          kind: "removed",
+          removedHost: true,
+          deregisteredService: true,
+          serviceRegistrationRetained: null,
+          removedLoginItem: true,
+        });
+      });
+
+      it("control: a failed outcome still rejects with its message", async () => {
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.removeTraycer = () =>
+          Promise.resolve({
+            kind: "failed" as const,
+            message: "uninstall failed",
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerAppUninstall,
+        );
+
+        await expect(handler(null, undefined)).rejects.toThrow(
+          "uninstall failed",
+        );
+      });
+    });
+
+    describe("Uninstall host (traycerHostUninstall)", () => {
+      it.each(DEFERRAL_MESSAGES)(
+        "$label resolves declined",
+        async ({ message }) => {
+          const invoke = RunnerHostInvoke;
+          const bridge = makeBridge();
+          bridge.options.hostController.uninstallHost = vi.fn(() =>
+            Promise.resolve({ kind: "deferred" as const, message }),
+          );
+          const handler = await registerHandler(
+            bridge,
+            invoke.traycerHostUninstall,
+          );
+
+          await expect(handler(null, { all: true })).resolves.toEqual({
+            kind: "declined",
+            message,
+          });
+        },
+      );
+
+      it("an ok outcome resolves { kind: 'uninstalled', ...the three fields }", async () => {
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.uninstallHost = () =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: {
+              removedInstallDir: true,
+              deregisteredService: true,
+              serviceRegistrationRetained: null,
+            },
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerHostUninstall,
+        );
+
+        await expect(handler(null, { all: true })).resolves.toEqual({
+          kind: "uninstalled",
+          removedInstallDir: true,
+          deregisteredService: true,
+          serviceRegistrationRetained: null,
+        });
+      });
+
+      it("control: a failed outcome still rejects with its message", async () => {
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.uninstallHost = () =>
+          Promise.resolve({
+            kind: "failed" as const,
+            message: "uninstall failed",
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerHostUninstall,
+        );
+
+        await expect(handler(null, { all: true })).rejects.toThrow(
+          "uninstall failed",
+        );
+      });
+    });
+
+    describe("Queued free-port (traycerFreePortAndRestart)", () => {
+      it.each(DEFERRAL_MESSAGES)(
+        "$label resolves declined",
+        async ({ message }) => {
+          writeEnrollment(LIVE_HOST_ID);
+          const invoke = RunnerHostInvoke;
+          const bridge = makeBridge();
+          bridge.options.hostController.freePortAndRestart = vi.fn(() =>
+            Promise.resolve({ kind: "deferred" as const, message }),
+          );
+          const handler = await registerHandler(
+            bridge,
+            invoke.traycerFreePortAndRestart,
+          );
+
+          await expect(
+            handler(null, {
+              port: 8765,
+              pid: 4242,
+              processName: "node",
+              expectedHostId: LIVE_HOST_ID,
+            }),
+          ).resolves.toEqual({ kind: "declined", message });
+        },
+      );
+
+      it("an ok outcome resolves { kind: 'applied', port, pid, processName }", async () => {
+        writeEnrollment(LIVE_HOST_ID);
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.freePortAndRestart = () =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: { activated: true },
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerFreePortAndRestart,
+        );
+
+        await expect(
+          handler(null, {
+            port: 8765,
+            pid: 4242,
+            processName: "node",
+            expectedHostId: LIVE_HOST_ID,
+          }),
+        ).resolves.toEqual({
+          kind: "applied",
+          port: 8765,
+          pid: 4242,
+          processName: "node",
+        });
+      });
+
+      it("control: a failed outcome still rejects with its message", async () => {
+        writeEnrollment(LIVE_HOST_ID);
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.freePortAndRestart = () =>
+          Promise.resolve({
+            kind: "failed" as const,
+            message: "free-port failed",
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerFreePortAndRestart,
+        );
+
+        await expect(
+          handler(null, {
+            port: 8765,
+            pid: 4242,
+            processName: "node",
+            expectedHostId: LIVE_HOST_ID,
+          }),
+        ).rejects.toThrow("free-port failed");
+      });
+
+      it("control: an abandoned outcome (the lane-head guard) still rejects with its message", async () => {
+        writeEnrollment(LIVE_HOST_ID);
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        bridge.options.hostController.freePortAndRestart = () =>
+          Promise.resolve({
+            kind: "abandoned" as const,
+            message: "abandoned by the lane-head guard",
+          });
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerFreePortAndRestart,
+        );
+
+        await expect(
+          handler(null, {
+            port: 8765,
+            pid: 4242,
+            processName: "node",
+            expectedHostId: LIVE_HOST_ID,
+          }),
+        ).rejects.toThrow("abandoned by the lane-head guard");
+      });
+
+      it("control: an identity mismatch rejects without calling the controller", async () => {
+        writeEnrollment(LIVE_HOST_ID);
+        const invoke = RunnerHostInvoke;
+        const bridge = makeBridge();
+        const freePortAndRestart = vi.fn(() =>
+          Promise.resolve({
+            kind: "ok" as const,
+            value: { activated: true },
+          }),
+        );
+        bridge.options.hostController.freePortAndRestart = freePortAndRestart;
+        const handler = await registerHandler(
+          bridge,
+          invoke.traycerFreePortAndRestart,
+        );
+
+        await expect(
+          handler(null, {
+            port: 8765,
+            pid: 4242,
+            processName: "node",
+            expectedHostId: OTHER_HOST_ID,
+          }),
+        ).rejects.toThrow(HOST_CHANGED_MESSAGE);
+        expect(freePortAndRestart).not.toHaveBeenCalled();
+      });
+    });
   });
 
   // Coordinator's required test: drive the REAL doctor read and queued

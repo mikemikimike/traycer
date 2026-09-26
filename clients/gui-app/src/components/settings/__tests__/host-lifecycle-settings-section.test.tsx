@@ -104,6 +104,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { HostClient } from "@traycer-clients/shared/host-client/host-client";
@@ -130,6 +131,10 @@ import {
   HOST_LIFECYCLE_SUPERSEDED_DESCRIPTION,
   HOST_LIFECYCLE_SUPERSEDED_TITLE,
   HOST_NONE_CONFIRM_STOP_LABEL,
+  HOST_NONE_CONFIRM_TITLE_BUSY,
+  HOST_NONE_CONFIRM_TITLE_IDLE,
+  HOST_QUIT_HOST_CHANGED_DESCRIPTION,
+  HOST_QUIT_HOST_CHANGED_TITLE,
   hostLifecycleOptionCopy,
   hostMachineNoun,
 } from "@/lib/host/host-lifecycle-copy";
@@ -140,6 +145,33 @@ import { useAuthStore } from "@/stores/auth/auth-store";
 
 const MACHINE = hostMachineNoun();
 const OPTION_COPY = hostLifecycleOptionCopy(MACHINE);
+
+// F23/T42: the copy a set refusal renders is chosen by `result.reason`
+// (`hostLifecycleSetRefusalCopy`), never `result.message` (main's or the CLI's
+// raw text). Written out literally so these tests pin the wording itself.
+const HOST_BUSY_STOP_REFUSED_COPY =
+  "The host has work in progress, so it was left running. Stop host again to end that work.";
+const LOCK_BUSY_STOP_REFUSED_COPY =
+  "Another Traycer process is managing the host right now, so nothing was changed. Try again in a moment.";
+const UPDATE_ACTIVE_STOP_REFUSED_COPY =
+  "The host is installing an update, so nothing was changed. Try again once it finishes.";
+const STOP_FAILED_COPY =
+  "The host couldn't be stopped, so nothing was changed. If you started it from a terminal, stop it there, then try again.";
+const WRITE_FAILED_COPY =
+  "Couldn't save this setting. Try again, or change it from the command line with `traycer host lifecycle set <mode>`.";
+const CONFIRMATION_REQUIRED_COPY =
+  "Turning off the local host stops Traycer Host. Confirm the stop to continue.";
+
+// Fixture `message` values: the real raw CLI/main text that must never reach
+// the DOM.
+const CLI_BUSY =
+  "The running host has work in progress; refusing to stop it and lose that work. Re-run with --force to stop it anyway.";
+const NOT_SERVICE_RUN =
+  "host stop: the running host was started in a terminal (supervisor pid 4242) and is not run by the service; stop it there with Ctrl-C, or pass --force";
+const UPDATE_ACTIVE =
+  "The host update-attempt lock at /Users/someone/.traycer/host/update-attempt.lock is held by pid 77 (update, since 2026-09-26T10:00:00Z); re-run with --force to stop anyway.";
+const WRITE_FAILED_HOME =
+  "The host lifecycle setting could not be saved: Error: EACCES: permission denied, open '/Users/someone/.traycer/host/lifecycle-policy.json'";
 
 function localEntry(hostId: string): HostDirectoryEntry {
   return {
@@ -155,7 +187,11 @@ function localEntry(hostId: string): HostDirectoryEntry {
 function view(overrides: Partial<HostLifecycleView>): HostLifecycleView {
   return {
     desired: { mode: "background", rev: 1, updatedBy: null, updatedAt: null },
-    applied: { localHostCapability: "managed", supervisor: "enforcing" },
+    applied: {
+      localHostCapability: "managed",
+      supervisor: "enforcing",
+      admittedAs: null,
+    },
     pending: "none",
     ...overrides,
   };
@@ -564,6 +600,100 @@ describe("<HostLifecycleSettingsSection /> - restart-host line dispatches the SE
   });
 });
 
+// F4-3: a host started in a terminal is not governed by the mode, so the
+// restart-host line's own button must never dispatch a restart over it - it
+// disables itself and names why, rather than letting a click reach
+// `LocalHostRestartFlow`.
+describe("<HostLifecycleSettingsSection /> - restart-host line with a foreground-admitted host (F4-3)", () => {
+  it("disables Restart host, names the reason via aria-describedby, and dispatches no restart on click", async () => {
+    hostBindingMock.current = {
+      directory: { getLocalEntry: () => localEntry("host-a") },
+    };
+    directoryListMock.current = { data: [localEntry("host-a")] };
+    const cooperativeFixture = buildOverviewHostFixture({
+      hostId: "host-a",
+      isLocalMachine: true,
+    });
+    clientForHostIdMock.current = (hostId) =>
+      hostId === "host-a" ? cooperativeFixture.client : null;
+    const restartHostServiceIfHostIdle = vi.fn(() =>
+      Promise.resolve({ kind: "restarted" as const }),
+    );
+    const fixture = buildLifecycleHost(
+      view({
+        desired: { mode: "linked", rev: 2, updatedBy: null, updatedAt: null },
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: "foreground",
+        },
+        pending: "restart-host",
+      }),
+      () => Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(
+      createFakeRunnerHost({
+        hostLifecycle: fixture.host,
+        hostManagement: buildOverviewManagement({
+          restartHostServiceIfHostIdle,
+        }),
+      }),
+    );
+
+    await screen.findByTestId("host-lifecycle-applied-line");
+    const button = screen.getByTestId(
+      "host-lifecycle-restart-host",
+    ) as HTMLButtonElement;
+    // Native property, not jest-dom's `toBeDisabled()`: this repo has no
+    // jest-dom matchers wired in (see e.g. `host-doctor-card.test.tsx`).
+    expect(button.disabled).toBe(true);
+
+    expect(
+      screen.getByText(
+        "A host started in a terminal is running; restart it yourself to apply.",
+      ),
+    ).not.toBeNull();
+    const describedBy = button.getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+    const reasonEl =
+      describedBy === null ? null : document.getElementById(describedBy);
+    expect(reasonEl?.textContent).toBe(
+      "A host started in a terminal is running; restart it yourself to apply.",
+    );
+
+    fireEvent.click(button);
+    expect(restartHostServiceIfHostIdle).not.toHaveBeenCalled();
+    expect(cooperativeFixture.restartCalls()).toBe(0);
+  });
+
+  it("control: admittedAs null keeps the button enabled with no reason text", async () => {
+    const fixture = buildLifecycleHost(
+      view({
+        desired: { mode: "linked", rev: 2, updatedBy: null, updatedAt: null },
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: null,
+        },
+        pending: "restart-host",
+      }),
+      () => Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await screen.findByTestId("host-lifecycle-applied-line");
+    const button = screen.getByTestId(
+      "host-lifecycle-restart-host",
+    ) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(
+      screen.queryByText(
+        "A host started in a terminal is running; restart it yourself to apply.",
+      ),
+    ).toBeNull();
+  });
+});
+
 describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating", () => {
   it("disables 'none' with the plan reason on a FREE subscription", async () => {
     useAuthStore.getState().setSubscriptionStatus("FREE");
@@ -615,7 +745,11 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
     localHostQuitStatusMock.current = idleVerdict("host-a");
     const fixture = buildLifecycleHost(
       view({
-        applied: { localHostCapability: "managed", supervisor: "enforcing" },
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: null,
+        },
       }),
       () => Promise.resolve({ kind: "applied", view: view({}) }),
     );
@@ -628,7 +762,9 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
     expect(dialog).not.toBeNull();
     expect(screen.queryByTestId("host-quit-keep")).toBeNull();
     expect(screen.queryByTestId("host-quit-remember")).toBeNull();
-    expect(screen.getByTestId("host-quit-stop").textContent).toContain(
+    // T43: not pending, so the button renders no PendingDots node - its
+    // textContent should be exactly the stop label, nothing else.
+    expect(screen.getByTestId("host-quit-stop").textContent).toBe(
       HOST_NONE_CONFIRM_STOP_LABEL,
     );
     expect(fixture.setMock).not.toHaveBeenCalled();
@@ -674,7 +810,7 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
     });
   });
 
-  it("a stop-refused (host-busy) result keeps the dialog open with the refusal, and the NEXT Stop sends force", async () => {
+  it("F23: a stop-refused (host-busy) result shows curated copy (never the raw CLI text), and the NEXT Stop sends force", async () => {
     hostBindingMock.current = { directory: { getLocalEntry: () => null } };
     localHostQuitStatusMock.current = idleVerdict("host-a");
     let attempt = 0;
@@ -684,7 +820,7 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
         return Promise.resolve({
           kind: "stop-refused",
           reason: "host-busy",
-          message: "Something started on the host.",
+          message: CLI_BUSY,
           view: view({}),
         });
       }
@@ -698,10 +834,16 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
     fireEvent.click(screen.getByTestId("host-quit-stop"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("host-quit-detail").textContent).toContain(
-        "Something started on the host.",
+      expect(screen.getByTestId("host-quit-detail").textContent).toBe(
+        HOST_BUSY_STOP_REFUSED_COPY,
       );
     });
+    expect(screen.getByTestId("host-quit-detail").textContent).not.toContain(
+      "--force",
+    );
+    expect(screen.getByTestId("host-quit-detail").textContent).not.toContain(
+      "Re-run",
+    );
     expect(screen.getByTestId("host-quit-dialog")).not.toBeNull();
 
     fireEvent.click(screen.getByTestId("host-quit-stop"));
@@ -713,14 +855,14 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
     });
   });
 
-  it("a failed result shows the failure message inline and keeps the dialog open", async () => {
+  it("F23: a failed (write-failed) result shows curated copy and never leaks the raw path/error text", async () => {
     hostBindingMock.current = { directory: { getLocalEntry: () => null } };
     localHostQuitStatusMock.current = idleVerdict("host-a");
     const fixture = buildLifecycleHost(view({}), () =>
       Promise.resolve({
         kind: "failed",
         reason: "write-failed",
-        message: "Couldn't write the policy file.",
+        message: WRITE_FAILED_HOME,
         view: view({}),
       }),
     );
@@ -732,11 +874,313 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
     fireEvent.click(screen.getByTestId("host-quit-stop"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("host-quit-detail").textContent).toContain(
-        "Couldn't write the policy file.",
+      expect(screen.getByTestId("host-quit-detail").textContent).toBe(
+        WRITE_FAILED_COPY,
       );
     });
     expect(screen.getByTestId("host-quit-dialog")).not.toBeNull();
+    expect(document.body.textContent).not.toContain("/Users/someone");
+    expect(document.body.textContent).not.toContain("EACCES");
+  });
+
+  it("a stop-refused (update-active) result shows curated copy and never leaks the lock path", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({
+        kind: "stop-refused",
+        reason: "update-active",
+        message: UPDATE_ACTIVE,
+        view: view({}),
+      }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-detail").textContent).toBe(
+        UPDATE_ACTIVE_STOP_REFUSED_COPY,
+      );
+    });
+    expect(document.body.textContent).not.toContain("/Users/someone");
+  });
+
+  it("a failed (stop-failed) result shows curated copy and never leaks --force", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({
+        kind: "failed",
+        reason: "stop-failed",
+        message: NOT_SERVICE_RUN,
+        view: view({}),
+      }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-detail").textContent).toBe(
+        STOP_FAILED_COPY,
+      );
+    });
+    expect(screen.getByTestId("host-quit-detail").textContent).not.toContain(
+      "--force",
+    );
+  });
+
+  it("a stop-refused (lock-busy) result shows curated copy", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({
+        kind: "stop-refused",
+        reason: "lock-busy",
+        message: "Another Traycer process is managing the host.",
+        view: view({}),
+      }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-detail").textContent).toBe(
+        LOCK_BUSY_STOP_REFUSED_COPY,
+      );
+    });
+  });
+
+  it("U7: force is sent only when the verdict FIRST offered with Stop enabled was busy/unknown - an idle-then-busy flip still sends if-idle", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-dialog").textContent).toContain(
+        HOST_NONE_CONFIRM_TITLE_IDLE,
+      );
+    });
+
+    // Flip the mocked verdict, then force a re-render: `pushChange` writes a
+    // fresh lifecycle view into the query cache, which re-renders the whole
+    // settings section (including the still-open dialog), and the dialog
+    // re-reads `useLocalHostQuitStatus()` - i.e. this mock - on every render.
+    localHostQuitStatusMock.current = busyVerdict("host-a");
+    // `view({})` alone is structurally identical to what is already cached,
+    // and TanStack Query's `setQueryData` keeps the SAME reference (no
+    // re-render) for a structurally-equal write - so this bumps `rev` to
+    // force one, without changing the desired mode the dialog cares about.
+    fixture.pushChange(
+      view({
+        desired: {
+          mode: "background",
+          rev: 2,
+          updatedBy: null,
+          updatedAt: null,
+        },
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-dialog").textContent).toContain(
+        HOST_NONE_CONFIRM_TITLE_BUSY,
+      );
+    });
+
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+    await waitFor(() => {
+      expect(fixture.setMock).toHaveBeenLastCalledWith({
+        mode: "none",
+        stop: "if-idle",
+      });
+    });
+  });
+
+  it("U7 control: a verdict that is busy from the dialog's first render sends force", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = busyVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(fixture.setMock).toHaveBeenLastCalledWith({
+        mode: "none",
+        stop: "force",
+      });
+    });
+  });
+
+  it("F13: after a host-busy refusal on an idle verdict, the counts line must not still read idle", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({
+        kind: "stop-refused",
+        reason: "host-busy",
+        message: CLI_BUSY,
+        view: view({}),
+      }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-dialog").textContent).toContain(
+        HOST_NONE_CONFIRM_TITLE_BUSY,
+      );
+    });
+    expect(screen.getByTestId("host-quit-counts").textContent).toBe(
+      "The host reports it is busy. Shells and scheduled wakes: unknown on this host version.",
+    );
+  });
+
+  it("T44a: an 'unknown' verdict sends stop:'force'", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = {
+      localHostId: "host-a",
+      verdict: { kind: "unknown", reason: "unreachable" },
+      liveLocalHostIdNow: () => "host-a",
+      recheck: () => undefined,
+    };
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(fixture.setMock).toHaveBeenLastCalledWith({
+        mode: "none",
+        stop: "force",
+      });
+    });
+  });
+
+  it("T44b: a host changed under the open dialog refuses to stop, toasts, and rechecks instead", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    const recheck = vi.fn();
+    localHostQuitStatusMock.current = {
+      localHostId: "host-a",
+      verdict: {
+        kind: "idle",
+        busySessionCount: 0,
+        breakdown: null,
+        statusMinor: null,
+      },
+      liveLocalHostIdNow: () => "host-b",
+      recheck,
+    };
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(toast.info).toHaveBeenCalledWith(HOST_QUIT_HOST_CHANGED_TITLE, {
+        description: HOST_QUIT_HOST_CHANGED_DESCRIPTION,
+      });
+    });
+    expect(fixture.setMock).not.toHaveBeenCalled();
+    expect(recheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("T41: the none-confirm opens with Cancel focused, and Enter closes it without calling set", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByTestId("host-quit-cancel"),
+      );
+    });
+
+    const user = userEvent.setup();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("host-quit-dialog")).toBeNull();
+    });
+    expect(fixture.setMock).not.toHaveBeenCalled();
+  });
+
+  // F24: `not-running` - the local host is not serving - has nothing to list
+  // and nothing to force.
+  it("F24: a 'not-running' verdict titles as the idle confirm and sends stop:'if-idle'", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    const notRunningVerdict: LocalHostQuitStatus = {
+      localHostId: "host-a",
+      verdict: { kind: "not-running" },
+      liveLocalHostIdNow: () => "host-a",
+      recheck: () => undefined,
+    };
+    localHostQuitStatusMock.current = notRunningVerdict;
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-quit-dialog").textContent).toContain(
+        "Stop the host on this machine?",
+      );
+    });
+    fireEvent.click(screen.getByTestId("host-quit-stop"));
+
+    await waitFor(() => {
+      expect(fixture.setMock).toHaveBeenLastCalledWith({
+        mode: "none",
+        stop: "if-idle",
+      });
+    });
   });
 
   it("a superseded result closes the dialog and shows a toast", async () => {
@@ -763,7 +1207,11 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
   it("picking 'none' while localHostCapability is 'none' calls set directly with no confirm dialog", async () => {
     const fixture = buildLifecycleHost(
       view({
-        applied: { localHostCapability: "none", supervisor: "enforcing" },
+        applied: {
+          localHostCapability: "none",
+          supervisor: "enforcing",
+          admittedAs: null,
+        },
       }),
       () => Promise.resolve({ kind: "applied", view: view({}) }),
     );
@@ -779,6 +1227,146 @@ describe("<HostLifecycleSettingsSection /> - the 'none' option and plan gating",
       });
     });
     expect(screen.queryByTestId("host-quit-dialog")).toBeNull();
+  });
+});
+
+// F4-E: main now COMMITS `set({mode:"none", stop})` during a foreground run -
+// it refuses the stop as `not-service-run`, writes none, and leaves the
+// terminal host running. So the confirm must not offer or claim a stop while
+// `admittedAs === "foreground"`.
+describe("<HostLifecycleSettingsSection /> - the none confirm during a foreground run (F4-E)", () => {
+  it("shows the foreground-safe title/description and a Switch action, never Stop host", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(
+      view({
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: "foreground",
+        },
+      }),
+      () => Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    const dialog = await screen.findByTestId("host-quit-dialog");
+
+    expect(dialog.textContent).toContain("Switch to No local host?");
+    expect(dialog.textContent).toContain(
+      "A host started in a terminal is running. Traycer won't stop it: it keeps running until you stop it there. From the next launch, Traycer connects only to remote hosts.",
+    );
+    expect(
+      screen.queryByRole("button", { name: HOST_NONE_CONFIRM_STOP_LABEL }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Switch" })).not.toBeNull();
+  });
+
+  it("clicking Switch calls set exactly once with {mode:'none', stop:'if-idle'} and closes on an applied result", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(
+      view({
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: "foreground",
+        },
+      }),
+      () => Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    await screen.findByTestId("host-quit-dialog");
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+
+    await waitFor(() => {
+      expect(fixture.setMock).toHaveBeenCalledTimes(1);
+    });
+    expect(fixture.setMock).toHaveBeenCalledWith({
+      mode: "none",
+      stop: "if-idle",
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("host-quit-dialog")).toBeNull();
+    });
+  });
+
+  it("control: admittedAs null keeps today's stop-only form (Stop host present, no Switch)", async () => {
+    hostBindingMock.current = { directory: { getLocalEntry: () => null } };
+    localHostQuitStatusMock.current = idleVerdict("host-a");
+    const fixture = buildLifecycleHost(
+      view({
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: null,
+        },
+      }),
+      () => Promise.resolve({ kind: "applied", view: view({}) }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[4].label }));
+    const dialog = await screen.findByTestId("host-quit-dialog");
+
+    expect(dialog.textContent).toContain(HOST_NONE_CONFIRM_TITLE_IDLE);
+    expect(
+      screen.getByRole("button", { name: HOST_NONE_CONFIRM_STOP_LABEL }),
+    ).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Switch" })).toBeNull();
+  });
+});
+
+describe("<HostLifecycleSettingsSection /> - the settings card's own inline error uses result.reason, not raw message", () => {
+  it("F23: a failed (write-failed) result on a direct mode change shows curated copy and never leaks the raw path/error text", async () => {
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({
+        kind: "failed",
+        reason: "write-failed",
+        message: WRITE_FAILED_HOME,
+        view: view({}),
+      }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[3].label }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-lifecycle-error").textContent).toBe(
+        WRITE_FAILED_COPY,
+      );
+    });
+    expect(document.body.textContent).not.toContain("/Users/someone");
+  });
+
+  it("a failed (confirmation-required) result on a direct mode change shows its curated copy", async () => {
+    const fixture = buildLifecycleHost(view({}), () =>
+      Promise.resolve({
+        kind: "failed",
+        reason: "confirmation-required",
+        message:
+          "Turning off the local host stops Traycer Host. Confirm the stop to continue.",
+        view: view({}),
+      }),
+    );
+    renderSection(createFakeRunnerHost({ hostLifecycle: fixture.host }));
+
+    await waitForReady();
+    fireEvent.click(screen.getByRole("radio", { name: OPTION_COPY[3].label }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("host-lifecycle-error").textContent).toBe(
+        CONFIRMATION_REQUIRED_COPY,
+      );
+    });
   });
 });
 

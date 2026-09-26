@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   formatWindowsProcessStartIdentity,
   parseWindowsWmiCreationDate,
@@ -79,6 +80,69 @@ function findDeniedReadCandidate(): DeniedReadCandidate | null {
     : null;
 }
 
+const spawnedDeniedChildren: ChildProcess[] = [];
+
+afterEach(() => {
+  for (const child of spawnedDeniedChildren.splice(0)) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
+});
+
+function spawnDeniedReadChild(): DeniedReadCandidate | null {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const pid = child.pid;
+  if (pid === undefined || pid <= 0) {
+    child.kill();
+    return null;
+  }
+  spawnedDeniedChildren.push(child);
+  const scriptPath = fileURLToPath(
+    new URL("./deny-process-query.ps1", import.meta.url),
+  );
+  let stdout: string;
+  try {
+    stdout = execFileSync(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-File", scriptPath, String(pid)],
+      { encoding: "utf8", windowsHide: true, timeout: 30_000 },
+    );
+  } catch {
+    return null;
+  }
+  const line = stdout
+    .trim()
+    .split(/\r?\n/)
+    .filter((entry) => entry.includes("|"))
+    .pop();
+  if (line === undefined) return null;
+  const separator = line.indexOf("|");
+  if (separator < 0) return null;
+  const parsedPid = Number(line.slice(0, separator));
+  const creationMicros = parseWindowsWmiCreationDate(line.slice(separator + 1));
+  return Number.isInteger(parsedPid) && parsedPid > 0 && creationMicros !== null
+    ? { pid: parsedPid, creationMicros }
+    : null;
+}
+
+function requireDeniedReadCandidate(): DeniedReadCandidate {
+  const owned = spawnDeniedReadChild();
+  if (owned !== null) return owned;
+  const scanned = findDeniedReadCandidate();
+  if (scanned !== null) return scanned;
+  throw new Error(
+    process.env.CI
+      ? "no denied-read candidate under CI: DACL-deny child and session-0 scan both failed"
+      : "no process in this security context has a denied exact read",
+  );
+}
+
 // UTC epoch microseconds back to the round-trip ("o") ISO text a recorded
 // Windows token carries - WMI only ever gives six fractional digits, so the
 // 7th is synthetic and deliberately non-zero, exactly like a real .NET
@@ -105,13 +169,8 @@ function tokenFromUtcMicros(utcMicros: number, seventhDigit: string): string {
 describe.skipIf(process.platform !== "win32")(
   "matchLiveProcessStartIdentity: a real denied read on this Windows machine",
   () => {
-    it("resolves a real inaccessible process through WMI, and the exact reader stays primary-only", (ctx) => {
-      const candidate = findDeniedReadCandidate();
-      ctx.skip(
-        candidate === null,
-        "no process in this security context has a denied exact read (an elevated runner can read everything) - nothing to prove here",
-      );
-      if (candidate === null) return;
+    it("resolves a real inaccessible process through WMI, and the exact reader stays primary-only", () => {
+      const candidate = requireDeniedReadCandidate();
 
       const recordedToken = tokenFromUtcMicros(candidate.creationMicros, "5");
       expect(matchLiveProcessStartIdentity(candidate.pid, recordedToken)).toBe(

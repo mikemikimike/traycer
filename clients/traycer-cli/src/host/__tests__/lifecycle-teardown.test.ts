@@ -1,4 +1,13 @@
-import { describe, expect, it, vi, type Mock } from "vitest";
+import { rmSync } from "node:fs";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 import {
   SHUTDOWN_FORCE_EXIT_MS,
   STOP_EXIT_GRACE_MARGIN_MS,
@@ -11,6 +20,7 @@ import type {
   CooperativeShutdownOutcome,
   ForcedShutdownOutcome,
 } from "../../service/platforms/desktop-agent-shutdown";
+import { hostHomeDir } from "../../store/paths";
 import type { PublishedProcessIdentityVerdict } from "../../store/process-identity";
 import type { HostPidMetadata } from "../pid-metadata";
 import {
@@ -21,6 +31,31 @@ import {
   type OwnedHostChild,
   type TeardownAttemptResult,
 } from "../lifecycle-teardown";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, so without this the suite
+// would resolve this machine's REAL `~/.traycer`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-lifecycle-teardown-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 const TERM_GRACE = SHUTDOWN_FORCE_EXIT_MS + STOP_EXIT_GRACE_MARGIN_MS;
 
@@ -270,17 +305,35 @@ describe("createLifecycleTeardown: gates before commit", () => {
     expect(h.commit).not.toHaveBeenCalled();
   });
 
-  it("a committed teardown never reconfirms again", async () => {
+  // T10: keep the child ALIVE across both attempts so attempt 2 goes through
+  // `withLock` again (a dead child would take the lockless committed
+  // shortcut and never reach the `if (!committed)` guard at all), and assert
+  // the reconfirm closure still runs exactly once in total.
+  it("a committed teardown never reconfirms again, even when a later attempt retakes the lock", async () => {
     const h = harness("linux");
     const child = fakeChild(5, h.seq, { endsOnSignal: null });
-    child.end();
     h.state.child = child;
+    h.state.record = record(5);
+    h.state.cooperative = { kind: "hung", pid: 5 };
+    h.state.force = { kind: "hung", pid: 5 };
     const reconfirm = vi.fn(async () => true);
-    await h.teardown.attempt(reconfirm, no);
-    await h.teardown.attempt(reconfirm, no);
+
+    expect(await h.teardown.attempt(reconfirm, no)).toEqual({
+      kind: "retry",
+      reason: "host-hung",
+    });
+    expect(h.teardown.committed()).toBe(true);
     expect(reconfirm).toHaveBeenCalledTimes(1);
     expect(h.commit).toHaveBeenCalledTimes(1);
-    expect(h.teardown.committed()).toBe(true);
+
+    const locksBefore = h.seq.filter((s) => s === "lock").length;
+    expect(await h.teardown.attempt(reconfirm, no)).toEqual({
+      kind: "retry",
+      reason: "host-hung",
+    });
+    expect(h.seq.filter((s) => s === "lock").length).toBe(locksBefore + 1);
+    expect(reconfirm).toHaveBeenCalledTimes(1);
+    expect(h.commit).toHaveBeenCalledTimes(1);
   });
 });
 

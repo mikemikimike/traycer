@@ -91,8 +91,11 @@ describe("describeHostQuitPrompt - initial round", () => {
     expect(model.stopLabel).toBe(HOST_QUIT_STOP_LABEL);
     expect(model.stopDisabled).toBe(false);
     expect(model.stopForce).toBe(false);
+    // breakdown is null, so the idle lead is the neutral one, never "Nothing
+    // is running" (that lead requires a non-null breakdown with both counts
+    // settled at 0).
     expect(model.countsLine).toBe(
-      "Nothing is running on this host right now. Shells and scheduled wakes: not reported by this host.",
+      "No agents or terminals are working on this host right now. Shells and scheduled wakes: not reported by this host.",
     );
     expect(model.analyticsVerdict).toBe("idle");
   });
@@ -256,6 +259,117 @@ describe("describeHostQuitPrompt - busy-retry round", () => {
     );
 
     expect(model.countsLine).not.toBeNull();
+  });
+});
+
+describe("describeHostQuitPrompt - F13: non-initial rounds build countsLine with busy:true", () => {
+  // A busy/busy-retry round is always busy whatever the FRESH verdict says
+  // (the host has just refused an idle-only stop), so countsLine must never
+  // be built with the fresh verdict's own busy/idle split.
+  const FRESH_IDLE_VERDICT: HostQuitVerdict = {
+    kind: "idle",
+    busySessionCount: 0,
+    breakdown: null,
+    statusMinor: 6,
+  };
+  const FRESH_IDLE_VERDICT_WITH_SHELLS: HostQuitVerdict = {
+    kind: "idle",
+    busySessionCount: 0,
+    breakdown: {
+      workingAgents: 0,
+      activeTerminalAgents: 0,
+      busyTerminals: 0,
+      shells: 2,
+      scheduledWakes: 0,
+    },
+    statusMinor: 6,
+  };
+  const ROUNDS: ReadonlyArray<
+    readonly ["busy" | "busy-retry", "ask" | "stop-if-idle"]
+  > = [
+    ["busy", "stop-if-idle"],
+    ["busy-retry", "ask"],
+  ];
+
+  for (const [round, mode] of ROUNDS) {
+    it(`${round} round (${mode}): idle verdict with no breakdown reads the busy generic sentence`, () => {
+      const model = describeHostQuitPrompt(
+        request(mode, round),
+        FRESH_IDLE_VERDICT,
+        LOCAL_HOST_ID,
+      );
+
+      expect(model.countsLine).toBe(
+        "The host reports it is busy. Shells and scheduled wakes: not reported by this host.",
+      );
+    });
+
+    it(`${round} round (${mode}): idle verdict with a shells-only breakdown still reads the busy lead`, () => {
+      const model = describeHostQuitPrompt(
+        request(mode, round),
+        FRESH_IDLE_VERDICT_WITH_SHELLS,
+        LOCAL_HOST_ID,
+      );
+
+      expect(model.countsLine).toBe(
+        "The host reports it is busy. Also on this host: 2 shells.",
+      );
+    });
+  }
+});
+
+describe("F24: not-running verdict (a directory entry that is down / not dialable)", () => {
+  const NOT_RUNNING_VERDICT: HostQuitVerdict = { kind: "not-running" };
+
+  it("initial + ask: auto-answers keep, remember:false, like no-local-host", () => {
+    expect(
+      automaticHostQuitDecision(request("ask", "initial"), NOT_RUNNING_VERDICT),
+    ).toEqual({ kind: "keep", remember: false });
+  });
+
+  it("initial + stop-if-idle: auto-answers stop, force:false, remember:false, like no-local-host", () => {
+    expect(
+      automaticHostQuitDecision(
+        request("stop-if-idle", "initial"),
+        NOT_RUNNING_VERDICT,
+      ),
+    ).toEqual({ kind: "stop", force: false, remember: false });
+  });
+
+  it("initial: hidden for both modes, like no-local-host", () => {
+    expect(
+      hostQuitPromptVisible(request("ask", "initial"), NOT_RUNNING_VERDICT),
+    ).toBe(false);
+    expect(
+      hostQuitPromptVisible(
+        request("stop-if-idle", "initial"),
+        NOT_RUNNING_VERDICT,
+      ),
+    ).toBe(false);
+  });
+
+  it("busy/busy-retry rounds: never auto-answered, always visible - control", () => {
+    expect(
+      automaticHostQuitDecision(
+        request("stop-if-idle", "busy"),
+        NOT_RUNNING_VERDICT,
+      ),
+    ).toBeNull();
+    expect(
+      automaticHostQuitDecision(
+        request("ask", "busy-retry"),
+        NOT_RUNNING_VERDICT,
+      ),
+    ).toBeNull();
+    expect(
+      hostQuitPromptVisible(
+        request("stop-if-idle", "busy"),
+        NOT_RUNNING_VERDICT,
+      ),
+    ).toBe(true);
+    expect(
+      hostQuitPromptVisible(request("ask", "busy-retry"), NOT_RUNNING_VERDICT),
+    ).toBe(true);
   });
 });
 

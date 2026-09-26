@@ -86,6 +86,7 @@ const READY_STATUS: HostControllerStatus = {
   localAttempt: null,
   removedByUser: false,
   checkedAt: "2026-05-15T00:00:00Z",
+  lastEnsureFailure: null,
 };
 
 const DEBT_STATUS: HostControllerStatus = {
@@ -138,6 +139,7 @@ function makeManagement(overrides: ManagementOverrides): IHostManagement {
     ),
     uninstallHost: vi.fn(() =>
       Promise.resolve({
+        kind: "uninstalled" as const,
         removedInstallDir: true,
         deregisteredService: true,
         serviceRegistrationRetained: null,
@@ -146,6 +148,7 @@ function makeManagement(overrides: ManagementOverrides): IHostManagement {
     restartHost: vi.fn(() => Promise.resolve({ kind: "restarted" as const })),
     uninstallTraycer: vi.fn(() =>
       Promise.resolve({
+        kind: "removed" as const,
         removedHost: true,
         deregisteredService: true,
         serviceRegistrationRetained: null,
@@ -184,7 +187,9 @@ function makeManagement(overrides: ManagementOverrides): IHostManagement {
         errorMessage: null,
       }),
     ),
-    freePortAndRestart: vi.fn((input) => Promise.resolve(input)),
+    freePortAndRestart: vi.fn((input) =>
+      Promise.resolve({ kind: "applied" as const, ...input }),
+    ),
     runDoctorRepairQueued: vi.fn(() =>
       Promise.resolve({ kind: "applied" as const }),
     ),

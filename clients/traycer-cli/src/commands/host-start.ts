@@ -62,11 +62,14 @@ import {
 } from "../host/host-start-adoption";
 import {
   admitSupervisorLifecycle,
+  lifecycleGateSettledParkRule,
   type SupervisorLifecycleGateDeps,
+  type SupervisorLifecycleGateInput,
 } from "../host/lifecycle-admission";
 import {
   probeDesktopPresenceLiveness,
   readDesktopPresence,
+  markSupervisorRunOwed,
   readHostLifecyclePolicy,
   readInheritableRunOwnership,
   removeSupervisorRecords,
@@ -94,7 +97,7 @@ import {
 import { createLifecycleTeardownPlatform } from "../host/update-mutation";
 import { SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1 } from "@traycer/protocol/config/supervisor-record";
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
-import { ownProcessStartIdentity } from "../store/process-identity";
+import { ownProcessStartIdentityAsync } from "../store/process-identity";
 import { resolveCliVersion } from "../cli-version";
 import {
   actionableStopIntentReason,
@@ -129,7 +132,7 @@ import {
   type HostUpdateAttemptRecord,
   type UpdateContenderOutcome,
 } from "@traycer-clients/shared/host-update";
-import { encodeInstallGeneration } from "@traycer-clients/shared/host-version/install-generation";
+import { readSupervisorRelaunchInstalledIdentity } from "../host/update-contender";
 import { SUPERVISOR_ADMISSION_WAIT_MS } from "../host/update-budget";
 import { RELAUNCH_BACKOFF_MS } from "../host/relaunch-schedule";
 import { createCliLogger, errorFromUnknown, type ILogger } from "../logger";
@@ -532,7 +535,14 @@ export interface SupervisorLifecycleDeps extends Omit<
   readonly inheritRunOwnership: (
     environment: Environment,
   ) => Promise<InheritedRunOwnership | null>;
-  readonly ownStartIdentity: () => ProcessStartIdentity | null;
+  /**
+   * This process's start identity, stamped into the run state. ASYNC: the
+   * synchronous read remembers a failed first probe for the life of the
+   * process, and one slow first read (a lock acquisition's, on a loaded
+   * Windows machine) would otherwise leave every run of this supervisor
+   * uninheritable (`readInheritableRunOwnership` refuses `null`).
+   */
+  readonly ownStartIdentity: () => Promise<ProcessStartIdentity | null>;
   readonly cliVersion: string;
   readonly observer: LifecycleObserverRuntime;
   readonly teardown: LifecycleTeardownPlatform;
@@ -742,23 +752,11 @@ const defaultRunDeps: RunHostStartDeps = {
         // that moved between that read and this lock is exactly the case the
         // baseline comparison exists to catch. That reuse would be sharpest
         // for the interrupted-active arm, whose window is exactly when a live
-        // holder is most likely to be moving.
-        readInstalledIdentity: async () => {
-          const record = await readHostInstallRecord(options.environment);
-          if (record === null) return null;
-          return {
-            installedVersion: record.version,
-            // The RECORD, never a rebuilt literal. This string is compared
-            // byte-for-byte against the baseline `installGenerationOf`
-            // (`host/update-run.ts`) wrote at park time, so a per-site field
-            // mapping is the one thing that could silently make the two
-            // disagree - and a disagreement here fails CLOSED: the exemption
-            // stops firing, this command exits 0 again while an update is
-            // parked, and the outage it exists to prevent comes back with
-            // nothing red anywhere.
-            installGeneration: encodeInstallGeneration(record),
-          };
-        },
+        // holder is most likely to be moving. The one reader `host ensure`'s
+        // start of the installed bytes uses too, so both starts are judged
+        // alike.
+        readInstalledIdentity: () =>
+          readSupervisorRelaunchInstalledIdentity(options.environment),
       },
       async (_capability, context) => {
         // Announced only when a record actually stood. An admitted relaunch
@@ -838,9 +836,17 @@ const defaultRunDeps: RunHostStartDeps = {
     consumeAdoption: (environment, serviceLabel, adoptionNonce) =>
       consumeHostStartAdoption(environment, serviceLabel, adoptionNonce),
     writeRecords: writeSupervisorRecords,
-    removeRecords: removeSupervisorRecords,
+    // An exit that owes a successor marks the run state it keeps: that mark,
+    // not the file's mere survival, is what lets a successor inherit it. A
+    // SIGKILL, power loss or session end leaves the file too, unmarked.
+    removeRecords: async (environment, supervisorPid, removal) => {
+      if (removal === "keep-run-state") {
+        await markSupervisorRunOwed(environment, supervisorPid);
+      }
+      await removeSupervisorRecords(environment, supervisorPid, removal);
+    },
     inheritRunOwnership: readInheritableRunOwnership,
-    ownStartIdentity: () => ownProcessStartIdentity(),
+    ownStartIdentity: () => ownProcessStartIdentityAsync(),
     cliVersion: resolveCliVersion(process.env),
     observer: defaultLifecycleObserverRuntime,
     // Behind the named facade, like every other service and host actuator
@@ -1447,20 +1453,22 @@ export async function runHostStart(
   // (`serviceStarted`) can park; the rule itself, and why it keys on the
   // consumed proof rather than on `serviceStarted` or the nonce, is in
   // `host/lifecycle-admission.ts`. In-process relaunches are the same run and
-  // are never re-admitted here.
+  // are never re-admitted here - with the one exception below, a park rule
+  // the gate never got to ask.
+  const lifecycleGateInput: SupervisorLifecycleGateInput = {
+    environment: opts.environment,
+    serviceLaunch:
+      serviceStarted && serviceLabel !== null
+        ? {
+            serviceLabel,
+            adoptionNonce: "adoptionNonce" in opts ? opts.adoptionNonce : null,
+          }
+        : null,
+  };
+  const lifecycleGateDeps = { ...deps.lifecycle, now: deps.now };
   const lifecycleGate = await admitSupervisorLifecycle(
-    {
-      environment: opts.environment,
-      serviceLaunch:
-        serviceStarted && serviceLabel !== null
-          ? {
-              serviceLabel,
-              adoptionNonce:
-                "adoptionNonce" in opts ? opts.adoptionNonce : null,
-            }
-          : null,
-    },
-    { ...deps.lifecycle, now: deps.now },
+    lifecycleGateInput,
+    lifecycleGateDeps,
   );
   if (lifecycleGate.kind === "park") {
     // `mode=` only. Deliberately none of the usual fields: nothing about this
@@ -1472,10 +1480,37 @@ export async function runHostStart(
     return exitSupervisor(0);
   }
   pendingAdoption = lifecycleGate.consumed;
+  // The presence the park rule last judged, for the run state.
+  let lifecyclePresence = lifecycleGate.presence;
+  // Whether the park rule still owes this run an answer. The gate asks it
+  // only of an `absent` proof, and a grant settles it the other way; a proof
+  // it could not use (refused, lost, unreadable) settles NOTHING. The first
+  // attempt refuses that proof and the loop relaunches - and a later attempt
+  // that then finds no proof at all is exactly the unattended start the rule
+  // exists for, arriving past the one place that asked it. So until it is
+  // settled, each later attempt goes through the gate again before it admits.
+  let parkRuleOwed = !lifecycleGateSettledParkRule(lifecycleGate.consumed);
 
   for (;;) {
     attemptNumber += 1;
     const isFirstAttempt = attemptNumber === 1;
+    // Only once the gate's own proof is spent: an unspent one is still this
+    // attempt's to use, and consuming again would strand it.
+    if (parkRuleOwed && !isFirstAttempt && pendingAdoption === null) {
+      const regate = await admitSupervisorLifecycle(
+        lifecycleGateInput,
+        lifecycleGateDeps,
+      );
+      if (regate.kind === "park") {
+        logger.info("Host supervisor parked by lifecycle policy", {
+          mode: regate.mode,
+        });
+        return exitSupervisor(0);
+      }
+      pendingAdoption = regate.consumed;
+      lifecyclePresence = regate.presence ?? lifecyclePresence;
+      parkRuleOwed = !lifecycleGateSettledParkRule(regate.consumed);
+    }
     // D5: a fresh id per attempt. `spawn-evidence.ts` pairs a post-baseline
     // `starting` marker with its terminal marker, so a relaunch has to read as
     // a genuinely new attempt rather than a second ending for the first one.
@@ -2524,10 +2559,14 @@ export async function runHostStart(
       // files, and every exit path must remove what is ours (the removal is
       // pid-guarded and tolerates an absent file).
       recordsPublished = true;
+      // `serviceLabel`, not `serviceStarted`: a label-derived probe is a
+      // service launch too - it only must not RETRY (`serviceStarted` above)
+      // - and recording it `foreground` made the relaunch wait ignore it, a
+      // stop read it as a terminal run, and a 77 successor not inherit.
       const admittedAs: SupervisorRunAdmission =
         granted.value !== null
           ? "granted"
-          : serviceStarted
+          : serviceLabel !== null
             ? "unattended"
             : "foreground";
       const published = await publishSupervisorRecords({
@@ -2538,11 +2577,12 @@ export async function runHostStart(
         startedAt: supervisorStartedAt,
         admission: admittedAs,
         origin: granted.value?.origin ?? null,
-        presence: lifecycleGate.presence,
+        presence: lifecyclePresence,
       });
       // Whatever mode is in force now: a Background run must notice a later
-      // switch to Linked, and a terminal-started one a Linked desktop
-      // launching beside it, with no host restart (critique round 1, R2).
+      // switch to Linked with no host restart (critique round 1, R2). A
+      // terminal-started (`foreground`) run is never adopted: Linked governs
+      // the service-run host only.
       observer = startLifecycleObserver({
         environment: opts.environment,
         logger,
@@ -2551,6 +2591,7 @@ export async function runHostStart(
         nowIso: deps.now,
         pollMs: LIFECYCLE_OBSERVER_POLL_MS,
         graceMs: LIFECYCLE_PRESENCE_CRASH_GRACE_MS,
+        admission: admittedAs,
         initial: {
           adopted: published.runState.adopted,
           lastPresence: published.runState.lastPresence,
@@ -2976,7 +3017,7 @@ async function publishSupervisorRecords(input: {
     runState: {
       v: 1,
       supervisorPid: input.supervisorPid,
-      supervisorStartIdentity: input.deps.lifecycle.ownStartIdentity(),
+      supervisorStartIdentity: await input.deps.lifecycle.ownStartIdentity(),
       admission: input.admission,
       origin: input.origin,
       adopted: inherited !== null || input.presence?.liveness === "alive",
@@ -3013,14 +3054,18 @@ export function exitOwesSuccessor(exitCode: number): boolean {
 }
 
 /**
- * Is this start the successor an owed exit was waiting for, and so a
- * continuation of that run rather than a new one?
+ * May this start be the successor an owed exit was waiting for, and so ask to
+ * continue that run rather than begin a new one?
  *
  * - `granted` with origin `maintenance` - the relaunch leg of `host update`
  *   or `host restart`, which by definition brings back a run that existed.
- * - `unattended` - the service manager's own relaunch of a 77 or 76 exit,
- *   which can win the race against the CLI's granted start (launchd's
- *   `KeepAlive{SuccessfulExit:false}`, systemd's `Restart=on-failure`).
+ * - `unattended` - it MAY be the service manager's own relaunch of a 77 or 76
+ *   exit, which can win the race against the CLI's granted start (launchd's
+ *   `KeepAlive{SuccessfulExit:false}`, systemd's `Restart=on-failure`). It
+ *   may equally be a logon trigger, or a relaunch after a crash, following a
+ *   run that owed nothing. This predicate only says who may ask; the answer
+ *   is `readInheritableRunOwnership`'s, which inherits only from the owed
+ *   exit's footprint (the run state kept, `supervisor.json` gone).
  *
  * Never a `foreground` start or a `desktop` / `terminal` / N-1 (`null`
  * origin) grant: those are new runs, and a person's terminal start must not

@@ -1,14 +1,56 @@
 import { spawn } from "node:child_process";
+import { rmSync } from "node:fs";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   serializeSupervisorRecord,
   supervisorRecordPath,
   type SupervisorRecord,
 } from "@traycer/protocol/config/supervisor-record";
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it: this
+// file's own `store/paths` mock below only replaces `hostHomeDir` - it is
+// NOT isolation on its own, because `createCliLogger` (through
+// `store/paths.ts`'s `cliLogPath`) and the protocol path helpers still
+// resolve `homedir()` for real. `node:os.homedir()` itself must be
+// redirected first.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-live-supervisor-run-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(async () => {
+  expect(osHome.current).not.toBe("");
+  const paths =
+    await vi.importActual<typeof import("../../store/paths")>(
+      "../../store/paths",
+    );
+  expect(paths.hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+  expect(paths.cliLogPath("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 // `readLiveSupervisorRun` (host/live-supervisor-run.ts, NEW for
 // CRASH-RELAUNCH-ENSURE-RACE) is the one reader that answers "is a
@@ -53,6 +95,8 @@ function sampleRecord(pid: number): SupervisorRecord {
     cliVersion: "1.0.0",
     capabilities: [],
     startedAt: new Date().toISOString(),
+    startIdentity: null,
+    admittedAs: null,
   };
 }
 

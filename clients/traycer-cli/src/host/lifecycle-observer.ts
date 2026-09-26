@@ -10,6 +10,11 @@ import {
   type HostLifecycleMode,
   type HostLifecyclePolicy,
 } from "@traycer/protocol/config/host-lifecycle-policy";
+import {
+  probeProcessExistenceWithoutSpawn,
+  type SpawnFreeProcessExistence,
+} from "@traycer-clients/shared/host-lock/process-identity";
+import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
 import type { Environment } from "../runner/environment";
 import { errorFromUnknown, type ILogger } from "../logger";
 import { hostHomeDir } from "../store/paths";
@@ -18,6 +23,7 @@ import {
   type DesktopPresenceLiveness,
   type LifecycleRecordRead,
   type ObservedDesktopPresence,
+  type SupervisorRunAdmission,
 } from "./lifecycle-files";
 import {
   LIFECYCLE_TEARDOWN_ADMISSION,
@@ -30,10 +36,13 @@ import {
 //
 // ONE observer per supervisor, for the supervisor's whole life after its
 // first admitted spawn, WHATEVER mode was in force at spawn: a Background
-// supervisor must notice a later switch to Linked, and a terminal-started run
-// must become desktop-owned the moment a Linked desktop appears beside it -
-// neither needs a host restart. Every tick re-reads BOTH records from disk
-// and never acts on a value it read on an earlier tick.
+// supervisor must notice a later switch to Linked without a host restart.
+// Every tick re-reads BOTH records from disk and never acts on a value it
+// read on an earlier tick.
+//
+// Linked governs the SERVICE-run host only. A terminal-started run (admitted
+// `foreground`) is never adopted, whatever desktop runs beside it, so the
+// app's quit or crash never tears it down (`runIsAdoptable`).
 //
 // The observer only decides. What it decides is handed to the teardown
 // actuator (`./lifecycle-teardown.ts`), which alone touches the host.
@@ -51,6 +60,14 @@ export const LIFECYCLE_OBSERVER_POLL_MS = 5_000;
  * this is the backstop for a crashed or force-killed app.
  */
 export const LIFECYCLE_PRESENCE_CRASH_GRACE_MS = 30_000;
+
+/**
+ * How long an `alive` presence verdict is reused instead of re-probed, while
+ * a spawn-free existence check still finds the pid. One crash grace: see the
+ * bound at the memo in `startLifecycleObserver`.
+ */
+export const LIFECYCLE_PRESENCE_ALIVE_REUSE_MS =
+  LIFECYCLE_PRESENCE_CRASH_GRACE_MS;
 
 /** The observer's reads, the same seams the admission gate reads through. */
 export interface LifecycleRecordReads {
@@ -70,21 +87,28 @@ export interface LifecycleRecordReads {
 /**
  * What one tick read, fresh from disk.
  *
- * `presence` is `null` when there is no well-formed record - absent, torn or
- * unreadable alike, the rule every reader of these files follows.
+ * `presence`:
+ * - the observed record, when it is well formed;
+ * - `null` when there is no record at all (`absent`) - the desktop is gone;
+ * - `"indeterminate"` when a record is there but is not one this reader can
+ *   use (`invalid` or `unreadable`). That is never evidence the desktop is
+ *   gone: a newer desktop beside an older supervisor writes exactly such a
+ *   record (an `onExit` or `v` it does not know), and a reader must never act
+ *   on a verdict it does not know.
  */
 export interface LifecycleTickObservation {
   readonly mode: HostLifecycleMode;
   /** The policy record's `rev`; `null` when no well-formed record exists. */
   readonly rev: number | null;
-  readonly presence: ObservedDesktopPresence | null;
+  readonly presence: ObservedDesktopPresence | "indeterminate" | null;
 }
 
 /**
  * - `holds` - every clause of the stop rule is positively true this tick.
  * - `does-not-hold` - at least one clause is positively false.
  * - `unknown` - nothing is false, but the presence probe could not tell
- *   whether the desktop is running (`indeterminate`). Never evidence of death:
+ *   whether the desktop is running, or the record could not be read
+ *   (`indeterminate`). Never evidence of death:
  *   it neither starts the grace clock nor fires a teardown, and it does not
  *   reset a clock already running either - a process positively seen dead
  *   does not come back.
@@ -97,8 +121,9 @@ export type StopRuleVerdict = "holds" | "does-not-hold" | "unknown";
  * 1. the run is desktop-owned (`adopted`),
  * 2. the last verdict a well-formed record carried is `stop`,
  * 3. the presence process is positively dead, or the record is `gone`
- *    (missing or unreadable after adoption - distinct from never present,
- *    which clause 1 already excludes),
+ *    (missing after adoption - distinct from never present, which clause 1
+ *    already excludes; a record that is there but unreadable or invalid is
+ *    `indeterminate`, not gone),
  * 4. the mode is neither `background` nor `none`.
  *
  * `keep` and `handoff` never stop.
@@ -126,6 +151,20 @@ export function evaluateStopRule(input: {
 }
 
 /**
+ * Can a desktop ever own this run?
+ *
+ * Only a SERVICE run: `granted` (the CLI or the desktop asked the service to
+ * start it) or `unattended` (the service manager started it on its own). A
+ * `foreground` run is a `traycer host start` in a terminal, and Linked governs
+ * the service-run host only: a desktop running beside it - Linked or not -
+ * never adopts it, so the app's quit or crash never tears it down. The one
+ * predicate both the published run state and the observer read.
+ */
+export function runIsAdoptable(admission: SupervisorRunAdmission): boolean {
+  return admission !== "foreground";
+}
+
+/**
  * When the stop rule started holding, and for which desktop.
  *
  * Keyed by the presence record's pid: the grace measures ONE desktop's death,
@@ -139,7 +178,12 @@ interface StopConditionClock {
 
 /** What the observer carries from one tick to the next. */
 export interface LifecycleObserverState {
-  /** A live presence has been observed during this run. Sticky. */
+  /** How this run was admitted; fixed for the run. */
+  readonly admission: SupervisorRunAdmission;
+  /**
+   * A live presence has been observed during this run, and the run is one a
+   * desktop can own (`runIsAdoptable`). Sticky.
+   */
   readonly adopted: boolean;
   /**
    * The last well-formed presence record observed, as `supervisor-run.json`
@@ -172,18 +216,30 @@ export function applyLifecycleTick(
   nowMs: number,
   graceMs: number,
 ): LifecycleTickResult {
-  const presence = observation.presence;
-  const adopted = previous.adopted || presence?.liveness === "alive";
-  const lastPresence = presence ?? previous.lastPresence;
+  // The well-formed record this tick read, if any. An indeterminate one says
+  // nothing new: ownership and the last verdict stay as they were.
+  const observed =
+    observation.presence === "indeterminate" ? null : observation.presence;
+  // A foreground run is never adopted, whatever an earlier publish claimed.
+  const adopted =
+    runIsAdoptable(previous.admission) &&
+    (previous.adopted || observed?.liveness === "alive");
+  const lastPresence = observed ?? previous.lastPresence;
   const verdict = evaluateStopRule({
     adopted,
     mode: observation.mode,
     lastVerdict: lastPresence?.onExit ?? null,
-    presence: presence === null ? "gone" : presence.liveness,
+    presence:
+      observation.presence === null
+        ? "gone"
+        : observation.presence === "indeterminate"
+          ? "indeterminate"
+          : observation.presence.liveness,
   });
-  // A missing record continues the clock of the desktop it last named.
+  // A missing or unreadable record continues the clock of the desktop it
+  // last named.
   const presencePid =
-    presence?.pid ??
+    observed?.pid ??
     previous.condition?.presencePid ??
     previous.lastPresence?.pid ??
     null;
@@ -206,6 +262,7 @@ export function applyLifecycleTick(
       break;
   }
   const state: LifecycleObserverState = {
+    admission: previous.admission,
     adopted,
     lastPresence,
     mode: observation.mode,
@@ -267,6 +324,12 @@ export interface LifecycleObserverRuntime {
     environment: Environment,
     onChange: () => void,
   ) => HostHomeWatch | null;
+  /**
+   * Does `pid` name a running process, answered WITHOUT spawning anything?
+   * Existence, not identity: it may only keep an `alive` verdict a full
+   * probe already gave, never stand in for one.
+   */
+  readonly processExists: (pid: number) => SpawnFreeProcessExistence;
 }
 
 /**
@@ -314,6 +377,7 @@ export const defaultLifecycleObserverRuntime: LifecycleObserverRuntime = {
       return null;
     }
   },
+  processExists: (pid) => probeProcessExistenceWithoutSpawn(pid),
 };
 
 export interface LifecycleObserverInput {
@@ -324,6 +388,8 @@ export interface LifecycleObserverInput {
   readonly nowIso: () => string;
   readonly pollMs: number;
   readonly graceMs: number;
+  /** How this run was admitted: a `foreground` run is never adopted. */
+  readonly admission: SupervisorRunAdmission;
   /** What the admission gate already knew: its observed presence, if any. */
   readonly initial: {
     readonly adopted: boolean;
@@ -368,6 +434,7 @@ export function startLifecycleObserver(
 ): LifecycleObserverHandle {
   const { environment, logger, runtime } = input;
   let state: LifecycleObserverState = {
+    admission: input.admission,
     adopted: input.initial.adopted,
     lastPresence: input.initial.lastPresence,
     mode: "background",
@@ -403,20 +470,83 @@ export function startLifecycleObserver(
     });
   };
 
+  // The last `alive` verdict a full probe gave, for the record it was given
+  // for (pid AND start identity: a relaunched desktop writes a new record and
+  // is probed afresh). Reused while it is younger than
+  // `LIFECYCLE_PRESENCE_ALIVE_REUSE_MS` AND a spawn-free existence check still
+  // finds the pid, so a steady desktop costs one full probe per reuse window
+  // instead of one per tick - on Windows a `tasklist` and a PowerShell spawn
+  // each.
+  //
+  // The bound: a desktop that dies and whose pid the OS hands to another
+  // process inside the 30 s window still reads `exists`, so it is served
+  // `alive` until the window closes. That delays the stop-rule clock by at
+  // most one window - one crash grace - and never causes a wrong stop:
+  // `alive` only ever holds the rule off. A pid that no longer exists ends the reuse at
+  // once. Only `alive` is kept; `dead` and `indeterminate` are re-probed.
+  let aliveMemo: {
+    readonly pid: number;
+    readonly identity: ProcessStartIdentity;
+    readonly probedAtMs: number;
+  } | null = null;
+
+  const probeLiveness = async (
+    record: DesktopPresence,
+  ): Promise<DesktopPresenceLiveness> => {
+    const nowMs = runtime.nowMs();
+    if (
+      aliveMemo !== null &&
+      aliveMemo.pid === record.pid &&
+      aliveMemo.identity === record.processStartIdentity &&
+      nowMs - aliveMemo.probedAtMs >= 0 &&
+      nowMs - aliveMemo.probedAtMs < LIFECYCLE_PRESENCE_ALIVE_REUSE_MS &&
+      runtime.processExists(record.pid) === "exists"
+    ) {
+      return "alive";
+    }
+    const liveness = await input.reads.probePresence(record);
+    aliveMemo =
+      liveness === "alive"
+        ? {
+            pid: record.pid,
+            identity: record.processStartIdentity,
+            probedAtMs: nowMs,
+          }
+        : null;
+    return liveness;
+  };
+
   const observe = async (): Promise<LifecycleTickObservation> => {
     const policyRead = await input.reads.readPolicy(environment);
+    const mode = effectiveModeOf(policyRead);
     const presenceRead = await input.reads.readPresence(environment);
-    let presence: ObservedDesktopPresence | null = null;
-    if (presenceRead.kind === "valid") {
-      presence = {
-        pid: presenceRead.record.pid,
-        onExit: presenceRead.record.onExit,
-        liveness: await input.reads.probePresence(presenceRead.record),
-        observedAt: input.nowIso(),
-      };
+    let presence: ObservedDesktopPresence | "indeterminate" | null;
+    switch (presenceRead.kind) {
+      case "absent":
+        presence = null;
+        break;
+      case "invalid":
+      case "unreadable":
+        presence = "indeterminate";
+        break;
+      case "valid":
+        presence = {
+          pid: presenceRead.record.pid,
+          onExit: presenceRead.record.onExit,
+          // In Background and None the stop rule cannot hold whatever the
+          // desktop is doing (`evaluateStopRule`), so probing it could not
+          // change a decision: not looked at, and said so. A switch to a
+          // stopping mode is read on the next tick, which probes.
+          liveness:
+            mode === "background" || mode === "none"
+              ? "indeterminate"
+              : await probeLiveness(presenceRead.record),
+          observedAt: input.nowIso(),
+        };
+        break;
     }
     return {
-      mode: effectiveModeOf(policyRead),
+      mode,
       rev: policyRead.kind === "valid" ? policyRead.record.rev : null,
       presence,
     };
@@ -578,6 +708,12 @@ function describeClearedCondition(
     return "mode-changed";
   }
   if (state.lastPresence?.onExit !== "stop") return "verdict-changed";
-  if (observation.presence?.liveness === "alive") return "desktop-alive";
+  if (
+    observation.presence !== null &&
+    observation.presence !== "indeterminate" &&
+    observation.presence.liveness === "alive"
+  ) {
+    return "desktop-alive";
+  }
   return "presence-changed";
 }

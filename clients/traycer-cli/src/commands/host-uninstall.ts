@@ -30,6 +30,8 @@ import {
   type UpdateMutationCapability,
 } from "@traycer-clients/shared/host-update";
 import { readHostPidMetadata } from "../host/pid-metadata";
+import { refuseDesktopDisruptionOfForegroundRun } from "../host/foreground-host-run";
+import type { HostStartOrigin } from "../host/lifecycle-origin";
 import {
   getPublishedProcessIdentityVerdict,
   type PublishedProcessIdentityVerdict,
@@ -55,6 +57,16 @@ import {
 // is never removed - there is no destructive "purge" path.
 export interface HostUninstallArgs {
   readonly all: boolean;
+}
+
+/** The command's own arguments: who asked, beside what to remove. */
+export interface HostUninstallCommandArgs extends HostUninstallArgs {
+  /**
+   * `--lifecycle-origin`. `desktop` refuses `--all` over a host a person
+   * started in a terminal (`refuseDesktopDisruptionOfForegroundRun`); a
+   * terminal's `--all` stops that host as it always has.
+   */
+  readonly lifecycleOrigin: HostStartOrigin;
 }
 
 export interface RuntimePurgeStopController {
@@ -156,7 +168,9 @@ export async function stopServiceBeforeRuntimePurge(
   }
 }
 
-export function buildHostUninstallCommand(args: HostUninstallArgs): CommandFn {
+export function buildHostUninstallCommand(
+  args: HostUninstallCommandArgs,
+): CommandFn {
   return async (ctx): Promise<CommandResult> => {
     ctx.runtime.logger.info("Host uninstall command started", {
       environment: ctx.runtime.environment,
@@ -170,8 +184,19 @@ export function buildHostUninstallCommand(args: HostUninstallArgs): CommandFn {
         pollIntervalMs: 100,
         admission: "host-uninstall-maintenance",
       },
-      (capability) =>
-        runHostUninstallWithAttempt(
+      async (capability) => {
+        // First under the lock, before the deregister, the stop and its
+        // intent, and the byte removal: the desktop's Remove Traycer leaves a
+        // host a person started in a terminal running and changes nothing.
+        // The bare form never stops a host, so only `--all` asks.
+        if (args.all) {
+          await refuseDesktopDisruptionOfForegroundRun(
+            "host uninstall",
+            ctx.runtime.environment,
+            args.lifecycleOrigin,
+          );
+        }
+        return runHostUninstallWithAttempt(
           args,
           {
             environment: ctx.runtime.environment,
@@ -192,7 +217,8 @@ export function buildHostUninstallCommand(args: HostUninstallArgs): CommandFn {
             probeProcessExited: getPublishedProcessIdentityVerdict,
           },
           capability,
-        ),
+        );
+      },
     );
   };
 }
@@ -315,7 +341,8 @@ async function runHostUninstallWithActuators(
     // failed/crashed exit and launchd respawns the host before we
     // ever reach `uninstall`. Deregistering first removes that
     // supervision so no exit outcome can trigger a respawn.
-    await actuators.uninstall(controller, { label });
+    // `--all` stops the host itself next, whoever started it.
+    await actuators.uninstall(controller, { label, leaveForegroundRun: null });
     serviceUninstalled = true;
     ctx.logger.info("Host uninstall service deregistered", {
       environment: ctx.environment,

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { HOST_OVERVIEW } from "@/components/settings/panels/host-overview.definitions";
 import { SettingsGroup } from "@/components/settings/settings-group";
@@ -9,6 +9,8 @@ import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-di
 import { useRunnerHost } from "@/providers/use-runner-host";
 import { useDeregisterHostFromAccount } from "@/hooks/auth/use-deregister-host-mutation";
 import { useRunnerUninstallTraycer } from "@/hooks/runner/use-runner-uninstall-traycer-mutation";
+import { useLocalHostForegroundRun } from "@/hooks/host/use-local-host-foreground-run";
+import { HOST_FOREGROUND_REMOVE_TRAYCER_REASON } from "@/lib/host/host-lifecycle-copy";
 import { requestAppQuit } from "@/lib/desktop-app-lifecycle";
 import type { HostScope } from "@/components/settings/host-scope/use-host-scope";
 import type { HostScopeOption } from "@/components/settings/host-scope/host-scope-model";
@@ -201,18 +203,39 @@ function RemoveTraycerRow(): ReactNode {
   const { hostManagement } = useRunnerHost();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const uninstall = useRunnerUninstallTraycer();
+  // THIS machine's host was started in a terminal: removing Traycer would stop
+  // a run this app did not start, and the CLI refuses it. Withheld with the
+  // reason on every control that removes - the row's button, its confirm (a
+  // run that began under an open dialog) and the incomplete state's retry.
+  const blockedReason = useLocalHostForegroundRun()
+    ? HOST_FOREGROUND_REMOVE_TRAYCER_REASON
+    : null;
+  const reasonId = useId();
   if (hostManagement === null) return null;
+  const reasonHint =
+    blockedReason === null ? undefined : (
+      <span id={reasonId}>{blockedReason}</span>
+    );
 
-  if (uninstall.isSuccess) {
-    if (uninstall.data.serviceRegistrationRetained === true) {
+  // Only a removal that RAN switches the row. A `declined` one removed
+  // nothing, so the row stays on Remove Traycer and the hook's notice says why.
+  const removed =
+    uninstall.isSuccess && uninstall.data.kind === "removed"
+      ? uninstall.data
+      : null;
+  if (removed !== null) {
+    if (removed.serviceRegistrationRetained === true) {
       return (
         <SettingsRow
           row={HOST_OVERVIEW.definitions.removalIncomplete}
+          hint={reasonHint}
           control={
             <Button
               type="button"
               variant="destructive"
               size="sm"
+              disabled={blockedReason !== null}
+              aria-describedby={blockedReason === null ? undefined : reasonId}
               data-testid="settings-retry-uninstall"
               onClick={() => uninstall.mutate()}
             >
@@ -222,7 +245,7 @@ function RemoveTraycerRow(): ReactNode {
         />
       );
     }
-    if (uninstall.data.serviceRegistrationRetained === null) {
+    if (removed.serviceRegistrationRetained === null) {
       return (
         <SettingsRow
           row={HOST_OVERVIEW.definitions.removalUnverified}
@@ -256,12 +279,14 @@ function RemoveTraycerRow(): ReactNode {
     <>
       <SettingsRow
         row={HOST_OVERVIEW.definitions.removeTraycer}
+        hint={reasonHint}
         control={
           <Button
             type="button"
             variant="destructive"
             size="sm"
-            disabled={uninstall.isPending}
+            disabled={uninstall.isPending || blockedReason !== null}
+            aria-describedby={blockedReason === null ? undefined : reasonId}
             data-testid="settings-remove-traycer"
             onClick={() => setConfirmOpen(true)}
           >
@@ -277,7 +302,7 @@ function RemoveTraycerRow(): ReactNode {
         }
       />
       <ConfirmDestructiveDialog
-        blockedReason={null}
+        blockedReason={blockedReason}
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Remove Traycer from this computer?"

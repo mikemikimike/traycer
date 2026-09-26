@@ -2437,8 +2437,24 @@ describe("RunnerIpcBridge", () => {
       bridge.getUnsyncedEditsSnapshot(),
     );
 
-    expect(windowA.sentMessages).toEqual([]);
-    expect(windowB.sentMessages).toEqual([
+    // Revealing the target window (already-focused windowB) touches the
+    // registry's MRU and can fan a windows-list change out to every window,
+    // windowA included - that fan-out is not what this test is about. What
+    // matters is that windowA never gets pulled into the quit prompt itself.
+    expect(
+      windowA.sentMessages.filter(
+        (message) =>
+          message.channel === RunnerHostEvent.quitRequested ||
+          message.channel === RunnerHostEvent.hostQuitRequest,
+      ),
+    ).toEqual([]);
+    // windowB may also see the same reveal's windows-list fan-out; what
+    // matters is that it got exactly one quitRequested, with this snapshot.
+    expect(
+      windowB.sentMessages.filter(
+        (message) => message.channel === RunnerHostEvent.quitRequested,
+      ),
+    ).toEqual([
       {
         channel: RunnerHostEvent.quitRequested,
         payload: {
@@ -4196,6 +4212,12 @@ describe("RunnerIpcBridge", () => {
         bridge.invoke(RunnerHostInvoke.requestHostRespawn),
       ).resolves.toEqual({ kind: "restarted" });
       expect(bridge.hostController.respawnCalls).toBe(1);
+      // This channel has no `expectedHostId` to build a lane-head guard from,
+      // so it must go through the controller's unguarded FORCE path, not the
+      // idle-gated one.
+      expect(bridge.hostController.respawnCallArgs).toEqual([
+        { intent: { kind: "background" }, mode: "force" },
+      ]);
       bridge.dispose();
     });
 

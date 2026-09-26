@@ -1,4 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { rmSync } from "node:fs";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 import type { RuntimeContext } from "../../runner/runtime";
 import { noopLogger } from "../../logger";
 
@@ -6,6 +17,26 @@ import { noopLogger } from "../../logger";
 // host is already installed + registered + running, and the three
 // mutating branches (full install, service-only register, start) keyed
 // off the current install record + service status.
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `ensureHost` runs the REAL `provisionHost`, whose update-attempt segment
+// takes its lock and reads its attempt record under `hostHomeDir()`, and
+// `store/paths` binds `homedir()` at module load. Without this every row
+// took (and read) this machine's REAL `~/.traycer/host` lock. The dir is made
+// inside the `node:os` factory, so it exists before the first module that
+// asks for `homedir()` is evaluated.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = mkdtempSync(
+      join(actual.tmpdir(), "traycer-ensure-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
 
 const mocks = vi.hoisted(() => ({
   callOrder: [] as string[],
@@ -24,6 +55,8 @@ const mocks = vi.hoisted(() => ({
   assertHostNotBusyMock: vi.fn(),
   gateStoreFormatFloorMock: vi.fn(),
   isVersionYankedMock: vi.fn(),
+  publishHostStartAdoptionMock: vi.fn(),
+  readServiceRegistrationDisabledMock: vi.fn(),
 }));
 
 vi.mock("../../installer", () => ({
@@ -116,16 +149,38 @@ vi.mock("../busy-check", () => ({
   assertHostNotBusy: mocks.assertHostNotBusyMock,
 }));
 
+// P4: real exports (the message constant, the error builder) plus a `vi.fn`
+// for the read, defaulted to "not-disabled" in `beforeEach` below so every
+// OTHER row in this file - none of which cares about this gate - keeps
+// exercising `runStart`'s escalation exactly as before this mock existed.
+vi.mock("../../service/registration-disabled", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../service/registration-disabled")
+    >();
+  return {
+    ...actual,
+    readServiceRegistrationDisabled: (
+      ...callArgs: Parameters<typeof mocks.readServiceRegistrationDisabledMock>
+    ) => mocks.readServiceRegistrationDisabledMock(...callArgs),
+  };
+});
+
 // The real `publishHostStartAdoption` waits (up to 30s) for a service-
 // manager child to ack a spawn that never happens under a stubbed
 // controller. This suite pins `ensureHost`'s orchestration, not the
 // adoption handshake (that's `host-start-adoption.test.ts`), so replace it
 // with an immediately-satisfied lease.
 vi.mock("../host-start-adoption", () => ({
-  publishHostStartAdoption: async () => ({
-    waitForSpawn: async () => undefined,
-    cancel: async () => undefined,
-  }),
+  publishHostStartAdoption: (
+    ...callArgs: Parameters<typeof mocks.publishHostStartAdoptionMock>
+  ) => {
+    mocks.publishHostStartAdoptionMock(...callArgs);
+    return Promise.resolve({
+      waitForSpawn: async () => undefined,
+      cancel: async () => undefined,
+    });
+  },
 }));
 
 const {
@@ -142,12 +197,25 @@ const {
   withCliLockMock,
   assertHostNotBusyMock,
   isVersionYankedMock,
+  publishHostStartAdoptionMock,
+  readServiceRegistrationDisabledMock,
 } = mocks;
 
 import { ensureHost, type EnsureHostOptions } from "../ensure";
 import { config } from "../../config";
 import { cliError, CLI_ERROR_CODES } from "../../runner/errors";
 import type { ServiceController } from "../../service";
+import { hostHomeDir } from "../../store/paths";
+import { atServiceSpawnEdge } from "../../service/spawn-edge";
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 function makeRuntime(): RuntimeContext {
   return {
@@ -303,6 +371,9 @@ beforeEach(() => {
     acceptStoreFormatLoss: false,
     site: "host ensure",
   });
+  readServiceRegistrationDisabledMock.mockResolvedValue({
+    kind: "not-disabled",
+  });
 });
 
 afterEach(() => {
@@ -365,6 +436,42 @@ describe("ensureHost", () => {
       postSwapAction: "start",
       postSwapError: null,
     });
+  });
+
+  // T2: every existing fixture in this file passes `lifecycleOrigin:
+  // "terminal"` (the default in `makeOpts`), so nothing here pins that the
+  // desktop's own origin actually reaches the published host-start adoption
+  // proof. `host ensure` is desktop's post-auth provisioning call, so a
+  // caller passing `lifecycleOrigin: "desktop"` is the routine case, not an
+  // edge one.
+  it("threads lifecycleOrigin: desktop through to the published host-start adoption proof", async () => {
+    readHostInstallRecordMock.mockResolvedValue({
+      installId: "install-1.5.0",
+      version: "1.5.0",
+      runtimeVersion: null,
+      installedAt: "2026-01-01T00:00:00.000Z",
+      archiveSha256: "a".repeat(64),
+    });
+    const controller = makeController("stopped");
+    // `makeController`'s plain `start` never reaches `atServiceSpawnEdge()`
+    // (same convention as every other fixture in this file, and in
+    // `provision-supervisor-relaunch.test.ts`), so the armed publish hook
+    // never fires and the mocked `publishHostStartAdoption` is never called.
+    // This case is specifically about what reaches that publish call, so its
+    // `start` must reach the real spawn edge - wrapping (not replacing) the
+    // original keeps the same closure's mutable `current` state in sync.
+    const originalStart = controller.start;
+    controller.start = vi.fn(async (label) => {
+      await atServiceSpawnEdge();
+      return originalStart(label);
+    });
+    createServiceControllerMock.mockReturnValue(controller);
+
+    const result = await ensureHost(makeOpts({ lifecycleOrigin: "desktop" }));
+
+    expect(result.action).toBe("started");
+    expect(publishHostStartAdoptionMock).toHaveBeenCalledTimes(1);
+    expect(publishHostStartAdoptionMock.mock.calls[0]?.[3]).toBe("desktop");
   });
 
   it("escalate-once: install's own recovery run is accepted without a duplicate IgnoreNew start", async () => {
@@ -814,5 +921,273 @@ describe("ensureHost", () => {
     expect(stageHostInstallSourceMock).toHaveBeenCalledTimes(1);
     expect(commitHostInstallSourceMock).not.toHaveBeenCalled();
     expect(discardStagedHostInstallSourceMock).toHaveBeenCalledTimes(1);
+  });
+
+  // R2 (F18 sibling): `readProvisionState` (provision.ts ~:1682-1696) reads a
+  // `controller.status` REJECTION as "not registered" - the same shape
+  // `statusService` (windows.ts) confuses "access denied" and "timeout" with
+  // "no such task" for (R1). Reading a failed probe as unregistered sends
+  // `ensureHost` down the service-register branch even for a host that is
+  // fully installed and registered - `installHostServiceWithAttempt` ->
+  // `controller.install`, which on Windows is `/Create /F` over the EXISTING
+  // task: it drops the user's disabled/customised settings for a task that
+  // was never actually missing.
+  describe("R2: a status probe failure must not be read as 'not registered'", () => {
+    function accessDeniedStatusError(): Promise<never> {
+      return import("../../service/process-runner").then(
+        ({ ProcessRunError }) => {
+          throw new ProcessRunError(
+            "schtasks /Query /TN ai.traycer.host exited with code 1: ERROR: Access is denied.",
+            "schtasks",
+            ["/Query", "/TN", "ai.traycer.host"],
+            1,
+            "",
+            "ERROR: Access is denied.\r\n",
+          );
+        },
+      );
+    }
+
+    function timeoutStatusError(): Promise<never> {
+      return import("../../service/process-runner").then(
+        ({ ProcessTimeoutError }) => {
+          throw new ProcessTimeoutError(
+            "schtasks /Query /TN ai.traycer.host timed out after 15000ms (killed via SIGTERM)",
+            "schtasks",
+            ["/Query", "/TN", "ai.traycer.host"],
+            -1,
+            "",
+            "",
+            15_000,
+          );
+        },
+      );
+    }
+
+    function spyLogger(): {
+      readonly logger: RuntimeContext["logger"];
+      readonly info: Mock;
+    } {
+      const info = vi.fn();
+      return {
+        logger: { debug: vi.fn(), info, warn: vi.fn(), error: vi.fn() },
+        info,
+      };
+    }
+
+    it("(i) install record at the requested version + an access-denied status rejection: starts the registered service instead of re-registering it", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = makeController("stopped");
+      controller.status = vi.fn(accessDeniedStatusError);
+      createServiceControllerMock.mockReturnValue(controller);
+      const { logger, info } = spyLogger();
+
+      const result = await ensureHost(
+        makeOpts({ runtime: { ...makeRuntime(), logger } }),
+      );
+
+      expect(controller.start).toHaveBeenCalledTimes(1);
+      expect(controller.install).not.toHaveBeenCalled();
+      expect(result.action).toBe("started");
+      // `info` also carries unrelated lines this flow logs regardless (e.g.
+      // "Host provisioning started" at the top of `provisionHost`), so count
+      // THIS message specifically rather than every `info` call.
+      const statusUnreadableLines = info.mock.calls.filter(
+        (call) =>
+          call[0] ===
+          "Host provisioning could not read the service status; starting the registered service instead of re-registering it",
+      );
+      expect(statusUnreadableLines).toHaveLength(1);
+    });
+
+    it("(ii) the same, with a timeout-shaped status rejection: starts the registered service instead of re-registering it", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = makeController("stopped");
+      controller.status = vi.fn(timeoutStatusError);
+      createServiceControllerMock.mockReturnValue(controller);
+      const { logger, info } = spyLogger();
+
+      const result = await ensureHost(
+        makeOpts({ runtime: { ...makeRuntime(), logger } }),
+      );
+
+      expect(controller.start).toHaveBeenCalledTimes(1);
+      expect(controller.install).not.toHaveBeenCalled();
+      expect(result.action).toBe("started");
+      const statusUnreadableLines = info.mock.calls.filter(
+        (call) =>
+          call[0] ===
+          "Host provisioning could not read the service status; starting the registered service instead of re-registering it",
+      );
+      expect(statusUnreadableLines).toHaveLength(1);
+    });
+
+    it("(iii) control: a genuinely missing task (status resolves 'not-installed') DOES register the service - same fixture as the pinned 'registers the service when installed but not registered' row above", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = makeController("not-installed");
+      createServiceControllerMock.mockReturnValue(controller);
+
+      const result = await ensureHost(makeOpts({}));
+
+      expect(result.action).toBe("service-registered");
+      expect(controller.install).toHaveBeenCalledTimes(1);
+    });
+
+    it("(iv) evidence path: the probe rejects AND the start itself fails - the escalation re-registers on THAT evidence, exactly once, after the failed start", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = makeController("stopped");
+      controller.status = vi.fn(accessDeniedStatusError);
+      controller.start = vi.fn(async () => {
+        throw new Error("start failed: the registered task could not be run");
+      });
+      createServiceControllerMock.mockReturnValue(controller);
+
+      const result = await ensureHost(makeOpts({}));
+
+      expect(controller.start).toHaveBeenCalledTimes(1);
+      expect(controller.install).toHaveBeenCalledTimes(1);
+      const startOrder = vi.mocked(controller.start).mock
+        .invocationCallOrder[0];
+      const installOrder = vi.mocked(controller.install).mock
+        .invocationCallOrder[0];
+      if (startOrder === undefined || installOrder === undefined) {
+        throw new Error("unreachable: both mocks must have been called");
+      }
+      expect(startOrder).toBeLessThan(installOrder);
+      // `runStart`'s escalation retries `start` again only when the REWRITE
+      // itself failed with SERVICE_CONTROL_FAILED (Windows' `/Run` launch
+      // verification). This fixture's `install` succeeds cleanly - the fake
+      // controller's own registration IS the recovery launch, per
+      // `runStart`'s comment - so no second `start` call follows it.
+      expect(controller.start).toHaveBeenCalledTimes(1);
+      expect(result.action).toBe("started");
+    });
+  });
+
+  describe("P4: a user-disabled Scheduled Task must not be silently re-registered", () => {
+    function stoppedControllerWithFailingStart(): ServiceController {
+      const controller = makeController("stopped");
+      controller.status = vi.fn(async () => ({
+        state: "stopped" as const,
+        version: null,
+        listenUrl: null,
+        pid: null,
+      }));
+      // The exact shape `runTaskAndVerifyStart` (windows.ts) throws when
+      // `/Run` fails - the trigger `runStart`'s `catch (firstError)` reads
+      // `readServiceRegistrationDisabled` over, mocked separately per row.
+      controller.start = vi.fn(async () => {
+        throw cliError({
+          code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+          message:
+            "schtasks /Run failed for ai.traycer.host: schtasks /Run /TN ai.traycer.host exited with code 1: ERROR: The attempted operation is not supported for a task that is disabled.",
+          details: {
+            task: "ai.traycer.host",
+            cause:
+              "schtasks /Run /TN ai.traycer.host exited with code 1: ERROR: The attempted operation is not supported for a task that is disabled.",
+            registrationCommitted: true,
+          },
+          exitCode: 1,
+        });
+      });
+      return controller;
+    }
+
+    it("(p1) disabled: rejects with E_SERVICE_REGISTRATION_DISABLED and never calls install", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = stoppedControllerWithFailingStart();
+      createServiceControllerMock.mockReturnValue(controller);
+      readServiceRegistrationDisabledMock.mockResolvedValue({
+        kind: "disabled",
+      });
+
+      await expect(ensureHost(makeOpts({}))).rejects.toMatchObject({
+        code: CLI_ERROR_CODES.SERVICE_REGISTRATION_DISABLED,
+        message:
+          "the Traycer Host task is disabled in Task Scheduler; enable it or run `traycer host service install`",
+      });
+      expect(controller.start).toHaveBeenCalledTimes(1);
+      expect(controller.install).not.toHaveBeenCalled();
+      expect(readServiceRegistrationDisabledMock).toHaveBeenCalledWith(
+        {
+          id: "ai.traycer.host",
+          displayName: "Traycer Host",
+          environment: "production",
+          devSlot: null,
+        },
+        process.platform,
+      );
+    });
+
+    it("(p2) unknown: the escalation runs as before (install is still called once)", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = stoppedControllerWithFailingStart();
+      createServiceControllerMock.mockReturnValue(controller);
+      readServiceRegistrationDisabledMock.mockResolvedValue({
+        kind: "unknown",
+        reason: "schtasks /Query could not run (ETIMEDOUT)",
+      });
+
+      const result = await ensureHost(makeOpts({}));
+
+      expect(controller.install).toHaveBeenCalledTimes(1);
+      expect(result.action).toBe("started");
+    });
+
+    it("(p3) not-disabled: the escalation runs as before (install is still called once)", async () => {
+      readHostInstallRecordMock.mockResolvedValue({
+        installId: "install-1.5.0",
+        version: "1.5.0",
+        runtimeVersion: null,
+        installedAt: "2026-01-01T00:00:00.000Z",
+        archiveSha256: "a".repeat(64),
+      });
+      const controller = stoppedControllerWithFailingStart();
+      createServiceControllerMock.mockReturnValue(controller);
+      readServiceRegistrationDisabledMock.mockResolvedValue({
+        kind: "not-disabled",
+      });
+
+      const result = await ensureHost(makeOpts({}));
+
+      expect(controller.install).toHaveBeenCalledTimes(1);
+      expect(result.action).toBe("started");
+    });
   });
 });

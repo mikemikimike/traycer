@@ -201,6 +201,17 @@ describe("verifyProcessIdentity (sync): Windows denied-read fallback", () => {
     expect(verifyProcessIdentity(tokenFor(RECORDED_TOKEN))).toBe("alive-same");
   });
 
+  it("exact read denied, WMI creation 1 microsecond earlier -> alive-same", () => {
+    scenario = {
+      pid: TEST_PID,
+      livenessAlive: true,
+      exactRead: "denied",
+      fallback: { deniedDmtf: "20260102030405.123455+000" },
+    };
+
+    expect(verifyProcessIdentity(tokenFor(RECORDED_TOKEN))).toBe("alive-same");
+  });
+
   it("exact read denied, WMI creation 2 microseconds later -> alive-different", () => {
     scenario = {
       pid: TEST_PID,

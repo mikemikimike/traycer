@@ -201,6 +201,32 @@ describe("ownProcessStartIdentity (sync)", () => {
   });
 });
 
+// F27 (shared half): a FAILED sync probe must not suppress the very next
+// async read. Only an ASYNC failure should open the
+// `OWN_START_IDENTITY_RETRY_MS` window; today the sync failure's
+// `ownStartIdentityFailedAtMs` is the same field the async path consults, so
+// a supervisor whose lock acquisition's sync probe timed out gets `null`
+// back from the async read too, immediately, with no probe at all.
+describe("F27: a sync failure must not suppress the immediately-following async read", () => {
+  it("probes async right after a failed sync read, instead of answering from the sync failure's memory", async () => {
+    const mod = await loadFreshModule();
+    const syncReader = vi.fn((_pid: number): string | null => null);
+    mod.__setProcessStartIdentityReaderForTest(syncReader);
+
+    expect(mod.ownProcessStartIdentity()).toBeNull();
+    expect(syncReader).toHaveBeenCalledTimes(1);
+
+    const asyncReader = vi.fn(async (_pid: number) => "linux:boot-a 9999");
+    mod.__setAsyncProcessStartIdentityReaderForTest(asyncReader);
+
+    await expect(mod.ownProcessStartIdentityAsync()).resolves.toBe(
+      "linux:boot-a 9999",
+    );
+    expect(asyncReader).toHaveBeenCalledTimes(1);
+    expect(mod.ownProcessStartIdentity()).toBe("linux:boot-a 9999");
+  });
+});
+
 // S6: on win32, this process's OWN async probe gets three times the room a
 // probe of any other pid gets (see `OWN_WINDOWS_START_IDENTITY_TIMEOUT_MS`'s
 // comment in `process-identity.ts` for the measured BelowNormal-priority

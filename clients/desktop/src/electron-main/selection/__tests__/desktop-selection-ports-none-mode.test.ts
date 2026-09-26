@@ -104,6 +104,7 @@ import {
   DESKTOP_LOCK_POLL_INTERVAL_MS,
   DESKTOP_LOCK_WAIT_MS,
   HostController,
+  type HostControllerSupervisorRun,
 } from "../../host/host-controller";
 import { __resetHostRemovalStateForTest } from "../../host/host-removal-state";
 import { setAppliedLocalHostCapability } from "../../host/local-host-capability";
@@ -324,6 +325,14 @@ describe("createDesktopLocalHostEnsurePort in none mode", () => {
 });
 
 describe("createDesktopLocalHostEnsurePort against a quiesced real controller", () => {
+  const NO_SUPERVISOR_RUN: HostControllerSupervisorRun = {
+    readSupervisorRun: async () => ({
+      state: "not-running",
+      supervisorPid: null,
+      admittedAs: null,
+    }),
+  };
+
   function newRealController(): HostController {
     return new HostController({
       environment: "production",
@@ -335,6 +344,7 @@ describe("createDesktopLocalHostEnsurePort against a quiesced real controller", 
       reachabilityProbe: async () => false,
       desktopLockWaitMs: DESKTOP_LOCK_WAIT_MS,
       desktopLockPollIntervalMs: DESKTOP_LOCK_POLL_INTERVAL_MS,
+      supervisorRun: NO_SUPERVISOR_RUN,
     });
   }
 

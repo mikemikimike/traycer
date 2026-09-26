@@ -1,7 +1,16 @@
+import { rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { withUpdateContender } from "@traycer-clients/shared/host-update";
 import type { ProcessStartIdentity } from "@traycer/protocol/host/lifecycle";
 import type { SupervisorRecord } from "@traycer/protocol/config/supervisor-record";
@@ -24,6 +33,25 @@ const homeRef = vi.hoisted(() => ({ current: "" }));
 vi.mock("../../store/paths", () => ({
   hostHomeDir: () => homeRef.current,
 }));
+
+// The `store/paths` mock above covers only paths built through that module
+// (and any other of its helpers throws, being undefined). Paths the protocol
+// and shared packages build from `os.homedir()` themselves are not covered,
+// and the timed-out escalation's service restart reaches further into them
+// than a start does. So `homedir()` is redirected too: nothing this suite
+// runs can resolve this machine's REAL `~/.traycer`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = mkdtempSync(
+      joinPath(actual.tmpdir(), "traycer-provision-relaunch-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
 
 const incumbentRef = vi.hoisted(() => ({
   // `null` = no incumbent host answering; anything else = found.
@@ -87,6 +115,15 @@ import { CLI_ERROR_CODES } from "../../runner/errors";
 import type { HostInstallRecord } from "@traycer/protocol/config/installation-records";
 import type { SupervisorRelaunchWaitDeps } from "../service-supervisor-relaunch";
 
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(homedir()).toBe(osHome.current);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
+
 const roots: string[] = [];
 
 async function freshHome(): Promise<string> {
@@ -133,6 +170,8 @@ function sampleSupervisorRecord(pid: number): SupervisorRecord {
     cliVersion: "1.0.0",
     capabilities: [],
     startedAt: new Date().toISOString(),
+    startIdentity: null,
+    admittedAs: null,
   };
 }
 
@@ -166,8 +205,22 @@ async function removeSupervisor(pid: number): Promise<void> {
 }
 
 /** installed + registered + NOT running - the branch `runStart` handles. */
+/** The fake service controller `stoppedController` returns - typed, so a
+ * row can wrap it (`...base`, `base.status`). */
+interface StoppedController {
+  readonly status: (label: { id: string }) => Promise<{
+    readonly state: "stopped";
+    readonly version: string;
+    readonly listenUrl: null;
+    readonly pid: null;
+  }>;
+  readonly install: () => Promise<void>;
+  readonly start: () => Promise<void>;
+  readonly hostStartAdoptionLabel: (label: { id: string }) => Promise<string>;
+}
+
 function stoppedController(): {
-  readonly controller: unknown;
+  readonly controller: StoppedController;
   readonly calls: Record<string, number>;
 } {
   const calls: Record<string, number> = { install: 0, start: 0, status: 0 };
@@ -315,39 +368,76 @@ describe("provisionHost - the start branch, with a live service supervisor", () 
     expect(result.action).toBe("noop");
   });
 
-  it("(3c) rejects with E_SERVICE_SUPERVISOR_RELAUNCHING when the wait times out, with nothing started", async () => {
+  // F28: this row used to pin a timed-out wait REJECTING as "relaunching"
+  // with nothing started - the defect itself: "relaunching" was only ever
+  // inferred from the supervisor's liveness, and the wait had just disproved
+  // it, so the host stayed down behind a wedged supervisor. A timed-out wait
+  // now escalates ((3h) pins the restart). This is that escalation's other
+  // branch: the stalled supervisor is gone by its locked re-read, so there is
+  // nothing to restart and the ordinary start runs instead.
+  it("(3c) a timed-out wait escalates, and takes the ordinary start when the stalled supervisor is gone by the locked re-read", async () => {
     const hostHomeDir = await freshHome();
     homeRef.current = hostHomeDir;
     mocks.readHostInstallRecordMock.mockResolvedValue(
       sampleInstallRecord("2.0.0"),
     );
     mocks.serviceLabelForMock.mockReturnValue(testLabel());
-    const { controller, calls } = stoppedController();
+    const { controller: base, calls } = stoppedController();
+    const WAIT_MS = 100;
+    const clock = { value: 0 };
+    let restartCalls = 0;
+    let removed = false;
+    const controller = {
+      ...base,
+      // The first status read past the deadline is the escalation's locked
+      // re-read: the wedged supervisor exits just before it.
+      status: async (label: { id: string }) => {
+        if (clock.value >= WAIT_MS && !removed) {
+          removed = true;
+          await removeSupervisor(process.pid);
+        }
+        return base.status(label);
+      },
+      restart: async () => {
+        restartCalls += 1;
+      },
+    };
     mocks.createServiceControllerMock.mockReturnValue(controller);
     await writeLiveSupervisor(process.pid);
-    // The host never comes up, and the supervisor never goes away - the
-    // only way out of the wait is the deadline.
+    // The host never comes up, and the supervisor outlives the whole wait -
+    // the only way out of the wait is the deadline.
     incumbentRef.current = null;
-    const clock = { value: 0 };
+    const warnings: string[] = [];
 
-    await expect(
-      provisionHost(
-        makeOpts({
-          supervisorRelaunchWait: {
-            now: () => clock.value,
-            sleep: async (ms) => {
-              clock.value += ms;
+    const result = await provisionHost(
+      makeOpts({
+        runtime: {
+          ...makeRuntime(),
+          logger: {
+            ...noopLogger,
+            warn: (message) => {
+              warnings.push(message);
             },
-            waitMs: 100,
-            pollIntervalMs: 40,
           },
-        }),
-      ),
-    ).rejects.toMatchObject({
-      code: CLI_ERROR_CODES.SERVICE_SUPERVISOR_RELAUNCHING,
-    });
+        },
+        supervisorRelaunchWait: {
+          now: () => clock.value,
+          sleep: async (ms) => {
+            clock.value += ms;
+          },
+          waitMs: WAIT_MS,
+          pollIntervalMs: 40,
+        },
+      }),
+    );
 
-    expect(calls.start).toBe(0);
+    expect(warnings).toContain(
+      "Host provisioning waited out the service supervisor's relaunch with no host; restarting the service",
+    );
+    expect(removed).toBe(true);
+    expect(result.action).toBe("started");
+    expect(calls.start).toBe(1);
+    expect(restartCalls).toBe(0);
     expect(calls.install).toBe(0);
   });
 
@@ -388,7 +478,17 @@ describe("provisionHost - the start branch, with a live service supervisor", () 
       sampleInstallRecord("2.0.0"),
     );
     mocks.serviceLabelForMock.mockReturnValue(testLabel());
-    const { controller, calls } = stoppedController();
+    const { controller: base, calls } = stoppedController();
+    let restartCalls = 0;
+    // The wait below times out, and a timed-out wait now escalates to a
+    // service restart ((3h)) - the rejection this row once awaited was F28's
+    // defect, not what it pins. What it pins is the probe inside the wait.
+    const controller = {
+      ...base,
+      restart: async () => {
+        restartCalls += 1;
+      },
+    };
     mocks.createServiceControllerMock.mockReturnValue(controller);
     await writeLiveSupervisor(process.pid);
     incumbentRef.current = null;
@@ -429,11 +529,10 @@ describe("provisionHost - the start branch, with a live service supervisor", () 
           },
         }),
       ),
-    ).rejects.toMatchObject({
-      code: CLI_ERROR_CODES.SERVICE_SUPERVISOR_RELAUNCHING,
-    });
+    ).resolves.toMatchObject({ action: "started" });
 
     expect(probedOutcomeKind).toBe("ran");
+    expect(restartCalls).toBe(1);
     expect(calls.start).toBe(0);
   });
 
@@ -548,6 +647,59 @@ describe("provisionHost - the start branch, with a live service supervisor", () 
     // records gone on the recheck immediately after); the third relaunching
     // outcome hit the bound and threw without waiting a third time.
     expect(sleepCalls).toBe(2);
+    expect(calls.start).toBe(0);
+    expect(calls.install).toBe(0);
+  });
+
+  // F28: a live supervisor whose child never comes back must not be waited
+  // out a second time and left to throw. After the FIRST timed-out wait,
+  // `provisionHost` must escalate by recycling the wedged supervisor through
+  // a service restart, and resolve - not throw, and not wait a second time.
+  it("(3h) escalates to a service restart after one timed-out relaunch wait, and resolves instead of throwing", async () => {
+    const hostHomeDir = await freshHome();
+    homeRef.current = hostHomeDir;
+    mocks.readHostInstallRecordMock.mockResolvedValue(
+      sampleInstallRecord("2.0.0"),
+    );
+    mocks.serviceLabelForMock.mockReturnValue(testLabel());
+    const { controller: base, calls } = stoppedController();
+    let restartCalls = 0;
+    const controller = {
+      ...base,
+      restart: async () => {
+        restartCalls += 1;
+        // Deliberately never calls `atServiceSpawnEdge()` - same convention
+        // as `stoppedController().start` above and every fake controller in
+        // `update-mutation-supervisor-relaunch.test.ts`: a call that never
+        // reaches an edge publishes nothing and waits for nothing.
+      },
+    };
+    mocks.createServiceControllerMock.mockReturnValue(controller);
+    await writeLiveSupervisor(process.pid);
+    // The host never comes back, and the supervisor never goes away (this
+    // fake `restart` does not touch the supervisor records) - the only way
+    // out of the wait is the deadline, exactly once.
+    incumbentRef.current = null;
+    const clock = { value: 0 };
+    let sleepCalls = 0;
+
+    const result = await provisionHost(
+      makeOpts({
+        supervisorRelaunchWait: {
+          now: () => clock.value,
+          sleep: async (ms) => {
+            sleepCalls += 1;
+            clock.value += ms;
+          },
+          waitMs: 10,
+          pollIntervalMs: 10,
+        },
+      }),
+    );
+
+    expect(result).toBeDefined();
+    expect(restartCalls).toBe(1);
+    expect(sleepCalls).toBe(1);
     expect(calls.start).toBe(0);
     expect(calls.install).toBe(0);
   });

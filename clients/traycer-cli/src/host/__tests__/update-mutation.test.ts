@@ -1,13 +1,56 @@
+import { rmSync } from "node:fs";
 import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   updateAttemptLockPath,
   updateAttemptRecordPath,
   withUpdateContender,
   type UpdateMutationCapability,
 } from "@traycer-clients/shared/host-update";
+
+// HOME is redirected to a private temp dir BEFORE anything reads it: this
+// file's own `store/paths` mock below only replaces `hostHomeDir` - it is
+// NOT isolation on its own, because `createCliLogger` (through
+// `store/paths.ts`'s `cliLogPath`) and the protocol path helpers still
+// resolve `homedir()` for real. `node:os.homedir()` itself must be
+// redirected first.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-update-mutation-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(async () => {
+  expect(osHome.current).not.toBe("");
+  expect(homedir()).toBe(osHome.current);
+  const paths =
+    await vi.importActual<typeof import("../../store/paths")>(
+      "../../store/paths",
+    );
+  expect(paths.hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+  expect(paths.cliLogPath("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 const homeRef = vi.hoisted(() => ({ current: "" }));
 const commitMock = vi.hoisted(() => ({
@@ -56,6 +99,7 @@ import type {
 import { CLI_ERROR_CODES, cliError } from "../../runner/errors";
 import { ungatedStoreFormatFloorEvidence } from "../store-format-floor";
 import { atServiceSpawnEdge } from "../../service/spawn-edge";
+import { verifyServiceMutationAuthority } from "../../service/mutation-authority";
 
 const roots: string[] = [];
 
@@ -695,6 +739,58 @@ describe("CLI capability-consuming mutation facades", () => {
     expect(outcome).toEqual({ kind: "ran", result: refreshResult });
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith(serviceOptions.label);
+  });
+
+  // T20: `refreshHostServiceDefinitionWithAttempt` runs its refresher
+  // callback INSIDE `withServiceMutationAuthority`'s scope (`update-
+  // mutation.ts:154`) - the pinned test at `:672-698` above only observes
+  // that the refresher ran; this observes the SCOPE itself, from inside the
+  // fake refresher, by calling `verifyServiceMutationAuthority` directly.
+  it("refreshHostServiceDefinitionWithAttempt runs its refresher inside the mutation authority scope: verifyServiceMutationAuthority resolves while live, rejects once the capability is lost", async () => {
+    const hostHomeDir = await freshHome();
+    homeRef.current = hostHomeDir;
+    const observed: { readonly liveResult: unknown; lostRejected: boolean } = {
+      liveResult: undefined,
+      lostRejected: false,
+    };
+    const refresh = vi.fn(async (): Promise<ServiceDefinitionRefresh> => {
+      await verifyServiceMutationAuthority();
+      // The capability is still live here - proven by the call above not
+      // throwing. Now take it away, the same way the file's other rows
+      // steal a live capability (`unlink(updateAttemptLockPath(...))`),
+      // and prove the SAME check now rejects from inside this same scope.
+      await unlink(updateAttemptLockPath(hostHomeDir));
+      try {
+        await verifyServiceMutationAuthority();
+      } catch {
+        observed.lostRejected = true;
+      }
+      return { kind: "current" };
+    });
+
+    const outcome = await withUpdateContender(
+      {
+        hostHomeDir,
+        reason: contenderOptions.reason,
+        waitMs: 0,
+        pollIntervalMs: 10,
+        admission: contenderOptions.admission,
+      },
+      (capability) =>
+        refreshHostServiceDefinitionWithAttempt(
+          capability,
+          contenderOptions,
+          { refresh },
+          serviceOptions.label,
+        ),
+    );
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(observed.lostRejected).toBe(true);
+    // `withServiceMutationAuthority`'s own catch-block re-probe (also now
+    // lost) rejects the whole attempt with the authority error, which
+    // `withUpdateContender` reports as a non-"ran" outcome.
+    expect(outcome.kind).not.toBe("ran");
   });
 
   it("refreshHostServiceDefinitionWithAttempt: a forged capability is rejected before the refresher ever runs", async () => {

@@ -1,6 +1,52 @@
-import { describe, expect, it } from "vitest";
-import { describeServiceDefinitionRefresh } from "../service-refresh";
+import { afterAll, describe, expect, it, vi } from "vitest";
+
+// T20: `refreshServiceDefinitionUnderContender` (this file's other subject
+// under test) resolves the CLI attempt lock's home via `hostHomeDir`, which
+// - unless `WithCliUpdateContenderOptions.hostHomeDir` is passed explicitly,
+// which this command never does - falls back to `store/paths`'s
+// `hostHomeDir(environment)`. That constant is captured from `os.homedir()`
+// at module load, so it must be redirected before any import runs.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = mkdtempSync(
+      join(actual.tmpdir(), "traycer-service-refresh-test-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+// The platform-specific refresher is stubbed so this test exercises only the
+// contender/admission wiring `refreshServiceDefinitionUnderContender` owns,
+// not any real systemd/launchd/schtasks call.
+const refresherMock = vi.hoisted(() => ({
+  refresh: vi.fn(),
+}));
+vi.mock("../../service/definition-refresh", () => ({
+  createServiceDefinitionRefresher: () => ({
+    inspect: async () => {
+      throw new Error("inspect should not be called by the refresh command");
+    },
+    refresh: refresherMock.refresh,
+  }),
+}));
+
+afterAll(async () => {
+  if (osHome.current !== "") {
+    const { rm } = await import("node:fs/promises");
+    await rm(osHome.current, { recursive: true, force: true });
+  }
+});
+
+import {
+  describeServiceDefinitionRefresh,
+  refreshServiceDefinitionUnderContender,
+} from "../service-refresh";
 import type { ServiceDefinitionRefreshOutcome } from "../service-refresh";
+import { serviceLabelFor } from "../../service/label";
 import type { ServiceLabel } from "../../service/label";
 
 // `describeServiceDefinitionRefresh`: the one line `traycer host service
@@ -83,5 +129,36 @@ describe("describeServiceDefinitionRefresh", () => {
       result: { kind: "current" },
     });
     expect(line).toContain("ai.traycer.host.dev.myslot");
+  });
+});
+
+describe("refreshServiceDefinitionUnderContender", () => {
+  it("calls the platform refresher's refresh exactly once, with the environment's own label, and returns its result under the label", async () => {
+    const refreshResult: ServiceDefinitionRefreshOutcome["result"] = {
+      kind: "current",
+    };
+    refresherMock.refresh.mockReset();
+    refresherMock.refresh.mockResolvedValue(refreshResult);
+
+    const outcome = await refreshServiceDefinitionUnderContender("production");
+
+    expect(refresherMock.refresh).toHaveBeenCalledTimes(1);
+    expect(refresherMock.refresh).toHaveBeenCalledWith(
+      serviceLabelFor("production"),
+    );
+    expect(outcome).toEqual({
+      label: serviceLabelFor("production"),
+      result: refreshResult,
+    });
+  });
+
+  it("propagates the platform refresher's own rejection unchanged", async () => {
+    refresherMock.refresh.mockReset();
+    const refreshError = new Error("refresh failed for real");
+    refresherMock.refresh.mockRejectedValue(refreshError);
+
+    await expect(
+      refreshServiceDefinitionUnderContender("production"),
+    ).rejects.toThrow("refresh failed for real");
   });
 });

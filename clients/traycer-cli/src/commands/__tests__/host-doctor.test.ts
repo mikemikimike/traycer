@@ -1,9 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { rmSync } from "node:fs";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { CommandContext } from "../../runner/runner";
 import type { RuntimeContext } from "../../runner/runtime";
 import { noopLogger } from "../../logger";
 import type { DoctorResult } from "../../doctor";
 import type { HostLifecycleSnapshot } from "../../host/lifecycle-snapshot";
+import { hostHomeDir } from "../../store/paths";
 
 // `hostDoctorCommand` (`../host-doctor.ts`) is a thin wrapper: it calls
 // `runDoctor` and renders `DoctorResult` (issues + the lifecycle facts) as
@@ -14,6 +24,31 @@ import type { HostLifecycleSnapshot } from "../../host/lifecycle-snapshot";
 // corrupt - the same way `host-status-observational.test.ts` mocks
 // `readHostLifecycleSnapshot` rather than re-deriving a `DoctorResult` from
 // scratch.
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, so without this the suite
+// would resolve this machine's REAL `~/.traycer`.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync: makeTempDir } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = makeTempDir(
+      joinPath(actual.tmpdir(), "traycer-host-doctor-test-home-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
+
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 const mocks = vi.hoisted(() => ({
   runDoctorMock: vi.fn(),
@@ -135,7 +170,14 @@ describe("hostDoctorCommand human output", () => {
     const result = await hostDoctorCommand(makeCtx());
 
     expect(result.human).toContain("Lifecycle:");
-    expect(result.human).toContain("corrupt");
+    // T18: pins the Lifecycle row's OWN rendered text (lifecycle-snapshot.ts
+    // describePolicy's "invalid" branch), not just the substring "corrupt" -
+    // which the injected issue's title also contains and would satisfy even
+    // if this row stopped naming the policy file corrupt.
+    expect(result.human).toContain("Lifecycle mode");
+    expect(result.human).toContain(
+      "(the policy file is corrupt and reads as background)",
+    );
     // Also surfaced as a top-level issue, not just folded into the facts.
     expect(result.human).toContain("HOST_LIFECYCLE_POLICY_UNREADABLE");
     expect(result.exitCode).toBe(0);

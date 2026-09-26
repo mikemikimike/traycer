@@ -90,6 +90,8 @@ export interface HostApplyArgs {
    * `--lifecycle-origin`, recorded in the adoption proof the post-swap start
    * publishes (`host/lifecycle-origin.ts`). A direct `host apply` carries its
    * caller's origin; only `host update`'s own apply leg is `maintenance`.
+   * `desktop` also refuses to apply over a host started in a terminal
+   * (`ApplyHostOptions.lifecycleOrigin`).
    */
   readonly lifecycleOrigin: HostStartOrigin;
 }

@@ -100,6 +100,8 @@ function sampleSupervisorRecord(pid: number): SupervisorRecord {
     cliVersion: "1.0.0",
     capabilities: [],
     startedAt: new Date().toISOString(),
+    startIdentity: null,
+    admittedAs: null,
   };
 }
 

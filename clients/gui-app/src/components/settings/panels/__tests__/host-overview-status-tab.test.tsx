@@ -512,6 +512,7 @@ describe("<HostOverviewVersionCard/> hides Update now / Check now while in fligh
       degrade: null,
       desktopBridge: null,
       onInstallationHelp: vi.fn(),
+      foregroundUpdateLine: null,
     };
   }
 
@@ -564,6 +565,7 @@ describe("<HostOverviewOperationCard/> force controls are destructive, Restart s
         onRestart={vi.fn()}
         onForceUpdate={null}
         cliFloorBlocked={false}
+        foregroundHeldFinish={null}
         completion={completion}
       />,
     );
@@ -586,6 +588,7 @@ describe("<HostOverviewOperationCard/> force controls are destructive, Restart s
         onRestart={null}
         onForceUpdate={vi.fn()}
         cliFloorBlocked={false}
+        foregroundHeldFinish={null}
         completion={completion}
       />,
     );
@@ -606,6 +609,7 @@ describe("<HostOverviewOperationCard/> force controls are destructive, Restart s
         onRestart={null}
         onForceUpdate={null}
         cliFloorBlocked={false}
+        foregroundHeldFinish={null}
         completion={completion}
       />,
     );
@@ -627,6 +631,7 @@ describe("<HostOverviewOperationCard/> tone", () => {
         onRestart={null}
         onForceUpdate={null}
         cliFloorBlocked={false}
+        foregroundHeldFinish={null}
         completion={completion}
       />,
     );
@@ -726,6 +731,7 @@ describe("<HostUpdateDrainGateRow/> Apply now is destructive, and the row render
         liveBusyBreakdown={null}
         settledBusySessionCount={2}
         settledBusyBreakdown={null}
+        foregroundUpdateLine={null}
       />,
     );
     expect(container.textContent).toBe("");
@@ -740,6 +746,7 @@ describe("<HostUpdateDrainGateRow/> Apply now is destructive, and the row render
         liveBusyBreakdown={null}
         settledBusySessionCount={null}
         settledBusyBreakdown={null}
+        foregroundUpdateLine={null}
       />,
     );
     expect(container.textContent).toBe("");
@@ -754,6 +761,7 @@ describe("<HostUpdateDrainGateRow/> Apply now is destructive, and the row render
         liveBusyBreakdown={null}
         settledBusySessionCount={2}
         settledBusyBreakdown={null}
+        foregroundUpdateLine={null}
       />,
     );
     const row = screen.getByTestId("host-update-drain-gate-host-a");
@@ -1525,6 +1533,7 @@ describe("a refused/failed attempt line shows while an update is in flight, even
           degrade: null,
           desktopBridge: null,
           onInstallationHelp: vi.fn(),
+          foregroundUpdateLine: null,
         }}
         inFlight
         autoUpdate={null}

@@ -93,6 +93,7 @@ const CONTROLLER_STATUS_BASE: HostControllerStatus = {
   localAttempt: null,
   removedByUser: false,
   checkedAt: "2026-08-27T00:00:00.000Z",
+  lastEnsureFailure: null,
 };
 
 function notImplementedManagement(
@@ -118,7 +119,9 @@ function notImplementedManagement(
     registerService: vi.fn(notImplemented("registerService")),
     deregisterService: vi.fn(notImplemented("deregisterService")),
     registryCheck: vi.fn(notImplemented("registryCheck")),
-    freePortAndRestart: vi.fn((input) => Promise.resolve(input)),
+    freePortAndRestart: vi.fn((input) =>
+      Promise.resolve({ kind: "applied" as const, ...input }),
+    ),
     runDoctorRepairQueued: vi.fn(() =>
       Promise.resolve({ kind: "applied" as const }),
     ),

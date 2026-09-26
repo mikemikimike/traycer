@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/node";
 import { errorFromUnknown } from "../logger";
+import { withBoundedWaitProgress } from "./bounded-wait-progress";
 import {
   CLI_ERROR_CODES,
   EXPECTED_CLI_ERROR_CODES,
@@ -85,7 +86,9 @@ export async function runCommand(
   // that exit happens. See `finishAfterProcessFatal` in exit.ts.
   markCommandStarted();
   try {
-    result = await fn(ctx);
+    // The waits deep inside the body report through `ctx.progress` too, so
+    // Desktop's idle timer sees each one begin (bounded-wait-progress.ts).
+    result = await withBoundedWaitProgress(ctx.progress, () => fn(ctx));
   } catch (err) {
     markCommandSettled();
     const cliErr = toCliError(err);

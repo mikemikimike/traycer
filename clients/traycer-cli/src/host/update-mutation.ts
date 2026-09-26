@@ -1,4 +1,7 @@
-import type { UpdateMutationCapability } from "@traycer-clients/shared/host-update";
+import {
+  supervisorRelaunchAdmitsStandingRecord,
+  type UpdateMutationCapability,
+} from "@traycer-clients/shared/host-update";
 import {
   applyHost,
   type ApplyHostOptions,
@@ -9,10 +12,12 @@ import {
   type CommitHostInstallSourceOptions,
   type CommitHostInstallSourceResult,
 } from "../installer/install";
+import { reportBoundedWait } from "../runner/bounded-wait-progress";
 import type { WithCliUpdateContenderOptions } from "./update-contender";
 import {
+  readSupervisorRelaunchInstalledIdentity,
   requireCliUpdateMutationCapability,
-  withCliUpdateContender,
+  withCliLifecycleTeardownSegment,
 } from "./update-contender";
 import {
   LIFECYCLE_TEARDOWN_ADMISSION,
@@ -20,7 +25,11 @@ import {
   LIFECYCLE_TEARDOWN_OPERATION,
   type LifecycleTeardownPlatform,
 } from "./lifecycle-teardown";
-import { readHostPidMetadata } from "./pid-metadata";
+import {
+  publishedHostProcessGone,
+  readHostPidMetadata,
+  readHostPidMetadataEvidence,
+} from "./pid-metadata";
 import {
   forceStopHostProcessReporting,
   removeHostPidMetadataIfUnchanged,
@@ -35,10 +44,19 @@ import {
   verifyServiceMutationAuthority,
   withServiceMutationAuthority,
 } from "../service/mutation-authority";
-import { runWithLeaseAtServiceSpawnEdge } from "../service/spawn-edge";
+import {
+  isUnacknowledgedSpawn,
+  runWithLeaseAtServiceSpawnEdge,
+} from "../service/spawn-edge";
 import { assertHostIdleForStop } from "./busy-check";
 import { publishHostStartAdoption } from "./host-start-adoption";
-import { findLiveServiceSupervisor } from "./service-supervisor-relaunch";
+import { findLiveIncumbentHost } from "./incumbent-check";
+import {
+  defaultSupervisorRelaunchWaitDeps,
+  findLiveServiceSupervisor,
+  MAX_SUPERVISOR_RELAUNCH_WAITS,
+  waitForSupervisorRelaunch,
+} from "./service-supervisor-relaunch";
 import type { HostStartOrigin } from "./lifecycle-origin";
 import type {
   DesktopRegistrationTakeover,
@@ -64,13 +82,17 @@ export async function applyHostWithAttempt(
   capability: UpdateMutationCapability,
   contenderOptions: WithCliUpdateContenderOptions,
   origin: HostStartOrigin,
-  options: Omit<ApplyHostOptions, "verifyMutationCapability">,
+  options: Omit<
+    ApplyHostOptions,
+    "verifyMutationCapability" | "lifecycleOrigin"
+  >,
 ): Promise<ApplyHostOutcome> {
   const verify = (): Promise<void> =>
     requireCliUpdateMutationCapability(capability, contenderOptions);
   await requireCliUpdateMutationCapability(capability, contenderOptions);
   return applyHost({
     ...options,
+    lifecycleOrigin: origin,
     verifyMutationCapability: verify,
     publishHostStartAdoption: (serviceLabel) =>
       publishHostStartAdoption(
@@ -197,6 +219,7 @@ export async function stopHostServiceWithAttempt(
     if (busyGate === "if-idle") {
       await assertHostIdleForStop(label.environment);
     }
+    reportBoundedWait("stopping the host service");
     await controller.stop(label, options);
   });
 }
@@ -255,12 +278,18 @@ export type ServiceStartOutcome =
  * (CRASH-RELAUNCH-ENSURE-RACE). A start after an update or restart stop finds
  * no live supervisor - that stop ended it and it removed its records - and
  * takes the ordinary path.
+ *
+ * A start whose proof no supervisor acknowledged is retried ONCE, when a
+ * positive read says nothing is running (`afterUnacknowledgedStart`).
  */
 export async function startHostServiceWithAttempt(
   capability: UpdateMutationCapability,
   contenderOptions: WithCliUpdateContenderOptions,
   origin: HostStartOrigin,
-  controller: Pick<ServiceController, "start" | "hostStartAdoptionLabel">,
+  controller: Pick<
+    ServiceController,
+    "start" | "status" | "hostStartAdoptionLabel"
+  >,
   label: ServiceLabel,
 ): Promise<ServiceStartOutcome> {
   const supervisor = await findLiveServiceSupervisor(label.environment);
@@ -272,20 +301,179 @@ export async function startHostServiceWithAttempt(
   }
   const verify = (): Promise<void> =>
     requireCliUpdateMutationCapability(capability, contenderOptions);
-  await withServiceMutationAuthority(verify, async () => {
-    await runWithHostStartAdoption(
-      capability,
-      contenderOptions,
-      origin,
-      controller,
-      label,
-      async () => {
-        await requireCliUpdateMutationCapability(capability, contenderOptions);
-        await controller.start(label);
-      },
+  // Each call publishes a fresh proof: `runWithHostStartAdoption` mints a new
+  // nonce at the spawn edge, and the lease cancels its own on the way out.
+  const startOnce = (): Promise<void> =>
+    withServiceMutationAuthority(verify, () =>
+      runWithHostStartAdoption(
+        capability,
+        contenderOptions,
+        origin,
+        controller,
+        label,
+        async () => {
+          await requireCliUpdateMutationCapability(
+            capability,
+            contenderOptions,
+          );
+          await controller.start(label);
+        },
+      ),
     );
-  });
+  return startRetryingUnacknowledged(capability, controller, label, startOnce);
+}
+
+/**
+ * `startOnce`, and once more when no supervisor acknowledged its proof and a
+ * positive read says nothing is running (`afterUnacknowledgedStart`). Each
+ * call of `startOnce` publishes its own proof.
+ *
+ * "No supervisor acknowledged" is `isUnacknowledgedSpawn`: the ack wait's own
+ * timeout, or - Windows - the `/Run` whose spawn evidence never came, thrown
+ * as the start's own failure after its lease waited the ack out in vain.
+ *
+ * Each start, the reads after a timed-out one, and each supervisor wait in
+ * between is a bounded wait of its own, and reports as it begins: stacked,
+ * they are the longest silence a restart had (bounded-wait-progress.ts).
+ */
+async function startRetryingUnacknowledged(
+  capability: UpdateMutationCapability,
+  controller: Pick<ServiceController, "status">,
+  label: ServiceLabel,
+  startOnce: () => Promise<void>,
+): Promise<ServiceStartOutcome> {
+  try {
+    reportBoundedWait("starting the host service");
+    await startOnce();
+  } catch (error) {
+    if (!isUnacknowledgedSpawn(error)) throw error;
+    reportBoundedWait("checking whether the host service started");
+    const after = await afterUnacknowledgedStart(capability, controller, label);
+    switch (after.kind) {
+      case "unknown":
+        throw error;
+      case "running":
+        return { kind: "started" };
+      case "supervisor-relaunching":
+        return after;
+      case "stopped":
+        reportBoundedWait("starting the host service again");
+        await startOnce();
+        return { kind: "started" };
+    }
+  }
   return { kind: "started" };
+}
+
+type UnacknowledgedStartState =
+  | { readonly kind: "running" }
+  | { readonly kind: "supervisor-relaunching"; readonly supervisorPid: number }
+  | { readonly kind: "stopped" }
+  | { readonly kind: "unknown" };
+
+/**
+ * What a start whose proof no supervisor acknowledged left behind, and so
+ * whether to start once more.
+ *
+ * The race it exists for: a supervisor that parks under the lifecycle policy
+ * consumes the proof one last time before it exits
+ * (`admitSupervisorLifecycle`), and a start that published its proof AND
+ * reached the service manager in the few milliseconds between that consume
+ * and the exit was lost - the manager saw the service still running and
+ * started nothing (`systemctl start` on an active unit, a plain `kickstart`,
+ * `/Run` under IgnoreNew), and the parked supervisor exited without the
+ * proof. Nothing is left running after that, so a second start - with a
+ * fresh proof - is the one that brings the host up.
+ *
+ * Retried only on a POSITIVE read that nothing is running: the service is
+ * registered, no host answers, no supervisor record names a live process, and
+ * the host's pid record is absent or names a process that is provably gone.
+ * That last read is the one every platform's `status` derives `running` from,
+ * made here directly because a Desktop-owned macOS registration reports
+ * `externally-managed` whether or not its host runs, and an unreadable record
+ * is no evidence. Any read that fails keeps the timeout. A service another
+ * start brought up meanwhile is not started again: a host answering its
+ * recorded endpoint, or a live supervisor whose relaunch the caller waits for
+ * exactly as it would before any start - when that relaunch is one the
+ * standing record admits (`afterRefusedSupervisor` otherwise).
+ */
+async function afterUnacknowledgedStart(
+  capability: UpdateMutationCapability,
+  controller: Pick<ServiceController, "status">,
+  label: ServiceLabel,
+): Promise<UnacknowledgedStartState> {
+  try {
+    const { state } = await controller.status(label);
+    if (state === "not-installed") return { kind: "unknown" };
+    if ((await findLiveIncumbentHost(label.environment)) !== null) {
+      return { kind: "running" };
+    }
+    const supervisor = await findLiveServiceSupervisor(label.environment);
+    if (supervisor !== null) {
+      const admitted = await supervisorRelaunchAdmitsStandingRecord(
+        capability,
+        () => readSupervisorRelaunchInstalledIdentity(label.environment),
+      );
+      if (!admitted) return await afterRefusedSupervisor(label);
+      return {
+        kind: "supervisor-relaunching",
+        supervisorPid: supervisor.supervisorPid,
+      };
+    }
+    return (await hostProcessProvablyGone(label))
+      ? { kind: "stopped" }
+      : { kind: "unknown" };
+  } catch {
+    return { kind: "unknown" };
+  }
+}
+
+/**
+ * A live supervisor whose next relaunch the standing record refuses (a
+ * restart admitted over `downloading`, say, under `recovery-maintenance`):
+ * leaving the host to it leaves the host down, because that relaunch exits
+ * with no host. Wait for it to leave instead, then read again.
+ *
+ * Waited out UNDER this caller's lock, unlike `waitForSupervisorRelaunch`'s
+ * other callers, and deliberately: this supervisor is not going to bring the
+ * host back, so there is nothing to hold off. Its relaunch contends for this
+ * lock and gives up as `busy`, which a service launch reports with a
+ * NON-zero exit (`host-start.ts`, `SERVICE_RELAUNCH_BUSY_EXIT_CODE`), within
+ * its backoff plus `SUPERVISOR_ADMISSION_WAIT_MS` - where released it would
+ * be refused and exit 0. Once it is gone the start this caller retries
+ * publishes a fresh proof, which the next supervisor consumes before it
+ * contends. Capped at `MAX_SUPERVISOR_RELAUNCH_WAITS` waits; one that never
+ * leaves keeps the timeout.
+ */
+async function afterRefusedSupervisor(
+  label: ServiceLabel,
+): Promise<UnacknowledgedStartState> {
+  for (let wait = 0; wait < MAX_SUPERVISOR_RELAUNCH_WAITS; wait += 1) {
+    reportBoundedWait("waiting for the host service's supervisor to exit");
+    const settled = await waitForSupervisorRelaunch(
+      label.environment,
+      defaultSupervisorRelaunchWaitDeps,
+    );
+    if (settled.kind === "host-ready") return { kind: "running" };
+    if (settled.kind === "supervisor-gone") {
+      return (await hostProcessProvablyGone(label))
+        ? { kind: "stopped" }
+        : { kind: "unknown" };
+    }
+  }
+  return { kind: "unknown" };
+}
+
+async function hostProcessProvablyGone(label: ServiceLabel): Promise<boolean> {
+  const evidence = await readHostPidMetadataEvidence(label.environment);
+  switch (evidence.kind) {
+    case "absent":
+      return true;
+    case "unreadable":
+      return false;
+    case "read":
+      return publishedHostProcessGone(evidence.metadata);
+  }
 }
 
 /**
@@ -322,37 +510,56 @@ export async function stopHostForRestartWithAttempt(
     requireCliUpdateMutationCapability(capability, contenderOptions);
   return withServiceMutationAuthority(verify, () => {
     if (onAuthorityVerified !== null) onAuthorityVerified();
+    reportBoundedWait("stopping the host service for a restart");
     return controller.stopForRestart(label, options);
   });
 }
 
-/** Final-actuator facade for the relaunch half of a controlled restart. */
+/**
+ * Final-actuator facade for the relaunch half of a controlled restart.
+ *
+ * A relaunch whose proof no supervisor acknowledged is relaunched once more,
+ * exactly as a start is (`startRetryingUnacknowledged`): a plain
+ * `systemctl start` or `kickstart` issued while a parking supervisor is still
+ * exiting starts nothing. A live supervisor or an answering host found
+ * instead is the relaunch this leg asked for.
+ */
 export async function relaunchHostAfterRestartWithAttempt(
   capability: UpdateMutationCapability,
   contenderOptions: WithCliUpdateContenderOptions,
   origin: HostStartOrigin,
   controller: Pick<
     ServiceController,
-    "relaunchAfterRestart" | "hostStartAdoptionLabel"
+    "relaunchAfterRestart" | "status" | "hostStartAdoptionLabel"
   >,
   label: ServiceLabel,
   stopped: RestartStop,
 ): Promise<void> {
   const verify = (): Promise<void> =>
     requireCliUpdateMutationCapability(capability, contenderOptions);
-  await withServiceMutationAuthority(verify, async () => {
-    await runWithHostStartAdoption(
-      capability,
-      contenderOptions,
-      origin,
-      controller,
-      label,
-      async () => {
-        await requireCliUpdateMutationCapability(capability, contenderOptions);
-        await controller.relaunchAfterRestart(label, stopped);
-      },
+  const relaunchOnce = (): Promise<void> =>
+    withServiceMutationAuthority(verify, () =>
+      runWithHostStartAdoption(
+        capability,
+        contenderOptions,
+        origin,
+        controller,
+        label,
+        async () => {
+          await requireCliUpdateMutationCapability(
+            capability,
+            contenderOptions,
+          );
+          await controller.relaunchAfterRestart(label, stopped);
+        },
+      ),
     );
-  });
+  await startRetryingUnacknowledged(
+    capability,
+    controller,
+    label,
+    relaunchOnce,
+  );
 }
 
 // `origin` is the one field every start facade above threads through to the
@@ -460,8 +667,9 @@ export function createLifecycleTeardownPlatform(): LifecycleTeardownPlatform {
     withLock: (environment, run) => {
       // ONE options value for acquisition and revalidation, as `host stop`
       // does. Its own admission: refused inside any active attempt, so the
-      // teardown never interleaves with a swap, but admitted over a park,
-      // which it leaves standing for the next supervisor start to resume.
+      // teardown never interleaves with a swap, but admitted over a park the
+      // next supervisor start can resume - judged with that start's own
+      // install reader (`withCliLifecycleTeardownSegment`).
       const options: WithCliUpdateContenderOptions = {
         environment,
         reason: LIFECYCLE_TEARDOWN_OPERATION,
@@ -469,7 +677,7 @@ export function createLifecycleTeardownPlatform(): LifecycleTeardownPlatform {
         pollIntervalMs: 100,
         admission: LIFECYCLE_TEARDOWN_ADMISSION,
       };
-      return withCliUpdateContender(options, (capability) =>
+      return withCliLifecycleTeardownSegment(options, (capability) =>
         run(() => requireCliUpdateMutationCapability(capability, options)),
       );
     },

@@ -12,6 +12,11 @@ import {
   formatDarwinProcessStartIdentity,
   type ProcessStartIdentity,
 } from "@traycer/protocol/host/lifecycle/process-start-identity";
+import { SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1 } from "@traycer/protocol/config/supervisor-record";
+import {
+  __setAsyncProcessLivenessReaderForTest,
+  __setAsyncProcessStartIdentityReaderForTest,
+} from "@traycer-clients/shared/host-lock/process-identity";
 import type {
   HostLifecycleSetResult,
   HostLifecycleStopChoice,
@@ -73,6 +78,13 @@ class FakeController implements HostLifecycleTransitionsController {
   stopOutcome: StopHostOutcome = { kind: "stopped", forced: false };
   onStop: () => Promise<void> = () => Promise.resolve();
 
+  /** F29: open `holdAutomaticIntents` holds right now (hold +1, release -1). */
+  openHolds = 0;
+  /** F29: `openHolds` as it stood at the moment of each `convergeReady` call. */
+  readonly convergeOpenHolds: number[] = [];
+  /** T23: `openHolds` as it stood at the moment of each `stopHost` call. */
+  readonly holdsAtStop: number[] = [];
+
   /** M1: `refreshServiceDefinition` calls, in the order made. */
   readonly refreshCalls: number[] = [];
   refreshOutcome: MutationOutcome<ServiceDefinitionRefreshOk> = {
@@ -84,12 +96,31 @@ class FakeController implements HostLifecycleTransitionsController {
   /** Hook for order assertions against another spied-on call. */
   onRefreshCall: () => void = () => undefined;
 
+  /** T24(b): every barrier passed to `deferMutationsUntil`, in call order. */
+  readonly deferredBarriers: Promise<unknown>[] = [];
+
+  deferMutationsUntil(barrier: Promise<unknown>): void {
+    this.deferredBarriers.push(barrier);
+  }
+
+  /**
+   * R6: `applyStaged("launch", false)` is the launch reconcile's step
+   * (`host apply --respect-hold`, a no-op when nothing is staged), called
+   * once when a `"foreground"` run is followed by anything else while the
+   * lanes are active.
+   */
+  applyStaged = vi.fn(async () => ({
+    kind: "ok" as const,
+    value: { appliedVersion: "x", runningActivated: true, applied: true },
+  }));
+
   convergeReady(
     force: boolean,
     intent: LocalHostMutationIntent,
     versionPolicy: ConvergeReadyVersionPolicy,
   ): Promise<GuardedMutationOutcome<ConvergeReadyOk>> {
     this.converges.push({ force, intent, versionPolicy });
+    this.convergeOpenHolds.push(this.openHolds);
     return Promise.resolve({
       kind: "ok",
       value: { running: true, version: null },
@@ -98,6 +129,7 @@ class FakeController implements HostLifecycleTransitionsController {
 
   async stopHost(request: StopHostRequest): Promise<StopHostOutcome> {
     this.stops.push(request);
+    this.holdsAtStop.push(this.openHolds);
     await this.onStop();
     return this.stopOutcome;
   }
@@ -122,9 +154,14 @@ class FakeController implements HostLifecycleTransitionsController {
 
   holdAutomaticIntents(): AutomaticIntentHold {
     this.holdCount += 1;
+    this.openHolds += 1;
+    let released = false;
     return {
       release: () => {
+        if (released) return;
+        released = true;
         this.releaseCount += 1;
+        this.openHolds -= 1;
       },
     };
   }
@@ -478,12 +515,38 @@ describe("setMode: -> none while the lanes run", () => {
       expect(harness.controller.quiesceCount).toBe(1);
       expect(harness.controller.holdCount).toBe(1);
       expect(harness.controller.releaseCount).toBe(1);
+      // T23: the hold taken before the stop is still open AT the stop call -
+      // the automatic intents (health monitor, ensure port) cannot bring the
+      // host back while the stop, and the commit behind it, are in flight.
+      expect(harness.controller.holdsAtStop).toEqual([1]);
       // This process booted with the lanes on and the renderer still runs
       // them: `none` applies at the next launch.
       expect(result.view.pending).toBe("restart-app");
       expect(result.view.applied.localHostCapability).toBe("managed");
     });
   }
+
+  // T23: a stop that succeeds but whose commit's policy write then throws
+  // must not have quiesced the automatic intents, and must leave the hold
+  // released and the live presence (still naming this process) in place -
+  // the write is the commitment, and it did not happen.
+  it("T23: a policy write that fails after a successful stop commits nothing and releases the hold", async () => {
+    const harness = await activeHarness();
+    const realWritePolicy = harness.store.writePolicy.bind(harness.store);
+    vi.spyOn(harness.store, "writePolicy").mockImplementation(async (mode) => {
+      if (mode === "none") {
+        throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      }
+      return realWritePolicy(mode);
+    });
+    const result = await runNone(harness, "if-idle");
+    expect(result.kind).toBe("failed");
+    expect(reasonOf(result)).toBe("write-failed");
+    expect(harness.controller.quiesceCount).toBe(0);
+    expect(await harness.store.readPresence()).not.toBeNull();
+    expect(harness.controller.releaseCount).toBe(1);
+    expect((await harness.store.readPolicy()).mode).not.toBe("none");
+  });
 
   const refusals: readonly (readonly [StopHostOutcome, string])[] = [
     [{ kind: "host-busy", message: "work in progress" }, "host-busy"],
@@ -509,15 +572,6 @@ describe("setMode: -> none while the lanes run", () => {
   const failures: readonly StopHostOutcome[] = [
     { kind: "failed", message: "cli exploded" },
     { kind: "withdrawn" },
-    // OBS-HOST-STOP-FOREGROUND: the running host is a terminal's
-    // `traycer host start`; the service stop reached nothing, so `none` must
-    // not commit over a host that still runs. Same arm as `failed` in
-    // `stopNotCommitted` - the CLI's message says where the host came from.
-    {
-      kind: "not-service-run",
-      message:
-        "host stop: the running host was started in a terminal (supervisor pid 4242) and is not run by the service; stop it there with Ctrl-C, or pass --force",
-    },
   ];
   for (const outcome of failures) {
     it(`a ${outcome.kind} stop fails with stop-failed and commits nothing`, async () => {
@@ -533,27 +587,6 @@ describe("setMode: -> none while the lanes run", () => {
       expect(harness.controller.releaseCount).toBe(1);
     });
   }
-
-  // OBS-HOST-STOP-FOREGROUND: `stopNotCommitted`'s `not-service-run` arm
-  // carries the CLI's own message through unchanged - it names where the
-  // host came from (a terminal) and how to end it, and nothing here may
-  // paraphrase it.
-  it("a not-service-run stop carries the CLI's message through to the failed result", async () => {
-    const harness = await activeHarness();
-    const outcome: StopHostOutcome = {
-      kind: "not-service-run",
-      message:
-        "host stop: the running host was started in a terminal (supervisor pid 4242) and is not run by the service; stop it there with Ctrl-C, or pass --force",
-    };
-    harness.controller.stopOutcome = outcome;
-    const result = await runNone(harness, "force");
-    expect(result.kind).toBe("failed");
-    expect(reasonOf(result)).toBe("stop-failed");
-    expect(messageOf(result)).toBe(outcome.message);
-    expect((await harness.store.readPolicy()).mode).toBe("ask");
-    expect(await presenceVerdict(harness.store)).toBe("keep");
-    expect(harness.controller.quiesceCount).toBe(0);
-  });
 
   it("is superseded when a newer non-none policy appears during the stop", async () => {
     const harness = await activeHarness();
@@ -777,6 +810,42 @@ describe("quit verdicts", () => {
     expect(await harness.store.readPresence()).toEqual(before);
   });
 
+  // T27: `setMode({mode:"linked"})` and `writeQuitVerdict("keep")` fired
+  // concurrently must not race - `writeQuitVerdict` is serialized behind the
+  // in-flight mode change, so its write can only ever be the LAST one to
+  // land, whatever `setMode`'s own writePresence call is doing. Gate the
+  // `"stop"` write (setMode's) so it stays pending while `writeQuitVerdict`
+  // is submitted, then release it and check the calls landed in program
+  // order, not by relative speed.
+  it("T27: writeQuitVerdict fired alongside setMode(linked) is serialized behind it and wins", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    const callOrder: DesktopPresenceOnExit[] = [];
+    let releaseGate: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const realWritePresence = harness.store.writePresence.bind(harness.store);
+    vi.spyOn(harness.store, "writePresence").mockImplementation(
+      async (onExit, rev) => {
+        callOrder.push(onExit);
+        if (onExit === "stop") await gate;
+        return realWritePresence(onExit, rev);
+      },
+    );
+
+    const linked = harness.service.setMode({ mode: "linked", stop: null });
+    const quit = harness.service.writeQuitVerdict("keep");
+    // Give any code that is NOT properly serialized a window to race ahead
+    // while the "stop" write is still gated.
+    await settle();
+    releaseGate();
+    await Promise.all([linked, quit]);
+
+    expect(callOrder).toEqual(["stop", "keep"]);
+    const presence = await harness.store.readPresence();
+    expect(presence?.onExit).toBe("keep");
+  });
+
   it("reports no-local-host and writes nothing when the lanes are off", async () => {
     const harness = makeHarness("none", POLL_MS);
     expect(await harness.service.writeQuitVerdict("handoff")).toBe(
@@ -952,21 +1021,29 @@ describe("refreshDefinitionAfterWrite (M1)", () => {
     expect(Object.keys(payload).sort()).toEqual(["mode", "reason"]);
   });
 
-  it("applySetMode resolves even when the refresh promise never settles", async () => {
+  // T30: a real-time race against a fixed 250 ms timer can pass vacuously
+  // under load (the timer, not the code, decides the winner). `vi.waitFor`
+  // instead polls the actual fact - the setMode promise settled - so the test
+  // is red only when `applySetMode` genuinely blocks on the never-settling
+  // refresh, whatever the machine's load is.
+  it("T30: applySetMode resolves even when the refresh promise never settles", async () => {
     const harness = makeHarness("managed", POLL_MS);
     await harness.service.writeLaunchPresence();
     harness.controller.refreshNeverSettles = true;
 
-    const winner = await Promise.race([
-      harness.service
-        .setMode({ mode: "ask", stop: null })
-        .then(() => "applied" as const),
-      new Promise<"timeout">((resolve) => {
-        setTimeout(() => resolve("timeout"), 250);
-      }),
-    ]);
+    let settled = false;
+    const setModePromise = harness.service
+      .setMode({ mode: "ask", stop: null })
+      .then((result) => {
+        settled = true;
+        return result;
+      });
 
-    expect(winner).toBe("applied");
+    await vi.waitFor(() => {
+      expect(settled).toBe(true);
+    });
+    const result = await setModePromise;
+    expect(result.kind).toBe("applied");
     expect(harness.controller.refreshCalls.length).toBe(1);
   });
 
@@ -1206,5 +1283,672 @@ describe("presence retry (F-WIN-2)", () => {
     const presence = await harness.store.readPresence();
     expect(presence?.onExit).toBe("keep");
     expect(presence?.policyRev).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F10: `observe()`'s change-detection keys on `rev` alone
+// (`read.rev !== this.presenceRev`). An external write that lands at the
+// SAME rev this desktop already published under - a different mode, at an
+// equal rev, from a co-writer racing the same bump - is invisible to that
+// check, so the stale presence verdict is never corrected.
+// ---------------------------------------------------------------------------
+describe("F10: change detection keys on (rev, mode), not rev", () => {
+  it("an equal-rev CLI write with a different mode republishes the presence", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "ask");
+    await harness.service.writeLaunchPresence();
+    await harness.service.setMode({ mode: "background", stop: null });
+    expect((await harness.store.readPolicy()).rev).toBe(5);
+    expect(await presenceVerdict(harness.store)).toBe("keep");
+    expect((await harness.store.readPresence())?.policyRev).toBe(5);
+
+    const writeSpy = vi.spyOn(harness.store, "writePresence");
+    // Equal rev, different mode: the CLI and this desktop's own write raced
+    // onto the same rev number.
+    await writeCliPolicy(harness.store, 5, "linked");
+    harness.service.startObserving();
+    harness.records.fire();
+
+    await vi.waitFor(() => {
+      expect(writeSpy).toHaveBeenCalledWith("stop", 5);
+    });
+    const presence = await harness.store.readPresence();
+    expect(presence?.onExit).toBe("stop");
+    expect(presence?.policyRev).toBe(5);
+  });
+
+  it("GREEN control: an unequal-rev CLI write (rev 6, linked) also republishes stop", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "ask");
+    await harness.service.writeLaunchPresence();
+    await harness.service.setMode({ mode: "background", stop: null });
+    expect((await harness.store.readPolicy()).rev).toBe(5);
+
+    await writeCliPolicy(harness.store, 6, "linked");
+    harness.service.startObserving();
+    harness.records.fire();
+
+    await vi.waitFor(() => {
+      expect(harness.views.at(-1)?.desired.rev).toBe(6);
+    });
+    const presence = await harness.store.readPresence();
+    expect(presence?.onExit).toBe("stop");
+    expect(presence?.policyRev).toBe(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// U9: a quit verdict's presence write that failed (a transient EPERM/rename
+// failure) must be retried by the NEXT observation, exactly like a launch
+// presence or a mode-change presence is (F-WIN-2). Today `observe()`'s retry
+// branch (`presenceRev === null`) only fires when NOTHING has ever landed,
+// and its "external write" branch is gated on `quitVerdict === null` - so a
+// verdict write that fails while a PRIOR write already set `presenceRev`
+// (the common case: launch presence lands, then a quit verdict's write
+// fails) hits neither branch and is silently never retried.
+// ---------------------------------------------------------------------------
+describe("U9: a quit verdict whose write failed is retried", () => {
+  it("a failed quit-verdict write is retried by the next observation", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await harness.service.writeLaunchPresence();
+
+    const writeSpy = vi.spyOn(harness.store, "writePresence");
+    writeSpy.mockRejectedValueOnce(
+      Object.assign(new Error("rename failed"), { code: "EPERM" }),
+    );
+    expect(await harness.service.writeQuitVerdict("stop")).toBe("write-failed");
+
+    harness.service.startObserving();
+    harness.records.fire();
+
+    await vi.waitFor(() => {
+      expect(writeSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(writeSpy.mock.calls[1]?.[0]).toBe("stop");
+    const presence = await harness.store.readPresence();
+    expect(presence?.onExit).toBe("stop");
+  });
+
+  it("a failed release is retried back to the mode's verdict", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    expect(await harness.service.writeQuitVerdict("stop")).toBe("written");
+
+    const writeSpy = vi.spyOn(harness.store, "writePresence");
+    writeSpy.mockRejectedValueOnce(
+      Object.assign(new Error("rename failed"), { code: "EPERM" }),
+    );
+    await harness.service.releaseQuitVerdict();
+
+    harness.service.startObserving();
+    harness.records.fire();
+
+    await vi.waitFor(async () => {
+      expect((await harness.store.readPresence())?.onExit).toBe("keep");
+    });
+  });
+
+  it("GREEN control: with no injected failure, writeQuitVerdict lands and a later fire makes no extra writePresence call", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    expect(await harness.service.writeQuitVerdict("stop")).toBe("written");
+
+    const writeSpy = vi.spyOn(harness.store, "writePresence");
+    const callsBefore = writeSpy.mock.calls.length;
+    harness.service.startObserving();
+    harness.records.fire();
+    await settle();
+    expect(writeSpy.mock.calls.length).toBe(callsBefore);
+    expect((await harness.store.readPresence())?.onExit).toBe("stop");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F29: every job the service runs - `setMode`, `writeQuitVerdict`,
+// `releaseQuitVerdict`, an observation tick - goes through the SAME strict
+// FIFO `serialize()` chain, so a `→ none` commit's `stopHost` await (which
+// can run for as long as the host takes to drain) blocks every quit-path
+// call submitted after it starts, even though none of them touch the host
+// the stop is acting on. The quit path must not wait behind it.
+// ---------------------------------------------------------------------------
+describe("F29: quit-path calls do not wait behind an in-flight none stop", () => {
+  function sleep(ms: number): Promise<"blocked"> {
+    return new Promise((resolve) => {
+      setTimeout(() => resolve("blocked"), ms);
+    });
+  }
+
+  function makeGate(): {
+    readonly promise: Promise<void>;
+    readonly resolve: () => void;
+  } {
+    let resolveFn: () => void = () => undefined;
+    const promise = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    return { promise, resolve: resolveFn };
+  }
+
+  async function startNoneStop(harness: Harness): Promise<{
+    readonly none: Promise<HostLifecycleSetResult>;
+    readonly resolveGate: () => void;
+  }> {
+    const gate = makeGate();
+    harness.controller.onStop = () => gate.promise;
+    await writeCliPolicy(harness.store, 4, "ask");
+    await harness.service.writeLaunchPresence();
+    const none = harness.service.setMode({ mode: "none", stop: "if-idle" });
+    await vi.waitFor(() => {
+      expect(harness.controller.stops.length).toBe(1);
+    });
+    return { none, resolveGate: gate.resolve };
+  }
+
+  it("writeQuitVerdict resolves while a none stop is still running", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    const { none, resolveGate } = await startNoneStop(harness);
+
+    const raced = await Promise.race([
+      harness.service.writeQuitVerdict("stop"),
+      sleep(1000),
+    ]);
+    expect(raced).toBe("written");
+    expect(await presenceVerdict(harness.store)).toBe("stop");
+
+    resolveGate();
+    const noneResult = await none;
+    expect(noneResult.kind).toBe("applied");
+    expect((await harness.store.readPolicy()).mode).toBe("none");
+    expect(await harness.store.readPresence()).toBeNull();
+    expect(harness.controller.quiesceCount).toBe(1);
+  });
+
+  it("releaseQuitVerdict and an observation also resolve during the stop", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    const { none, resolveGate } = await startNoneStop(harness);
+
+    await Promise.race([harness.service.writeQuitVerdict("stop"), sleep(1000)]);
+
+    const releaseRaced = await Promise.race([
+      harness.service.releaseQuitVerdict().then(() => "released" as const),
+      sleep(1000),
+    ]);
+    expect(releaseRaced).toBe("released");
+
+    harness.service.startObserving();
+    const viewsBefore = harness.views.length;
+    const observedRaced = await Promise.race([
+      new Promise<"observed">((resolve) => {
+        const unsubscribe = harness.service.onChange(() => {
+          unsubscribe();
+          resolve("observed");
+        });
+        harness.records.fire();
+      }),
+      sleep(1000),
+    ]);
+    expect(observedRaced).toBe("observed");
+    expect(harness.views.length).toBeGreaterThan(viewsBefore);
+
+    resolveGate();
+    await none;
+  });
+
+  it("a mode chosen during the none stop supersedes it, and linked converges once the hold is released", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    const { none, resolveGate } = await startNoneStop(harness);
+
+    const linkedRaced = await Promise.race([
+      harness.service
+        .setMode({ mode: "linked", stop: null })
+        .then((result) => result.kind),
+      sleep(1000),
+    ]);
+    expect(linkedRaced).toBe("applied");
+
+    resolveGate();
+    const noneResult = await none;
+    expect(noneResult.kind).toBe("superseded");
+    expect(harness.controller.quiesceCount).toBe(0);
+    expect((await harness.store.readPolicy()).mode).toBe("linked");
+
+    await vi.waitFor(() => {
+      expect(
+        harness.controller.convergeOpenHolds.some((count) => count === 0),
+      ).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F11 (desktop side): `convergeIfDown` only brings a down host back when
+// `readSupervisorState()` says `not-running`. Once that read also verifies
+// the recorded supervisor's liveness/identity, a `supervisor.json` left
+// behind by a dead or recycled-pid supervisor must read as stale (so the
+// converge fires) rather than `enforcing` (which suppresses it, per the
+// existing `any -> linked over an old supervisor` test's baseline).
+// ---------------------------------------------------------------------------
+describe("F11: a stale supervisor.json does not suppress the linked converge", () => {
+  const RECORDED_PID = 777_001;
+  const RECORDED_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+  );
+  const OBSERVED_DIFFERENT_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Mon Jul 7 09:00:00 2026"),
+  );
+
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+    __setAsyncProcessStartIdentityReaderForTest(null);
+  });
+
+  async function writeRawSupervisor(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+    startIdentity: ProcessStartIdentity | null,
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    const record: Record<string, unknown> = {
+      v: 1,
+      pid,
+      cliVersion: "1.0.0",
+      capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+      startedAt: "2026-09-24T09:00:00.000Z",
+    };
+    if (startIdentity !== null) record.startIdentity = startIdentity;
+    await writeFile(store.supervisorPath, JSON.stringify(record), "utf8");
+  }
+
+  it("dead recorded pid: the record is stale and linked converges", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisor(harness.store, RECORDED_PID, null);
+    __setAsyncProcessLivenessReaderForTest((pid) =>
+      Promise.resolve(pid === RECORDED_PID ? "dead" : "alive"),
+    );
+
+    const result = await harness.service.setMode({
+      mode: "linked",
+      stop: null,
+    });
+    expect(result.kind).toBe("applied");
+
+    await vi.waitFor(() => {
+      expect(harness.controller.converges.length).toBe(1);
+    });
+    const view = await harness.service.getView();
+    expect(view.applied.supervisor).toBe("not-running");
+  });
+
+  it("alive pid with a different start identity: stale, linked converges", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisor(harness.store, RECORDED_PID, RECORDED_IDENTITY);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(OBSERVED_DIFFERENT_IDENTITY),
+    );
+
+    const result = await harness.service.setMode({
+      mode: "linked",
+      stop: null,
+    });
+    expect(result.kind).toBe("applied");
+
+    await vi.waitFor(() => {
+      expect(harness.controller.converges.length).toBe(1);
+    });
+    const view = await harness.service.getView();
+    expect(view.applied.supervisor).toBe("not-running");
+  });
+
+  it("GREEN control: alive pid with the same identity is enforcing, no converge", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisor(harness.store, RECORDED_PID, RECORDED_IDENTITY);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(RECORDED_IDENTITY),
+    );
+
+    await harness.service.setMode({ mode: "linked", stop: null });
+    await settle();
+    expect(harness.controller.converges.length).toBe(0);
+    const view = await harness.service.getView();
+    expect(view.applied.supervisor).toBe("enforcing");
+  });
+
+  it("GREEN control: legacy record, alive pid is enforcing", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisor(harness.store, RECORDED_PID, null);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+
+    await harness.service.setMode({ mode: "linked", stop: null });
+    await settle();
+    expect(harness.controller.converges.length).toBe(0);
+    const view = await harness.service.getView();
+    expect(view.applied.supervisor).toBe("enforcing");
+  });
+
+  it("GREEN control: indeterminate liveness is enforcing", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisor(harness.store, RECORDED_PID, null);
+    __setAsyncProcessLivenessReaderForTest(() =>
+      Promise.resolve("indeterminate"),
+    );
+
+    await harness.service.setMode({ mode: "linked", stop: null });
+    await settle();
+    expect(harness.controller.converges.length).toBe(0);
+    const view = await harness.service.getView();
+    expect(view.applied.supervisor).toBe("enforcing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 (lifecycle side): "the desktop leaves a host that a person started in a
+// terminal untouched; the mode governs the service run only." A live,
+// capable, identity-matching supervisor record now also carries `admittedAs`
+// ("service" for a labelled/unattended start, "foreground" for a person's own
+// terminal). `getView().applied.admittedAs` surfaces it, and a foreground run
+// under an ENFORCED mode (linked/ask/stop-if-idle) reports `restart-host`
+// even though the record itself reads `enforcing` - the mode is not
+// considered satisfied by a run this desktop did not start under service
+// control. `background` and a `"service"` record are unaffected.
+// ---------------------------------------------------------------------------
+describe("R4: getView surfaces admittedAs, and a foreground run pends a restart under an enforced mode", () => {
+  const RECORDED_PID = 777_002;
+  const RECORDED_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+  );
+
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+    __setAsyncProcessStartIdentityReaderForTest(null);
+  });
+
+  async function writeRawSupervisorRun(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+    admittedAs: "service" | "foreground" | null,
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    const record: Record<string, unknown> = {
+      v: 1,
+      pid,
+      cliVersion: "1.0.0",
+      capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+      startedAt: "2026-09-24T09:00:00.000Z",
+      startIdentity: RECORDED_IDENTITY,
+    };
+    if (admittedAs !== null) record.admittedAs = admittedAs;
+    await writeFile(store.supervisorPath, JSON.stringify(record), "utf8");
+  }
+
+  function stubLiveIdentityMatch(): void {
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(RECORDED_IDENTITY),
+    );
+  }
+
+  it("a live foreground record's view reports admittedAs 'foreground'", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    const view = await harness.service.getView();
+    expect(view.applied.admittedAs).toBe("foreground");
+  });
+
+  it("a legacy record's view reports admittedAs null", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, null);
+    stubLiveIdentityMatch();
+
+    const view = await harness.service.getView();
+    expect(view.applied.admittedAs).toBeNull();
+  });
+
+  it("no host's view reports admittedAs null", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+
+    const view = await harness.service.getView();
+    expect(view.applied.admittedAs).toBeNull();
+  });
+
+  const enforcedModes: readonly HostLifecycleMode[] = [
+    "linked",
+    "ask",
+    "stop-if-idle",
+  ];
+
+  it.each(enforcedModes)(
+    "a live foreground record under %s pends restart-host",
+    async (mode) => {
+      const harness = makeHarness("managed", POLL_MS);
+      await writeCliPolicy(harness.store, 4, mode);
+      await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+      stubLiveIdentityMatch();
+
+      const view = await harness.service.getView();
+      expect(view.pending).toBe("restart-host");
+    },
+  );
+
+  it("a live foreground record under background pends none", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "background");
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    const view = await harness.service.getView();
+    expect(view.pending).toBe("none");
+  });
+
+  it("a live service record under linked pends none", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "linked");
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "service");
+    stubLiveIdentityMatch();
+
+    const view = await harness.service.getView();
+    expect(view.pending).toBe("none");
+  });
+
+  it("readRunAdmission() freshly reads the live foreground record", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    expect(await harness.service.readRunAdmission()).toBe("foreground");
+  });
+
+  it("currentRunAdmission() is null before any view is derived, and reflects the last derived view after", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    expect(harness.service.currentRunAdmission()).toBeNull();
+    await harness.service.getView();
+    expect(harness.service.currentRunAdmission()).toBe("foreground");
+  });
+
+  it("an observation pushes a view carrying the live foreground record's admittedAs", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    harness.service.startObserving();
+    const before = harness.views.length;
+    harness.records.fire();
+    await vi.waitFor(() => {
+      expect(harness.views.length).toBeGreaterThan(before);
+    });
+    expect(harness.views[harness.views.length - 1].applied.admittedAs).toBe(
+      "foreground",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 / T08's ruling: a `→ none` stop request against a host this desktop
+// never started under service control reports `not-service-run`, not a
+// failure - "the desktop leaves a host that a person started in a terminal
+// untouched" means there is nothing for `host stop` to withdraw, but this
+// desktop's OWN choice to no longer govern it must still commit. Before the
+// fix, `not-service-run` fell into the same bucket as a genuine `failed` stop
+// (see `stopNotCommitted`) and committed nothing.
+// ---------------------------------------------------------------------------
+describe("R5: → none commits on a not-service-run stop (T08's ruling)", () => {
+  it("commits none when the stop reports not-service-run", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "ask");
+    await harness.service.writeLaunchPresence();
+    harness.controller.stopOutcome = {
+      kind: "not-service-run",
+      message: "the host is not running as a service",
+    };
+    const infoCallsBefore = vi.mocked(log.info).mock.calls.length;
+    const warnCallsBefore = vi.mocked(log.warn).mock.calls.length;
+
+    const result = await runNone(harness, "if-idle");
+
+    expect(result.kind).toBe("applied");
+    const read = await harness.store.readPolicy();
+    expect(read.mode).toBe("none");
+    expect(await harness.store.readPresence()).toBeNull();
+    expect(harness.controller.quiesceCount).toBe(1);
+    expect(harness.controller.openHolds).toBe(0);
+    expect(harness.controller.releaseCount).toBe(1);
+    // OBS-HOST-STOP-FOREGROUND's observability intent, carried onto the
+    // committed path: the "none committed" INFO line names the reason a
+    // person's terminal host was left untouched, and nothing here WARNs -
+    // this was never a failure.
+    const infoCalls = vi.mocked(log.info).mock.calls.slice(infoCallsBefore);
+    const infoCall = infoCalls.find(
+      ([message]) => message === "[host-lifecycle] none committed",
+    );
+    expect(infoCall?.[1]).toMatchObject({ reason: "not-service-run" });
+    expect(vi.mocked(log.warn).mock.calls.length).toBe(warnCallsBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T08's ruling: "the ensure ladder finishes the update once the terminal
+// host is gone." `observe()` follows the live supervisor's `admittedAs` from
+// one observation to the next; when a `"foreground"` run (a person's own
+// terminal) is followed by anything else - the record removed, stale, or now
+// `"service"` - while the lanes are active, it runs the launch reconcile's
+// step (`controller.applyStaged("launch", false)`, `host apply
+// --respect-hold`, a no-op when nothing is staged) once, so a staged update
+// that was waiting behind the foreground run lands as soon as it ends.
+// ---------------------------------------------------------------------------
+describe("R6: a terminal run ending applies a ready launch stage", () => {
+  const RECORDED_PID = 777_003;
+  const RECORDED_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+  );
+
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+    __setAsyncProcessStartIdentityReaderForTest(null);
+  });
+
+  async function writeRawSupervisorRun(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+    admittedAs: "service" | "foreground",
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    await writeFile(
+      store.supervisorPath,
+      JSON.stringify({
+        v: 1,
+        pid,
+        cliVersion: "1.0.0",
+        capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+        startedAt: "2026-09-24T09:00:00.000Z",
+        startIdentity: RECORDED_IDENTITY,
+        admittedAs,
+      }),
+      "utf8",
+    );
+  }
+
+  function stubLiveIdentityMatch(): void {
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(RECORDED_IDENTITY),
+    );
+  }
+
+  it("case 1: a foreground run ending while lanes are active calls applyStaged once", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "background");
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    harness.service.startObserving();
+    await vi.waitFor(() => {
+      expect(harness.views.length).toBeGreaterThan(0);
+    });
+
+    await rm(harness.store.supervisorPath, { force: true });
+    harness.records.fire();
+
+    await vi.waitFor(() => {
+      expect(harness.controller.applyStaged).toHaveBeenCalledTimes(1);
+    });
+    expect(harness.controller.applyStaged).toHaveBeenCalledWith(
+      "launch",
+      false,
+    );
+  });
+
+  it("case 2: a foreground record observed twice with no edge does not call applyStaged", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "background");
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    harness.service.startObserving();
+    await vi.waitFor(() => {
+      expect(harness.views.length).toBeGreaterThan(0);
+    });
+
+    harness.records.fire();
+    await settle();
+
+    expect(harness.controller.applyStaged).not.toHaveBeenCalled();
+  });
+
+  it("case 3: a service run ending does not call applyStaged (only a foreground run ending does)", async () => {
+    const harness = makeHarness("managed", POLL_MS);
+    await writeCliPolicy(harness.store, 4, "background");
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "service");
+    stubLiveIdentityMatch();
+
+    harness.service.startObserving();
+    await vi.waitFor(() => {
+      expect(harness.views.length).toBeGreaterThan(0);
+    });
+
+    await rm(harness.store.supervisorPath, { force: true });
+    harness.records.fire();
+    await settle();
+
+    expect(harness.controller.applyStaged).not.toHaveBeenCalled();
+  });
+
+  it("case 4: lanes off never calls applyStaged even across a foreground-run edge", async () => {
+    const harness = makeHarness("none", POLL_MS);
+    await writeRawSupervisorRun(harness.store, RECORDED_PID, "foreground");
+    stubLiveIdentityMatch();
+
+    harness.service.startObserving();
+    await settle();
+
+    await rm(harness.store.supervisorPath, { force: true });
+    harness.records.fire();
+    await settle();
+
+    expect(harness.controller.applyStaged).not.toHaveBeenCalled();
   });
 });

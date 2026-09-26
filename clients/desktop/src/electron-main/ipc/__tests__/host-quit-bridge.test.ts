@@ -5,7 +5,11 @@ import {
   RunnerHostInvoke,
 } from "../../../ipc-contracts/ipc-channels";
 import type { DesktopPublishedHostSnapshot } from "../../../ipc-contracts/host-types";
-import type { HostLifecycleView } from "../../../ipc-contracts/host-lifecycle-types";
+import type {
+  HostLifecycleView,
+  LocalHostCapability,
+} from "../../../ipc-contracts/host-lifecycle-types";
+import type { HostLifecycleIpcService } from "../platform-ipc";
 import type {
   HostQuitDecision,
   HostQuitDecisionResponse,
@@ -327,7 +331,11 @@ function sender(webContentsId: number): {
 
 const VIEW: HostLifecycleView = {
   desired: { mode: "ask", rev: 1, updatedBy: "desktop", updatedAt: null },
-  applied: { localHostCapability: "managed", supervisor: "not-running" },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
   pending: "none",
 };
 
@@ -422,7 +430,9 @@ function transactionsOver(fixture: Fixture): {
   let authorized = 0;
   let stopped = 0;
   const txs = new QuitTransactions({
-    isInstallingUpdate: () => false,
+    isRelaunchIntended: () => false,
+    isLocalHostRunning: () => Promise.resolve(true),
+    isForegroundHostRun: async () => false,
     lifecycle: {
       readQuitPolicy: async () => ({ mode: "ask", rev: 1 }),
       writeQuitVerdict: async () => "written",
@@ -436,6 +446,8 @@ function transactionsOver(fixture: Fixture): {
       },
       holdAutomaticIntents: () => ({ release: () => undefined }),
       quiesce: () => undefined,
+      spawnServiceDefinitionRefresh: async () => "spawned",
+      lifecycleAdmissionBlock: null,
     },
     requestDecision: (prompt) => fixture.bridge.requestHostQuitDecision(prompt),
     withdrawDecision: (error) => {
@@ -473,17 +485,36 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 }
 
+// T35: the previous version raced `promise.then(...)` (a NEW promise, always
+// at least one microtask tick behind `promise` itself) against an
+// already-resolved sentinel - so the sentinel always won, even when `promise`
+// had ALREADY settled. That made `settlesWithin` a tautological `false`.
+// Racing `promise` itself against the sentinel lets an already-settled `promise`
+// win (its reaction job was queued first, at race-call time); a `catch` covers
+// a `promise` that settles by REJECTING - that is still "settled".
 async function settlesWithin(promise: Promise<unknown>): Promise<boolean> {
   const sentinel = Symbol("pending");
-  const raced = await Promise.race([
-    promise.then(
-      () => "settled",
-      () => "settled",
-    ),
-    Promise.resolve(sentinel),
-  ]);
-  return raced === "settled";
+  try {
+    const raced = await Promise.race([promise, Promise.resolve(sentinel)]);
+    return raced !== sentinel;
+  } catch {
+    return true;
+  }
 }
+
+describe("T35: settlesWithin correctly distinguishes settled from pending", () => {
+  it("an already-resolved promise gives true", async () => {
+    expect(await settlesWithin(Promise.resolve("value"))).toBe(true);
+  });
+
+  it("an already-rejected promise gives true", async () => {
+    expect(await settlesWithin(Promise.reject(new Error("boom")))).toBe(true);
+  });
+
+  it("a never-settling promise gives false", async () => {
+    expect(await settlesWithin(new Promise(() => undefined))).toBe(false);
+  });
+});
 
 beforeEach(() => {
   ipcMainState.handlers.clear();
@@ -880,5 +911,252 @@ describe("quit transaction over the real bridge: the native fallback", () => {
       { requestId, phase: "stopping", idleOnly: false },
       { requestId, phase: "quitting" },
     ]);
+  });
+});
+
+// The trusted-sender guard (`RunnerIpcBridge.isTrustedIpcSender`) is
+// `handleInvoke`'s job, so every channel registered through it inherits the
+// check "for free" - but nothing proved that for these channels
+// specifically. Registering one with a raw `ipcMain.handle` at its call site
+// would bypass the guard entirely and stay green everywhere else, because
+// FakeBridge (used by `host-lifecycle-ipc.test.ts` and
+// `host-quit-bridge.test.ts`'s own fixtures above) has no guard, and every
+// other case here only ever exercises windows that ARE registered. These
+// tests go through the REAL bridge with an id `TestRegistry` never
+// registered.
+const LIFECYCLE_VIEW: HostLifecycleView = {
+  desired: { mode: "ask", rev: 1, updatedBy: "desktop", updatedAt: null },
+  applied: {
+    localHostCapability: "managed",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
+  pending: "none",
+};
+
+function installFakeLifecycle(
+  fixture: Fixture,
+  capability: LocalHostCapability,
+): void {
+  const service: HostLifecycleIpcService = {
+    getView: async () => LIFECYCLE_VIEW,
+    setMode: async () => ({ kind: "applied", view: LIFECYCLE_VIEW }),
+    onChange: () => () => undefined,
+  };
+  fixture.bridge.installHostLifecycle(service, capability);
+}
+
+function requireHandler(
+  channel: string,
+): (event: unknown, ...args: unknown[]) => unknown {
+  const handler = ipcMainState.handlers.get(channel);
+  if (handler === undefined) {
+    throw new Error(`no handler registered for ${channel}`);
+  }
+  return handler;
+}
+
+const UNREGISTERED_SENDER_ID = 90909;
+
+describe("untrusted sender rejection through the real bridge (T36)", () => {
+  it("hostQuitListening rejects an unregistered sender", async () => {
+    const fixture = await newFixture(true);
+    const handler = requireHandler(RunnerHostInvoke.hostQuitListening);
+    expect(() => handler(sender(UNREGISTERED_SENDER_ID), true)).toThrow(
+      /not trusted/,
+    );
+    expect(fixture.bridge.hostQuitListeningWindowIds.size).toBe(0);
+  });
+
+  it("hostQuitAcknowledge rejects an unregistered sender", async () => {
+    const fixture = await newFixture(true);
+    fixture.listen(101);
+    const rig = transactionsOver(fixture);
+    rig.txs.onBeforeQuit();
+    await vi.waitFor(() => {
+      expect(fixture.w1.sentOn(RunnerHostEvent.hostQuitRequest)).toHaveLength(
+        1,
+      );
+    });
+    const requestId = fixture.requestIdOf(fixture.w1);
+    const handler = requireHandler(RunnerHostInvoke.hostQuitAcknowledge);
+    expect(() => handler(sender(UNREGISTERED_SENDER_ID), requestId)).toThrow(
+      /not trusted/,
+    );
+  });
+
+  it("hostQuitRespond rejects an unregistered sender", async () => {
+    const fixture = await newFixture(true);
+    fixture.listen(101);
+    const rig = transactionsOver(fixture);
+    rig.txs.onBeforeQuit();
+    await vi.waitFor(() => {
+      expect(fixture.w1.sentOn(RunnerHostEvent.hostQuitRequest)).toHaveLength(
+        1,
+      );
+    });
+    const requestId = fixture.requestIdOf(fixture.w1);
+    fixture.ack(101, requestId);
+    const handler = requireHandler(RunnerHostInvoke.hostQuitRespond);
+    const response: HostQuitDecisionResponse = {
+      requestId,
+      decision: { kind: "keep", remember: false },
+    };
+    expect(() => handler(sender(UNREGISTERED_SENDER_ID), response)).toThrow(
+      /not trusted/,
+    );
+    // The untrusted invoke must not have resolved the real waiter either.
+    expect(rig.nativeAsked).toHaveLength(0);
+  });
+
+  it("hostLifecycleGet rejects an unregistered sender", async () => {
+    const fixture = await newFixture(true);
+    installFakeLifecycle(fixture, "managed");
+    const handler = requireHandler(RunnerHostInvoke.hostLifecycleGet);
+    expect(() => handler(sender(UNREGISTERED_SENDER_ID))).toThrow(
+      /not trusted/,
+    );
+  });
+
+  it("hostLifecycleSet rejects an unregistered sender", async () => {
+    const fixture = await newFixture(true);
+    installFakeLifecycle(fixture, "managed");
+    const handler = requireHandler(RunnerHostInvoke.hostLifecycleSet);
+    expect(() =>
+      handler(sender(UNREGISTERED_SENDER_ID), { mode: "none", stop: null }),
+    ).toThrow(/not trusted/);
+  });
+
+  it("positive control: hostLifecycleGet/Set answer a registered sender", async () => {
+    const fixture = await newFixture(true);
+    installFakeLifecycle(fixture, "managed");
+    const getHandler = requireHandler(RunnerHostInvoke.hostLifecycleGet);
+    await expect(Promise.resolve(getHandler(sender(101)))).resolves.toEqual(
+      LIFECYCLE_VIEW,
+    );
+    const setHandler = requireHandler(RunnerHostInvoke.hostLifecycleSet);
+    await expect(
+      Promise.resolve(setHandler(sender(101), { mode: "none", stop: null })),
+    ).resolves.toEqual({ kind: "applied", view: LIFECYCLE_VIEW });
+  });
+});
+
+// F6: the unsynced-edits prompt (`requestQuitDecision`) must show and focus
+// a hidden MRU window before asking it - the same as `requestHostQuitDecision`
+// already does. On head it does not: it sends straight to `safeSendToWindow`
+// with no `focusById` first, so a hidden MRU window is asked while invisible.
+describe("F6: requestQuitDecision shows and focuses a hidden MRU window", () => {
+  it("w1 hidden and MRU, app-lifecycle ready: show, focus, THEN send quitRequested", async () => {
+    const fixture = await newFixture(false);
+    fixture.bridge.appLifecycleReadyWindowIds.add("window-1");
+    fixture.bridge.requestQuitDecision([]).catch(() => undefined);
+    expect(
+      fixture.order.filter(
+        (entry) =>
+          entry === "w1:show" ||
+          entry === "w1:focus" ||
+          entry === `w1:send:${RunnerHostEvent.quitRequested}`,
+      ),
+    ).toEqual([
+      "w1:show",
+      "w1:focus",
+      `w1:send:${RunnerHostEvent.quitRequested}`,
+    ]);
+  });
+});
+
+// T35 negatives: an ack (or a respond) must match BOTH the window that owns
+// the pending request and its requestId - a stale/foreign one must never be
+// mistaken for the real answer. These stay green on head; only
+// `settlesWithin`'s tautology (fixed above) was hiding them.
+describe("T35 negatives: an ack/respond must match window AND requestId", () => {
+  it("host quit prompt: an ack from the WRONG window (w1's requestId acked as window-2) is ignored - still rejects after the ack budget", async () => {
+    vi.useFakeTimers();
+    const fixture = await newFixture(true);
+    fixture.listen(101);
+    const decision = fixture.bridge.requestHostQuitDecision(ASK_PROMPT);
+    const requestId = fixture.requestIdOf(fixture.w1);
+    const rejection = expect(decision).rejects.toThrow(
+      /did not acknowledge servicing/,
+    );
+    fixture.ack(102, requestId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+  });
+
+  it("host quit prompt: an ack from w1 with a WRONG requestId is ignored - still rejects after the ack budget", async () => {
+    vi.useFakeTimers();
+    const fixture = await newFixture(true);
+    fixture.listen(101);
+    const decision = fixture.bridge.requestHostQuitDecision(ASK_PROMPT);
+    const rejection = expect(decision).rejects.toThrow(
+      /did not acknowledge servicing/,
+    );
+    fixture.ack(101, "not-the-real-request-id");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+  });
+
+  function payloadRequestId(payload: unknown): string {
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "requestId" in payload &&
+      typeof payload.requestId === "string"
+    ) {
+      return payload.requestId;
+    }
+    throw new Error("payload has no string requestId");
+  }
+
+  function requestIdOfQuit(window: TestWindow): string {
+    const message = window.sentOn(RunnerHostEvent.quitRequested).at(-1);
+    if (message === undefined) throw new Error("no quitRequested sent");
+    return payloadRequestId(message.payload);
+  }
+
+  it("unsynced-edits prompt: an ack from the WRONG window is ignored - still rejects after the ack budget", async () => {
+    vi.useFakeTimers();
+    const fixture = await newFixture(true);
+    fixture.bridge.appLifecycleReadyWindowIds.add("window-1");
+    const decision = fixture.bridge.requestQuitDecision([]);
+    const requestId = requestIdOfQuit(fixture.w1);
+    const rejection = expect(decision).rejects.toThrow(
+      /did not acknowledge servicing/,
+    );
+    fixture.invoke(RunnerHostInvoke.acknowledgeQuitRequest, 102, requestId);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+  });
+
+  it("unsynced-edits prompt: an ack from w1 with a WRONG requestId is ignored - still rejects after the ack budget", async () => {
+    vi.useFakeTimers();
+    const fixture = await newFixture(true);
+    fixture.bridge.appLifecycleReadyWindowIds.add("window-1");
+    const decision = fixture.bridge.requestQuitDecision([]);
+    const rejection = expect(decision).rejects.toThrow(
+      /did not acknowledge servicing/,
+    );
+    fixture.invoke(
+      RunnerHostInvoke.acknowledgeQuitRequest,
+      101,
+      "not-the-real-request-id",
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    await rejection;
+  });
+
+  it("unsynced-edits prompt: a respond from the wrong window leaves the request pending", async () => {
+    const fixture = await newFixture(true);
+    fixture.bridge.appLifecycleReadyWindowIds.add("window-1");
+    const decision = fixture.bridge.requestQuitDecision([]);
+    const requestId = requestIdOfQuit(fixture.w1);
+    fixture.invoke(RunnerHostInvoke.acknowledgeQuitRequest, 101, requestId);
+    fixture.invoke(RunnerHostInvoke.respondToQuitRequest, 102, {
+      requestId,
+      decision: "userCancelled",
+    });
+    await flush();
+    expect(await settlesWithin(decision)).toBe(false);
   });
 });

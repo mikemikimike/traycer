@@ -19,6 +19,7 @@ import type {
   QueuedDoctorRepair,
   QueuedDoctorRepairResult,
   FreePortAndRestartInput,
+  FreePortAndRestartResult,
   IHostManagement,
   IRunnerHost,
 } from "@traycer-clients/shared/platform/runner-host";
@@ -48,7 +49,7 @@ interface ManagementOverrides {
   }) => Promise<QueuedDoctorRepairResult>;
   readonly freePortAndRestart?: (
     input: FreePortAndRestartInput & { readonly expectedHostId: string },
-  ) => Promise<FreePortAndRestartInput>;
+  ) => Promise<FreePortAndRestartResult>;
   readonly getHostLogs?: (input: {
     readonly tailLines: number;
     readonly expectedHostId: string;
@@ -83,7 +84,8 @@ function makeManagement(overrides: ManagementOverrides): IHostManagement {
     deregisterService: vi.fn(notImplemented("deregisterService")),
     registryCheck: vi.fn(notImplemented("registryCheck")),
     freePortAndRestart:
-      overrides.freePortAndRestart ?? vi.fn((input) => Promise.resolve(input)),
+      overrides.freePortAndRestart ??
+      vi.fn((input) => Promise.resolve({ kind: "applied" as const, ...input })),
     runDoctorRepairQueued:
       overrides.runDoctorRepairQueued ??
       vi.fn(() => Promise.resolve({ kind: "applied" as const })),
@@ -246,7 +248,7 @@ describe("HostDoctorCard pending CLI upgrade", () => {
   it("opens the Free Port + Restart confirmation when PORT_CONFLICT carries process identity", async () => {
     const freePortAndRestart = vi.fn(
       (input: FreePortAndRestartInput & { readonly expectedHostId: string }) =>
-        Promise.resolve(input),
+        Promise.resolve({ kind: "applied" as const, ...input }),
     );
     const issue: HostDoctorIssue = {
       code: "PORT_CONFLICT",
@@ -315,7 +317,7 @@ describe("HostDoctorCard pending CLI upgrade", () => {
   it("allows Free Port + Restart when PID and process name are unknown", async () => {
     const freePortAndRestart = vi.fn(
       (input: FreePortAndRestartInput & { readonly expectedHostId: string }) =>
-        Promise.resolve(input),
+        Promise.resolve({ kind: "applied" as const, ...input }),
     );
     const issue: HostDoctorIssue = {
       code: "PORT_CONFLICT",
@@ -366,7 +368,7 @@ describe("HostDoctorCard pending CLI upgrade", () => {
   it("never presents Free Port + Restart with port 0", async () => {
     const freePortAndRestart = vi.fn(
       (input: FreePortAndRestartInput & { readonly expectedHostId: string }) =>
-        Promise.resolve(input),
+        Promise.resolve({ kind: "applied" as const, ...input }),
     );
     const restartHost = vi.fn(() =>
       Promise.resolve({ kind: "restarted" as const }),

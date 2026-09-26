@@ -1765,7 +1765,7 @@ describe("host lifecycle analytics schema", () => {
       "linked",
       "none",
     ] as const;
-    const sources = ["settings", "quit-modal", "no-host-card"] as const;
+    const sources = ["settings", "quit-modal", "no-host-card", "cli"] as const;
 
     for (const mode of modes) {
       for (const source of sources) {

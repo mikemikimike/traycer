@@ -28,6 +28,11 @@ import {
   formatLinuxProcessStartIdentity,
   type ProcessStartIdentity,
 } from "@traycer/protocol/host/lifecycle/process-start-identity";
+import {
+  __setAsyncProcessLivenessReaderForTest,
+  __setAsyncProcessStartIdentityReaderForTest,
+  type ProcessLivenessVerdict,
+} from "@traycer-clients/shared/host-lock/process-identity";
 import { HostLifecyclePolicyStore } from "../host-lifecycle-policy";
 
 vi.mock("../../app/logger", () => ({
@@ -231,6 +236,10 @@ describe("HostLifecyclePolicyStore.writePolicy", () => {
 });
 
 describe("HostLifecyclePolicyStore.readSupervisorState", () => {
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+  });
+
   async function writeSupervisor(
     store: HostLifecyclePolicyStore,
     capabilities: readonly string[],
@@ -244,6 +253,8 @@ describe("HostLifecyclePolicyStore.readSupervisorState", () => {
         cliVersion: "1.0.0",
         capabilities,
         startedAt: "2026-09-24T09:00:00.000Z",
+        startIdentity: null,
+        admittedAs: null,
       }),
       "utf8",
     );
@@ -266,13 +277,15 @@ describe("HostLifecyclePolicyStore.readSupervisorState", () => {
   it("is enforcing with a supervisor record advertising lifecycle-policy-v1", async () => {
     const store = makeStore(OWN_IDENTITY);
     await writeSupervisor(store, [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1]);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
     expect(await store.readSupervisorState()).toBe("enforcing");
   });
 
-  it("is enforcing regardless of pid.json when the capability is present", async () => {
+  it("is enforcing regardless of pid.json while the recorded supervisor is alive", async () => {
     const store = makeStore(OWN_IDENTITY);
     await writeSupervisor(store, [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1]);
     await writePid();
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
     expect(await store.readSupervisorState()).toBe("enforcing");
   });
 
@@ -293,6 +306,481 @@ describe("HostLifecyclePolicyStore.readSupervisorState", () => {
     await writeSupervisor(store, ["some-other-capability"]);
     await writePid();
     expect(await store.readSupervisorState()).toBe("not-enforcing");
+  });
+
+  // ---------------------------------------------------------------------
+  // F11: a supervisor record naming a dead or recycled pid must not read as
+  // "enforcing" - the recorded supervisor is provably gone, so its promise
+  // that the lifecycle policy is enforced does not hold. Only POSITIVE
+  // liveness/identity evidence (dead, or alive-different) may downgrade the
+  // verdict; anything the probe could not establish (indeterminate, a legacy
+  // record with no identity to compare, or one whose `startIdentity` is not a
+  // usable identity string) falls back to `enforcing` on the capability alone.
+  // ---------------------------------------------------------------------
+  describe("F11: readSupervisorState liveness", () => {
+    async function writeRawSupervisorWithIdentity(
+      store: HostLifecyclePolicyStore,
+      pid: number,
+      startIdentity: ProcessStartIdentity | null | "garbage",
+    ): Promise<void> {
+      await mkdir(hostHome, { recursive: true });
+      await writeFile(
+        store.supervisorPath,
+        JSON.stringify({
+          v: 1,
+          pid,
+          cliVersion: "1.0.0",
+          capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+          startedAt: "2026-09-24T09:00:00.000Z",
+          startIdentity,
+        }),
+        "utf8",
+      );
+    }
+
+    async function writeRawSupervisorLegacy(
+      store: HostLifecyclePolicyStore,
+      pid: number,
+    ): Promise<void> {
+      await mkdir(hostHome, { recursive: true });
+      await writeFile(
+        store.supervisorPath,
+        JSON.stringify({
+          v: 1,
+          pid,
+          cliVersion: "1.0.0",
+          capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+          startedAt: "2026-09-24T09:00:00.000Z",
+        }),
+        "utf8",
+      );
+    }
+
+    const RECORDED_PID = 777_001;
+    const RECORDED_IDENTITY = requireIdentity(
+      formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+    );
+    const OBSERVED_DIFFERENT_IDENTITY = requireIdentity(
+      formatDarwinProcessStartIdentity("Mon Jul 7 09:00:00 2026"),
+    );
+
+    afterEach(() => {
+      __setAsyncProcessLivenessReaderForTest(null);
+      __setAsyncProcessStartIdentityReaderForTest(null);
+    });
+
+    function stubLiveness(verdict: ProcessLivenessVerdict): void {
+      __setAsyncProcessLivenessReaderForTest(() => Promise.resolve(verdict));
+    }
+
+    function stubIdentity(identity: ProcessStartIdentity | null): void {
+      __setAsyncProcessStartIdentityReaderForTest(() =>
+        Promise.resolve(identity),
+      );
+    }
+
+    it("dead + no pid.json is not-running", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorLegacy(store, RECORDED_PID);
+      stubLiveness("dead");
+      expect(await store.readSupervisorState()).toBe("not-running");
+    });
+
+    it("dead + a valid pid.json is not-enforcing", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorLegacy(store, RECORDED_PID);
+      await writePid();
+      stubLiveness("dead");
+      expect(await store.readSupervisorState()).toBe("not-enforcing");
+    });
+
+    it("alive with a different start identity is not-running", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorWithIdentity(
+        store,
+        RECORDED_PID,
+        RECORDED_IDENTITY,
+      );
+      stubLiveness("alive");
+      stubIdentity(OBSERVED_DIFFERENT_IDENTITY);
+      expect(await store.readSupervisorState()).toBe("not-running");
+    });
+
+    it("alive with the same start identity is enforcing", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorWithIdentity(
+        store,
+        RECORDED_PID,
+        RECORDED_IDENTITY,
+      );
+      stubLiveness("alive");
+      stubIdentity(RECORDED_IDENTITY);
+      expect(await store.readSupervisorState()).toBe("enforcing");
+    });
+
+    it("a legacy record (no startIdentity) with an alive pid is enforcing", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorLegacy(store, RECORDED_PID);
+      stubLiveness("alive");
+      expect(await store.readSupervisorState()).toBe("enforcing");
+    });
+
+    it("indeterminate liveness is enforcing (only positive evidence downgrades it)", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorLegacy(store, RECORDED_PID);
+      stubLiveness("indeterminate");
+      expect(await store.readSupervisorState()).toBe("enforcing");
+    });
+
+    it("a non-identity startIdentity string with an alive pid is enforcing (liveness only)", async () => {
+      const store = makeStore(OWN_IDENTITY);
+      await writeRawSupervisorWithIdentity(store, RECORDED_PID, "garbage");
+      stubLiveness("alive");
+      expect(await store.readSupervisorState()).toBe("enforcing");
+    });
+  });
+});
+
+// F11-cache: `supervisorRecordIsStale`'s memo is reused only for less than
+// `SUPERVISOR_VERDICT_REUSE_MS` (60s) AND only while the spawn-free existence
+// probe still agrees with the cached verdict. Both conditions matter: on
+// Windows a dead supervisor's pid is commonly reissued within seconds, and a
+// reissued pid also answers `exists` - existence alone cannot tell the
+// recorded supervisor from its replacement, which is exactly what the age
+// bound is for. These tests use a REAL, live, non-self pid (`process.ppid`)
+// so the actual spawn-free existence probe (`probeProcessExistenceWithoutSpawn`,
+// a bare `process.kill(pid, 0)`) answers `exists` throughout, standing in for
+// "the pid still exists" without mocking that probe itself. `process.pid` is
+// deliberately not used: `verifyProcessIdentityAsync` special-cases it.
+describe("F11-cache: the supervisor verdict cache is re-probed after its max age (pid reuse)", () => {
+  const RECORDED_PID = process.ppid;
+  const RECORDED = requireIdentity(
+    formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+  );
+  const OTHER = requireIdentity(
+    formatDarwinProcessStartIdentity("Mon Jul 7 09:00:00 2026"),
+  );
+
+  let clockMs: number;
+
+  function makeClockedStore(): HostLifecyclePolicyStore {
+    return new HostLifecyclePolicyStore({
+      hostHomeDir: hostHome,
+      pidMetadataFile: pidFile,
+      ownPid: OWN_PID,
+      readOwnStartIdentity: () => Promise.resolve(OWN_IDENTITY),
+      now: () => new Date(clockMs),
+    });
+  }
+
+  async function writeRawSupervisor(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+    startIdentity: ProcessStartIdentity,
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    await writeFile(
+      store.supervisorPath,
+      JSON.stringify({
+        v: 1,
+        pid,
+        cliVersion: "1.0.0",
+        capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+        startedAt: "2026-09-24T09:00:00.000Z",
+        startIdentity,
+      }),
+      "utf8",
+    );
+  }
+
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+    __setAsyncProcessStartIdentityReaderForTest(null);
+  });
+
+  it("re-probes 60s after the cached verdict, even while the pid still exists", async () => {
+    clockMs = Date.parse("2026-09-24T10:00:00.000Z");
+    const store = makeClockedStore();
+    await writeRawSupervisor(store, RECORDED_PID, RECORDED);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    const identityReader = vi.fn(() =>
+      Promise.resolve<ProcessStartIdentity | null>(RECORDED),
+    );
+    __setAsyncProcessStartIdentityReaderForTest(identityReader);
+
+    // 1. First read: no memo yet, a full probe runs.
+    expect(await store.readSupervisorState()).toBe("enforcing");
+    expect(identityReader).toHaveBeenCalledTimes(1);
+
+    // 2. The pid has since been reissued to another process (the reader now
+    // answers OTHER), but only 30s have passed: within the reuse window
+    // (existence still `exists`, verdict still cached and under 60s old) the
+    // cached verdict wins and no new probe runs.
+    identityReader.mockResolvedValue(OTHER);
+    clockMs += 30_000;
+    expect(await store.readSupervisorState()).toBe("enforcing");
+    expect(identityReader).toHaveBeenCalledTimes(1);
+
+    // 3. 60s after the first probe: the cache has expired and is re-probed
+    // regardless of the pid still existing, picking up the reissue.
+    clockMs += 30_000;
+    expect(await store.readSupervisorState()).toBe("not-running");
+    expect(identityReader).toHaveBeenCalledTimes(2);
+  });
+
+  it("a negative age (the clock stepped backward) does not reuse the cache", async () => {
+    clockMs = Date.parse("2026-09-24T10:00:00.000Z");
+    const store = makeClockedStore();
+    await writeRawSupervisor(store, RECORDED_PID, RECORDED);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    const identityReader = vi.fn(() =>
+      Promise.resolve<ProcessStartIdentity | null>(RECORDED),
+    );
+    __setAsyncProcessStartIdentityReaderForTest(identityReader);
+
+    expect(await store.readSupervisorState()).toBe("enforcing");
+    expect(identityReader).toHaveBeenCalledTimes(1);
+
+    // The clock steps BACKWARD (NTP correction, a resumed VM). A negative age
+    // is not "within window": it re-probes just like an expired one, and
+    // picks up the reissue.
+    identityReader.mockResolvedValue(OTHER);
+    clockMs -= 10_000;
+    expect(await store.readSupervisorState()).toBe("not-running");
+    expect(identityReader).toHaveBeenCalledTimes(2);
+  });
+});
+
+// F4 (lifecycle side): "the desktop leaves a host that a person started in a
+// terminal untouched; the mode governs the service run only." `readSupervisorRun`
+// is the one call that gives a caller BOTH facts at once - whether the running
+// supervisor enforces the policy at all (`state`, exactly `readSupervisorState`'s
+// answer) and, when it does, which kind of run this is (`admittedAs`, from the
+// live record's own field) - so a decision that must leave a foreground run
+// alone can be made from one read. Reuses the F11 fixture shape: a real, live,
+// non-self pid (`process.ppid`) so the spawn-free existence probe answers
+// `exists`, and the liveness/identity seams.
+describe("HostLifecyclePolicyStore.readSupervisorRun (F4)", () => {
+  const RUN_RECORDED_PID = process.ppid;
+  const RUN_RECORDED_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+  );
+  const RUN_OBSERVED_DIFFERENT_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Mon Jul 7 09:00:00 2026"),
+  );
+
+  async function writeRawSupervisorRun(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+    startIdentity: ProcessStartIdentity,
+    admittedAs: "service" | "foreground",
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    await writeFile(
+      store.supervisorPath,
+      JSON.stringify({
+        v: 1,
+        pid,
+        cliVersion: "1.0.0",
+        capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+        startedAt: "2026-09-24T09:00:00.000Z",
+        startIdentity,
+        admittedAs,
+      }),
+      "utf8",
+    );
+  }
+
+  async function writeRawLegacySupervisorRun(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    await writeFile(
+      store.supervisorPath,
+      JSON.stringify({
+        v: 1,
+        pid,
+        cliVersion: "1.0.0",
+        capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+        startedAt: "2026-09-24T09:00:00.000Z",
+      }),
+      "utf8",
+    );
+  }
+
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+    __setAsyncProcessStartIdentityReaderForTest(null);
+  });
+
+  it("a live foreground record reads enforcing with the pid and admittedAs 'foreground'", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawSupervisorRun(
+      store,
+      RUN_RECORDED_PID,
+      RUN_RECORDED_IDENTITY,
+      "foreground",
+    );
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(RUN_RECORDED_IDENTITY),
+    );
+
+    expect(await store.readSupervisorRun()).toEqual({
+      state: "enforcing",
+      supervisorPid: RUN_RECORDED_PID,
+      admittedAs: "foreground",
+    });
+  });
+
+  it("a live service record reads enforcing with admittedAs 'service'", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawSupervisorRun(
+      store,
+      RUN_RECORDED_PID,
+      RUN_RECORDED_IDENTITY,
+      "service",
+    );
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(RUN_RECORDED_IDENTITY),
+    );
+
+    expect(await store.readSupervisorRun()).toEqual({
+      state: "enforcing",
+      supervisorPid: RUN_RECORDED_PID,
+      admittedAs: "service",
+    });
+  });
+
+  it("a legacy record with no admittedAs field reads enforcing with admittedAs null", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawLegacySupervisorRun(store, RUN_RECORDED_PID);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+
+    expect(await store.readSupervisorRun()).toEqual({
+      state: "enforcing",
+      supervisorPid: RUN_RECORDED_PID,
+      admittedAs: null,
+    });
+  });
+
+  it("a stale record (identity mismatch) with no pid.json reads not-running with no pid and no admittedAs", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawSupervisorRun(
+      store,
+      RUN_RECORDED_PID,
+      RUN_RECORDED_IDENTITY,
+      "foreground",
+    );
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(RUN_OBSERVED_DIFFERENT_IDENTITY),
+    );
+
+    expect(await store.readSupervisorRun()).toEqual({
+      state: "not-running",
+      supervisorPid: null,
+      admittedAs: null,
+    });
+  });
+});
+
+// F4 (addendum): the health monitor's hold key. `readIdentifiedSupervisorPid`
+// returns the live supervisor's pid ONLY when its record carries a start
+// identity AND that identity checks out - a positively-identified process to
+// hold, never a bare pid a legacy record cannot vouch for. This is the one
+// difference from `readSupervisorRun().supervisorPid`, which returns the pid
+// for a legacy record too (liveness alone is enough for that read's purpose).
+describe("HostLifecyclePolicyStore.readIdentifiedSupervisorPid (F4)", () => {
+  const ID_RECORDED_PID = process.ppid;
+  const ID_RECORDED_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Sun Jul 6 12:00:00 2026"),
+  );
+  const ID_OBSERVED_DIFFERENT_IDENTITY = requireIdentity(
+    formatDarwinProcessStartIdentity("Mon Jul 7 09:00:00 2026"),
+  );
+
+  async function writeRawSupervisorWithIdentity(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+    startIdentity: ProcessStartIdentity,
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    await writeFile(
+      store.supervisorPath,
+      JSON.stringify({
+        v: 1,
+        pid,
+        cliVersion: "1.0.0",
+        capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+        startedAt: "2026-09-24T09:00:00.000Z",
+        startIdentity,
+      }),
+      "utf8",
+    );
+  }
+
+  async function writeRawLegacySupervisor(
+    store: HostLifecyclePolicyStore,
+    pid: number,
+  ): Promise<void> {
+    await mkdir(hostHome, { recursive: true });
+    await writeFile(
+      store.supervisorPath,
+      JSON.stringify({
+        v: 1,
+        pid,
+        cliVersion: "1.0.0",
+        capabilities: [SUPERVISOR_CAPABILITY_LIFECYCLE_POLICY_V1],
+        startedAt: "2026-09-24T09:00:00.000Z",
+      }),
+      "utf8",
+    );
+  }
+
+  afterEach(() => {
+    __setAsyncProcessLivenessReaderForTest(null);
+    __setAsyncProcessStartIdentityReaderForTest(null);
+  });
+
+  it("a live record whose identity checks out returns the pid", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawSupervisorWithIdentity(
+      store,
+      ID_RECORDED_PID,
+      ID_RECORDED_IDENTITY,
+    );
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(ID_RECORDED_IDENTITY),
+    );
+
+    expect(await store.readIdentifiedSupervisorPid()).toBe(ID_RECORDED_PID);
+  });
+
+  it("a live legacy record with no startIdentity returns null", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawLegacySupervisor(store, ID_RECORDED_PID);
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+
+    expect(await store.readIdentifiedSupervisorPid()).toBeNull();
+  });
+
+  it("a record whose identity mismatches (pid reissued) returns null", async () => {
+    const store = makeStore(OWN_IDENTITY);
+    await writeRawSupervisorWithIdentity(
+      store,
+      ID_RECORDED_PID,
+      ID_RECORDED_IDENTITY,
+    );
+    __setAsyncProcessLivenessReaderForTest(() => Promise.resolve("alive"));
+    __setAsyncProcessStartIdentityReaderForTest(() =>
+      Promise.resolve(ID_OBSERVED_DIFFERENT_IDENTITY),
+    );
+
+    expect(await store.readIdentifiedSupervisorPid()).toBeNull();
   });
 });
 

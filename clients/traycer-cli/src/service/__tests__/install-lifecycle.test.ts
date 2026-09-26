@@ -1851,3 +1851,61 @@ describe("restartAfterAbortedSwap (Desktop-managed: the stop route reports what 
     expect(harness.relaunchAfterRestart).toHaveBeenCalledTimes(1);
   });
 });
+
+// F21: `createBytesOnlyInstallLifecycle`'s `restartAfterAbortedSwap` calls a
+// bare `controller.start(label)`, unlike `createServiceInstallLifecycle`'s
+// equivalent restore (`:366-380`), which wraps its start in
+// `runWithPublishedHostStartAdoption` so the controller's spawn-edge lease
+// can publish a host-start adoption proof. The bytes-only lifecycle has no
+// `setHostStartAdoptionPublisher` at all, so a Windows install that stops a
+// running host, aborts before the swap, and restarts it leaves no adoption
+// proof behind.
+describe("F21: createBytesOnlyInstallLifecycle publishes host-start adoption on restartAfterAbortedSwap", () => {
+  it("Windows, a running host: setHostStartAdoptionPublisher is wired, and restartAfterAbortedSwap publishes before/at the restart's spawn edge", async () => {
+    const harness = makeController("running");
+    // The same edge probe the post-swap rows above use: "controller-entered"
+    // lands BEFORE the fake reaches its spawn edge, so it can precede
+    // "publish" only when the edge - not the call - publishes the proof.
+    const events: string[] = [];
+    harness.start.mockImplementation(async () => {
+      events.push("controller-entered");
+      await atServiceSpawnEdge();
+      events.push("start");
+    });
+    mocks.createServiceControllerMock.mockReturnValue(harness.controller);
+    const bytesOnly = createBytesOnlyInstallLifecycle(
+      harness.controller,
+      label,
+      NO_INSTALL_PHASE_HOOKS,
+    );
+
+    await withPlatformAsync("win32", () => bytesOnly.beforeSwap());
+    expect(harness.stop).toHaveBeenCalledTimes(1);
+
+    expect(bytesOnly.setHostStartAdoptionPublisher).not.toBeUndefined();
+    const setPublisher = bytesOnly.setHostStartAdoptionPublisher;
+    if (setPublisher === undefined) {
+      throw new Error(
+        "createBytesOnlyInstallLifecycle exposes no adoption publisher seam",
+      );
+    }
+    const lease = {
+      waitForSpawn: vi.fn(async () => undefined),
+      cancel: vi.fn(async () => undefined),
+    };
+    const publishSpy = vi.fn(async (serviceLabel: string) => {
+      expect(serviceLabel).toBe(label.id);
+      events.push("publish");
+      return lease;
+    });
+    setPublisher(publishSpy);
+
+    await withPlatformAsync("win32", () => bytesOnly.restartAfterAbortedSwap());
+
+    expect(publishSpy).toHaveBeenCalledTimes(1);
+    expect(publishSpy).toHaveBeenCalledWith(label.id);
+    expect(harness.start).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["controller-entered", "publish", "start"]);
+    expect(lease.waitForSpawn).toHaveBeenCalledTimes(1);
+  });
+});

@@ -42,7 +42,11 @@ export interface HostQuitDialogViewProps {
   } | null;
   /** `null` hides Keep (the `→ none` confirm's only choice is Stop). */
   readonly keepLabel: string | null;
-  readonly stopLabel: string;
+  /**
+   * `null` hides Stop: the `→ none` confirm during a foreground run stops
+   * nothing, so its one action is Keep's primary slot, never a destructive one.
+   */
+  readonly stopLabel: string | null;
   readonly stopDisabled: boolean;
   /** The answer in flight, if any; every button is disabled while it is. */
   readonly pendingAction: HostQuitDialogAction | null;
@@ -158,16 +162,18 @@ export function HostQuitDialogView(props: HostQuitDialogViewProps): ReactNode {
             {props.pendingAction === "cancel" ? <PendingDots /> : null}
             {HOST_QUIT_CANCEL_LABEL}
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={locked || props.stopDisabled}
-            onClick={props.onStop}
-            data-testid="host-quit-stop"
-          >
-            {props.pendingAction === "stop" ? <PendingDots /> : null}
-            {props.stopLabel}
-          </Button>
+          {props.stopLabel === null ? null : (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={locked || props.stopDisabled}
+              onClick={props.onStop}
+              data-testid="host-quit-stop"
+            >
+              {props.pendingAction === "stop" ? <PendingDots /> : null}
+              {props.stopLabel}
+            </Button>
+          )}
           {props.keepLabel === null ? null : (
             <Button
               ref={keepRef}

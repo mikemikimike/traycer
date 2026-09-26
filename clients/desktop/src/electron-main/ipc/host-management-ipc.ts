@@ -27,7 +27,9 @@ import type {
   HostRestartRequestResult,
   HostServiceRestartResult,
   MutationKind,
-  FreePortAndRestartInput,
+  FreePortAndRestartResult,
+  HostUninstallResult,
+  TraycerUninstallResult,
 } from "../../ipc-contracts/host-management-types";
 import {
   hostAvailableManifestSchema,
@@ -323,17 +325,6 @@ function admissionBlockIsUpdateWork(block: LifecycleAdmissionBlock): boolean {
 }
 
 /**
- * The failure message of a non-ok outcome, or `null` when it succeeded.
- *
- * Lets a Doctor repair route inspect an outcome WITHOUT throwing yet, after
- * it has already narrowed away the `abandoned` arm - what is left non-ok is
- * a genuine failure and gets the error path.
- */
-function failureMessageOf<TOk>(outcome: MutationOutcome<TOk>): string | null {
-  return outcome.kind === "ok" ? null : outcome.message;
-}
-
-/**
  * Every non-"ok" outcome rejects the IPC invoke - matches the legacy
  * CLI-throw contract for the handlers that never had a "keep the old
  * host, surface it for a compat probe" branch. An `abandoned` outcome (the
@@ -347,6 +338,44 @@ function okOrThrow<TOk>(outcome: GuardedMutationOutcome<TOk>): TOk {
     throw new Error(outcome.message);
   }
   return outcome.value;
+}
+
+/**
+ * `okOrThrow` for a route whose renderer contract carries a `declined` arm: a
+ * `deferred` - the write did not run, for a reason another click cannot fix
+ * (a host a person started in a terminal, host starts suspended, lock
+ * contention) - resolves `declined` with its message instead of rejecting.
+ * Every other non-ok outcome still rejects.
+ */
+function okOrDeclined<TOk>(
+  outcome: GuardedMutationOutcome<TOk>,
+):
+  | { readonly kind: "ok"; readonly value: TOk }
+  | { readonly kind: "declined"; readonly message: string } {
+  if (outcome.kind === "deferred") {
+    return { kind: "declined", message: outcome.message };
+  }
+  return { kind: "ok", value: okOrThrow(outcome) };
+}
+
+/**
+ * The recovery console's taxonomy for a queued repair's settled outcome.
+ * `ok` is applied. A repair that did not run for a reason the person cannot
+ * fix by clicking again is `declined`: the lane-head identity guard's
+ * `abandoned`, and every `deferred` - host starts suspended (a `none`
+ * machine, or a stop in progress), a host started in a terminal, lock
+ * contention. The console announces `declined` as information and never
+ * counts it toward its recurrence lock, so a refusal cannot lock the Doctor.
+ * Anything else is a genuine failure and rejects.
+ */
+function queuedDoctorRepairResultOf<TOk>(
+  outcome: GuardedMutationOutcome<TOk>,
+): QueuedDoctorRepairResult {
+  if (outcome.kind === "ok") return { kind: "applied" };
+  if (outcome.kind === "abandoned" || outcome.kind === "deferred") {
+    return { kind: "declined", message: outcome.message };
+  }
+  throw new Error(outcome.message);
 }
 
 /**
@@ -1224,9 +1253,13 @@ export function registerHostManagementIpc(bridge: RunnerIpcBridge): void {
 
   bridge.handleInvoke(
     RunnerHostInvoke.traycerHostUninstall,
-    async (_event, raw: unknown) => {
+    async (_event, raw: unknown): Promise<HostUninstallResult> => {
       const all = optionalBoolean(raw, "all");
-      return okOrThrow(await bridge.options.hostController.uninstallHost(all));
+      const settled = okOrDeclined(
+        await bridge.options.hostController.uninstallHost(all),
+      );
+      if (settled.kind === "declined") return settled;
+      return { kind: "uninstalled", ...settled.value };
     },
   );
 
@@ -1236,29 +1269,36 @@ export function registerHostManagementIpc(bridge: RunnerIpcBridge): void {
   // item, and running `host uninstall --all` - all owned by
   // `HostController.removeTraycer()` now. `~/.traycer` user data is never
   // touched (the CLI has no purge path by design).
-  bridge.handleInvoke(RunnerHostInvoke.traycerAppUninstall, async () => {
-    const result = okOrThrow(
-      await bridge.options.hostController.removeTraycer(),
-    );
+  bridge.handleInvoke(
+    RunnerHostInvoke.traycerAppUninstall,
+    async (): Promise<TraycerUninstallResult> => {
+      const settled = okOrDeclined(
+        await bridge.options.hostController.removeTraycer(),
+      );
+      // Declined - over a host a person started in a terminal, for one -
+      // removed nothing, so there is no installed version to refresh away.
+      if (settled.kind === "declined") return settled;
+      const result = settled.value;
 
-    // Refresh the registry cache so `installedVersion` (now absent) drives
-    // `updateAvailable` to false. That makes every update-driven reinstall
-    // vector - the launch/quit auto-update reconciles and the tray "update
-    // available" affordance - naturally no-op through their existing
-    // `updateAvailable` guards. Tolerated: a failed probe must never fail an
-    // otherwise-complete uninstall.
-    await refreshRegistryUpdateState(bridge.options.hostController, {
-      force: true,
-      maxAgeMs: null,
-    }).catch((err: unknown) => {
-      log.warn("[host-management] registry refresh after uninstall failed", {
-        err,
+      // Refresh the registry cache so `installedVersion` (now absent) drives
+      // `updateAvailable` to false. That makes every update-driven reinstall
+      // vector - the launch/quit auto-update reconciles and the tray "update
+      // available" affordance - naturally no-op through their existing
+      // `updateAvailable` guards. Tolerated: a failed probe must never fail
+      // an otherwise-complete uninstall.
+      await refreshRegistryUpdateState(bridge.options.hostController, {
+        force: true,
+        maxAgeMs: null,
+      }).catch((err: unknown) => {
+        log.warn("[host-management] registry refresh after uninstall failed", {
+          err,
+        });
       });
-    });
 
-    log.info("[host-management] in-app uninstall complete", { ...result });
-    return result;
-  });
+      log.info("[host-management] in-app uninstall complete", { ...result });
+      return { kind: "removed", ...result };
+    },
+  );
 
   bridge.handleInvoke(
     RunnerHostInvoke.traycerHostRemovalGet,
@@ -1621,13 +1661,9 @@ export function registerHostManagementIpc(bridge: RunnerIpcBridge): void {
         // callers. It carries no guard intent: it rewrites the service
         // definition for this slot's label, which is the same file whichever
         // host identity later runs under it, and it starts nothing.
-        const outcome =
-          await bridge.options.hostController.refreshServiceDefinition();
-        const failure = failureMessageOf(outcome);
-        if (failure !== null) {
-          throw new Error(failure);
-        }
-        return { kind: "applied" };
+        return queuedDoctorRepairResultOf(
+          await bridge.options.hostController.refreshServiceDefinition(),
+        );
       }
       if (repair === "restart") {
         // Queued like its two siblings, so the identity question rides the
@@ -1681,18 +1717,12 @@ export function registerHostManagementIpc(bridge: RunnerIpcBridge): void {
       // caller whose intent ran - rendered the same way as the pre-enqueue
       // check above, and never counted toward the console's recurrence lock,
       // which would let a merely-renamed host disable Doctor after three
-      // clicks.
-      if (outcome.kind === "abandoned") {
-        return { kind: "declined", message: outcome.message };
-      }
-      // Anything else that stopped this repair is a genuine failure and
-      // rejects, matching what the renderer did when it called the unfenced
-      // methods directly.
-      const failure = failureMessageOf(outcome);
-      if (failure !== null) {
-        throw new Error(failure);
-      }
-      return { kind: "applied" };
+      // clicks. Neither is a `deferred`: a machine running no local host, or
+      // a host started in a terminal, would otherwise lock the Doctor after
+      // three clicks on a repair it was always going to refuse. Anything
+      // else rejects, matching what the renderer did when it called the
+      // unfenced methods directly.
+      return queuedDoctorRepairResultOf(outcome);
     },
   );
 
@@ -1794,7 +1824,7 @@ export function registerHostManagementIpc(bridge: RunnerIpcBridge): void {
 
   bridge.handleInvoke(
     RunnerHostInvoke.traycerFreePortAndRestart,
-    async (_event, raw: unknown) => {
+    async (_event, raw: unknown): Promise<FreePortAndRestartResult> => {
       // Flow 4 step 7: confirmation is the renderer's responsibility - by
       // the time we get here the user has already approved killing the
       // foreign process. Per the Tech Plan, Desktop maps Doctor fix
@@ -1827,16 +1857,21 @@ export function registerHostManagementIpc(bridge: RunnerIpcBridge): void {
       // queued repairs this is the one that most needs re-asking: the
       // consequence of getting it wrong is killing a process nobody named.
       const intent = userRepairIntent(bridge, expectedHostId);
-      okOrThrow(
+      // A deferral - host starts suspended, a host started in a terminal -
+      // declines; the identity refusals above and at the lane head still
+      // reject, as they always have on this route.
+      const settled = okOrDeclined(
         await bridge.options.hostController.freePortAndRestart(
           pid,
           port,
           intent,
         ),
       );
+      if (settled.kind === "declined") return settled;
       // `ActivateInstalledOk` carries no port/pid/processName - echo the
       // confirmed input back, matching the renderer contract's shape.
-      const result: FreePortAndRestartInput = {
+      const result: FreePortAndRestartResult = {
+        kind: "applied",
         port: port ?? 0,
         pid,
         processName,

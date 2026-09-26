@@ -68,38 +68,28 @@ export function describeHostQuitPrompt(
 ): HostQuitPromptModel {
   const facts =
     verdict.kind === "busy" || verdict.kind === "idle" ? verdict : null;
+  // A busy round is busy whatever the fresh list says (the table below), so
+  // its counts line leads with the host's work, never with "Nothing is
+  // running" under a title that says it is still working.
+  const busyState = request.round !== "initial" || verdict.kind === "busy";
   const countsLine =
     facts === null
       ? null
       : hostQuitCountsLine({
-          busy: facts.kind === "busy",
+          busy: busyState,
           busySessionCount: facts.busySessionCount,
           breakdown: facts.breakdown,
           statusMinor: facts.statusMinor,
         });
   const breakdown = facts === null ? null : facts.breakdown;
   if (request.round !== "initial") {
-    const retry = request.round === "busy-retry";
-    const stateKind = retry ? "busy-retry" : "busy-round";
-    return {
-      stateKind:
-        verdict.kind === "checking" ? `${stateKind}-checking` : stateKind,
-      title: HOST_QUIT_TITLE_BUSY,
-      description: retry
-        ? HOST_QUIT_DESCRIPTION_BUSY_RETRY
-        : HOST_QUIT_DESCRIPTION_BUSY,
-      detail:
-        verdict.kind === "unknown"
-          ? hostQuitUnknownDescription(verdict.reason)
-          : null,
+    return describeBusyRound({
+      retry: request.round === "busy-retry",
+      verdict,
       countsLine,
-      sessionsHostId: localHostId,
-      stopLabel: HOST_QUIT_STOP_LABEL,
-      stopDisabled: verdict.kind === "checking",
-      stopForce: true,
-      analyticsVerdict: "busy",
       breakdown,
-    };
+      localHostId,
+    });
   }
   switch (verdict.kind) {
     case "busy":
@@ -146,6 +136,7 @@ export function describeHostQuitPrompt(
       };
     case "checking":
     case "no-local-host":
+    case "not-running":
       return {
         stateKind: verdict.kind,
         title: HOST_QUIT_TITLE_CHECKING,
@@ -163,11 +154,46 @@ export function describeHostQuitPrompt(
 }
 
 /**
+ * A `busy` or `busy-retry` round: busy whatever the fresh list says, since the
+ * host has just refused an idle-only stop (see `describeHostQuitPrompt`).
+ */
+function describeBusyRound(input: {
+  readonly retry: boolean;
+  readonly verdict: HostQuitVerdict;
+  readonly countsLine: string | null;
+  readonly breakdown: HostBusyBreakdownV2 | null;
+  readonly localHostId: string | null;
+}): HostQuitPromptModel {
+  const { verdict } = input;
+  const stateKind = input.retry ? "busy-retry" : "busy-round";
+  return {
+    stateKind:
+      verdict.kind === "checking" ? `${stateKind}-checking` : stateKind,
+    title: HOST_QUIT_TITLE_BUSY,
+    description: input.retry
+      ? HOST_QUIT_DESCRIPTION_BUSY_RETRY
+      : HOST_QUIT_DESCRIPTION_BUSY,
+    detail:
+      verdict.kind === "unknown"
+        ? hostQuitUnknownDescription(verdict.reason)
+        : null,
+    countsLine: input.countsLine,
+    sessionsHostId: input.localHostId,
+    stopLabel: HOST_QUIT_STOP_LABEL,
+    stopDisabled: verdict.kind === "checking",
+    stopForce: true,
+    analyticsVerdict: "busy",
+    breakdown: input.breakdown,
+  };
+}
+
+/**
  * The answer this modal gives WITHOUT asking, or `null` to ask.
  *
- * - No host entry on this machine: nothing to keep or stop. Ask keeps (the
- *   choice that can never lose work); Stop-if-idle asks main to stop if idle,
- *   which is what that mode promised.
+ * - No host entry on this machine, or one whose host is not serving: nothing
+ *   the modal could list. Ask keeps (the choice that can never lose work);
+ *   Stop-if-idle asks main to stop if idle, which is what that mode promised
+ *   and which a host that is in fact busy refuses.
  * - Stop-if-idle's first round with an idle list: that mode's promise is an
  *   instant quit when nothing is running, so it answers Stop (if-idle) and
  *   never shows the list. A busy race comes back as a busy-retry round.
@@ -182,7 +208,7 @@ export function automaticHostQuitDecision(
   verdict: HostQuitVerdict,
 ): HostQuitDecision | null {
   if (request.round !== "initial") return null;
-  if (verdict.kind === "no-local-host") {
+  if (verdict.kind === "no-local-host" || verdict.kind === "not-running") {
     return request.mode === "ask"
       ? { kind: "keep", remember: false }
       : { kind: "stop", force: false, remember: false };
@@ -204,7 +230,9 @@ export function hostQuitPromptVisible(
   verdict: HostQuitVerdict,
 ): boolean {
   if (request.round !== "initial") return true;
-  if (verdict.kind === "no-local-host") return false;
+  if (verdict.kind === "no-local-host" || verdict.kind === "not-running") {
+    return false;
+  }
   if (request.mode === "stop-if-idle") {
     return verdict.kind === "busy" || verdict.kind === "unknown";
   }

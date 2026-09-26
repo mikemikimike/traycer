@@ -80,6 +80,7 @@ import {
   CLOSE_TO_TRAY_NOTICE_FILE_NAME,
   CloseToTray,
   createCloseToTrayNoticeOnce,
+  HiddenToTrayWindows,
   parseCloseToTrayNoticeState,
   registryCloseToTrayWindows,
   type CloseToTrayNoticeState,
@@ -109,6 +110,7 @@ import {
   isInstallingUpdate,
 } from "../app/updater";
 import {
+  isRelocationRelaunchPending,
   isUpdateBlockedByLocation,
   maybePromptRelocateToApplications,
   UPDATE_BLOCKED_LOCATION_REASON,
@@ -236,6 +238,46 @@ import { DESKTOP_APP_NAME } from "../../config";
 // (where no timeout would help), and the cached ambient snapshot is the
 // fail-safe fallback on timeout.
 const QUIT_FRESH_UNSYNCED_SNAPSHOT_TIMEOUT_MS = 200;
+
+// How long the quit waits to learn whether a local host is running before it
+// asks what to do with it. A pid.json read and a loopback presence probe
+// answer in milliseconds; past this the quit asks as if the host were up.
+const QUIT_HOST_LIVENESS_TIMEOUT_MS = 2_000;
+
+/**
+ * A relaunch is intended when this quit hands over to another instance: the
+ * updater's `quitAndInstall`, or the macOS move to /Applications, which
+ * relaunches the moved copy and quits this one from inside the call.
+ */
+function isRelaunchIntendedQuit(): boolean {
+  return isInstallingUpdate() || isRelocationRelaunchPending();
+}
+
+/**
+ * Whether a local host is running, for the quit's "no prompt for a dead
+ * host": a fresh pid.json read with its presence probe, bounded. A read that
+ * cannot tell - it timed out or failed - answers `true`, so a live host is
+ * never skipped.
+ */
+async function isLocalHostRunningForQuit(
+  host: HostLifecycle,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const unknown = new Promise<"unknown">((resolve) => {
+    timer = setTimeout(() => {
+      resolve("unknown");
+    }, QUIT_HOST_LIVENESS_TIMEOUT_MS);
+  });
+  try {
+    const read = await Promise.race([host.reloadSnapshotFromDisk(), unknown]);
+    if (read === "unknown") return true;
+    return read !== null;
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Phased desktop boot.
@@ -696,6 +738,7 @@ async function runWindowPhase(state: BootState): Promise<AppServices> {
   const hostController = new HostController({
     environment: config.environment,
     hostLifecycle: host,
+    supervisorRun: lifecycleStore,
     // Wrapped, not passed raw: the controller re-probes this endpoint on every
     // status read (the renderer polls it continuously), and until int #48 every
     // one of those successes was discarded. On 2026-08-11 that meant probes
@@ -727,14 +770,10 @@ async function runWindowPhase(state: BootState): Promise<AppServices> {
   });
   // The presence record goes on disk BEFORE any converge intent can spawn the
   // CLI: a supervisor the desktop's own grant admits, and a crash relaunch
-  // shortly after, must both see a live presence. The lane is held on the
-  // write rather than first paint waiting for it - the record needs this
-  // process's start identity, which on Windows is a PowerShell probe.
-  const launchPresence =
-    localHostCapability === "managed"
-      ? hostLifecycle.writeLaunchPresence()
-      : Promise.resolve();
-  hostController.deferMutationsUntil(launchPresence);
+  // shortly after, must both see a live presence. Nothing above submits a
+  // mutation or spawns the CLI, and nothing may: the hold covers only what is
+  // submitted after it.
+  const launchPresence = hostLifecycle.holdLaneOnLaunchPresence();
   // The mutation lane's NDJSON progress is the only evidence main has that a
   // first install is still downloading/extracting rather than stuck. Feeding it
   // to the lifecycle is what keeps `bootstrap()` from declaring "Traycer Host
@@ -755,6 +794,9 @@ async function runWindowPhase(state: BootState): Promise<AppServices> {
 
   const tray = await createTraySafe(createMruWindowProxy(windowRegistry));
   const registryForClose = windowRegistry;
+  // The windows close-to-tray hid - the only hidden ones. Shared with the
+  // quit's stopping reveal.
+  const hiddenToTray = new HiddenToTrayWindows();
   closeToTray = new CloseToTray({
     platform: process.platform,
     // A constructed tray is enough on Windows (the notification area always
@@ -768,7 +810,7 @@ async function runWindowPhase(state: BootState): Promise<AppServices> {
       }),
     isQuitting: () => shellQuitState.isQuitting(),
     readQuitMode: async () => (await hostLifecycle.readQuitPolicy()).mode,
-    windows: registryCloseToTrayWindows(registryForClose),
+    windows: registryCloseToTrayWindows(registryForClose, hiddenToTray),
     requestQuit: () => {
       app.quit();
     },
@@ -842,7 +884,12 @@ async function runWindowPhase(state: BootState): Promise<AppServices> {
       bridge.dispatchMenuCommand(command) ?? false,
     checkForUpdates: () =>
       checkForUpdatesNow(config.isDev, "manual").then(() => undefined),
-    localHostLanes: hostLifecycle,
+    localHostLanes: {
+      localHostLanesActive: () => hostLifecycle.localHostLanesActive(),
+      localHostRunIsForeground: () =>
+        hostLifecycle.currentRunAdmission() === "foreground",
+      onChange: (listener) => hostLifecycle.onChange(listener),
+    },
   });
   menu.install();
 
@@ -890,6 +937,7 @@ async function runWindowPhase(state: BootState): Promise<AppServices> {
     hostLifecycle,
     menu,
     windowRegistry,
+    hiddenToTray,
     bridge,
     tray,
     desktopStateStore,
@@ -1106,6 +1154,8 @@ function localHostLaneStarters(
             services.hostController.automaticIntentsSuspended,
           governor: recoveryGovernor,
           readLiveness: undefined,
+          readLiveSupervisorPid: () =>
+            services.hostLifecycle.readIdentifiedSupervisorPid(),
         });
         state.bridge?.disposeFns.push(() => healthMonitor.dispose());
       });
@@ -1322,6 +1372,7 @@ interface LifecycleServices {
   readonly hostLifecycle: HostLifecycleService;
   readonly menu: MenuController;
   readonly windowRegistry: WindowRegistry;
+  readonly hiddenToTray: HiddenToTrayWindows;
   readonly bridge: RunnerIpcBridge;
   readonly tray: DesktopTrayController | null;
   readonly desktopStateStore: DesktopStateStore;
@@ -1391,9 +1442,12 @@ function wireAppLifecycle(state: BootState, services: LifecycleServices): void {
   };
 
   const quitTransactions = new QuitTransactions({
-    isInstallingUpdate,
+    isRelaunchIntended: isRelaunchIntendedQuit,
     lifecycle: services.hostLifecycle,
     controller: services.hostController,
+    isLocalHostRunning: () => isLocalHostRunningForQuit(services.host),
+    isForegroundHostRun: async () =>
+      (await services.hostLifecycle.readRunAdmission()) === "foreground",
     requestDecision: (prompt) =>
       services.bridge.requestHostQuitDecision(prompt),
     withdrawDecision: (error) => {
@@ -1407,7 +1461,12 @@ function wireAppLifecycle(state: BootState, services: LifecycleServices): void {
       services.bridge.publishHostQuitState(event);
     },
     revealStopping: () => {
-      if (revealHiddenWindowForStopping(services.windowRegistry)) {
+      if (
+        revealHiddenWindowForStopping(
+          services.windowRegistry,
+          services.hiddenToTray,
+        )
+      ) {
         log.info("[host-quit] window shown for stopping", {
           phase: "stopping",
           reason: "stop-running",
@@ -1427,13 +1486,15 @@ function wireAppLifecycle(state: BootState, services: LifecycleServices): void {
     // failure, or the bounded drain timeout all fall through to the quit; the
     // launch-time `applyStaged` reconcile is the guaranteed fallback either
     // way.
+    // A relocation relaunch runs the same sequence: its pending check reads
+    // the same relaunch intent, which a move that did not happen lowers.
     runUpdateInstallSequence: (hooks) =>
       runUpdateInstallQuitSequence({
         drainHostMutation: () =>
           services.hostController.awaitMutationLaneIdle(
             QUIT_HOST_MUTATION_DRAIN_TIMEOUT_MS,
           ),
-        isInstallPending: isInstallingUpdate,
+        isInstallPending: isRelaunchIntendedQuit,
         drainRendererProjection: () =>
           services.bridge.requestFreshUnsyncedSnapshot(
             QUIT_FRESH_UNSYNCED_SNAPSHOT_TIMEOUT_MS,
@@ -1484,9 +1545,9 @@ function wireAppLifecycle(state: BootState, services: LifecycleServices): void {
     }
 
     // One transaction per quit (see `quit-transaction.ts`): the first pass
-    // creates it, a repeat joins it. Its update-install branch keeps the
-    // existing order - `quitAndInstall` drives that quit after the user chose
-    // "Restart", and intercepting it with the unsynced-edits prompt would
+    // creates it, a repeat joins it. Its relaunch branch keeps the existing
+    // update-install order - `quitAndInstall` drives that quit after the user
+    // chose "Restart", and intercepting it with the unsynced-edits prompt would
     // silently swallow the install - and its only "allow" is that branch's
     // existing second pass: the updater re-firing `quit()` is let through,
     // once the `handoff` verdict is on disk.
@@ -1598,6 +1659,10 @@ function installTrayHostLifecycle(
             lanesActive: services.hostLifecycle.localHostLanesActive(),
             mode: policy.mode,
             hostRunning: services.host.getSnapshot() !== null,
+            // Current as of the view `onChange` last delivered, and that
+            // notification is one this refresh runs on.
+            foregroundRun:
+              services.hostLifecycle.currentRunAdmission() === "foreground",
           }),
         );
       })

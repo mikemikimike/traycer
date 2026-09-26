@@ -27,6 +27,7 @@ import type {
   ConvergeReadyOk,
   ConvergeReadyVersionPolicy,
   HostControllerStatus,
+  HostRespawnMode,
   InstallVersionOk,
   LocalHostMutationIntent,
   MutationOutcome,
@@ -243,6 +244,7 @@ class FakeHostController implements IpcHostController {
     reachable: false,
     localAttempt: null,
     removedByUser: false,
+    lastEnsureFailure: null,
     checkedAt: "2026-01-01T00:00:00.000Z",
   };
 
@@ -332,8 +334,11 @@ class FakeHostController implements IpcHostController {
     this.calls.push({ method: "refreshServiceDefinition", args: [] });
     return this.refreshServiceDefinitionResult;
   }
-  async respawn(): Promise<MutationOutcome<ActivateInstalledOk>> {
-    this.calls.push({ method: "respawn", args: [] });
+  async respawn(
+    intent: LocalHostMutationIntent,
+    mode: HostRespawnMode,
+  ): Promise<MutationOutcome<ActivateInstalledOk>> {
+    this.calls.push({ method: "respawn", args: [intent, mode] });
     return this.respawnResult;
   }
   async recoverIfDown(): Promise<
@@ -661,7 +666,7 @@ describe("host-management IPC - CLI subprocess argv carries NO --environment (CL
       { method: "applyStaged", args: ["manual", false] },
       { method: "uninstallHost", args: [true] },
       { method: "removeTraycer", args: [] },
-      { method: "respawn", args: [] },
+      { method: "respawn", args: [{ kind: "background" }, "force"] },
       { method: "registerService", args: [] },
       { method: "deregisterService", args: [] },
       { method: "freePortAndRestart", args: [1234, 7000] },
@@ -887,7 +892,7 @@ describe("host-management IPC - CLI subprocess argv carries NO --environment (CL
     expect(hostController.calls).toEqual([
       { method: "installVersion", args: ["latest", true] },
       { method: "uninstallHost", args: [true] },
-      { method: "respawn", args: [] },
+      { method: "respawn", args: [{ kind: "background" }, "force"] },
       { method: "registerService", args: [] },
       { method: "deregisterService", args: [] },
     ]);
@@ -976,7 +981,12 @@ describe("host-management IPC - CLI subprocess argv carries NO --environment (CL
     const result = await bridge.handlers.get(
       RunnerHostInvoke.traycerFreePortAndRestart,
     )!(null, { port: 7000, pid: 1234, processName: "rogue" });
-    expect(result).toEqual({ port: 7000, pid: 1234, processName: "rogue" });
+    expect(result).toEqual({
+      kind: "applied",
+      port: 7000,
+      pid: 1234,
+      processName: "rogue",
+    });
     expect(bridge.options.hostController.calls).toContainEqual({
       method: "freePortAndRestart",
       args: [1234, 7000],

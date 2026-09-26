@@ -1,8 +1,37 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { rmSync } from "node:fs";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // `traycer host service start` - the public background start, and the
 // counterpart to `host stop`. See `../service-start.ts`'s module doc for why
 // it exists as its own command rather than a mode of `host start`.
+
+// HOME is redirected to a private temp dir BEFORE anything reads it:
+// `store/paths` binds `homedir()` at module load, and the start facade reads
+// the supervisor records under it (`findLiveServiceSupervisor`). Without this
+// every row read - and could act on - this machine's REAL `~/.traycer/host`.
+// The dir is made inside the `node:os` factory, so it exists before the
+// first module that asks for `homedir()` is evaluated.
+const osHome = vi.hoisted(() => ({ current: "" }));
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  const { mkdtempSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  if (osHome.current === "") {
+    osHome.current = mkdtempSync(
+      join(actual.tmpdir(), "traycer-service-start-test-"),
+    );
+  }
+  return { ...actual, homedir: () => osHome.current };
+});
 
 const mocks = vi.hoisted(() => ({
   controllerCalls: [] as string[],
@@ -82,6 +111,17 @@ vi.mock("../../store/cli-lock", async (importOriginal) => {
 import { buildServiceStartCommand } from "../service-start";
 import type { CommandContext } from "../../runner/runner";
 import { CLI_ERROR_CODES, CliError } from "../../runner/errors";
+import { hostHomeDir } from "../../store/paths";
+
+// Fail loudly, before any row runs, if the redirect above ever stops taking.
+beforeAll(() => {
+  expect(osHome.current).not.toBe("");
+  expect(hostHomeDir("production").startsWith(osHome.current)).toBe(true);
+});
+
+afterAll(() => {
+  rmSync(osHome.current, { recursive: true, force: true });
+});
 
 function fakeCtx(): CommandContext {
   return {
@@ -130,12 +170,12 @@ describe("buildServiceStartCommand", () => {
     vi.clearAllMocks();
   });
 
-  // The `not-installed` read is ADVISORY, not a gate. On Windows
-  // `statusService` maps every `schtasks /Query` failure - timeout, transient
-  // access denial - to `not-installed`, so refusing on it meant a genuinely
-  // registered service could not be started whenever that query happened to
-  // fail. The platform start is the authoritative attempt; the read only
-  // decides what to say when it fails.
+  // The `not-installed` read is ADVISORY, not a gate. A registration probe
+  // can misread a registered service (a Linux manifest stat or a macOS
+  // `launchctl print` that simply fails), so refusing on it meant a genuinely
+  // registered service could not be started whenever that probe misread.
+  // The platform start is the authoritative attempt; the read only decides
+  // what to say when it fails.
   it("still attempts the start when the registration probe says nothing is installed", async () => {
     mocks.startFails = false;
     mocks.statusResponses = [

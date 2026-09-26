@@ -18,6 +18,7 @@ export {
   isProcessAlive,
   matchLiveProcessStartIdentity,
   ownProcessStartIdentity,
+  ownProcessStartIdentityAsync,
   probeProcessLiveness,
   readLiveProcessStartTimeMs,
   readProcessStartIdentity,

@@ -30,7 +30,11 @@ import { useSettingsSearchStore } from "@/stores/settings/settings-search-store"
 function view(overrides: Partial<HostLifecycleView>): HostLifecycleView {
   return {
     desired: { mode: "background", rev: 1, updatedBy: null, updatedAt: null },
-    applied: { localHostCapability: "managed", supervisor: "enforcing" },
+    applied: {
+      localHostCapability: "managed",
+      supervisor: "enforcing",
+      admittedAs: null,
+    },
     pending: "none",
     ...overrides,
   };
@@ -189,5 +193,127 @@ describe("<HostLifecycleModeLine />", () => {
   it("renders nothing with no runner host at all", () => {
     renderLine(null);
     expect(screen.queryByTestId("host-overview-lifecycle-line")).toBeNull();
+  });
+});
+
+// F4-2: a host started in a terminal (`applied.admittedAs === "foreground"`)
+// is not governed by the mode - the line must say so instead of the mode's
+// ordinary promise, for every desired mode including "none" (which today
+// renders no line at all).
+describe("<HostLifecycleModeLine /> - foreground admission (F4-2)", () => {
+  it("renders 'started in a terminal' when admittedAs is foreground, whatever the desired mode", async () => {
+    const host = buildLifecycleHost(
+      view({
+        desired: {
+          mode: "background",
+          rev: 1,
+          updatedBy: null,
+          updatedAt: null,
+        },
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: "foreground",
+        },
+      }),
+    );
+    renderLine(createFakeRunnerHost({ hostLifecycle: host }));
+
+    const button = await screen.findByTestId("host-overview-lifecycle-line");
+    expect(button.textContent).toBe("started in a terminal");
+  });
+
+  it("renders 'started in a terminal' even when the desired mode is 'none'", async () => {
+    const host = buildLifecycleHost(
+      view({
+        desired: { mode: "none", rev: 1, updatedBy: null, updatedAt: null },
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: "foreground",
+        },
+      }),
+    );
+    renderLine(createFakeRunnerHost({ hostLifecycle: host }));
+
+    const button = await screen.findByTestId("host-overview-lifecycle-line");
+    expect(button.textContent).toBe("started in a terminal");
+  });
+
+  it("a pushed view that resolves to admittedAs: service switches back to the mode's ordinary promise", async () => {
+    const changeHandlers: Array<(next: HostLifecycleView) => void> = [];
+    const initial = view({
+      desired: { mode: "background", rev: 1, updatedBy: null, updatedAt: null },
+      applied: {
+        localHostCapability: "managed",
+        supervisor: "enforcing",
+        admittedAs: "foreground",
+      },
+    });
+    const host: IHostLifecycleHost = {
+      get: () => Promise.resolve(initial),
+      set: () =>
+        Promise.resolve({
+          kind: "applied",
+          view: initial,
+        } satisfies HostLifecycleSetResult),
+      onChange: (handler) => {
+        changeHandlers.push(handler);
+        return { dispose: () => undefined };
+      },
+      quit: null,
+    };
+    renderLine(createFakeRunnerHost({ hostLifecycle: host }));
+
+    const button = await screen.findByTestId("host-overview-lifecycle-line");
+    expect(button.textContent).toBe("started in a terminal");
+
+    act(() => {
+      for (const handler of changeHandlers) {
+        handler(
+          view({
+            desired: {
+              mode: "background",
+              rev: 2,
+              updatedBy: null,
+              updatedAt: null,
+            },
+            applied: {
+              localHostCapability: "managed",
+              supervisor: "enforcing",
+              admittedAs: "service",
+            },
+          }),
+        );
+      }
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("host-overview-lifecycle-line").textContent,
+      ).toBe("keeps running after quit");
+    });
+  });
+
+  it("control: admittedAs null under background renders the ordinary promise", async () => {
+    const host = buildLifecycleHost(
+      view({
+        desired: {
+          mode: "background",
+          rev: 1,
+          updatedBy: null,
+          updatedAt: null,
+        },
+        applied: {
+          localHostCapability: "managed",
+          supervisor: "enforcing",
+          admittedAs: null,
+        },
+      }),
+    );
+    renderLine(createFakeRunnerHost({ hostLifecycle: host }));
+
+    const button = await screen.findByTestId("host-overview-lifecycle-line");
+    expect(button.textContent).toBe("keeps running after quit");
   });
 });

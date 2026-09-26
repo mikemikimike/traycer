@@ -35,6 +35,7 @@ import type {
   ServiceRegistrationOk,
   TraycerUninstallResult,
   FreePortAndRestartInput,
+  FreePortAndRestartResult,
 } from "../ipc-contracts/host-management-types";
 
 /**
@@ -85,7 +86,7 @@ export interface HostManagementBridgeSurface {
   }): Promise<HostRegistryUpdateState>;
   freePortAndRestart(
     input: FreePortAndRestartInput & { readonly expectedHostId: string },
-  ): Promise<FreePortAndRestartInput>;
+  ): Promise<FreePortAndRestartResult>;
   freePortAndRestartIfIdle(
     input: FreePortAndRestartInput & { readonly expectedHostId: string },
   ): Promise<DoctorRepairDispatch>;
@@ -204,7 +205,7 @@ export function buildHostManagementBridge(): HostManagementBridgeSurface {
       ipcRenderer.invoke(
         RunnerHostInvoke.traycerFreePortAndRestart,
         input,
-      ) as Promise<FreePortAndRestartInput>,
+      ) as Promise<FreePortAndRestartResult>,
     freePortAndRestartIfIdle: (input) =>
       ipcRenderer.invoke(
         RunnerHostInvoke.traycerFreePortAndRestartIfIdle,

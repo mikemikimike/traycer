@@ -179,6 +179,11 @@ export const CLI_ERROR_CODES = {
   // exit, after which a start takes the ordinary path. Deliberately not
   // expected: a host its supervisor cannot bring back is a real failure.
   SERVICE_SUPERVISOR_RELAUNCHING: "E_SERVICE_SUPERVISOR_RELAUNCHING",
+  // The registration exists but its owner turned it off (Windows: the Task
+  // Scheduler task is disabled), so a start was refused and the CLI did not
+  // re-register over that choice. Nothing was changed; the message names the
+  // two repairs. Expected: it is the user's setting, not a defect.
+  SERVICE_REGISTRATION_DISABLED: "E_SERVICE_REGISTRATION_DISABLED",
 
   // --- CLI install lifecycle (foundation only in NP-1) ---
   CLI_LOCK_BUSY: "E_CLI_LOCK_BUSY",
@@ -235,6 +240,7 @@ export const EXPECTED_CLI_ERROR_CODES: ReadonlySet<CliErrorCode> =
     CLI_ERROR_CODES.CONFIG_INVALID_VALUE,
     CLI_ERROR_CODES.CONFIG_MISSING_KEY,
     CLI_ERROR_CODES.CLI_LOCK_BUSY,
+    CLI_ERROR_CODES.SERVICE_REGISTRATION_DISABLED,
     CLI_ERROR_CODES.REGISTRY_UNAVAILABLE,
     CLI_ERROR_CODES.RELEASE_AUTHENTICATION_REQUIRED,
   ]);

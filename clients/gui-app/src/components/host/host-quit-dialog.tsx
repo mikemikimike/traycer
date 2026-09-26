@@ -9,6 +9,7 @@ import {
   HostQuitDialogView,
   type HostQuitDialogAction,
 } from "@/components/host/host-quit-dialog-view";
+import { useDisclosedStopForce } from "@/components/host/use-disclosed-stop-force";
 import {
   useLocalHostQuitStatus,
   type LocalHostQuitStatus,
@@ -93,6 +94,14 @@ function HostQuitPrompt(
     status.localHostId,
   );
   const automatic = automaticHostQuitDecision(request, status.verdict);
+  // A Stop whose force the person was not shown when it was first offered
+  // (a poll turned the list busy since) goes as idle-only; main refuses it if
+  // the host is busy and asks again, over the busy list.
+  const stopForce = useDisclosedStopForce({
+    offerKey: request.requestId,
+    enabled: !model.stopDisabled,
+    force: model.stopForce,
+  });
 
   // An automatic answer is sent exactly once per request, from an effect:
   // it answers main (an external system), and the verdict it depends on only
@@ -209,7 +218,7 @@ function HostQuitPrompt(
       onStop={() =>
         answer({
           kind: "stop",
-          force: model.stopForce,
+          force: stopForce,
           remember: props.remember,
         })
       }

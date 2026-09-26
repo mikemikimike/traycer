@@ -42,6 +42,7 @@ import type {
   ServiceRegistrationOk,
   TraycerUninstallResult,
   FreePortAndRestartInput,
+  FreePortAndRestartResult,
   IHostManagement,
   IHostTray,
   IFileDropHost,
@@ -357,7 +358,7 @@ export interface DesktopHostManagementBridge {
   }): Promise<HostRegistryUpdateState>;
   freePortAndRestart(
     input: FreePortAndRestartInput & { readonly expectedHostId: string },
-  ): Promise<FreePortAndRestartInput>;
+  ): Promise<FreePortAndRestartResult>;
   freePortAndRestartIfIdle(
     input: FreePortAndRestartInput & { readonly expectedHostId: string },
   ): Promise<DoctorRepairDispatch>;

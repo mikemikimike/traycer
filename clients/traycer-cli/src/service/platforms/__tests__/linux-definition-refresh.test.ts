@@ -10,7 +10,7 @@ import {
 import { chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 // Test isolation: `serviceManifestPath` normally resolves through the real
 // `os.homedir()` to `~/.config/systemd/user/<label>.service` - redirect it
@@ -28,8 +28,42 @@ vi.mock("../../label", async (importOriginal) => {
   };
 });
 
+// F16: a read-only `systemctl --user show -p NeedDaemonReload` probe, run
+// through `process-runner`'s `runCommand` (NOT the refresh's injected `run`)
+// whenever the unit TEXT already looks current - so a unit rewrite whose
+// `daemon-reload` earlier failed is detected even though the file itself
+// matches `buildUnit`'s output. Partial mock: only `runCommand` is replaced,
+// everything else (`ProcessRunError`, etc.) is the real module.
+const runCommandMock = vi.hoisted(() => ({
+  impl: null as
+    | ((
+        command: string,
+        args: readonly string[],
+      ) => Promise<{ stdout: string; stderr: string; exitCode: number }>)
+    | null,
+}));
+vi.mock("../../process-runner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../process-runner")>();
+  return {
+    ...actual,
+    runCommand: async (command: string, args: readonly string[]) => {
+      if (runCommandMock.impl !== null) {
+        return runCommandMock.impl(command, args);
+      }
+      // Default answer: no reload pending - the common case, and what every
+      // OTHER test in this file (none of which know about this probe) must
+      // keep seeing so their zero-runner-call assertions stay true.
+      return { stdout: "no\n", stderr: "", exitCode: 0 };
+    },
+  };
+});
+
 afterAll(async () => {
   await rm(TEST_UNIT_DIR, { recursive: true, force: true });
+});
+
+afterEach(() => {
+  runCommandMock.impl = null;
 });
 
 import {
@@ -370,5 +404,126 @@ describe("daemon-reload rejects", () => {
       command: "systemctl",
       args: ["--user", "daemon-reload"],
     });
+  });
+
+  // Extends the scenario above (pinned at :332-373 as of head 82d2c71781):
+  // that test proves the daemon-reload failure is reported and the rewrite
+  // survives it. This continues from there with a RETRY - the real F16
+  // failure mode - rather than editing the pinned test in place.
+  it("retry after the failed reload above: NeedDaemonReload now answers 'yes', so the retry reloads and succeeds - head sees the already-current text and does nothing", async () => {
+    const label = labelFor("daemon-reload-rejects-then-retry");
+    await writeUnit(
+      label,
+      historicalUnit(label, [CLI.command, "host", "start"]),
+      0o644,
+    );
+    const failingCalls: RecordedCall[] = [];
+    const failingRunner: ProcessRunner = async (command, args) => {
+      failingCalls.push({ command, args: [...args] });
+      throw new ProcessRunError(
+        "systemctl --user daemon-reload exited with code 1: unit file changed on disk",
+        command,
+        args,
+        1,
+        "",
+        "unit file changed on disk",
+      );
+    };
+    await refreshLinuxServiceDefinition(label, failingRunner).catch(
+      (err: unknown) => err,
+    );
+    // The unit is already rewritten to the current text (proven above); only
+    // systemd's own daemon-reload state is still stale.
+    expect(await readFile(manifestPath(label), "utf8")).toBe(
+      buildSystemdUnit({ label, cli: CLI }),
+    );
+
+    runCommandMock.impl = async (command, args) => {
+      if (
+        command === "systemctl" &&
+        args[0] === "--user" &&
+        args[1] === "show" &&
+        args[2] === "-p" &&
+        args[3] === "NeedDaemonReload" &&
+        args[4] === "--value" &&
+        args[5] === `${label.id}.service`
+      ) {
+        return { stdout: "yes\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "no\n", stderr: "", exitCode: 0 };
+    };
+    const retryCalls: RecordedCall[] = [];
+    const retryResult = await refreshLinuxServiceDefinition(
+      label,
+      recordingRunner(retryCalls),
+    );
+
+    expect(retryCalls).toEqual([
+      { command: "systemctl", args: ["--user", "daemon-reload"] },
+    ]);
+    expect(retryResult.kind).toBe("refreshed");
+  });
+});
+
+// F16: `planLinuxDefinition` currently treats unit-TEXT equality alone as
+// proof there is nothing to do. When a PREVIOUS unit rewrite's own
+// `daemon-reload` failed, systemd still holds the old unit
+// (`NeedDaemonReload=yes`) even though the file on disk now matches
+// `buildUnit`'s current output - so a retry of `host service refresh` must
+// still reload, not report `current`.
+describe("F16: NeedDaemonReload=yes on an already-current unit text", () => {
+  it("current unit text + NeedDaemonReload=yes: inspect is stale, refresh runs exactly one daemon-reload with no file rewrite - head reports current with zero calls", async () => {
+    const label = labelFor("f16-needs-reload");
+    const currentText = buildSystemdUnit({ label, cli: CLI });
+    await writeUnit(label, currentText, 0o644);
+    const before = await stat(manifestPath(label));
+    runCommandMock.impl = async (command, args) => {
+      if (
+        command === "systemctl" &&
+        args[0] === "--user" &&
+        args[1] === "show" &&
+        args[2] === "-p" &&
+        args[3] === "NeedDaemonReload" &&
+        args[4] === "--value" &&
+        args[5] === `${label.id}.service`
+      ) {
+        return { stdout: "yes\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "no\n", stderr: "", exitCode: 0 };
+    };
+
+    const state = await inspectLinuxServiceDefinition(label);
+    // Full shape, not just `kind`: the unit TEXT is already
+    // `buildSystemdUnit`'s current output, which is always the wrapped
+    // `/bin/sh -c <capability-probe> "$0" "$@" ...` invocation
+    // (`registeredUnitInvocation` reads that shape as `form: "inline-script"`,
+    // never `"direct"` - `buildUnit` has emitted only the wrapped form since
+    // the adoption-nonce capability probe landed). The reload-only fix does
+    // not touch the file, so a stale unit written by an earlier failed
+    // refresh still only applies at the loaded unit's NEXT start, same as
+    // every other stale-unit row in this file.
+    expect(state).toEqual({
+      kind: "stale",
+      form: "inline-script",
+      appliesAt: "next-start",
+    });
+
+    const calls: RecordedCall[] = [];
+    const result = await refreshLinuxServiceDefinition(
+      label,
+      recordingRunner(calls),
+    );
+
+    expect(result).toEqual({
+      kind: "refreshed",
+      form: "inline-script",
+      appliesAt: "next-start",
+    });
+    expect(calls).toEqual([
+      { command: "systemctl", args: ["--user", "daemon-reload"] },
+    ]);
+    const after = await stat(manifestPath(label));
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(await readFile(manifestPath(label), "utf8")).toBe(currentText);
   });
 });

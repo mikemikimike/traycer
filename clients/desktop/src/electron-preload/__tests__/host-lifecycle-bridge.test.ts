@@ -65,7 +65,11 @@ import {
 
 const VIEW: HostLifecycleView = {
   desired: { mode: "none", rev: 2, updatedBy: "desktop", updatedAt: null },
-  applied: { localHostCapability: "none", supervisor: "not-running" },
+  applied: {
+    localHostCapability: "none",
+    supervisor: "not-running",
+    admittedAs: null,
+  },
   pending: "none",
 };
 
