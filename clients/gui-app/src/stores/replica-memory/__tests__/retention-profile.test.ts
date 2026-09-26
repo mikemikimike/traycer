@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS } from "@traycer-clients/shared/host-transport/remote/config";
 import { DEFAULT_MAX_LIVE_EPICS } from "@/stores/replica-memory/budget-limits";
 import {
   DESKTOP_RETENTION_PROFILE,
@@ -63,6 +64,15 @@ describe("RetentionProfile", () => {
     // defeat the ratio the doc comment on `RetentionProfile` describes.
     expect(MOBILE_RETENTION_PROFILE.maxLiveEpics).toBeGreaterThan(
       MOBILE_RETENTION_PROFILE.retainedTopLevelSurfaces,
+    );
+  });
+
+  it("leaves warm chats asleep on resume only where the resume measures its background", () => {
+    // Desktop's resume carries no dwell, so it cannot tell a laptop sleep from
+    // a blip; the phone's sleeps exactly the chats the wake would re-dial.
+    expect(DESKTOP_RETENTION_PROFILE.sleepWarmChatsAfterBackgroundMs).toBeNull();
+    expect(MOBILE_RETENTION_PROFILE.sleepWarmChatsAfterBackgroundMs).toBe(
+      WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS,
     );
   });
 

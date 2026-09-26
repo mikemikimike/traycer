@@ -1,3 +1,4 @@
+import { WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS } from "@traycer-clients/shared/host-transport/remote/config";
 import { EPIC_REPLICAS_MAX_LIVE } from "./budget-limits";
 
 /**
@@ -32,6 +33,20 @@ export interface RetentionProfile {
   readonly maxWarmChatSessions: number;
   /** Lingering plain terminals (`TerminalSessionRegistry`). */
   readonly maxLingeringPlainTerminals: number;
+  /**
+   * The measured background past which a resume leaves lease-free warm chats
+   * asleep instead of letting the wake re-dial them
+   * (`subscribeWarmChatSleepOnResume`), or `null` for a shell where a resume
+   * never does.
+   *
+   * It is the dwell at which the transports stop probing and re-dial every
+   * stream outright ({@link WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS}): past
+   * it each warm chat re-subscribes and downloads its snapshot and skeleton
+   * again whether or not anyone opens it, and under it a quick switch may
+   * have kept the socket, and the warm chat is what makes switching back
+   * instant.
+   */
+  readonly sleepWarmChatsAfterBackgroundMs: number | null;
 }
 
 /** Electron desktop and the browser: the numbers the app has always run. */
@@ -40,6 +55,11 @@ export const DESKTOP_RETENTION_PROFILE: RetentionProfile = Object.freeze({
   retainedTopLevelSurfaces: 5,
   maxWarmChatSessions: 6,
   maxLingeringPlainTerminals: 6,
+  // Off. The desktop shell's resume carries no dwell (`powerMonitor` reports
+  // no sleep duration), so its wake reconnect probes each socket first and
+  // re-dials only the ones that fail, and nothing here could tell a laptop
+  // sleep from a blip. Turning this on needs the shell to measure the sleep.
+  sleepWarmChatsAfterBackgroundMs: null,
 });
 
 /** The installed Capacitor app: a 2 GB process ceiling, one visible tab. */
@@ -48,6 +68,7 @@ export const MOBILE_RETENTION_PROFILE: RetentionProfile = Object.freeze({
   retainedTopLevelSurfaces: 2,
   maxWarmChatSessions: 3,
   maxLingeringPlainTerminals: 3,
+  sleepWarmChatsAfterBackgroundMs: WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS,
 });
 
 /**

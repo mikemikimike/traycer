@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-runner-host";
+import type { IHostStreamClient } from "@traycer-clients/shared/host-transport/host-stream-client";
 import { WAKE_FORCE_RECONNECT_AFTER_BACKGROUND_MS } from "@traycer-clients/shared/host-transport/remote/index";
+import type { HostStreamRpcRegistry } from "@traycer/protocol/host/registry";
 import {
   createChatSessionStore,
   type ChatSessionStoreHandle,
@@ -12,7 +14,16 @@ import {
   disposeAllChatSessions,
 } from "@/lib/registries/chat-session-registry";
 import { subscribeWarmChatSleepOnResume } from "@/lib/chats/chat-session-resume-sleep";
-import { setMobileApp } from "@/lib/mobile-app";
+import { subscribeChatSessionWakeRetry } from "@/lib/chats/chat-session-wake-retry";
+import {
+  resetRemoteResumeSweepForTest,
+  subscribeStreamWakeReconnect,
+} from "@/lib/host/stream-wake-reconnect";
+import {
+  DESKTOP_RETENTION_PROFILE,
+  MOBILE_RETENTION_PROFILE,
+  setRetentionProfile,
+} from "@/stores/replica-memory/retention-profile";
 
 const EPIC_ID = "epic-resume-sleep";
 const HOST_ID = "host-resume-sleep";
@@ -80,12 +91,13 @@ function makeRunnerHost(): MockRunnerHost {
 
 afterEach(() => {
   disposeAllChatSessions();
-  setMobileApp(false);
+  setRetentionProfile(DESKTOP_RETENTION_PROFILE);
+  resetRemoteResumeSweepForTest();
 });
 
 describe("subscribeWarmChatSleepOnResume", () => {
   it("after a long background, leaves lease-free idle chats asleep and the leased one connected", () => {
-    setMobileApp(true);
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
     const runnerHost = makeRunnerHost();
     const warm = openChat("chat-warm", false);
     const onScreen = openChat("chat-on-screen", true);
@@ -101,7 +113,7 @@ describe("subscribeWarmChatSleepOnResume", () => {
   });
 
   it("keeps a lease-free chat with work in flight connected", () => {
-    setMobileApp(true);
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
     const runnerHost = makeRunnerHost();
     const busy = openChat("chat-busy", true);
     busy.handle.store.setState({ runStatus: "running" });
@@ -116,7 +128,7 @@ describe("subscribeWarmChatSleepOnResume", () => {
   });
 
   it("reconnects a chat left asleep once a tile leases it", () => {
-    setMobileApp(true);
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
     const runnerHost = makeRunnerHost();
     const warm = openChat("chat-warm", false);
     const dispose = subscribeWarmChatSleepOnResume(runnerHost);
@@ -139,7 +151,7 @@ describe("subscribeWarmChatSleepOnResume", () => {
   });
 
   it("leaves warm chats alone after a quick app switch, whose sockets may have survived", () => {
-    setMobileApp(true);
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
     const runnerHost = makeRunnerHost();
     const warm = openChat("chat-warm", false);
     const dispose = subscribeWarmChatSleepOnResume(runnerHost);
@@ -154,7 +166,7 @@ describe("subscribeWarmChatSleepOnResume", () => {
     dispose();
   });
 
-  it("does nothing off the mobile app", () => {
+  it("does nothing on a profile without a sleep threshold", () => {
     const runnerHost = makeRunnerHost();
     const warm = openChat("chat-warm", false);
     const dispose = subscribeWarmChatSleepOnResume(runnerHost);
@@ -167,7 +179,7 @@ describe("subscribeWarmChatSleepOnResume", () => {
   });
 
   it("stops listening once disposed", () => {
-    setMobileApp(true);
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
     const runnerHost = makeRunnerHost();
     const warm = openChat("chat-warm", false);
     const dispose = subscribeWarmChatSleepOnResume(runnerHost);
@@ -176,5 +188,123 @@ describe("subscribeWarmChatSleepOnResume", () => {
     runnerHost.emitSystemResumed({ backgroundedForMs: LONG_BACKGROUND_MS });
 
     expect(warm.handle.store.getState().asleep).toBe(false);
+  });
+});
+
+/**
+ * A chat whose stream client rides a transport wired to the resume edge the
+ * way the durable transport is (`subscribeStreamWakeReconnect`), and counts the
+ * `chat.subscribe` frames it would send: one when the stream opens, and one
+ * more for every forced wake re-dial of a transport that is still open.
+ * Closing the stream disposes the wake wiring first and then the socket, in
+ * the durable transport's order.
+ */
+function openWiredChat(
+  chatId: string,
+  runnerHost: MockRunnerHost,
+): { readonly handle: ChatSessionStoreHandle; readonly frames: () => number } {
+  let frames = 0;
+  const handle = createChatSessionStore({
+    environment: CHAT_STORE_TEST_ENVIRONMENT,
+    hostId: HOST_ID,
+    epicId: EPIC_ID,
+    chatId,
+    userId: "user-resume-sleep",
+    onAuthError: null,
+    onProviderAuthError: null,
+    wakeTransport: null,
+    streamFlushCoordinator: IMMEDIATE_STREAM_FLUSH_COORDINATOR,
+    streamClientFactory: () => {
+      let closed = false;
+      frames += 1;
+      const transport: IHostStreamClient<HostStreamRpcRegistry> = {
+        subscribe: () => {
+          throw new Error("unused");
+        },
+        subscribeWithParamsProvider: () => {
+          throw new Error("unused");
+        },
+        close: () => {
+          closed = true;
+        },
+        isClosed: () => closed,
+        getClosedReason: () => null,
+        onClosed: () => () => undefined,
+        instanceId: `transport-${chatId}`,
+        notifyBearerRotated: () => undefined,
+        notifyCloudVerdictChanged: () => undefined,
+        reconnectAll: (_reason, options) => {
+          // A closed client ignores the wake, as `WsStreamClient` does.
+          if (closed || options.probeFirst) return;
+          frames += 1;
+        },
+        isReady: () => !closed,
+        getMethodSupport: () => "unknown",
+        subscribeMethodSupport: () => () => undefined,
+        getMethodSchemaVersion: () => null,
+        subscribeAvailabilityRecovered: () => () => undefined,
+      };
+      const disposeWake = subscribeStreamWakeReconnect(transport, runnerHost);
+      return {
+        sendAction: () => undefined,
+        sameTurnSteeringProtocolSupported: () => false,
+        draftBlobBridgeSupported: () => false,
+        requestTranscriptRange: () => undefined,
+        requestResnapshot: () => undefined,
+        close: () => {
+          disposeWake();
+          transport.close("chat-stream-closed");
+        },
+      };
+    },
+  });
+  const registry = __getChatSessionRegistryForTests();
+  registry.acquire(
+    { epicId: EPIC_ID, chatId, hostId: HOST_ID, scopeKey: "resume-scope" },
+    () => handle,
+  );
+  registry.release(EPIC_ID, chatId, HOST_ID);
+  return { handle, frames: () => frames };
+}
+
+// The resume edge reaches three handlers: each chat transport's own wake
+// re-dial, the closed-session wake retry, and the resume sleep. The shell runs
+// them in subscription order, and which came first depends on whether the
+// chat opened before or after the controller mounted.
+describe("subscribeWarmChatSleepOnResume against the wake reconnect", () => {
+  it("wake reconnect first: the re-dial goes out, then the chat is left asleep", () => {
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
+    const runnerHost = makeRunnerHost();
+    const warm = openWiredChat("chat-wake-first", runnerHost);
+    const disposeRetry = subscribeChatSessionWakeRetry(runnerHost);
+    const disposeSleep = subscribeWarmChatSleepOnResume(runnerHost);
+
+    runnerHost.emitSystemResumed({ backgroundedForMs: LONG_BACKGROUND_MS });
+
+    const state = warm.handle.store.getState();
+    expect(state.asleep).toBe(true);
+    expect(state.connectionStatus).toBe("closed");
+    // The opening subscribe and the wake's forced re-dial; the wake retry
+    // does not re-dial a sleeping chat.
+    expect(warm.frames()).toBe(2);
+    disposeSleep();
+    disposeRetry();
+  });
+
+  it("resume sleep first: the chat is left asleep and no re-dial goes out", () => {
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
+    const runnerHost = makeRunnerHost();
+    const disposeSleep = subscribeWarmChatSleepOnResume(runnerHost);
+    const disposeRetry = subscribeChatSessionWakeRetry(runnerHost);
+    const warm = openWiredChat("chat-sleep-first", runnerHost);
+
+    runnerHost.emitSystemResumed({ backgroundedForMs: LONG_BACKGROUND_MS });
+
+    const state = warm.handle.store.getState();
+    expect(state.asleep).toBe(true);
+    expect(state.connectionStatus).toBe("closed");
+    expect(warm.frames()).toBe(1);
+    disposeRetry();
+    disposeSleep();
   });
 });
