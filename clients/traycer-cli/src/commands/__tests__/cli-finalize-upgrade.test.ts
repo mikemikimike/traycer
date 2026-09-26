@@ -231,15 +231,15 @@ describe("cliFinalizeUpgradeCommand / runFinalizeUpgradeSwap", () => {
   // executable invocation -> real staged->live rename -> service start) -
   // that's a genuine, currently-unclosed coverage gap, not a code bug the
   // review found. A real end-to-end run needs an actual Windows machine
-  // (PowerShell + a live OS service); this repo's CI has no Windows test
-  // job for traycer-cli (`.github/workflows/test.yml` runs only
-  // ubuntu-latest + a macOS job scoped to desktop packaging - the sole
-  // `windows-latest` runner anywhere in this monorepo's workflows belongs
-  // to `release-desktop.yml`, which packages/signs the Electron installer,
-  // not the CLI test suite). Adding a `skipIf(win32)`-inverted test here
-  // would never actually run in this environment and would be fake
-  // coverage, so this suite does NOT add one - per the fixup ticket's own
-  // instruction, this is recorded as an honest residual instead:
+  // (PowerShell + a live OS service); `test-windows-cli-exit` is a
+  // `windows-latest` job in `.github/workflows/test.yml` now, but it runs
+  // only the SEA build/smoke/exit-code checks and clients/shared's
+  // denied-read vitest file - none of which touches the finalize-helper's
+  // rename+service-start path this test is about. Adding a
+  // `skipIf(win32)`-inverted test here would still never actually run
+  // against that path in this environment and would be fake coverage, so
+  // this suite does NOT add one - per the fixup ticket's own instruction,
+  // this is recorded as an honest residual instead:
   //
   //   RESIDUAL: the real Windows rename+start path
   //   (`installer/install.ts`-analogous binary replace via

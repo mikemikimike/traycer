@@ -910,9 +910,10 @@ async function killVerifiedProcessTree(
     suspects: priorSuspects,
     protectedAncestors: priorProtected,
   };
-  // The previous round's kills that threw, for the next scan to confirm or
-  // clear (`reportFailedKillsStillRunning`). Every kill round is followed by
-  // a scan - the loop scans once more than it kills - so none goes unchecked.
+  // The previous round's kills that threw, for a handle-bound probe to confirm
+  // or clear once that round is over (`reportFailedKillsStillRunning`). Every
+  // kill round is followed by a scan - the loop scans once more than it kills -
+  // and the probe runs beside it, so none goes unchecked.
   let failedKills: readonly WindowsFailedKill[] = [];
   for (let round = 0; round <= WINDOWS_KILL_CONVERGENCE_ROUNDS; round += 1) {
     // BEFORE the scan, and that ordering is the soundness argument for the
@@ -928,7 +929,7 @@ async function killVerifiedProcessTree(
     // that pid rather than admitting one it cannot support.
     const seenAliveAt = deps.now();
     const table = await scanSlotProcessTable(label, run);
-    reportFailedKillsStillRunning(failedKills, table, label);
+    await reportFailedKillsStillRunning(failedKills, label, run);
     failedKills = [];
     if (table === null) {
       // Before the first kill this refuses to start; after one it refuses to
@@ -958,7 +959,17 @@ async function killVerifiedProcessTree(
       },
       memory,
     );
-    const pids = uniqueProcessIds(killSet.kill);
+    const listed = uniqueProcessIds(killSet.kill);
+    // At the round bound a listing is about to fail the stop, and a listing is
+    // no proof: an exited process can stay in the table while another process
+    // still holds a handle to it. So there, and
+    // only there, each listed process is asked through its own handle first
+    // (`killSetStillRunning`); what has exited drops out, and a kill set that
+    // empties converges below exactly as an empty scan does.
+    const pids =
+      round === WINDOWS_KILL_CONVERGENCE_ROUNDS && listed.length > 0
+        ? await killSetStillRunning(listed, table, run)
+        : listed;
     const unattributed = uniqueProcessIds(killSet.unattributed);
     const undecided = uniqueProcessIds(killSet.undecided);
     const protectedAncestors = uniqueProcessIds(killSet.protectedAncestors);
@@ -1182,9 +1193,9 @@ export interface WindowsKillTarget {
 }
 
 // The kill script's report on one target. Diagnostic only: the loop never acts
-// on it, because the next scan is the only evidence of what is still running -
-// a `failed` report waits for that scan before it is logged as a survivor
-// (`WindowsFailedKill`). `reused` is the case this mechanism exists for - the
+// on it, because the next scan is what it selects victims from - and a
+// `failed` report waits for a handle-bound probe after that scan before it is
+// logged as a survivor (`WindowsFailedKill`). `reused` is the case this mechanism exists for - the
 // pid the scan selected now belongs to a process born at a different time -
 // and `unverifiable` is a target whose creation time the scan could not read,
 // which is never killed.
@@ -1273,25 +1284,47 @@ interface WindowsFailedKill {
   readonly outcome: string;
 }
 
-// The previous round's failed kills, against the scan that follows them: WARN
-// only the targets that scan still lists under the identity they were
-// targeted by - every one of them when the scan could not be read, since none
-// is then proven gone. A target it no longer lists exited on its own, which
-// is what the kill was for.
-function reportFailedKillsStillRunning(
+// What the handle-bound script does to each target it pins and matches.
+type WindowsHandleBoundAction = "kill" | "probe";
+
+// The kill set's processes still running, asked through their own handles
+// (`buildHandleBoundKillScript`'s "probe"): `gone` (exited, or no process wears
+// the pid) and `reused` (a later process does) drop out. A probe that did not
+// run or did not report keeps every one, so the stop refuses as it did.
+// Measured on Windows Server 2022: an exited process whose launcher held its
+// handle stayed listed until the launcher saw the exit, seconds later.
+async function killSetStillRunning(
+  pids: readonly number[],
+  table: readonly WindowsProcessTableRow[],
+  run: ProcessRunner,
+): Promise<number[]> {
+  const created = new Map(table.map((row) => [row.processId, row.created]));
+  const gone = await probeProcessesGone(
+    pids.map((pid) => ({ processId: pid, created: created.get(pid) ?? 0 })),
+    run,
+  );
+  return pids.filter((pid) => !gone.has(pid));
+}
+
+// The previous round's failed kills, asked again through their own handles
+// once that round is over: WARN only the targets still running under the
+// identity they were targeted by. Not the scan: an exited process can stay
+// listed while another process holds a handle to it
+// (`buildHandleBoundKillScript`), so a row is no proof it runs. A probe that reports `gone` (exited, or no
+// process wears the pid) or `reused` (a later process does) clears its target,
+// which exited on its own - what the kill was for. A probe that did not run or
+// did not report keeps every target, since none is then proven gone.
+async function reportFailedKillsStillRunning(
   failed: readonly WindowsFailedKill[],
-  table: readonly WindowsProcessTableRow[] | null,
   label: ServiceLabel,
-): void {
-  const running =
-    table === null
-      ? failed
-      : failed.filter((kill) =>
-          table.some(
-            (row) =>
-              row.processId === kill.processId && row.created === kill.created,
-          ),
-        );
+  run: ProcessRunner,
+): Promise<void> {
+  if (failed.length === 0) return;
+  const cleared = await probeProcessesGone(
+    failed.map(({ processId, created }) => ({ processId, created })),
+    run,
+  );
+  const running = failed.filter((kill) => !cleared.has(kill.processId));
   if (running.length === 0) return;
   createCliLogger(label.environment).warn(
     "Windows host kill round left targets running after a failed kill",
@@ -1300,6 +1333,62 @@ function reportFailedKillsStillRunning(
       outcomes: running.map((kill) => `${kill.processId}=${kill.outcome}`),
     },
   );
+}
+
+// The targets a handle-bound probe proves gone, by pid. The probe is chunked
+// like the kill (`WINDOWS_KILL_TARGETS_PER_SCRIPT` targets per script, under
+// the same command-line cap), but its chunks run side by side, so the whole
+// probe still costs one `WINDOWS_PROCESS_KILL_TIMEOUT_MS`.
+async function probeProcessesGone(
+  targets: readonly WindowsKillTarget[],
+  run: ProcessRunner,
+): Promise<ReadonlySet<number>> {
+  const chunks: WindowsKillTarget[][] = [];
+  for (
+    let start = 0;
+    start < targets.length;
+    start += WINDOWS_KILL_TARGETS_PER_SCRIPT
+  ) {
+    chunks.push(targets.slice(start, start + WINDOWS_KILL_TARGETS_PER_SCRIPT));
+  }
+  const gone = await Promise.all(
+    chunks.map((chunk) => probeChunkGone(chunk, run)),
+  );
+  return new Set(gone.flat());
+}
+
+// One probe script's `gone` and `reused` pids. Empty when it did not run or
+// did not report, which keeps exactly this chunk's targets; the authority
+// error is the one exception, as everywhere in this module.
+async function probeChunkGone(
+  targets: readonly WindowsKillTarget[],
+  run: ProcessRunner,
+): Promise<number[]> {
+  try {
+    const result = await run(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        buildHandleBoundKillScript(targets, "probe"),
+      ],
+      {
+        env: undefined,
+        cwd: undefined,
+        timeoutMs: WINDOWS_PROCESS_KILL_TIMEOUT_MS,
+        tolerateNonZeroExit: true,
+      },
+    );
+    const outcomes = parseKillOutcomeJson(result.stdout);
+    if (outcomes === null) return [];
+    return outcomes
+      .filter((entry) => entry.outcome === "gone" || entry.outcome === "reused")
+      .map((entry) => entry.processId);
+  } catch (cause) {
+    if (isServiceMutationAuthorityError(cause)) throw cause;
+    return [];
+  }
 }
 
 async function runHandleBoundKillScript(
@@ -1315,7 +1404,7 @@ async function runHandleBoundKillScript(
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        buildHandleBoundKillScript(targets),
+        buildHandleBoundKillScript(targets, "kill"),
       ],
       {
         env: undefined,
@@ -1367,7 +1456,8 @@ async function runHandleBoundKillScript(
       // creation-time sources disagreeing, which the live Windows run exists
       // to rule out - and the one thing the survivor refusal the user sees
       // cannot tell them. A refused kill (`failed: <type>`) is not named
-      // here: the next scan says whether it survived (`WindowsFailedKill`).
+      // here: the probe after the next scan says whether it survived
+      // (`WindowsFailedKill`).
       logger.warn("Windows host kill round left targets unreached", {
         targets: targets.length,
         outcomes: rendered,
@@ -1442,9 +1532,24 @@ async function runHandleBoundKillScript(
  * The literal holds only integers this module produced (`WindowsKillTarget`
  * from the scan's own JSON), never text, so there is nothing to quote and no
  * argument-injection surface.
+ *
+ * `action` "kill" terminates the matched process. "probe" acts on nothing: the
+ * matched process is `gone` when its handle says it has exited, `running`
+ * otherwise. An exited process can stay in the process table - pid,
+ * creation time and all - while another process still holds a handle to it,
+ * so neither a scan row nor a successful pin proves it is running; only the
+ * handle does. The same rule decides a kill that threw (`Kill()` on a process
+ * already exiting throws): a matched process whose handle reports `HasExited`
+ * is `gone`, and `failed` only otherwise. Measured on Windows Server 2022: an
+ * orphan codex whose launcher held its handle was listed for seconds after it
+ * exited, and a kill round's table re-check named it a survivor. A handle
+ * opened by an unrelated process did not keep a killed child listed (4 of 4
+ * runs), so which holders do is not established; this rule does not depend on
+ * it. traycer-host's handle-bound script carries the same rule.
  */
 function buildHandleBoundKillScript(
   targets: readonly WindowsKillTarget[],
+  action: WindowsHandleBoundAction,
 ): string {
   const literal = targets
     .map(
@@ -1452,6 +1557,13 @@ function buildHandleBoundKillScript(
         `  @{ ProcessId = ${killTargetInteger(target.processId)}; Created = ${killTargetInteger(target.created)} }`,
     )
     .join(",\n");
+  const act =
+    action === "probe"
+      ? [
+          "        if ($process.HasExited) { $outcome = 'gone' }",
+          "        else { $outcome = 'running' }",
+        ]
+      : ["        $process.Kill()", "        $outcome = 'killed'"];
   return [
     "$ErrorActionPreference = 'Stop'",
     "$targets = @(",
@@ -1459,6 +1571,7 @@ function buildHandleBoundKillScript(
     ")",
     "$results = foreach ($target in $targets) {",
     "  $process = $null",
+    "  $matched = $false",
     "  $outcome = 'unverifiable'",
     "  try {",
     "    if ([long]$target.Created -gt 0) {",
@@ -1467,8 +1580,8 @@ function buildHandleBoundKillScript(
     "      $ticks = ($process.StartTime.ToUniversalTime() - [datetime]'1970-01-01').Ticks",
     "      $started = [long](($ticks - ($ticks % 10)) / 10)",
     "      if ([math]::Abs($started - [long]$target.Created) -le 1) {",
-    "        $process.Kill()",
-    "        $outcome = 'killed'",
+    "        $matched = $true",
+    ...act,
     "      } else {",
     "        $outcome = 'reused'",
     "      }",
@@ -1479,7 +1592,12 @@ function buildHandleBoundKillScript(
     "      $reason = $reason.InnerException",
     "    }",
     "    if ($reason -is [System.ArgumentException]) { $outcome = 'gone' }",
-    "    else { $outcome = 'failed: ' + $reason.GetType().Name }",
+    "    else {",
+    "      $outcome = 'failed: ' + $reason.GetType().Name",
+    "      if ($matched) {",
+    "        try { if ($process.HasExited) { $outcome = 'gone' } } catch { }",
+    "      }",
+    "    }",
     "  } finally {",
     "    if ($null -ne $process) { $process.Dispose() }",
     "  }",

@@ -371,6 +371,25 @@ function tableJson(rows: readonly TableRowInput[]): string {
   );
 }
 
+// The kill (or probe) script's own JSON shape (`ProcessId`/`Outcome`),
+// matching what `parseWindowsKillOutcomeJson` pins directly. Shared by every
+// fixture below that fakes a kill or probe reply as plain (pid, outcome)
+// pairs - `probeProcessesGone` parses the exact same shape a kill script's
+// report does, whichever mode produced it.
+function killOutcomeJson(
+  outcomes: readonly {
+    readonly processId: number;
+    readonly outcome: string;
+  }[],
+): string {
+  return JSON.stringify(
+    outcomes.map((outcome) => ({
+      ProcessId: outcome.processId,
+      Outcome: outcome.outcome,
+    })),
+  );
+}
+
 // Both halves of a kill round are `powershell.exe` invocations: the table scan
 // (`Get-CimInstance Win32_Process`) and the handle-bound kill
 // (`GetProcessById`). The fakes below tell them apart by the script they
@@ -383,16 +402,44 @@ function isScanCall(command: string, args: readonly string[]): boolean {
   );
 }
 
+// Both the "kill" and "probe" scripts share one scaffold (`GetProcessById`,
+// the identity check, the try/catch), so "GetProcessById" alone no longer
+// tells them apart - the catch's own `$matched` re-check
+// (`if ($matched) { try { if ($process.HasExited) ... } }`) puts the literal
+// text "HasExited" into a KILL script too, not just a probe one. What is
+// mode-exclusive is the ACTION each script's happy path takes: only "kill"
+// ever emits `$process.Kill()`, and only "probe" ever emits the literal
+// `$outcome = 'running'` (nothing else in either script produces that word).
+// `isKillCall` keys on the former and `isProbeCall` requires "HasExited" (as
+// a probe's own action body always has it) while explicitly excluding a kill
+// script's `$process.Kill()`, so the two classifiers partition every
+// handle-bound-script call with no overlap.
 function isKillCall(command: string, args: readonly string[]): boolean {
   return (
     command === "powershell.exe" &&
-    args.some((arg) => arg.includes("GetProcessById"))
+    args.some(
+      (arg) =>
+        arg.includes("GetProcessById") && arg.includes("$process.Kill()"),
+    )
   );
 }
 
-// The targets one kill invocation carries, in the order the script walks
-// them. Read back out of the target literal `buildHandleBoundKillScript`
-// emits (`@{ ProcessId = <pid>; Created = <micros> }` per target).
+function isProbeCall(command: string, args: readonly string[]): boolean {
+  return (
+    command === "powershell.exe" &&
+    args.some(
+      (arg) =>
+        arg.includes("GetProcessById") &&
+        arg.includes("HasExited") &&
+        !arg.includes("$process.Kill()"),
+    )
+  );
+}
+
+// The targets one kill OR probe invocation carries, in the order the script
+// walks them - both modes share the identical target-literal shape
+// (`@{ ProcessId = <pid>; Created = <micros> }` per target), so one parser
+// reads either back out of the script text.
 function killTargetsOf(args: readonly string[]): WindowsKillTarget[] {
   const script = args.find((arg) => arg.includes("GetProcessById")) ?? "";
   const targets: WindowsKillTarget[] = [];
@@ -409,6 +456,13 @@ function scanCalls(calls: readonly RecordedCall[]): RecordedCall[] {
   return calls.filter((call) => isScanCall(call.command, call.args));
 }
 
+// Every probe invocation (the round-bound `killSetStillRunning` check, or
+// `reportFailedKillsStillRunning`'s own probe of the previous round's failed
+// kills), in issue order.
+function probeCalls(calls: readonly RecordedCall[]): RecordedCall[] {
+  return calls.filter((call) => isProbeCall(call.command, call.args));
+}
+
 // One entry per kill script - one per round, unless the round carried more
 // than `WINDOWS_KILL_TARGETS_PER_SCRIPT` targets and issued several in a row -
 // holding that script's targets in issue order.
@@ -423,6 +477,22 @@ function killRounds(calls: readonly RecordedCall[]): WindowsKillTarget[][] {
 function killedPids(calls: readonly RecordedCall[]): number[] {
   return killRounds(calls).flatMap((round) =>
     round.map((target) => target.processId),
+  );
+}
+
+// A WARN call's second argument comes off a `vi.fn()` mock with no generic,
+// so it types as `any` at the call site; this narrows it down to the pids
+// named in its `outcomes` list with no cast. Each outcome is
+// `"<pid>=<reason>"` and only the pid before `=` is kept.
+function warnOutcomePids(details: unknown): number[] {
+  if (typeof details !== "object" || details === null) {
+    return [];
+  }
+  if (!("outcomes" in details) || !Array.isArray(details.outcomes)) {
+    return [];
+  }
+  return details.outcomes.map((entry: unknown) =>
+    Number(String(entry).split("=")[0]),
   );
 }
 
@@ -2853,6 +2923,328 @@ describe("killHostProcessTree convergence loop", () => {
       });
     });
   });
+
+  // F-ZOMBIE-SURVIVOR (coordinator's addendum, Diff 2): at the round bound a
+  // LISTING is about to fail the stop, and the whole point of this fix is
+  // that a listing is no proof - an exited process can stay in the table while
+  // another process still holds a handle to it. So at the bound, and only
+  // there, `killVerifiedProcessTree`
+  // asks each listed pid through its own handle first (`killSetStillRunning`)
+  // before deciding whether to refuse. These pins drive that branch directly
+  // through `controller.stop`, with a bespoke runner that routes scan, kill
+  // and probe calls independently by script text (`isScanCall`/`isKillCall`/
+  // `isProbeCall`) - `roundedRunner`'s table-only scripting can't express a
+  // scan that keeps re-listing a pid the kill script itself reports success
+  // for, which is exactly the artifact this fix exists to see through.
+  describe("F-ZOMBIE-SURVIVOR: the round-bound probe on a listing the table cannot disprove", () => {
+    const ROUNDS = WINDOWS_KILL_CONVERGENCE_ROUNDS;
+
+    it("a slot process the scan keeps listing every round, but the round-bound probe reports it gone, converges instead of refusing", async () => {
+      // The scenario measured on Windows Server 2022: X's kill script never
+      // throws (it reports `killed` every round - the OS accepted the
+      // terminate call), yet the NEXT scan keeps listing X under the same
+      // identity anyway - another process still holds a handle to it, keeping
+      // its row in the process table. Nothing in the round loop's own
+      // kill-set computation consults a kill script's outcome (only the
+      // NEXT SCAN's rows decide what is still "kill"able), so X is
+      // re-selected every round regardless - this table alone would never
+      // converge on its own; only the round-bound probe's own, independent
+      // answer can.
+      const X = 950_001;
+      const calls: RecordedCall[] = [];
+      let scanCount = 0;
+      const runner: ProcessRunner = async (command, args) => {
+        calls.push({ command, args });
+        if (isScanCall(command, args)) {
+          scanCount += 1;
+          if (scanCount === 1) return success(tableJson([])); // guard scan
+          return success(
+            tableJson([
+              { processId: X, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        if (isProbeCall(command, args)) {
+          return success(killOutcomeJson([{ processId: X, outcome: "gone" }]));
+        }
+        if (isKillCall(command, args)) {
+          return success(
+            killOutcomeJson([{ processId: X, outcome: "killed" }]),
+          );
+        }
+        return success("");
+      };
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        controller.stop(serviceLabelFor("staging"), { force: false }),
+      ).resolves.toBeUndefined();
+
+      // The guard's leading scan, plus one scan per round 0..ROUNDS.
+      expect(scanCalls(calls)).toHaveLength(ROUNDS + 2);
+      // A real kill call in every round EXCEPT the bound: the bound round
+      // never reaches `killProcessIdentities` because the round-bound probe
+      // clears the listing before the `pids.length === 0` convergence check.
+      expect(killedPids(calls)).toEqual(
+        Array.from({ length: ROUNDS }, () => X),
+      );
+      expect(probeCalls(calls)).toHaveLength(1);
+      expect(killTargetsOf(probeCalls(calls)[0]?.args ?? [])).toEqual([
+        { processId: X, created: 1000 },
+      ]);
+
+      // RED on SHIP1 (`S/round1/r1-fix5/ship2/windows.ship1.ts`, before this
+      // addendum): `pids` at the bound is unconditionally `listed` - there is
+      // no round-bound probe to clear it - so the loop throws "still running
+      // after N kill rounds" instead of resolving. Recorded separately
+      // against that file; FINAL SHIP (installed here) resolves as above.
+    });
+
+    it("the round-bound probe reports it still running: the refusal names it exactly as an un-addended survivor would", async () => {
+      const X = 950_002;
+      const calls: RecordedCall[] = [];
+      let scanCount = 0;
+      const runner: ProcessRunner = async (command, args) => {
+        calls.push({ command, args });
+        if (isScanCall(command, args)) {
+          scanCount += 1;
+          if (scanCount === 1) return success(tableJson([]));
+          return success(
+            tableJson([
+              { processId: X, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        if (isProbeCall(command, args)) {
+          return success(
+            killOutcomeJson([{ processId: X, outcome: "running" }]),
+          );
+        }
+        if (isKillCall(command, args)) {
+          return success(
+            killOutcomeJson([{ processId: X, outcome: "killed" }]),
+          );
+        }
+        return success("");
+      };
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        controller.stop(serviceLabelFor("staging"), { force: false }),
+      ).rejects.toMatchObject({
+        code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+        details: { survivingPids: [X] },
+      });
+
+      expect(probeCalls(calls)).toHaveLength(1);
+    });
+
+    it("two listed pids at the bound, the probe clears one and keeps the other: the refusal names only the one still running", async () => {
+      const X = 950_003;
+      const Y = 950_004;
+      const calls: RecordedCall[] = [];
+      let scanCount = 0;
+      const runner: ProcessRunner = async (command, args) => {
+        calls.push({ command, args });
+        if (isScanCall(command, args)) {
+          scanCount += 1;
+          if (scanCount === 1) return success(tableJson([]));
+          return success(
+            tableJson([
+              { processId: X, parentProcessId: 1, created: 1000, slot: true },
+              { processId: Y, parentProcessId: 1, created: 2000, slot: true },
+            ]),
+          );
+        }
+        if (isProbeCall(command, args)) {
+          return success(
+            killOutcomeJson([
+              { processId: X, outcome: "gone" },
+              { processId: Y, outcome: "running" },
+            ]),
+          );
+        }
+        if (isKillCall(command, args)) {
+          const targets = killTargetsOf(args).map((target) => target.processId);
+          return success(
+            killOutcomeJson(
+              targets.map((pid) => ({ processId: pid, outcome: "killed" })),
+            ),
+          );
+        }
+        return success("");
+      };
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        controller.stop(serviceLabelFor("staging"), { force: false }),
+      ).rejects.toMatchObject({
+        code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+        details: { survivingPids: [Y] },
+      });
+
+      expect(probeCalls(calls)).toHaveLength(1);
+      expect(
+        killTargetsOf(probeCalls(calls)[0]?.args ?? [])
+          .map((t) => t.processId)
+          .sort((a, b) => a - b),
+      ).toEqual([X, Y].sort((a, b) => a - b));
+    });
+
+    it("the round-bound probe does not report (unparseable output): the refusal names every listed pid, exactly as before this addendum", async () => {
+      const X = 950_005;
+      const Y = 950_006;
+      const calls: RecordedCall[] = [];
+      let scanCount = 0;
+      const runner: ProcessRunner = async (command, args) => {
+        calls.push({ command, args });
+        if (isScanCall(command, args)) {
+          scanCount += 1;
+          if (scanCount === 1) return success(tableJson([]));
+          return success(
+            tableJson([
+              { processId: X, parentProcessId: 1, created: 1000, slot: true },
+              { processId: Y, parentProcessId: 1, created: 2000, slot: true },
+            ]),
+          );
+        }
+        if (isProbeCall(command, args)) {
+          return success("not json");
+        }
+        if (isKillCall(command, args)) {
+          const targets = killTargetsOf(args).map((target) => target.processId);
+          return success(
+            killOutcomeJson(
+              targets.map((pid) => ({ processId: pid, outcome: "killed" })),
+            ),
+          );
+        }
+        return success("");
+      };
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        controller.stop(serviceLabelFor("staging"), { force: false }),
+      ).rejects.toMatchObject({
+        code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+        details: { survivingPids: [X, Y] },
+      });
+
+      expect(probeCalls(calls)).toHaveLength(1);
+    });
+
+    it("the round-bound probe clears every listed pid, but an unattributed row is ALSO present that round: refuses on the unattributed row, not a resolved stop", async () => {
+      // P is killed cleanly in round 0 and never listed again (really
+      // reaped). X is the lingering/handle-held process, listed every
+      // round and always reporting `killed`. Y claims P - a remembered
+      // victim - but was born far outside P's proven lifetime window, so it
+      // is `unattributed` every round from round 1 onward, never resolving
+      // either way. At the bound, X is the only LISTED (killable) pid, and
+      // the round-bound probe clears it - but that must not paper over Y:
+      // the stop still has to refuse, on the unattributed row, not resolve.
+      const P = 950_101;
+      const X = 950_102;
+      const Y = 950_103;
+      const calls: RecordedCall[] = [];
+      let scanCount = 0;
+      const runner: ProcessRunner = async (command, args) => {
+        calls.push({ command, args });
+        if (isScanCall(command, args)) {
+          scanCount += 1;
+          if (scanCount === 1) return success(tableJson([])); // guard
+          if (scanCount === 2) {
+            return success(
+              tableJson([
+                { processId: P, parentProcessId: 1, created: 100, slot: true },
+                { processId: X, parentProcessId: 1, created: 200, slot: true },
+              ]),
+            );
+          }
+          // Round 1 onward: P is gone for good; X keeps showing up (the
+          // handle-held artifact); Y claims P at a birth far outside P's
+          // proven lifetime window.
+          return success(
+            tableJson([
+              { processId: X, parentProcessId: 1, created: 200, slot: true },
+              {
+                processId: Y,
+                parentProcessId: 0,
+                claimedParentProcessId: P,
+                created: 500_000,
+                slot: false,
+              },
+            ]),
+          );
+        }
+        if (isProbeCall(command, args)) {
+          return success(killOutcomeJson([{ processId: X, outcome: "gone" }]));
+        }
+        if (isKillCall(command, args)) {
+          const targets = killTargetsOf(args).map((target) => target.processId);
+          return success(
+            killOutcomeJson(
+              targets.map((pid) => ({ processId: pid, outcome: "killed" })),
+            ),
+          );
+        }
+        return success("");
+      };
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      const rejection: unknown = await controller
+        .stop(serviceLabelFor("staging"), { force: false })
+        .catch((cause: unknown) => cause);
+
+      // The UNATTRIBUTED refusal specifically, not the "still running after
+      // N kill rounds" one - the two carry different shapes, and both would
+      // satisfy a bare `unattributedPids: [Y]` match (the round-bound
+      // refusal ALSO reports `unattributedPids` alongside its own
+      // `survivingPids`), so this checks the discriminating fields: the
+      // unattributed refusal's `details` has no `survivingPids` at all, and
+      // its message names what could not be tied to the slot rather than
+      // "still running after N kill rounds".
+      expect(rejection).toMatchObject({
+        code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+        details: { unattributedPids: [Y] },
+      });
+      const details =
+        rejection !== null &&
+        typeof rejection === "object" &&
+        "details" in rejection
+          ? rejection.details
+          : null;
+      expect(
+        details !== null &&
+          typeof details === "object" &&
+          "survivingPids" in details,
+      ).toBe(false);
+      const message =
+        rejection instanceof Error ? rejection.message : String(rejection);
+      expect(message).toContain(
+        "could be neither tied to this slot nor ruled out of it",
+      );
+      expect(message).not.toContain("still running after");
+
+      // The round-bound probe genuinely ran and genuinely cleared X - this
+      // is the UNATTRIBUTED refusal, not the "still running" one, proving
+      // the two checks are independent: a fully-probe-cleared kill listing
+      // does not paper over a leftover unattributed row.
+      expect(probeCalls(calls)).toHaveLength(1);
+    });
+
+    it("no probe runs before the bound: a stop that converges well within the round bound issues no round-bound-probe-shaped call", async () => {
+      const { runner, calls } = convergingTableRunner([
+        { processId: 950_201, parentProcessId: 1, slot: true },
+      ]);
+      const controller = createWindowsController(runner, noTimingDeps);
+
+      await expect(
+        controller.stop(serviceLabelFor("staging"), { force: false }),
+      ).resolves.toBeUndefined();
+
+      expect(probeCalls(calls)).toHaveLength(0);
+    });
+  });
 });
 
 // The fix for a field-proven defect: the old code WARNed "left targets
@@ -2877,28 +3269,13 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     loggerMock.warn.mockReset();
   });
 
-  // The kill script's own JSON shape (`ProcessId`/`Outcome`), matching what
-  // `parseWindowsKillOutcomeJson` above already pins - shared here so every
-  // fixture below states its outcomes as plain (pid, outcome) pairs.
-  function killOutcomeJson(
-    outcomes: readonly {
-      readonly processId: number;
-      readonly outcome: string;
-    }[],
-  ): string {
-    return JSON.stringify(
-      outcomes.map((outcome) => ({
-        ProcessId: outcome.processId,
-        Outcome: outcome.outcome,
-      })),
-    );
-  }
-
   it("F-CLI-FAILED-WARN: a failed-kill target absent from the next scan gets neither WARN, and the stop resolves", async () => {
     // Round 0 kills 501 and the kill script reports `failed: Win32Exception`.
     // Round 1's scan does not list 501 at all - it really is gone, exactly
     // the field case (a console host that finished exiting on its own once
-    // its last client's Kill() raced it). Converges with nothing left.
+    // its last client's Kill() raced it). `reportFailedKillsStillRunning`
+    // runs its OWN probe beside that scan (never from the scan's own table),
+    // and here it confirms 501 gone. Converges with nothing left.
     const calls: RecordedCall[] = [];
     let scanCount = 0;
     const runner: ProcessRunner = async (command, args) => {
@@ -2919,6 +3296,11 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
         }
         return success(tableJson([]));
       }
+      if (isProbeCall(command, args)) {
+        // `reportFailedKillsStillRunning`'s own probe of round 0's failed
+        // kill: 501 genuinely exited, so the probe reports it gone.
+        return success(killOutcomeJson([{ processId: 501, outcome: "gone" }]));
+      }
       if (isKillCall(command, args)) {
         return success(
           killOutcomeJson([
@@ -2936,24 +3318,105 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
 
     expect(killedPids(calls)).toEqual([501]);
     expect(scanCalls(calls)).toHaveLength(3);
+    // Exactly one probe call, asked about the failed kill's own identity.
+    const probed = probeCalls(calls);
+    expect(probed).toHaveLength(1);
+    expect(killTargetsOf(probed[0]?.args ?? [])).toEqual([
+      { processId: 501, created: 1000 },
+    ]);
     // Neither WARN fired for 501: not the immediate "unreached" one (the
     // `failed...` outcome is excluded from that filter now), and not the
-    // scan-confirmed one (the next scan no longer lists 501 at all).
+    // probe-confirmed one (the probe reports it gone).
     expect(loggerMock.warn).not.toHaveBeenCalled();
 
     // Ablation abl-cli-gate: drop `!outcome.outcome.startsWith("failed"),`
     // (and its preceding `&&`) from the `unreached` filter in
     // `runHandleBoundKillScript` -> this test reddens: round 0's own
     // "failed: Win32Exception" outcome falls back into `unreached` and WARNs
-    // immediately, naming 501, before the next scan ever runs.
+    // immediately, naming 501, before the next round's probe ever runs.
   });
 
-  it("F-CLI-FAILED-WARN (control): a failed-kill target the next scan still lists under the SAME identity gets exactly one scan-confirmed WARN, and a re-targeted kill still converges", async () => {
+  it("F-ZOMBIE-SURVIVOR: a failed-kill target the next scan STILL LISTS under the same identity, but the probe reports it gone, gets NO WARN - the table row is the artifact, the handle is the truth", async () => {
+    // The exact mechanism this fix exists for: 501 has genuinely exited (the
+    // probe's own handle-bound read proves it), but another process still
+    // holds a handle to it, so round 1's scan keeps
+    // listing 501 under its own (pid, Created) as if it were still running.
+    // A bare table-match (PRE) would read this as "still running" and WARN;
+    // the probe, asked through 501's own handle, reports `gone` instead. No
+    // WARN. Round 1's kill set still lists 501 too (same stale row), so it
+    // is re-targeted - this time the kill script itself reports `killed` -
+    // and round 2's scan is finally empty, converging the stop.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    let killCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) {
+          // The guard's own leading scan (`askHostToStandDown`, sharing the
+          // sweep's exact script): answered with an empty table.
+          return success(tableJson([]));
+        }
+        if (scanCount <= 3) {
+          // Round 0's AND round 1's scan: the held-open-handle table
+          // artifact keeps listing 501 under the identical identity.
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isProbeCall(command, args)) {
+        // The handle-bound truth: 501 really has exited, despite the table
+        // still listing it.
+        return success(killOutcomeJson([{ processId: 501, outcome: "gone" }]));
+      }
+      if (isKillCall(command, args)) {
+        killCount += 1;
+        return success(
+          killOutcomeJson([
+            {
+              processId: 501,
+              outcome: killCount === 1 ? "failed: Win32Exception" : "killed",
+            },
+          ]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+    // Exactly one probe call: round 1's `reportFailedKillsStillRunning` of
+    // round 0's failed kill. Round 1's own re-kill succeeds, so no further
+    // failed kill is ever recorded and round 2 never has anything to probe.
+    expect(probeCalls(calls)).toHaveLength(1);
+    expect(killedPids(calls)).toEqual([501, 501]);
+
+    // RED on PRE (`S/round1/r1-fix5/prefix/windows.ts`, before this fix
+    // existed at all): `reportFailedKillsStillRunning` there matches the
+    // failed kill's identity directly against the round's own SCAN table,
+    // with no probe at all - 501 is still listed under the same (pid,
+    // created), so PRE WARNs "left targets running after a failed kill"
+    // (misled by the very table artifact this fix exists to see through).
+    // Recorded separately against PRE bytes; FINAL SHIP (installed here)
+    // gives no WARN, as asserted above.
+  });
+
+  it("F-CLI-FAILED-WARN (control): a failed-kill target the next scan still lists under the SAME identity gets exactly one probe-confirmed WARN, and a re-targeted kill still converges", async () => {
     // Round 0 kills 501, reported `failed: Win32Exception`. Round 1's scan
-    // still lists 501 under the SAME `created` (1000) - it really is still
-    // running. That is the one case the scan-confirmed WARN exists for.
-    // Round 1 re-targets 501 and this time the kill lands cleanly; round 2's
-    // scan is empty and the stop still resolves.
+    // still lists 501 under the SAME `created` (1000), and the probe
+    // confirms it is genuinely still running - that is the one case the
+    // probe-confirmed WARN exists for. Round 1 re-targets 501 and this time
+    // the kill lands cleanly; round 2's scan is empty and the stop still
+    // resolves.
     const calls: RecordedCall[] = [];
     let scanCount = 0;
     let killCount = 0;
@@ -2982,6 +3445,13 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
         }
         return success(tableJson([]));
       }
+      if (isProbeCall(command, args)) {
+        // The probe's own answer for THIS identity: it really is still
+        // running under the handle the probe just pinned.
+        return success(
+          killOutcomeJson([{ processId: 501, outcome: "running" }]),
+        );
+      }
       if (isKillCall(command, args)) {
         killCount += 1;
         return success(
@@ -3003,6 +3473,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
 
     expect(killedPids(calls)).toEqual([501, 501]);
     expect(scanCalls(calls)).toHaveLength(4);
+    expect(probeCalls(calls)).toHaveLength(1);
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
       "Windows host kill round left targets running after a failed kill",
@@ -3014,20 +3485,23 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
 
     // Ablation abl-cli-confirm: replace `if (running.length === 0) return;`
     // with `return;` in `reportFailedKillsStillRunning` -> this test reddens:
-    // the scan-confirmed WARN never fires even though the same identity is
-    // still listed, so `loggerMock.warn` is never called.
+    // the probe-confirmed WARN never fires even though the probe reported
+    // the same identity still running, so `loggerMock.warn` is never called.
   });
 
-  it("F-CLI-FAILED-WARN (control): a failed-kill target whose next scan lists a DIFFERENT `created` (a reused pid) gets no failed-kill WARN", async () => {
+  it("F-CLI-FAILED-WARN (control): a failed-kill target the probe reports `reused` for gets no failed-kill WARN - a stranger now wears the recycled pid", async () => {
     // Round 0 kills 501 (born 1000), reported `failed: Win32Exception`.
     // Round 1's scan lists 501 again, but born at 2000 - a fresh, unrelated
-    // process that landed on the recycled pid. `reportFailedKillsStillRunning`
-    // matches on (processId, created) together, so this is not "the same
-    // target still running" and must not WARN. The new occupant is an
-    // ordinary slot-matched process and is killed like any other; round 2's
-    // scan is empty and the stop resolves.
+    // process that landed on the recycled pid - and the probe, asked about
+    // the ORIGINAL identity (501, created 1000), reports `reused`: the
+    // current occupant of that pid does not match the age it was asked
+    // about. `reportFailedKillsStillRunning` matches on (processId, created)
+    // together, so this is not "the same target still running" and must not
+    // WARN. The new occupant is an ordinary slot-matched process and is
+    // killed like any other; round 2's scan is empty and the stop resolves.
     const calls: RecordedCall[] = [];
     let scanCount = 0;
+    let killCount = 0;
     const runner: ProcessRunner = async (command, args) => {
       calls.push({ command, args });
       if (isScanCall(command, args)) {
@@ -3053,9 +3527,24 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
         }
         return success(tableJson([]));
       }
-      if (isKillCall(command, args)) {
+      if (isProbeCall(command, args)) {
+        // Asked about (501, created 1000) - the FAILED kill's own identity -
+        // and the pid is now a stranger born at 2000, so the probe reports
+        // `reused`, the same verdict a "kill" script gives a mismatched
+        // identity.
         return success(
-          killOutcomeJson([{ processId: 501, outcome: "killed" }]),
+          killOutcomeJson([{ processId: 501, outcome: "reused" }]),
+        );
+      }
+      if (isKillCall(command, args)) {
+        killCount += 1;
+        return success(
+          killOutcomeJson([
+            {
+              processId: 501,
+              outcome: killCount === 1 ? "failed: Win32Exception" : "killed",
+            },
+          ]),
         );
       }
       return success("");
@@ -3068,18 +3557,38 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
 
     expect(killedPids(calls)).toEqual([501, 501]);
     expect(scanCalls(calls)).toHaveLength(4);
+    expect(probeCalls(calls)).toHaveLength(1);
     expect(loggerMock.warn).not.toHaveBeenCalled();
+
+    // NOTE (adaptation): the code THIS test's runner shipped with, before
+    // this pass, reported "killed" for every kill call - never
+    // "failed: Win32Exception" - so no failed kill was ever recorded and the
+    // probe/WARN mechanism this test's own name and comment describe was
+    // never actually exercised; it passed vacuously regardless of the
+    // "reused pid" story. Fixed here via `killCount` so round 0's kill
+    // genuinely fails, which is what makes the probe's `reused` verdict (and
+    // the resulting "no WARN") a real assertion rather than an accident of
+    // nothing ever reaching the WARN gate.
   });
 
-  it("F-CLI-FAILED-WARN: an unreadable scan after a failed kill WARNs naming the target (every failed kill is 'still running' when the scan cannot prove otherwise), and the stop still refuses to enumerate", async () => {
+  it("F-CLI-FAILED-WARN: an unreadable scan after a failed kill WARNs naming the target (the probe cannot report either, so nothing is proven gone), and the stop still refuses to enumerate", async () => {
     // Round 0 kills 501, reported `failed: Win32Exception`. Round 1's scan
     // itself fails (a non-authority throw, same as `scanSlotProcessTable`'s
     // other unreadable-scan pins), so it resolves `null` rather than a table.
-    // `reportFailedKillsStillRunning` treats a null scan as proving nothing
-    // gone, so every outstanding failed kill WARNs - and the stop rejects
-    // with the existing "could not enumerate" refusal, exactly as the other
-    // unreadable-scan pins in this file already exercise for a scan with no
-    // failed-kill history.
+    //
+    // Traced against the real `killVerifiedProcessTree` order: each round
+    // calls `scanSlotProcessTable` FIRST (which swallows this throw and
+    // returns `null`), then unconditionally calls
+    // `reportFailedKillsStillRunning` - which no longer reads the scan's
+    // table at all in this ship, so it runs its OWN probe regardless of
+    // whether the round's own scan just failed. Only AFTER that does the
+    // loop check `if (table === null) throw ...`. So the probe DOES run here,
+    // before the "could not enumerate" refusal ever fires - and this fixture
+    // makes it fail too (unparseable output), modelling "the whole
+    // PowerShell surface is down this round": neither the scan nor the probe
+    // can prove 501 gone, so it WARNs as still running, and the round's own
+    // scan failure still ends the stop in the existing "could not enumerate"
+    // refusal.
     const calls: RecordedCall[] = [];
     let scanCount = 0;
     const runner: ProcessRunner = async (command, args) => {
@@ -3099,6 +3608,10 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
           );
         }
         throw new Error("powershell scan timed out");
+      }
+      if (isProbeCall(command, args)) {
+        // No usable report - same underlying unavailability as the scan.
+        return success("not json");
       }
       if (isKillCall(command, args)) {
         return success(
@@ -3120,6 +3633,10 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
 
     expect(scanCalls(calls)).toHaveLength(3);
     expect(killedPids(calls)).toEqual([501]);
+    // The probe DID run in round 1, despite that round's own scan failing -
+    // proof it is that the two are independent, not that one gates the
+    // other.
+    expect(probeCalls(calls)).toHaveLength(1);
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
       "Windows host kill round left targets running after a failed kill",
@@ -3130,12 +3647,100 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     });
   });
 
+  it("F-CLI-FAILED-WARN: a probe that cannot report keeps every failed target running even though the very next scan is healthy and empty - the probe is the sole gate, not scan absence", async () => {
+    // Round 0 kills 501 AND 502, both reported `failed: Win32Exception`.
+    // Round 1's scan succeeds and lists neither - under the OLD (pre-probe)
+    // table-matching mechanism this alone would have cleared both silently.
+    // The probe is what actually decides now, and here it cannot report
+    // (garbage stdout), so both stay presumed running and WARN, even though
+    // nothing about the round's OWN scan is unhealthy.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) return success(tableJson([]));
+        if (scanCount === 2) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+              { processId: 502, parentProcessId: 1, created: 2000, slot: true },
+            ]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isProbeCall(command, args)) {
+        return success("not json");
+      }
+      if (isKillCall(command, args)) {
+        return success(
+          killOutcomeJson([
+            { processId: 501, outcome: "failed: Win32Exception" },
+            { processId: 502, outcome: "failed: Win32Exception" },
+          ]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(scanCalls(calls)).toHaveLength(3);
+    expect(probeCalls(calls)).toHaveLength(1);
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
+      "Windows host kill round left targets running after a failed kill",
+    );
+    expect(loggerMock.warn.mock.calls[0]?.[1]).toEqual({
+      targets: 2,
+      outcomes: ["501=failed: Win32Exception", "502=failed: Win32Exception"],
+    });
+  });
+
+  it("F-CLI-FAILED-WARN: the probe never runs when no kill failed - an ordinary clean converge issues no probe-shaped call", async () => {
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount <= 2) {
+          return success(
+            tableJson([{ processId: 701, parentProcessId: 1, slot: true }]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isKillCall(command, args)) {
+        return success(
+          killOutcomeJson([{ processId: 701, outcome: "killed" }]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(killedPids(calls)).toEqual([701]);
+    expect(probeCalls(calls)).toHaveLength(0);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+
   it("F-CLI-FAILED-WARN (kept behaviour): a `reused` outcome still WARNs immediately in its own round, before any next scan", async () => {
     // 601's kill script reports `reused` - a different process now wears the
     // pid - which is not a `failed...` outcome and must keep the immediate
     // "unreached" WARN this mechanism has always given it; only `failed...`
-    // moved to the scan-confirmed path. Round 1's scan is empty so the stop
-    // still resolves.
+    // moved to the probe-confirmed path. Round 1's scan is empty so the stop
+    // still resolves, and no probe call is ever issued - `reused` never
+    // populates `failedKills`.
     const calls: RecordedCall[] = [];
     let scanCount = 0;
     const runner: ProcessRunner = async (command, args) => {
@@ -3168,6 +3773,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     ).resolves.toBeUndefined();
 
     expect(killedPids(calls)).toEqual([601]);
+    expect(probeCalls(calls)).toHaveLength(0);
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
     expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
       "Windows host kill round left targets unreached",
@@ -3176,6 +3782,233 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
       targets: 1,
       outcomes: ["601=reused"],
     });
+  });
+});
+
+// `probeProcessesGone` chunks its targets the same way the kill script does
+// (`WINDOWS_KILL_TARGETS_PER_SCRIPT` per script, under the same command-line
+// cap), but runs its chunks side by side (`Promise.all`), each through
+// `probeChunkGone`. These pins drive it through the CHEAPER of the two public
+// callers to reach 600 targets: `reportFailedKillsStillRunning` needs only one
+// kill round (600 failed kills) before its very next scan; the round-bound
+// `killSetStillRunning` would need the same 600 pids relisted for
+// `WINDOWS_KILL_CONVERGENCE_ROUNDS` rounds running up to the bound, which is
+// more fixture weight for the same chunking behaviour. `probeProcessesGone`
+// itself is private, so there is no more direct path.
+describe("F-ZOMBIE-SURVIVOR: the probe chunks like the kill (WINDOWS_KILL_TARGETS_PER_SCRIPT per script)", () => {
+  beforeEach(() => {
+    mocks.readHostPidMetadata.mockReset();
+    mocks.readHostPidMetadata.mockResolvedValue(null);
+    mocks.removeHostPidMetadata.mockReset();
+    mocks.removeHostPidMetadata.mockResolvedValue(undefined);
+    loggerMock.warn.mockReset();
+  });
+
+  const FIRST_PID = 970_001;
+
+  function slotRows(count: number): TableRowInput[] {
+    return Array.from({ length: count }, (_, index) => ({
+      processId: FIRST_PID + index,
+      parentProcessId: 1,
+      slot: true,
+    }));
+  }
+
+  it("600 failed kills split the probe into 3 calls of 250/250/100 targets, all cleared - the stop resolves with no WARN", async () => {
+    const TOTAL = 600;
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) return success(tableJson([]));
+        if (scanCount === 2) return success(tableJson(slotRows(TOTAL)));
+        return success(tableJson([]));
+      }
+      if (isProbeCall(command, args)) {
+        const targets = killTargetsOf(args);
+        return success(
+          killOutcomeJson(
+            targets.map((target) => ({
+              processId: target.processId,
+              outcome: "gone",
+            })),
+          ),
+        );
+      }
+      if (isKillCall(command, args)) {
+        const targets = killTargetsOf(args);
+        return success(
+          killOutcomeJson(
+            targets.map((target) => ({
+              processId: target.processId,
+              outcome: "failed: Win32Exception",
+            })),
+          ),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    // Guard scan, round 0's scan (600 slot rows), round 1's scan (empty,
+    // converged) - round 0's kill is what fails all 600, chunked the same
+    // way `killProcessIdentities` already chunks a kill.
+    expect(scanCalls(calls)).toHaveLength(3);
+    expect(killedPids(calls)).toHaveLength(TOTAL);
+
+    const probed = probeCalls(calls);
+    expect(probed).toHaveLength(3);
+    expect(killTargetsOf(probed[0]?.args ?? []).length).toBe(250);
+    expect(killTargetsOf(probed[1]?.args ?? []).length).toBe(250);
+    expect(killTargetsOf(probed[2]?.args ?? []).length).toBe(100);
+
+    // Every one of the 600 targets was asked exactly once, across the three
+    // calls combined - a count/membership check, never a printed pid list.
+    const allProbedPids = probed.flatMap((call) =>
+      killTargetsOf(call.args).map((target) => target.processId),
+    );
+    expect(allProbedPids.length).toBe(TOTAL);
+    expect(new Set(allProbedPids).size).toBe(TOTAL);
+
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+
+    // RED on SHIP2 (`r1-fix5/ship2/windows.ts`, f2090e0e - before this
+    // addendum): `probeProcessesGone` sent every target in ONE script, so
+    // `probed` has length 1, not 3.
+  });
+
+  it("one throwing chunk (non-authority) keeps exactly its own targets; the other two chunks' targets clear normally", async () => {
+    const TOTAL = 600;
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    let probeCallCount = 0;
+    let throwingChunkPids: ReadonlySet<number> = new Set();
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) return success(tableJson([]));
+        if (scanCount === 2) return success(tableJson(slotRows(TOTAL)));
+        return success(tableJson([]));
+      }
+      if (isProbeCall(command, args)) {
+        probeCallCount += 1;
+        const targets = killTargetsOf(args);
+        // The 2nd of the 3 chunks (250 targets) fails to read at all - a
+        // broker-level throw, not an authority error - so `probeChunkGone`
+        // contributes nothing for exactly this chunk; the other two chunks'
+        // targets are unaffected and clear normally.
+        if (probeCallCount === 2) {
+          throwingChunkPids = new Set(
+            targets.map((target) => target.processId),
+          );
+          throw new Error("powershell probe chunk unavailable");
+        }
+        return success(
+          killOutcomeJson(
+            targets.map((target) => ({
+              processId: target.processId,
+              outcome: "gone",
+            })),
+          ),
+        );
+      }
+      if (isKillCall(command, args)) {
+        const targets = killTargetsOf(args);
+        return success(
+          killOutcomeJson(
+            targets.map((target) => ({
+              processId: target.processId,
+              outcome: "failed: Win32Exception",
+            })),
+          ),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(probeCallCount).toBe(3);
+    expect(throwingChunkPids.size).toBe(250);
+
+    // Exactly the throwing chunk's 250 pids stay "running" - the other 350
+    // (2 chunks' worth) cleared and dropped out. Asserted by count and set
+    // membership, never by printing the rows.
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
+      "Windows host kill round left targets running after a failed kill",
+    );
+    const details = loggerMock.warn.mock.calls[0]?.[1];
+    expect(details?.targets).toBe(250);
+    const namedPids = new Set<number>(warnOutcomePids(details));
+    expect(namedPids.size).toBe(250);
+    expect([...namedPids].every((pid) => throwingChunkPids.has(pid))).toBe(
+      true,
+    );
+
+    // RED on SHIP2 (f2090e0e): the whole 600-target set is one probe script;
+    // that single call throws, so `cleared` stays empty and ALL 600 targets
+    // are named running, not exactly the 250 of one chunk.
+  });
+
+  it("control: 250 targets - exactly at the chunk boundary - issue exactly 1 probe call, not 2", async () => {
+    const TOTAL = 250;
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) return success(tableJson([]));
+        if (scanCount === 2) return success(tableJson(slotRows(TOTAL)));
+        return success(tableJson([]));
+      }
+      if (isProbeCall(command, args)) {
+        const targets = killTargetsOf(args);
+        return success(
+          killOutcomeJson(
+            targets.map((target) => ({
+              processId: target.processId,
+              outcome: "gone",
+            })),
+          ),
+        );
+      }
+      if (isKillCall(command, args)) {
+        const targets = killTargetsOf(args);
+        return success(
+          killOutcomeJson(
+            targets.map((target) => ({
+              processId: target.processId,
+              outcome: "failed: Win32Exception",
+            })),
+          ),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(scanCalls(calls)).toHaveLength(3);
+    expect(killedPids(calls)).toHaveLength(TOTAL);
+    const probed = probeCalls(calls);
+    expect(probed).toHaveLength(1);
+    expect(killTargetsOf(probed[0]?.args ?? []).length).toBe(TOTAL);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
   });
 });
 
@@ -3203,10 +4036,13 @@ describe("handle-bound kill script", () => {
   });
 
   it("carries every target as (pid, creation micros) in issue order, opens the handle before reading StartTime, and kills through it only within 1 µs of the scan's creation time", () => {
-    const script = buildWindowsHandleBoundKillScript([
-      { processId: 400, created: 1_700_000_000_000_400 },
-      { processId: 100, created: 1_700_000_000_000_100 },
-    ]);
+    const script = buildWindowsHandleBoundKillScript(
+      [
+        { processId: 400, created: 1_700_000_000_000_400 },
+        { processId: 100, created: 1_700_000_000_000_100 },
+      ],
+      "kill",
+    );
     expect(script).toContain("$ErrorActionPreference = 'Stop'");
     // Integers only, no exponent, no quoting - and in the caller's order.
     const first = script.indexOf("ProcessId = 400; Created = 1700000000000400");
@@ -3232,14 +4068,70 @@ describe("handle-bound kill script", () => {
     expect(script).toContain("if ($null -ne $process) { $process.Dispose() }");
   });
 
+  it('F-ZOMBIE-SURVIVOR: a "probe" script never kills - it only reads HasExited through the pinned handle - while a "kill" script still terminates', () => {
+    const probe = buildWindowsHandleBoundKillScript(
+      [{ processId: 400, created: 1_700_000_000_000_400 }],
+      "probe",
+    );
+    const kill = buildWindowsHandleBoundKillScript(
+      [{ processId: 400, created: 1_700_000_000_000_400 }],
+      "kill",
+    );
+    // The probe's own happy-path action: read HasExited through the handle
+    // this script just pinned, never terminate through it.
+    expect(probe).toContain("if ($process.HasExited) { $outcome = 'gone' }");
+    expect(probe).toContain("else { $outcome = 'running' }");
+    expect(probe).not.toContain("$process.Kill()");
+    // The kill script is the mirror: it still terminates, and never reports
+    // the probe's own "running" outcome (its catch-rule re-check below
+    // reports only "gone", never "running" - a kill script has no code path
+    // that could report a matched process is still alive and unkilled).
+    expect(kill).toContain("$process.Kill()");
+    expect(kill).not.toContain("$outcome = 'running'");
+    // Everything OUTSIDE the action - the identity check, the pin, the
+    // dispose - is shared verbatim between the two modes.
+    const sharedUpTo = (script: string): string =>
+      script.slice(0, script.indexOf("if ([math]::Abs"));
+    expect(probe.slice(0, probe.indexOf("if ([math]::Abs"))).toBe(
+      sharedUpTo(kill),
+    );
+  });
+
+  it('F-ZOMBIE-SURVIVOR: a kill that throws re-checks HasExited through the SAME pinned handle before reporting "failed" - an exiting process reports "gone", not "failed"', () => {
+    const kill = buildWindowsHandleBoundKillScript(
+      [{ processId: 400, created: 1_700_000_000_000_400 }],
+      "kill",
+    );
+    // The exact catch-rule fix: `Kill()` on a process already exiting throws
+    // a Win32Exception, and this re-check is what turns that into "gone"
+    // instead of a permanent-looking "failed: Win32Exception" - through the
+    // SAME `$process` the try block already pinned, guarded by `$matched` so
+    // it only ever fires for a process this script actually identified (never
+    // for `reused`/`unverifiable`, which never set `$matched`).
+    expect(kill).toContain("if ($matched) {");
+    expect(kill).toContain(
+      "try { if ($process.HasExited) { $outcome = 'gone' } } catch { }",
+    );
+    // The re-check sits in the catch's non-ArgumentException branch, after
+    // the outcome is first set to `failed: <type>` - it OVERWRITES that
+    // provisional verdict rather than replacing the branch outright.
+    const failedAt = kill.indexOf(
+      "$outcome = 'failed: ' + $reason.GetType().Name",
+    );
+    const matchedAt = kill.indexOf("if ($matched) {");
+    expect(failedAt).toBeGreaterThan(-1);
+    expect(matchedAt).toBeGreaterThan(failedAt);
+  });
+
   it("normalises StartTime like the scan normalises CreationDate (UTC, Unix epoch, microseconds) but floors with integer arithmetic, and tolerates 1 µs", () => {
     const epoch = ".ToUniversalTime() - [datetime]'1970-01-01').Ticks";
     const scan = buildWindowsSlotProcessTableScanScript(
       "C:\\Users\\me\\.traycer\\host",
     );
-    const kill = buildWindowsHandleBoundKillScript([
-      { processId: 1, created: 1 },
-    ]);
+    const kill = buildWindowsHandleBoundKillScript(
+      [{ processId: 1, created: 1 }],
+      "kill",
+    );
     // Same epoch, same UTC normalisation on both sides.
     expect(scan).toContain(`($_.CreationDate${epoch} / 10)`);
     expect(kill).toContain(`($process.StartTime${epoch}`);
@@ -3261,12 +4153,15 @@ describe("handle-bound kill script", () => {
   });
 
   it("a target whose age is 0 - or anything that is not a safe non-negative integer - is emitted as Created = 0, which the script never kills", () => {
-    const script = buildWindowsHandleBoundKillScript([
-      { processId: 7, created: 0 },
-      { processId: 8, created: -5 },
-      { processId: 9, created: Number.MAX_SAFE_INTEGER + 2 },
-      { processId: 10, created: 1.5 },
-    ]);
+    const script = buildWindowsHandleBoundKillScript(
+      [
+        { processId: 7, created: 0 },
+        { processId: 8, created: -5 },
+        { processId: 9, created: Number.MAX_SAFE_INTEGER + 2 },
+        { processId: 10, created: 1.5 },
+      ],
+      "kill",
+    );
     for (const pid of [7, 8, 9, 10]) {
       expect(script).toContain(`ProcessId = ${pid}; Created = 0`);
     }
@@ -3476,6 +4371,7 @@ describe("handle-bound kill script", () => {
         processId: 4_294_967_295,
         created: Number.MAX_SAFE_INTEGER,
       })),
+      "kill",
     );
     expect(script.length).toBeLessThan(32_767 / 2);
   });
