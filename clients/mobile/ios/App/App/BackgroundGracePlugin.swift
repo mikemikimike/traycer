@@ -47,12 +47,19 @@ public class BackgroundGracePlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("ms must be a positive number of milliseconds")
             return
         }
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                call.reject("the plugin was released before the hold started")
+                return
+            }
             let id: String = call.callbackId
+            let deadline = DispatchTime.now() + .milliseconds(ms)
             let task = UIApplication.shared.beginBackgroundTask(withName: "BackgroundGrace") { [weak self] in
                 // Out of background time: answer now and end the task at once,
-                // or iOS kills the app for overrunning it.
-                self?.settle(id, backgrounded: Self.isBackgrounded(), grace: 0)
+                // or iOS kills the app for overrunning it. A background that
+                // has not yet lasted `ms` never answers `backgrounded: true`.
+                let lasted = DispatchTime.now() >= deadline
+                self?.settle(id, backgrounded: lasted && Self.isBackgrounded(), grace: 0)
             }
             let timer = DispatchWorkItem { [weak self] in
                 guard let self else { return }

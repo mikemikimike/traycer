@@ -1391,7 +1391,8 @@ function resumeEvidenceModeFor(platform: string): ResumeEvidenceMode {
 
 class MobileSystemResume {
   private readonly handlers = new Set<(event: SystemResumeEvent) => void>();
-  private readonly lastedSubscriptions = new Set<BackgroundLastedSubscription>();
+  private readonly lastedSubscriptions =
+    new Set<BackgroundLastedSubscription>();
   /** Cancels for the JS timers the current background episode armed. */
   private readonly lastedTimerCancels = new Set<() => void>();
   /**
