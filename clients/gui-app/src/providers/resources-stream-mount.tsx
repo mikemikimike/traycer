@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ResourcesStreamClient } from "@traycer-clients/shared/host-transport/resources-stream-client";
 import {
   useStreamHostId,
-  useStreamMethodSupport,
   useWsStreamClient,
 } from "@/lib/host/stream-runtime-context";
 import {
@@ -19,7 +18,7 @@ import {
   type ResourcesStreamClientFactory,
 } from "@/stores/resources/resources-store";
 import { getResourcesStreamClientFactoryOverride } from "@/providers/resources-stream-factory-override";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useEpicResourcesLease } from "@/hooks/resources/use-epic-resources-lease";
 
 export interface ResourcesStreamMountProps {
   readonly epicId: string;
@@ -31,113 +30,15 @@ export interface GlobalResourcesStreamMountProps {
 }
 
 /**
- * Headless lifecycle owner for one epic's `resources.subscribe` stream. Mounted
- * inside the epic pane (where the app-wide `WsStreamClient` and the epic id are
- * both in scope), it acquires the registry entry for `epicId` and releases it on
- * unmount. Rendering is delegated to the app-level surfaces that read the
- * registry by `epicId`, so this mount emits nothing itself.
+ * The epic pane's lease: held only while a global consumer is on screen AND
+ * the host cannot serve a global subscribe.
  *
- * Deferred until the stream client binds (`useWsStreamClient()` is `null` during
- * the initial host-hydration gap); the effect re-runs when it becomes available.
- *
- * Gated behind the settings that actually consume resource data (the header
- * popover and the sidebar chips) — with both off, no consumer would ever read
- * the entry, so the stream stays closed. Both booleans join the effect deps so
- * toggling a setting live acquires/releases without remounting the pane.
- */
-export function ResourcesStreamMount(
-  props: ResourcesStreamMountProps,
-): ReactNode {
-  const showGlobalResourceMonitor = useSettingsStore(
-    (state) => state.showGlobalResourceMonitor,
-  );
-  const navigatorChipsWanted = useSettingsStore(
-    (state) => state.navigatorResourceMetrics.length > 0,
-  );
-  useEpicResourcesLease(
-    props.epicId,
-    showGlobalResourceMonitor || navigatorChipsWanted,
-  );
-  return null;
-}
-
-/**
- * The epic's lease for its resource CHIPS alone - the phone's tab switcher
- * sheet, whose rows are the only place the installed app shows them. Unlike
- * {@link ResourcesStreamMount} it ignores the header monitor setting: the
- * monitor reads the global entry, and on an old host the pane's
- * {@link PhoneEpicResourcesFallbackMount} supplies what it needs.
- */
-export function EpicResourceChipsStreamMount(
-  props: ResourcesStreamMountProps,
-): ReactNode {
-  const chipsWanted = useSettingsStore(
-    (state) => state.navigatorResourceMetrics.length > 0,
-  );
-  useEpicResourcesLease(props.epicId, chipsWanted);
-  return null;
-}
-
-/**
- * Holds the registry entry for `epicId` while `wanted`, releasing it when that
- * turns false or the caller unmounts. The caller owns the demand: the settings
- * gate above for a pane or sheet, the old-host fallback below.
- */
-function useEpicResourcesLease(epicId: string, wanted: boolean): void {
-  const wsStreamClient = useWsStreamClient();
-  // Named for the same reason the global mount is: these entries are what the
-  // registry aggregates when no global stream exists (a pre-v1.1 host), so a
-  // reader checking "did this come from the machine I name" must be able to
-  // answer it for the fallback too, not just the global entry.
-  const hostId = useStreamHostId();
-  const resourcesSupport = useStreamMethodSupport("resources.subscribe");
-  const resourcesUnsupported = resourcesSupport === "unsupported";
-
-  useEffect(() => {
-    if (resourcesUnsupported || !wanted) return;
-    const override = getResourcesStreamClientFactoryOverride();
-    if (override === null && wsStreamClient === null) return;
-    // Token identifies the transport this entry is bound to; a host swap changes
-    // the `WsStreamClient` identity and rebuilds the store (see the registry).
-    const clientToken: unknown = override !== null ? override : wsStreamClient;
-    const streamClientFactory: ResourcesStreamClientFactory =
-      override !== null
-        ? override
-        : (scope, callbacks) => {
-            if (wsStreamClient === null) {
-              throw new Error(
-                "ResourcesStreamMount: WsStreamClient missing at open time.",
-              );
-            }
-            return new ResourcesStreamClient({
-              wsStreamClient,
-              scope,
-              callbacks,
-            });
-          };
-    resourcesRegistry.acquire(epicId, clientToken, hostId, () =>
-      createResourcesStore({
-        scope: { kind: "epic", epicId },
-        streamClientFactory,
-      }),
-    );
-    return () => {
-      resourcesRegistry.release(epicId);
-    };
-  }, [epicId, hostId, resourcesUnsupported, wanted, wsStreamClient]);
-}
-
-/**
- * The installed app's per-epic lease: held only while a global consumer is on
- * screen AND the host cannot serve a global subscribe.
- *
- * The phone shows an epic's own chips only inside the tab switcher sheet,
- * which leases the epic while open, so the pane holds no stream of its own.
- * That leaves one reader the sheet does not cover: an `@1.0` host answers the
- * global monitor through the registry's per-epic FALLBACK, which aggregates
- * whatever epic entries exist. With no pane lease there would be none, and the
- * panel (or an opted-in readout) would wait for data forever. So the pane
- * supplies its entry for exactly that window.
+ * An epic's own numbers are leased by the chips that draw them, so the pane
+ * holds no stream of its own. That leaves one reader no chip covers: an `@1.0`
+ * host answers the global monitor through the registry's per-epic FALLBACK,
+ * which aggregates whatever epic entries exist. With no pane lease there would
+ * be none, and the panel (or an opted-in readout) would wait for data forever.
+ * So the pane supplies its entry for exactly that window.
  *
  * The verdict is the full one - the pre-check for a local host, and the live
  * global stream's own negotiation for a remote one - read against the ambient
@@ -147,7 +48,7 @@ function useEpicResourcesLease(epicId: string, wanted: boolean): void {
  * readout is a global consumer with the header monitor and the navigator
  * chips both off, and that gate would read it as nobody wanting numbers.
  */
-export function PhoneEpicResourcesFallbackMount(
+export function EpicResourcesFallbackMount(
   props: ResourcesStreamMountProps,
 ): ReactNode {
   const hostId = useStreamHostId();
@@ -262,9 +163,9 @@ export function GlobalResourcesStreamMount(
   }, [hostId, reacquireToken, resourcesUnsupported, wsStreamClient]);
 
   // Demand is aggregated by the registry across every lease holder, so a
-  // holder that unmounts while interactive (the phone's header panel closing)
-  // drops the shared stream back to background instead of leaving it at the
-  // cadence only the departed holder asked for. Only a mount that HOLDS the
+  // holder that unmounts while interactive (a header panel closing) drops the
+  // shared stream back to background instead of leaving it at the cadence
+  // only the departed holder asked for. Only a mount that HOLDS the
   // lease may add demand: one that acquired nothing (its host convicted by the
   // pre-check, or no transport yet) would otherwise speed up another holder's
   // stream on a machine it is not watching.

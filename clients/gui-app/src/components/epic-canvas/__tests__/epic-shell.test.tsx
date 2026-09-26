@@ -92,10 +92,7 @@ vi.mock("@/components/epic-canvas/canvas/tile-canvas", () => ({
 // A marker for the pane's `resources.subscribe` lease: the suite asks only
 // whether the shell holds one, not what the stream does.
 vi.mock("@/providers/resources-stream-mount", () => ({
-  ResourcesStreamMount: (props: { readonly epicId: string }) => (
-    <div data-testid="resources-stream" data-epic-id={props.epicId} />
-  ),
-  PhoneEpicResourcesFallbackMount: (props: { readonly epicId: string }) => (
+  EpicResourcesFallbackMount: (props: { readonly epicId: string }) => (
     <div data-testid="resources-fallback" data-epic-id={props.epicId} />
   ),
 }));
@@ -294,35 +291,27 @@ describe("<EpicShell />", () => {
     __setEpicRuntimeWorkerFactoryForTests(previousWorkerFactory);
   });
 
-  it("holds the epic's resources stream in the pane off the installed app", async () => {
-    installControlledFactory();
-    const queryClient = new QueryClient();
-    renderShell(queryClient);
-    await waitForSessionReady();
+  // No platform branch: the chips lease the epic's own stream wherever they
+  // draw, so every shell's pane holds only the old-host fallback.
+  it.each([false, true])(
+    "holds only the old-host fallback lease (installed app: %s)",
+    async (mobileApp) => {
+      setMobileApp(mobileApp);
+      try {
+        installControlledFactory();
+        const queryClient = new QueryClient();
+        renderShell(queryClient);
+        await waitForSessionReady();
 
-    expect(
-      screen.getByTestId("resources-stream").getAttribute("data-epic-id"),
-    ).toBe(EPIC_ID);
-    queryClient.clear();
-  });
-
-  it("holds only the old-host fallback lease on the installed app", async () => {
-    setMobileApp(true);
-    try {
-      installControlledFactory();
-      const queryClient = new QueryClient();
-      renderShell(queryClient);
-      await waitForSessionReady();
-
-      expect(screen.queryByTestId("resources-stream")).toBeNull();
-      expect(
-        screen.getByTestId("resources-fallback").getAttribute("data-epic-id"),
-      ).toBe(EPIC_ID);
-      queryClient.clear();
-    } finally {
-      setMobileApp(false);
-    }
-  });
+        expect(
+          screen.getByTestId("resources-fallback").getAttribute("data-epic-id"),
+        ).toBe(EPIC_ID);
+        queryClient.clear();
+      } finally {
+        setMobileApp(false);
+      }
+    },
+  );
 
   it("renders the stable shell frame while the session is not ready", () => {
     render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);

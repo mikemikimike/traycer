@@ -16,11 +16,10 @@ import {
 
 /**
  * Module-scoped registry of live `resources.subscribe` stores, keyed by
- * `epicId`. The `ResourcesStreamMount` inside each epic pane acquires an entry
- * (lease-counted, so two panes on the same epic share one stream) and releases
- * it on unmount; app-level surfaces (the terminal / chat sidebars, the epic
- * status row) read the entry by `epicId` without needing to sit inside that
- * pane's React subtree.
+ * `epicId`. Each surface that draws an epic's numbers acquires its entry
+ * through `useEpicResourcesLease` (lease-counted, so every chip on one epic
+ * shares one stream) and releases it on unmount; readers look the entry up by
+ * `epicId` without needing to sit inside any particular React subtree.
  *
  * `clientToken` guards a host swap: the `WsStreamClient` identity is carried
  * alongside each entry, and an acquire whose token differs from the live entry
@@ -178,7 +177,7 @@ class ResourcesRegistry {
       ...entries.map((entry) => entry.sampledAt ?? 0),
     );
     const projection = {
-      // The fallback aggregates entries opened by the epic panes, which all ride
+      // The fallback aggregates the per-epic leases' entries, which all ride
       // one transport and so agree on a host. A disagreeing set never reaches
       // here — it returned empty above.
       hostId: attribution.hostId,
@@ -357,18 +356,6 @@ class ResourcesRegistry {
   }
 
   /**
-   * `hostId` is the host the caller opened `clientToken` against — the claim
-   * the projection republishes so a host-scoped reader can verify it. A caller
-   * that cannot name one passes `null`, which reads as "do not attribute this
-   * to any host" rather than as the active one.
-   *
-   * It is NOT part of the entry's identity: two lease holders sharing a
-   * transport are by construction describing one machine, so a second acquire
-   * keeps the name the first declared. A caller whose OWN host id changes must
-   * release and re-acquire — which is what re-running an effect that names it
-   * does.
-   */
-  /**
    * Registers one holder's interactive demand on the global stream; returns its
    * release. The stream runs interactive while any holder asks for it and
    * background otherwise, re-stated on every change and on every handle this
@@ -393,6 +380,18 @@ class ResourcesRegistry {
     );
   }
 
+  /**
+   * `hostId` is the host the caller opened `clientToken` against — the claim
+   * the projection republishes so a host-scoped reader can verify it. A caller
+   * that cannot name one passes `null`, which reads as "do not attribute this
+   * to any host" rather than as the active one.
+   *
+   * It is NOT part of the entry's identity: two lease holders sharing a
+   * transport are by construction describing one machine, so a second acquire
+   * keeps the name the first declared. A caller whose OWN host id changes must
+   * release and re-acquire — which is what re-running an effect that names it
+   * does.
+   */
   acquireGlobal(
     clientToken: unknown,
     hostId: string | null,

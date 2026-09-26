@@ -10,7 +10,7 @@ import type { HostStreamRpcRegistry } from "@traycer/protocol/host/registry";
 import type { OwnerResourceSnapshotWireV15 } from "@traycer/protocol/host/resources/subscribe";
 import {
   GlobalResourcesStreamMount,
-  PhoneEpicResourcesFallbackMount,
+  EpicResourcesFallbackMount,
 } from "@/providers/resources-stream-mount";
 import { __setResourcesStreamClientFactoryForTests } from "@/providers/resources-stream-factory-override";
 import { resourcesRegistry } from "@/stores/resources/resources-registry";
@@ -19,8 +19,8 @@ import { holdGlobalResourcesConsumer } from "@/stores/resources/global-resources
 
 // Defaults are a REMOTE host as the transport reports one: `"unknown"` support
 // and no schema version, so the pre-check cannot convict and only the global
-// stream's own negotiation can say the host is too old - the case a phone is
-// always in. A test flips `version` to model a local host whose capability
+// stream's own negotiation can say the host is too old - the case every
+// remote host is in. A test flips `version` to model a local host whose capability
 // cache convicts it before any stream opens.
 const streamMock = vi.hoisted(
   (): {
@@ -62,7 +62,7 @@ const fakeStreamClient: IHostStreamClient<HostStreamRpcRegistry> = {
   subscribeAvailabilityRecovered: () => () => undefined,
   getClosedReason: () => null,
   onClosed: () => () => undefined,
-  instanceId: "fake-phone-fallback-stream-client",
+  instanceId: "fake-fallback-stream-client",
 };
 
 /** The live callbacks of each open stream, keyed by what it subscribed to. */
@@ -128,20 +128,20 @@ function epicSnapshot(): ResourcesProjectionPayload {
 }
 
 /**
- * The phone with an epic pane mounted and its tab switcher sheet CLOSED: the
- * pane's fallback mount is the only thing that could lease the epic. The
+ * An epic pane mounted with no chip on screen: the pane's fallback mount is
+ * the only thing that could lease the epic. The
  * monitor stands for the header panel or an opted-in footer readout.
  */
-function PhoneEpicPane(props: { readonly monitorOpen: boolean }) {
+function EpicPane(props: { readonly monitorOpen: boolean }) {
   return (
     <>
       {props.monitorOpen ? <GlobalResourcesStreamMount interactive /> : null}
-      <PhoneEpicResourcesFallbackMount epicId="epic-1" />
+      <EpicResourcesFallbackMount epicId="epic-1" />
     </>
   );
 }
 
-describe("<PhoneEpicResourcesFallbackMount />", () => {
+describe("<EpicResourcesFallbackMount />", () => {
   beforeEach(() => {
     useSettingsStore.setState({
       showGlobalResourceMonitor: true,
@@ -166,8 +166,8 @@ describe("<PhoneEpicResourcesFallbackMount />", () => {
     streamMock.version = null;
   });
 
-  it("feeds an old host's global monitor from the pane while the sheet is closed", () => {
-    const view = render(<PhoneEpicPane monitorOpen />);
+  it("feeds an old host's global monitor from the pane with no chip on screen", () => {
+    const view = render(<EpicPane monitorOpen />);
     expect(resourcesRegistry.get("epic-1")).toBeNull();
 
     // The `@1.0` host accepts the downgraded global probe and its negotiated
@@ -183,13 +183,13 @@ describe("<PhoneEpicResourcesFallbackMount />", () => {
     ]);
 
     // The monitor closes: nothing on screen reads the fallback any more.
-    view.rerender(<PhoneEpicPane monitorOpen={false} />);
+    view.rerender(<EpicPane monitorOpen={false} />);
     expect(resourcesRegistry.get("epic-1")).toBeNull();
     expect(streams.has("epic:epic-1")).toBe(false);
   });
 
   it("opens no epic stream for a host that serves the global scope", () => {
-    render(<PhoneEpicPane monitorOpen />);
+    render(<EpicPane monitorOpen />);
 
     act(() => streamFor("global").onScopeSupport("supported"));
 
@@ -198,7 +198,7 @@ describe("<PhoneEpicResourcesFallbackMount />", () => {
   });
 
   it("opens no epic stream while no global monitor is up", () => {
-    render(<PhoneEpicPane monitorOpen={false} />);
+    render(<EpicPane monitorOpen={false} />);
 
     expect(resourcesRegistry.get("epic-1")).toBeNull();
     expect(streams.size).toBe(0);
@@ -209,26 +209,26 @@ describe("<PhoneEpicResourcesFallbackMount />", () => {
   // the consumer count is what keeps the pane shut until one does.
   it("follows the monitor for a host the pre-check already convicted", () => {
     streamMock.version = { major: 1, minor: 0 };
-    const view = render(<PhoneEpicPane monitorOpen={false} />);
+    const view = render(<EpicPane monitorOpen={false} />);
     expect(resourcesRegistry.get("epic-1")).toBeNull();
 
-    view.rerender(<PhoneEpicPane monitorOpen />);
+    view.rerender(<EpicPane monitorOpen />);
     expect(resourcesRegistry.getGlobal()).toBeNull();
     expect(resourcesRegistry.get("epic-1")).not.toBeNull();
 
-    view.rerender(<PhoneEpicPane monitorOpen={false} />);
+    view.rerender(<EpicPane monitorOpen={false} />);
     expect(resourcesRegistry.get("epic-1")).toBeNull();
   });
 
   // The footer readout alone: header monitor off, no navigator chips. The
   // pane's settings gate reads that as nobody wanting numbers; the readout
   // is still a global consumer, and on an old host it has no other source.
-  it("feeds a footer-only readout on an old host with the sheet closed", () => {
+  it("feeds a footer-only readout on an old host with no chip on screen", () => {
     useSettingsStore.setState({
       showGlobalResourceMonitor: false,
       navigatorResourceMetrics: [],
     });
-    render(<PhoneEpicPane monitorOpen />);
+    render(<EpicPane monitorOpen />);
 
     act(() => streamFor("global").onScopeSupport("unsupported"));
     expect(resourcesRegistry.get("epic-1")).not.toBeNull();
@@ -247,7 +247,7 @@ describe("<PhoneEpicResourcesFallbackMount />", () => {
     streamMock.version = { major: 1, minor: 0 };
     const releaseOther = holdGlobalResourcesConsumer("host-2");
     try {
-      render(<PhoneEpicPane monitorOpen={false} />);
+      render(<EpicPane monitorOpen={false} />);
       expect(resourcesRegistry.get("epic-1")).toBeNull();
     } finally {
       releaseOther();

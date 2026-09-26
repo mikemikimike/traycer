@@ -47,7 +47,7 @@ import {
 import type { HostScope } from "@/components/settings/host-scope/use-host-scope";
 import type { StreamRuntimeBinding } from "@/lib/host/stream-runtime-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ResourcesStreamMount } from "@/providers/resources-stream-mount";
+import { useEpicResourcesLease } from "@/hooks/resources/use-epic-resources-lease";
 import { __setResourcesStreamClientFactoryForTests } from "@/providers/resources-stream-factory-override";
 import {
   resourcesRegistry,
@@ -837,24 +837,48 @@ function desktopMetric(
   };
 }
 
+/** Holds one epic's stream lease, as a chip or the pane's fallback would. */
+function EpicLease(props: { readonly epicId: string }): null {
+  useEpicResourcesLease(props.epicId, true);
+  return null;
+}
+
+/**
+ * `emit()` speaks for the host: each call reaches the newest stream, and a
+ * global stream opened later - a header panel opening, which is when its
+ * stream opens - is first sent everything said so far, as a host sends a
+ * fresh subscriber its current state.
+ */
 function installStubFactory(): { emit: () => ResourcesStreamCallbacks } {
   let captured: ResourcesStreamCallbacks | null = null;
-  __setResourcesStreamClientFactoryForTests((_scope, callbacks) => {
+  const said: Array<(callbacks: ResourcesStreamCallbacks) => void> = [];
+  __setResourcesStreamClientFactoryForTests((scope, callbacks) => {
     captured = callbacks;
+    if (scope.kind === "global") {
+      for (const replay of said) replay(callbacks);
+    }
     return { close: () => undefined, setDemand: () => undefined };
   });
-  return {
-    emit: () => {
-      if (captured === null) throw new Error("stream callbacks not wired");
-      return captured;
-    },
+  const say = (message: (callbacks: ResourcesStreamCallbacks) => void) => {
+    if (captured === null) throw new Error("stream callbacks not wired");
+    said.push(message);
+    message(captured);
   };
+  const host: ResourcesStreamCallbacks = {
+    onSnapshot: (payload) => say((callbacks) => callbacks.onSnapshot(payload)),
+    onUpdate: (payload) => say((callbacks) => callbacks.onUpdate(payload)),
+    onConnectionStatus: (status, reason) =>
+      say((callbacks) => callbacks.onConnectionStatus(status, reason)),
+    onScopeSupport: (support) =>
+      say((callbacks) => callbacks.onScopeSupport(support)),
+  };
+  return { emit: () => host };
 }
 
 function renderPopover(): void {
   render(
     <TooltipProvider>
-      <ResourcesStreamMount epicId="epic-1" />
+      <EpicLease epicId="epic-1" />
       <ResourceMonitorPopover
         trigger="header-button"
         className={undefined}
@@ -955,7 +979,7 @@ describe("ResourceMonitorPopover", () => {
     installStubFactory();
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -2432,7 +2456,7 @@ describe("ResourceMonitorPopover", () => {
     const stub = installStubFactory();
     render(
       <TooltipProvider delayDuration={0}>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -3645,7 +3669,7 @@ describe("ResourceMonitorPopover", () => {
     const stub = installStubFactory();
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -3676,7 +3700,7 @@ describe("ResourceMonitorPopover", () => {
 
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -3736,7 +3760,7 @@ describe("ResourceMonitorPopover", () => {
 
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -3765,7 +3789,7 @@ describe("ResourceMonitorPopover", () => {
     const stub = installStubFactory();
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -3840,7 +3864,7 @@ describe("ResourceMonitorPopover", () => {
     const stub = installStubFactory();
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -3886,7 +3910,7 @@ describe("ResourceMonitorPopover", () => {
 
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -4838,7 +4862,7 @@ describe("ResourceMonitorPopover · host picker", () => {
     const stub = installStubFactory();
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="header-button"
           className={undefined}
@@ -5306,7 +5330,7 @@ describe("ResourceMonitorPopover · custom trigger", () => {
   function renderWithCustomTrigger(): void {
     render(
       <TooltipProvider>
-        <ResourcesStreamMount epicId="epic-1" />
+        <EpicLease epicId="epic-1" />
         <ResourceMonitorPopover
           trigger="custom"
           claimsOpenAction
@@ -5352,65 +5376,61 @@ describe("ResourceMonitorPopover · custom trigger", () => {
 });
 
 /**
- * The installed app's header button shows nothing while closed, so the global
- * stream follows the panel there. Everywhere else - the desktop header, and a
- * readout trigger on any shell - the closed popover keeps its background lease.
+ * The header button is a bare glyph that shows nothing while closed, so the
+ * global stream follows its panel on every shell. A readout trigger prints
+ * live numbers while closed and keeps its background lease on every shell.
  */
-describe("ResourceMonitorPopover · global stream lease", () => {
-  function renderHeader(): void {
-    render(
-      <TooltipProvider>
-        <ResourceMonitorPopover
-          trigger="header-button"
-          className={undefined}
-          claimsOpenAction
-        />
-      </TooltipProvider>,
-    );
-  }
+describe.each([false, true])(
+  "ResourceMonitorPopover · global stream lease (installed app: %s)",
+  (mobileApp) => {
+    function renderHeader(): void {
+      render(
+        <TooltipProvider>
+          <ResourceMonitorPopover
+            trigger="header-button"
+            className={undefined}
+            claimsOpenAction
+          />
+        </TooltipProvider>,
+      );
+    }
 
-  it("holds no global stream while the phone's header panel is closed", () => {
-    setMobileApp(true);
-    installStubFactory();
-    renderHeader();
+    it("holds a header glyph's global stream only while its panel is open", () => {
+      setMobileApp(mobileApp);
+      installStubFactory();
+      renderHeader();
 
-    expect(resourcesRegistry.getGlobal()).toBeNull();
+      expect(resourcesRegistry.getGlobal()).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Resources" }));
-    expect(resourcesRegistry.getGlobal()).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Resources" }));
+      expect(resourcesRegistry.getGlobal()).not.toBeNull();
 
-    fireEvent.keyDown(document.activeElement ?? document.body, {
-      key: "Escape",
+      fireEvent.keyDown(document.activeElement ?? document.body, {
+        key: "Escape",
+      });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(resourcesRegistry.getGlobal()).toBeNull();
     });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(resourcesRegistry.getGlobal()).toBeNull();
-  });
 
-  it("keeps the desktop header's background stream while closed", () => {
-    installStubFactory();
-    renderHeader();
+    it("keeps a readout trigger's background stream while closed", () => {
+      setMobileApp(mobileApp);
+      installStubFactory();
+      render(
+        <TooltipProvider>
+          <ResourceMonitorPopover
+            trigger="custom"
+            claimsOpenAction
+            contentSide="top"
+            triggerNode={
+              <button type="button" data-testid="status-bar-trigger">
+                cpu 12%
+              </button>
+            }
+          />
+        </TooltipProvider>,
+      );
 
-    expect(resourcesRegistry.getGlobal()).not.toBeNull();
-  });
-
-  it("keeps a readout trigger's background stream on the phone", () => {
-    setMobileApp(true);
-    installStubFactory();
-    render(
-      <TooltipProvider>
-        <ResourceMonitorPopover
-          trigger="custom"
-          claimsOpenAction
-          contentSide="top"
-          triggerNode={
-            <button type="button" data-testid="status-bar-trigger">
-              cpu 12%
-            </button>
-          }
-        />
-      </TooltipProvider>,
-    );
-
-    expect(resourcesRegistry.getGlobal()).not.toBeNull();
-  });
-});
+      expect(resourcesRegistry.getGlobal()).not.toBeNull();
+    });
+  },
+);
