@@ -1597,6 +1597,12 @@ function TerminalAgentHeaderControls(props: {
   );
 }
 
+// Exited handles whose non-zero exit has already been toasted. Keyed on the
+// handle rather than a per-mount ref because the live component remounts
+// while the warm handle survives in the session registry (see
+// `showExitToast`); a WeakSet so a disposed handle takes its entry with it.
+const exitToastShownForHandle = new WeakSet<TerminalSessionStoreHandle>();
+
 interface TerminalAgentLiveProps {
   readonly handle: TerminalSessionStoreHandle;
   readonly instanceId: string;
@@ -1632,7 +1638,6 @@ function TerminalAgentLive(props: TerminalAgentLiveProps) {
     props.tileId,
     props.instanceId,
   );
-  const exitToastShownRef = useRef(false);
   // One revive request per exit: the exit effect can re-run while the store
   // still reports the same exited state (dep identity churn), and stacking
   // `terminal.create` retries for one reap would race each other.
@@ -1653,24 +1658,34 @@ function TerminalAgentLive(props: TerminalAgentLiveProps) {
     // A `reaped` exit is the host's idle-reap of an unwatched agent -
     // lifecycle, not a crash. The exit effect below revives it in place.
     if (exitReason === "reaped") return;
-    if (!exitToastShownRef.current && exitCode !== null && exitCode !== 0) {
-      exitToastShownRef.current = true;
-      reportableErrorToast(
-        "Terminal agent exited with an error.",
-        {
-          description:
-            lastOutputPreview ??
-            "The agent stopped before reporting a readable error. Try restarting it.",
-        },
-        createReportIssueContext({
-          title: "Terminal agent exited with an error",
-          message: null,
-          code: String(exitCode),
-          source: "Terminal agent",
-        }),
-      );
-    }
+    if (exitCode === null || exitCode === 0) return;
+    // Once per EXIT, not once per mount. This component is remounted while the
+    // warm exited handle lives on in the session registry (a renderer-side
+    // churn the host never sees), and a per-mount ref re-fired this toast on
+    // every remount - one Codex launch failure stacked a toast a second for
+    // half a minute. The handle is the exit's identity: a fresh handle after a
+    // force-release is a new observation and toasts again. The stable id is
+    // belt and braces - two live instances of one session collapse into one
+    // toast instead of two.
+    if (exitToastShownForHandle.has(handle)) return;
+    exitToastShownForHandle.add(handle);
+    reportableErrorToast(
+      "Terminal agent exited with an error.",
+      {
+        id: `terminal-agent-exit:${handle.sessionId}`,
+        description:
+          lastOutputPreview ??
+          "The agent stopped before reporting a readable error. Try restarting it.",
+      },
+      createReportIssueContext({
+        title: "Terminal agent exited with an error",
+        message: null,
+        code: String(exitCode),
+        source: "Terminal agent",
+      }),
+    );
   }, [
+    handle,
     status,
     exitCode,
     exitReason,
