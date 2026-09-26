@@ -156,6 +156,15 @@ describe("settings search", () => {
     );
   });
 
+  it("lands built-in reviewer vocabulary on Providers and keeps auto mode judge on the Judge tab", () => {
+    expect(landingFor("built-in reviewer", DESKTOP)).toBe("providers#<top>");
+    expect(landingFor("own classifier", DESKTOP)).toBe("providers#<top>");
+    expect(landingFor("claude code", DESKTOP)).toBe("providers#<top>");
+    expect(landingFor("auto mode judge", DESKTOP)).toBe(
+      "permissions#permissions-tab-judge",
+    );
+  });
+
   it("still lets a page win on its own name", () => {
     // The kind nudge is small on purpose — it decides near-ties, it does not
     // outrank an exact match on a page's own name.
@@ -381,7 +390,7 @@ describe("settings search", () => {
     it("sends selected-host vocabulary to its Overview tab", () => {
       // Every group on a host-scoped page is dropped or concealed for an
       // unresolved, connecting or vanished host, so none of the in-body
-      // groups is a target — but each of the five tabs anchors on its own
+      // groups is a target — but each of the four tabs anchors on its own
       // trigger, which renders in every host state, so these words now land
       // on the TAB that answers them rather than on the bare page.
       for (const context of [DESKTOP, MOBILE]) {

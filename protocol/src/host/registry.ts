@@ -1,9 +1,14 @@
 import {
   organizationReadV10,
+  organizationReadV11,
+  organizationReadUpgradeV10ToV11,
   organizationRefreshV10,
+  organizationRefreshV11,
+  organizationRefreshUpgradeV10ToV11,
   organizationCommandV10,
   organizationHistoryV10,
   organizationSubscribeV10,
+  organizationSubscribeV11,
 } from "./organization/contracts";
 import {
   defineDowngradePath,
@@ -328,11 +333,17 @@ import {
   hostRestartV12,
 } from "@traycer/protocol/host/restart/contracts";
 import {
+  providersFallbackPolicyGetUpgradeV10ToV11,
   providersFallbackPolicyGetV10,
+  providersFallbackPolicyGetV11,
+  providersFallbackPolicyPreviewTierGroupsUpgradeV10ToV11,
   providersFallbackPolicyPreviewTierGroupsV10,
+  providersFallbackPolicyPreviewTierGroupsV11,
   providersFallbackPolicyResetV10,
   providersFallbackPolicyRestoreTierGroupsV10,
+  providersFallbackPolicySetUpgradeV10ToV11,
   providersFallbackPolicySetV10,
+  providersFallbackPolicySetV11,
 } from "@traycer/protocol/host/fallback-policy";
 import {
   chatFallbackCancelV10,
@@ -479,18 +490,24 @@ import {
   hostGetRateLimitUsageV21,
   hostGetRateLimitUsageV30,
   hostGetRateLimitUsageV40,
+  hostGetRateLimitUsageV50,
   hostGetRateLimitUsageUpgradeV10ToV11,
   hostGetRateLimitUsageUpgradeV11ToV12,
   hostGetRateLimitUsageUpgradeV12ToV20,
   hostGetRateLimitUsageUpgradeV20ToV21,
   hostGetRateLimitUsageUpgradeV21ToV30,
   hostGetRateLimitUsageUpgradeV30ToV40,
+  hostGetRateLimitUsageUpgradeV40ToV50,
   hostGetRateLimitUsageDowngradeV2ToV1,
   hostGetRateLimitUsageDowngradeV3ToV2,
   hostGetRateLimitUsageDowngradeV3ToV1,
   hostGetRateLimitUsageDowngradeV4ToV1,
   hostGetRateLimitUsageDowngradeV4ToV2,
   hostGetRateLimitUsageDowngradeV4ToV3,
+  hostGetRateLimitUsageDowngradeV5ToV1,
+  hostGetRateLimitUsageDowngradeV5ToV2,
+  hostGetRateLimitUsageDowngradeV5ToV3,
+  hostGetRateLimitUsageDowngradeV5ToV4,
   providersConsumeRateLimitResetCreditV10,
   providersRefreshProfileStatusV10,
   providersRefreshProfileStatusV20,
@@ -716,7 +733,9 @@ import {
   browserScreencastV21,
   browserSessionsV20,
   browserSessionsV21,
+  browserSessionsV22,
 } from "@traycer/protocol/host/browser/contracts";
+import { browserDesktopControlV10 } from "@traycer/protocol/host/browser/desktop-control";
 import {
   browserScreencastV10,
   browserSessionsV10,
@@ -822,12 +841,20 @@ import {
 } from "@traycer/protocol/host/session-import/scan";
 import {
   autoJudgeGetUpgradeV10ToV11,
+  autoJudgeGetUpgradeV11ToV12,
+  autoJudgeGetUpgradeV12ToV13,
   autoJudgeGetV10,
   autoJudgeGetV11,
+  autoJudgeGetV12,
+  autoJudgeGetV13,
   autoJudgeListRecentV10,
   autoJudgeSetUpgradeV10ToV11,
+  autoJudgeSetUpgradeV11ToV12,
+  autoJudgeSetUpgradeV12ToV13,
   autoJudgeSetV10,
   autoJudgeSetV11,
+  autoJudgeSetV12,
+  autoJudgeSetV13,
   autoPolicyGetV10,
   autoPolicySetV10,
   providersSetAutoJudgeV10,
@@ -4919,9 +4946,13 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
   "organization.read": {
     degrade: { kind: "unsupported" },
     1: {
-      latestMinor: 0,
+      latestMinor: 1,
       versions: {
         0: { contract: organizationReadV10, upgradeFromPreviousVersion: null },
+        1: {
+          contract: organizationReadV11,
+          upgradeFromPreviousVersion: organizationReadUpgradeV10ToV11,
+        },
       },
       downgradePathsFromLatest: {},
     },
@@ -4929,11 +4960,15 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
   "organization.refresh": {
     degrade: { kind: "unsupported" },
     1: {
-      latestMinor: 0,
+      latestMinor: 1,
       versions: {
         0: {
           contract: organizationRefreshV10,
           upgradeFromPreviousVersion: null,
+        },
+        1: {
+          contract: organizationRefreshV11,
+          upgradeFromPreviousVersion: organizationRefreshUpgradeV10ToV11,
         },
       },
       downgradePathsFromLatest: {},
@@ -5004,8 +5039,11 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
     1: {
       // @1.0 is RELEASED (`host-v1.3.2-staging.39` advertised it), so the
       // Automatic judge's `{ source: "fallback" }` answer opens @1.1 rather
-      // than widening it in place.
-      latestMinor: 1,
+      // than widening it in place. @1.1 is RELEASED too (every host tag from
+      // `host-v1.3.2-staging.52` on), so the machine's last judge pick opens
+      // @1.2 the same way. @1.2 is spoken by a released desktop (traycer#2162),
+      // so the judge's reasoning effort opens @1.3 rather than widening it.
+      latestMinor: 3,
       versions: {
         0: {
           contract: autoJudgeGetV10,
@@ -5023,6 +5061,23 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
           // never to the Traycer pocket a 1.0 desktop would bill it to.
           responseGrowthProjectionGated: true,
         },
+        2: {
+          contract: autoJudgeGetV12,
+          upgradeFromPreviousVersion: autoJudgeGetUpgradeV11ToV12,
+          // No `responseGrowthProjectionGated`: `lastSelection` is a new
+          // KEY, not value growth, so a 1.1 caller's within-major re-parse
+          // strips it, as it does `providers.list@9.1`'s `autoJudge`. A 1.0
+          // caller still gets the 1.1 projection, which builds its answer
+          // field by field and so never copies the key.
+        },
+        3: {
+          contract: autoJudgeGetV13,
+          upgradeFromPreviousVersion: autoJudgeGetUpgradeV12ToV13,
+          // `selection` / `lastSelection` gain the `reasoningEffort` KEY (the
+          // judge's effort). A new key is structural growth, not value
+          // growth: a <=1.2 caller's non-strict decode drops it, and the 1.0
+          // projection strips it on its way down, so no gate is declared.
+        },
       },
       downgradePathsFromLatest: {},
     },
@@ -5030,9 +5085,10 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
   "autoJudge.set": {
     degrade: { kind: "unsupported" },
     1: {
-      // Same line, same reason, as `autoJudge.get`: the echo reports the
-      // judge the new selection resolves to.
-      latestMinor: 1,
+      // Same line, same reasons, as `autoJudge.get`: the echo reports the
+      // judge the new selection resolves to, (@1.2) the last pick this write
+      // left, and (@1.3) the effort the selection carries.
+      latestMinor: 3,
       versions: {
         0: {
           contract: autoJudgeSetV10,
@@ -5044,6 +5100,18 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
           // See `autoJudge.get@1.1`; the projection is
           // `projectAutoJudgeSetResponseToV10`.
           responseGrowthProjectionGated: true,
+        },
+        2: {
+          contract: autoJudgeSetV12,
+          upgradeFromPreviousVersion: autoJudgeSetUpgradeV11ToV12,
+          // See `autoJudge.get@1.2`: `lastSelection` is a new key.
+        },
+        3: {
+          contract: autoJudgeSetV13,
+          upgradeFromPreviousVersion: autoJudgeSetUpgradeV12ToV13,
+          // See `autoJudge.get@1.3`. The request grows by the same key: a
+          // <=1.2 save is upgraded with `reasoningEffort: null`, the host's
+          // default for the model.
         },
       },
       downgradePathsFromLatest: {},
@@ -5789,6 +5857,21 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
         1: hostGetRateLimitUsageDowngradeV4ToV1,
         2: hostGetRateLimitUsageDowngradeV4ToV2,
         3: hostGetRateLimitUsageDowngradeV4ToV3,
+      },
+    },
+    5: {
+      latestMinor: 0,
+      versions: {
+        0: {
+          contract: hostGetRateLimitUsageV50,
+          upgradeFromPreviousVersion: hostGetRateLimitUsageUpgradeV40ToV50,
+        },
+      },
+      downgradePathsFromLatest: {
+        1: hostGetRateLimitUsageDowngradeV5ToV1,
+        2: hostGetRateLimitUsageDowngradeV5ToV2,
+        3: hostGetRateLimitUsageDowngradeV5ToV3,
+        4: hostGetRateLimitUsageDowngradeV5ToV4,
       },
     },
   },
@@ -10443,11 +10526,15 @@ const HOST_RPC_PROVIDERS_REGISTRY_DEFINITION = {
   "providers.fallbackPolicy.get": {
     degrade: { kind: "unsupported" },
     1: {
-      latestMinor: 0,
+      latestMinor: 1,
       versions: {
         0: {
           contract: providersFallbackPolicyGetV10,
           upgradeFromPreviousVersion: null,
+        },
+        1: {
+          contract: providersFallbackPolicyGetV11,
+          upgradeFromPreviousVersion: providersFallbackPolicyGetUpgradeV10ToV11,
         },
       },
       downgradePathsFromLatest: {},
@@ -10456,11 +10543,15 @@ const HOST_RPC_PROVIDERS_REGISTRY_DEFINITION = {
   "providers.fallbackPolicy.set": {
     degrade: { kind: "unsupported" },
     1: {
-      latestMinor: 0,
+      latestMinor: 1,
       versions: {
         0: {
           contract: providersFallbackPolicySetV10,
           upgradeFromPreviousVersion: null,
+        },
+        1: {
+          contract: providersFallbackPolicySetV11,
+          upgradeFromPreviousVersion: providersFallbackPolicySetUpgradeV10ToV11,
         },
       },
       downgradePathsFromLatest: {},
@@ -10495,11 +10586,16 @@ const HOST_RPC_PROVIDERS_REGISTRY_DEFINITION = {
   "providers.fallbackPolicy.previewTierGroups": {
     degrade: { kind: "unsupported" },
     1: {
-      latestMinor: 0,
+      latestMinor: 1,
       versions: {
         0: {
           contract: providersFallbackPolicyPreviewTierGroupsV10,
           upgradeFromPreviousVersion: null,
+        },
+        1: {
+          contract: providersFallbackPolicyPreviewTierGroupsV11,
+          upgradeFromPreviousVersion:
+            providersFallbackPolicyPreviewTierGroupsUpgradeV10ToV11,
         },
       },
       downgradePathsFromLatest: {},
@@ -11332,8 +11428,11 @@ export type HostRpcRegistry = typeof hostRpcRegistry;
 const HOST_STREAM_RPC_REGISTRY_OTHER_DEFINITION = {
   "organization.subscribe": {
     1: {
-      latestMinor: 0,
-      versions: { 0: { contract: organizationSubscribeV10 } },
+      latestMinor: 1,
+      versions: {
+        0: { contract: organizationSubscribeV10 },
+        1: { contract: organizationSubscribeV11 },
+      },
     },
   },
   "epic.subscribe": {
@@ -11624,6 +11723,12 @@ const HOST_STREAM_RPC_REGISTRY_OTHER_DEFINITION = {
   // client that drops the frame. The GUI feature-detects browser support by
   // these two NAMES in the host's openAck manifest, so a served major is the
   // only way to evolve them (`released-stream-surface-compat.test.ts`).
+  "host.browserPreparation.subscribe": {
+    1: {
+      latestMinor: 0,
+      versions: { 0: { contract: browserDesktopControlV10 } },
+    },
+  },
   "browser.sessions": {
     1: {
       latestMinor: 0,
@@ -11634,13 +11739,16 @@ const HOST_STREAM_RPC_REGISTRY_OTHER_DEFINITION = {
       },
     },
     2: {
-      latestMinor: 1,
+      latestMinor: 2,
       versions: {
         0: {
           contract: browserSessionsV20,
         },
         1: {
           contract: browserSessionsV21,
+        },
+        2: {
+          contract: browserSessionsV22,
         },
       },
     },
