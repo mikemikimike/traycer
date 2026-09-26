@@ -795,6 +795,7 @@ function TerminalAgentForkDialogBody(props: TerminalAgentForkDialogProps) {
                     // button.
                     terminalLoginSurface={null}
                     profileAdmission={admissionByProfileId}
+                    embedding={null}
                   />
                 </div>
                 {crossProfileClaudeHint ? (

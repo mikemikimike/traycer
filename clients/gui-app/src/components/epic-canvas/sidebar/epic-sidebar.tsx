@@ -2229,9 +2229,11 @@ function useExpandableHeaderMenu(
 ): {
   readonly open: boolean;
   readonly handleOpenChange: (open: boolean) => void;
+  readonly openPanelSearch: () => void;
 } {
   const open = usePanelHeaderMenuOpen(tabId, panelId, "more");
   const setMenuOpen = usePanelHeaderMenuStore((state) => state.setMenuOpen);
+  const openSearch = usePanelHeaderSearchStore((state) => state.openSearch);
   const setPanelSectionCollapsed = useEpicLeftPanelStore(
     (state) => state.setPanelSectionCollapsed,
   );
@@ -2242,7 +2244,15 @@ function useExpandableHeaderMenu(
     },
     [collapsed, panelId, setMenuOpen, setPanelSectionCollapsed, tabId],
   );
-  return { open, handleOpenChange };
+  // Search swaps the header row for the search row, which remounts this menu.
+  // Close it first: its open state lives in the store, so the new instance
+  // would otherwise mount open, close a moment later and hand focus back to
+  // its trigger, taking the caret out of the search input.
+  const openPanelSearch = useCallback(() => {
+    setMenuOpen(tabId, panelId, "more", false);
+    openSearch(tabId, panelId, "");
+  }, [openSearch, panelId, setMenuOpen, tabId]);
+  return { open, handleOpenChange, openPanelSearch };
 }
 
 function ChatHeaderMoreMenu(props: {
@@ -2255,9 +2265,7 @@ function ChatHeaderMoreMenu(props: {
   const selection = useSidebarBulkSelection();
   const permissionRole = useEpicPermissionRole();
   const connectionStatus = useEpicConnectionStatus();
-  const openSearch = usePanelHeaderSearchStore((state) => state.openSearch);
   const menu = useExpandableHeaderMenu(props.tabId, "chats", props.collapsed);
-  const searchSelectedRef = useRef(false);
   const selectionEnabled = selection.canSelect && connectionStatus !== "closed";
 
   return (
@@ -2272,20 +2280,10 @@ function ChatHeaderMoreMenu(props: {
         sideOffset={8}
         collisionAvoidance={{ side: "none", align: "none" }}
         className="w-[var(--available-width)] min-w-0 max-w-56"
-        finalFocus={() => {
-          if (!searchSelectedRef.current) return true;
-          searchSelectedRef.current = false;
-          // Search owns the next focus target. Radix otherwise restores focus
-          // to the now-secondary overflow trigger after the input has mounted.
-          return false;
-        }}
       >
         {props.searching ? null : (
           <DropdownMenuItem
-            onClick={() => {
-              searchSelectedRef.current = true;
-              openSearch(props.tabId, "chats", "");
-            }}
+            onClick={menu.openPanelSearch}
             data-testid="epic-sidebar-more-search-chats"
           >
             <Search className="size-4" />
@@ -2319,9 +2317,7 @@ function ArtifactHeaderMoreMenu(props: {
   readonly onCollapseAll: () => void;
 }) {
   const selection = useSidebarBulkSelection();
-  const openSearch = usePanelHeaderSearchStore((state) => state.openSearch);
   const searchAvailable = useArtifactSearchAvailable();
-  const searchSelectedRef = useRef(false);
   const menu = useExpandableHeaderMenu(
     props.tabId,
     "artifacts",
@@ -2340,23 +2336,13 @@ function ArtifactHeaderMoreMenu(props: {
         sideOffset={8}
         collisionAvoidance={{ side: "none", align: "none" }}
         className="w-[var(--available-width)] min-w-0 max-w-52"
-        finalFocus={() => {
-          if (!searchSelectedRef.current) return true;
-          searchSelectedRef.current = false;
-          // Keep the caret in the search input instead of returning it to the
-          // overflow trigger when the selection closes this menu.
-          return false;
-        }}
       >
         {/* Hidden when the Epic has NO artifacts or is open read-only - see
             `useArtifactSearchAvailable` for why emptiness and write access gate
             this and a size threshold does not. */}
         {searchAvailable && !props.searching ? (
           <DropdownMenuItem
-            onClick={() => {
-              searchSelectedRef.current = true;
-              openSearch(props.tabId, "artifacts", "");
-            }}
+            onClick={menu.openPanelSearch}
             data-testid="epic-sidebar-more-search-artifacts"
           >
             <Search className="size-4" />

@@ -407,6 +407,8 @@ function renderPickerWithFixture(
   selection: HarnessModelSelection,
 ): ComposerToolbarStore {
   const store = createComposerToolbarStore({
+    purpose: "run",
+    reasoningFallback: "model-default",
     seedKey: "picker-intent-rpc-test",
     values: {
       permission: "supervised",
@@ -436,6 +438,7 @@ function renderPickerWithFixture(
             runTargetHostId={null}
             profileAdmission={null}
             terminalLoginSurface={null}
+            embedding={null}
           />
         </TooltipProvider>
       </SurfaceActivityProvider>

@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Command,
   CommandInput,
@@ -20,79 +21,96 @@ import { tabRefKey } from "@/stores/tabs/layout";
 import { useHeaderTabAppearance } from "@/hooks/appearance/use-header-tab-appearance";
 import { useHeaderTabTitle } from "./header-tab-presentation";
 
-export function HiddenTabsMenu(props: {
+interface HiddenTabsMenuProps {
   readonly tabs: ReadonlyArray<HeaderTab>;
+  readonly side: "left" | "right";
   readonly onActivate: (tab: HeaderTab) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const activatedTab = useRef(false);
-  const count = props.tabs.length;
-  if (count === 0) return null;
-  const label = `${count} hidden ${count === 1 ? "tab" : "tabs"}`;
+  readonly fallbackFocusRef: RefObject<HTMLElement | null>;
+}
+
+export function HiddenTabsMenu(props: HiddenTabsMenuProps) {
   return (
     <div
-      data-hidden-tabs-control
-      className="flex shrink-0 items-center self-center px-1"
+      data-hidden-tabs-control={props.side}
+      className="flex w-9 shrink-0 items-center justify-center self-center"
     >
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <TooltipWrapper
-              label={label}
-              side="bottom"
-              sideOffset={4}
-              align="start"
-            >
-              <button
-                type="button"
-                aria-label={label}
-                className="flex h-7 min-w-9 items-center justify-center gap-1 rounded-md border border-border bg-foreground/8 px-1.5 text-ui-xs font-medium tabular-nums text-foreground transition-colors hover:bg-foreground/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-popup-open:border-foreground/40 data-popup-open:bg-foreground/12 [-webkit-app-region:no-drag]"
-              >
-                {count}
-                <ChevronDown className="size-3" aria-hidden />
-              </button>
-            </TooltipWrapper>
-          }
-        />
-        <PopoverContent
-          align="start"
-          layout="panel"
-          className="w-[min(90vw,20rem)]"
-          finalFocus={() => {
-            const restore = !activatedTab.current;
-            activatedTab.current = false;
-            return restore;
-          }}
-        >
-          <Command
-            variant="embedded"
-            selection="flat"
-            label="Search hidden tabs"
-          >
-            <CommandInput
-              placeholder="Search hidden tabs…"
-              aria-label="Search hidden tabs"
-            />
-            <CommandList>
-              <CommandEmpty>No matching tabs.</CommandEmpty>
-              <CommandGroup heading={label}>
-                {props.tabs.map((tab) => (
-                  <HiddenTabMenuItem
-                    key={tabRefKey(tab)}
-                    tab={tab}
-                    onActivate={() => {
-                      activatedTab.current = true;
-                      setOpen(false);
-                      props.onActivate(tab);
-                    }}
-                  />
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+      {props.tabs.length > 0 ? <HiddenTabsPopover {...props} /> : null}
     </div>
+  );
+}
+
+function HiddenTabsPopover(props: HiddenTabsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const activatedTab = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const label = `Tabs hidden to the ${props.side}`;
+  const align = props.side === "left" ? "start" : "end";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <TooltipWrapper
+            label={label}
+            side="bottom"
+            sideOffset={4}
+            align={align}
+          >
+            <Button
+              ref={triggerRef}
+              type="button"
+              variant="muted"
+              size="icon-sm"
+              aria-label={label}
+              className="[-webkit-app-region:no-drag]"
+            >
+              <ChevronDown className="size-3.5" aria-hidden />
+            </Button>
+          </TooltipWrapper>
+        }
+      />
+      <PopoverContent
+        align={align}
+        layout="panel"
+        className="w-[min(90vw,20rem)]"
+        finalFocus={() => {
+          const activated = activatedTab.current;
+          activatedTab.current = false;
+          if (activated) return false;
+          if (triggerRef.current === null) {
+            // Keep focus in the strip when scrolling removes the trigger,
+            // without stealing focus from an outside interaction.
+            if (document.activeElement === document.body) {
+              props.fallbackFocusRef.current?.focus({ preventScroll: true });
+            }
+            return false;
+          }
+          return true;
+        }}
+      >
+        <Command variant="embedded" selection="flat" label="Search hidden tabs">
+          <CommandInput
+            placeholder="Search hidden tabs…"
+            aria-label="Search hidden tabs"
+          />
+          <CommandList>
+            <CommandEmpty>No matching tabs.</CommandEmpty>
+            <CommandGroup heading={label}>
+              {props.tabs.map((tab) => (
+                <HiddenTabMenuItem
+                  key={tabRefKey(tab)}
+                  tab={tab}
+                  onActivate={() => {
+                    activatedTab.current = true;
+                    setOpen(false);
+                    props.onActivate(tab);
+                  }}
+                />
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 

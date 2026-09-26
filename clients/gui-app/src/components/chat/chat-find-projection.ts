@@ -52,6 +52,13 @@ import type {
 
 export interface ChatFindRow {
   readonly messageId: string;
+  /**
+   * The persisted records this row renders - the row id for a user row; for
+   * an assistant slice every record its turn folds (`turnMessageIds`), or
+   * the one `persistentMessageId`. What an index hit names, so it is how a
+   * hydrated hit finds its rows.
+   */
+  readonly recordIds: ReadonlyArray<string>;
   readonly units: ReadonlyArray<ChatFindUnit>;
 }
 
@@ -106,6 +113,9 @@ export function buildChatFindRows(
     );
     return {
       messageId: message.id,
+      recordIds: message.turnMessageIds ?? [
+        message.persistentMessageId ?? message.id,
+      ],
       units,
     };
   });
@@ -178,7 +188,7 @@ function chatFindUnitsForMessage(
   // A synthesized row whose single segment is a setup-card / forked-chat-link
   // / imported-chat-marker
   // renders that segment's own find anchor and no content block (the render side
-  // is renderSingleSpecialSegment in chat-message.tsx; both key off the shared
+  // is renderSpecialSegment in chat-message.tsx; both key off the shared
   // singleSpecialSegment predicate), so index the segment.
   const specialSegment = singleSpecialSegment(message.segments);
   if (specialSegment !== null) {
@@ -479,8 +489,9 @@ function segmentSearchText(segment: MessageSegment): ReadonlyArray<string> {
         ),
       ];
     case "auto-judge-notice":
-      // The host's notice is the whole painted line.
-      return [normalizeSearchableText(segment.message)];
+      // Never drawn (`rowPaintsNothing`: the tile withholds the row), so it
+      // has no text a find hit could be painted onto.
+      return [];
     case "setup-card":
       return [
         normalizeSearchableText(
