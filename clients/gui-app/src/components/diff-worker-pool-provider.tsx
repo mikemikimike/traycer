@@ -10,10 +10,9 @@ import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import { ResolvedThemeContext } from "@/providers/use-resolved-theme";
 import {
   getDiffWorkerPool,
-  registerDiffWorkerPoolLifecycle,
+  registerDiffWorkerPoolCreator,
   subscribeDiffWorkerPool,
-  unregisterDiffWorkerPoolLifecycle,
-  type DiffWorkerPoolLifecycle,
+  unregisterDiffWorkerPoolCreator,
 } from "@/lib/diff/diff-worker-pool-demand";
 import { getRetentionProfile } from "@/stores/replica-memory/retention-profile";
 import {
@@ -100,28 +99,20 @@ export function DiffWorkerPoolProvider(
   // creator has to be registered before that request lands or the request
   // reads "unavailable" and the surface takes the main-thread path.
   useLayoutEffect(() => {
-    const lifecycle: DiffWorkerPoolLifecycle = {
-      create: () =>
-        getOrCreateWorkerPoolSingleton({
-          poolOptions: {
-            workerFactory: () => new DiffsWorker(),
-            poolSize,
-          },
-          highlighterOptions: {
-            theme: themeRef.current,
-            useTokenTransformer: true,
-          },
-        }),
-      // Handed to the demand store as well as used below, because the pool no
-      // longer only dies with this provider: under a profile with an idle
-      // window the store drops it once nothing has rendered a diff for a
-      // while, and the library's singleton has to be released with it or the
-      // next `create` returns the terminated manager.
-      terminate: terminateWorkerPoolSingleton,
-    };
-    registerDiffWorkerPoolLifecycle(lifecycle);
+    const creator = () =>
+      getOrCreateWorkerPoolSingleton({
+        poolOptions: {
+          workerFactory: () => new DiffsWorker(),
+          poolSize,
+        },
+        highlighterOptions: {
+          theme: themeRef.current,
+          useTokenTransformer: true,
+        },
+      });
+    registerDiffWorkerPoolCreator(creator);
     return () => {
-      unregisterDiffWorkerPoolLifecycle(lifecycle);
+      unregisterDiffWorkerPoolCreator(creator);
       terminateWorkerPoolSingleton();
     };
   }, [poolSize]);

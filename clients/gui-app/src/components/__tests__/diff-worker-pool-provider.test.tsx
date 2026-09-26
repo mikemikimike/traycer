@@ -9,7 +9,7 @@ import {
 } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { createContext, useContext, type ReactNode } from "react";
-import type { SetupWorkerPoolProps } from "@pierre/diffs/worker";
+import type { SetupWorkerPoolProps, WorkerStats } from "@pierre/diffs/worker";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { ResolvedThemeContext } from "@/providers/use-resolved-theme";
@@ -32,10 +32,32 @@ interface RenderOptionsArg {
 
 interface FakeWorkerPoolManager {
   readonly setRenderOptions: Mock<(options: RenderOptionsArg) => Promise<void>>;
+  readonly getStats: () => WorkerStats;
+  readonly subscribeToStatChanges: () => () => void;
+  readonly terminate: Mock<() => void>;
 }
 
+/** Reports one live, idle worker until `terminate` runs. */
 function fakeWorkerPoolManager(): FakeWorkerPoolManager {
-  return { setRenderOptions: vi.fn(() => Promise.resolve()) };
+  let totalWorkers = 1;
+  return {
+    setRenderOptions: vi.fn(() => Promise.resolve()),
+    getStats: () => ({
+      managerState: totalWorkers === 0 ? "waiting" : "initialized",
+      workersFailed: false,
+      totalWorkers,
+      busyWorkers: 0,
+      queuedTasks: 0,
+      activeTasks: 0,
+      themeSubscribers: 0,
+      fileCacheSize: 0,
+      diffCacheSize: 0,
+    }),
+    subscribeToStatChanges: () => () => {},
+    terminate: vi.fn(() => {
+      totalWorkers = 0;
+    }),
+  };
 }
 
 const workerPoolMocks = vi.hoisted(() => ({
@@ -94,6 +116,7 @@ describe("DiffWorkerPoolProvider", () => {
     cleanup();
     __resetDiffWorkerPoolForTests();
     setRetentionProfile(DESKTOP_RETENTION_PROFILE);
+    vi.useRealTimers();
   });
 
   it("renders children", () => {
@@ -249,6 +272,46 @@ describe("DiffWorkerPoolProvider", () => {
     ).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("pool-state").textContent).toBe("present");
     expect(getDiffWorkerPool()).toBe(manager);
+  });
+
+  it("an idle release terminates the manager's workers but keeps the singleton, and the same pool stays in context", () => {
+    vi.useFakeTimers();
+    setRetentionProfile(MOBILE_RETENTION_PROFILE);
+    const manager = fakeWorkerPoolManager();
+    workerPoolMocks.getOrCreateWorkerPoolSingleton.mockReturnValue(manager);
+
+    render(
+      <ResolvedThemeContext.Provider value={lightTheme()}>
+        <DiffWorkerPoolProvider>
+          <PoolConsumerProbe />
+        </DiffWorkerPoolProvider>
+      </ResolvedThemeContext.Provider>,
+    );
+    let release: () => void = () => {};
+    act(() => {
+      release = acquireDiffWorkerPool();
+    });
+
+    act(() => {
+      release();
+      vi.advanceTimersByTime(MOBILE_RETENTION_PROFILE.diffWorkerPoolIdleMs);
+    });
+
+    // Forgetting the singleton would leave every mounted `<FileDiff>` holding
+    // a manager the library no longer knows, which respawns its workers on
+    // the next highlight with nothing left able to terminate them.
+    expect(manager.terminate).toHaveBeenCalledTimes(1);
+    expect(workerPoolMocks.terminateWorkerPoolSingleton).not.toHaveBeenCalled();
+    expect(getDiffWorkerPool()).toBe(manager);
+    expect(screen.getByTestId("pool-state").textContent).toBe("present");
+
+    act(() => {
+      acquireDiffWorkerPool();
+    });
+
+    expect(
+      workerPoolMocks.getOrCreateWorkerPoolSingleton,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("terminates the pool on unmount and clears the store", () => {

@@ -1,4 +1,4 @@
-import type { WorkerPoolManager } from "@pierre/diffs/worker";
+import type { WorkerPoolManager, WorkerStats } from "@pierre/diffs/worker";
 import type { RuntimeTimer } from "@traycer-clients/shared/replica-runtime";
 import {
   isDocumentVisible,
@@ -37,9 +37,20 @@ import { getRetentionProfile } from "@/stores/replica-memory/retention-profile";
  * was enough while the pool's only exit was the provider unmounting - and on
  * the phone the provider never unmounts, so the first diff of a session bought
  * its isolates for the life of the app. Each gate now holds a LEASE for as long
- * as its surface is mounted, which makes "nobody is rendering a diff right now"
- * an observable fact and lets the mobile profile put a clock on it
+ * as its surface is ON SCREEN, which makes "nobody is looking at a diff right
+ * now" an observable fact and lets the retention profile put a clock on it
  * (`diffWorkerPoolIdleMs`).
+ *
+ * The clock takes the ISOLATES, never the manager. `WorkerPoolManager` is
+ * re-initializable: `terminate()` kills its workers and settles their tasks,
+ * and the next task anyone submits to it re-enters `initialize()` and spawns
+ * a fresh set. A mounted `<FileDiff>` captures its manager once, in the ref
+ * callback that creates its instance (`useFileDiffInstance`), and never
+ * re-reads the context - so the one manager the provider built stays the
+ * library singleton, and stays in context, until the provider unmounts. Every
+ * body mounted against it, hidden or not, therefore keeps its DOM through a
+ * release, and whatever respawn a hidden body later causes lands on a manager
+ * this module can still see and terminate again.
  */
 
 /**
@@ -62,36 +73,37 @@ export type DiffWorkerPoolAvailability =
   | "unavailable";
 
 /**
- * Building the pool and tearing it down, both supplied by the provider.
- *
- * `create` is the provider's because only it can name the worker factory Vite
- * must see literally and the theme to seed the highlighter with. `terminate`
- * is the provider's for a narrower reason: the manager is the library's
- * singleton (`getOrCreateWorkerPoolSingleton`), so dropping OUR reference to it
- * is not enough - the library has to forget it too, or the next `create` hands
- * back the corpse.
+ * Building the pool, supplied by the provider, because only it can name the
+ * worker factory Vite must see literally and the theme to seed the highlighter
+ * with. Tearing the manager down is the provider's unmount alone; an idle
+ * release terminates the manager's workers in place (see above).
  */
-export interface DiffWorkerPoolLifecycle {
-  readonly create: () => WorkerPoolManager;
-  readonly terminate: () => void;
-}
+type PoolCreator = () => WorkerPoolManager;
 
 interface DiffWorkerPoolStore {
   manager: WorkerPoolManager | undefined;
-  lifecycle: DiffWorkerPoolLifecycle | null;
-  /** Mounted diff surfaces holding the pool open. */
+  creator: PoolCreator | null;
+  /** On-screen diff surfaces holding the pool's isolates open. */
   leases: number;
   idleTimer: RuntimeTimer | null;
   unwatchVisibility: (() => void) | null;
+  unwatchStats: (() => void) | null;
 }
 
 const store: DiffWorkerPoolStore = {
   manager: undefined,
-  lifecycle: null,
+  creator: null,
   leases: 0,
   idleTimer: null,
   unwatchVisibility: null,
+  unwatchStats: null,
 };
+
+/**
+ * How soon an idle release that found the manager still working tries again.
+ * Short, because the work it waits on is a highlight already in flight.
+ */
+const BUSY_RETRY_MS = 1_000;
 
 /**
  * Bumped whenever the store is reset wholesale - a provider unregistering, a
@@ -120,9 +132,11 @@ function createIfDue(): void {
   // and build a pool nothing asked for. The generation stamp on each lease
   // already prevents that; this is the arm that makes the failure inert
   // rather than inverted if one ever slips through.
-  if (store.leases < 1 || store.lifecycle === null) return;
-  store.manager = store.lifecycle.create();
-  watchVisibilityWhileIdleWindowApplies();
+  if (store.leases < 1 || store.creator === null) return;
+  const manager = store.creator();
+  store.manager = manager;
+  watchVisibility();
+  store.unwatchStats = manager.subscribeToStatChanges(rearmOnRespawn);
   notify();
 }
 
@@ -131,10 +145,8 @@ function createIfDue(): void {
  * happens here immediately if a surface already leased before the provider
  * registered (a surface below the provider can mount in the same commit).
  */
-export function registerDiffWorkerPoolLifecycle(
-  lifecycle: DiffWorkerPoolLifecycle,
-): void {
-  store.lifecycle = lifecycle;
+export function registerDiffWorkerPoolCreator(creator: PoolCreator): void {
+  store.creator = creator;
   createIfDue();
   notify();
 }
@@ -145,31 +157,28 @@ export function registerDiffWorkerPoolLifecycle(
  * The demand goes with it. Every surface that can lease a pool renders BELOW
  * this provider, so they have all unmounted too and none of their leases is
  * being discarded - whereas leases left standing would outlive them and make
- * the next `registerDiffWorkerPoolLifecycle` build a pool during its own mount.
+ * the next `registerDiffWorkerPoolCreator` build a pool during its own mount.
  * The shell can be torn down and rebuilt within one session (a host outage or
  * sign-out unmounts it under `HostReadyGate`), and the second shell has to be
  * as lazy as the first: eager spawning that only starts on the second lifetime
  * is exactly the cost this module exists to remove, minus the symptom that
  * would make anyone look.
  */
-export function unregisterDiffWorkerPoolLifecycle(
-  lifecycle: DiffWorkerPoolLifecycle,
-): void {
-  if (store.lifecycle !== lifecycle) return;
+export function unregisterDiffWorkerPoolCreator(creator: PoolCreator): void {
+  if (store.creator !== creator) return;
   cancelIdleWindow();
-  stopWatchingVisibility();
+  stopWatching();
   generation += 1;
-  store.lifecycle = null;
+  store.creator = null;
   store.manager = undefined;
   store.leases = 0;
   notify();
 }
 
 /**
- * A diff surface is about to render, and holds the pool open until the
- * returned release is called. The first lease with a registered lifecycle
- * builds the pool; the last release starts the idle window, if the active
- * profile has one.
+ * A diff surface is on screen, and holds the pool's isolates open until the
+ * returned release is called. The first lease with a registered creator
+ * builds the pool; the last release starts the idle window.
  *
  * The release is idempotent and generation-stamped, so a React unmount that
  * tears the provider down BEFORE its children (deletions commit parent-first)
@@ -199,7 +208,7 @@ export function getDiffWorkerPool(): WorkerPoolManager | undefined {
 
 export function getDiffWorkerPoolAvailability(): DiffWorkerPoolAvailability {
   if (store.manager !== undefined) return "ready";
-  if (store.leases > 0 && store.lifecycle === null) return "unavailable";
+  if (store.leases > 0 && store.creator === null) return "unavailable";
   return "pending";
 }
 
@@ -211,7 +220,7 @@ export function subscribeDiffWorkerPool(listener: () => void): () => void {
 }
 
 /**
- * The last diff surface just unmounted.
+ * The last on-screen diff surface just went (unmounted, or hidden).
  *
  * A hidden shell skips the window entirely. The window is a grace period for a
  * user who is *navigating between diffs*, and a backgrounded app has no such
@@ -219,20 +228,19 @@ export function subscribeDiffWorkerPool(listener: () => void): () => void {
  * every isolate still resident counts against it.
  */
 function startIdleWindow(): void {
-  const idleMs = getRetentionProfile().diffWorkerPoolIdleMs;
-  if (idleMs === null) return;
   if (store.manager === undefined) return;
   if (!isDocumentVisible()) {
-    terminateIdlePool();
+    releaseIdleIsolates();
     return;
   }
-  store.idleTimer = environment.scheduler.schedule(idleMs, () => {
+  scheduleRelease(getRetentionProfile().diffWorkerPoolIdleMs);
+}
+
+function scheduleRelease(delayMs: number): void {
+  cancelIdleWindow();
+  store.idleTimer = environment.scheduler.schedule(delayMs, () => {
     store.idleTimer = null;
-    // Re-checked rather than trusted: a surface that mounted while the window
-    // ran cancelled this timer, but a profile switched underneath it (tests
-    // do) or a pool already gone leave a timer with nothing to do.
-    if (store.leases > 0) return;
-    terminateIdlePool();
+    releaseIdleIsolates();
   });
 }
 
@@ -242,63 +250,70 @@ function cancelIdleWindow(): void {
 }
 
 /**
- * Drop the pool, and the isolates behind it, while nothing is rendering a
- * diff.
+ * Terminate the manager's workers while no diff is on screen. The manager
+ * itself stays: it is still the library singleton and still in context, and
+ * the next task submitted to it spawns a fresh set (see the module comment).
  *
- * ONLY AT ZERO LEASES, and that is a correctness bound rather than a policy
- * one. `WorkerPoolManager.terminate()` rejects every in-flight and queued task
- * and kills its workers, but it does NOT poison the manager: the next task
- * submitted to it re-enters `initialize()` and spawns a fresh set. A mounted
- * `<FileDiff>` captures its manager once, in the ref callback that creates the
- * instance, and never re-reads the context - so terminating under one would
- * buy the memory back only until its next render, and the respawned isolates
- * would belong to a manager the library singleton has already forgotten, with
- * nothing left able to terminate them. A lease is exactly "a Diffs component is
- * mounted against this pool", so zero leases is the one moment that cannot
- * happen.
+ * ONLY AT ZERO LEASES, so no on-screen body ever renders against a pool that
+ * is going away.
  *
- * In-flight prime-cache promises therefore belong to surfaces that have already
- * unmounted, and they SETTLE - `terminate()` rejects them with
- * `WorkerPoolTerminatedError` rather than leaving them pending - which is what
- * keeps a gate that re-mounts mid-flight from waiting on a promise no worker
- * will ever answer.
+ * ONLY WHILE THE MANAGER IS IDLE, which is a correctness bound rather than a
+ * policy one. `terminate()` rejects every queued and in-flight task, and a
+ * hidden body whose own highlight task was rejected is never told: its
+ * renderer keeps the plain-text result it painted while waiting, and
+ * `FileDiff.render()` returns early for an unchanged diff, so re-showing it
+ * would not ask again. With no task in flight, every mounted body already
+ * holds its highlighted result in its own renderer, and losing the workers
+ * costs it nothing. A busy manager is retried shortly instead.
  */
-function terminateIdlePool(): void {
+function releaseIdleIsolates(): void {
   cancelIdleWindow();
-  stopWatchingVisibility();
-  if (store.manager === undefined) return;
-  store.manager = undefined;
-  store.lifecycle?.terminate();
-  notify();
+  const { manager } = store;
+  if (manager === undefined || store.leases > 0) return;
+  const stats = manager.getStats();
+  if (stats.totalWorkers === 0 && stats.managerState === "waiting") return;
+  if (stats.activeTasks > 0 || stats.queuedTasks > 0) {
+    scheduleRelease(BUSY_RETRY_MS);
+    return;
+  }
+  manager.terminate();
 }
 
 /**
- * Watch the page's visibility for as long as a pool exists under a profile
- * with an idle window - so, on the phone, and only once it has actually built
- * one. Nothing to watch on desktop: its window is `null`, and the pool it
- * keeps is the behaviour this module has always had.
+ * The manager spawned workers with no lease holding them - a hidden body
+ * re-highlighting new content, or a theme change re-initializing the pool.
+ * Nothing will release a lease to start the window for those, so their
+ * arrival starts it.
  */
-function watchVisibilityWhileIdleWindowApplies(): void {
+function rearmOnRespawn(stats: WorkerStats): void {
+  if (store.leases > 0 || store.idleTimer !== null) return;
+  if (stats.totalWorkers === 0) return;
+  startIdleWindow();
+}
+
+/** Backgrounding the page is a release point for a pool no one is looking at. */
+function watchVisibility(): void {
   if (store.unwatchVisibility !== null) return;
-  if (getRetentionProfile().diffWorkerPoolIdleMs === null) return;
   store.unwatchVisibility = subscribeDocumentVisibility(() => {
     if (isDocumentVisible()) return;
     if (store.leases > 0) return;
-    terminateIdlePool();
+    releaseIdleIsolates();
   });
 }
 
-function stopWatchingVisibility(): void {
+function stopWatching(): void {
   store.unwatchVisibility?.();
   store.unwatchVisibility = null;
+  store.unwatchStats?.();
+  store.unwatchStats = null;
 }
 
 export function __resetDiffWorkerPoolForTests(): void {
   cancelIdleWindow();
-  stopWatchingVisibility();
+  stopWatching();
   generation += 1;
   store.manager = undefined;
-  store.lifecycle = null;
+  store.creator = null;
   store.leases = 0;
   listeners.clear();
 }

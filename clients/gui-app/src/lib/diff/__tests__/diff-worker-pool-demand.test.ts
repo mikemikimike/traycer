@@ -7,16 +7,15 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import type { WorkerPoolManager } from "@pierre/diffs/worker";
+import type { WorkerPoolManager, WorkerStats } from "@pierre/diffs/worker";
 import {
   __resetDiffWorkerPoolForTests,
   acquireDiffWorkerPool,
   getDiffWorkerPool,
   getDiffWorkerPoolAvailability,
-  registerDiffWorkerPoolLifecycle,
+  registerDiffWorkerPoolCreator,
   subscribeDiffWorkerPool,
-  unregisterDiffWorkerPoolLifecycle,
-  type DiffWorkerPoolLifecycle,
+  unregisterDiffWorkerPoolCreator,
 } from "@/lib/diff/diff-worker-pool-demand";
 import { __resetDocumentVisibilitySubscribersForTests } from "@/lib/dom/document-visibility";
 import {
@@ -25,44 +24,116 @@ import {
   setRetentionProfile,
 } from "@/stores/replica-memory/retention-profile";
 
-interface FakeWorkerPoolManager {
+const MOBILE_IDLE_MS = MOBILE_RETENTION_PROFILE.diffWorkerPoolIdleMs;
+const DESKTOP_IDLE_MS = DESKTOP_RETENTION_PROFILE.diffWorkerPoolIdleMs;
+
+interface FakeWorkerPoolManagerMembers {
+  readonly debugId: string;
   readonly setRenderOptions: () => Promise<void>;
   readonly primeFileHighlightCache: () => Promise<void>;
   readonly primeDiffHighlightCache: () => Promise<void>;
+  readonly getStats: () => WorkerStats;
+  readonly subscribeToStatChanges: (
+    callback: (stats: WorkerStats) => unknown,
+  ) => () => void;
+  readonly terminate: () => void;
 }
 
 /**
- * A prototype-less object asserted to the class type, with the three members
- * a consumer could call assigned onto it (`as unknown as` is lint-forbidden
- * here, and a three-member literal does not overlap the ~90-member class
- * enough for a direct `as`). Each fake is its own object identity, which is
- * all these tests read - none of the three methods is ever called.
+ * The manager as the store sees it, plus handles to drive it: its stats are
+ * set by the test, `broadcast` delivers them the way the library's own
+ * `requestAnimationFrame` broadcast would, and `terminate` behaves like the
+ * real one does to the stats (no workers, back to `"waiting"`).
  */
-function fakeManager(id: string): WorkerPoolManager {
-  const fake: FakeWorkerPoolManager & { readonly debugId: string } = {
+interface FakeManager {
+  readonly manager: WorkerPoolManager;
+  readonly terminate: Mock<() => void>;
+  readonly setStats: (patch: Partial<WorkerStats>) => void;
+  readonly broadcast: () => void;
+}
+
+const LIVE_STATS: WorkerStats = {
+  managerState: "initialized",
+  workersFailed: false,
+  totalWorkers: 1,
+  busyWorkers: 0,
+  queuedTasks: 0,
+  activeTasks: 0,
+  themeSubscribers: 0,
+  fileCacheSize: 0,
+  diffCacheSize: 0,
+};
+
+/**
+ * A prototype-less object asserted to the class type, with the members the
+ * store and the gates call assigned onto it (`as unknown as` is lint-forbidden
+ * here, and a handful of members does not overlap the ~90-member class enough
+ * for a direct `as`).
+ */
+function fakeManager(id: string): FakeManager {
+  let stats: WorkerStats = { ...LIVE_STATS };
+  const subscribers = new Set<(stats: WorkerStats) => unknown>();
+  const broadcast = () => {
+    for (const subscriber of Array.from(subscribers)) subscriber(stats);
+  };
+  const terminate = vi.fn<() => void>(() => {
+    stats = { ...stats, managerState: "waiting", totalWorkers: 0 };
+    broadcast();
+  });
+  const members: FakeWorkerPoolManagerMembers = {
     debugId: id,
     setRenderOptions: () => Promise.resolve(),
     primeFileHighlightCache: () => Promise.resolve(),
     primeDiffHighlightCache: () => Promise.resolve(),
+    getStats: () => stats,
+    subscribeToStatChanges: (callback) => {
+      subscribers.add(callback);
+      callback(stats);
+      return () => {
+        subscribers.delete(callback);
+      };
+    },
+    terminate,
   };
-  return Object.assign(Object.create(null) as WorkerPoolManager, fake);
+  return {
+    manager: Object.assign(Object.create(null) as WorkerPoolManager, members),
+    terminate,
+    setStats: (patch) => {
+      stats = { ...stats, ...patch };
+    },
+    broadcast,
+  };
 }
 
-function fakeLifecycle(id: string): DiffWorkerPoolLifecycle {
-  return { create: () => fakeManager(id), terminate: () => {} };
+/** A creator whose calls, and every manager it built, can be asserted on. */
+interface SpyCreator {
+  readonly creator: Mock<() => WorkerPoolManager>;
+  readonly built: ReadonlyArray<FakeManager>;
+  /** The one manager this creator built; throws if it built none or several. */
+  readonly only: () => FakeManager;
 }
 
-/** A lifecycle whose `create`/`terminate` can both be asserted on. */
-interface SpyLifecycle {
-  readonly lifecycle: DiffWorkerPoolLifecycle;
-  readonly create: Mock<() => WorkerPoolManager>;
-  readonly terminate: Mock<() => void>;
+function spyCreator(id: string): SpyCreator {
+  const built: Array<FakeManager> = [];
+  const creator = vi.fn<() => WorkerPoolManager>(() => {
+    const fake = fakeManager(`${id}-${built.length}`);
+    built.push(fake);
+    return fake.manager;
+  });
+  return {
+    creator,
+    built,
+    only: () => {
+      if (built.length !== 1) {
+        throw new Error(`expected exactly one manager, built ${built.length}`);
+      }
+      return built[0];
+    },
+  };
 }
 
-function spyLifecycle(id: string): SpyLifecycle {
-  const create = vi.fn<() => WorkerPoolManager>(() => fakeManager(id));
-  const terminate = vi.fn<() => void>(() => {});
-  return { lifecycle: { create, terminate }, create, terminate };
+function fakeCreator(id: string): () => WorkerPoolManager {
+  return () => fakeManager(id).manager;
 }
 
 /**
@@ -91,82 +162,63 @@ describe("diff-worker-pool-demand", () => {
     vi.useRealTimers();
   });
 
-  it("starts pending: no manager, no lifecycle, no lease", () => {
+  it("starts pending: no manager, no creator, no lease", () => {
     expect(getDiffWorkerPool()).toBeUndefined();
     expect(getDiffWorkerPoolAvailability()).toBe("pending");
   });
 
   it("creates the pool exactly once when leased, then registered", () => {
-    const { lifecycle, create } = spyLifecycle("a");
+    const { creator } = spyCreator("a");
     acquireDiffWorkerPool();
-    // No lifecycle registered yet: a lease alone cannot create the pool.
+    // No creator registered yet: a lease alone cannot create the pool.
     expect(getDiffWorkerPoolAvailability()).toBe("unavailable");
     expect(getDiffWorkerPool()).toBeUndefined();
 
-    registerDiffWorkerPoolLifecycle(lifecycle);
+    registerDiffWorkerPoolCreator(creator);
 
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(creator).toHaveBeenCalledTimes(1);
     expect(getDiffWorkerPoolAvailability()).toBe("ready");
-    expect(getDiffWorkerPool()).toBe(create.mock.results[0]?.value);
+    expect(getDiffWorkerPool()).toBe(creator.mock.results[0]?.value);
   });
 
   it("creates the pool exactly once when registered, then leased", () => {
-    const { lifecycle, create } = spyLifecycle("b");
-    registerDiffWorkerPoolLifecycle(lifecycle);
-    expect(create).not.toHaveBeenCalled();
+    const { creator } = spyCreator("b");
+    registerDiffWorkerPoolCreator(creator);
+    expect(creator).not.toHaveBeenCalled();
     expect(getDiffWorkerPoolAvailability()).toBe("pending");
 
     acquireDiffWorkerPool();
 
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(creator).toHaveBeenCalledTimes(1);
     expect(getDiffWorkerPoolAvailability()).toBe("ready");
-    expect(getDiffWorkerPool()).toBe(create.mock.results[0]?.value);
+    expect(getDiffWorkerPool()).toBe(creator.mock.results[0]?.value);
   });
 
   it("never creates a second pool for an extra lease or a re-registration", () => {
-    const { lifecycle, create } = spyLifecycle("c");
-    registerDiffWorkerPoolLifecycle(lifecycle);
+    const { creator } = spyCreator("c");
+    registerDiffWorkerPoolCreator(creator);
     acquireDiffWorkerPool();
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(creator).toHaveBeenCalledTimes(1);
 
     acquireDiffWorkerPool();
-    registerDiffWorkerPoolLifecycle(lifecycle);
+    registerDiffWorkerPoolCreator(creator);
 
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(creator).toHaveBeenCalledTimes(1);
   });
 
-  it("reports 'unavailable' while leased with no lifecycle registered", () => {
+  it("reports 'unavailable' while leased with no creator registered", () => {
     expect(getDiffWorkerPoolAvailability()).toBe("pending");
     acquireDiffWorkerPool();
     expect(getDiffWorkerPoolAvailability()).toBe("unavailable");
     expect(getDiffWorkerPool()).toBeUndefined();
-  });
-
-  it("moves from 'unavailable' to 'ready' once a lifecycle registers after the lease", () => {
-    acquireDiffWorkerPool();
-    expect(getDiffWorkerPoolAvailability()).toBe("unavailable");
-
-    registerDiffWorkerPoolLifecycle(fakeLifecycle("d"));
-
-    expect(getDiffWorkerPoolAvailability()).toBe("ready");
-    expect(getDiffWorkerPool()).toBeDefined();
-  });
-
-  it("moves from 'pending' to 'ready' once the pool is created", () => {
-    registerDiffWorkerPoolLifecycle(fakeLifecycle("e"));
-    expect(getDiffWorkerPoolAvailability()).toBe("pending");
-
-    acquireDiffWorkerPool();
-
-    expect(getDiffWorkerPoolAvailability()).toBe("ready");
   });
 
   it("notifies subscribers on register, lease, and unregister", () => {
     const listener = vi.fn();
     const unsubscribe = subscribeDiffWorkerPool(listener);
-    const lifecycle = fakeLifecycle("f");
+    const creator = fakeCreator("f");
 
-    registerDiffWorkerPoolLifecycle(lifecycle);
+    registerDiffWorkerPoolCreator(creator);
     expect(listener).toHaveBeenCalledTimes(1);
 
     acquireDiffWorkerPool();
@@ -175,7 +227,7 @@ describe("diff-worker-pool-demand", () => {
     expect(listener.mock.calls.length).toBeGreaterThanOrEqual(2);
 
     listener.mockClear();
-    unregisterDiffWorkerPoolLifecycle(lifecycle);
+    unregisterDiffWorkerPoolCreator(creator);
     expect(listener).toHaveBeenCalledTimes(1);
 
     unsubscribe();
@@ -186,83 +238,48 @@ describe("diff-worker-pool-demand", () => {
     const unsubscribe = subscribeDiffWorkerPool(listener);
     unsubscribe();
 
-    registerDiffWorkerPoolLifecycle(fakeLifecycle("g"));
+    registerDiffWorkerPoolCreator(fakeCreator("g"));
     acquireDiffWorkerPool();
 
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("treats unregistering a different lifecycle than the one registered as a no-op", () => {
-    const registered = fakeLifecycle("h");
-    const other = fakeLifecycle("not-registered");
-    registerDiffWorkerPoolLifecycle(registered);
+  it("treats unregistering a different creator than the one registered as a no-op", () => {
+    const registered = fakeCreator("h");
+    registerDiffWorkerPoolCreator(registered);
     acquireDiffWorkerPool();
     const manager = getDiffWorkerPool();
     expect(manager).toBeDefined();
 
-    unregisterDiffWorkerPoolLifecycle(other);
+    unregisterDiffWorkerPoolCreator(fakeCreator("not-registered"));
 
-    // The real lifecycle (and the manager it built) survive an unregister call
-    // naming a different one.
     expect(getDiffWorkerPool()).toBe(manager);
     expect(getDiffWorkerPoolAvailability()).toBe("ready");
-  });
-
-  it("clears the manager, lifecycle, AND the leases when the registered lifecycle unregisters", () => {
-    const lifecycle = fakeLifecycle("i");
-    registerDiffWorkerPoolLifecycle(lifecycle);
-    acquireDiffWorkerPool();
-    expect(getDiffWorkerPool()).toBeDefined();
-
-    unregisterDiffWorkerPoolLifecycle(lifecycle);
-
-    expect(getDiffWorkerPool()).toBeUndefined();
-    // The leases are cleared too, not just the lifecycle/manager: every
-    // surface that could hold one renders below the provider, so it has
-    // unmounted along with it, and a lease left standing would make the NEXT
-    // registration build a pool eagerly during its own mount.
-    expect(getDiffWorkerPoolAvailability()).toBe("pending");
   });
 
   it("does not eagerly rebuild a pool for a second app-shell lifetime's registration after unregister", () => {
-    // The regression this pins: a host outage or sign-out unmounts the
-    // provider and remounts it under `HostReadyGate` within one session. The
-    // second lifetime must be exactly as lazy as the first - nothing has
-    // leased a pool YET in this lifetime, so registering its lifecycle alone
-    // must not build one.
-    const first = spyLifecycle("k1");
-    registerDiffWorkerPoolLifecycle(first.lifecycle);
+    // A host outage or sign-out unmounts the provider and remounts it under
+    // `HostReadyGate` within one session. The second lifetime must be exactly
+    // as lazy as the first - every surface that held a lease rendered below
+    // the provider and went with it, so registering alone must not build.
+    const first = spyCreator("k1");
+    registerDiffWorkerPoolCreator(first.creator);
     acquireDiffWorkerPool();
-    expect(first.create).toHaveBeenCalledTimes(1);
-    expect(getDiffWorkerPool()).toBeDefined();
+    expect(first.creator).toHaveBeenCalledTimes(1);
 
-    unregisterDiffWorkerPoolLifecycle(first.lifecycle);
-
-    // Second lifetime: the provider re-registers with a fresh lifecycle.
-    const second = spyLifecycle("k2");
-    registerDiffWorkerPoolLifecycle(second.lifecycle);
-
-    expect(second.create).not.toHaveBeenCalled();
+    unregisterDiffWorkerPoolCreator(first.creator);
     expect(getDiffWorkerPool()).toBeUndefined();
+
+    const second = spyCreator("k2");
+    registerDiffWorkerPoolCreator(second.creator);
+
+    expect(second.creator).not.toHaveBeenCalled();
     expect(getDiffWorkerPoolAvailability()).toBe("pending");
 
-    // Only a fresh lease, taken in THIS lifetime, re-creates the pool.
     acquireDiffWorkerPool();
 
-    expect(second.create).toHaveBeenCalledTimes(1);
-    expect(getDiffWorkerPool()).toBe(second.create.mock.results[0]?.value);
+    expect(second.creator).toHaveBeenCalledTimes(1);
     expect(getDiffWorkerPoolAvailability()).toBe("ready");
-  });
-
-  it("getDiffWorkerPool() reflects exactly the manager the lifecycle produced", () => {
-    const manager = fakeManager("j");
-    registerDiffWorkerPoolLifecycle({
-      create: () => manager,
-      terminate: () => {},
-    });
-    acquireDiffWorkerPool();
-
-    expect(getDiffWorkerPool()).toBe(manager);
   });
 
   it("a lease released after its provider unregistered does not drive the count negative", () => {
@@ -270,24 +287,21 @@ describe("diff-worker-pool-demand", () => {
     // BEFORE the gates below it release. A stale release must be inert, or the
     // next lifetime starts at -1 and never reaches the lease that builds a
     // pool.
-    const first = fakeLifecycle("neg-1");
-    registerDiffWorkerPoolLifecycle(first);
+    const first = fakeCreator("neg-1");
+    registerDiffWorkerPoolCreator(first);
     const release = acquireDiffWorkerPool();
 
-    unregisterDiffWorkerPoolLifecycle(first);
+    unregisterDiffWorkerPoolCreator(first);
     release();
     release();
 
-    const second = spyLifecycle("neg-2");
-    registerDiffWorkerPoolLifecycle(second.lifecycle);
-    // A count sitting at -1 reads as demand to `createIfDue`, so the second
-    // lifetime would spawn its isolates during its own mount - the exact
-    // eagerness this module exists to remove.
-    expect(second.create).not.toHaveBeenCalled();
+    const second = spyCreator("neg-2");
+    registerDiffWorkerPoolCreator(second.creator);
+    expect(second.creator).not.toHaveBeenCalled();
 
     acquireDiffWorkerPool();
 
-    expect(second.create).toHaveBeenCalledTimes(1);
+    expect(second.creator).toHaveBeenCalledTimes(1);
     expect(getDiffWorkerPoolAvailability()).toBe("ready");
   });
 
@@ -296,79 +310,174 @@ describe("diff-worker-pool-demand", () => {
       vi.useFakeTimers();
     });
 
-    it("keeps the pool forever under the desktop profile, which has no window", () => {
-      const { lifecycle, terminate } = spyLifecycle("desktop");
-      registerDiffWorkerPoolLifecycle(lifecycle);
+    it("terminates the workers once the mobile window elapses, and keeps the manager", () => {
+      setRetentionProfile(MOBILE_RETENTION_PROFILE);
+      const spy = spyCreator("idle");
+      registerDiffWorkerPoolCreator(spy.creator);
       const release = acquireDiffWorkerPool();
       const manager = getDiffWorkerPool();
-
-      release();
-      vi.advanceTimersByTime(60 * 60_000);
-
-      expect(terminate).not.toHaveBeenCalled();
-      expect(getDiffWorkerPool()).toBe(manager);
-    });
-
-    it("terminates the pool once the mobile window elapses with no consumer", () => {
-      setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const idleMs = MOBILE_RETENTION_PROFILE.diffWorkerPoolIdleMs;
-      if (idleMs === null) throw new Error("mobile profile has no idle window");
-      const { lifecycle, terminate } = spyLifecycle("idle");
-      registerDiffWorkerPoolLifecycle(lifecycle);
-      const release = acquireDiffWorkerPool();
-      expect(getDiffWorkerPool()).toBeDefined();
 
       release();
       // Still held through the grace period itself - the window exists so that
       // navigating between two diffs does not rebuild a WASM engine.
-      vi.advanceTimersByTime(idleMs - 1);
-      expect(terminate).not.toHaveBeenCalled();
-      expect(getDiffWorkerPool()).toBeDefined();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS - 1);
+      expect(spy.only().terminate).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(1);
 
-      expect(terminate).toHaveBeenCalledTimes(1);
-      expect(getDiffWorkerPool()).toBeUndefined();
-      expect(getDiffWorkerPoolAvailability()).toBe("pending");
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+      // The manager is what every mounted body captured. It stays the pool in
+      // context, so nothing mounted against it has to go.
+      expect(getDiffWorkerPool()).toBe(manager);
+      expect(getDiffWorkerPoolAvailability()).toBe("ready");
     });
 
-    it("keeps the pool when another consumer mounts inside the window", () => {
+    it("gives desktop the same release on a five-minute window", () => {
+      const spy = spyCreator("desktop");
+      registerDiffWorkerPoolCreator(spy.creator);
+      const release = acquireDiffWorkerPool();
+
+      release();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
+      // Desktop is not on the phone's clock.
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(DESKTOP_IDLE_MS - MOBILE_IDLE_MS - 1);
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+      expect(getDiffWorkerPool()).toBe(spy.only().manager);
+    });
+
+    it("keeps the workers when another surface comes on screen inside the window", () => {
       setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const idleMs = MOBILE_RETENTION_PROFILE.diffWorkerPoolIdleMs ?? 0;
-      const { lifecycle, terminate } = spyLifecycle("handoff");
-      registerDiffWorkerPoolLifecycle(lifecycle);
+      const spy = spyCreator("handoff");
+      registerDiffWorkerPoolCreator(spy.creator);
       const first = acquireDiffWorkerPool();
-      const manager = getDiffWorkerPool();
 
       first();
-      vi.advanceTimersByTime(idleMs / 2);
+      vi.advanceTimersByTime(MOBILE_IDLE_MS / 2);
       const second = acquireDiffWorkerPool();
-      vi.advanceTimersByTime(idleMs * 2);
+      vi.advanceTimersByTime(MOBILE_IDLE_MS * 2);
 
-      expect(terminate).not.toHaveBeenCalled();
-      expect(getDiffWorkerPool()).toBe(manager);
+      expect(spy.only().terminate).not.toHaveBeenCalled();
       second();
     });
 
-    it("never terminates while a consumer is still mounted", () => {
+    it("never terminates while a surface is on screen", () => {
       setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const { lifecycle, terminate } = spyLifecycle("mounted");
-      registerDiffWorkerPoolLifecycle(lifecycle);
+      const spy = spyCreator("mounted");
+      registerDiffWorkerPoolCreator(spy.creator);
       const first = acquireDiffWorkerPool();
       const second = acquireDiffWorkerPool();
 
       first();
       vi.advanceTimersByTime(60 * 60_000);
 
-      expect(terminate).not.toHaveBeenCalled();
-      expect(getDiffWorkerPool()).toBeDefined();
+      expect(spy.only().terminate).not.toHaveBeenCalled();
       second();
+    });
+
+    it("reuses the same manager for the next lease after a release", () => {
+      setRetentionProfile(MOBILE_RETENTION_PROFILE);
+      const spy = spyCreator("reuse");
+      registerDiffWorkerPoolCreator(spy.creator);
+      acquireDiffWorkerPool()();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+
+      // The manager re-initializes itself on its next task; a second manager
+      // would leave every body mounted against the first one talking to a pool
+      // the library singleton no longer knows.
+      acquireDiffWorkerPool();
+
+      expect(spy.creator).toHaveBeenCalledTimes(1);
+      expect(getDiffWorkerPool()).toBe(spy.only().manager);
+    });
+
+    it("waits for in-flight work to drain before terminating", () => {
+      setRetentionProfile(MOBILE_RETENTION_PROFILE);
+      const spy = spyCreator("busy");
+      registerDiffWorkerPoolCreator(spy.creator);
+      const release = acquireDiffWorkerPool();
+      // A hidden body's own highlight task is still running when the window
+      // closes. Terminating would reject it, and that body would keep its
+      // plain-text paint on return with nothing left to ask again.
+      spy.only().setStats({ activeTasks: 1 });
+
+      release();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(5_000);
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+
+      spy.only().setStats({ activeTasks: 0, queuedTasks: 1 });
+      vi.advanceTimersByTime(5_000);
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+
+      spy.only().setStats({ queuedTasks: 0 });
+      vi.advanceTimersByTime(5_000);
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops waiting on a busy manager once a surface comes back on screen", () => {
+      setRetentionProfile(MOBILE_RETENTION_PROFILE);
+      const spy = spyCreator("busy-return");
+      registerDiffWorkerPoolCreator(spy.creator);
+      const release = acquireDiffWorkerPool();
+      spy.only().setStats({ activeTasks: 1 });
+      release();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
+
+      const next = acquireDiffWorkerPool();
+      spy.only().setStats({ activeTasks: 0 });
+      vi.advanceTimersByTime(60 * 60_000);
+
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+      next();
+    });
+
+    it("re-arms the window when the manager respawns workers with no lease", () => {
+      setRetentionProfile(MOBILE_RETENTION_PROFILE);
+      const spy = spyCreator("respawn");
+      registerDiffWorkerPoolCreator(spy.creator);
+      acquireDiffWorkerPool()();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+
+      // A hidden body re-highlighting new content, or a theme change, submits
+      // a task to the dormant manager and it spawns a fresh worker. No lease
+      // is released to start the window for that one.
+      spy.only().setStats({ managerState: "initialized", totalWorkers: 1 });
+      spy.only().broadcast();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS - 1);
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1);
+
+      expect(spy.only().terminate).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not arm the window from a stats change while a lease holds the pool", () => {
+      setRetentionProfile(MOBILE_RETENTION_PROFILE);
+      const spy = spyCreator("leased-stats");
+      registerDiffWorkerPoolCreator(spy.creator);
+      const release = acquireDiffWorkerPool();
+
+      spy.only().broadcast();
+      vi.advanceTimersByTime(60 * 60_000);
+
+      expect(spy.only().terminate).not.toHaveBeenCalled();
+      release();
     });
 
     it("terminates immediately when the app is backgrounded mid-window", () => {
       setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const { lifecycle, terminate } = spyLifecycle("hidden");
-      registerDiffWorkerPoolLifecycle(lifecycle);
+      const spy = spyCreator("hidden");
+      registerDiffWorkerPoolCreator(spy.creator);
       const release = acquireDiffWorkerPool();
 
       release();
@@ -376,114 +485,55 @@ describe("diff-worker-pool-demand", () => {
 
       // No timer advanced: the grace period is for a user navigating between
       // diffs, and a backgrounded iOS app has none.
-      expect(terminate).toHaveBeenCalledTimes(1);
-      expect(getDiffWorkerPool()).toBeUndefined();
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+      expect(getDiffWorkerPool()).toBe(spy.only().manager);
     });
 
-    it("skips the window entirely when the last consumer unmounts while hidden", () => {
+    it("skips the window when the last lease goes while hidden", () => {
       setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const { lifecycle, terminate } = spyLifecycle("hidden-unmount");
-      registerDiffWorkerPoolLifecycle(lifecycle);
+      const spy = spyCreator("hidden-release");
+      registerDiffWorkerPoolCreator(spy.creator);
       const release = acquireDiffWorkerPool();
 
       setDocumentHidden(true);
-      // Held while the surface is still mounted: a mounted `<FileDiff>` keeps
-      // the manager it captured and would respawn its workers on the next
-      // render, behind a library singleton that has already forgotten it.
-      expect(terminate).not.toHaveBeenCalled();
+      // Held while a surface is still on screen in the page that went hidden.
+      expect(spy.only().terminate).not.toHaveBeenCalled();
 
       release();
 
-      expect(terminate).toHaveBeenCalledTimes(1);
-      expect(getDiffWorkerPool()).toBeUndefined();
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
     });
 
-    it("does not terminate on a hidden edge under the desktop profile", () => {
-      const { lifecycle, terminate } = spyLifecycle("desktop-hidden");
-      registerDiffWorkerPoolLifecycle(lifecycle);
-      const release = acquireDiffWorkerPool();
-      const manager = getDiffWorkerPool();
-
-      release();
-      setDocumentHidden(true);
-
-      expect(terminate).not.toHaveBeenCalled();
-      expect(getDiffWorkerPool()).toBe(manager);
-    });
-
-    it("rebuilds the pool on the next demand after an idle termination", () => {
+    it("does not terminate again a manager that is already dormant", () => {
       setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const idleMs = MOBILE_RETENTION_PROFILE.diffWorkerPoolIdleMs ?? 0;
-      const { lifecycle, create, terminate } = spyLifecycle("rebuild");
-      registerDiffWorkerPoolLifecycle(lifecycle);
-      const release = acquireDiffWorkerPool();
-      const first = getDiffWorkerPool();
-
-      release();
-      vi.advanceTimersByTime(idleMs);
-      expect(terminate).toHaveBeenCalledTimes(1);
-      expect(getDiffWorkerPool()).toBeUndefined();
-
-      // The provider is still mounted - only the pool went away - so the next
-      // surface's lease is all it takes.
-      acquireDiffWorkerPool();
-
-      expect(create).toHaveBeenCalledTimes(2);
-      expect(getDiffWorkerPool()).toBeDefined();
-      expect(getDiffWorkerPool()).not.toBe(first);
-      expect(getDiffWorkerPoolAvailability()).toBe("ready");
-    });
-
-    it("rebuilds the pool on the next demand after a backgrounded termination", () => {
-      setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const { lifecycle, create } = spyLifecycle("rebuild-hidden");
-      registerDiffWorkerPoolLifecycle(lifecycle);
+      const spy = spyCreator("dormant");
+      registerDiffWorkerPoolCreator(spy.creator);
       acquireDiffWorkerPool()();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
+
+      // Shown and hidden again without the manager ever being asked for work.
+      acquireDiffWorkerPool()();
+      vi.advanceTimersByTime(MOBILE_IDLE_MS);
       setDocumentHidden(true);
-      expect(getDiffWorkerPool()).toBeUndefined();
 
-      setDocumentHidden(false);
-      acquireDiffWorkerPool();
-
-      expect(create).toHaveBeenCalledTimes(2);
-      expect(getDiffWorkerPool()).toBeDefined();
+      expect(spy.only().terminate).toHaveBeenCalledTimes(1);
     });
 
-    it("settles the in-flight prime promises the terminated manager was holding", async () => {
-      // `WorkerPoolManager.terminate()` rejects every queued and in-flight
-      // task rather than leaving them pending, which is what keeps a gate
-      // whose surface unmounted mid-prime from awaiting a promise no worker
-      // will ever answer. Modelled here, because the real manager is not in
-      // this unit's reach.
+    it("stops watching the manager once the provider unregisters", () => {
       setRetentionProfile(MOBILE_RETENTION_PROFILE);
-      const idleMs = MOBILE_RETENTION_PROFILE.diffWorkerPoolIdleMs ?? 0;
-      let rejectPrime: ((error: Error) => void) | null = null;
-      const inFlight = new Promise<void>((_resolve, reject) => {
-        rejectPrime = reject;
-      });
-      const lifecycle: DiffWorkerPoolLifecycle = {
-        create: () => fakeManager("in-flight"),
-        terminate: () => rejectPrime?.(new Error("WorkerPoolTerminatedError")),
-      };
-      registerDiffWorkerPoolLifecycle(lifecycle);
-      const release = acquireDiffWorkerPool();
+      const spy = spyCreator("unregistered");
+      registerDiffWorkerPoolCreator(spy.creator);
+      acquireDiffWorkerPool();
 
-      let settled = false;
-      const observed = inFlight.then(
-        () => {
-          settled = true;
-        },
-        () => {
-          settled = true;
-        },
-      );
+      unregisterDiffWorkerPoolCreator(spy.creator);
+      // The provider has terminated the singleton itself; a broadcast from
+      // the corpse must not start a window over a store that no longer has it.
+      spy.only().broadcast();
+      setDocumentHidden(true);
+      vi.advanceTimersByTime(60 * 60_000);
 
-      release();
-      vi.advanceTimersByTime(idleMs);
-      await observed;
-
-      expect(settled).toBe(true);
-      expect(getDiffWorkerPool()).toBeUndefined();
+      expect(spy.only().terminate).not.toHaveBeenCalled();
     });
   });
 });

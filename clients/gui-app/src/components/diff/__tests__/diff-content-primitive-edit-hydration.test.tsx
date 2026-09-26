@@ -40,7 +40,7 @@ import { Editor, type EditorOptions } from "@pierre/diffs/edit";
 import type { WorkerPoolManager } from "@pierre/diffs/worker";
 import type { ReactNode } from "react";
 import { DiffContentPrimitive } from "@/components/diff/diff-content-primitive";
-import { registerDiffWorkerPoolLifecycle } from "@/lib/diff/diff-worker-pool-demand";
+import { registerDiffWorkerPoolCreator } from "@/lib/diff/diff-worker-pool-demand";
 
 const capturedFileDiffs: FileDiffMetadata[] = [];
 interface CapturedFileRender {
@@ -64,6 +64,7 @@ interface FakeWorkerPoolManager {
   readonly setRenderOptions: () => Promise<void>;
   readonly primeFileHighlightCache: () => Promise<void>;
   readonly primeDiffHighlightCache: () => Promise<void>;
+  readonly subscribeToStatChanges: () => () => void;
 }
 
 /**
@@ -77,6 +78,7 @@ function fakeWorkerPoolManager(): WorkerPoolManager {
     setRenderOptions: () => Promise.resolve(),
     primeFileHighlightCache: () => Promise.resolve(),
     primeDiffHighlightCache: () => Promise.resolve(),
+    subscribeToStatChanges: () => () => {},
   };
   return Object.assign(Object.create(null) as WorkerPoolManager, fake);
 }
@@ -703,10 +705,7 @@ index 1111111..2222222 100644
     // before the pool ever reached context - and stayed on the main thread
     // for that editor's whole lifetime. The gate now precedes the branch.
     const manager = fakeWorkerPoolManager();
-    registerDiffWorkerPoolLifecycle({
-      create: () => manager,
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => manager);
 
     const props = {
       patch: EMPTY_NEW_FILE_PATCH,

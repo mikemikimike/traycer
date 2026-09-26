@@ -19,7 +19,7 @@ import { DiffHighlightLoading } from "@/components/diff/diff-highlight-loading";
 import {
   __resetDiffWorkerPoolForTests,
   getDiffWorkerPool,
-  registerDiffWorkerPoolLifecycle,
+  registerDiffWorkerPoolCreator,
 } from "@/lib/diff/diff-worker-pool-demand";
 
 interface FakeWorkerPoolManager {
@@ -55,7 +55,10 @@ function fakeWorkerPoolManager(): FakeWorkerPoolManager {
 }
 
 function asWorkerPoolManager(fake: FakeWorkerPoolManager): WorkerPoolManager {
-  return Object.assign(Object.create(null) as WorkerPoolManager, fake);
+  // The store watches the manager it builds; nothing here drives its stats.
+  return Object.assign(Object.create(null) as WorkerPoolManager, fake, {
+    subscribeToStatChanges: () => () => {},
+  });
 }
 
 describe("useDiffs highlight gates", () => {
@@ -186,10 +189,7 @@ describe("useDiffs highlight gates", () => {
 
   it("keeps both the file and diff gates closed once a creator is registered but the context has not caught up yet", async () => {
     const manager = fakeWorkerPoolManager();
-    registerDiffWorkerPoolLifecycle({
-      create: () => asWorkerPoolManager(manager),
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => asWorkerPoolManager(manager));
     // `poolState.pool` stays undefined on purpose: the store already built the
     // manager, but the provider that would carry it into context has not
     // re-rendered in this test, so `useWorkerPool()` still answers undefined.
@@ -214,10 +214,7 @@ describe("useDiffs highlight gates", () => {
 
   it("requests the pool from the hook's own mount effect, so a registered creator builds it", () => {
     const manager = asWorkerPoolManager(fakeWorkerPoolManager());
-    registerDiffWorkerPoolLifecycle({
-      create: () => manager,
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => manager);
     expect(getDiffWorkerPool()).toBeUndefined();
 
     render(<FileReadyProbe file={sampleFile()} theme="pierre-dark" enabled />);
@@ -227,10 +224,7 @@ describe("useDiffs highlight gates", () => {
 
   it("releases the file gate once the context catches up with the pool the creator built", async () => {
     const manager = fakeWorkerPoolManager();
-    registerDiffWorkerPoolLifecycle({
-      create: () => asWorkerPoolManager(manager),
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => asWorkerPoolManager(manager));
 
     const rendered = render(
       <FileReadyProbe file={sampleFile()} theme="pierre-dark" enabled />,
@@ -254,10 +248,7 @@ describe("useDiffs highlight gates", () => {
 
   it("releases the diff gate once the context catches up with the pool the creator built", async () => {
     const manager = fakeWorkerPoolManager();
-    registerDiffWorkerPoolLifecycle({
-      create: () => asWorkerPoolManager(manager),
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => asWorkerPoolManager(manager));
     const fileDiffs = [sampleDiff("a.ts")];
 
     const rendered = render(
@@ -293,10 +284,7 @@ describe("useDiffs highlight gates", () => {
 
   it("keeps the edit gate closed when a creator is registered but no pool is in context yet", async () => {
     const manager = fakeWorkerPoolManager();
-    registerDiffWorkerPoolLifecycle({
-      create: () => asWorkerPoolManager(manager),
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => asWorkerPoolManager(manager));
 
     render(
       <EditReadyProbe
@@ -315,10 +303,7 @@ describe("useDiffs highlight gates", () => {
     // always has work, independent of `enabled` - so a disabled gate still
     // asks for the pool instead of skipping the request.
     const manager = asWorkerPoolManager(fakeWorkerPoolManager());
-    registerDiffWorkerPoolLifecycle({
-      create: () => manager,
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => manager);
 
     render(
       <FileReadyProbe
@@ -336,10 +321,7 @@ describe("useDiffs highlight gates", () => {
 
   it("holds a disabled gate until the pool reaches context, releases once it does, and never re-closes when enabled later flips true", () => {
     const manager = fakeWorkerPoolManager();
-    registerDiffWorkerPoolLifecycle({
-      create: () => asWorkerPoolManager(manager),
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => asWorkerPoolManager(manager));
 
     const rendered = render(
       <FileReadyProbe
@@ -379,10 +361,7 @@ describe("useDiffs highlight gates", () => {
 
   it("does not request the pool for an empty diff list", () => {
     const manager = asWorkerPoolManager(fakeWorkerPoolManager());
-    registerDiffWorkerPoolLifecycle({
-      create: () => manager,
-      terminate: () => {},
-    });
+    registerDiffWorkerPoolCreator(() => manager);
 
     render(<DiffReadyProbe fileDiffs={[]} theme="pierre-dark" enabled />);
     render(<EditReadyProbe fileDiffs={[]} theme="pierre-dark" enabled />);
