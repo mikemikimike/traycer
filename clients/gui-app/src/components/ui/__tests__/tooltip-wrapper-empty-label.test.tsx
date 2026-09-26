@@ -1,9 +1,10 @@
 /**
- * `TooltipWrapper`'s empty-label branch was unguarded: nothing asserted that
- * `label={null | undefined | ""}` renders the child transparently instead of
- * mounting a tooltip, or that props/ref injected by an outer `render`
- * trigger (the component's own documented contract - see its docstring)
- * still reach the real interactive element through it.
+ * `TooltipWrapper` always mounts `Tooltip`/`TooltipTrigger` now (`disabled`
+ * tracks the empty-label case) so the trigger's own DOM node - and any
+ * popover/menu anchored to it - never remounts when a caller toggles
+ * `label` between empty and non-empty (T11: this used to swap the returned
+ * root element type on that transition, which is why the notifications and
+ * avatar popovers anchored at the viewport origin instead of their trigger).
  */
 import { createRef, type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -24,9 +25,9 @@ const EMPTY_LABELS: ReadonlyArray<readonly [string, ReactNode]> = [
   ["undefined", undefined],
 ];
 
-describe("TooltipWrapper empty-label pass-through", () => {
+describe("TooltipWrapper empty-label suppression", () => {
   it.each(EMPTY_LABELS)(
-    "renders the child with no tooltip-trigger wiring for %s label",
+    "never presents a tooltip for %s label, even while focused",
     (_name, label) => {
       render(
         <TooltipWrapper
@@ -41,14 +42,72 @@ describe("TooltipWrapper empty-label pass-through", () => {
 
       const button = screen.getByRole("button", { name: "Target" });
       fireEvent.focus(button);
-      // `data-slot="tooltip-trigger"` is set synchronously by our own
-      // TooltipTrigger wrapper on every render, independent of open state -
-      // so this catches a tooltip that mounted but has not opened yet, which
-      // a bare `queryByRole("tooltip")` check would miss.
-      expect(button.getAttribute("data-slot")).not.toBe("tooltip-trigger");
       expect(screen.queryByRole("tooltip")).toBeNull();
+      expect(button.getAttribute("aria-describedby")).toBeNull();
     },
   );
+
+  it("stays suppressed even when the caller forces it open", () => {
+    render(
+      <TooltipWrapper
+        label={null}
+        open
+        side="top"
+        sideOffset={undefined}
+        align={undefined}
+      >
+        <button type="button">Target</button>
+      </TooltipWrapper>,
+    );
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("keeps the trigger's own DOM node across a label toggle (anchor identity)", () => {
+    const childRef = createRef<HTMLButtonElement>();
+    const view = render(
+      <TooltipWrapper
+        label={null}
+        side="top"
+        sideOffset={undefined}
+        align={undefined}
+      >
+        <button type="button" ref={childRef}>
+          Target
+        </button>
+      </TooltipWrapper>,
+    );
+    const node = childRef.current;
+    expect(node).not.toBeNull();
+
+    view.rerender(
+      <TooltipWrapper
+        label="Hint"
+        side="top"
+        sideOffset={undefined}
+        align={undefined}
+      >
+        <button type="button" ref={childRef}>
+          Target
+        </button>
+      </TooltipWrapper>,
+    );
+    expect(childRef.current).toBe(node);
+
+    view.rerender(
+      <TooltipWrapper
+        label={null}
+        side="top"
+        sideOffset={undefined}
+        align={undefined}
+      >
+        <button type="button" ref={childRef}>
+          Target
+        </button>
+      </TooltipWrapper>,
+    );
+    expect(childRef.current).toBe(node);
+  });
 
   it("keeps the child's own click handler working with no outer trigger", () => {
     const onClick = vi.fn();
@@ -71,19 +130,11 @@ describe("TooltipWrapper empty-label pass-through", () => {
   });
 
   it.each<[string, ReactNode]>([
-    ["an empty label (useRender's own merge, not the Tooltip stack)", null],
-    [
-      "a real label (through the Tooltip stack's TooltipTrigger render merge)",
-      "Hint",
-    ],
+    ["an empty label", null],
+    ["a real label", "Hint"],
   ])(
-    "composes with an outer render trigger for %s: the ref DropdownMenuTrigger injects and the child's own ref resolve to the same button, and both the trigger's open handler and the child's own click handler fire",
+    "composes with an outer render trigger for %s: the outer DropdownMenuTrigger ref and the child's own ref resolve to the same button, and both the trigger's open handler and the child's own click handler fire",
     (_name, label) => {
-      // Exercises the contract the component's own docstring names -
-      // `DropdownMenuTrigger render` injecting its ref/open-handler onto
-      // whatever TooltipWrapper renders. Either branch is the same central
-      // ref contract: an outer-injected ref and the child element's own ref
-      // must merge onto one real DOM node, not two separate clones.
       const onClick = vi.fn();
       const outerRef = createRef<HTMLElement>();
       const childRef = createRef<HTMLButtonElement>();

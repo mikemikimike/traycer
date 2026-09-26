@@ -180,6 +180,27 @@ describe("<UserMenu />", () => {
     result.cleanupClient();
   });
 
+  // Anchor identity regression: the trigger button must not remount on open.
+  it("keeps the avatar trigger as the same DOM node across the open transition (anchor identity)", async () => {
+    const host = buildHost();
+    const result = mountMenu(
+      host,
+      <UserMenu
+        userName="Ada Lovelace"
+        email="ada@example.com"
+        avatarUrl={null}
+        showAppSettings={false}
+      />,
+    );
+
+    const triggerBeforeOpen = await screen.findByTestId("user-menu-trigger");
+    fireEvent.click(triggerBeforeOpen);
+
+    expect(await screen.findByTestId("user-menu-content")).not.toBeNull();
+    expect(screen.getByTestId("user-menu-trigger")).toBe(triggerBeforeOpen);
+    result.cleanupClient();
+  });
+
   // H10: the item is always there (no gate on showAppSettings or anything
   // else) and opens the avatar Drafts dialog through the real store.
   it("opens the Drafts dialog and closes the menu", async () => {

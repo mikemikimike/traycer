@@ -215,6 +215,11 @@ if (runsFirstShard) {
       exitCode,
       runBrowserRegression("scripts/portal-lifecycle-gate.mjs"),
     );
+    // Real header/composer triggers must retain their anchors when tooltip labels change.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/real-app-anchor-gate.mjs"),
+    );
     // NOT here, deliberately, and each for its own reason:
     // - `scripts/window-host-modal-alignment-browser.mjs` measures the
     //   local-bootstrap body against ONE LEFT EDGE (A1/A2/A5/PC4) - the design

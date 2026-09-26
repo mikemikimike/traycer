@@ -29,17 +29,10 @@ interface TooltipWrapperProps {
   readonly collisionPadding?: number;
 }
 
-// Transparent wrapper: when `label` is empty/null, renders its child directly so
-// any props/ref injected by an outer `asChild` trigger (e.g.
-// `DropdownMenuTrigger asChild`) flow through to the inner child. Otherwise
-// renders the tooltip stack with the same forwarding via
-// `TooltipTrigger render`.
-//
-// We deliberately keep `TooltipWrapperProps` narrow at the call-site, but the
-// runtime `props` object also carries whatever `React.cloneElement` injects
-// when this component is the immediate child of an outer `asChild` slot
-// (`onClick`, `onPointerDown`, `ref`, etc.). The rest-spread forwards those
-// to the rendered child/TooltipTrigger so they reach the real interactive element.
+// Keep the trigger's ancestry stable when callers hide its label on open.
+// Returning the bare child would remount a nested popup trigger and leave
+// Base positioning against its detached anchor. Injected render props/ref
+// still flow through to the same interactive element for either label state.
 export function TooltipWrapper(props: TooltipWrapperProps) {
   const {
     children,
@@ -66,22 +59,23 @@ export function TooltipWrapper(props: TooltipWrapperProps) {
   const child = useRender({
     render: React.isValidElement(children) ? children : undefined,
     ref,
-    props: emptyLabel ? rest : {},
     enabled: React.isValidElement(children),
   });
-  if (emptyLabel || child === null) return child;
+  if (child === null) return null;
   return (
-    <Tooltip open={open} onOpenChange={onOpenChange}>
+    <Tooltip disabled={emptyLabel} open={open} onOpenChange={onOpenChange}>
       <TooltipTrigger {...rest} render={child} />
-      <TooltipContent
-        side={side}
-        sideOffset={sideOffset}
-        align={align}
-        collisionBoundary={collisionBoundary ?? undefined}
-        collisionPadding={collisionPadding}
-      >
-        {label}
-      </TooltipContent>
+      {!emptyLabel && (
+        <TooltipContent
+          side={side}
+          sideOffset={sideOffset}
+          align={align}
+          collisionBoundary={collisionBoundary ?? undefined}
+          collisionPadding={collisionPadding}
+        >
+          {label}
+        </TooltipContent>
+      )}
     </Tooltip>
   );
 }
