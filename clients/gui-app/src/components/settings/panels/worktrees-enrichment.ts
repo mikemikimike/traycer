@@ -29,7 +29,6 @@ import {
   keepResolvedEnrichmentRows,
   perPathEnrichmentQueryKey,
   useBatchedEnrichmentQueries,
-  WORKTREE_ENRICH_BATCH_LIMIT,
   WORKTREE_ENRICHMENT_GC_MS,
   type WorktreeEnrichmentBatcher,
 } from "@/components/settings/panels/worktrees-enrichment-batcher";
@@ -703,12 +702,7 @@ export function useWorktreeActivityEnrichment(
   const readiness = useReactiveHostReadiness(client);
   const batcher = useMemo(
     () =>
-      client === null
-        ? null
-        : createWorktreeEnrichmentBatcherForClient(
-            client,
-            WORKTREE_ENRICH_BATCH_LIMIT,
-          ),
+      client === null ? null : createWorktreeEnrichmentBatcherForClient(client),
     [client],
   );
   // One enrichment query per on-screen path - the cache identity is the path

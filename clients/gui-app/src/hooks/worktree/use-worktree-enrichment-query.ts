@@ -13,7 +13,6 @@ import type {
 import {
   perPathEnrichmentQueryOptions,
   sharedWorktreeEnrichmentBatcher,
-  WORKTREE_BACKGROUND_ENRICHMENT_STALE_MS,
 } from "@/components/settings/panels/worktrees-enrichment-batcher";
 import { useReactiveHostReadiness } from "@/hooks/host/use-reactive-host-readiness";
 import type { HostRpcRegistry } from "@/lib/host";
@@ -98,11 +97,9 @@ export function useWorktreeEnrichmentForClient(
         path,
         batcher,
         enabled: queriesEnabled,
-        // Longer than the app default: a navigation's remount no longer
-        // re-probes every row. A `worktree.changed` frame and Refresh still
-        // re-probe at once; a PR fact the host warmed in the background reaches
-        // these surfaces on the next remount after this.
-        staleTime: WORKTREE_BACKGROUND_ENRICHMENT_STALE_MS,
+        // The app default: a remount after it re-probes, so a PR fact the
+        // host warmed in the background still reaches these surfaces.
+        staleTime: null,
       }),
     ),
     combine: combineEnrichmentResults,
