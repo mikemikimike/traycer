@@ -1,4 +1,15 @@
-// AppHeader placement regression. Run: bun scripts/real-app-anchor-gate.mjs --out DIR
+// AppHeader placement + stay-open regression. Run: bun scripts/real-app-anchor-gate.mjs --out DIR
+//
+// Negative controls (each must FAIL the gate; they are not gate modes):
+//  - pre-fix source, run against the unmodified fixture:
+//      ANCHOR_GATE_USER_MENU_SOURCE=<saved user-menu.tsx>
+//      ANCHOR_GATE_TOOLTIP_SOURCE=<saved tooltip-wrapper.tsx>
+//      ANCHOR_GATE_TOOLTIP_PRIMITIVE_SOURCE=<saved ui/tooltip.tsx>
+//  - assertion sensitivity, fault injection in the driver:
+//      --fault close-after-placement   presses Escape once the popup is placed,
+//      so EVERY case's stay-open assertions must fail. It proves the
+//      assertions can fail; it says nothing about which cases the pre-fix
+//      source breaks.
 import assert from "node:assert/strict";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -23,6 +34,27 @@ const outDir = outIndex >= 0 ? args[outIndex + 1] : null;
 const caseIndex = args.indexOf("--case");
 const caseFilter = caseIndex >= 0 ? args[caseIndex + 1] : "";
 assert(outIndex < 0 || outDir, "--out requires a directory");
+const faultIndex = args.indexOf("--fault");
+const fault = faultIndex >= 0 ? args[faultIndex + 1] : null;
+assert(
+  fault === null || fault === "close-after-placement",
+  "--fault only supports close-after-placement",
+);
+const controls = {
+  fault,
+  tooltipSource: process.env.ANCHOR_GATE_TOOLTIP_SOURCE ?? null,
+  tooltipPrimitiveSource:
+    process.env.ANCHOR_GATE_TOOLTIP_PRIMITIVE_SOURCE ?? null,
+  userMenuSource: process.env.ANCHOR_GATE_USER_MENU_SOURCE ?? null,
+};
+
+// Real users hold a click ~100-200ms. Base opens on mousedown, so a handler
+// that toggles on the release closes the menu it just opened - a zero-length
+// press/release hides it.
+const CLICK_HOLD_MS = 150;
+// TooltipProvider's default delay is 500ms.
+const TOOLTIP_DELAY_MS = 500;
+const SETTLE_MS = 350;
 
 async function findFreePort() {
   return new Promise((resolvePort, reject) => {
@@ -175,6 +207,7 @@ async function clickSelector(client, selector) {
     buttons: 1,
     clickCount: 1,
   });
+  await delay(CLICK_HOLD_MS);
   await client.send("Input.dispatchMouseEvent", {
     type: "mouseReleased",
     x,
@@ -226,6 +259,74 @@ async function screenshot(client, path) {
   await writeFile(path, Buffer.from(data, "base64"));
 }
 
+function awaitRafs(client, count) {
+  return evaluate(
+    client,
+    `new Promise((resolve) => { let n = ${count}; const tick = () => (--n <= 0 ? resolve() : requestAnimationFrame(tick)); requestAnimationFrame(tick); })`,
+  );
+}
+
+async function moveMouse(client, x, y) {
+  await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+}
+
+async function pressEscape(client) {
+  for (const type of ["keyDown", "keyUp"]) {
+    await client.send("Input.dispatchKeyEvent", {
+      type,
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
+  }
+}
+
+function sampleOpen(client, triggerSelector, popupSelector) {
+  return evaluate(
+    client,
+    `({ same: window.anchorTrigger === document.querySelector(${JSON.stringify(triggerSelector)}), expanded: window.anchorTrigger.getAttribute("aria-expanded"), presented: window.anchorGate.isPresented(${JSON.stringify(popupSelector)}), tooltipShown: document.querySelector('[data-slot="tooltip-content"]') !== null })`,
+  );
+}
+
+// The popup must survive what happens right after opening: the click release,
+// time, animation frames, and the pointer resting on (or returning to) the
+// trigger past the tooltip delay - while no tooltip shows over it.
+async function sampleStayOpen(client, triggerSelector, popupSelector) {
+  if (fault === "close-after-placement") await pressEscape(client);
+  const sample = () => sampleOpen(client, triggerSelector, popupSelector);
+  const stayOpen = {};
+  await awaitRafs(client, 5);
+  await delay(SETTLE_MS);
+  stayOpen.settled = await sample();
+  const rect = await rectOf(client, triggerSelector);
+  const x = rect.x + rect.width / 2;
+  const y = rect.y + rect.height / 2;
+  await moveMouse(client, x, y);
+  await delay(TOOLTIP_DELAY_MS + 200);
+  await awaitRafs(client, 3);
+  stayOpen.pointerRest = await sample();
+  await moveMouse(client, 10, 700);
+  await delay(100);
+  await moveMouse(client, x, y);
+  await delay(TOOLTIP_DELAY_MS + 200);
+  await awaitRafs(client, 3);
+  stayOpen.pointerReturn = await sample();
+  return stayOpen;
+}
+
+function assertStaysOpen(name, stayOpen) {
+  for (const [phase, snap] of Object.entries(stayOpen)) {
+    assert(
+      snap.same && snap.expanded === "true" && snap.presented,
+      `${name} stay-open ${phase}: popup closed or trigger replaced: ${JSON.stringify(snap)}`,
+    );
+    assert(
+      !snap.tooltipShown,
+      `${name} stay-open ${phase}: tooltip is showing over the open popup`,
+    );
+  }
+}
+
 async function runCase(
   client,
   origin,
@@ -263,15 +364,27 @@ async function runCase(
     await focusAndPressKey(client, triggerSelector, "ArrowDown");
   else throw new Error(`Unknown gesture: ${gesture}`);
 
-  const placement = await evaluate(client, `window.anchorGate.finish()`);
+  // Evidence first: a popup that closes itself can make `finish()` reject, and
+  // the record must still carry the stay-open samples.
+  let placement = null;
+  let placementError = null;
+  try {
+    placement = await evaluate(client, `window.anchorGate.finish()`);
+  } catch (error) {
+    placementError = String(error);
+  }
+  const stayOpen = await sampleStayOpen(client, triggerSelector, popupSelector);
   const identity = await evaluate(
     client,
     `({ same: window.anchorTrigger === document.querySelector(${JSON.stringify(triggerSelector)}), connected: window.anchorTrigger.isConnected, originalRect: window.anchorTrigger.getBoundingClientRect().toJSON(), activeElement: document.activeElement?.outerHTML.slice(0,200) })`,
   );
   const record = {
     name,
+    controls,
     before,
     placement,
+    placementError,
+    stayOpen,
     identity,
     exceptions: [...exceptions],
   };
@@ -289,6 +402,10 @@ async function runCase(
     exceptions.length === 0,
     `${name}: page threw: ${exceptions.join("\n")}`,
   );
+
+  console.log(`  stay-open=${JSON.stringify(stayOpen)}`);
+  assertStaysOpen(name, stayOpen);
+  assert(placement !== null, `${name}: ${placementError}`);
 
   console.log(`  trigger before=${JSON.stringify(before)}`);
   console.log(`  first placement=${JSON.stringify(placement.first)}`);
@@ -352,11 +469,7 @@ async function runNarrowToggleCase(client, origin, kind, gesture, exceptions) {
   else await focusAndPressKey(client, triggerSelector, "Enter");
   await waitForSelector(client, popupSelector);
 
-  const awaitRafs = (count) =>
-    evaluate(
-      client,
-      `new Promise((resolve) => { let n = ${count}; const tick = () => (--n <= 0 ? resolve() : requestAnimationFrame(tick)); requestAnimationFrame(tick); })`,
-    );
+  const stayOpen = await sampleStayOpen(client, triggerSelector, popupSelector);
   const identity = () =>
     evaluate(
       client,
@@ -367,16 +480,31 @@ async function runNarrowToggleCase(client, origin, kind, gesture, exceptions) {
     client,
     "window.anchorGate.setComposerNarrow(true); undefined",
   );
-  await awaitRafs(2);
+  await awaitRafs(client, 2);
   const afterNarrow = await identity();
+  // The narrow context can flip trigger labels while the popup is open, so the
+  // stay-open checks must also run in that state, not only before the toggle.
+  const narrowStayOpen = await sampleStayOpen(
+    client,
+    triggerSelector,
+    popupSelector,
+  );
   await evaluate(
     client,
     "window.anchorGate.setComposerNarrow(false); undefined",
   );
-  await awaitRafs(2);
+  await awaitRafs(client, 2);
   const afterWide = await identity();
 
-  const record = { name, afterNarrow, afterWide, exceptions: [...exceptions] };
+  const record = {
+    name,
+    controls,
+    stayOpen,
+    narrowStayOpen,
+    afterNarrow,
+    afterWide,
+    exceptions: [...exceptions],
+  };
   if (outDir !== null) {
     await writeFile(
       resolve(outDir, `${name.replaceAll("/", "-")}.json`),
@@ -387,6 +515,8 @@ async function runNarrowToggleCase(client, origin, kind, gesture, exceptions) {
     exceptions.length === 0,
     `${name}: page threw: ${exceptions.join("\n")}`,
   );
+  assertStaysOpen(name, stayOpen);
+  assertStaysOpen(`${name} (narrow)`, narrowStayOpen);
   for (const [phase, snap] of [
     ["narrow", afterNarrow],
     ["wide", afterWide],

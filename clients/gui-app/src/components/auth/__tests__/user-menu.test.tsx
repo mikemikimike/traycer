@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -172,11 +173,41 @@ describe("<UserMenu />", () => {
     );
 
     const trigger = await screen.findByTestId("user-menu-trigger");
-    fireEvent.click(trigger);
+    await userEvent.click(trigger);
 
     const identity = await screen.findByTestId("user-menu-identity");
     expect(identity.textContent).toContain("Ada Lovelace");
     expect(identity.textContent).toContain("ada@example.com");
+    result.cleanupClient();
+  });
+
+  // Regression: Base opens on mousedown (deferred one frame), so a click handler
+  // that toggles `open` on release closes the menu it just opened. Hold the
+  // press until Base's frame lands, then release, as a real ~150ms click does;
+  // `userEvent.click` presses and releases too fast to expose it.
+  it("stays open after a held press and release on the avatar trigger", async () => {
+    const host = buildHost();
+    const result = mountMenu(
+      host,
+      <UserMenu
+        userName="Ada Lovelace"
+        email="ada@example.com"
+        avatarUrl={null}
+        showAppSettings={false}
+      />,
+    );
+
+    const user = userEvent.setup();
+    const trigger = await screen.findByTestId("user-menu-trigger");
+    await user.pointer({ keys: "[MouseLeft>]", target: trigger });
+    await waitFor(() => {
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    });
+    await user.pointer({ keys: "[/MouseLeft]" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("user-menu-content")).toBeTruthy();
     result.cleanupClient();
   });
 
@@ -194,7 +225,7 @@ describe("<UserMenu />", () => {
     );
 
     const triggerBeforeOpen = await screen.findByTestId("user-menu-trigger");
-    fireEvent.click(triggerBeforeOpen);
+    await userEvent.click(triggerBeforeOpen);
 
     expect(await screen.findByTestId("user-menu-content")).not.toBeNull();
     expect(screen.getByTestId("user-menu-trigger")).toBe(triggerBeforeOpen);
@@ -215,7 +246,7 @@ describe("<UserMenu />", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByTestId("user-menu-trigger"));
+    await userEvent.click(await screen.findByTestId("user-menu-trigger"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Drafts" }));
 
     expect(useDesktopDialogStore.getState().activeDialog).toBe("drafts");
@@ -241,7 +272,7 @@ describe("<UserMenu />", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByTestId("user-menu-trigger"));
+    await userEvent.click(await screen.findByTestId("user-menu-trigger"));
     await screen.findByTestId("user-menu-identity");
 
     expect(screen.queryByTestId("user-menu-manage-subscription")).toBeNull();
@@ -262,7 +293,7 @@ describe("<UserMenu />", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByTestId("user-menu-trigger"));
+    await userEvent.click(await screen.findByTestId("user-menu-trigger"));
     await screen.findByTestId("user-menu-identity");
 
     expect(screen.getByTestId("user-menu-manage-subscription")).toBeTruthy();
@@ -281,7 +312,7 @@ describe("<UserMenu />", () => {
       />,
     );
 
-    fireEvent.click(
+    await userEvent.click(
       await screen.findByRole("button", { name: "Open user menu" }),
     );
 
@@ -310,7 +341,7 @@ describe("<UserMenu />", () => {
 
     expect(isSuppressed()).toBe(false);
 
-    fireEvent.click(trigger);
+    await userEvent.click(trigger);
     expect(await screen.findByTestId("user-menu-content")).toBeTruthy();
     expect(isSuppressed()).toBe(true);
 
@@ -339,7 +370,7 @@ describe("<UserMenu />", () => {
     );
 
     const trigger = await screen.findByTestId("user-menu-trigger");
-    fireEvent.click(trigger);
+    await userEvent.click(trigger);
     const signOut = await screen.findByTestId("user-menu-sign-out");
     fireEvent.click(signOut);
 
@@ -372,7 +403,7 @@ describe("<UserMenu />", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByTestId("user-menu-trigger"));
+    await userEvent.click(await screen.findByTestId("user-menu-trigger"));
     fireEvent.click(await screen.findByTestId("user-menu-sign-out"));
     fireEvent.click(await screen.findByTestId("confirm-cancel"));
 

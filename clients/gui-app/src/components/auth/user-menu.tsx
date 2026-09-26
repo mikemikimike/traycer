@@ -32,12 +32,7 @@ export interface UserMenuProps {
   readonly showAppSettings: boolean;
 }
 
-/**
- * Avatar-triggered identity menu. Controlled open state is intentional:
- * jsdom doesn't implement the full PointerEvent path Radix drives, so
- * without the explicit `open` the Radix trigger wouldn't fire under
- * tests. Outside-click + Escape dismissal still come from Radix.
- */
+/** Avatar-triggered identity menu; controlled state also suppresses its tooltip. */
 export function UserMenu(props: UserMenuProps) {
   const runnerHost = useRunnerHost();
   const openLink = useOpenLink();
@@ -73,9 +68,6 @@ export function UserMenu(props: UserMenuProps) {
                 aria-label="Open user menu"
                 data-testid="user-menu-trigger"
                 className="rounded-full"
-                onClick={() => {
-                  setOpen((value) => !value);
-                }}
               >
                 <Avatar size="sm">
                   {props.avatarUrl !== null ? (

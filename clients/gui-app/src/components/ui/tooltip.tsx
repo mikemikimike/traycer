@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils";
 import { useSafeAreaCollisionPadding } from "@/components/ui/safe-area-collision-padding";
 import { usePortalConcealed } from "@/components/ui/portal-concealment-context";
 
+const OPEN_POPUP_TRIGGER =
+  '[data-popup-open], [aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"]';
+
 const TooltipProviderPresence = React.createContext(false);
 // Base 1.8 supplies hover behavior but no tooltip role or description link.
 const TooltipDescription = React.createContext({ id: "", open: false });
@@ -46,6 +49,17 @@ function Tooltip({
         open={open}
         defaultOpen={defaultOpen}
         onOpenChange={(nextOpen, details) => {
+          // Tooltip and popup triggers may share a node, wrap one another,
+          // or regain a label when a composer narrows. Suppress help only
+          // within that open popup's trigger composition.
+          if (
+            nextOpen &&
+            (details.trigger?.closest(OPEN_POPUP_TRIGGER) ||
+              details.trigger?.querySelector(OPEN_POPUP_TRIGGER))
+          ) {
+            details.cancel();
+            return;
+          }
           onOpenChange?.(nextOpen, details);
           if (!details.isCanceled) setUncontrolledOpen(nextOpen);
         }}

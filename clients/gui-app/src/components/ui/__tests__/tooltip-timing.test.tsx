@@ -13,6 +13,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Tooltip,
@@ -253,5 +254,57 @@ describe("tooltip shared skip window", () => {
       vi.advanceTimersByTime(1);
     });
     expect(screen.getByText("Tip two")).toBeTruthy();
+  });
+});
+
+describe("tooltip on expanded triggers", () => {
+  function openAfterDelay(trigger: ReactElement): boolean {
+    vi.useFakeTimers();
+    render(
+      <TooltipProvider delay={500}>
+        <Tooltip>
+          <TooltipTrigger render={trigger} />
+          <TooltipContent>Tip</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>,
+    );
+    const button = screen.getByRole("button", { name: "Trigger" });
+    act(() => {
+      hoverIn(button);
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    return isOpen();
+  }
+
+  it("stays closed on an expanded popup trigger (aria-haspopup + aria-expanded)", () => {
+    expect(
+      openAfterDelay(
+        <button type="button" aria-haspopup="menu" aria-expanded="true">
+          Trigger
+        </button>,
+      ),
+    ).toBe(false);
+  });
+
+  it("still opens on a collapsed popup trigger", () => {
+    expect(
+      openAfterDelay(
+        <button type="button" aria-haspopup="menu" aria-expanded="false">
+          Trigger
+        </button>,
+      ),
+    ).toBe(true);
+  });
+
+  it("still opens on an expanded disclosure trigger (aria-expanded without aria-haspopup)", () => {
+    expect(
+      openAfterDelay(
+        <button type="button" aria-expanded="true">
+          Trigger
+        </button>,
+      ),
+    ).toBe(true);
   });
 });
