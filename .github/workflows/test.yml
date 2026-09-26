@@ -301,12 +301,14 @@ jobs:
       - name: Exit-code repro loop
         run: bun run --filter @traycer-clients/traycer-cli smoke:exit-code
       # The only Windows run of the host-lock verifying read against a real
-      # process whose exact read is DENIED (session 0, or higher integrity). It
-      # self-skips when this runner can read every process, so its value is on
-      # an unelevated runner; it is here so the file is not Linux-skipped only.
-      - name: Denied-read fallback, a real session-0 process
+      # process whose exact read is DENIED. The runner is elevated: its token
+      # holds SeDebugPrivilege, and every PowerShell the reader starts would
+      # enable it and read every process. The wrapper removes the privilege
+      # from the token this run inherits; the test fails under CI if it is
+      # still held.
+      - name: Denied-read fallback, a real denied read
         working-directory: clients/shared
-        run: bunx vitest run host-lock/__tests__/process-identity-windows-denied-read.win32.test.ts
+        run: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File host-lock/__tests__/run-without-sedebug.ps1 bunx vitest run host-lock/__tests__/process-identity-windows-denied-read.win32.test.ts
 
   # macOS job: the desktop workspace's packaging/signing-adjacent assertions
   # (prepack unit suite + the real electron-builder pack in test:packaging)

@@ -173,6 +173,27 @@ vi.mock("../../../host/pid-metadata", () => ({
   readHostPidMetadataEvidence: async () => ({ kind: "absent" as const }),
 }));
 
+// The real logger appends to the invoking user's actual ~/.traycer log file -
+// stub it so the failed-kill WARN gating pins stay hermetic and assertable,
+// the same discipline macos.test.ts and desktop-agent-shutdown.test.ts already
+// apply to this exact module. Every other site in this file logs through
+// `debug`/`info`/`error`, and no existing test reads any of them back, so
+// replacing all four with spies (three no-op, one assertable) changes nothing
+// observable elsewhere in this suite.
+const loggerMock = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock("../../../logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../logger")>();
+  return {
+    ...actual,
+    createCliLogger: () => ({
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: loggerMock.warn,
+      error: vi.fn(),
+    }),
+  };
+});
+
 // Test isolation: `hiddenHostLauncherPath(label)` resolves through
 // `cliInstallHomeDir` to `join(os.homedir(), ".traycer", "cli", ...)` (via
 // `@traycer/protocol/config/installation`), and `os.homedir()` ignores
@@ -2724,6 +2745,305 @@ describe("killHostProcessTree convergence loop", () => {
         code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
         details: { unattributedPids: [777] },
       });
+    });
+  });
+});
+
+// The fix for a field-proven defect: the old code WARNed "left targets
+// unreached" for EVERY kill outcome other than `killed`/`gone`, including
+// `failed: Win32Exception` - which is exactly what `Kill()` throws on a
+// process that is already terminating, and killing a console client's last
+// process hands its console host precisely that state. The WARN then named a
+// pid no later round selected again. The fix defers judgment on a
+// `failed...` outcome to the scan that follows: `runHandleBoundKillScript` no
+// longer warns immediately for it (only `reused`/`unverifiable` still do),
+// `killProcessIdentities` returns it as a `WindowsFailedKill`, and the loop
+// hands the accumulated set to `reportFailedKillsStillRunning` right after the
+// NEXT scan - which warns only for a target that scan still lists under the
+// SAME (processId, created) identity, or for all of them when the scan
+// itself could not be read.
+describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next scan", () => {
+  beforeEach(() => {
+    mocks.readHostPidMetadata.mockReset();
+    mocks.readHostPidMetadata.mockResolvedValue(null);
+    mocks.removeHostPidMetadata.mockReset();
+    mocks.removeHostPidMetadata.mockResolvedValue(undefined);
+    loggerMock.warn.mockReset();
+  });
+
+  // The kill script's own JSON shape (`ProcessId`/`Outcome`), matching what
+  // `parseWindowsKillOutcomeJson` above already pins - shared here so every
+  // fixture below states its outcomes as plain (pid, outcome) pairs.
+  function killOutcomeJson(
+    outcomes: readonly {
+      readonly processId: number;
+      readonly outcome: string;
+    }[],
+  ): string {
+    return JSON.stringify(
+      outcomes.map((outcome) => ({
+        ProcessId: outcome.processId,
+        Outcome: outcome.outcome,
+      })),
+    );
+  }
+
+  it("F-CLI-FAILED-WARN: a failed-kill target absent from the next scan gets neither WARN, and the stop resolves", async () => {
+    // Round 0 kills 501 and the kill script reports `failed: Win32Exception`.
+    // Round 1's scan does not list 501 at all - it really is gone, exactly
+    // the field case (a console host that finished exiting on its own once
+    // its last client's Kill() raced it). Converges with nothing left.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isKillCall(command, args)) {
+        return success(
+          killOutcomeJson([
+            { processId: 501, outcome: "failed: Win32Exception" },
+          ]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(killedPids(calls)).toEqual([501]);
+    expect(scanCalls(calls)).toHaveLength(2);
+    // Neither WARN fired for 501: not the immediate "unreached" one (the
+    // `failed...` outcome is excluded from that filter now), and not the
+    // scan-confirmed one (the next scan no longer lists 501 at all).
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+
+    // Ablation abl-cli-gate: drop `!outcome.outcome.startsWith("failed"),`
+    // (and its preceding `&&`) from the `unreached` filter in
+    // `runHandleBoundKillScript` -> this test reddens: round 0's own
+    // "failed: Win32Exception" outcome falls back into `unreached` and WARNs
+    // immediately, naming 501, before the next scan ever runs.
+  });
+
+  it("F-CLI-FAILED-WARN (control): a failed-kill target the next scan still lists under the SAME identity gets exactly one scan-confirmed WARN, and a re-targeted kill still converges", async () => {
+    // Round 0 kills 501, reported `failed: Win32Exception`. Round 1's scan
+    // still lists 501 under the SAME `created` (1000) - it really is still
+    // running. That is the one case the scan-confirmed WARN exists for.
+    // Round 1 re-targets 501 and this time the kill lands cleanly; round 2's
+    // scan is empty and the stop still resolves.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    let killCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        if (scanCount === 2) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isKillCall(command, args)) {
+        killCount += 1;
+        return success(
+          killOutcomeJson([
+            {
+              processId: 501,
+              outcome: killCount === 1 ? "failed: Win32Exception" : "killed",
+            },
+          ]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(killedPids(calls)).toEqual([501, 501]);
+    expect(scanCalls(calls)).toHaveLength(3);
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
+      "Windows host kill round left targets running after a failed kill",
+    );
+    expect(loggerMock.warn.mock.calls[0]?.[1]).toEqual({
+      targets: 1,
+      outcomes: ["501=failed: Win32Exception"],
+    });
+
+    // Ablation abl-cli-confirm: replace `if (running.length === 0) return;`
+    // with `return;` in `reportFailedKillsStillRunning` -> this test reddens:
+    // the scan-confirmed WARN never fires even though the same identity is
+    // still listed, so `loggerMock.warn` is never called.
+  });
+
+  it("F-CLI-FAILED-WARN (control): a failed-kill target whose next scan lists a DIFFERENT `created` (a reused pid) gets no failed-kill WARN", async () => {
+    // Round 0 kills 501 (born 1000), reported `failed: Win32Exception`.
+    // Round 1's scan lists 501 again, but born at 2000 - a fresh, unrelated
+    // process that landed on the recycled pid. `reportFailedKillsStillRunning`
+    // matches on (processId, created) together, so this is not "the same
+    // target still running" and must not WARN. The new occupant is an
+    // ordinary slot-matched process and is killed like any other; round 2's
+    // scan is empty and the stop resolves.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        if (scanCount === 2) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 2000, slot: true },
+            ]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isKillCall(command, args)) {
+        return success(
+          killOutcomeJson([{ processId: 501, outcome: "killed" }]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(killedPids(calls)).toEqual([501, 501]);
+    expect(scanCalls(calls)).toHaveLength(3);
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+
+  it("F-CLI-FAILED-WARN: an unreadable scan after a failed kill WARNs naming the target (every failed kill is 'still running' when the scan cannot prove otherwise), and the stop still refuses to enumerate", async () => {
+    // Round 0 kills 501, reported `failed: Win32Exception`. Round 1's scan
+    // itself fails (a non-authority throw, same as `scanSlotProcessTable`'s
+    // other unreadable-scan pins), so it resolves `null` rather than a table.
+    // `reportFailedKillsStillRunning` treats a null scan as proving nothing
+    // gone, so every outstanding failed kill WARNs - and the stop rejects
+    // with the existing "could not enumerate" refusal, exactly as the other
+    // unreadable-scan pins in this file already exercise for a scan with no
+    // failed-kill history.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) {
+          return success(
+            tableJson([
+              { processId: 501, parentProcessId: 1, created: 1000, slot: true },
+            ]),
+          );
+        }
+        throw new Error("powershell scan timed out");
+      }
+      if (isKillCall(command, args)) {
+        return success(
+          killOutcomeJson([
+            { processId: 501, outcome: "failed: Win32Exception" },
+          ]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).rejects.toMatchObject({
+      code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+      message: expect.stringContaining("could not enumerate"),
+    });
+
+    expect(scanCalls(calls)).toHaveLength(2);
+    expect(killedPids(calls)).toEqual([501]);
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
+      "Windows host kill round left targets running after a failed kill",
+    );
+    expect(loggerMock.warn.mock.calls[0]?.[1]).toEqual({
+      targets: 1,
+      outcomes: ["501=failed: Win32Exception"],
+    });
+  });
+
+  it("F-CLI-FAILED-WARN (kept behaviour): a `reused` outcome still WARNs immediately in its own round, before any next scan", async () => {
+    // 601's kill script reports `reused` - a different process now wears the
+    // pid - which is not a `failed...` outcome and must keep the immediate
+    // "unreached" WARN this mechanism has always given it; only `failed...`
+    // moved to the scan-confirmed path. Round 1's scan is empty so the stop
+    // still resolves.
+    const calls: RecordedCall[] = [];
+    let scanCount = 0;
+    const runner: ProcessRunner = async (command, args) => {
+      calls.push({ command, args });
+      if (isScanCall(command, args)) {
+        scanCount += 1;
+        if (scanCount === 1) {
+          return success(
+            tableJson([{ processId: 601, parentProcessId: 1, slot: true }]),
+          );
+        }
+        return success(tableJson([]));
+      }
+      if (isKillCall(command, args)) {
+        return success(
+          killOutcomeJson([{ processId: 601, outcome: "reused" }]),
+        );
+      }
+      return success("");
+    };
+    const controller = createWindowsController(runner, noTimingDeps);
+
+    await expect(
+      controller.stop(serviceLabelFor("staging"), { force: false }),
+    ).resolves.toBeUndefined();
+
+    expect(killedPids(calls)).toEqual([601]);
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+    expect(loggerMock.warn.mock.calls[0]?.[0]).toBe(
+      "Windows host kill round left targets unreached",
+    );
+    expect(loggerMock.warn.mock.calls[0]?.[1]).toEqual({
+      targets: 1,
+      outcomes: ["601=reused"],
     });
   });
 });

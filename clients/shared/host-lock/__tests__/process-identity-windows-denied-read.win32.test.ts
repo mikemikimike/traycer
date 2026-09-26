@@ -13,16 +13,24 @@ import {
 // The real thing, on a real Windows machine. Section A and the seam-based
 // sibling prove the mechanism against a scripted `tasklist` / `powershell`;
 // this file proves the SAME code path against a real process this security
-// context genuinely cannot read exactly - a session-0 service when the
-// runner is unelevated. An ELEVATED runner can read everything, so there is
-// no candidate to find; the one test below self-skips at runtime rather than
-// asserting nothing.
+// context genuinely cannot read exactly - its own DACL-denied child, or a
+// session-0 service when the runner is unelevated.
+//
+// On an elevated token (the GitHub Windows runner's own) SeDebugPrivilege is
+// held, and the reader's fresh PowerShell enables it during its own startup
+// and reads everything - a DACL deny binds nothing, so there is no denied
+// read left to find. So this file must run through `run-without-sedebug.ps1`,
+// which removes the privilege from the token the whole run inherits; a
+// removed privilege cannot be re-enabled by any descendant. The first test
+// below checks that first: it fails under `CI` if the privilege is still
+// held (naming the wrapper), and skips elsewhere with the same reason rather
+// than asserting nothing.
 //
 // Read-only and additive: nothing here kills or spawns a tracked process -
 // only `powershell` itself, to enumerate `Get-Process` and to answer
-// `Get-WmiObject` for a pid this test never otherwise touches. This file only
-// runs on Windows (`describe.skipIf` below) and is wired into the Windows CI
-// job separately.
+// `Get-WmiObject` for a pid this test never otherwise touches, plus its own
+// node child and a `whoami`. This file only runs on Windows
+// (`describe.skipIf` below) and is wired into the Windows CI job separately.
 
 const FIND_DENIED_READ_PID_SCRIPT = [
   "foreach ($p in Get-Process) {",
@@ -47,6 +55,41 @@ interface DeniedReadCandidate {
   readonly pid: number;
   readonly creationMicros: number;
 }
+
+type DeniedReadResult =
+  | { readonly kind: "candidate"; readonly candidate: DeniedReadCandidate }
+  | { readonly kind: "refused"; readonly exitCode: number | null };
+
+// `execFileSync` throws an Error augmented with `status` (the child's exit
+// code, or null on a timeout/signal) when the child exits non-zero.
+function exitCodeOfError(error: unknown): number | null {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number"
+  ) {
+    return error.status;
+  }
+  return null;
+}
+
+// Whether this process's token holds SeDebugPrivilege, enabled or not.
+// Every `powershell` the reader starts inherits the token, and a fresh
+// PowerShell enables SeDebug during its own startup (measured on a Windows
+// VM), so while the privilege is held a DACL deny binds nothing the reader
+// does and no denied read exists to find. `whoami` inherits the same token;
+// privilege names are not localised.
+function seDebugHeld(): boolean {
+  return execFileSync("whoami", ["/priv", "/fo", "csv", "/nh"], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 15_000,
+  }).includes('"SeDebugPrivilege"');
+}
+
+const SEDEBUG_HELD_REASON =
+  "this token holds SeDebugPrivilege, so every PowerShell the reader starts can read every process - run this file through run-without-sedebug.ps1, as the Windows CI step does";
 
 // Enumerates real, currently running processes and returns the first one
 // whose exact `.get_StartTime()` read is refused with ERROR_ACCESS_DENIED
@@ -92,7 +135,7 @@ afterEach(() => {
   }
 });
 
-function spawnDeniedReadChild(): DeniedReadCandidate | null {
+function spawnDeniedReadChild(): DeniedReadResult {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
     stdio: "ignore",
     windowsHide: true,
@@ -100,7 +143,7 @@ function spawnDeniedReadChild(): DeniedReadCandidate | null {
   const pid = child.pid;
   if (pid === undefined || pid <= 0) {
     child.kill();
-    return null;
+    return { kind: "refused", exitCode: null };
   }
   spawnedDeniedChildren.push(child);
   const scriptPath = fileURLToPath(
@@ -113,33 +156,35 @@ function spawnDeniedReadChild(): DeniedReadCandidate | null {
       ["-NoProfile", "-NonInteractive", "-File", scriptPath, String(pid)],
       { encoding: "utf8", windowsHide: true, timeout: 30_000 },
     );
-  } catch {
-    return null;
+  } catch (error) {
+    return { kind: "refused", exitCode: exitCodeOfError(error) };
   }
   const line = stdout
     .trim()
     .split(/\r?\n/)
     .filter((entry) => entry.includes("|"))
     .pop();
-  if (line === undefined) return null;
+  if (line === undefined) return { kind: "refused", exitCode: 0 };
   const separator = line.indexOf("|");
-  if (separator < 0) return null;
+  if (separator < 0) return { kind: "refused", exitCode: 0 };
   const parsedPid = Number(line.slice(0, separator));
   const creationMicros = parseWindowsWmiCreationDate(line.slice(separator + 1));
   return Number.isInteger(parsedPid) && parsedPid > 0 && creationMicros !== null
-    ? { pid: parsedPid, creationMicros }
-    : null;
+    ? { kind: "candidate", candidate: { pid: parsedPid, creationMicros } }
+    : { kind: "refused", exitCode: 0 };
 }
 
+// Exit-code legend for the DACL-deny child (`deny-process-query.ps1`): 2 =
+// DenyQuery failed, 3 = StartTime still readable (the DACL did not bind),
+// 4 = the read failed with a code other than 5, 5 = WMI has no
+// CreationDate, null = the script could not run.
 function requireDeniedReadCandidate(): DeniedReadCandidate {
   const owned = spawnDeniedReadChild();
-  if (owned !== null) return owned;
+  if (owned.kind === "candidate") return owned.candidate;
   const scanned = findDeniedReadCandidate();
   if (scanned !== null) return scanned;
   throw new Error(
-    process.env.CI
-      ? "no denied-read candidate under CI: DACL-deny child and session-0 scan both failed"
-      : "no process in this security context has a denied exact read",
+    `neither the DACL-deny child (exit=${String(owned.exitCode)}) nor the session-0 scan produced a candidate, with SeDebugPrivilege not held`,
   );
 }
 
@@ -169,7 +214,11 @@ function tokenFromUtcMicros(utcMicros: number, seventhDigit: string): string {
 describe.skipIf(process.platform !== "win32")(
   "matchLiveProcessStartIdentity: a real denied read on this Windows machine",
   () => {
-    it("resolves a real inaccessible process through WMI, and the exact reader stays primary-only", () => {
+    it("resolves a real inaccessible process through WMI, and the exact reader stays primary-only", (ctx) => {
+      const held = seDebugHeld();
+      if (held && process.env.CI) throw new Error(SEDEBUG_HELD_REASON);
+      ctx.skip(held, SEDEBUG_HELD_REASON);
+      if (held) return;
       const candidate = requireDeniedReadCandidate();
 
       const recordedToken = tokenFromUtcMicros(candidate.creationMicros, "5");

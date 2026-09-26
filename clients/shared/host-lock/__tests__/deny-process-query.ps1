@@ -7,7 +7,6 @@ public static class TraycerProcDacl {
   const uint READ_CONTROL = 0x00020000;
   const uint QUERY = 0x0400;
   const uint QUERY_LIMITED = 0x1000;
-  const uint TOKEN_ADJUST_PRIVILEGES = 0x0020;
   const uint TOKEN_QUERY = 0x0008;
   const uint SE_KERNEL_OBJECT = 6;
   const uint DACL_SECURITY_INFORMATION = 4;
@@ -26,18 +25,6 @@ public static class TraycerProcDacl {
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr t, int c, IntPtr b, int l, out int r);
   [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Auto)] static extern int SetEntriesInAcl(uint c, ref EXPLICIT_ACCESS e, IntPtr o, out IntPtr n);
   [DllImport("advapi32.dll", SetLastError=true)] static extern uint SetSecurityInfo(IntPtr h, uint ot, uint si, IntPtr ow, IntPtr g, IntPtr d, IntPtr s);
-  [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool LookupPrivilegeValue(string s, string n, out long l);
-  [StructLayout(LayoutKind.Sequential)] struct TOKEN_PRIVILEGES { public uint PrivilegeCount; public long Luid; public uint Attributes; }
-  [DllImport("advapi32.dll", SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr t, bool d, ref TOKEN_PRIVILEGES n, int l, IntPtr p, IntPtr r);
-  public static void DisableDebug() {
-    IntPtr tok;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out tok)) return;
-    TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
-    tp.PrivilegeCount = 1; tp.Attributes = 0;
-    if (!LookupPrivilegeValue(null, "SeDebugPrivilege", out tp.Luid)) { CloseHandle(tok); return; }
-    AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
-    CloseHandle(tok);
-  }
   public static bool DenyQuery(int pid) {
     IntPtr proc = OpenProcess(WRITE_DAC | READ_CONTROL, false, pid);
     if (proc == IntPtr.Zero) return false;
@@ -58,7 +45,6 @@ public static class TraycerProcDacl {
   }
 }
 '@
-[TraycerProcDacl]::DisableDebug()
 if (-not [TraycerProcDacl]::DenyQuery($TargetPid)) { exit 2 }
 try {
   $null = (Get-Process -Id $TargetPid).get_StartTime()

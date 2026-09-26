@@ -755,6 +755,10 @@ async function killVerifiedProcessTree(
     suspects: priorSuspects,
     protectedAncestors: priorProtected,
   };
+  // The previous round's kills that threw, for the next scan to confirm or
+  // clear (`reportFailedKillsStillRunning`). Every kill round is followed by
+  // a scan - the loop scans once more than it kills - so none goes unchecked.
+  let failedKills: readonly WindowsFailedKill[] = [];
   for (let round = 0; round <= WINDOWS_KILL_CONVERGENCE_ROUNDS; round += 1) {
     // BEFORE the scan, and that ordering is the soundness argument for the
     // whole carry-over: every victim this round selects is one the scan below
@@ -769,6 +773,8 @@ async function killVerifiedProcessTree(
     // that pid rather than admitting one it cannot support.
     const seenAliveAt = deps.now();
     const table = await scanSlotProcessTable(label, run);
+    reportFailedKillsStillRunning(failedKills, table, label);
+    failedKills = [];
     if (table === null) {
       // Before the first kill this refuses to start; after one it refuses to
       // claim the tree came down. Both are the same statement - we cannot see
@@ -876,7 +882,7 @@ async function killVerifiedProcessTree(
     // refuses to act on and the next round refuses to link anything to, which
     // is the right way for it to be wrong.
     const created = new Map(table.map((row) => [row.processId, row.created]));
-    await killProcessIdentities(
+    failedKills = await killProcessIdentities(
       orderWindowsKillsDescendantsFirst(pids, table).map((pid) => ({
         processId: pid,
         created: created.get(pid) ?? 0,
@@ -1021,10 +1027,12 @@ export interface WindowsKillTarget {
 }
 
 // The kill script's report on one target. Diagnostic only: the loop never acts
-// on it, because the next scan is the only evidence of what is still running.
-// `reused` is the case this mechanism exists for - the pid the scan selected
-// now belongs to a process born at a different time - and `unverifiable` is a
-// target whose creation time the scan could not read, which is never killed.
+// on it, because the next scan is the only evidence of what is still running -
+// a `failed` report waits for that scan before it is logged as a survivor
+// (`WindowsFailedKill`). `reused` is the case this mechanism exists for - the
+// pid the scan selected now belongs to a process born at a different time -
+// and `unverifiable` is a target whose creation time the scan could not read,
+// which is never killed.
 export interface WindowsKillOutcome {
   readonly processId: number;
   readonly outcome: string;
@@ -1063,8 +1071,9 @@ async function killProcessIdentities(
   targets: readonly WindowsKillTarget[],
   label: ServiceLabel,
   run: ProcessRunner,
-): Promise<void> {
+): Promise<WindowsFailedKill[]> {
   const startedAt = performance.now();
+  const failed: WindowsFailedKill[] = [];
   for (
     let start = 0;
     start < targets.length;
@@ -1078,15 +1087,64 @@ async function killProcessIdentities(
         "Windows host kill round ran out of time; the targets not yet sent wait for the next scan",
         { targets: targets.length, unsent: targets.length - start },
       );
-      return;
+      return failed;
     }
-    await runHandleBoundKillScript(
-      targets.slice(start, start + WINDOWS_KILL_TARGETS_PER_SCRIPT),
-      remainingMs,
-      label,
-      run,
+    failed.push(
+      ...(await runHandleBoundKillScript(
+        targets.slice(start, start + WINDOWS_KILL_TARGETS_PER_SCRIPT),
+        remainingMs,
+        label,
+        run,
+      )),
     );
   }
+  return failed;
+}
+
+// A target whose kill threw, with the identity it was targeted by. Not a
+// survivor on the script's word: `Kill()` on a process that is already
+// terminating throws a `Win32Exception` (TerminateProcess answers
+// STATUS_PROCESS_IS_TERMINATING as access denied), and killing a client hands
+// its console host exactly that state - it starts to exit on its own once its
+// last client is gone, while the script is still on its way to it. Seen on
+// Windows Server 2022: a `host restart` whose round reported
+// `failed: Win32Exception` for one of five targets completed with no survivor
+// refusal, so no later round selected that pid, and nothing held it later.
+// The host's own tree kill gates its WARN the same way
+// (`windowsFailedStillRunning` in traycer-host).
+interface WindowsFailedKill {
+  readonly processId: number;
+  readonly created: number;
+  readonly outcome: string;
+}
+
+// The previous round's failed kills, against the scan that follows them: WARN
+// only the targets that scan still lists under the identity they were
+// targeted by - every one of them when the scan could not be read, since none
+// is then proven gone. A target it no longer lists exited on its own, which
+// is what the kill was for.
+function reportFailedKillsStillRunning(
+  failed: readonly WindowsFailedKill[],
+  table: readonly WindowsProcessTableRow[] | null,
+  label: ServiceLabel,
+): void {
+  const running =
+    table === null
+      ? failed
+      : failed.filter((kill) =>
+          table.some(
+            (row) =>
+              row.processId === kill.processId && row.created === kill.created,
+          ),
+        );
+  if (running.length === 0) return;
+  createCliLogger(label.environment).warn(
+    "Windows host kill round left targets running after a failed kill",
+    {
+      targets: running.length,
+      outcomes: running.map((kill) => `${kill.processId}=${kill.outcome}`),
+    },
+  );
 }
 
 async function runHandleBoundKillScript(
@@ -1094,7 +1152,7 @@ async function runHandleBoundKillScript(
   timeoutMs: number,
   label: ServiceLabel,
   run: ProcessRunner,
-): Promise<void> {
+): Promise<WindowsFailedKill[]> {
   try {
     const result = await run(
       "powershell.exe",
@@ -1126,21 +1184,35 @@ async function runHandleBoundKillScript(
         exitCode: result.exitCode,
         stderr: result.stderr.trim().slice(0, 500),
       });
-      return;
+      return [];
     }
     const rendered = outcomes.map(
       (outcome) => `${outcome.processId}=${outcome.outcome}`,
     );
+    const outcomeOf = new Map(
+      outcomes.map((outcome) => [outcome.processId, outcome.outcome]),
+    );
+    const failed: WindowsFailedKill[] = [];
+    for (const target of targets) {
+      const outcome = outcomeOf.get(target.processId);
+      if (outcome !== undefined && outcome.startsWith("failed")) {
+        failed.push({ ...target, outcome });
+      }
+    }
     const unreached = outcomes.filter(
-      (outcome) => outcome.outcome !== "killed" && outcome.outcome !== "gone",
+      (outcome) =>
+        outcome.outcome !== "killed" &&
+        outcome.outcome !== "gone" &&
+        !outcome.outcome.startsWith("failed"),
     );
     if (unreached.length > 0) {
       // A target the kill did not reach and that may still be alive: a
-      // reused pid (the case this exists for, and rare), no identity to
-      // check, or a refused handle. EVERY target `reused` is the signature
-      // of the two creation-time sources disagreeing, which the live Windows
-      // run exists to rule out - and the one thing the survivor refusal the
-      // user sees cannot tell them.
+      // reused pid (the case this exists for, and rare), or no identity to
+      // check. EVERY target `reused` is the signature of the two
+      // creation-time sources disagreeing, which the live Windows run exists
+      // to rule out - and the one thing the survivor refusal the user sees
+      // cannot tell them. A refused kill (`failed: <type>`) is not named
+      // here: the next scan says whether it survived (`WindowsFailedKill`).
       logger.warn("Windows host kill round left targets unreached", {
         targets: targets.length,
         outcomes: rendered,
@@ -1151,12 +1223,14 @@ async function runHandleBoundKillScript(
         outcomes: rendered,
       });
     }
+    return failed;
   } catch (cause) {
     if (isServiceMutationAuthorityError(cause)) throw cause;
     createCliLogger(label.environment).debug(
       "Windows host kill round did not complete; the next scan decides",
       { targets: targets.length, cause: describeCause(cause) },
     );
+    return [];
   }
 }
 
