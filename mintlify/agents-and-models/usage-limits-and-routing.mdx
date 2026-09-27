@@ -1,0 +1,137 @@
+---
+title: "Usage limits and model routing"
+description: "See how much of each provider's usage limit is left, switch accounts when one runs low, check what your agents cost, and let Traycer route a blocked chat to another account or model."
+keywords: ['usage limits', 'rate limits', 'quota', 'status bar', 'switch profile', 'codex manual reset', 'usage', 'cost', 'tokens', 'model routing', 'fallback', 'switch back']
+---
+
+Most coding agents run on a subscription or an account with usage limits. Traycer reads those limits from each provider, shows them in the app, warns you in the composer when a chat's account is running low, and can move a blocked chat to another account or model for you.
+
+## Which Providers Report Usage Limits
+
+Traycer shows usage for the providers that report it. Each provider reports its own kind of limit.
+
+| Provider | What Traycer shows |
+| --- | --- |
+| **Claude Code** | Current session and weekly limits, weekly limits for particular models, and extra usage |
+| **Codex** | Session and weekly limits, limits for particular models, credits, and [manual resets](#codex-manual-resets) |
+| **Cursor** | Usage for the billing cycle, split into Cursor models and other models, and spend |
+| **Grok** | Usage for the billing period, and credit |
+| **OpenCode** | OpenCode Go's session, weekly and monthly limits |
+| **OpenRouter** | Credit and spend |
+| **Hugging Face** | Included credit and spend |
+| **Kilo Code** | Credit balance |
+| **Antigravity** | Limits for each group of Google models, each with its own windows |
+
+Time-based limits are named by their length: **Current session** is a 5-hour window, and longer ones read **Daily**, **Weekly** or **Monthly**. Other providers don't report limits, so Traycer shows no usage for them.
+
+Usage is read on the host that runs the provider, for each account you are signed in to there. While a host is offline, its usage limits can't be read.
+
+## Where to See Usage Limits
+
+### Status Bar
+
+The status bar at the bottom of the window shows one reading per provider that reports a limit, with the percentage used or remaining and when the limit resets. Click it to open the [Usage limits](#usage-limits-popover) popover.
+
+What the readings show, and whether they sit in the status bar or the header, are set in [Layout](/settings/layout).
+
+### Usage Limits Popover
+
+Press **⌘⇧U / Ctrl+Shift+U** to open **Usage limits**, or click the usage reading in the status bar or header.
+
+- **Overview** shows the main limits of every provider at once. Each provider also has its own tab with the full detail.
+- Each account shows its limits, how much is used, when each limit resets, and when it was last updated.
+- **Refresh all** re-reads every provider. A provider's own tab has a refresh button for that provider alone.
+- The eye button on an account shows or hides it in the status bar.
+- **Manage provider** opens that provider in [Providers](/settings/providers).
+- The settings button at the bottom opens the status bar settings in [Layout](/settings/layout).
+- The **Traycer** tab shows your Traycer plan and usage, for your personal account and each team.
+
+If you use more than one host, pick the host at the top of the popover. You can resize the popover by dragging its edges.
+
+The same limits appear in Settings on each provider's **Profiles & Limits** tab (Claude Code, Codex, Grok and Antigravity) or **Usage limits** tab (other providers). See [Providers](/settings/providers).
+
+## When an Account Runs Low
+
+When the account a chat uses is running low on usage, or has reached its limit, a banner above the composer says so, for example "_account_ is running low on usage."
+
+| Control | What it does |
+| --- | --- |
+| **Switch to** _account_ | Switches this chat to the account Traycer recommends. |
+| **More profiles** | The arrow next to **Switch to**. Lists every account for that provider with its status, such as **Running low**, **Limited** or **Not checked**. Hover over an account, or move to it with the arrow keys, to see its usage. |
+| **Choose a profile** | Shown instead of **Switch to** when Traycer has no single account to recommend. |
+| **View profile limits** | Shown when no other account can be used. The banner says "No other profile is currently available." |
+| **Also switch _N_ other chats in this task** | Switches the Task's other chats on the same account too. |
+
+Close the banner with its **X**.
+
+Switching accounts needs a second account on the same provider. Claude Code, Codex, Grok and Antigravity support more than one account through managed profiles; see [Agents & Models](/agents-and-models/coding-agents).
+
+## Codex Manual Resets
+
+Codex can give you manual resets for a usage limit. When you have some, the Codex tab in **Usage limits** and the Codex **Profiles & Limits** tab show **Manual resets** with the number available.
+
+Click **Use reset**, then confirm in the "Use a Codex manual reset?" dialog. Traycer uses the reset that expires first, on the Codex limit you have currently reached. A used reset can't be returned or undone.
+
+## Cost and Token Usage
+
+Traycer also records what your agents spend in tokens and estimated cost.
+
+- **A Task.** Click the **Usage** button (a chart icon) at the top right of the Task. The dialog shows cost and token usage for the Task over the last **7 days**, **30 days** or **90 days**. You can export it as an image, and **View full usage** opens Settings › Account › **Usage**.
+- **A chat.** Right-click a chat's tab and choose **Usage** to see cost and token usage for that chat's full history.
+- **Everything.** Settings › Account › **Usage** shows usage across all your agents. See [Account](/settings/account#usage).
+
+Costs are estimated from the providers' published prices, so they can differ from what you are billed.
+
+## Automatic Model Routing
+
+When a rate limit or another provider problem blocks a chat's turn, Traycer can recover for you. With **Route automatically** on, it works through your plan:
+
+1. Try another account on the same provider.
+2. Try an equivalent model on another provider.
+3. Wait for the limit to reset, if the provider says when.
+4. Notify you.
+
+**Route automatically** is off by default. It applies to chat agents on the host you set it for, never to Terminal agents. You set it up, reorder the steps, and choose which models count as equivalent in [Model routing](/settings/model-routing).
+
+A switch starts a new agent session from the chat's history and retries the blocked message there. Messages waiting to run move with it.
+
+### The Switch Countdown
+
+Before switching, Traycer shows a countdown card above the composer, for example "Switching to _destination_ in 12s". The countdown is 15 seconds by default.
+
+| Control | What it does |
+| --- | --- |
+| **Don't switch** | Stops the switch and keeps the error. You can retry from the message. |
+| **Choose differently…** | Opens a menu of other accounts and equivalent models, with the step Traycer would take next marked **Recommended**. Opening it pauses the countdown. |
+| **Sign in instead** | Shown when the account was signed out. Stops the switch and opens the provider so you can sign in again. |
+| **Model routing** | Opens Model routing settings for the chat's host. |
+| **X** | Hides the card. The switch still goes ahead. |
+
+### Waiting for a Reset
+
+When Traycer waits for a limit to reset, the card says when the chat will resume, for example "Resuming at 3:00 PM (in about 2h 14m)". Messages waiting to run wait with it.
+
+- **Stop waiting** stops the wait and keeps the error.
+- **Switch instead…** picks another account or model now.
+
+Traycer waits only when the provider gives a reset time within your longest wait, which is 6 hours by default.
+
+### Switching Back
+
+When the original account's limit resets, what happens depends on your setting. By default Traycer asks, with a banner such as "_account_'s limit has reset":
+
+- **Switch back** moves the chat back from your next message on, along with messages waiting to run. It starts a new agent session from the chat's history.
+- **Stay on** _account or model_ keeps the chat where it is.
+- **Don't ask for this chat** stops asking in this chat.
+
+You can make Traycer switch back automatically, or always stay, in [Model routing](/settings/model-routing#behavior).
+
+### Choosing a Step Yourself
+
+A blocked turn's error in the chat can also offer steps to take yourself: **Retry** on the same account and model, **Switch…** to pick another account or model, and **Wait until** _time_ when the provider has said when the limit resets and that is within your longest wait.
+
+<Note>
+  Turning **Route automatically** off stops new switches and waits only. Chats
+  already switching or waiting carry on; stop them from the card in the chat.
+  Your coding agent's own retries are separate and aren't affected.
+</Note>
