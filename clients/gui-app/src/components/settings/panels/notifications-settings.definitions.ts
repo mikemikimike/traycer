@@ -11,6 +11,7 @@ export const HOST_NOTIFICATIONS = defineSettingsSection("notifications", {
     description: "What this host surfaces, and what its automation receives.",
     keywords: [
       "alerts",
+      "inbox",
       "filter",
       "automation",
       "host",

@@ -15,7 +15,7 @@ import {
 export type NeedsYouReason = "approval" | "reply";
 
 /**
- * One agent prompt waiting on the person: the Inbox's Needs you group, its
+ * One agent prompt waiting on the person: the Notifications drawer's Needs you group, its
  * count, and the Activity view's Needs you block all read this (D10).
  */
 export interface NeedsYouItem {

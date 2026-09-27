@@ -37,7 +37,7 @@ const BADGE_TRANSITION = { duration: 0.14, ease: "easeOut" } as const;
  * the same hold/coalescing/focus policy.
  *
  * The center's Popover wiring is `useNotificationCenter`'s, shared with the
- * strip's Inbox drawer; this owns the bell trigger and its badge, so
+ * strip's Notifications drawer; this owns the bell trigger and its badge, so
  * `NotificationsPopover` stays purely presentational.
  */
 export function NotificationsBell() {
@@ -72,7 +72,7 @@ export function NotificationsBell() {
     // unreachable stream AND by a reachable one whose summary is not exact
     // yet, so naming the transport was a diagnosis this state cannot support.
     if (state.kind === "unknown") {
-      return "Notifications — status unavailable, so this may be out of date";
+      return "Notifications status unavailable, so this may be out of date";
     }
     return chord === null
       ? "Notifications"

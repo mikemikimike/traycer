@@ -75,7 +75,7 @@ import { useHostNotificationUnreadCount } from "@/stores/notifications/host-noti
 import { useNotificationUnreadCount } from "@/stores/notifications/notifications-store";
 import { useSystemTabModalActions } from "@/stores/tabs/use-system-tab-modal";
 
-/** What differs between the bell's center and the strip's Inbox drawer. */
+/** What differs between the bell's center and the strip's Notifications drawer. */
 const VARIANT_CHROME: Readonly<
   Record<
     NotificationsPopoverProps["variant"],
@@ -92,7 +92,7 @@ const VARIANT_CHROME: Readonly<
     shellClassName: "w-[min(90vw,34rem)]",
   },
   inbox: {
-    title: "Inbox",
+    title: "Notifications",
     attentionLabel: "Updates",
     shellClassName: "h-full w-[min(90vw,24rem)]",
   },
@@ -100,8 +100,8 @@ const VARIANT_CHROME: Readonly<
 
 interface NotificationsPopoverProps {
   /**
-   * `center` is the bell's notification center. `inbox` is the strip's Inbox
-   * drawer: titled "Inbox", filling the drawer's height, with the Needs you
+   * `center` is the bell's notification center. `inbox` is the strip's
+   * Notifications drawer: titled "Notifications", filling the drawer's height, with the Needs you
    * group on top and its rows left out of the sections below.
    */
   readonly variant: "center" | "inbox";
@@ -406,7 +406,7 @@ export function NotificationsPopover(
     [setOpen, shellRef],
   );
 
-  // Combined render order (Needs you in the Inbox, then Attention, then
+  // Combined render order (Needs you in the Notifications drawer, then Attention, then
   // Recent) - must match DOM order exactly, since scroll anchoring measures
   // rows by this sequence and arrivals count the rows it names.
   const orderedFeedIds = useMemo(
@@ -733,7 +733,7 @@ export function NotificationsPopover(
 }
 
 interface NotificationsFeedSectionsProps {
-  /** The Inbox's Needs you group, above everything else. */
+  /** The Notifications drawer's Needs you group, above everything else. */
   readonly needsYou: ReactNode | null;
   readonly attentionLabel: string;
   readonly attentionIds: ReadonlyArray<string>;
@@ -1266,7 +1266,7 @@ function useWithoutNeedsYouRows(
   }, [feedIds, items]);
 }
 
-/** The Inbox's first group: every prompt waiting on the person (D10). */
+/** The Notifications drawer's first group: every prompt waiting on the person (D10). */
 function NeedsYouGroup(props: {
   readonly items: ReadonlyArray<NeedsYouItemData>;
   readonly onActivate: (row: MergedNotificationRow) => void;

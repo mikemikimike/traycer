@@ -379,7 +379,7 @@ function renderPopover(): void {
   );
 }
 
-/** The strip's Inbox drawer variant (finding 2): Needs you rows are pulled
+/** The strip's Notifications drawer variant (finding 2): Needs you rows are pulled
  * out of Attention/Recent but must still feed scroll anchoring and arrivals. */
 function InboxPopoverShell(): ReactNode {
   const headingRef = useRef<HTMLHeadingElement>(null);

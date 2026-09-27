@@ -13,7 +13,7 @@ import {
 
 /**
  * `selectNeedsYouItems` / `needsYouReasonOf` (D10): the pure selector behind
- * the Inbox's Needs you group and its count. Rows are built by hand rather
+ * the Notifications drawer's Needs you group and its count. Rows are built by hand rather
  * than through a live store, since the selector's contract is entirely a
  * function of the merged row - resolution, host kind, and payload.
  */

@@ -350,7 +350,7 @@ function buildRouterWithCapture(target: TargetCapture, onNavigate: () => void) {
   return { router };
 }
 
-/** The Inbox drawer's own shell - `variant="inbox"` alongside `PopoverShell`'s
+/** The Notifications drawer's own shell - `variant="inbox"` alongside `PopoverShell`'s
  * `"center"`, rather than a shared parameter: `PopoverShell` and
  * `buildRouterWithCapture` have 50+ call sites across this file, and every one
  * of them is a `center` case - threading a required variant through all of
@@ -3089,17 +3089,17 @@ describe("NotificationsPopover", () => {
     expect("resolvedAt" in retained ? retained.resolvedAt : null).toBeNull();
   });
 
-  // D10: the Inbox drawer's own group of prompts waiting on the person, on
+  // D10: the Notifications drawer's own group of prompts waiting on the person, on
   // top of the ordinary Updates/Recent sections it otherwise shares with the
   // center.
-  it("titles the shell 'Inbox' in inbox mode and 'Notifications' in center mode", async () => {
+  it("titles the shell 'Notifications' in both the inbox and center variants", async () => {
     const { router: inboxRouter } = buildInboxRouterWithCapture(
       freshCapture(),
       () => undefined,
     );
     renderRouter(inboxRouter);
     expect(
-      await screen.findByRole("heading", { name: "Inbox" }),
+      await screen.findByRole("heading", { name: "Notifications" }),
     ).not.toBeNull();
     cleanup();
 

@@ -64,7 +64,7 @@ export interface NotificationCenter {
  * Everything the notification center's Radix Popover needs apart from its
  * trigger: the shared open state, the `app.notifications.open` binding, the
  * one-time geometry lock, the open/close focus lifecycle and the open
- * analytics. The header's bell and the strip's Inbox drawer each own one
+ * analytics. The header's bell and the strip's Notifications drawer each own one
  * trigger around it; only one of the two is ever mounted.
  */
 export function useNotificationCenter(): NotificationCenter {
