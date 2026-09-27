@@ -28,7 +28,9 @@ import { accumulatedDiffTotals } from "@/lib/chat/accumulated-change-rows";
 import type { DiffLineCounts } from "@/lib/file-change-diff-hunks";
 import {
   backgroundHeaderSummary,
-  backgroundRunningRowCount,
+  backgroundSectionCounts,
+  buildBackgroundTree,
+  buildRememberedBackgroundNodes,
   dedupeByTaskId,
 } from "@/lib/chat/background-item-tree";
 import type { ChatSessionState } from "@/stores/chats/chat-session-store";
@@ -216,39 +218,37 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     () => dedupeByTaskId(backgroundItems),
     [backgroundItems],
   );
-  const backgroundRunning = useMemo(
+  // The panel's own tree additionally carries forward parents it has seen
+  // before. That history only ever MERGES roots, so a count over the delivered
+  // items alone can come out one group HIGHER than the panel's, never lower -
+  // rare, transient, and it converges on the panel's next render.
+  const backgroundCounts = useMemo(
     () =>
-      backgroundRunningRowCount({
-        items: dedupedBackgroundItems,
+      backgroundSectionCounts({
+        tree: buildBackgroundTree(
+          dedupedBackgroundItems,
+          buildRememberedBackgroundNodes(dedupedBackgroundItems, new Map()),
+        ),
         runningManagedCommandIds: input.runningManagedCommands.map(
           (command) => command.id,
         ),
         heldManagedCommandIds: input.heldManagedCommands.map(
           (held) => held.commandId,
         ),
+        portForwardCount: input.portForwardCount,
       }),
     [
       dedupedBackgroundItems,
       input.runningManagedCommands,
       input.heldManagedCommands,
-    ],
-  );
-  const backgroundSummary = useMemo(
-    () =>
-      backgroundHeaderSummary({
-        runningCount: backgroundRunning,
-        heldCount: input.heldManagedCommands.length,
-        waitingWakeCount: dedupedBackgroundItems.filter(
-          (item) => item.kind === "wakeup",
-        ).length,
-        portForwardCount: input.portForwardCount,
-      }),
-    [
-      backgroundRunning,
-      input.heldManagedCommands,
-      dedupedBackgroundItems,
       input.portForwardCount,
     ],
+  );
+  const backgroundRunning = backgroundCounts.runningCount;
+  const backgroundTotal = backgroundCounts.total;
+  const backgroundSummary = useMemo(
+    () => backgroundHeaderSummary(backgroundCounts),
+    [backgroundCounts],
   );
   const changeTotals = useMemo(
     () => accumulatedDiffTotals(input.restore.accumulatedFileChanges),
@@ -398,21 +398,17 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
         // rather than replacing it, and the kinds are the panel's to draw.
         glyph: "background",
         hotspotRef: backgroundHotspot.ref,
-        // The count IS the running count, so anything in it lights the chip -
-        // and a shell whose process is alive is in that count whether or not it
-        // is monitoring, since the host reports it as `running` either way
-        // (`managedCommandStatusSchema`).
+        // Only running work lights the chip, so a pending wake or a held
+        // shell rests it - and a shell whose process is alive is running
+        // whether or not it is monitoring, since the host reports it as
+        // `running` either way (`managedCommandStatusSchema`).
         working: backgroundRunning > 0,
         lineDeltas: null,
-        text: `${backgroundRunning}`,
-        // The number on the chip is the running count, but the section can be
-        // on screen for a held shell or a pending wake with nothing running at
-        // all - so the sentence is the header's own summary, which names every
-        // part rather than letting a bare `0` stand for "nothing here".
+        // Everything the panel lists, not just the running part: a chip that
+        // said `0` over a pending wake read as an empty section.
+        text: `${backgroundTotal}`,
+        // The header's own summary names which parts make up that number.
         label: `Background. ${backgroundSummary}.`,
-        // The header's own summary again: it already names every part the
-        // section can be on screen for, including the held shell and the
-        // pending wake the pill's running count cannot show.
         detail: backgroundSummary,
         // A failure outranks the plain arrival: it is the one thing this
         // section can report that is not simply news, and the ring is the
@@ -456,6 +452,7 @@ export function useChatDockChrome(input: ChatDockChromeInput): ChatDockChrome {
     agentsWorking,
     agentsRoster,
     backgroundRunning,
+    backgroundTotal,
     input.backgroundFailureToken,
     filesChangedHotspot.ref,
     activeAgentsHotspot.ref,

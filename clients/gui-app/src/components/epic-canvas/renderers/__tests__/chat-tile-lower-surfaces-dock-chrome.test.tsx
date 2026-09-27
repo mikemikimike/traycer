@@ -16,6 +16,7 @@ import type {
   ChatRunSettings,
 } from "@traycer/protocol/host/agent/gui/subscribe";
 import type { ManagedCommand } from "@traycer/protocol/host/managed-command/unary-schemas";
+import type { ChatPortForward } from "@traycer/protocol/host/port-forward";
 
 /**
  * `useChatDockChrome` (`chat-tile-lower-surfaces.tsx`) is the piece deciding
@@ -280,6 +281,20 @@ function runningManagedCommand(args: {
     chatId: CHAT_ID,
     createdAtMs: 1,
     updatedAtMs: 2,
+  };
+}
+
+/** A live port forward, seeded through `managedCommandSession.setPortForwards`. */
+function portForward(id: string): ChatPortForward {
+  return {
+    forwardId: id,
+    description: "dev server",
+    target: { hostId: HOST_ID, port: 3000 },
+    listen: { hostId: HOST_ID, requestedPort: 8080, boundPort: 8080 },
+    state: "active",
+    stateReason: null,
+    createdAtMs: 1,
+    recentEvents: [],
   };
 }
 
@@ -728,7 +743,8 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     );
 
     const chip = screen.getByTestId("chat-dock-chip-background");
-    expect(chipText("background")).toBe("1");
+    // Total, not the running count alone: one running row plus one waiting.
+    expect(chipText("background")).toBe("2");
     expect(chip.getAttribute("aria-label")).toBe(
       "Background. 1 running · 1 waiting.",
     );
@@ -753,23 +769,29 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     );
 
     const chip = screen.getByTestId("chat-dock-chip-background");
-    expect(chipText("background")).toBe("0");
+    // Every group the panel lists, not just the running part: one waiting wake.
+    expect(chipText("background")).toBe("1");
     expect(chipWorking("background")).toBe(false);
+    expect(chip.getAttribute("aria-label")).toBe("Background. 1 waiting.");
     expect(
       chip.querySelector("svg.lucide-message-square-clock"),
     ).not.toBeNull();
     expect(chip.querySelector("svg.lucide-alarm-clock")).toBeNull();
 
     // A held shell joins the wake: two kinds, and the mark does not change.
-    // Held output is not running, so the chip still rests.
+    // Held output is not running, so the chip still rests, but its own group
+    // still joins the total.
     act(() => {
       managedCommandSession.setHeldUpdates([
         { commandId: "cmd-1", description: "deploy watcher", heldAtMs: 1 },
       ]);
     });
 
-    expect(chipText("background")).toBe("0");
+    expect(chipText("background")).toBe("2");
     expect(chipWorking("background")).toBe(false);
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Background. 1 held · 1 waiting.",
+    );
     expect(
       chip.querySelector("svg.lucide-message-square-clock"),
     ).not.toBeNull();
@@ -838,11 +860,103 @@ describe("useChatDockChrome via ChatDockCompactStrip", () => {
     const chip = screen.getByTestId("chat-dock-chip-background");
     expect(chip.getAttribute("aria-label")).toBe("Background. 1 held.");
     expect(chipWorking("background")).toBe(false);
-    expect(chipText("background")).toBe("0");
+    // Held work joins the total, so the number no longer reads "0" over a
+    // section the panel shows one row for.
+    expect(chipText("background")).toBe("1");
     expect(
       chip.querySelector("svg.lucide-message-square-clock"),
     ).not.toBeNull();
     expect(chip.querySelector("svg.lucide-circle-pause")).toBeNull();
+  });
+
+  // Held-and-running is the same shell id in both sets: the panel renders it
+  // ONCE, as held, so the total must not double count it either.
+  it("counts a shell that is both running and held once, as held", () => {
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
+
+    renderSurfaces(
+      surfacesProps({
+        restoreContext: EMPTY_RESTORE,
+        queueItems: [],
+        backgroundItems: [],
+      }),
+    );
+    act(() => {
+      managedCommandSession.setCommands([
+        runningManagedCommand({
+          id: "cmd-1",
+          description: "deploy watcher",
+          monitoring: false,
+        }),
+      ]);
+    });
+    act(() => {
+      managedCommandSession.setHeldUpdates([
+        { commandId: "cmd-1", description: "deploy watcher", heldAtMs: 1 },
+      ]);
+    });
+
+    const chip = screen.getByTestId("chat-dock-chip-background");
+    expect(chipText("background")).toBe("1");
+    expect(chipWorking("background")).toBe(false);
+    expect(chip.getAttribute("aria-label")).toBe("Background. 1 held.");
+  });
+
+  // A port forward outlives the turn that made it, so a chat that is
+  // otherwise idle can still hold one - and the chip's number has to include
+  // it. Seeded through the real chat session store `usePortForwardsForChat`
+  // reads, not a mock of the hook.
+  it("counts a live port forward in the background chip, with no items or shells", () => {
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
+
+    renderSurfaces(
+      surfacesProps({
+        restoreContext: EMPTY_RESTORE,
+        queueItems: [],
+        backgroundItems: [],
+      }),
+    );
+    act(() => {
+      managedCommandSession.setPortForwards([portForward("forward-1")]);
+    });
+
+    const chip = screen.getByTestId("chat-dock-chip-background");
+    expect(chipText("background")).toBe("1");
+    expect(chipWorking("background")).toBe(false);
+    expect(chip.getAttribute("aria-label")).toBe("Background. 1 port forward.");
+  });
+
+  // Every part at once: a running background item, a waiting wake, a held
+  // shell and a port forward. The total sums all four, the label names each,
+  // and the chip lights because something is genuinely running.
+  it("sums every part of the background section in one mixed chip", () => {
+    useLayoutStore.getState().setRegionValues("background", { size: "chip" });
+
+    renderSurfaces(
+      surfacesProps({
+        restoreContext: EMPTY_RESTORE,
+        queueItems: [],
+        backgroundItems: [
+          backgroundCommandItem("task-1", "bun test"),
+          backgroundWakeupItem("wake-1", "Review status"),
+        ],
+      }),
+    );
+    act(() => {
+      managedCommandSession.setHeldUpdates([
+        { commandId: "cmd-1", description: "deploy watcher", heldAtMs: 1 },
+      ]);
+    });
+    act(() => {
+      managedCommandSession.setPortForwards([portForward("forward-1")]);
+    });
+
+    const chip = screen.getByTestId("chat-dock-chip-background");
+    expect(chipText("background")).toBe("4");
+    expect(chipWorking("background")).toBe(true);
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Background. 1 running · 1 held · 1 waiting · 1 port forward.",
+    );
   });
 
   // `BackgroundItemsPanel` counts its own header on `dedupeByTaskId(items)`, so

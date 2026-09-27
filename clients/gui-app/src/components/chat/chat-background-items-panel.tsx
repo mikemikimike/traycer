@@ -64,10 +64,10 @@ import { cn } from "@/lib/utils";
 import { TreeGroupGuide } from "@/components/epic-canvas/sidebar/epic-sidebar-tree-guide";
 import {
   backgroundHeaderSummary,
+  backgroundSectionCounts,
   buildBackgroundTree,
   buildRememberedBackgroundNodes,
   dedupeByTaskId,
-  treeHasRunningTask,
   type BackgroundTreeNode,
   type RememberedBackgroundNode,
 } from "@/lib/chat/background-item-tree";
@@ -714,10 +714,6 @@ export function BackgroundItemsPanel(props: {
     () => buildBackgroundTree(items, rememberedByTaskId),
     [items, rememberedByTaskId],
   );
-  const runningGroupCount = tree.filter(treeHasRunningTask).length;
-  const waitingWakeCount = items.filter(
-    (item) => item.kind === "wakeup",
-  ).length;
   const hostId = useTabHostId();
   // Read from the same store the rows below read, so the header can never
   // claim a count the list does not show. Scoped to the TAB's bound host,
@@ -761,12 +757,15 @@ export function BackgroundItemsPanel(props: {
     chatId: props.chatId,
     hostId,
   });
-  const headerSummary = backgroundHeaderSummary({
-    runningCount: runningGroupCount + runningOnlyManagedCommands.length,
-    heldCount: heldManagedCommands.length,
-    waitingWakeCount,
-    portForwardCount: portForwards.length,
-  });
+  // The chip's number comes from the same helper, so the two cannot disagree.
+  const headerSummary = backgroundHeaderSummary(
+    backgroundSectionCounts({
+      tree,
+      runningManagedCommandIds: managedCommands.map((command) => command.id),
+      heldManagedCommandIds: heldManagedCommands.map((held) => held.commandId),
+      portForwardCount: portForwards.length,
+    }),
+  );
   const deliverHeld = useManagedCommandDeliverHeld(props.chatId);
   const deliverHeldPending = useManagedCommandDeliverHeldIsPending(
     props.chatId,
