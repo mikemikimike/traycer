@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -340,7 +346,7 @@ describe("useHistoryQuery", () => {
     expect(screen.getByTestId("fetching").textContent).toBe("false");
     expect(
       screen.getByRole("status", { name: "History titles" }).textContent,
-    ).toBe("Alpha workbench|Beta search flow");
+    ).toBe("Beta search flow|Alpha workbench");
 
     rerender(
       <HistoryQueryHarness
@@ -552,6 +558,69 @@ describe("useHistoryQuery", () => {
     expect(
       screen.getByRole("status", { name: "History titles" }).textContent,
     ).toBe("Beta search flow|Alpha workbench");
+  });
+
+  it("orders filtered Recent results across the cloud page and branch-matched union", async () => {
+    const recentAt = (hour: number, minute: number): number =>
+      Date.parse(
+        `2026-04-22T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00.000Z`,
+      );
+    testState.tasks = [
+      taskLightWithRecentAt(
+        "cloud-a",
+        "rank cloud A",
+        "traycer/gui-app",
+        recentAt(11, 5),
+      ),
+      taskLightWithRecentAt(
+        "cloud-b",
+        "rank cloud B",
+        "traycer/server",
+        recentAt(11, 20),
+      ),
+    ];
+    testState.response = { tasks: testState.tasks, hasMore: false };
+    testState.worktreeIndex = [
+      {
+        ...worktreeWithPullRequest(84),
+        branch: "rank-extras",
+        owners: [
+          {
+            epicId: "context-extra",
+            ownerKind: "chat",
+            ownerId: "chat-extra",
+            updatedAt: 1,
+          },
+        ],
+      },
+    ];
+    testState.taskContexts = new Map([
+      [
+        "context-extra",
+        taskLightWithRecentAt(
+          "context-extra",
+          "rank extra",
+          "traycer/local",
+          recentAt(11, 10),
+        ),
+      ],
+    ]);
+
+    render(
+      <HistoryQueryHarness
+        search={patchHistorySearch(DEFAULT_HISTORY_SEARCH, {
+          query: "rank",
+          sort: "recent",
+          sortExplicit: true,
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("status", { name: "History titles" }).textContent,
+      ).toBe("rank cloud B|rank extra|rank cloud A");
+    });
   });
 
   it("dedups a task matched by both the cloud query and a local worktree string", () => {
@@ -1016,7 +1085,7 @@ describe("useHistoryQuery", () => {
       );
       expect(
         screen.getByRole("status", { name: "History titles" }).textContent,
-      ).toBe("Alpha workbench|Beta search flow");
+      ).toBe("Beta search flow|Alpha workbench");
     });
 
     it("host-filters an id-fetched worktree match instead of dropping the local search", () => {
@@ -1277,6 +1346,15 @@ function taskLight(id: string, title: string, repo: string): ListTaskLight {
     },
     pinned: false,
   };
+}
+
+function taskLightWithRecentAt(
+  id: string,
+  title: string,
+  repo: string,
+  recentAt: number,
+): ListTaskLight {
+  return { ...taskLight(id, title, repo), recentAt };
 }
 
 function taskLightWithOrganization(

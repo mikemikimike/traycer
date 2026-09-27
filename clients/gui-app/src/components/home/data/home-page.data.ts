@@ -46,6 +46,10 @@ export interface HistoryItem {
   updatedAtMs: number;
   updatedLabel: string;
   updatedBucket: HistoryRecencyBucket;
+  /** Viewer-scoped task edit or own-chat activity; absent on older fixtures. */
+  recentAtMs?: number;
+  recentLabel?: string;
+  recentBucket?: HistoryRecencyBucket;
   linkedRepos: ReadonlyArray<string>;
   linkedWorkspaces: ReadonlyArray<HistoryWorkspaceRef>;
   /**
@@ -216,6 +220,7 @@ function buildHistoryItem(args: {
     isPreservedOrphan,
   } = args;
   const ownership = light.createdBy === userId ? "mine" : "shared";
+  const recentAt = Math.max(light.updatedAt, task.recentAt ?? light.updatedAt);
   return {
     organization:
       "organization" in task
@@ -235,6 +240,9 @@ function buildHistoryItem(args: {
     updatedAtMs: light.updatedAt,
     updatedLabel: formatDistanceToNow(light.updatedAt, { addSuffix: true }),
     updatedBucket: toHistoryRecencyBucket(light.updatedAt, nowMs),
+    recentAtMs: recentAt,
+    recentLabel: formatDistanceToNow(recentAt, { addSuffix: true }),
+    recentBucket: toHistoryRecencyBucket(recentAt, nowMs),
     linkedRepos: readTaskRepos(task),
     linkedWorkspaces: readTaskWorkspaces(task),
     chatHostIds: task.chatHostIds ?? null,
@@ -586,9 +594,9 @@ export function sortHistoryItems(
         .sort(
           (left, right) =>
             comparePinnedHistoryItems(left, right) ||
-            right.updatedAtMs - left.updatedAtMs ||
-            BUCKET_ORDER[left.updatedBucket] -
-              BUCKET_ORDER[right.updatedBucket],
+            (right.recentAtMs ?? right.updatedAtMs) -
+              (left.recentAtMs ?? left.updatedAtMs) ||
+            compareRecentEpicIds(left.epicId, right.epicId),
         );
     case "last-viewed":
       // The central list endpoint already returns the complete eligible set in
@@ -626,6 +634,12 @@ export function sortHistoryItems(
   }
 }
 
+function compareRecentEpicIds(left: string, right: string): number {
+  if (left < right) return 1;
+  if (left > right) return -1;
+  return 0;
+}
+
 /** Stable pinned-first partition for relevance-ranked search results. */
 export function prioritizePinnedHistoryItems(
   items: ReadonlyArray<HistoryItem>,
@@ -649,9 +663,10 @@ export function groupHistoryItems(
   const groups = new Map<HistoryRecencyBucket, HistoryItem[]>();
 
   for (const item of items) {
-    const current = groups.get(item.updatedBucket) ?? [];
+    const bucket = item.recentBucket ?? item.updatedBucket;
+    const current = groups.get(bucket) ?? [];
     current.push(item);
-    groups.set(item.updatedBucket, current);
+    groups.set(bucket, current);
   }
 
   return (["today", "yesterday", "earlier"] as const).flatMap((bucket) => {
@@ -662,7 +677,7 @@ export function groupHistoryItems(
   });
 }
 
-function toHistoryRecencyBucket(
+export function toHistoryRecencyBucket(
   updatedAtMs: number,
   nowMs: number,
 ): HistoryRecencyBucket {

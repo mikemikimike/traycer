@@ -576,6 +576,10 @@ function settledHistoryItems(
   sort: HistorySortOption,
   query: string,
 ): ReadonlyArray<HistoryItem> {
+  // Host-synthesized local homes belong on page one, while later cloud pages
+  // remain cloud-owned. Sort the loaded union by the durable key even when a
+  // filter or picker disables the optimistic active-row overlay.
+  if (sort === "recent") return sortHistoryItems(items, "recent");
   if (contextExtrasCount > 0) {
     return sortProjectedHistoryItems(items, sort, query);
   }

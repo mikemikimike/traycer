@@ -336,7 +336,7 @@ export const MobileHistoryRow = memo(function MobileHistoryRow(
             canEdit={canRename}
             organizationVisible={!selectionMode}
             displayTitle={displayTitle}
-            updatedLabel={item.updatedLabel}
+            updatedLabel={item.recentLabel ?? item.updatedLabel}
             isPinned={item.isPinned}
             provenance={historyRowProvenance(item)}
             isRenaming={isRenaming}
@@ -445,7 +445,7 @@ function RowTitleBlock(props: {
             fallback={props.item.organization}
           />
         ) : null}
-        <span className="truncate">updated {props.updatedLabel}</span>
+        <span className="truncate">activity {props.updatedLabel}</span>
         {props.provenance === null ? null : (
           <span
             data-testid={`epics-list-row-provenance-label-${props.provenance}`}

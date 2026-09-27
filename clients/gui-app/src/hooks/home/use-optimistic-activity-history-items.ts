@@ -1,0 +1,381 @@
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { formatDistanceToNow } from "date-fns";
+import type { HistoryItem } from "@/components/home/data/home-page.data";
+import {
+  buildHistoryItemsFromTasks,
+  sortHistoryItems,
+  toHistoryRecencyBucket,
+} from "@/components/home/data/home-page.data";
+import { useEpicGetTaskContexts } from "@/hooks/epic/use-epic-get-task-contexts-query";
+import {
+  authorizesCloudCapability,
+  useAuthStore,
+} from "@/stores/auth/auth-store";
+import { useTurnEpicIds } from "@/stores/use-working-epic-ids";
+
+const MAX_ACTIVE_ROWS = 64;
+const STAMP_TTL_MS = 10 * 60_000;
+const REFRESH_DEBOUNCE_MS = 750;
+const REFRESH_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+const EMPTY_ITEMS: readonly HistoryItem[] = [];
+const listeners = new Set<() => void>();
+const activeSeen = new Set<string>();
+const stamps = new Map<string, { at: number; expiresAt: number }>();
+interface ActivitySnapshot {
+  readonly revision: number;
+  readonly stamps: ReadonlyMap<string, { at: number; expiresAt: number }>;
+}
+const EMPTY_SNAPSHOT: ActivitySnapshot = { revision: 0, stamps: new Map() };
+let currentSnapshot: ActivitySnapshot = EMPTY_SNAPSHOT;
+const generations = new Map<string, number>();
+const scheduledGenerations = new Map<string, number>();
+const scopeSubscribers = new Map<string, number>();
+interface RefreshState {
+  readonly scope: string;
+  readonly userId: string;
+  timer: number | null;
+  inFlight: boolean;
+  refetch: () => Promise<unknown>;
+  attempts: number;
+  deadline: number;
+}
+const refreshes = new Map<string, RefreshState>();
+
+function keyFor(userId: string, epicId: string): string {
+  return JSON.stringify([userId, epicId]);
+}
+
+function changed(userId: string | null): void {
+  if (userId !== null) {
+    generations.set(userId, (generations.get(userId) ?? 0) + 1);
+  }
+  currentSnapshot = {
+    revision: currentSnapshot.revision + 1,
+    stamps: new Map(stamps),
+  };
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function snapshot(): ActivitySnapshot {
+  return currentSnapshot;
+}
+
+function removeExpiredStamps(at: number): boolean {
+  let removed = false;
+  for (const [key, stamp] of stamps) {
+    if (stamp.expiresAt > at) continue;
+    stamps.delete(key);
+    activeSeen.delete(key);
+    removed = true;
+  }
+  return removed;
+}
+
+/** Records only a new active edge; a durable catch-up does not re-arm it. */
+export function observeActiveHistoryEdges(
+  userId: string,
+  workingEpicIds: ReadonlySet<string>,
+  at: number,
+): boolean {
+  let added = false;
+  for (const key of [...activeSeen]) {
+    const pair = JSON.parse(key) as [string, string];
+    if (pair[0] === userId && !workingEpicIds.has(pair[1]))
+      activeSeen.delete(key);
+  }
+  const expired = removeExpiredStamps(at);
+  for (const epicId of workingEpicIds) {
+    const key = keyFor(userId, epicId);
+    if (activeSeen.has(key)) continue;
+    activeSeen.add(key);
+    stamps.set(key, { at, expiresAt: at + STAMP_TTL_MS });
+    added = true;
+    if (stamps.size > MAX_ACTIVE_ROWS) {
+      const oldest = stamps.keys().next().value;
+      if (oldest !== undefined) stamps.delete(oldest);
+    }
+    if (activeSeen.size > MAX_ACTIVE_ROWS * 4) {
+      const oldest = activeSeen.values().next().value;
+      if (oldest !== undefined) activeSeen.delete(oldest);
+    }
+  }
+  if (added) changed(userId);
+  else if (expired) changed(null);
+  return added;
+}
+
+/** An own record delta can arrive while the task is idle or already active. */
+export function observeOwnHistoryRecordChange(
+  userId: string,
+  epicId: string,
+  at: number,
+): void {
+  const key = keyFor(userId, epicId);
+  const previous = stamps.get(key);
+  stamps.delete(key);
+  stamps.set(key, {
+    at: Math.max(previous?.at ?? 0, at),
+    expiresAt: Date.now() + STAMP_TTL_MS,
+  });
+  if (stamps.size > MAX_ACTIVE_ROWS) {
+    const oldest = stamps.keys().next().value;
+    if (oldest !== undefined) stamps.delete(oldest);
+  }
+  changed(userId);
+}
+
+/** Removes have no owner on the old stream wire, so only reconcile the page. */
+export function requestHistoryActivityRefresh(userId: string): void {
+  changed(userId);
+}
+
+/** Removes an optimistic key once a returned durable key reaches its edge. */
+export function settleHistoryActivity(
+  userId: string,
+  items: readonly HistoryItem[],
+): void {
+  let removed = false;
+  for (const item of items) {
+    const key = keyFor(userId, item.epicId);
+    const stamp = stamps.get(key);
+    if (stamp === undefined) continue;
+    if ((item.recentAtMs ?? item.updatedAtMs) < stamp.at) continue;
+    stamps.delete(key);
+    removed = true;
+  }
+  if (removed) changed(null);
+}
+
+/** Pure loaded-row projection shared by the panel and the phone drawer. */
+export function projectOptimisticHistoryItems(
+  userId: string,
+  pageItems: readonly HistoryItem[],
+  backfilled: readonly HistoryItem[],
+  nowMs: number,
+): readonly HistoryItem[] {
+  const byEpic = new Map(pageItems.map((item) => [item.epicId, item]));
+  for (const item of backfilled) {
+    if (!byEpic.has(item.epicId)) byEpic.set(item.epicId, item);
+  }
+  const items = [...byEpic.values()].map((item) => {
+    const stamp = stamps.get(keyFor(userId, item.epicId));
+    if (stamp === undefined || stamp.expiresAt <= nowMs) return item;
+    const recentAtMs = Math.max(item.recentAtMs ?? item.updatedAtMs, stamp.at);
+    return {
+      ...item,
+      recentAtMs,
+      recentLabel: formatDistanceToNow(recentAtMs, { addSuffix: true }),
+      recentBucket: toHistoryRecencyBucket(recentAtMs, nowMs),
+    };
+  });
+  return sortHistoryItems(items, "recent");
+}
+
+function hasUnsettledStamps(userId: string, now: number): boolean {
+  for (const [key, stamp] of stamps) {
+    if (
+      stamp.expiresAt > now &&
+      (JSON.parse(key) as [string, string])[0] === userId
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function scheduleActivityRefresh(state: RefreshState, delay: number): void {
+  if (state.timer !== null || state.inFlight) return;
+  state.timer = window.setTimeout(() => {
+    state.timer = null;
+    state.inFlight = true;
+    state.attempts += 1;
+    void state
+      .refetch()
+      .catch(() => undefined)
+      .finally(() => {
+        state.inFlight = false;
+        if (refreshes.get(state.scope) !== state) return;
+        const now = Date.now();
+        const pending = hasUnsettledStamps(state.userId, now);
+        // A removal has no timestamp on the frozen stream wire. Give it three
+        // attempts; timestamped upserts retry through the bounded stamp window.
+        if (now >= state.deadline || (!pending && state.attempts >= 3)) {
+          refreshes.delete(state.scope);
+          return;
+        }
+        const retryIndex = Math.min(
+          state.attempts - 1,
+          REFRESH_RETRY_DELAYS_MS.length - 1,
+        );
+        scheduleActivityRefresh(state, REFRESH_RETRY_DELAYS_MS[retryIndex]);
+      });
+  }, delay);
+}
+
+function queueActivityRefresh(
+  scope: string,
+  userId: string,
+  generation: number,
+  refetch: () => Promise<unknown>,
+): void {
+  const existing = refreshes.get(scope);
+  if (existing !== undefined) {
+    existing.refetch = refetch;
+    if (generation > (scheduledGenerations.get(scope) ?? 0)) {
+      existing.attempts = 0;
+      existing.deadline = Date.now() + STAMP_TTL_MS;
+    }
+    scheduledGenerations.set(scope, generation);
+    scheduleActivityRefresh(existing, REFRESH_DEBOUNCE_MS);
+    return;
+  }
+  const state: RefreshState = {
+    scope,
+    userId,
+    timer: null,
+    inFlight: false,
+    refetch,
+    attempts: 0,
+    deadline: Date.now() + STAMP_TTL_MS,
+  };
+  refreshes.set(scope, state);
+  scheduledGenerations.set(scope, generation);
+  scheduleActivityRefresh(state, REFRESH_DEBOUNCE_MS);
+}
+
+export interface OptimisticActivityHistoryInput {
+  readonly items: readonly HistoryItem[];
+  readonly userId: string | null;
+  readonly hostId: string | null;
+  readonly enabled: boolean;
+  readonly refetch: () => Promise<unknown>;
+}
+
+/**
+ * Active edges can outrun the cloud outbox. Keep at most 64 stamped rows in a
+ * shared, ten-minute overlay; one batched context request supplies missing
+ * active rows and one scoped refresh resets retained cursor pages.
+ */
+export function useOptimisticActivityHistoryItems(
+  input: OptimisticActivityHistoryInput,
+): readonly HistoryItem[] {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const workingEpicIds = useTurnEpicIds();
+  const activitySnapshot = useSyncExternalStore(
+    subscribe,
+    snapshot,
+    () => EMPTY_SNAPSHOT,
+  );
+  const cloudAuthorized = useAuthStore((state) =>
+    authorizesCloudCapability(state.status),
+  );
+  const missing = useMemo(() => {
+    if (!input.enabled) return [];
+    const onPage = new Set(input.items.map((item) => item.epicId));
+    const stamped = [...activitySnapshot.stamps]
+      .filter(
+        ([key]) => (JSON.parse(key) as [string, string])[0] === input.userId,
+      )
+      .map(([key]) => (JSON.parse(key) as [string, string])[1]);
+    return [...new Set([...workingEpicIds, ...stamped])]
+      .filter((epicId) => !onPage.has(epicId))
+      .sort()
+      .slice(0, MAX_ACTIVE_ROWS);
+  }, [
+    activitySnapshot.stamps,
+    input.enabled,
+    input.items,
+    input.userId,
+    workingEpicIds,
+  ]);
+  const backfill = useEpicGetTaskContexts(missing, input.userId, {
+    enabled: cloudAuthorized,
+  });
+  const backfilled = useMemo(
+    () =>
+      buildHistoryItemsFromTasks(
+        [...backfill.tasksById.values()],
+        nowMs,
+        input.userId,
+        backfill.localHomedTaskIds,
+      ).filter((item) => missing.includes(item.epicId)),
+    [
+      backfill.localHomedTaskIds,
+      backfill.tasksById,
+      input.userId,
+      missing,
+      nowMs,
+    ],
+  );
+  useEffect(() => {
+    if (!input.enabled || input.userId === null) return;
+    const scope = JSON.stringify([input.hostId, input.userId]);
+    scopeSubscribers.set(scope, (scopeSubscribers.get(scope) ?? 0) + 1);
+    return () => {
+      const remaining = (scopeSubscribers.get(scope) ?? 1) - 1;
+      if (remaining > 0) {
+        scopeSubscribers.set(scope, remaining);
+        return;
+      }
+      scopeSubscribers.delete(scope);
+      scheduledGenerations.delete(scope);
+      const state = refreshes.get(scope);
+      if (state?.timer !== null && state?.timer !== undefined) {
+        window.clearTimeout(state.timer);
+      }
+      refreshes.delete(scope);
+    };
+  }, [input.enabled, input.hostId, input.userId]);
+  useEffect(() => {
+    if (input.userId === null) return;
+    observeActiveHistoryEdges(input.userId, workingEpicIds, Date.now());
+    if (!input.enabled) return;
+    const scope = JSON.stringify([input.hostId, input.userId]);
+    const generation = generations.get(input.userId) ?? 0;
+    if (generation > (scheduledGenerations.get(scope) ?? 0)) {
+      queueActivityRefresh(scope, input.userId, generation, input.refetch);
+    } else {
+      const state = refreshes.get(scope);
+      if (state !== undefined) state.refetch = input.refetch;
+    }
+  }, [
+    activitySnapshot,
+    input.enabled,
+    input.hostId,
+    input.refetch,
+    input.userId,
+    workingEpicIds,
+  ]);
+  useEffect(() => {
+    if (input.userId !== null) settleHistoryActivity(input.userId, input.items);
+  }, [input.items, input.userId]);
+  useEffect(() => {
+    if (!input.enabled || input.userId === null || stamps.size === 0) return;
+    const earliestExpiry = Math.min(
+      ...[...stamps.values()].map((stamp) => stamp.expiresAt),
+    );
+    const timer = window.setTimeout(
+      () => {
+        if (removeExpiredStamps(Date.now())) changed(null);
+        setNowMs(Date.now());
+      },
+      Math.max(0, earliestExpiry - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [activitySnapshot, input.enabled, input.userId]);
+  if (!input.enabled || input.userId === null) return input.items;
+  if (input.items.length === 0 && backfilled.length === 0) return EMPTY_ITEMS;
+  return projectOptimisticHistoryItems(
+    input.userId,
+    input.items,
+    backfilled,
+    nowMs,
+  );
+}

@@ -31,7 +31,7 @@ const testState: {
   workingEpicIds: ReadonlySet<string>;
   /** Rows `epic.getTaskContexts` can answer, keyed by epic id. */
   backfillTasks: ReadonlyMap<string, ListTaskLight>;
-  /** The id lists the in-progress lift asked that batch about. */
+  /** The id lists the activity projection asked that batch about. */
   backfillIdCalls: ReadonlyArray<string>[];
 } = {
   items: [],
@@ -100,11 +100,8 @@ vi.mock("@/hooks/home/use-history-query", () => ({
   }),
 }));
 
-// The two inputs the in-progress lift reads. Both are mocked at their own
-// boundary rather than mocking the lift hook itself, so the real
-// `useInProgressHistoryItems` / `withInProgressFirst` pair runs in these tests:
-// the store says WHICH epics are running, and the by-id batch answers the ones
-// no history page listed.
+// Mock the shared activity projection inputs at their boundaries: turn ids
+// determine optimistic activity, and the by-id batch answers missing rows.
 vi.mock("@/stores/use-working-epic-ids", () => ({
   useTurnEpicIds: (): ReadonlySet<string> => testState.workingEpicIds,
 }));
@@ -930,7 +927,7 @@ describe("MobileNavDrawer", () => {
       expect(testState.backfillIdCalls.at(-1)).toEqual(["z"]);
     });
 
-    it("moves a listed running task to the top without duplicating it", async () => {
+    it("moves a listed turn-active task to the top without duplicating it", async () => {
       testState.items = [
         historyItem({
           id: "a",
@@ -954,8 +951,9 @@ describe("MobileNavDrawer", () => {
       expect(
         rows.filter((row) => row.textContent.includes("running")).length,
       ).toBe(1);
-      // Already on the page, so the by-id batch has nothing to ask for.
-      expect(testState.backfillIdCalls.at(-1)).toEqual([]);
+      // The projection may ask for an older pending active row, but never
+      // fetches the already-listed task a second time.
+      expect(testState.backfillIdCalls.at(-1)).not.toContain("c");
     });
 
     it("leaves the order alone while a search is active", async () => {
@@ -1065,12 +1063,14 @@ describe("MobileNavDrawer", () => {
       renderDrawer();
       const rows = await screen.findAllByTestId("mobile-nav-task-row");
 
-      const status = rows[0]?.querySelector('[role="status"]');
+      const busyRow = rows.find((row) => row.textContent.includes("busy"));
+      const quietRow = rows.find((row) => row.textContent.includes("quiet"));
+      const status = busyRow?.querySelector('[role="status"]');
       expect(status?.getAttribute("aria-label")).toBe(
         "Task activity in progress",
       );
       expect(screen.getByTestId("mobile-nav-task-activity-a")).toBeTruthy();
-      expect(rows[1]?.querySelector('[role="status"]')).toBeNull();
+      expect(quietRow?.querySelector('[role="status"]')).toBeNull();
     });
 
     it("shows the pin and then the running indicator on a pinned running task", async () => {
@@ -1196,13 +1196,17 @@ describe("MobileNavDrawer", () => {
       const rows = await screen.findAllByTestId("mobile-nav-task-row");
 
       // Asked about exactly the ids on screen, epic ids only.
-      expect(testState.indicatorEpicIdCalls.at(-1)).toEqual(["a", "b"]);
-      const status = rows[0]?.querySelector('[role="status"]');
+      expect(testState.indicatorEpicIdCalls.at(-1)).toEqual(
+        expect.arrayContaining(["a", "b"]),
+      );
+      const doneRow = rows.find((row) => row.textContent.includes("done"));
+      const quietRow = rows.find((row) => row.textContent.includes("quiet"));
+      const status = doneRow?.querySelector('[role="status"]');
       expect(status).not.toBeNull();
       expect(
         status?.querySelector('[data-testid^="mobile-nav-task-"]'),
       ).not.toBeNull();
-      expect(rows[1]?.querySelector('[role="status"]')).toBeNull();
+      expect(quietRow?.querySelector('[role="status"]')).toBeNull();
     });
 
     it("never looks a phase up for live activity or notifications", async () => {

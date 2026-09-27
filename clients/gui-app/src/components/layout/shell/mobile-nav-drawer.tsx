@@ -41,9 +41,8 @@ import { useSettingsStore } from "@/stores/settings/settings-store";
 import { cn } from "@/lib/utils";
 import { epicDisplayTitle } from "@/lib/display-title";
 import { useAmbientHistorySearchState } from "@/hooks/home/use-history-search-state";
-import { useInProgressHistoryItems } from "@/hooks/home/use-in-progress-history-items";
+import { useOptimisticActivityHistoryItems } from "@/hooks/home/use-optimistic-activity-history-items";
 import { hasActiveHistoryFilters } from "@/lib/history-search";
-import { withInProgressFirst } from "@/lib/home/current-tasks";
 import { formatRelativeTimestamp, useSampledNow } from "@/lib/relative-time";
 import type { HistoryItem } from "@/components/home/data/home-page.data";
 import { useHistoryQuery } from "@/hooks/home/use-history-query";
@@ -367,32 +366,18 @@ function DrawerTaskList(props: DrawerTaskListProps): ReactNode {
     isFetchingNextPage,
     cloudPagePending,
     currentUserId,
+    hostId,
   } = useHistoryQuery({ search, nowMs: null });
   // Memoized so the id list below only changes when the page does, not on
   // every render's fresh empty array.
   const pageItems = useMemo(() => data?.items ?? [], [data]);
-  // The drawer is the phone's only always-reachable task list, and it renders
-  // the feed's order - pinned first, then epic `updatedAt` descending. Agent
-  // activity never touches `updatedAt`, so the task the user is watching right
-  // now can sit below tasks they last opened weeks ago, or past the loaded
-  // page entirely. Desktop never has this problem: Home's "In progress" group
-  // holds those rows, and Home is not mounted on a phone. Lift them here
-  // instead - same rows, same semantics, no second section in a drawer whose
-  // whole list is already one caption.
-  //
-  // Stands down under any narrowing (`hasActiveHistoryFilters`, which the
-  // ambient state shares with History): a search's ranking is the answer the
-  // user asked for, and a filtered feed must not have a row backfilled into it
-  // that the filter would have excluded.
-  const inProgress = useInProgressHistoryItems({
+  const items = useOptimisticActivityHistoryItems({
     items: pageItems,
     userId: currentUserId,
-    enabled: !hasActiveHistoryFilters(search),
+    hostId,
+    enabled: !hasActiveHistoryFilters(search) && search.sort === "recent",
+    refetch,
   });
-  const items = useMemo(
-    () => withInProgressFirst(inProgress, pageItems),
-    [inProgress, pageItems],
-  );
 
   // The rows' status indicator reads notification state from context, and the
   // drawer is mounted by the shell outside the providers the tab strip and the
@@ -553,7 +538,10 @@ function DrawerTaskList(props: DrawerTaskListProps): ReactNode {
                 in a third of the width. Formatted here rather than by changing
                 `updatedLabel`, which the landing list and the tray also read. */}
             <span className="shrink-0 text-ui-xs text-muted-foreground">
-              {formatRelativeTimestamp(item.updatedAtMs, now)}
+              {formatRelativeTimestamp(
+                item.recentAtMs ?? item.updatedAtMs,
+                now,
+              )}
             </span>
             {/* A tap on this row opens the task, so the status dot's sentence
                 has no hover to live in. The two-word label is the visible

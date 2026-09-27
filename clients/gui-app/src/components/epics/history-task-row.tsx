@@ -196,7 +196,7 @@ export function HistoryTaskRow(props: HistoryTaskRowProps): ReactNode {
         <HistoryRowTrailingMetadata
           epicId={props.item.epicId}
           selectionMode={props.selectionMode}
-          updatedLabel={props.item.updatedLabel}
+          updatedLabel={props.item.recentLabel ?? props.item.updatedLabel}
           worktrees={props.worktrees}
           provenance={historyRowProvenance(props.item)}
         />
@@ -254,7 +254,7 @@ function HistoryRowTrailingMetadata(props: {
             "transition-opacity md:group-hover/list-row:opacity-0 md:group-focus-within/list-row:opacity-0",
         )}
       >
-        updated {props.updatedLabel}
+        activity {props.updatedLabel}
         {props.provenance === null ? null : (
           <span
             data-testid={`epics-list-row-coarse-provenance-label-${props.provenance}`}

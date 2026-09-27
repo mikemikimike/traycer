@@ -82,8 +82,7 @@ import { HistoryTaskRow } from "@/components/epics/history-task-row";
 import { historyItemDisplayTitle } from "@/components/epics/history-item-title";
 import { MobileHistoryList } from "@/components/epics/mobile/mobile-history-list";
 import { useHistoryOpenItem } from "@/components/epics/use-history-open-item";
-import { useInProgressHistoryItems } from "@/hooks/home/use-in-progress-history-items";
-import { withInProgressFirst } from "@/lib/home/current-tasks";
+import { useOptimisticActivityHistoryItems } from "@/hooks/home/use-optimistic-activity-history-items";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useChatHostFilterSupport } from "@/hooks/home/use-chat-host-filter-support";
 import type { HistoryMessageHitsInputs } from "@/components/epics/history-message-hits";
@@ -396,32 +395,17 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   // body's branch count grow with every field the query gained.
   const view = historyPanelView(data);
   const pageItems = view.items;
-  // Declared here rather than beside its first render use: the in-progress
-  // lift below is the earliest reader, and one `search` verdict for the whole
-  // body beats two calls that could drift apart.
   const hasActiveFilters = hasActiveHistoryFilters(search);
-  // The phone's replacement for Home's "In progress" group. History renders
-  // the feed's order, agent activity does not move a task up it, and the
-  // phone has no Home surface carrying those rows - so a task with an agent
-  // running can sit pages below where desktop shows it. Lifted into the
-  // panel's `items` rather than into the mobile body's prop so that selection,
-  // delete and pin all resolve a lifted row the same way they resolve any
-  // other. Desktop is untouched: it keeps `CurrentTasksSection`.
-  //
-  // `picker` is excluded for the reason `HistoryListBody` excludes it - it is
-  // a read-only destination browser, not the user's task feed. A narrowed
-  // History is excluded too: a search's ranking is what the user asked for,
-  // and a filtered feed must not be handed back a row the filter excluded.
-  const isMobileViewport = useIsMobileViewport();
-  const inProgress = useInProgressHistoryItems({
+  // The same bounded activity projection drives this panel and the drawer.
+  // Its active edge covers the short gap before the cloud record stamp lands.
+  const items = useOptimisticActivityHistoryItems({
     items: pageItems,
     userId: currentUserId,
-    enabled: isMobileViewport && variant !== "picker" && !hasActiveFilters,
+    hostId,
+    enabled:
+      variant !== "picker" && !hasActiveFilters && search.sort === "recent",
+    refetch,
   });
-  const items = useMemo(
-    () => withInProgressFirst(inProgress, pageItems),
-    [inProgress, pageItems],
-  );
   const worktreesByEpicId = view.worktreesByEpicId;
   const indicatorEpicIds = useMemo(
     () => items.map((item) => item.epicId),

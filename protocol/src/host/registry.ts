@@ -585,12 +585,14 @@ import {
   epicListTasksV14,
   epicListTasksV15,
   epicListTasksV16,
+  epicListTasksV17,
   epicListTasksUpgradeV10ToV11,
   epicListTasksUpgradeV11ToV12,
   epicListTasksUpgradeV12ToV13,
   epicListTasksUpgradeV13ToV14,
   epicListTasksUpgradeV14ToV15,
   epicListTasksUpgradeV15ToV16,
+  epicListTasksUpgradeV16ToV17,
   epicMentionEpicsV10,
   epicMentionReviewsV10,
   epicMentionSpecsV10,
@@ -7055,7 +7057,7 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
   },
   "epic.listTasks": {
     1: {
-      latestMinor: 6,
+      latestMinor: 7,
       versions: {
         0: {
           contract: epicListTasksV10,
@@ -7088,6 +7090,10 @@ const HOST_RPC_REGISTRY_BASE_DEFINITION = {
           // `localFirstPhase: "initial"`; lower-minor contracts strip that
           // directive and therefore retain their released response values.
           responseGrowthProjectionGated: true,
+        },
+        7: {
+          contract: epicListTasksV17,
+          upgradeFromPreviousVersion: epicListTasksUpgradeV16ToV17,
         },
       },
       downgradePathsFromLatest: {},

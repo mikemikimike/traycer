@@ -1001,9 +1001,18 @@ export const epicListPreservationSchema = lazySchema(() =>
 export type EpicListPreservation = z.infer<typeof epicListPreservationSchema>;
 
 // `epic.listTasks@1.5` list row: adds the preservation marker.
-export const listTaskLightSchema = lazySchema(() =>
+export const listTaskLightSchemaPre17 = lazySchema(() =>
   listTaskLightSchemaPre15.extend({
     preservation: epicListPreservationSchema.optional(),
+  }),
+);
+export type ListTaskLightPre17 = z.infer<typeof listTaskLightSchemaPre17>;
+
+// `epic.listTasks@1.7` adds the per-viewer activity key. `updatedAt` inside
+// the Epic/Phase light remains the task document edit time.
+export const listTaskLightSchema = lazySchema(() =>
+  listTaskLightSchemaPre17.extend({
+    recentAt: z.number().optional(),
   }),
 );
 export type ListTaskLight = z.infer<typeof listTaskLightSchema>;
@@ -1237,7 +1246,7 @@ export type ListTasksCompleteness = z.infer<typeof listTasksCompletenessSchema>;
 // below picked up `home` and `preservation` at an ALREADY-RELEASED `@1.2`,
 // with nobody touching a getTaskContexts schema, and the released-baseline
 // gate reported it as a BREAKING structural change at a shipped version.
-export const listTaskLightSchemaPre16 = listTaskLightSchema;
+export const listTaskLightSchemaPre16 = listTaskLightSchemaPre17;
 export type ListTaskLightPre16 = z.infer<typeof listTaskLightSchemaPre16>;
 
 // `epic.listTasks@1.5` response: `@1.4`'s rows plus the preservation marker and
@@ -1258,10 +1267,19 @@ export type ListTasksResponsePre16 = z.infer<
 // this line simply omits them; absence remains "this host cannot say", never
 // "complete". The `tasks` redeclaration below carries the LIVE row and is the
 // one place on this line that should.
-export const listTasksResponseSchema = lazySchema(() =>
+export const listTasksResponseSchemaPre17 = lazySchema(() =>
   listTasksResponseSchemaPre16.extend({
-    tasks: z.array(listTaskLightSchema),
+    tasks: z.array(listTaskLightSchemaPre17),
     completeness: listTasksCompletenessSchema.optional(),
+  }),
+);
+export type ListTasksResponsePre17 = z.infer<
+  typeof listTasksResponseSchemaPre17
+>;
+
+export const listTasksResponseSchema = lazySchema(() =>
+  listTasksResponseSchemaPre17.extend({
+    tasks: z.array(listTaskLightSchema),
   }),
 );
 export type ListTasksResponse = z.infer<typeof listTasksResponseSchema>;

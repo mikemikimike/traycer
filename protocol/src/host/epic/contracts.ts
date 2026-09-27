@@ -70,6 +70,7 @@ import {
   listTasksResponseSchemaPre14,
   listTasksResponseSchemaPre15,
   listTasksResponseSchemaPre16,
+  listTasksResponseSchemaPre17,
   prepareArtifactImageRequestSchema,
   prepareArtifactImageResponseSchema,
   removeEpicRepoRequestSchema,
@@ -344,7 +345,7 @@ export const epicListTasksV16 = defineRpcContract({
   method: "epic.listTasks",
   schemaVersion: { major: 1, minor: 6 } as const,
   requestSchema: listTasksRequestSchema,
-  responseSchema: listTasksResponseSchema,
+  responseSchema: listTasksResponseSchemaPre17,
 });
 
 export const epicListTasksUpgradeV15ToV16 = defineUpgradePath<
@@ -357,6 +358,25 @@ export const epicListTasksUpgradeV15ToV16 = defineUpgradePath<
   // An older host cannot have returned a local-first page. Do not manufacture
   // `pending`: its absence continues to mean the released single-response
   // behaviour, exactly as a 1.5 renderer already reads it.
+  upgradeResponse: (response) => response,
+});
+
+// The per-viewer activity key is additive and optional. A 1.6 peer keeps its
+// frozen row schema, so it cannot accidentally claim to know Recent activity.
+export const epicListTasksV17 = defineRpcContract({
+  method: "epic.listTasks",
+  schemaVersion: { major: 1, minor: 7 } as const,
+  requestSchema: listTasksRequestSchema,
+  responseSchema: listTasksResponseSchema,
+});
+
+export const epicListTasksUpgradeV16ToV17 = defineUpgradePath<
+  typeof epicListTasksV16,
+  typeof epicListTasksV17
+>({
+  from: epicListTasksV16.schemaVersion,
+  to: epicListTasksV17.schemaVersion,
+  upgradeRequest: (request) => request,
   upgradeResponse: (response) => response,
 });
 
