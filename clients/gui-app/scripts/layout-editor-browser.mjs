@@ -7896,7 +7896,9 @@ try {
   const launched = await launchChromeWithDevTools(
     chromePath,
     "traycer-layout-editor-",
-    [],
+    [
+      "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+    ],
   );
   chrome = launched.chrome;
   chromeProfilePath = launched.profilePath;
@@ -7935,6 +7937,15 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   });
+  const mouseAvailable = await evaluate(
+    client,
+    'matchMedia("(hover: hover) and (pointer: fine)").matches',
+  );
+  if (!mouseAvailable) {
+    throw new Error(
+      "Layout editor mouse regressions require a fine, hovering pointer",
+    );
+  }
   const origin = `http://127.0.0.1:${vitePort}`;
   const canvasUrl = `${origin}${canvasFixturePath}`;
   const phases = selectedPhases();

@@ -324,9 +324,15 @@ async function stripRow(client, id) {
  * on any reload or hot update voids the run (see the end).
  */
 async function warmUp(client, origin) {
-  for (const url of [STRIP_FIXTURE, AGENTS_FIXTURE, CANVAS_FIXTURE]) {
-    await client.send("Page.navigate", { url: origin + url });
-    await delay(3000);
+  for (const [url, ready] of [
+    [STRIP_FIXTURE, "window.__sideTabStripProbe?.ready === true"],
+    [AGENTS_FIXTURE, "window.__hoverCardAgentsProbe?.ready === true"],
+    [
+      CANVAS_FIXTURE,
+      "window.__layoutCanvasProbe?.ready === true && document.querySelector('[data-testid=\"epic-sidebar-rail\"]') !== null",
+    ],
+  ]) {
+    await open(client, origin + url, ready, "warm-up fixture");
   }
   let seen = -1;
   while (seen !== viteReloads.length) {
