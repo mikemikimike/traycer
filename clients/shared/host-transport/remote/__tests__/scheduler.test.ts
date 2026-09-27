@@ -672,9 +672,7 @@ describe("PriorityScheduler", () => {
         activeSources.push(source);
         scheduler.enqueue(source);
       }
-      scheduler.enqueue(
-        chunkedSource(nextStreamId, QosClass.INTERACTIVE, 4),
-      );
+      scheduler.enqueue(chunkedSource(nextStreamId, QosClass.INTERACTIVE, 4));
       scheduler.resume();
       for (
         let i = 0;
