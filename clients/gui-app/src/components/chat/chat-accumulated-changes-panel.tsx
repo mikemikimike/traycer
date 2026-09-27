@@ -45,7 +45,12 @@ import {
 import { DiffLineDeltas } from "@/components/chat/diff-line-deltas";
 import { FileChangeHeader } from "@/components/chat/segments/file-change-segment";
 import { RevertArtifactsCheckbox } from "@/components/chat/segments/revert-artifacts-checkbox";
-import { useArtifactRowDisplay } from "@/components/chat/segments/use-artifact-row-display";
+import {
+  sessionlessArtifactRowDisplay,
+  useArtifactRowDisplay,
+  type ArtifactRowDisplay,
+} from "@/components/chat/segments/use-artifact-row-display";
+import { EpicSessionGate } from "@/providers/epic-session-gate";
 import { artifactOperationVerb } from "@/lib/chat/artifact-operation-verb";
 
 interface ChatAccumulatedChangesPanelProps {
@@ -485,19 +490,55 @@ function AccumulatedChangeRow(props: AccumulatedChangeRowProps) {
   );
 }
 
-function ArtifactAccumulatedHeader(props: {
+interface ArtifactAccumulatedHeaderProps {
   readonly artifact: CheckpointArtifactTag;
   readonly operation: CheckpointFileOperation;
   readonly additions: number;
   readonly deletions: number;
-}) {
-  const { artifact, operation, additions, deletions } = props;
+}
+
+/**
+ * The live title and opener read the open epic, which the layout editor's
+ * sample workspace draws this panel without: there the row keeps its captured
+ * tag and opens nothing.
+ */
+function ArtifactAccumulatedHeader(props: ArtifactAccumulatedHeaderProps) {
+  const { artifact, operation } = props;
+  return (
+    <EpicSessionGate
+      fallback={
+        <ArtifactAccumulatedHeaderView
+          {...props}
+          display={sessionlessArtifactRowDisplay({
+            artifactKind: artifact.kind,
+            fallbackTitle: artifact.title,
+            operation,
+          })}
+        />
+      }
+    >
+      <LiveArtifactAccumulatedHeader {...props} />
+    </EpicSessionGate>
+  );
+}
+
+function LiveArtifactAccumulatedHeader(props: ArtifactAccumulatedHeaderProps) {
+  const { artifact, operation } = props;
   const display = useArtifactRowDisplay({
     artifactId: artifact.artifactId,
     artifactKind: artifact.kind,
     fallbackTitle: artifact.title,
     operation,
   });
+  return <ArtifactAccumulatedHeaderView {...props} display={display} />;
+}
+
+function ArtifactAccumulatedHeaderView(
+  props: ArtifactAccumulatedHeaderProps & {
+    readonly display: ArtifactRowDisplay;
+  },
+) {
+  const { operation, additions, deletions, display } = props;
   return (
     <>
       <StaticEpicNodeIcon
