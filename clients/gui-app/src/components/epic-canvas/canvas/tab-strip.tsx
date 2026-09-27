@@ -873,12 +873,11 @@ function TabItemBody(
               onKeyDown={handleKeyDown}
               onAuxClick={handleAuxClick}
               className={cn(
-                "group relative flex h-9 shrink-0 cursor-pointer items-center gap-1.5 border-r border-canvas-border/70 px-3 text-ui-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                // Fill the scroller row without the 1px vertical overflow fixed on main.
+                "group relative flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-canvas-border/70 px-3 pt-px text-ui-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 "transition-[background-color,color] duration-300 ease-spring",
                 "hover:bg-card/60 active:scale-97",
-                // Paint over the strip border so the active tab merges with the panel below.
-                isActive &&
-                  "bg-(--app-background) text-canvas-foreground shadow-[inset_0_-1px_0_0_var(--app-background)]",
+                isActive && "bg-(--app-background) text-canvas-foreground",
                 !isActive && "text-muted-foreground hover:text-foreground/90",
               )}
             >

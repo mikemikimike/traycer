@@ -35,6 +35,7 @@ interface CommandProps extends Omit<
   readonly highlightedValue?: string;
   readonly defaultHighlightedValue?: string;
   readonly onHighlightChange?: (value: string) => void;
+  readonly allowDisabledHighlight?: boolean;
   readonly loopNavigation?: boolean;
 }
 
@@ -206,6 +207,7 @@ function Command({
   highlightedValue,
   defaultHighlightedValue = "",
   onHighlightChange,
+  allowDisabledHighlight,
   loopNavigation = false,
   onKeyDown,
   onKeyDownCapture,
@@ -253,9 +255,15 @@ function Command({
     [rows, groups, query, shouldFilter, scoreItem, sourcePositions],
   );
   const currentValue = highlightedValue ?? active;
+  const selectable =
+    allowDisabledHighlight === true
+      ? rows.filter((row) => !row.element.hidden)
+      : enabled;
   const selected =
-    enabled.find((row) => row.id === activeRowId && row.key === currentValue) ??
-    enabled.find((row) => row.key === currentValue) ??
+    selectable.find(
+      (row) => row.id === activeRowId && row.key === currentValue,
+    ) ??
+    selectable.find((row) => row.key === currentValue) ??
     enabled.at(0);
   const setHighlightedRow = React.useCallback(
     (row: CommandRow) => {
@@ -632,6 +640,7 @@ function CommandItem({
   searchText,
   keywords = [],
   disabled = false,
+  hidden: hiddenProp = false,
   onAction,
   showCheck = true,
   ref,
@@ -671,7 +680,7 @@ function CommandItem({
       key: itemKey ?? text,
       text,
       keywords: keywordsRef.current,
-      disabled,
+      disabled: disabled || hiddenProp,
       group,
       element: element.current,
       anchor: anchor.current,
@@ -683,11 +692,13 @@ function CommandItem({
     inferredText,
     keywordKey,
     disabled,
+    hiddenProp,
     group,
     registerRow,
   ]);
   const selected = context.activeId === id;
-  const hidden = context.scores.has(id) && context.scores.get(id) === 0;
+  const hidden =
+    hiddenProp || (context.scores.has(id) && context.scores.get(id) === 0);
   return (
     <>
       <template ref={anchor} />
