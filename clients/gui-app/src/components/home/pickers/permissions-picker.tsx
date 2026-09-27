@@ -30,10 +30,12 @@ import {
   type PermissionMode,
 } from "@/components/home/data/landing-options";
 import {
-  autoJudgeMetaLine,
+  autoJudgeRowFace,
   autoModeMidTurnLock,
   type AutoJudgeBilling,
+  type AutoJudgeRowFace,
 } from "@/lib/auto-mode/auto-judge-billing";
+import { AutoJudgeLine } from "@/components/home/pickers/auto-judge-line";
 
 interface PermissionsPickerProps {
   value: PermissionMode;
@@ -277,12 +279,12 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
                 <PermissionOptionBody
                   label={option.label}
                   description={description}
-                  metaLine={
+                  judgeFace={
                     isSupported &&
                     !lockedMidTurn &&
                     option.id === "auto" &&
                     judgeBilling !== null
-                      ? autoJudgeMetaLine(judgeBilling)
+                      ? autoJudgeRowFace(judgeBilling)
                       : null
                   }
                   notice={
@@ -322,13 +324,13 @@ export function PermissionsPicker(props: PermissionsPickerProps) {
  * pocket it spends and what a mid-turn switch actually does.
  *
  * Extracted so the `auto` row's two extra lines do not push the map callback
- * above the complexity ceiling; it renders nothing for `metaLine` / `notice`
+ * above the complexity ceiling; it renders nothing for `judgeFace` / `notice`
  * on every other row, which is what keeps their absence the default.
  */
 function PermissionOptionBody(props: {
   readonly label: string;
   readonly description: string;
-  readonly metaLine: string | null;
+  readonly judgeFace: AutoJudgeRowFace | null;
   readonly notice: string | null;
 }) {
   return (
@@ -339,13 +341,8 @@ function PermissionOptionBody(props: {
       <span className="block leading-5 text-muted-foreground">
         {props.description}
       </span>
-      {props.metaLine !== null ? (
-        <span
-          data-testid="permission-option-meta"
-          className="block leading-5 text-ui-xs text-muted-foreground"
-        >
-          {props.metaLine}
-        </span>
+      {props.judgeFace !== null ? (
+        <AutoJudgeLine face={props.judgeFace} testId="permission-option-meta" />
       ) : null}
       {props.notice !== null ? (
         <span
