@@ -632,6 +632,7 @@ describe("PriorityScheduler", () => {
       const abortedStreamId = 1000;
       const nextStreamId = 1016;
       const writesByStream = new Map<number, number>();
+      const activeSources: OutboundChunkSource[] = [];
       const scheduler = new PriorityScheduler({
         write: async (frame) => {
           written.push({ streamId: frame.streamId, type: frame.type });
@@ -658,17 +659,22 @@ describe("PriorityScheduler", () => {
         now: () => Date.now(),
       });
 
-      // Pause the pump so all sixteen INTERACTIVE chunk streams are queued
-      // before the first source can begin. Holding the first source's second
-      // frame then proves all sixteen reservations are active.
+      // Queue sixteen partial INTERACTIVE streams plus the blocked seventeenth
+      // before pumping. As the first chunks rotate through, the waiter reaches
+      // the head before all active continuations.
       scheduler.pause();
       for (
         let streamId = abortedStreamId;
         streamId < nextStreamId;
         streamId += 1
       ) {
-        scheduler.enqueue(chunkedSource(streamId, QosClass.INTERACTIVE, 4));
+        const source = chunkedSource(streamId, QosClass.INTERACTIVE, 4);
+        activeSources.push(source);
+        scheduler.enqueue(source);
       }
+      scheduler.enqueue(
+        chunkedSource(nextStreamId, QosClass.INTERACTIVE, 4),
+      );
       scheduler.resume();
       for (
         let i = 0;
@@ -679,13 +685,20 @@ describe("PriorityScheduler", () => {
       }
       await abortedChunkHeld;
       expect(writesByStream.size).toBe(16);
+      expect(
+        [...writesByStream.keys()].sort((left, right) => left - right),
+      ).toEqual(
+        Array.from({ length: 16 }, (_, index) => abortedStreamId + index),
+      );
+      expect(activeSources.every((source) => !source.done)).toBe(true);
       expect(written.length).toBeGreaterThanOrEqual(16);
       expect(written.length).toBeLessThanOrEqual(CHUNK_PACE_BURST_FRAMES);
 
+      // The waiter is at the queue head before the active continuations. Refill
+      // pacing while the writer is held so a premature release makes its first
+      // chunk eligible immediately, before CLOSE or those continuations.
+      await vi.advanceTimersByTimeAsync(500);
       scheduler.dropStreamOutbound(abortedStreamId);
-      // Queue the capacity-blocked stream AHEAD of CLOSE. If local abort were
-      // treated as peer-confirmed, A would be incorrectly allowed to start.
-      scheduler.enqueue(chunkedSource(nextStreamId, QosClass.INTERACTIVE, 4));
       let seq = 0;
       scheduler.enqueue(
         new OutboundChunkSource(
