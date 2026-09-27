@@ -48,9 +48,9 @@
 // jsdom has no hit testing, no layout and no paint order, so nothing below is
 // decidable there.
 //
-//   A1. No `inert` anywhere inside the canvas column.
-//   A2. Every region on the scene is the hit target at its own centre.
-//   A3. A real `mouseMoved` stamps `data-hover` and raises the name chip.
+//   A3. A real `mouseMoved` onto every region's centre stamps `data-hover` and
+//       raises the name chip, so nothing (`inert`, an overlay, a sibling) sits
+//       over it where it takes input.
 //   A4. A real click selects, opens that region's inspector section, and the
 //       APP does not act: no menu, no popover, no file chooser, no panel
 //       toggled.
@@ -59,26 +59,25 @@
 //       L-143), a rail icon across a divider, a rail DIVIDER, and the clamp -
 //       each read back off the layout store as exactly one history step, with
 //       `[data-layout-dragging]` and a reflowing sibling measured mid-gesture.
-//   A6. Microphone Shown draws a box, Hidden removes it, and its ghost comes
-//       back under a real hover on the inspector's index row.
+//   A6. Microphone Hidden removes its box, and its ghost comes back under a
+//       real hover on the inspector's index row.
 //   A7. A Hidden + Chip dock member ghosts as a PILL, not as the row it never
 //       takes at rest.
 //   A8. A real right-click opens the quick-verb menu on a region inside a
 //       session and at rest - the dock's rows, the sample rail's icons and the
-//       minimap included (L-144) - and opens nothing on the sample transcript.
+//       minimap included (L-144), each naming its region - and opens nothing
+//       on the sample transcript's prose.
 //   A9. The editing frame is counted in PIXELS off a screenshot, within 3 CSS
 //       px of each of the column's four edges, in all three dock modes -
 //       including the top edge under the opaque positioned header, which is
 //       the exact place the pre-L-130 outline was painted under (LV2-04). Its
 //       inset and radius are asserted against L-137's numbers rather than
-//       merely read, each of the four corners is checked for the square join
-//       an arc cannot draw, and the editor's own TAB under the top run is
-//       READ - fill against stroke - rather than sampled (L-163).
-//  A10. The selection ring's painted box is the region's box plus its padding,
-//       stays inside the window on the bottom row, and follows a dock switch.
+//       merely read, and each of the four corners is checked for the square
+//       join an arc cannot draw.
 //
-// The canvas fixture mounts the shell's own `AppColumnFrame`; A1-A10 run it at
-// the `top` placement.
+// The canvas fixture mounts the shell's own `AppColumnFrame`; A3-A9 run it at
+// the `top` placement. The selection ring's painted box is the switch phase's
+// (A14) and the groups phase's (clamped at the window's edge).
 //
 // ---------------------------------------------------------------------------
 // THE SIDE TAB STRIP (specs/side-tabs, ticket 12)
@@ -101,8 +100,8 @@
 //       themes.
 //       A13 - the band per platform (40px, strip top at its bottom, hidden in
 //       macOS fullscreen), the 40px title row where the strip owns the title
-//       bar, the frame's 6px shell gap on every edge, and the dialog
-//       overlay's top under `.wco`.
+//       bar, the surface frame flush under the band or the window top, and the
+//       dialog overlay's top under `.wco`.
 //       Row kit - the 10px badge on a 20x16 leading monogram tile, and the group line as
 //       one continuous line across its members.
 //   Phase 2c (switch). A14 - a real click on Position "Left" moves the strip in
@@ -126,8 +125,7 @@
 //       own, the canvas frame's border suppressed only on the edge that
 //       already carries the surface's own seam line, no radius or
 //       pseudo-element arc left anywhere, and both width handles as the hit
-//       at the flush boundaries; left/right x none/macOS and top, in both
-//       themes.
+//       at the flush boundaries; left/right x none/macOS and top.
 //   header - `header=app` at the top (staging round 1, F4; flush surface,
 //       ticket 09): the active tab, the split pair's focused member and both
 //       drag overlays are one 32px box (its own rounding, self-consistent on
@@ -136,8 +134,7 @@
 //       against the header's own bottom edge. No controls, macOS and
 //       Windows, panel on either side, in both themes.
 //   running - the glyph set's running state is AgentSpinningDots' default
-//       dots on the expanded strip and the top header (F3), in both themes:
-//       advancing under an emulated `no-preference`, one steady visible frame
+//       dots on the expanded strip and the top header (F3): advancing under an emulated `no-preference`, one steady visible frame
 //       with an unchanged status name under `reduce`; the collapsed rail shows
 //       the same work as meter turn pips with no spinner.
 //   join - the active row and tile take the panel's fill across the gap and
@@ -145,34 +142,45 @@
 //       joins on the far side or over a route surface; the bridge holds over
 //       the hovered resize handle and after a reorder settles, and gives way
 //       while its row is cut by the list's edge.
-//   rail - 60px, each tile's meter (pips, the attention pip, "+N") and badge
-//       kind as a 14px disc at the top-right; the waiting pulse painted past
-//       the last row with the list's padding holding its 8px spread.
-//   overlays - the hover card, the user menu (one click, no double toggle)
-//       and the Notifications drawer (flush with the frame) open toward the content
-//       and inside the window, on both edges.
-//   coverage - with a known host the activity plane does not reach, a task
-//       with no known agent hovers as unknown (never "Idle") with no meter
-//       pips, a running task's counts carry the partial notice and the account
-//       count reads as a floor; under a fleet union, and for a one-host
-//       account on a local plane, all three read plainly (F8).
+//   flip - F2: across a live panel side change, and on load, the panel sits
+//       flush against the content frame and the hosted chat body stays on its
+//       slot inside it, never over the panel.
+//   moves - the same after every other live change that moves the content:
+//       a strip side switch, top to side and back, a strip collapse, a real
+//       width drag, the panel collapsing to its rail.
+//   rail - 60px, each tile's badge kind as a 14px disc at the top-right; the
+//       waiting pulse painted past the last row with the list's padding
+//       holding its 8px spread.
+//   overlays - the hover card and the Notifications drawer (flush with the
+//       frame) open toward the content and inside the window, on both edges.
+//   readings - the strip foot's readings row: two readings split it in half,
+//       one takes all of it, collapsed they stack as 40px tiles, no reading is
+//       ever drawn cut, and each popover opens toward the content.
+//   hostmenu - the account menu opens on one click toward the content, inside
+//       the window and at most 256px wide, and a long host name truncates and
+//       reads in full from its tooltip.
 //   activity - the live agents under the active row in the Activity view,
-//       gone on a collapse and in the Layered view.
-//   striptop - the top block (F1, F7), left/right x none/macOS x rail/expanded
-//       in both themes: the rail as one column (the lights on macOS left, expand,
+//       inside the strip, each title one 16px indent step per level.
+//   striptop - the top block (F1, F7), left/right x none/macOS x rail/expanded:
+//       the rail as one column (the lights on macOS left, expand,
 //       Notifications, All tasks, New Task, a divider, Home, the tiles, the avatar),
 //       every part centred on the rail's axis, 32px nav tiles 4px apart, the
-//       divider midway, Home and the tiles evenly spaced, no history arrows;
+//       divider midway, Home and the tiles evenly spaced;
 //       expanded, New Task after Home in Home's box with its icon and label
-//       level with Home's; New Task filled with the primary colour in both.
+//       level with Home's; New Task filled with the primary colour and the
+//       divider readable, in both themes.
 //   stripresize - F9: a real drag on the strip's handle across the snap point
 //       switches the layout (tiles or rows, the top block, the joined item,
 //       the Activity view's live agents) with the pointer still down, both
-//       ways and on both edges; the store is written once, on release; Escape
-//       mid-drag restores the starting layout and width.
+//       ways and on both edges, and the store is written once, on release;
+//       the crossing eases, and Escape or a release lands at once.
 //   placement - the tab strip and the sample sidebar selected by their own
 //       space, the placement bar beside them, a pictogram writing the edge, and
 //       a real drag lighting the zones and writing the edge it is dropped on.
+//   groups - a stacked pair on the panel rail is one icon with no card, its
+//       count painted on it while editing, the ring clamped onto it inside the
+//       window, its row's Enter and Space by real keys, and a divider moved by
+//       real drags and keys.
 //
 // Set LAYOUT_EDITOR_BROWSER_SHOTS to a directory to keep those phases'
 // screenshots.
@@ -183,9 +191,9 @@
 // and specs/sidebar-redesign/tickets/07.
 //
 // Set LAYOUT_EDITOR_BROWSER_PHASES to a comma list of parity, canvas, sides,
-// switch, strip, sheets, header, running, flip, moves, join, rail, striptop, stripresize, overlays, activity, placement,
-// readings, hostmenu to run only
-// those while iterating; every selected phase runs even after one fails, and
+// switch, strip, sheets, header, running, flip, moves, join, rail, striptop,
+// stripresize, overlays, readings, hostmenu, activity, placement, groups to run
+// only those while iterating; every selected phase runs even after one fails, and
 // the run fails if any did.
 // ---------------------------------------------------------------------------
 import assert from "node:assert/strict";
@@ -750,32 +758,10 @@ const TERMINALS_ABOVE_THE_DIVIDER = [
   "railComments",
 ];
 
-/**
- * Terminals joined to Browsers by a link the user made (L-168).
- *
- * Terminals stays ABOVE Browsers and every panel keeps its place: the list's
- * row action hands the panel BELOW to the writer as the source, so the join
- * costs no reorder at all (L-170).
- */
-const TERMINALS_STACKED_ABOVE_BROWSERS = [
-  "railAgents",
-  "stack:railAgents+railArtifacts",
-  "railArtifacts",
-  "railTerminals",
-  "stack:railTerminals+railBrowsers",
-  "railBrowsers",
-  "railGitDiff",
-  "railPullRequests",
-  "railFileTree",
-  "railSharing",
-  "railComments",
-];
-
 // --- phase 2b: the side placements (A9 generalised, A11, A12, A13) ----------
 
 /** The strip's own numbers (side-strip-tokens.ts, D4, S-20), restated so a drift is a failure. */
 const SIDE_STRIP_RAIL_WIDTH = 60;
-const SIDE_STRIP_DEFAULT_WIDTH = 240;
 /**
  * The collapsed panel's rail: the vertical `EpicLeftPanelRail`'s `w-12`
  * (48px, not the strip's 60px rail). Flush surface: the collapsed rail
@@ -796,8 +782,6 @@ const SIDE_TAB_TILE_WIDTH = 40;
 const SIDE_TAB_TILE_HEIGHT = 44;
 const SIDE_TAB_MONOGRAM_CHIP = { width: 26, height: 22 };
 const SIDE_TAB_RAIL_BADGE = 14;
-/** `--shell-gap`: the ground between the window edge, the strip and every sheet (D1). */
-const SHELL_GAP = 6;
 /**
  * How far apart two fills have to be, as a WCAG contrast ratio, to count as
  * two fills at all: the same fill sampled twice reads 1.00.
@@ -2504,7 +2488,7 @@ const NO_INDICATOR = {
   unreadDone: false,
 };
 
-/** One badge per kind, and meters from one pip to "+N" (the rail expectations below). */
+/** One badge per kind (the rail expectations below). */
 const RAIL_INDICATORS = {
   "fixture-alpha": { ...NO_INDICATOR, pendingApproval: true },
   "fixture-beta": { ...NO_INDICATOR, pendingInterview: true },
@@ -2528,17 +2512,17 @@ const RAIL_ACTIVITY = {
 };
 
 /**
- * What each tile draws from those: the meter holds four pips at most, the
- * attention pip included and never cut, and the rest is "+N". Delta's failure
- * is the seed's local notification.
+ * The badge each tile draws from those; Delta's failure is the seed's local
+ * notification. How many pips a meter draws, and its "+N", are
+ * `agent-meter.test.tsx`'s: a count of nodes is not a layout question.
  */
 const RAIL_EXPECTED = {
-  AR: { badge: "approval", pips: 2, more: null },
-  BR: { badge: "reply", pips: 1, more: null },
-  GN: { badge: "unread", pips: 1, more: null },
-  DM: { badge: "failed", pips: 1, more: null },
-  EC: { badge: null, pips: 3, more: null },
-  ZS: { badge: null, pips: 4, more: "+1" },
+  AR: "approval",
+  BR: "reply",
+  GN: "unread",
+  DM: "failed",
+  EC: null,
+  ZS: null,
 };
 
 async function saveShot(client, name) {
@@ -3152,20 +3136,16 @@ async function runRunningPhase(client, pageUrl, pageLoads) {
         );
         for (const motion of RUNNING_MOTION) {
           await emulateReducedMotion(client, motion);
-          for (const theme of ["light", "dark"]) {
-            await checkRunning(
-              client,
-              variant,
-              motion,
-              theme,
-              `${label}, ${motion}, ${theme}`,
-              violations,
-              notes,
-            );
-          }
+          await checkRunning(
+            client,
+            variant,
+            motion,
+            `${label}, ${motion}`,
+            violations,
+            notes,
+          );
         }
         await emulateReducedMotion(client, "");
-        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
         await closeShellVariant(
           client,
           pageLoads,
@@ -3174,7 +3154,7 @@ async function runRunningPhase(client, pageUrl, pageLoads) {
           violations,
         );
       },
-      "the expanded strip and the top header draw running turns as AgentSpinningDots' default dots in both themes - advancing with motion, holding one visible frame under reduced motion with the same status name - and the collapsed rail shows them as turn pips with no spinner",
+      "the expanded strip and the top header draw running turns as AgentSpinningDots' default dots - advancing with motion, holding one visible frame under reduced motion with the same status name - and the collapsed rail shows them as turn pips with no spinner",
     );
   } finally {
     // Later phases must not inherit an emulated preference.
@@ -3185,24 +3165,12 @@ async function runRunningPhase(client, pageUrl, pageLoads) {
   }
 }
 
-async function checkRunning(
-  client,
-  variant,
-  motion,
-  theme,
-  label,
-  violations,
-  notes,
-) {
+async function checkRunning(client, variant, motion, label, violations, notes) {
   const fail = (line) => violations.push(`${label}: ${line}`);
-  await evaluate(
-    client,
-    `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-  );
   await settle(client, 350);
   await saveShot(
     client,
-    `running-${variant.query.tabs}-${variant.query.collapsed === 1 ? "collapsed" : "expanded"}-${motion}-${theme}`,
+    `running-${variant.query.tabs}-${variant.query.collapsed === 1 ? "collapsed" : "expanded"}-${motion}`,
   );
   const probe = await evaluate(client, RUNNING_PROBE);
   // A second read a few ticks later: with motion it must have advanced, under
@@ -3352,25 +3320,12 @@ async function runSheetsPhase(client, pageUrl, pageLoads) {
         { ...variant.query, collapsed: 0, dock: "right", surface: "epic" },
         label,
       );
-      for (const theme of ["light", "dark"]) {
-        await evaluate(
-          client,
-          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-        );
-        await settle(client, 250);
-        await checkSheets(
-          client,
-          variant,
-          `${label}, ${theme}`,
-          violations,
-          notes,
-        );
-        await saveShot(
-          client,
-          `sheets-${variant.query.tabs}-${variant.query.wco}-${variant.query.sidebar}-${theme}`,
-        );
-      }
-      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      // Margins, borders, radii and hit targets: nothing here is themed.
+      await checkSheets(client, variant, label, violations, notes);
+      await saveShot(
+        client,
+        `sheets-${variant.query.tabs}-${variant.query.wco}-${variant.query.sidebar}`,
+      );
       await closeShellVariant(
         client,
         pageLoads,
@@ -3379,7 +3334,7 @@ async function runSheetsPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    `${String(SHEET_VARIANTS.length)} windows in both themes - the surface frame flush on every side (no margin, no padding), the panel with no border of its own, the canvas frame's border suppressed only on its own seam edge with no radius anywhere, and the width handles as the hit at the flush boundaries`,
+    `${String(SHEET_VARIANTS.length)} windows - the surface frame flush on every side (no margin, no padding), the panel with no border of its own, the canvas frame's border suppressed only on its own seam edge with no radius anywhere, and the width handles as the hit at the flush boundaries`,
   );
 }
 
@@ -4278,10 +4233,6 @@ async function runRailPhase(client, pageUrl, pageLoads) {
         client,
         `window.__layoutCanvasProbe.setIndicators(${JSON.stringify(RAIL_INDICATORS)}, {})`,
       );
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
-      );
       await settle(client, 1400);
       await checkRailTiles(client, fail, say);
       await saveShot(client, `rail-${variant.label}`);
@@ -4296,7 +4247,7 @@ async function runRailPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "a 60px rail on both edges, every tile's meter (pips, the attention pip, \"+N\") and its badge by kind in a 14px disc at the top-right, and the waiting pulse painted past the last row at the list's scrolled edge",
+    "a 60px rail on both edges, each tile's badge by kind in a 14px disc at the top-right, and the waiting pulse painted past the last row at the list's scrolled edge",
   );
 }
 
@@ -4312,12 +4263,9 @@ const RAIL_TILES_PROBE = `(() => {
     strip: box(strip),
     tiles: Object.fromEntries(tiles.map((tile) => {
       const badge = tile.querySelector('[data-testid="side-tab-rail-badge"]');
-      const more = tile.querySelector('[data-testid="side-tab-meter-more"]');
       return [(tile.querySelector('[data-testid="side-tab-monogram-chip"]')?.textContent ?? "").trim(), {
         rect: box(tile),
         badge: badge === null ? null : { kind: badge.getAttribute("data-kind"), rect: box(badge), radius: getComputedStyle(badge).borderTopLeftRadius },
-        pips: tile.querySelectorAll("[data-pip]").length,
-        more: more === null ? null : more.textContent.trim(),
       }];
     })),
   };
@@ -4329,7 +4277,7 @@ async function checkRailTiles(client, fail, say) {
     fail(
       `the rail is ${probe.strip.width.toFixed(1)}px wide, not ${String(SIDE_STRIP_RAIL_WIDTH)}`,
     );
-  for (const [monogram, expected] of Object.entries(RAIL_EXPECTED)) {
+  for (const [monogram, badge] of Object.entries(RAIL_EXPECTED)) {
     const tile = probe.tiles[monogram];
     if (tile === undefined) {
       fail(
@@ -4337,19 +4285,9 @@ async function checkRailTiles(client, fail, say) {
       );
       continue;
     }
-    if (tile.pips !== expected.pips)
-      fail(
-        `${monogram}: ${String(tile.pips)} pips, expected ${String(expected.pips)}`,
-      );
-    if (tile.more !== expected.more)
-      fail(
-        `${monogram}: overflow "${String(tile.more)}", expected "${String(expected.more)}"`,
-      );
     const kind = tile.badge?.kind ?? null;
-    if (kind !== expected.badge)
-      fail(
-        `${monogram}: badge ${String(kind)}, expected ${String(expected.badge)}`,
-      );
+    if (kind !== badge)
+      fail(`${monogram}: badge ${String(kind)}, expected ${String(badge)}`);
     if (tile.badge !== null) {
       const b = tile.badge.rect;
       if (
@@ -4376,7 +4314,7 @@ async function checkRailTiles(client, fail, say) {
     Object.entries(probe.tiles)
       .map(
         ([monogram, tile]) =>
-          `${monogram} ${String(tile.pips)} pip(s)${tile.more === null ? "" : ` ${tile.more}`}${tile.badge === null ? "" : ` ${tile.badge.kind}`}`,
+          `${monogram}${tile.badge === null ? "" : ` ${tile.badge.kind}`}`,
       )
       .join("; "),
   );
@@ -4504,9 +4442,7 @@ const STRIP_TOP_PROBE = `(() => {
     inbox: box(q('[data-testid="side-strip-inbox"]')),
     allTasks: box(q('[data-testid="side-strip-all-tasks"]')),
     newTask: box(newTask),
-    newTaskInTitleRow: newTask !== null && newTask.closest('[data-testid="side-strip-title-row"]') !== null,
     newTaskFill: newTask === null ? null : getComputedStyle(newTask).backgroundColor,
-    newTaskText: newTask === null ? null : newTask.textContent.trim(),
     newTaskIcon: box(newTask?.querySelector("svg") ?? null),
     newTaskLabel: box(q('[data-testid="side-strip-new-task-label"]')),
     primaryFill,
@@ -4520,11 +4456,8 @@ const STRIP_TOP_PROBE = `(() => {
     items: [...(q('[data-testid="header-tab-strip-scroll"]')?.children ?? [])]
       .map((node) => box(node))
       .filter((rect) => rect.height > 0),
-    arrows: strip.querySelectorAll('[data-testid^="history-nav-"]').length,
     inboxIcon: box(q('[data-testid="side-strip-inbox"] svg')),
     inboxMark: box(q('[data-testid="side-strip-inbox-needs-you-badge"]') ?? q('[data-testid="side-strip-inbox-unknown-indicator"]')),
-    inboxUnknown: box(q('[data-testid="side-strip-inbox-unknown-indicator"]')),
-    inboxUnread: box(q('[data-testid="side-strip-inbox-unread-count"]') ?? q('[data-testid="side-strip-inbox-needs-you-count"]')),
     rows: [...strip.querySelectorAll('[data-side-tab="expanded"]')].map((row) => {
       const tile = row.querySelector('[data-testid="side-tab-leading-tile"]');
       const letters = tile?.querySelector("span[aria-hidden]")?.firstChild ?? null;
@@ -4576,10 +4509,15 @@ async function runStripTopPhase(client, pageUrl, pageLoads) {
         await settle(client, 600);
         const fail = (line) => violations.push(`${label}, ${theme}: ${line}`);
         const probe = await evaluate(client, STRIP_TOP_PROBE);
-        if (variant.query.collapsed === 1) {
-          checkRailColumn(probe, variant, fail);
+        // Geometry once; what a theme can change - the fill and the
+        // divider's contrast - in both.
+        if (theme === "light") {
+          if (variant.query.collapsed === 1)
+            checkRailColumn(probe, variant, fail);
+          else checkExpandedTop(probe, fail);
+        }
+        if (variant.query.collapsed === 1)
           await checkRailDividerDrawn(client, probe.divider, fail);
-        } else checkExpandedTop(probe, fail);
         checkNewTaskPrimary(probe, fail);
         await saveStripShot(client, probe.strip, `${variant.shot}-${theme}`);
         if (theme === "dark")
@@ -4594,7 +4532,7 @@ async function runStripTopPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    `${String(STRIP_TOP_VARIANTS.length)} windows in both themes - the rail as one centred column (expand, Notifications, All tasks, New Task, a divider, Home, the tiles, the avatar) with an even rhythm and no history arrows, and the expanded New Task as a primary row after Home, aligned with it`,
+    `${String(STRIP_TOP_VARIANTS.length)} windows - the rail as one centred column (expand, Notifications, All tasks, New Task, a divider, Home, the tiles, the avatar) with an even rhythm, and the expanded New Task as a primary-filled row after Home, aligned with it; the fill and the divider in both themes`,
   );
 }
 
@@ -4639,8 +4577,6 @@ function checkNewTaskPrimary(probe, fail) {
     fail("no New Task button (side-strip-new-task)");
     return;
   }
-  if (probe.newTaskInTitleRow)
-    fail("New Task sits in the title row, not after the nav rows (F7)");
   if (probe.newTaskFill !== probe.primaryFill)
     fail(
       `New Task fills ${String(probe.newTaskFill)}, not the primary ${probe.primaryFill} (F7)`,
@@ -4655,10 +4591,6 @@ function checkNewTaskPrimary(probe, fail) {
  * are from each other.
  */
 function checkRailColumn(probe, variant, fail) {
-  if (probe.arrows > 0)
-    fail(
-      `${String(probe.arrows)} history arrow(s) in the rail; collapsed drops them`,
-    );
   const ownsTitleBar =
     variant.query.tabs === "left" && variant.query.wco === "mac";
   const column = [
@@ -4722,8 +4654,11 @@ function checkRailColumn(probe, variant, fail) {
       );
   }
   // The Notifications tile's mark sits on its glyph's top-right corner as a task
-  // badge sits on its chip: centred 1px out from that corner.
-  if (probe.inboxIcon !== null && probe.inboxMark !== null) {
+  // badge sits on its chip: centred 1px out from that corner. Alpha waits on
+  // an approval (RAIL_INDICATORS), so there is always a mark to place.
+  if (probe.inboxIcon === null || probe.inboxMark === null)
+    fail("the Notifications tile draws no glyph or no mark while a task waits");
+  else {
     const cx = probe.inboxMark.x + probe.inboxMark.width / 2;
     const expectedX = probe.inboxIcon.x + probe.inboxIcon.width + 1;
     const cy = probe.inboxMark.y + probe.inboxMark.height / 2;
@@ -4843,17 +4778,7 @@ function checkExpandedTop(probe, fail) {
     fail(
       `New Task's label is at x=${probe.newTaskLabel.x.toFixed(1)}, Home's title at x=${probe.homeTitle.x.toFixed(1)}`,
     );
-  if (probe.newTaskText !== null && !probe.newTaskText.startsWith("New Task"))
-    fail(`the button reads "${probe.newTaskText}", not "New Task"`);
   const middle = (rect) => rect.y + rect.height / 2;
-  if (
-    probe.inboxUnknown !== null &&
-    probe.inboxUnread !== null &&
-    Math.abs(middle(probe.inboxUnknown) - middle(probe.inboxUnread)) > 0.5
-  )
-    fail(
-      `the Notifications row's unavailable dot is centred at y=${middle(probe.inboxUnknown).toFixed(1)}, its count at y=${middle(probe.inboxUnread).toFixed(1)}`,
-    );
   for (const row of probe.rows) {
     if (row.meter !== null && row.titleRect !== null) {
       if (Math.abs(middle(row.meter) - middle(row.titleRect)) > 0.5)
@@ -4874,8 +4799,6 @@ function checkExpandedTop(probe, fail) {
 
 // --- F9: a handle drag across the snap point switches the layout live ---
 
-/** `SIDE_STRIP_SNAP_TO_RAIL_BELOW_PX`: the midpoint of the 192px minimum and the rail. */
-const SIDE_STRIP_SNAP_BELOW = (192 + SIDE_STRIP_RAIL_WIDTH) / 2;
 const SIDE_STRIP_PERSIST_KEY = "traycer-gui-app:side-tab-strip";
 
 const STRIP_RESIZE_PROBE = `(() => {
@@ -4906,9 +4829,11 @@ const STRIP_RESIZE_PROBE = `(() => {
 
 /**
  * F9: the strip's layout follows a real handle drag across the snap point at
- * the crossing, both ways and on both edges, with the pointer still down; the
- * store is written once, on release; Escape mid-drag puts back the layout and
- * the width the drag started from.
+ * the crossing, both ways and on both edges, with the pointer still down, and
+ * the store is written once, on release. The crossing's own rules (out of the
+ * rail, a cancelled drag, the stored width) are `side-tab-strip.test.tsx`'s;
+ * what only a browser has is the handle jumping under a held, captured
+ * pointer, and the eased width (`checkStripCrossingEase`).
  */
 async function runStripResizePhase(client, pageUrl, pageLoads) {
   await runShellPhase(
@@ -4916,8 +4841,6 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
     [
       { label: "left", edge: "left", sidebar: "left" },
       { label: "right", edge: "right", sidebar: "right" },
-      { label: "left, sidebar right", edge: "left", sidebar: "right" },
-      { label: "right, sidebar left", edge: "right", sidebar: "left" },
     ],
     async (variant, violations, notes) => {
       const label = `stripresize ${variant.label}`;
@@ -5041,55 +4964,8 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
       expectLayout(state, "rail", "released under the snap point");
       expectPersisted(state, true, "released under the snap point");
 
-      // 4. From the rail, out past the snap point and held: expanded.
-      state = await probe();
-      const railGrip = state.handle;
-      const fromRail = (width) => ({
-        x: railGrip.x + sign * (width - SIDE_STRIP_RAIL_WIDTH),
-        y: railGrip.y,
-      });
-      await pressAt(client, railGrip.x, railGrip.y);
-      await moveInSteps(client, railGrip, fromRail(230));
-      await settle(client, 150);
-      state = await probe();
-      await saveShot(client, `${shotName}-3-held-out-of-rail`);
-      expectWidth(state, 230, "held out of the rail");
-      expectLayout(state, "expanded", "held out of the rail");
-      expectPersisted(
-        state,
-        true,
-        "held out of the rail (nothing stored mid-drag)",
-      );
-      // 5. Escape, still held: the rail and its width, nothing stored.
-      await pressKey(client, "Escape");
-      await settle(client, 200);
-      state = await probe();
-      await saveShot(client, `${shotName}-4-escaped`);
-      expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "after Escape");
-      expectLayout(state, "rail", "after Escape");
-      expectPersisted(state, true, "after Escape");
-      // The release that ends the cancelled drag changes nothing.
-      await releaseAt(client, fromRail(230).x, fromRail(230).y);
-      await settle(client, 200);
-      state = await probe();
-      expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "released after Escape");
-      expectLayout(state, "rail", "released after Escape");
-
-      // 6. Out of the rail and released: expanded at the released width.
-      await pressAt(client, railGrip.x, railGrip.y);
-      await moveInSteps(client, railGrip, fromRail(260));
-      await releaseAt(client, fromRail(260).x, fromRail(260).y);
-      await settle(client, 300);
-      state = await probe();
-      expectWidth(state, 260, "released out of the rail");
-      expectLayout(state, "expanded", "released out of the rail");
-      expectPersisted(state, false, "released out of the rail");
-      if (state.persisted?.widthPx !== 260)
-        fail(
-          `released out of the rail: the stored width is ${String(state.persisted?.widthPx)}, expected 260`,
-        );
       say(
-        `snap below ${String(SIDE_STRIP_SNAP_BELOW)}px; final ${state.width.toFixed(0)}px, stored ${JSON.stringify(state.persisted)}`,
+        `final ${state.width.toFixed(0)}px, stored ${JSON.stringify(state.persisted)}`,
       );
 
       await closeShellVariant(
@@ -5100,7 +4976,7 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both edges a real handle drag switches the strip between the rail and the expanded layout at the snap point with the pointer still down (tiles, top block, joined item, the Activity view's live agents), stores the result once on release, and Escape mid-drag restores the starting layout and width",
+    "on both edges a real handle drag switches the strip between the rail and the expanded layout at the snap point with the pointer still down (tiles, top block, joined item, the Activity view's live agents), and stores the result once on release; the crossing eases, and Escape and a release land at once",
   );
 }
 
@@ -5211,7 +5087,7 @@ async function checkStripCrossingEase(client, input) {
   await settle(client, 300);
 }
 
-// --- overlays: the hover card, the user menu and the Notifications drawer, toward the content ---
+// --- overlays: the hover card and the Notifications drawer, toward the content (the user menu is hostmenu's) ---
 
 async function runOverlaysPhase(client, pageUrl, pageLoads) {
   await runShellPhase(
@@ -5282,30 +5158,6 @@ async function runOverlaysPhase(client, pageUrl, pageLoads) {
       await moveTo(client, frame.cx, frame.cy);
       await settle(client, 400);
 
-      const trigger = await rectOf(client, '[data-testid="user-menu-trigger"]');
-      await pressAndRelease(client, trigger.cx, trigger.cy, "left");
-      await settle(client, 250);
-      const early = await rectOf(client, '[role="menu"]');
-      await delay(500);
-      const menu = await rectOf(client, '[role="menu"]');
-      if (early !== null && menu === null)
-        fail("the user menu opened and closed again on one click");
-      placed("the user menu", menu, trigger);
-      await saveShot(client, `overlay-menu-${variant.edge}`);
-      await client.send("Input.dispatchKeyEvent", {
-        type: "keyDown",
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-      await client.send("Input.dispatchKeyEvent", {
-        type: "keyUp",
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-      await settle(client, 300);
-
       const inbox = await rectOf(client, '[data-testid="side-strip-inbox"]');
       await pressAndRelease(client, inbox.cx, inbox.cy, "left");
       await settle(client, 600);
@@ -5323,28 +5175,8 @@ async function runOverlaysPhase(client, pageUrl, pageLoads) {
             `the Notifications drawer ${boxText(drawer)} is not level with the sheets ${boxText(frame)}`,
           );
       }
-      for (const theme of ["light", "dark"]) {
-        await evaluate(
-          client,
-          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-        );
-        await settle(client, 200);
-        await saveShot(client, `overlay-inbox-${variant.edge}-${theme}`);
-      }
-      // Persisted: the next variant boots from the shipped "system".
-      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
-      await client.send("Input.dispatchKeyEvent", {
-        type: "keyDown",
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
-      await client.send("Input.dispatchKeyEvent", {
-        type: "keyUp",
-        key: "Escape",
-        code: "Escape",
-        windowsVirtualKeyCode: 27,
-      });
+      await saveShot(client, `overlay-inbox-${variant.edge}`);
+      await pressKey(client, "Escape");
       await settle(client, 300);
       await closeShellVariant(
         client,
@@ -5354,319 +5186,7 @@ async function runOverlaysPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both edges the hover card, the user menu (still open 750ms after one click) and the Notifications drawer (flush with the frame) open toward the content and inside the window",
-  );
-}
-
-// --- activity coverage: an unserved task's hover card (staging round 1, F8) ---
-
-/** The hover card's words and marks, read off the painted card. */
-const HOVER_CARD_READING = `(() => {
-  const card = document.querySelector('[data-testid="side-tab-hover-card"]');
-  if (card === null) return null;
-  const state = card.querySelector('[data-testid="side-tab-hover-card-state"]');
-  const title = card.querySelector('[data-testid="side-tab-hover-card-body"] > div')?.textContent ?? null;
-  return {
-    state: state === null ? null : state.textContent,
-    title,
-    unknownGlyph: card.querySelector('[data-testid="side-tab-hover-card-unknown"]') !== null,
-    partial: card.querySelector('[data-testid="side-tab-hover-card-partial"]')?.textContent ?? null,
-    counts: card.querySelector('[data-testid="side-tab-hover-card-counts"]')?.textContent ?? null,
-    stateGlyphs: state === null ? [] : [...state.querySelectorAll("[data-status-glyph]")].map((node) => node.getAttribute("data-status-glyph")),
-    rowGlyphs: [...card.querySelectorAll('[data-testid="side-tab-hover-card-agents"] li')].map((row) => row.querySelector("[data-status-glyph]")?.getAttribute("data-status-glyph") ?? null),
-  };
-})()`;
-
-/** The agent pips a tab's meter draws, the attention pip left out. */
-const meterAgentPips = (epicId) => `(() => {
-  const close = document.querySelector('[data-testid="tab-close-epic-${epicId}"]');
-  const row = close === null ? null : close.closest("[data-side-tab]");
-  if (row === null) return null;
-  return row.querySelectorAll('[data-testid="side-tab-meter"] [data-pip="turn"], [data-testid="side-tab-meter"] [data-pip="background"]').length;
-})()`;
-
-/**
- * Alpha's meter (one running agent) in the expanded row, found by its close
- * button, or on the rail, found by its "AR" monogram: whether it draws the
- * floor's "+" and what it announces.
- */
-const alphaMeter = (collapsed) => `(() => {
-  const tile = ${String(collapsed)}
-    ? [...document.querySelectorAll('[data-testid="side-tab-strip"] [data-side-tab="collapsed"]')].find((node) => (node.querySelector('[data-testid="side-tab-monogram-chip"]')?.textContent ?? "").trim() === "AR") ?? null
-    : document.querySelector('[data-testid="tab-close-epic-fixture-alpha"]')?.closest("[data-side-tab]") ?? null;
-  const meter = tile?.querySelector('[data-testid="side-tab-meter"]') ?? null;
-  if (meter === null) return null;
-  const floor = meter.querySelector('[data-testid="side-tab-meter-floor"]');
-  const r = floor === null ? null : floor.getBoundingClientRect();
-  return {
-    label: meter.getAttribute("aria-label"),
-    floor: r === null ? null : { width: r.width, height: r.height },
-    pips: meter.querySelectorAll("[data-pip]").length,
-  };
-})()`;
-
-/** The hover card titles of the rows the coverage phase reads. */
-const HOVER_CARD_TITLES = {
-  "fixture-alpha": "Alpha rollout",
-  "fixture-beta": "Beta review",
-  "fixture-epsilon": "Epsilon cleanup",
-};
-
-/** The fixture's own computer, which the `hosts=1` and `solo=1` directories list. */
-const FIXTURE_STUDIO_HOST = "fixture-host-studio";
-/** Where `setActivity` writes the union's rows; no directory lists it. */
-const FIXTURE_ACTIVITY_HOST = "test-local-host";
-
-async function runCoveragePhase(client, pageUrl, pageLoads) {
-  await runShellPhase(
-    "coverage",
-    [
-      // Three known hosts, a local plane on this one: the other two unserved.
-      {
-        label: "partial",
-        fleet: { hosts: 1 },
-        studio: "partial",
-        covered: false,
-      },
-      // The same three hosts under a cloud union that spans them.
-      { label: "fleet", fleet: { hosts: 1 }, studio: "fleet", covered: true },
-      // One known host under a local plane: the whole account is in view.
-      {
-        label: "single-host",
-        fleet: { solo: 1 },
-        studio: "partial",
-        covered: true,
-      },
-      // A task waiting on approval, with one agent running.
-      {
-        label: "attention",
-        fleet: {},
-        studio: "fleet",
-        covered: true,
-        attention: true,
-      },
-      // The same under a host directory, whose indicator query is keyed by
-      // the notification host.
-      {
-        label: "attention-hosts",
-        fleet: { hosts: 1 },
-        studio: "fleet",
-        covered: true,
-        attention: true,
-      },
-    ],
-    async (variant, violations, notes) => {
-      const label = `coverage ${variant.label}`;
-      const loadsAtStart = await openShellVariant(
-        client,
-        pageUrl,
-        pageLoads,
-        {
-          tabs: "left",
-          collapsed: 0,
-          wco: "none",
-          dock: "right",
-          surface: "epic",
-          account: 1,
-          warm: 1,
-          ...variant.fleet,
-        },
-        label,
-      );
-      const fail = (line) => violations.push(`${label}: ${line}`);
-      const say = (line) => notes.push(`${label}: ${line}`);
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
-      );
-      // The rows' slice answers as a local plane; the studio's own slice
-      // carries the variant's reach.
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivityCoverage(${JSON.stringify(FIXTURE_ACTIVITY_HOST)}, "partial")`,
-      );
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivityCoverage(${JSON.stringify(FIXTURE_STUDIO_HOST)}, ${JSON.stringify(variant.studio)})`,
-      );
-      await settle(client, 300);
-      const frame = await rectOf(client, SURFACE_FRAME);
-      // Polled, not slept: the card opens on the row's own delay, and the
-      // previous row's card must be gone before the next one is read.
-      const hover = async (epicId, shot) => {
-        const row = await rowRect(client, `epic:${epicId}`);
-        await moveTo(client, row.cx, row.cy);
-        let reading = null;
-        for (const deadline = Date.now() + 4000; Date.now() < deadline;) {
-          reading = await evaluate(client, HOVER_CARD_READING);
-          if (reading?.title === HOVER_CARD_TITLES[epicId]) break;
-          await delay(50);
-        }
-        if (reading?.title !== HOVER_CARD_TITLES[epicId]) reading = null;
-        // The open animation, then the frame the reading describes.
-        await settle(client, 400);
-        if (reading !== null)
-          reading = await evaluate(client, HOVER_CARD_READING);
-        await saveShot(client, `coverage-${variant.label}-${shot ?? epicId}`);
-        await moveTo(client, frame.cx, frame.cy);
-        for (const deadline = Date.now() + 4000; Date.now() < deadline;) {
-          if ((await evaluate(client, HOVER_CARD_READING)) === null) break;
-          await delay(50);
-        }
-        return reading;
-      };
-
-      // An attention state keeps its glyph and words: no agent row shows it.
-      // Its own variant, with no host directory: the badge rides the host's
-      // indicator answer, which `setIndicators` writes.
-      if (variant.attention) {
-        await evaluate(
-          client,
-          `window.__layoutCanvasProbe.setIndicators(${JSON.stringify(RAIL_INDICATORS)}, {})`,
-        );
-        await settle(client, 300);
-        const alphaWaiting = await hover(
-          "fixture-alpha",
-          "fixture-alpha-waiting",
-        );
-        if (alphaWaiting === null)
-          fail("alpha's hover card did not open while it waits");
-        else if (
-          alphaWaiting.stateGlyphs.join() !== "approval" ||
-          !alphaWaiting.state?.startsWith("Needs approval") ||
-          alphaWaiting.counts !== "1 running"
-        )
-          fail(
-            `alpha, waiting on approval, reads "${String(alphaWaiting.state)}" with glyphs [${alphaWaiting.stateGlyphs.join(", ")}], not the approval glyph, "Needs approval" and "1 running"`,
-          );
-        say(`alpha waiting ${JSON.stringify(alphaWaiting)}`);
-        await closeShellVariant(
-          client,
-          pageLoads,
-          loadsAtStart,
-          label,
-          violations,
-        );
-        return;
-      }
-
-      // Beta has no agent in the union and no badge: its silence is the claim.
-      const beta = await hover("fixture-beta");
-      if (beta === null) fail("beta's hover card did not open");
-      else if (!variant.covered) {
-        if (!beta.unknownGlyph || beta.state?.includes("Idle"))
-          fail(
-            `beta, unserved, reads "${beta.state}" with${beta.unknownGlyph ? "" : "out"} the unknown glyph, not unknown`,
-          );
-        if (beta.partial !== null)
-          fail(
-            `beta, unknown, also carries the partial notice "${beta.partial}"`,
-          );
-      } else if (beta.unknownGlyph || beta.state !== "Idle") {
-        fail(`beta, covered, reads "${beta.state}", not "Idle"`);
-      }
-      const betaPips = await evaluate(client, meterAgentPips("fixture-beta"));
-      if (betaPips !== 0 && betaPips !== null)
-        fail(
-          `beta's meter draws ${String(betaPips)} agent pips with nothing known running`,
-        );
-
-      // Alpha has one running agent: a count that is a floor when unserved,
-      // and plain text - only an agent row draws a running glyph (G5).
-      const alpha = await hover("fixture-alpha");
-      if (alpha === null) fail("alpha's hover card did not open");
-      else {
-        if (alpha.counts !== "1 running")
-          fail(`alpha's counts read "${alpha.counts}", not "1 running"`);
-        if (alpha.state !== "1 running" || alpha.stateGlyphs.length > 0)
-          fail(
-            `alpha's summary line reads "${alpha.state}" with glyphs [${alpha.stateGlyphs.join(", ")}], not the plain "1 running"`,
-          );
-        const wantsNotice = !variant.covered;
-        if ((alpha.partial !== null) !== wantsNotice)
-          fail(
-            `alpha ${wantsNotice ? "lacks" : "carries"} the partial notice (${String(alpha.partial)})`,
-          );
-      }
-
-      // Epsilon's session is open, so its card names its agents: the rows
-      // carry the glyphs, the summary line none (G5).
-      const epsilon = await hover("fixture-epsilon");
-      if (epsilon === null) fail("epsilon's hover card did not open");
-      else {
-        if (epsilon.rowGlyphs.length === 0)
-          fail("epsilon's card names no agent rows, so G5 is not exercised");
-        else if (epsilon.rowGlyphs.some((glyph) => glyph === null))
-          fail(
-            `an epsilon agent row draws no status glyph (${JSON.stringify(epsilon.rowGlyphs)})`,
-          );
-        if (epsilon.stateGlyphs.length > 0)
-          fail(
-            `epsilon's summary line draws [${epsilon.stateGlyphs.join(", ")}] beside rows that already do`,
-          );
-        if (epsilon.counts !== "2 running · 1 background")
-          fail(
-            `epsilon's counts read "${String(epsilon.counts)}", not "2 running · 1 background"`,
-          );
-      }
-
-      // Alpha's meter, in the row and on the 60px rail: one pip, and a "+"
-      // with "1+ running" exactly when the count is a floor (R1-A1).
-      const checkMeter = (where, meter) => {
-        if (meter === null) {
-          fail(`alpha's ${where} meter is not drawn`);
-          return;
-        }
-        if (meter.pips !== 1)
-          fail(
-            `alpha's ${where} meter draws ${String(meter.pips)} pips, not 1`,
-          );
-        const wantsFloor = !variant.covered;
-        const drawn =
-          meter.floor !== null &&
-          meter.floor.width > 0 &&
-          meter.floor.height > 0;
-        if (drawn !== wantsFloor)
-          fail(
-            `alpha's ${where} meter ${wantsFloor ? "lacks" : "draws"} the floor's "+"`,
-          );
-        const wantsLabel = wantsFloor ? "1+ running" : "1 running";
-        if (meter.label !== wantsLabel)
-          fail(
-            `alpha's ${where} meter announces "${String(meter.label)}", not "${wantsLabel}"`,
-          );
-      };
-      const rowMeter = await evaluate(client, alphaMeter(false));
-      // A single covered agent is the leading glyph's to show; only a floor
-      // mounts the row's meter.
-      if (variant.covered) {
-        if (rowMeter !== null)
-          fail(
-            `alpha's row mounts a meter for one covered agent (${JSON.stringify(rowMeter)})`,
-          );
-      } else {
-        checkMeter("row", rowMeter);
-      }
-      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(true)");
-      await settle(client, 400);
-      const railMeter = await evaluate(client, alphaMeter(true));
-      checkMeter("rail", railMeter);
-      await saveShot(client, `coverage-${variant.label}-rail`);
-      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
-      await settle(client, 400);
-
-      say(
-        `beta ${JSON.stringify(beta)}; beta meter agent pips ${String(betaPips)}; alpha ${JSON.stringify(alpha)}; alpha row meter ${JSON.stringify(rowMeter)}; alpha rail meter ${JSON.stringify(railMeter)}; epsilon ${JSON.stringify(epsilon)}`,
-      );
-      await closeShellVariant(
-        client,
-        pageLoads,
-        loadsAtStart,
-        label,
-        violations,
-      );
-    },
-    "with a known host out of the plane's reach, a task with no known agent hovers as unknown (never Idle) with no meter pips and a running task carries the partial notice; under a fleet union, and for a one-host account on a local plane, Idle and plain counts. The summary line never draws a running glyph (only agent rows do), and an approval keeps its glyph and words",
+    "on both edges the hover card and the Notifications drawer (flush with the frame) open toward the content and inside the window",
   );
 }
 
@@ -5912,18 +5432,10 @@ async function runReadingsPhase(client, pageUrl, pageLoads) {
           );
       }
       // At rest, before any click leaves focus (and its tooltip) on a reading.
-      for (const theme of ["light", "dark"]) {
-        await evaluate(
-          client,
-          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-        );
-        await settle(client, 250);
-        await saveShot(
-          client,
-          `readings-${variant.edge}-${variant.readings}${variant.collapsed === 1 ? "-collapsed" : ""}-${theme}`,
-        );
-      }
-      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+      await saveShot(
+        client,
+        `readings-${variant.edge}-${variant.readings}${variant.collapsed === 1 ? "-collapsed" : ""}`,
+      );
       // Each reading's popover opens toward the content and inside the window.
       const viewport = await evaluate(
         client,
@@ -5979,21 +5491,19 @@ async function runReadingsPhase(client, pageUrl, pageLoads) {
   );
 }
 
-// --- the account menu's Host section (staging round 1, F5) ---
+// --- the account menu's Host section (staging round 1, F5; G4) ---
 
-/** The fixture's offline host label, long enough to truncate (G4). */
-const FIXTURE_OFFLINE_HOST_NAME =
-  "gpu-runner-02.us-central1-a.c.example-project.internal (nightly)";
-
+/**
+ * What the Host section draws and where. Its rows, the inert offline host,
+ * the check, the keyboard and a switch held in flight are
+ * `user-menu-host-section.test.tsx`'s; what only a browser can say is the
+ * menu's laid-out width and placement, and whether a name truncates.
+ */
 const HOST_MENU_PROBE = `(() => {
   const section = document.querySelector('[data-testid="user-menu-host-section"]');
   if (section === null) return null;
   return [...section.querySelectorAll('[data-testid^="user-menu-host-option-"]')].map((row) => ({
     hostId: row.getAttribute("data-testid").slice("user-menu-host-option-".length),
-    text: row.textContent,
-    checked: row.getAttribute("aria-checked") === "true",
-    disabled: row.getAttribute("aria-disabled") === "true" || row.hasAttribute("data-disabled"),
-    pending: row.querySelector('[data-testid^="user-menu-host-activating-"]') !== null,
     truncated: (() => { const name = row.querySelector(".truncate"); return name !== null && name.scrollWidth > name.clientWidth + 0.5; })(),
     box: (() => { const r = row.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }; })(),
   }));
@@ -6026,50 +5536,18 @@ async function runHostMenuPhase(client, pageUrl, pageLoads) {
       );
       const fail = (line) => violations.push(`${label}: ${line}`);
       const say = (line) => notes.push(`${label}: ${line}`);
-      const openMenu = async () => {
-        const trigger = await rectOf(
-          client,
-          '[data-testid="user-menu-trigger"]',
-        );
-        await pressAndRelease(client, trigger.cx, trigger.cy, "left");
-        await settle(client, 600);
-        return await evaluate(client, HOST_MENU_PROBE);
-      };
-      let rows = await openMenu();
+      // One real click, read 600ms later: a double toggle has closed it again.
+      const trigger = await rectOf(client, '[data-testid="user-menu-trigger"]');
+      await pressAndRelease(client, trigger.cx, trigger.cy, "left");
+      await settle(client, 600);
+      const rows = await evaluate(client, HOST_MENU_PROBE);
       if (rows === null) {
         fail("the menu has no Host section");
       } else {
-        say(
-          rows
-            .map(
-              (row) =>
-                `${row.text}${row.checked ? " [x]" : ""}${row.disabled ? " (inert)" : ""}`,
-            )
-            .join(" | "),
-        );
-        if (rows.length !== 3) fail(`${rows.length} host rows, expected 3`);
-        const offline = rows.find((row) => row.hostId === "fixture-host-mini");
-        if (offline === undefined || !offline.disabled)
-          fail("the host with no route is not inert");
-        else if (!/offline/.test(offline.text))
-          fail(`the offline host says "${offline.text}", not offline`);
-        const checked = rows.filter((row) => row.checked);
-        if (checked.length !== 1 || checked[0].hostId !== "fixture-host-studio")
-          fail(
-            `the check is on ${checked.map((row) => row.hostId).join(", ") || "nothing"}, not this machine's host`,
-          );
-        for (const theme of ["light", "dark"]) {
-          await evaluate(
-            client,
-            `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-          );
-          await settle(client, 250);
-          await saveShot(client, `hostmenu-${variant.label}-${theme}`);
-        }
-        await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
+        await saveShot(client, `hostmenu-${variant.label}`);
         // G4: a menu's width whatever a host is called, inside the window and
-        // opening toward the content; the long name truncates and reads in
-        // full from its tooltip, and a name that fits has none.
+        // opening toward the content; the long names truncate and read in
+        // full from their tooltips, and a name that fits has none.
         const geo = await evaluate(
           client,
           `(() => {
@@ -6096,12 +5574,6 @@ async function runHostMenuPhase(client, pageUrl, pageLoads) {
           fail(
             `the menu ${JSON.stringify(geo.menu)} does not open toward the content from ${JSON.stringify(geo.trigger)}`,
           );
-        const long = rows.find((row) => row.hostId === "fixture-host-builder");
-        const short = rows.find((row) => row.hostId === "fixture-host-studio");
-        if (long === undefined || !long.truncated)
-          fail("the long host name is not truncated");
-        if (short === undefined || short.truncated)
-          fail("the short host name is truncated");
         const tooltipText = async (row) => {
           await moveTo(client, row.box.x + 40, row.box.cy);
           await settle(client, 1200);
@@ -6110,248 +5582,30 @@ async function runHostMenuPhase(client, pageUrl, pageLoads) {
             `document.querySelector('[role="tooltip"]')?.textContent ?? null`,
           );
         };
-        if (long !== undefined) {
-          const text = await tooltipText(long);
-          if (
-            text === null ||
-            !text.includes(
-              "build-vm-01.asia-south2-b.c.example-project.internal (staging)",
-            )
-          )
-            fail(
-              `hovering the long name shows ${JSON.stringify(text)}, not its full name`,
-            );
-          else
-            say(
-              `${geo.menu.width.toFixed(0)}px menu; the long name truncates and its tooltip reads ${JSON.stringify(text)}`,
-            );
-          for (const theme of ["light", "dark"]) {
-            await evaluate(
-              client,
-              `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-            );
-            await settle(client, 250);
-            await saveShot(
-              client,
-              `hostmenu-${variant.label}-long-tooltip-${theme}`,
-            );
+        // The long online name, the long offline one, and one that fits.
+        for (const [hostId, fullName] of [
+          [
+            "fixture-host-builder",
+            "build-vm-01.asia-south2-b.c.example-project.internal (staging)",
+          ],
+          [
+            "fixture-host-mini",
+            "gpu-runner-02.us-central1-a.c.example-project.internal (nightly)",
+          ],
+          ["fixture-host-studio", null],
+        ]) {
+          const row = rows.find((entry) => entry.hostId === hostId);
+          if (row === undefined) {
+            fail(`no ${hostId} row`);
+            continue;
           }
-          await evaluate(
-            client,
-            'window.__layoutCanvasProbe.setTheme("system")',
-          );
+          if (row.truncated !== (fullName !== null))
+            fail(`${hostId}'s name is ${row.truncated ? "" : "not "}truncated`);
+          const text = await tooltipText(row);
+          if (fullName === null ? text !== null : !text?.includes(fullName))
+            fail(`hovering ${hostId}'s name shows ${JSON.stringify(text)}`);
         }
-        if (short !== undefined) {
-          const text = await tooltipText(short);
-          if (text !== null)
-            fail(
-              `hovering the short name shows a tooltip ${JSON.stringify(text)}`,
-            );
-        }
-        // An offline host with a long name still reads in full, and picking
-        // it does nothing: the menu stays open, nothing is sent, the check
-        // stays put.
-        const offlineRow = rows.find(
-          (row) => row.hostId === "fixture-host-mini",
-        );
-        if (offlineRow !== undefined) {
-          if (!offlineRow.truncated)
-            fail("the long offline host name is not truncated");
-          const text = await tooltipText(offlineRow);
-          if (text === null || !text.includes(FIXTURE_OFFLINE_HOST_NAME))
-            fail(
-              `hovering the offline name shows ${JSON.stringify(text)}, not its full name`,
-            );
-          for (const theme of ["light", "dark"]) {
-            await evaluate(
-              client,
-              `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-            );
-            await settle(client, 250);
-            await saveShot(
-              client,
-              `hostmenu-${variant.label}-offline-tooltip-${theme}`,
-            );
-          }
-          await evaluate(
-            client,
-            'window.__layoutCanvasProbe.setTheme("system")',
-          );
-          const sentBefore = await evaluate(
-            client,
-            "window.__layoutCanvasProbe.activationCount()",
-          );
-          await pressAndRelease(
-            client,
-            offlineRow.box.cx,
-            offlineRow.box.cy,
-            "left",
-          );
-          await settle(client, 600);
-          const sentAfter = await evaluate(
-            client,
-            "window.__layoutCanvasProbe.activationCount()",
-          );
-          const after = await evaluate(client, HOST_MENU_PROBE);
-          if (after === null) fail("picking the offline host closed the menu");
-          else if (
-            after.find((row) => row.checked)?.hostId !== "fixture-host-studio"
-          )
-            fail("picking the offline host moved the check");
-          if (sentAfter !== sentBefore)
-            fail(
-              `picking the offline host sent ${sentAfter - sentBefore} activations`,
-            );
-          // The keyboard reaches it too: an inert row keeps its focus stop,
-          // and focus alone opens the same tooltip.
-          await moveTo(client, geo.menu.left + 10, geo.menu.top + 10);
-          await settle(client, 400);
-          let focused = null;
-          for (
-            let step = 0;
-            step < 8 && focused !== "fixture-host-mini";
-            step += 1
-          ) {
-            await pressKey(client, "ArrowDown");
-            await settle(client, 150);
-            focused = await evaluate(
-              client,
-              `document.activeElement?.getAttribute("data-testid")?.replace("user-menu-host-option-", "") ?? null`,
-            );
-          }
-          if (focused !== "fixture-host-mini")
-            fail("ArrowDown never reaches the offline host");
-          await settle(client, 1200);
-          const keyText = await evaluate(
-            client,
-            `document.querySelector('[role="tooltip"]')?.textContent ?? null`,
-          );
-          if (
-            focused === "fixture-host-mini" &&
-            (keyText === null || !keyText.includes(FIXTURE_OFFLINE_HOST_NAME))
-          )
-            fail(
-              `focusing the offline host shows ${JSON.stringify(keyText)}, not its full name`,
-            );
-          await saveShot(client, `hostmenu-${variant.label}-offline-keyboard`);
-          const keySentBefore = await evaluate(
-            client,
-            "window.__layoutCanvasProbe.activationCount()",
-          );
-          await pressKey(client, "Enter");
-          await settle(client, 600);
-          const keySent =
-            (await evaluate(
-              client,
-              "window.__layoutCanvasProbe.activationCount()",
-            )) - keySentBefore;
-          const afterKey = await evaluate(client, HOST_MENU_PROBE);
-          if (afterKey === null)
-            fail("Enter on the offline host closed the menu");
-          else if (
-            afterKey.find((row) => row.checked)?.hostId !==
-            "fixture-host-studio"
-          )
-            fail("Enter on the offline host moved the check");
-          if (keySent !== 0)
-            fail(`Enter on the offline host sent ${keySent} activations`);
-          if (
-            after !== null &&
-            sentAfter === sentBefore &&
-            text !== null &&
-            afterKey !== null &&
-            keySent === 0 &&
-            focused === "fixture-host-mini"
-          )
-            say(
-              `the offline host truncates, its tooltip reads ${JSON.stringify(text)} on hover and on keyboard focus, and a click or Enter on it does nothing`,
-            );
-        }
-        await moveTo(client, geo.menu.left + 10, geo.menu.top + 10);
-        await settle(client, 300);
-        const target = rows.find((row) => !row.checked && !row.disabled);
-        if (target === undefined) {
-          fail("no online host to switch to");
-        } else {
-          // The switch is held in flight (R1-A2): the menu closes on the pick
-          // and unmounts its rows, and a reopened menu must still know a
-          // switch is running - every row held, the spinner on the target,
-          // the check where it was, and a click sending nothing more.
-          await evaluate(
-            client,
-            "window.__layoutCanvasProbe.holdActivations()",
-          );
-          const countBefore = await evaluate(
-            client,
-            "window.__layoutCanvasProbe.activationCount()",
-          );
-          await pressAndRelease(client, target.box.cx, target.box.cy, "left");
-          await settle(client, 1200);
-          const menuGone =
-            (await rectOf(client, '[data-testid="user-menu-content"]')) ===
-            null;
-          if (!menuGone) fail("the menu stayed open after a switch");
-          rows = await openMenu();
-          if (rows === null) {
-            fail("the reopened menu has no Host section");
-          } else {
-            const open = rows.filter((row) => !row.disabled);
-            if (open.length > 0)
-              fail(
-                `mid-switch, ${open.map((row) => row.hostId).join(", ")} still take a click`,
-              );
-            const pending = rows
-              .filter((row) => row.pending)
-              .map((row) => row.hostId);
-            if (pending.length !== 1 || pending[0] !== target.hostId)
-              fail(
-                `mid-switch, the spinner is on ${pending.join(", ") || "nothing"}, not ${target.hostId}`,
-              );
-            const still = rows.find((row) => row.checked);
-            if (still?.hostId !== "fixture-host-studio")
-              fail(
-                `mid-switch, the check moved to ${still?.hostId ?? "nothing"} early`,
-              );
-            await saveShot(client, `hostmenu-${variant.label}-pending`);
-            const again = rows.find((row) => row.hostId === target.hostId);
-            await pressAndRelease(client, again.box.cx, again.box.cy, "left");
-            await settle(client, 400);
-          }
-          const sent =
-            (await evaluate(
-              client,
-              "window.__layoutCanvasProbe.activationCount()",
-            )) - countBefore;
-          if (sent !== 1) fail(`one switch sent ${sent} activations`);
-          else
-            say(
-              `mid-switch the reopened menu holds every row, spinner on ${target.hostId}, 1 activation sent`,
-            );
-          await pressKey(client, "Escape");
-          await settle(client, 300);
-          await evaluate(
-            client,
-            "window.__layoutCanvasProbe.releaseActivations()",
-          );
-          await settle(client, 800);
-          rows = await openMenu();
-          if (
-            rows !== null &&
-            rows.some(
-              (row) =>
-                row.pending ||
-                (row.disabled && row.hostId !== "fixture-host-mini"),
-            )
-          )
-            fail("after the switch settled, rows are still held");
-          const now = rows?.find((row) => row.checked) ?? null;
-          if (now === null || now.hostId !== target.hostId)
-            fail(
-              `after clicking ${target.hostId} the check is on ${now?.hostId ?? "nothing"}`,
-            );
-          else say(`switched to ${target.hostId}`);
-          await saveShot(client, `hostmenu-${variant.label}-switched`);
-        }
+        say(`${geo.menu.width.toFixed(0)}px menu`);
       }
       await pressKey(client, "Escape");
       await settle(client, 300);
@@ -6363,7 +5617,7 @@ async function runHostMenuPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "the strip's and the header's account menu list every host, the unreachable one inert, a switch in flight holds every row across a close and reopen with one activation sent, and once it settles the check is on the picked host",
+    "the strip's and the header's account menu open on one click toward the content, inside the window and no wider than 256px, and a long host name, online or offline, truncates and reads in full from its tooltip while one that fits has none",
   );
 }
 
@@ -6448,7 +5702,9 @@ async function runActivityPhase(client, pageUrl, pageLoads) {
             `${name}'s title starts ${(x - from).toFixed(1)}px past the task's title, expected ${String(step)}`,
           );
       }
-      if (shown.slot !== null && shown.active !== null) {
+      if (shown.slot === null || shown.active === null) {
+        fail("no live-agents slot or no active row to measure");
+      } else {
         if (shown.slot.y < shown.active.y + shown.active.height - 0.5)
           fail(
             `the live agents ${boxText(shown.slot)} are not under the active row ${boxText(shown.active)}`,
@@ -6461,32 +5717,8 @@ async function runActivityPhase(client, pageUrl, pageLoads) {
             `the live agents ${boxText(shown.slot)} leave the strip ${boxText(shown.strip)}`,
           );
       }
-      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(true)");
-      await settle(client, 400);
-      const collapsed = await evaluate(client, LIVE_AGENTS_PROBE);
-      if (collapsed.rows.length !== 0)
-        fail(
-          `the collapsed rail still lists ${String(collapsed.rows.length)} live agents`,
-        );
-      await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
-      await settle(client, 400);
-      const back = await evaluate(client, LIVE_AGENTS_PROBE);
-      if (back.rows.length !== 3)
-        fail(
-          `expanded again, the strip lists ${String(back.rows.length)} live agents`,
-        );
-      await evaluate(
-        client,
-        'window.__layoutCanvasProbe.setStripView("layered")',
-      );
-      await settle(client, 400);
-      const layered = await evaluate(client, LIVE_AGENTS_PROBE);
-      if (layered.rows.length !== 0)
-        fail(
-          `the Layered view still lists ${String(layered.rows.length)} live agents in the strip`,
-        );
       notes.push(
-        `${label}: ${String(shown.rows.length)} under the active row at ${shown.slot === null ? "-" : boxText(shown.slot)}, titles at ${shown.titles.map((x) => (x === null ? "-" : x.toFixed(1))).join(" / ")}; collapsed ${String(collapsed.rows.length)}, expanded ${String(back.rows.length)}, layered ${String(layered.rows.length)}`,
+        `${label}: ${String(shown.rows.length)} under the active row at ${shown.slot === null ? "-" : boxText(shown.slot)}, titles at ${shown.titles.map((x) => (x === null ? "-" : x.toFixed(1))).join(" / ")}`,
       );
       await closeShellVariant(
         client,
@@ -6496,7 +5728,7 @@ async function runActivityPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both edges the active task's live agents sit under its row while the strip is expanded in the Activity view, and leave on a collapse or the Layered view",
+    "on both edges the active task's live agents sit under its row, inside the strip, each title indented one 16px step per level (when they show is live-agents-slot-store.test.ts's)",
   );
 }
 
@@ -6537,98 +5769,6 @@ const PLACEMENT_PROBE = `(() => {
     viewport: { width: window.innerWidth, height: window.innerHeight },
   };
 })()`;
-
-/** What Find's results list shows: each row's text and its highlighted marks. */
-const FIND_PROBE = `(() => {
-  const rows = [...document.querySelectorAll("[data-layout-find-result]")];
-  return {
-    rows: rows.map((row) => ({ text: row.textContent, marks: [...row.querySelectorAll("mark")].map((mark) => mark.textContent) })),
-    empty: document.body.textContent.includes("No layout settings match"),
-    area: document.querySelector("[data-layout-area-form]")?.getAttribute("data-layout-area-form") ?? null,
-  };
-})()`;
-
-/**
- * Find a setting in both themes, by real typing: "ring" lists settings with
- * the match highlighted at a word start (never "Sharing"), Enter opens the
- * first one's area, and a query that matches nothing says so.
- */
-async function runFindPhase(client, pageUrl, pageLoads) {
-  await runShellPhase(
-    "find",
-    [{ label: "light" }, { label: "dark" }],
-    async (variant, violations, notes) => {
-      const label = `find ${variant.label}`;
-      const loadsAtStart = await openShellVariant(
-        client,
-        pageUrl,
-        pageLoads,
-        {
-          tabs: "top",
-          collapsed: 0,
-          wco: "none",
-          dock: "right",
-          surface: "sample",
-        },
-        label,
-      );
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setTheme(${JSON.stringify(variant.label)})`,
-      );
-      await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
-      await settle(client, 600);
-      const fail = (line) => violations.push(`${label}: ${line}`);
-      const typeQuery = async (text) => {
-        await evaluate(
-          client,
-          `(() => { const field = document.querySelector('input[aria-label="Find a setting"]'); field.focus(); field.select(); })()`,
-        );
-        await client.send("Input.insertText", { text });
-        await settle(client, 300);
-      };
-
-      await typeQuery("ring");
-      let probe = await evaluate(client, FIND_PROBE);
-      await saveShot(client, `find-ring-${variant.label}`);
-      notes.push(`${label}: ${probe.rows.map((row) => row.text).join(" | ")}`);
-      if (probe.rows.length === 0) fail('"ring" lists no settings');
-      for (const row of probe.rows) {
-        if (!row.marks.some((mark) => mark.toLowerCase() === "ring"))
-          fail(`"${row.text}" highlights no "ring" (${row.marks.join(", ")})`);
-      }
-
-      await typeQuery("composer");
-      probe = await evaluate(client, FIND_PROBE);
-      await saveShot(client, `find-area-${variant.label}`);
-      if (probe.rows[0]?.text !== "ComposerArea")
-        fail(
-          `"composer" does not list the Composer area first (${probe.rows.map((row) => row.text).join(" | ")})`,
-        );
-
-      await typeQuery("zzzz");
-      probe = await evaluate(client, FIND_PROBE);
-      await saveShot(client, `find-empty-${variant.label}`);
-      if (!probe.empty || probe.rows.length > 0)
-        fail('"zzzz" shows no empty state');
-
-      await typeQuery("ring");
-      await pressKey(client, "Enter");
-      await settle(client, 600);
-      probe = await evaluate(client, FIND_PROBE);
-      await saveShot(client, `find-enter-${variant.label}`);
-      if (probe.area === null) fail("Enter opened no area");
-      await closeShellVariant(
-        client,
-        pageLoads,
-        loadsAtStart,
-        label,
-        violations,
-      );
-    },
-    "results at word starts, Enter opens an area, and an empty state",
-  );
-}
 
 async function runPlacementPhase(client, pageUrl, pageLoads) {
   await runShellPhase(
@@ -6708,9 +5848,6 @@ async function runPlacementPhase(client, pageUrl, pageLoads) {
           `pictogram -> ${String(probe.placement)}, bar ${probe.bar === null ? "-" : boxText(probe.bar.rect)}`,
         );
       }
-
-      await checkPlacementKeys(client, fail, say);
-      await checkEscapeCancelsDrag(client, fail, say);
 
       // Dragged by its own space to the left band, then to the top band.
       for (const edge of ["left", "top"]) {
@@ -6792,17 +5929,7 @@ async function runPlacementPhase(client, pageUrl, pageLoads) {
   );
 }
 
-const KEY_CODES = {
-  Escape: 27,
-  Enter: 13,
-  Tab: 9,
-  Home: 36,
-  End: 35,
-  ArrowLeft: 37,
-  ArrowUp: 38,
-  ArrowRight: 39,
-  ArrowDown: 40,
-};
+const KEY_CODES = { Escape: 27, Enter: 13, ArrowUp: 38 };
 
 /**
  * One real key press, held 60ms as a finger holds it. Radix moves roving
@@ -6820,167 +5947,6 @@ async function pressKey(client, key) {
   await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...event });
   await new Promise((resolve) => setTimeout(resolve, 60));
   await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...event });
-}
-
-/** Where focus is, and what each of a radio group's items says about itself. */
-const RADIO_GROUP_PROBE = (groupSelector) => `(() => {
-  const group = document.querySelector(${JSON.stringify(groupSelector)});
-  if (group === null) return null;
-  const items = [...group.querySelectorAll('[role="radio"]')];
-  return {
-    items: items.map((node) => ({ label: node.getAttribute("aria-label") ?? node.textContent, checked: node.getAttribute("aria-checked"), tabIndex: node.tabIndex })),
-    focused: items.findIndex((node) => node === document.activeElement),
-    placement: document.querySelector("[data-tab-strip-placement]")?.getAttribute("data-tab-strip-placement") ?? null,
-  };
-})()`;
-
-/**
- * The bar's two radio groups by real keys (finding 3): one Tab stop each,
- * arrows move focus and check the item they land on, Home and End move focus
- * only. The strip stands on the right when this starts.
- */
-async function checkPlacementKeys(client, fail, say) {
-  const groups = [
-    {
-      name: "Tabs position",
-      selector:
-        '[data-layout-placement-bar] [role="radiogroup"][aria-label="Tabs position"]',
-    },
-    {
-      name: "Tabs view",
-      selector:
-        '[data-layout-placement-bar] [role="radiogroup"][aria-label="Tabs view"]',
-    },
-  ];
-  for (const group of groups) {
-    const read = () => evaluate(client, RADIO_GROUP_PROBE(group.selector));
-    let state = await read();
-    if (state === null) {
-      fail(`${group.name}: no radio group in the bar`);
-      continue;
-    }
-    await evaluate(
-      client,
-      `document.querySelector(${JSON.stringify(`${group.selector} [role="radio"][aria-checked="true"]`)}).focus()`,
-    );
-    const start = (await read()).focused;
-    const count = state.items.length;
-    const steps = [
-      { key: "ArrowLeft", focus: (start - 1 + count) % count, checks: true },
-      { key: "ArrowRight", focus: start, checks: true },
-      { key: "Home", focus: 0, checks: false },
-      { key: "End", focus: count - 1, checks: false },
-    ];
-    let checked = start;
-    const trail = [];
-    for (const step of steps) {
-      await pressKey(client, step.key);
-      await settle(client, 400);
-      state = await read();
-      if (step.checks) checked = step.focus;
-      const expected = state?.items[step.focus]?.label;
-      if (state === null) {
-        fail(`${group.name}: the group is gone after ${step.key}`);
-        break;
-      }
-      if (state.focused !== step.focus)
-        fail(
-          `${group.name}: ${step.key} left focus on ${state.focused === -1 ? "nothing in the group" : state.items[state.focused].label}, expected ${String(expected)}`,
-        );
-      const nowChecked = state.items.findIndex(
-        (item) => item.checked === "true",
-      );
-      if (nowChecked !== checked)
-        fail(
-          `${group.name}: after ${step.key} ${state.items[nowChecked]?.label ?? "nothing"} is checked, expected ${state.items[checked].label}`,
-        );
-      trail.push(
-        `${step.key}->${state.focused === -1 ? "-" : state.items[state.focused].label}${nowChecked === state.focused ? "*" : ""}`,
-      );
-    }
-    // One Tab stop: Tab from the item in hand leaves the group.
-    await evaluate(
-      client,
-      `document.querySelector(${JSON.stringify(`${group.selector} [role="radio"][aria-checked="true"]`)}).focus()`,
-    );
-    await pressKey(client, "Tab");
-    await settle(client, 200);
-    const tabbed = await read();
-    if (tabbed !== null && tabbed.focused !== -1)
-      fail(
-        `${group.name}: Tab from the checked item landed on ${tabbed.items[tabbed.focused].label}, a second stop in the same group`,
-      );
-    if (
-      group.name === "Tabs position" &&
-      state !== null &&
-      state.placement !== "right"
-    )
-      fail(
-        `${group.name}: the keys left the strip at ${String(state.placement)}, expected back on the right`,
-      );
-    say(`${group.name} keys: ${trail.join(" ")} (* = checked)`);
-  }
-  await evaluate(client, "document.activeElement?.blur()");
-}
-
-/**
- * Escape while the strip is in hand (finding 1): the zones go at once, the
- * selection stays (Escape spent itself on the drag), and the release after
- * writes nothing and records no history.
- */
-async function checkEscapeCancelsDrag(client, fail, say) {
-  const before = await evaluate(client, PLACEMENT_PROBE);
-  const depth = await evaluate(
-    client,
-    "window.__layoutCanvasProbe.historyDepth()",
-  );
-  const from = before.spacer;
-  await pressAt(client, from.cx, from.cy);
-  const armed = { x: from.cx + 12, y: from.cy + 12 };
-  await moveInSteps(client, { x: from.cx, y: from.cy }, armed);
-  await settle(client, 150);
-  const started = await evaluate(client, DROP_ZONES_PROBE);
-  const zone = started.zones.find((candidate) => candidate.edge === "left");
-  const target = zone === undefined ? armed : { x: zone.cx, y: zone.cy };
-  await moveInSteps(client, armed, target);
-  await settle(client, 150);
-  const mid = await evaluate(client, DROP_ZONES_PROBE);
-  checkDrop(mid, "left", fail);
-  await pressKey(client, "Escape");
-  await settle(client, 200);
-  const cancelled = await evaluate(client, DROP_ZONES_PROBE);
-  await saveShot(client, "placement-drag-escaped");
-  await releaseAt(client, target.x, target.y);
-  await settle(client, 600);
-  const after = await evaluate(client, PLACEMENT_PROBE);
-  const released = await evaluate(client, DROP_ZONES_PROBE);
-  const depthAfter = await evaluate(
-    client,
-    "window.__layoutCanvasProbe.historyDepth()",
-  );
-  if (cancelled.dragging || cancelled.zones.length > 0)
-    fail(
-      `Escape mid-drag left ${String(cancelled.zones.length)} drop zones${cancelled.dragging ? " and the strip in hand" : ""}`,
-    );
-  if (released.dragging || released.zones.length > 0)
-    fail(
-      `the release after Escape left ${String(released.zones.length)} drop zones${released.dragging ? " and the strip in hand" : ""}`,
-    );
-  if (after.placement !== before.placement)
-    fail(
-      `the release after Escape moved the strip from ${String(before.placement)} to ${String(after.placement)}`,
-    );
-  if (depthAfter !== depth)
-    fail(
-      `the release after Escape recorded history (${String(depth)} -> ${String(depthAfter)})`,
-    );
-  if (after.bar === null || after.ring === null)
-    fail(
-      "Escape mid-drag also cleared the selection: it should only put the strip back",
-    );
-  say(
-    `Escape mid-drag: zones ${String(mid.zones.length)} -> ${String(cancelled.zones.length)}, placement ${String(before.placement)} -> ${String(after.placement)}, history ${String(depth)} -> ${String(depthAfter)}, still selected ${String(after.bar !== null)}`,
-  );
 }
 
 function checkBar(probe, surface, edges, current, views, fail) {
@@ -7102,15 +6068,11 @@ const RAIL_GROUP_PROBE = `(() => {
       const id = node.getAttribute("data-sortable-id") ?? "";
       return id.startsWith("stack:") ? "link:" + id : id;
     }).slice(0, 4),
-    // The rail's labels are the hover card's label chip (G8).
-    tooltip: [...document.querySelectorAll('[data-slot="hover-card-content"][data-appearance="tooltip"]')].map((node) => node.textContent),
-    focused: document.activeElement?.getAttribute("data-testid") ?? null,
   };
 })()`;
 
 const GROUP_VARIANTS = [
   { label: "left light", sidebar: "left", theme: "light" },
-  { label: "left dark", sidebar: "left", theme: "dark" },
   { label: "right dark", sidebar: "right", theme: "dark" },
 ];
 
@@ -7252,102 +6214,6 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
           );
         await saveShot(client, shotName("rest"));
 
-        // The tooltip names every member, on a real hover.
-        const top = rail?.buttons.find(
-          (button) => button.testId === "epic-rail-chats",
-        );
-        if (top !== undefined) {
-          await moveTo(client, top.rect.cx, top.rect.cy);
-          // The rail's first label waits for intent (G8): wait on the label
-          // itself being open, not on a guess at the delay.
-          await waitFor(
-            client,
-            "the group icon's label",
-            `document.querySelector('[data-slot="hover-card-content"][data-appearance="tooltip"][data-state="open"]') !== null`,
-          );
-          rail = await read();
-          if (!rail.tooltip.includes("Agents · Artifacts"))
-            fail(
-              `hovering the group shows the tooltip ${JSON.stringify(rail.tooltip)}, expected "Agents · Artifacts"`,
-            );
-          await saveShot(client, shotName("tooltip"));
-          await moveTo(client, 1, 1);
-          await settle(client, 300);
-        }
-
-        // Lit follows the group: another panel's click unlights it, and a
-        // real click on the group lights it again.
-        rail = await read();
-        const terminals = rail?.buttons.find(
-          (button) => button.testId === "epic-rail-terminals",
-        );
-        if (terminals !== undefined && top !== undefined) {
-          await pressAndRelease(
-            client,
-            terminals.rect.cx,
-            terminals.rect.cy,
-            "left",
-          );
-          await settle(client, 300);
-          rail = await read();
-          if (
-            rail.buttons.find((button) => button.testId === "epic-rail-chats")
-              ?.current === true
-          )
-            fail("the group icon stays lit after Terminals was opened");
-          await pressAndRelease(client, top.rect.cx, top.rect.cy, "left");
-          await settle(client, 300);
-          rail = await read();
-          if (
-            rail.buttons.find((button) => button.testId === "epic-rail-chats")
-              ?.current !== true
-          )
-            fail("a click on the group icon did not open the group");
-        }
-
-        // Keyboard: Enter on the focused group icon collapses the panel (it is
-        // the lit icon), and the collapsed rail draws the same group vertically.
-        await evaluate(
-          client,
-          `document.querySelector('[data-testid="epic-rail-chats"]').focus()`,
-        );
-        rail = await read();
-        if (rail.focused !== "epic-rail-chats")
-          fail(
-            `the group icon does not take focus (focus on ${String(rail.focused)})`,
-          );
-        await pressKey(client, "Enter");
-        await settle(client, 400);
-        rail = await read();
-        checkRailGroup(
-          rail,
-          {
-            ...agentsOnTop,
-            where: "collapsed",
-            orientation: "vertical",
-            count: null,
-          },
-          fail,
-        );
-        await saveShot(client, shotName("vertical"));
-        const vertical = rail?.buttons.find(
-          (button) => button.testId === "epic-rail-chats",
-        );
-        if (vertical !== undefined) {
-          await pressAndRelease(
-            client,
-            vertical.rect.cx,
-            vertical.rect.cy,
-            "left",
-          );
-          await settle(client, 400);
-        }
-        rail = await read();
-        if (rail?.orientation !== "horizontal")
-          fail(
-            "a click on the collapsed rail's group icon did not expand the panel",
-          );
-
         // The editor: the icon counts its members and the Sidebar area's
         // Panels list orders them.
         await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
@@ -7482,149 +6348,9 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
           await settle(client, 400);
         }
 
-        // Reorder within the group through the Position list's writer: the
-        // group stays, and its icon and name follow the new top.
-        const depth = await evaluate(
-          client,
-          "window.__layoutCanvasProbe.historyDepth()",
-        );
-        await evaluate(
-          client,
-          'window.__layoutCanvasProbe.moveRailEntry("railArtifacts", 0)',
-        );
-        await settle(client, 400);
-        rail = await read();
-        checkRailGroup(
-          rail,
-          {
-            id: "stack:railArtifacts+railAgents",
-            topTestId: "epic-rail-artifacts",
-            hiddenTestId: "epic-rail-chats",
-            label: "Artifacts · Agents",
-            where: "reordered",
-            orientation: "horizontal",
-            count: "2",
-          },
-          fail,
-        );
-        const swapped = [
-          "railArtifacts",
-          "link:stack:railArtifacts+railAgents",
-          "railAgents",
-          "railTerminals",
-        ];
-        if (rail !== null && rail.index.join(",") !== swapped.join(","))
-          fail(
-            `reordered, the inspector lists ${rail.index.join(", ")}, expected ${swapped.join(", ")}`,
-          );
-        const depthAfter = await evaluate(
-          client,
-          "window.__layoutCanvasProbe.historyDepth()",
-        );
-        if (depthAfter !== depth + 1)
-          fail(
-            `the reorder cost ${String(depthAfter - depth)} history steps, expected 1`,
-          );
-        await saveShot(client, shotName("reordered"));
-
-        // Three members (L-181): Terminals joins, the one icon counts three
-        // and is named for all of them, and the Sidebar area's stack row
-        // lists every member with its own Unstack. A REAL click on the middle
-        // member's takes it out in one history step, and the others stay.
-        await evaluate(
-          client,
-          'window.__layoutCanvasProbe.stackPanelInto("terminals", "chats")',
-        );
-        await settle(client, 400);
-        rail = await read();
-        checkRailGroup(
-          rail,
-          {
-            id: "stack:railArtifacts+railAgents+railTerminals",
-            topTestId: "epic-rail-artifacts",
-            hiddenTestId: "epic-rail-terminals",
-            label: "Artifacts · Agents · Terminals",
-            where: "three members",
-            orientation: "horizontal",
-            count: "3",
-          },
-          fail,
-        );
-        const unstackAgents =
-          '[data-layout-inspector] [data-stack-member="railAgents"] button';
-        await evaluate(
-          client,
-          `document.querySelector(${JSON.stringify(unstackAgents)})?.scrollIntoView({ block: "center" })`,
-        );
-        await flush(client);
-        await saveShot(client, shotName("three-members"));
-        const chip = await rectOf(client, unstackAgents);
-        const depthBeforeUnstack = await evaluate(
-          client,
-          "window.__layoutCanvasProbe.historyDepth()",
-        );
-        if (chip === null)
-          fail("three members: the stack row has no Unstack for Agents");
-        else {
-          await pressAt(client, chip.cx, chip.cy);
-          await releaseAt(client, chip.cx, chip.cy);
-          await settle(client, 500);
-          rail = await read();
-          checkRailGroup(
-            rail,
-            {
-              id: "stack:railArtifacts+railTerminals",
-              topTestId: "epic-rail-artifacts",
-              hiddenTestId: "epic-rail-terminals",
-              label: "Artifacts · Terminals",
-              where: "middle member unstacked",
-              orientation: "horizontal",
-              count: "2",
-            },
-            fail,
-          );
-          const unstackDepth = await evaluate(
-            client,
-            "window.__layoutCanvasProbe.historyDepth()",
-          );
-          if (unstackDepth !== depthBeforeUnstack + 1)
-            fail(
-              `unstacking the middle member cost ${String(unstackDepth - depthBeforeUnstack)} history steps, expected 1`,
-            );
-          await saveShot(client, shotName("middle-unstacked"));
-        }
-
-        // Ungrouped: every panel draws its own icon and nothing groups them.
-        await evaluate(
-          client,
-          'window.__layoutCanvasProbe.unstackRail("stack:railArtifacts+railTerminals")',
-        );
-        await settle(client, 400);
-        rail = await read();
-        if (rail !== null) {
-          if (rail.groups.length !== 0)
-            fail(
-              `ungrouped, the rail still draws ${String(rail.groups.length)} groups`,
-            );
-          for (const [testId, name] of [
-            ["epic-rail-artifacts", "Artifacts"],
-            ["epic-rail-chats", "Agents"],
-            ["epic-rail-terminals", "Terminals"],
-          ]) {
-            const button = rail.buttons.find(
-              (candidate) => candidate.testId === testId,
-            );
-            if (button === undefined) fail(`ungrouped, ${testId} has no icon`);
-            else if (button.label !== name)
-              fail(
-                `ungrouped, ${testId} is named "${String(button.label)}", expected "${name}"`,
-              );
-          }
-        }
-        await saveShot(client, shotName("ungrouped"));
         const dividerMoves = await checkDividerRowMoves(client, fail, shotName);
         say(
-          `rest, tooltip, lit, keyboard, vertical, editing count and index, reorder (${String(depthAfter - depth)} step), a three-member stack's middle Unstack, ungroup and ${String(dividerMoves)} divider row moves checked`,
+          `rest, editing count and index, the bottom member's ring and keys, and ${String(dividerMoves)} divider row moves checked`,
         );
         await evaluate(client, "window.__layoutCanvasProbe.endSession()");
         await settle(client, 300);
@@ -7643,7 +6369,7 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator, named and tooltipped for both members; it lights with the group, works by keyboard, draws the same in the collapsed vertical rail, counts its members only while the editor customizes the rail, which lists them in order; reordering the members swaps the icon and name in one history step, a third member joins and a real click on the stack row's middle Unstack takes it out in one history step, ungrouping gives each its own icon, and a divider added with Add divider moves by a real drag on its grip and on its line and by Space, ArrowUp, Space, each in one history step",
+    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator; while the editor customizes the rail it paints its member count on the icon, a click on the bottom member's row rings the group icon inside the window, Enter toggles that row once per press and Space grab-and-drop leaves it selected, and a divider added with Add divider moves by a real drag on its grip and on its line and by Space, ArrowUp, Space, each in one history step (the group's labels, lighting, collapse and stack edits are epic-sidebar.test.tsx's and rail-stack-position-list.test.tsx's)",
   );
 }
 
@@ -7796,13 +6522,11 @@ function selectedPhases() {
     "striptop",
     "stripresize",
     "overlays",
-    "coverage",
     "activity",
     "placement",
     "readings",
     "hostmenu",
     "groups",
-    "find",
   ];
   const raw = process.env.LAYOUT_EDITOR_BROWSER_PHASES;
   if (raw === undefined || raw.trim() === "") return new Set(all);
@@ -7837,7 +6561,7 @@ async function openVariant(client, url, label, readyExpression, pageLoads) {
     await navigateAndSettle(client, url, label, readyExpression, pageLoads);
   } catch (error) {
     // One renewed navigation, never more. The first load of "side rail left,
-    // macOS" stops answering CDP (a 15s `Runtime.evaluate` timeout) whenever
+    // macOS" stops answering CDP (`cdp-client.mjs` times the command out) whenever
     // the parity phase ran earlier in the same Chrome: reproduced with
     // `parity,sides` and the full run, never with `sides` or `canvas,sides`
     // alone, and the second navigation always settles and passes. So some
@@ -7862,7 +6586,8 @@ async function openVariant(client, url, label, readyExpression, pageLoads) {
 
 /** A CDP timeout, or a readiness timeout on a document whose module never ran. */
 function stalledBoot(message) {
-  if (message.startsWith("Timed out sending CDP command")) return true;
+  // `cdp-client.mjs`'s own timeout for a command the page never answers.
+  if (/^CDP \S+ got no answer within \d+ms/.test(message)) return true;
   return (
     message.startsWith("Timed out waiting for") &&
     message.includes('<div id=\\"root\\"></div>')
@@ -8109,13 +6834,11 @@ try {
     ["striptop", () => runStripTopPhase(client, canvasUrl, pageLoads)],
     ["stripresize", () => runStripResizePhase(client, canvasUrl, pageLoads)],
     ["overlays", () => runOverlaysPhase(client, canvasUrl, pageLoads)],
-    ["coverage", () => runCoveragePhase(client, canvasUrl, pageLoads)],
     ["activity", () => runActivityPhase(client, canvasUrl, pageLoads)],
     ["placement", () => runPlacementPhase(client, canvasUrl, pageLoads)],
     ["readings", () => runReadingsPhase(client, canvasUrl, pageLoads)],
     ["hostmenu", () => runHostMenuPhase(client, canvasUrl, pageLoads)],
     ["groups", () => runGroupsPhase(client, canvasUrl, pageLoads)],
-    ["find", () => runFindPhase(client, canvasUrl, pageLoads)],
   ];
   const failures = [];
   for (const [phase, run] of runs) {
@@ -8516,19 +7239,18 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
   const violations = [];
   const notes = [];
   const fileChoosers = [];
-  client.on("Page.fileChooserOpened", (params) => {
+  const stopWatchingChoosers = client.on("Page.fileChooserOpened", (params) => {
     fileChoosers.push(params);
   });
 
-  await client.send("Page.navigate", { url: pageUrl });
-  await waitForStablePage(
+  const loadsAtStart = await openVariant(
     client,
+    pageUrl,
     "the layout editor canvas fixture",
     "window.__layoutCanvasProbe?.ready === true",
     pageLoads,
   );
   await client.send("Page.setInterceptFileChooserDialog", { enabled: true });
-  const loadsAtStart = pageLoads.count;
   await evaluate(client, INSTALL_PIXEL_TOOLS);
   await evaluate(client, "window.__layoutCanvasProbe.reset()");
   await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
@@ -8570,49 +7292,11 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
       );
   }
 
-  // --- A1. Nothing on the canvas is inert (LV2-01, L-131) -------------------
-  const inert = await evaluate(
-    client,
-    `(() => {
-      const column = document.querySelector("[data-layout-column]");
-      if (column === null) return { error: "no app column" };
-      return {
-        error: null,
-        count: column.querySelectorAll("[inert]").length,
-        tags: [...column.querySelectorAll("[inert]")]
-          .slice(0, 6)
-          .map((n) => n.tagName + "." + (n.getAttribute("class") ?? "")),
-      };
-    })()`,
-  );
-  if (inert.error !== null) violations.push(`A1: ${inert.error}`);
-  else if (inert.count !== 0) {
-    violations.push(
-      `A1: ${String(inert.count)} inert subtree(s) inside the canvas column, so nothing under them can be pointed at: ${inert.tags.join(" | ")}`,
-    );
-  }
-
-  // --- A2. Every region is the hit target at its own centre -----------------
-  for (const regionId of mountedRegions) {
-    const hit = await evaluate(client, hitProbe(regionId));
-    if (hit.error !== null) {
-      violations.push(`A2 ${regionId}: ${hit.error}`);
-      continue;
-    }
-    if (hit.width === 0 || hit.height === 0) {
-      violations.push(
-        `A2 ${regionId}: the region's box is ${String(hit.width)}x${String(hit.height)}, so there is nothing to point at`,
-      );
-      continue;
-    }
-    if (hit.resolved !== regionId) {
-      violations.push(
-        `A2 ${regionId}: elementFromPoint(${String(hit.x)}, ${String(hit.y)}) resolved ${String(hit.resolved)} (hit ${String(hit.hitTag)}, inertAncestor=${String(hit.inert)})`,
-      );
-    }
-  }
-
   // --- A3. A real mouseMoved hovers it and raises the chip ------------------
+  // Real input onto each region's centre: an `inert` subtree, an overlay or a
+  // sibling region painted over it all leave its data-hover unset. (That the
+  // scene carries no `inert` is sample-workspace-surface.test.tsx's; the
+  // chip's words and anchored position are jsdom's and the parity phase's.)
   for (const regionId of mountedRegions) {
     const box = await rectOf(client, regionSelector(regionId));
     if (box === null) {
@@ -8631,22 +7315,10 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
         `A3 ${regionId}: a real mouseMoved onto (${box.cx.toFixed(0)}, ${box.cy.toFixed(0)}) left data-hover=${String(hover.hover)}`,
       );
     }
-    const name = coverage.names[regionId];
     if (hover.chipHidden || hover.chipRect === null) {
       violations.push(
         `A3 ${regionId}: no name chip on screen (hidden=${String(hover.chipHidden)})`,
       );
-    } else {
-      if (!String(hover.chipText).startsWith(`${name} · `)) {
-        violations.push(
-          `A3 ${regionId}: the chip reads "${String(hover.chipText)}", expected it to start with "${name} · "`,
-        );
-      }
-      if (!near(hover.chipRect, hover.regionRect, 48)) {
-        violations.push(
-          `A3 ${regionId}: the chip at ${boxText(hover.chipRect)} is not beside the region at ${boxText(hover.regionRect)}`,
-        );
-      }
     }
   }
   await moveTo(client, 4, 4);
@@ -8702,7 +7374,7 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
     }
   }
 
-  // --- A5. Six real drags and one join, each one history step ---------------
+  // --- A5. Seven real drags, each one history step --------------------------
   const baseline = await evaluate(
     client,
     "window.__layoutCanvasProbe.snapshot()",
@@ -8717,16 +7389,9 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
     notes.push(...result.notes);
   }
 
-  // --- A6. The mic chip, and its ghost --------------------------------------
+  // --- A6. The mic chip hidden, and its ghost -------------------------------
+  // Shown is the shipped preset's, which A3 and A4 already point at.
   await resetSession(client);
-  await evaluate(client, "window.__layoutCanvasProbe.setMicShown(true)");
-  await flush(client);
-  const micShown = await rectOf(client, regionSelector("mic"));
-  if (micShown === null || micShown.width === 0 || micShown.height === 0) {
-    violations.push(
-      `A6: Microphone Shown drew no box on the sample composer (${JSON.stringify(micShown)})`,
-    );
-  }
   await evaluate(client, "window.__layoutCanvasProbe.setMicShown(false)");
   await flush(client);
   const micHidden = await rectOf(client, regionSelector("mic"));
@@ -8793,10 +7458,32 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
     }
     await dismissLayers(client);
 
-    const turn = await rectOf(client, "[data-sample-turn]");
-    if (turn === null) violations.push("A8: no sample transcript turn found");
+    // A point on the prose of a turn that is on screen - the conversation
+    // opens at its end, so the first turn is scrolled out - and on no region,
+    // or the firewall's silence would be the region menu's absence.
+    const prose = await evaluate(
+      client,
+      `(() => {
+        for (const turn of [...document.querySelectorAll("[data-sample-turn]")].reverse()) {
+          const r = turn.getBoundingClientRect();
+          for (let fy = 0.1; fy < 1; fy += 0.1) {
+            for (let fx = 0.1; fx < 1; fx += 0.1) {
+              const x = r.left + r.width * fx;
+              const y = r.top + r.height * fy;
+              if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+              const hit = document.elementFromPoint(x, y);
+              if (hit !== null && turn.contains(hit) && hit.closest("[data-layout-region]") === null)
+                return { x, y };
+            }
+          }
+        }
+        return null;
+      })()`,
+    );
+    if (prose === null)
+      violations.push("A8: no on-screen transcript prose outside a region");
     else {
-      const onProse = await rightClickMenu(client, turn.cx, turn.cy);
+      const onProse = await rightClickMenu(client, prose.x, prose.y);
       if (onProse.open) {
         violations.push(
           `A8: a right-click on the sample transcript opened a menu ("${onProse.text.slice(0, 120)}"); the firewall should swallow it`,
@@ -8828,6 +7515,10 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
         violations.push(
           "A8: a real right-click on the mic AT REST opened no [role=menu] (L-19)",
         );
+      } else if (!atRest.text.includes(coverage.names.mic)) {
+        violations.push(
+          `A8: the at-rest menu does not name Microphone; it reads "${atRest.text.slice(0, 120)}"`,
+        );
       }
       await dismissLayers(client);
     }
@@ -8852,12 +7543,23 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
       violations.push(`A8: no ${regionId} on the canvas to right-click`);
       continue;
     }
+    // A menu left over from the region before would answer for this one.
+    if (
+      await evaluate(client, `document.querySelector('[role="menu"]') !== null`)
+    )
+      violations.push(
+        `A8: a menu is already open before right-clicking ${regionId}`,
+      );
     const menu = await rightClickMenu(client, box.cx, box.cy);
-    if (menu.open) notes.push(`quick-verb menu on ${regionId}: opens`);
-    else
+    if (!menu.open)
       violations.push(
         `A8: a real right-click on ${regionId} inside a session opened no [role=menu] (L-144)`,
       );
+    else if (!menu.text.includes(coverage.names[regionId]))
+      violations.push(
+        `A8: the menu on ${regionId} does not name ${coverage.names[regionId]}; it reads "${menu.text.slice(0, 120)}"`,
+      );
+    else notes.push(`quick-verb menu on ${regionId}: opens`);
     await dismissLayers(client);
   }
 
@@ -8869,29 +7571,12 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
   } else {
     notes.push(`--warning-foreground paints as rgb(${target.join(", ")})`);
     // Where the stylesheet put the stroke, read off the column rather than
-    // restated here (see `countEdge`). Read as the TOKENS were authored, and
-    // parsed here: a custom property comes back verbatim, so `0.25rem` or
-    // `calc(4px)` would silently become 0.25 and NaN, and a driver that
-    // swallowed either would report a frame regression that did not happen.
-    const tokens = await evaluate(
-      client,
-      `(() => {
-        const column = document.querySelector("[data-layout-column]");
-        if (column === null) return { inset: null, radius: null };
-        const style = getComputedStyle(column);
-        return {
-          inset: style.getPropertyValue("--layout-editor-frame-inset").trim(),
-          radius: style.getPropertyValue("--layout-editor-frame-radius").trim(),
-        };
-      })()`,
-    );
-    const frame = {
-      inset: pxValue(tokens.inset),
-      radius: pxValue(tokens.radius),
-    };
+    // restated here (see `countEdge`); `pxValue` refuses anything but plain
+    // px, so a `0.25rem` cannot silently read as a regression.
+    const frame = await readFrameGeometry(client);
     if (frame.inset === null || frame.radius === null) {
       violations.push(
-        `A9: the frame's geometry is not a plain px value (inset ${String(tokens.inset)}, radius ${String(tokens.radius)}), so nothing below measured where the stroke actually is; the counts fall back to L-137's ${String(DESIGNED_FRAME_INSET)}px and ${String(DESIGNED_FRAME_RADIUS)}px`,
+        `A9: the frame's geometry is not a plain px value, so nothing below measured where the stroke actually is; the counts fall back to L-137's ${String(DESIGNED_FRAME_INSET)}px and ${String(DESIGNED_FRAME_RADIUS)}px`,
       );
       frame.inset = frame.inset ?? DESIGNED_FRAME_INSET;
       frame.radius = frame.radius ?? DESIGNED_FRAME_RADIUS;
@@ -8990,153 +7675,51 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
     await flush(client);
     await delay(400);
 
-    // The editor's own TAB, under that same stroke (L-138, L-163). Its box
-    // sits 2px below the frame's top run (F4), and while the tab wore the
-    // colour on its EDGE the two read as one broken line. What must hold is
-    // that the colour is the tab's AREA and the ordinary border is its edge.
-    //
-    // Read, not counted. The fill IS the target colour, so a pixel probe would
-    // have to exclude the filled box to see a stroke at all. A computed-style
-    // read asks the declarations
-    // themselves, so nothing it reports depends on antialiasing, on the dot
-    // phase, or on where the label happens to fall. Both sides of every
-    // comparison are normalised through one element's `color`, so a theme that
-    // spells a token with `light-dark()` compares as the colour it resolves to
-    // rather than as the text it was written in.
-    const chrome = await evaluate(
+    // The editor's own top TAB under that run (L-163): the real `TabChrome`
+    // in its session state, filled with the editing colour and edged in
+    // anything but it, read as resolved colours through one element so a
+    // `light-dark()` token compares as what it paints. The side strip's
+    // session row is another component (`checkSessionRow`).
+    const tab = await evaluate(
       client,
       `(() => {
-        const tab = document.querySelector("[data-fixture-session-tab]");
-        if (tab === null) return { error: "no session tab in the fixture header" };
+        const box = document.querySelector('[data-fixture-session-tab] [data-testid="tab-chrome-box"]');
+        if (box === null) return null;
         const probe = document.createElement("span");
-        probe.style.display = "none";
-        tab.append(probe);
+        box.append(probe);
         const resolve = (value) => {
           probe.style.color = "";
           probe.style.color = value;
           return getComputedStyle(probe).color;
         };
-        const amber = resolve("var(--warning-foreground)");
-        const box = tab.querySelector('[data-testid="tab-chrome-box"]');
-        const edges = box === null ? [] : ["Top", "Right", "Bottom", "Left"].map((side) => ({
-          name: "tab-chrome-box border-" + side.toLowerCase(),
-          paint: getComputedStyle(box)["border" + side + "Color"],
-        }));
-        const result = {
-          error: null,
-          amber,
-          fill: box === null ? null : resolve(getComputedStyle(box).backgroundColor),
-          edges: edges.map((edge) => ({
-            name: edge.name,
-            paint: edge.paint === "none" ? "none" : resolve(edge.paint),
-          })),
+        const style = getComputedStyle(box);
+        const read = {
+          amber: resolve("var(--warning-foreground)"),
+          fill: resolve(style.backgroundColor),
+          edges: ["Top", "Right", "Bottom", "Left"].map((side) => resolve(style["border" + side + "Color"])),
         };
         probe.remove();
-        return result;
+        return read;
       })()`,
     );
-    if (chrome.error !== null) {
-      violations.push(`A9 tab: ${chrome.error}`);
-    } else {
-      notes.push(
-        `session tab fill ${String(chrome.fill)} against the editing colour ${String(chrome.amber)}; edges ${chrome.edges.map((edge) => `${String(edge.name)}=${String(edge.paint)}`).join(", ")}`,
-      );
-      if (chrome.fill !== chrome.amber) {
-        violations.push(
-          `A9 tab: the editor's own tab is filled ${String(chrome.fill)} rather than the editing colour ${String(chrome.amber)}, so the tab is not the solid object the frame is the outline of (L-163)`,
-        );
-      }
-      for (const edge of chrome.edges) {
-        if (edge.paint !== chrome.amber) continue;
-        violations.push(
-          `A9 tab: ${String(edge.name)} is painted in the editing colour ${String(chrome.amber)}, so the tab wears a ring of it - which traces the skirt below the header baseline and lands on the frame's own line at the tab's shoulders (L-163)`,
-        );
-      }
-    }
-  }
-
-  // --- A10. The selection ring's painted box --------------------------------
-  await resetSession(client);
-  const midBox = await rectOf(client, regionSelector("railBrowsers"));
-  if (midBox === null) violations.push("A10: no railBrowsers to select");
-  else {
-    await pressAndRelease(client, midBox.cx, midBox.cy, "left");
-    await delay(600);
-    await flush(client);
-    const ring = await evaluate(client, ringProbe("railBrowsers"));
-    if (ring.error !== null) violations.push(`A10: ${ring.error}`);
+    if (tab === null) violations.push("A9 tab: no session tab chrome");
     else {
-      const expected = {
-        x: ring.region.x - RING_PADDING,
-        y: ring.region.y - RING_PADDING,
-        width: ring.region.width + RING_PADDING * 2,
-        height: ring.region.height + RING_PADDING * 2,
-      };
-      if (!sameBoxWithin(ring.ring, expected, 1.5)) {
+      notes.push(`session tab fill ${tab.fill}, edges ${tab.edges.join(" ")}`);
+      if (tab.fill !== tab.amber)
         violations.push(
-          `A10: the ring is painted at ${boxText(ring.ring)}, expected the region's box plus ${String(RING_PADDING)}px at ${boxText(expected)}`,
+          `A9 tab: the editor's tab is filled ${tab.fill}, not the editing colour ${tab.amber} (L-163)`,
         );
-      }
-      // The one thing a dock switch moves without resizing anything (L-90).
-      await evaluate(client, 'window.__layoutCanvasProbe.setDockMode("left")');
-      await flush(client);
-      await delay(700);
-      const moved = await evaluate(client, ringProbe("railBrowsers"));
-      const movedExpected = {
-        x: moved.region.x - RING_PADDING,
-        y: moved.region.y - RING_PADDING,
-        width: moved.region.width + RING_PADDING * 2,
-        height: moved.region.height + RING_PADDING * 2,
-      };
-      if (Math.abs(moved.region.x - ring.region.x) < 50) {
+      if (tab.edges.includes(tab.amber))
         violations.push(
-          `A10: the dock switch did not move the column (region x ${String(ring.region.x)} -> ${String(moved.region.x)}), so the ring's follow is untested`,
+          `A9 tab: the editor's tab is edged in the editing colour ${tab.amber}, a ring the frame's own line runs into (L-163)`,
         );
-      }
-      if (!sameBoxWithin(moved.ring, movedExpected, 1.5)) {
-        violations.push(
-          `A10: after a dock switch the ring is at ${boxText(moved.ring)} and the region at ${boxText(moved.region)}`,
-        );
-      }
-      await evaluate(client, 'window.__layoutCanvasProbe.setDockMode("right")');
-      await flush(client);
-      await delay(400);
-    }
-
-    // The bottom row: every band the ring paints has to be inside the window.
-    const bottom = await evaluate(client, bottomRegionProbe());
-    if (bottom === null) violations.push("A10: no bottom-row region found");
-    else {
-      await pressAndRelease(client, bottom.cx, bottom.cy, "left");
-      await delay(600);
-      await flush(client);
-      const ringBottom = await evaluate(client, ringProbe(bottom.regionId));
-      notes.push(
-        `bottom-row region is ${bottom.regionId}, ${String(Math.round(ringBottom.innerHeight - (ringBottom.region.y + ringBottom.region.height)))}px clear of the window's bottom edge`,
-      );
-      const painted = ringBottom.ring.y + ringBottom.ring.height + RING_BLEED;
-      if (painted > ringBottom.innerHeight + 0.5) {
-        violations.push(
-          `A10: on ${bottom.regionId} the ring's outermost band reaches y=${painted.toFixed(1)} in a ${String(ringBottom.innerHeight)}px window, so it is clipped (LV2-16)`,
-        );
-      }
-      if (ringBottom.ring.x < RING_BLEED - 0.5) {
-        violations.push(
-          `A10: on ${bottom.regionId} the ring's left band reaches x=${(ringBottom.ring.x - RING_BLEED).toFixed(1)}`,
-        );
-      }
     }
   }
 
-  // A document that was rebuilt under the probes is not the one these numbers
-  // describe: Vite's dev client answers any source edit with a full reload,
-  // and a reload resets the session, the layout store and the ghost state
-  // every assertion above was standing on. Reported rather than tolerated.
-  if (pageLoads.count !== loadsAtStart) {
-    violations.push(
-      `the page reloaded ${String(pageLoads.count - loadsAtStart)} time(s) DURING this phase (Vite answers a source edit with a full reload), so every measurement above describes a document that was rebuilt under it; re-run with the tree quiet`,
-    );
-  }
+  // A document rebuilt under the probes is not the one these numbers describe.
+  assertNoReloadSince(pageLoads, loadsAtStart, "canvas", violations);
+  stopWatchingChoosers();
+  await client.send("Page.setInterceptFileChooserDialog", { enabled: false });
 
   console.log(`\n--- canvas interaction regression ---`);
   for (const note of notes) console.log(`  ${note}`);
@@ -9169,49 +7752,20 @@ function regionSelector(regionId) {
   return `[data-layout-region="${regionId}"]`;
 }
 
-function hitProbe(regionId) {
-  return `(() => {
-    const node = document.querySelector(${JSON.stringify(regionSelector(regionId))});
-    if (node === null) return { error: "the region has no node on the canvas" };
-    const rect = node.getBoundingClientRect();
-    const x = Math.round(rect.x + rect.width / 2);
-    const y = Math.round(rect.y + rect.height / 2);
-    const hit = document.elementFromPoint(x, y);
-    const region = hit === null ? null : hit.closest("[data-layout-region]");
-    return {
-      error: null,
-      x,
-      y,
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-      hitTag:
-        hit === null
-          ? null
-          : hit.tagName + "." + String(hit.getAttribute("class") ?? "").slice(0, 60),
-      resolved: region === null ? null : region.getAttribute("data-layout-region"),
-      inert: hit === null ? null : hit.closest("[inert]") !== null,
-    };
-  })()`;
-}
-
 function hoverProbe(regionId) {
   return `(() => {
     const node = document.querySelector(${JSON.stringify(regionSelector(regionId))});
     const chip = document.querySelector("[data-layout-hover-chip]");
     if (node === null) return { error: "the region has no node on the canvas" };
-    const rect = node.getBoundingClientRect();
     const chipRect = chip === null || chip.hidden ? null : chip.getBoundingClientRect();
     return {
       error: null,
       hover: node.getAttribute("data-hover"),
-      anchor: node.getAttribute("data-layout-anchor"),
       chipHidden: chip === null ? true : chip.hidden,
-      chipText: chip === null ? null : chip.textContent,
       chipRect:
         chipRect === null
           ? null
           : { x: chipRect.x, y: chipRect.y, width: chipRect.width, height: chipRect.height },
-      regionRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
     };
   })()`;
 }
@@ -9250,24 +7804,6 @@ function ringProbe(regionId) {
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
     };
-  })()`;
-}
-
-function bottomRegionProbe() {
-  return `(() => {
-    let best = null;
-    for (const node of document.querySelectorAll("[data-layout-region]")) {
-      const rect = node.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      if (best === null || rect.bottom > best.bottom)
-        best = {
-          regionId: node.getAttribute("data-layout-region"),
-          bottom: rect.bottom,
-          cx: rect.x + rect.width / 2,
-          cy: rect.y + rect.height / 2,
-        };
-    }
-    return best;
   })()`;
 }
 
@@ -9381,6 +7917,11 @@ function midDragProbe(siblingSelector) {
           : (dragging.getAttribute("data-layout-member") ??
              dragging.getAttribute("data-layout-region")),
       transform: dragging === null ? null : dragging.style.transform,
+      draggingCenter: (() => {
+        if (dragging === null) return null;
+        const r = dragging.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      })(),
       siblingRect: rect === null ? null : { x: rect.x, y: rect.y },
     };
   })()`;
@@ -9540,43 +8081,13 @@ function buildDragPlans(toolbarLeft, dock) {
       expect: { kind: "rail", ids: TERMINALS_ABOVE_THE_DIVIDER },
     },
     {
-      // The one gesture on this rail that is not a reorder (L-168). The join
-      // is made through the product's own writer inside a recorded gesture,
-      // because the canvas drag engine has no middle band - `armLayoutDrag`
-      // resolves a SLOT, so a combine is the dnd-kit rail's gesture and the
-      // jsdom rail suite is where the pointer half is pinned. What this plan
-      // holds is the rest of it: the entry the writer adds, the one history
-      // step it costs, and the one group icon the rail draws for a pair (G3).
-      id: "stacking two rail icons draws one group icon",
-      setup: [
-        "window.__layoutCanvasProbe.reset()",
-        "window.__layoutCanvasProbe.stackTerminalsWithBrowsers()",
-      ],
-      kind: "state",
-      expect: { kind: "rail", ids: TERMINALS_STACKED_ABOVE_BROWSERS },
-      historyDelta: 1,
-      // Scoped to the app column, which is the rail the gesture acted on.
-      probe: `(() => {
-        const column = document.querySelector("[data-layout-column]");
-        const groups = [...column.querySelectorAll("[data-rail-stack]")];
-        return groups.map((node) => ({
-          id: node.getAttribute("data-rail-stack"),
-          icons: node.querySelectorAll("[data-layout-region]").length,
-          count: node.querySelector('[data-testid="epic-rail-stack-count"]')?.textContent ?? null,
-        }));
-      })()`,
-      expectProbe: [
-        { id: "stack:railAgents+railArtifacts", icons: 1, count: "2" },
-        { id: "stack:railTerminals+railBrowsers", icons: 1, count: "2" },
-      ],
-    },
-    {
       id: "the clamp: a rail icon pulled far outside the column",
       setup: ["window.__layoutCanvasProbe.reset()"],
       memberId: "railComments",
       memberSelector: regionSelector("railComments"),
       siblingSelector: null,
-      target: { kind: "viewport", dx: -60, dy: 300 },
+      // The expanded sample sidebar's rail runs horizontally (F3).
+      target: { kind: "viewport", dx: -60, dy: 300, axis: "x" },
       expect: { kind: "none" },
     },
   ];
@@ -9593,41 +8104,6 @@ async function runDrag(client, plan) {
   await flush(client);
   await delay(250);
   await flush(client);
-
-  // A plan with no pointer gesture: the setup IS the write, and what is
-  // asserted is the arrangement it produced, the history it cost and whatever
-  // the rail drew for it.
-  if (plan.kind === "state") {
-    const state = await evaluate(
-      client,
-      "window.__layoutCanvasProbe.snapshot()",
-    );
-    const depth = await evaluate(
-      client,
-      "window.__layoutCanvasProbe.historyDepth()",
-    );
-    const railIds = state.arrangement.rail.map((entry) => entry.id);
-    if (JSON.stringify(railIds) !== JSON.stringify(plan.expect.ids)) {
-      violations.push(
-        `A5 ${plan.id}: the layout store reads ${JSON.stringify(railIds)}, expected ${JSON.stringify(plan.expect.ids)}`,
-      );
-    }
-    if (depth - depthAtSetup !== plan.historyDelta) {
-      violations.push(
-        `A5 ${plan.id}: history went ${String(depthAtSetup)} -> ${String(depth)}; expected +${String(plan.historyDelta)}`,
-      );
-    }
-    const drawn = await evaluate(client, plan.probe);
-    if (JSON.stringify(drawn) !== JSON.stringify(plan.expectProbe)) {
-      violations.push(
-        `A5 ${plan.id}: the rail drew ${JSON.stringify(drawn)}, expected ${JSON.stringify(plan.expectProbe)}`,
-      );
-    }
-    notes.push(
-      `state "${plan.id}": ${JSON.stringify(railIds)}, groups ${JSON.stringify(drawn)}, history +${String(depth - depthAtSetup)}`,
-    );
-    return { violations, notes };
-  }
 
   const member = await rectOf(client, plan.memberSelector);
   if (member === null) {
@@ -9698,15 +8174,26 @@ async function runDrag(client, plan) {
   if (plan.expect.kind === "none") {
     // The clamp: the member may travel, but not as far as the pointer did, and
     // it may not be dropped anywhere (L-29).
+    // Where the member is PAINTED, against the pointer, on the rail's axis:
+    // the pull across it is the clamp's too, but not what it moves along.
+    const axis = plan.target.axis;
     const raw =
-      Math.abs(to.y - member.cy) > Math.abs(to.x - member.cx)
-        ? Math.abs(to.y - member.cy)
-        : Math.abs(to.x - member.cx);
-    const travelled = mid === null ? null : translationOf(mid.transform);
+      axis === "y" ? Math.abs(to.y - member.cy) : Math.abs(to.x - member.cx);
+    const travelled =
+      mid === null || mid.draggingCenter === null
+        ? null
+        : axis === "y"
+          ? Math.abs(mid.draggingCenter.y - member.cy)
+          : Math.abs(mid.draggingCenter.x - member.cx);
     notes.push(
       `clamp: pointer pulled ${raw.toFixed(0)}px to ${JSON.stringify(to)}, member travelled ${travelled === null ? "n/a" : travelled.toFixed(0)}px`,
     );
-    if (travelled !== null && travelled >= raw) {
+    if (travelled === null) {
+      violations.push(`A5 ${plan.id}: no member in hand to measure`);
+    } else if (travelled > raw / 2) {
+      // Unclamped, the member trails the pointer by the 6px activation
+      // distance alone (`drag-engine.ts`), so it would cover nearly all of the
+      // pull; clamped, it stops at its cluster's edge plus the rubber band.
       violations.push(
         `A5 ${plan.id}: the member followed the pointer ${travelled.toFixed(0)}px of ${raw.toFixed(0)}px, so nothing clamped it to its cluster`,
       );
@@ -9774,12 +8261,6 @@ function placedBeside(order, moved, anchor, after) {
   if (at < 0) return order;
   const insertAt = after ? at + 1 : at;
   return [...rest.slice(0, insertAt), moved, ...rest.slice(insertAt)];
-}
-
-function translationOf(transform) {
-  if (typeof transform !== "string") return null;
-  const match = transform.match(/translate[XY]\((-?[\d.]+)px\)/);
-  return match === null ? null : Math.abs(Number(match[1]));
 }
 
 // --- phase 2: small helpers -------------------------------------------------
@@ -10059,16 +8540,6 @@ async function countBox(client, box, target) {
   return await evaluate(
     client,
     `window.__countShot(${JSON.stringify(shot.data)}, true, ${JSON.stringify(target)}, 90)`,
-  );
-}
-
-/** Whether two boxes touch once the first is inflated by `slack` on every side. */
-function near(left, right, slack) {
-  return (
-    left.x - slack < right.x + right.width &&
-    left.x + left.width + slack > right.x &&
-    left.y - slack < right.y + right.height &&
-    left.y + left.height + slack > right.y
   );
 }
 

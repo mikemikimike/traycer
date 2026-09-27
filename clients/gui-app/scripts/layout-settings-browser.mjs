@@ -11,16 +11,17 @@
 // things jsdom cannot decide:
 //
 //   1. Areas (H2): the page is Settings ▸ Providers' master-detail - a rail
-//      of areas beside the picked one. Each area shows its own group and no
-//      other; the rail and the area's header stay put while its body scrolls;
-//      a newly picked area starts at its top; the arrow keys walk the rail; a
-//      changed area carries a dot its changed row's ↺ clears; a search result and
-//      the editor door's deep link each pick their row's area and land on the
-//      row; and nothing overflows the header or the card at either width.
+//      of areas beside the picked one. The rail and the area's header stay put
+//      while its body scrolls; a newly picked area starts at its top; a search
+//      result and the editor door's deep link each land their row in view;
+//      and nothing overflows the header or the card at either width.
 //      Below `md` the area select - and Providers' provider select, the same
-//      component - is operated for real; a short desktop pane scrolls its
-//      rail; a ↺ by keyboard leaves focus in the area; and a setup
-//      guide's focus return lands on the area control the width draws.
+//      component - is operated for real, and a changed area carries a dot its
+//      changed row's ↺ by keyboard clears, leaving focus in the area; a short
+//      desktop pane scrolls its rail; and a setup guide's focus return lands
+//      on the area control the width draws. Which area a pick shows, the
+//      rail's arrow keys and the dot's own logic are jsdom's
+//      (`layout-settings-panel.test.tsx`).
 //   2. Disclosures: every row that draws a chevron opens something with
 //      content, and every row that opens nothing draws no chevron.
 //   3. Every setting does something: each option of each segmented control,
@@ -32,7 +33,7 @@
 //      two switches, each changing only its own surface, and the rows draw
 //      the monitor's own Metrics choice.
 //
-// `--out DIR` writes a screenshot per area and per G7 step into DIR.
+// `--out DIR` writes a screenshot of each checked view and G7 step into DIR.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -65,12 +66,12 @@ const VARIANTS = [
   },
 ];
 const TABS = [
-  { label: "Presets", testIds: ["layout-presets-group", "layout-reset-group"] },
-  { label: "Task tabs", testIds: ["layout-surface-topBar"] },
-  { label: "Sidebar", testIds: ["layout-surface-sidebar"] },
-  { label: "Chat", testIds: ["layout-surface-chat"] },
-  { label: "Composer", testIds: ["layout-surface-composer"] },
-  { label: "Usage and resources", testIds: ["layout-surface-statusBar"] },
+  "Presets",
+  "Task tabs",
+  "Sidebar",
+  "Chat",
+  "Composer",
+  "Usage and resources",
 ];
 /**
  * Controls that only take effect once another is on, and the switch that
@@ -257,12 +258,11 @@ const HEADER_FIT_PROBE = `(() => {
 })()`;
 
 /**
- * `LAYOUT_SETTINGS_ONLY=tabs,fit,short,narrow,header,tabswitch,choose,sweep,g7,shots` runs only the named
+ * `LAYOUT_SETTINGS_ONLY=tabs,fit,short,narrow,header,choose,sweep,g7` runs only the named
  * checks - for a mutation run, where the full sweep is minutes of waiting on a
  * check that is not the one being proved.
  */
 const ONLY = process.env.LAYOUT_SETTINGS_ONLY?.split(",") ?? null;
-// `shots` is evidence, not a check: only when asked for by name.
 const runs = (check) => ONLY === null || ONLY.includes(check);
 
 const args = process.argv.slice(2);
@@ -353,12 +353,11 @@ try {
     "[data-fixture-settings-pane] [role=tablist]",
   );
   await delay(3_000);
-  if (ONLY?.includes("shots")) await captureComparison(client, origin);
   if (runs("fit")) await checkPanelFit(client, origin);
   if (runs("short")) await checkShortPane(client, origin);
   if (runs("narrow")) await checkNarrowSelectors(client, origin);
   const effects = new Map();
-  const PAGE_ONLY = ["shots", "fit", "short", "narrow"];
+  const PAGE_ONLY = ["fit", "short", "narrow"];
   for (const variant of VARIANTS) {
     if (ONLY !== null && ONLY.every((check) => PAGE_ONLY.includes(check)))
       break;
@@ -372,13 +371,10 @@ try {
     if (variant.key === "sample") {
       if (runs("tabs")) {
         await checkAreas(client);
-        await checkKeyboard(client);
-        await checkChangedDot(client);
         await checkLanding(client);
         await checkDisclosures(client);
       }
       if (runs("choose")) await checkChooseSeedsSelection(client);
-      if (runs("tabswitch")) await checkTabSwitchScroll(client);
       if (runs("header")) await checkHeaderFit(client);
     }
     if (runs("sweep")) {
@@ -476,29 +472,10 @@ async function loadFixture(client, url, readySelector) {
 // --- checks -----------------------------------------------------------------
 
 /**
- * Each area shows its own group and no other; the rail and the picked area's
- * header stay put while its body scrolls; and a newly picked area starts at
- * its top.
+ * The rail and the picked area's header stay put while its body scrolls, and
+ * a newly picked area starts at its top.
  */
 async function checkAreas(client) {
-  const allIds = TABS.flatMap((tab) => tab.testIds);
-  for (const tab of TABS) {
-    await clickTab(client, tab.label);
-    const shown = await evaluate(
-      client,
-      `${JSON.stringify(allIds)}.filter((id) => {
-         const node = document.querySelector('[data-fixture-settings-pane] [data-testid="' + id + '"]');
-         return node !== null && node.getClientRects().length > 0;
-       })`,
-    );
-    const expected = [...tab.testIds].sort();
-    if (JSON.stringify([...shown].sort()) !== JSON.stringify(expected)) {
-      failures.push(
-        `area ${tab.label} shows ${JSON.stringify(shown)}, expected ${JSON.stringify(expected)}`,
-      );
-    }
-    await screenshotPane(client, `area-${slug(tab.label)}`);
-  }
   // Pinned: the longest area scrolled to its end moves its body and nothing
   // else - not the rail, not its header, not the settings pane.
   await clickTab(client, "Usage and resources");
@@ -530,102 +507,11 @@ async function checkAreas(client) {
   for (const label of ["Chat", "Usage and resources"]) {
     await clickTab(client, label);
     const top = await evaluate(client, AREA_GEOMETRY);
-    if (top.body !== 0)
-      failures.push(`${label} opened scrolled into its body (${top.body}px)`);
-  }
-}
-
-/**
- * The rail is a vertical tab list: ArrowDown and ArrowUp walk it, End and Home
- * jump to its ends, and each step picks the area it lands on.
- */
-async function checkKeyboard(client) {
-  await evaluate(client, "window.__layoutCanvasProbe.reset()");
-  await clickTab(client, "Presets");
-  await evaluate(
-    client,
-    `document.querySelector(${JSON.stringify(AREA_TAB)} + '[aria-selected="true"]').focus()`,
-  );
-  const expectations = [
-    ["ArrowDown", "Task tabs"],
-    ["ArrowDown", "Sidebar"],
-    ["End", "Usage and resources"],
-    ["ArrowUp", "Composer"],
-    ["Home", "Presets"],
-  ];
-  for (const [name, label] of expectations) {
-    await press(client, name);
-    await settle(client);
-    const state = await evaluate(
-      client,
-      `(() => {
-         const focused = document.activeElement;
-         const panel = ${PANEL};
-         return {
-           focused: focused?.matches(${JSON.stringify(AREA_TAB)}) ? ${AREA_NAME}(focused) : null,
-           selected: [...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].filter((tab) => tab.getAttribute('aria-selected') === 'true').map(${AREA_NAME}),
-           panel: panel?.getAttribute('aria-label') ?? null,
-         };
-       })()`,
-    );
-    if (
-      state.focused !== label ||
-      JSON.stringify(state.selected) !== JSON.stringify([label]) ||
-      state.panel !== label
-    ) {
+    if (top.body !== 0 || top.pane !== 0)
       failures.push(
-        `keyboard: ${name} should pick ${label}, got ${JSON.stringify(state)}`,
+        `${label} opened scrolled (body ${top.body}px, pane ${top.pane}px)`,
       );
-    }
   }
-}
-
-/**
- * A changed area carries the dot from the edit that changed it, and the
- * changed row's ↺ clears it and nothing else.
- */
-async function checkChangedDot(client) {
-  const dots = () =>
-    evaluate(
-      client,
-      `[...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].filter((tab) => tab.querySelector('[data-testid="area-changed-dot"]') !== null).map(${AREA_NAME})`,
-    );
-  await evaluate(client, "window.__layoutCanvasProbe.reset()");
-  await settle(client);
-  const before = await dots();
-  if (before.includes("Chat"))
-    failures.push(`changed dot: Chat is marked before any edit`);
-  await resetTo(client, "Chat", []);
-  if (
-    (await operateAndWait(client, "minimap Minimap display: Hidden")) !== true
-  )
-    failures.push("changed dot: hiding the minimap stored nothing");
-  const after = await dots();
-  if (!after.includes("Chat"))
-    failures.push(
-      `changed dot: Chat is not marked after an edit (${JSON.stringify(after)})`,
-    );
-  await screenshotPane(client, "changed-dot-chat");
-  await revertRowByKeyboard(
-    client,
-    "Minimap",
-    "Chat",
-    "changed-dot-chat-revert",
-  );
-  const cleared = await dots();
-  if (cleared.includes("Chat"))
-    failures.push("changed dot: Chat is still marked after the ↺");
-  if (JSON.stringify(cleared) !== JSON.stringify(before))
-    failures.push(
-      `changed dot: the Minimap ↺ changed other areas: ${JSON.stringify(before)} -> ${JSON.stringify(cleared)}`,
-    );
-  const minimap = await evaluate(
-    client,
-    "window.__layoutCanvasProbe.snapshot().overrides.minimap ?? null",
-  );
-  if (minimap !== null)
-    failures.push(`changed dot: the Minimap ↺ left ${JSON.stringify(minimap)}`);
-  await evaluate(client, "window.__layoutCanvasProbe.reset()");
 }
 
 /**
@@ -642,7 +528,6 @@ async function checkLanding(client) {
       "Sidebar",
       '[data-settings-anchor="layout-sidebar-side"]',
     ],
-    ["search", "revealSetting", "layout-mobile-footer", null, null],
     [
       "deep link",
       "landOnRegion",
@@ -659,8 +544,6 @@ async function checkLanding(client) {
     ],
   ];
   for (const [kind, method, target, area, selector] of cases) {
-    // The mobile footer row only exists in the installed mobile app.
-    if (area === null) continue;
     await evaluate(client, "window.__layoutCanvasProbe.reset()");
     await clickTab(client, "Presets");
     await evaluate(
@@ -870,7 +753,7 @@ async function checkShortPane(client, origin) {
       "short pane: a wheel over the rail does not bring Status bar into view",
     );
 
-  for (const { label } of TABS) {
+  for (const label of TABS) {
     const point = await evaluate(
       client,
       `(() => {
@@ -1017,8 +900,8 @@ async function checkNarrowSelectors(client, origin) {
  * no chevron (the G6 empty collapsibles).
  */
 async function checkDisclosures(client) {
-  for (const tab of TABS.slice(1)) {
-    await clickTab(client, tab.label);
+  for (const label of TABS.slice(1)) {
+    await clickTab(client, label);
     const rows = await evaluate(
       client,
       `[...document.querySelectorAll('[data-fixture-settings-pane] [role="tabpanel"]:not([hidden]) [data-sortable-id]')].map((row) => ({
@@ -1043,12 +926,12 @@ async function checkDisclosures(client) {
       );
       if (detail.length === 0) {
         failures.push(
-          `${tab.label}: row ${row.id} has a chevron that opens nothing`,
+          `${label}: row ${row.id} has a chevron that opens nothing`,
         );
       }
     }
     console.log(
-      `${tab.label}: ${rows.filter((row) => row.discloses).length} of ${rows.length} rows disclose`,
+      `${label}: ${rows.filter((row) => row.discloses).length} of ${rows.length} rows disclose`,
     );
   }
 }
@@ -1060,10 +943,10 @@ async function checkDisclosures(client) {
 async function operateEverySetting(client) {
   const results = [];
   const plans = [];
-  for (const tab of TABS) {
-    await resetTo(client, tab.label, []);
+  for (const label of TABS) {
+    await resetTo(client, label, []);
     for (const control of await listControls(client))
-      plans.push({ tab: tab.label, steps: [], control });
+      plans.push({ tab: label, steps: [], control });
   }
   for (const setup of SETUPS) {
     await resetTo(client, setup.tab, []);
@@ -1165,36 +1048,6 @@ async function checkChooseSeedsSelection(client) {
       );
     }
   }
-  await evaluate(client, "window.__layoutCanvasProbe.reset()");
-}
-
-/**
- * A newly picked area starts at its top even when the one left was scrolled
- * far down: at a short window, Status bar scrolled to its end, then Sidebar,
- * whose body must begin at its top, right under its header.
- */
-async function checkTabSwitchScroll(client) {
-  await setViewport(client, { width: 1200, height: 700 });
-  await resetTo(client, "Usage and resources", []);
-  await evaluate(
-    client,
-    `(() => { const body = ${PANEL}.querySelector('[data-layout-area-body]'); body.scrollTop = body.scrollHeight; })()`,
-  );
-  await settle(client);
-  const left = await evaluate(client, AREA_GEOMETRY);
-  await clickTab(client, "Sidebar");
-  await settle(client);
-  const m = await evaluate(client, AREA_GEOMETRY);
-  if (!left.overflows || left.body === 0)
-    failures.push(
-      `area switch: Status bar does not scroll at 1200x700, so the case proves nothing`,
-    );
-  if (m.body !== 0 || m.pane !== 0)
-    failures.push(
-      `area switch: Sidebar opened scrolled (body ${m.body}, pane ${m.pane})`,
-    );
-  await screenshotPane(client, "area-switch-short-window");
-  await setViewport(client, VIEWPORT);
   await evaluate(client, "window.__layoutCanvasProbe.reset()");
 }
 
@@ -1577,14 +1430,7 @@ async function operate(client, name) {
 
 /** One key, unmodified, to whatever holds focus. */
 async function press(client, name) {
-  const codes = {
-    ArrowDown: 40,
-    ArrowUp: 38,
-    Home: 36,
-    End: 35,
-    Enter: 13,
-    Escape: 27,
-  };
+  const codes = { Enter: 13, Escape: 27 };
   // Enter activates a button through its character, which only `keyDown`
   // with text carries.
   const down =
@@ -1651,44 +1497,6 @@ async function stableSignature(client) {
 }
 
 // --- evidence ---------------------------------------------------------------
-
-/**
- * `LAYOUT_SETTINGS_ONLY=shots`: Settings ▸ Layout and Settings ▸ Providers,
- * each alone in the pane at the same width, in both themes (H2).
- */
-async function captureComparison(client, origin) {
-  for (const [size, viewport] of SHOT_SIZES) {
-    await setViewport(client, viewport);
-    for (const panel of ["layout", "providers"]) {
-      await loadFixture(
-        client,
-        `${origin}${FIXTURE_PATH}?settings=1&pane=full&panel=${panel}&account=1&hosts=1&readings=both`,
-        "[data-settings-panel-shell]",
-      );
-      for (const theme of ["light", "dark"]) {
-        await evaluate(
-          client,
-          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
-        );
-        await delay(600);
-        await screenshotPage(client, `${panel}-${size}-${theme}`);
-        // Every area once, at the width a desktop draws the rail.
-        if (panel !== "layout" || size !== "normal") continue;
-        const areas = await evaluate(
-          client,
-          `[...document.querySelectorAll(${JSON.stringify(AREA_TAB)})].map(${AREA_NAME})`,
-        );
-        for (const area of areas.slice(1)) {
-          await clickTab(client, area);
-          await delay(200);
-          await screenshotPage(client, `layout-area-${slug(area)}-${theme}`);
-        }
-        await clickTab(client, areas[0]);
-      }
-    }
-  }
-  await setViewport(client, VIEWPORT);
-}
 
 async function screenshotPane(client, name) {
   if (outDir === null) return;

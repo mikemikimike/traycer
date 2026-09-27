@@ -223,11 +223,23 @@ if (runsFirstShard) {
     );
     // Same gate: hover-card timing (G8) is pointer events, focus modality,
     // portals and frames, none of which jsdom has. Ablated before wiring:
-    // the Radix cards fail 22 of 26 scenarios (hand-off ~510ms, a card that
-    // opens after a click-and-leave, a blink on click, a card under the menu).
+    // the Radix cards failed 22 of 26 scenario runs, when the driver still ran
+    // each in both themes (hand-off ~510ms, a card that opens after a
+    // click-and-leave, a blink on click, a card under the menu).
     exitCode = firstFailure(
       exitCode,
       runBrowserRegression("scripts/hover-card-browser.mjs"),
+    );
+    // Same gate: Settings ▸ Layout beside the live app column (G6, G7). An
+    // area's body scrolls under a pinned rail and header, the page fits a
+    // desktop and a phone width with the rail or the select the breakpoint
+    // draws, a short pane's rail scrolls under a real wheel, the Radix select
+    // and a row's ↺ work by real pointer and key, the header's readings leave
+    // the tabs room, and every setting visibly changes the app column. Layout,
+    // media queries, hit testing and real input: none of it is jsdom's.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/layout-settings-browser.mjs"),
     );
     // Same gate: whether a non-overflowing tab strip's scroller has ANY
     // vertical scroll range, and whether a real mouse wheel over it wobbles

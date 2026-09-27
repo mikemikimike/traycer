@@ -41,8 +41,9 @@
 //       no tab stops.
 //   R1/R2 the rail: the neighbour's label replaces the first at once.
 //
-// Every scenario runs in the light and the dark theme (emulated
-// `prefers-color-scheme`; every fixture boots on the "system" theme).
+// Every scenario runs once, in the light theme (emulated
+// `prefers-color-scheme`; every fixture boots on the "system" theme): hover
+// timing, focus and paint counts do not depend on the theme.
 //
 // Set HOVER_CARD_EVIDENCE_DIR to keep the JSON timeline and screenshots, and
 // HOVER_CARD_ONLY to a comma list of scenario ids (S1,S3,A6,...) to iterate.
@@ -884,6 +885,15 @@ async function stripScenarios(client, origin, theme) {
     );
     await shot(client, `${theme}-s10-keyboard`);
     const { events } = await takeEvents(client);
+    // The card is the FOCUSED row's, not merely a card.
+    const cardOf = (testid) => {
+      const id = testid?.startsWith("tab-close-epic-fixture-")
+        ? testid.slice("tab-close-epic-fixture-".length)
+        : null;
+      return id === null ? null : stripTitle(id);
+    };
+    const tabTitle = cardOf(focused);
+    const tabAgainTitle = cardOf(focusedAgain);
     record(
       theme,
       "S10",
@@ -901,13 +911,17 @@ async function stripScenarios(client, origin, theme) {
         ],
         [
           `Tab opens the focused row's card within ${FOCUS_OPEN_MAX_MS}ms`,
-          afterTab.length === 1,
+          afterTab.length === 1 &&
+            tabTitle !== null &&
+            afterTab[0].includes(tabTitle),
           { afterTab, focused },
         ],
         ["Escape closes it", afterEscape.length === 0, afterEscape],
         [
-          `Tab again opens a card within ${FOCUS_OPEN_MAX_MS}ms`,
-          afterTabAgain.length === 1,
+          `Tab again opens the next focused row's card within ${FOCUS_OPEN_MAX_MS}ms`,
+          afterTabAgain.length === 1 &&
+            tabAgainTitle !== null &&
+            afterTabAgain[0].includes(tabAgainTitle),
           { afterTabAgain, focusedAgain },
         ],
       ],
@@ -1563,24 +1577,23 @@ try {
     mobile: false,
   });
   await warmUp(client, origin);
-  for (const theme of ["light", "dark"]) {
-    for (const [fixture, run] of [
-      ["strip", stripScenarios],
-      ["agents", agentScenarios],
-      ["canvas", canvasScenarios],
-    ]) {
-      // A fixture that does not boot is one red, not the end of the run.
-      try {
-        await run(client, origin, theme);
-      } catch (error) {
-        record(
-          theme,
-          `${fixture}-fixture`,
-          "the fixture did not boot",
-          [["booted", false, String(error.message)]],
-          null,
-        );
-      }
+  const theme = "light";
+  for (const [fixture, run] of [
+    ["strip", stripScenarios],
+    ["agents", agentScenarios],
+    ["canvas", canvasScenarios],
+  ]) {
+    // A fixture that does not boot is one red, not the end of the run.
+    try {
+      await run(client, origin, theme);
+    } catch (error) {
+      record(
+        theme,
+        `${fixture}-fixture`,
+        "the fixture did not boot",
+        [["booted", false, String(error.message)]],
+        null,
+      );
     }
   }
 } finally {
