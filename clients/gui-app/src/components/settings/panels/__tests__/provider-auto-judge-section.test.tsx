@@ -278,7 +278,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox"));
     await user.click(
-      screen.getByRole("option", { name: "Claude Code's classifier" }),
+      await screen.findByRole("option", { name: "Claude Code's classifier" }),
     );
 
     // Two arguments now: the variables, plus a per-call `onError` the row uses
@@ -312,7 +312,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox"));
     await user.click(
-      screen.getByRole("option", { name: "Claude Code's classifier" }),
+      await screen.findByRole("option", { name: "Claude Code's classifier" }),
     );
     expect(screen.getByRole("combobox").textContent).toMatch(
       "Claude Code's classifier",
@@ -387,7 +387,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox"));
     await user.click(
-      screen.getByRole("option", { name: "Claude Code's classifier" }),
+      await screen.findByRole("option", { name: "Claude Code's classifier" }),
     );
     expect(screen.getByRole("combobox").textContent).toMatch(
       "Claude Code's classifier",
@@ -429,7 +429,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox"));
     await user.click(
-      screen.getByRole("option", { name: "Claude Code's classifier" }),
+      await screen.findByRole("option", { name: "Claude Code's classifier" }),
     );
     expect(screen.getByRole("combobox").textContent).toMatch(
       "Claude Code's classifier",
@@ -690,7 +690,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox"));
     await user.click(
-      screen.getByRole("option", { name: "Claude Code's classifier" }),
+      await screen.findByRole("option", { name: "Claude Code's classifier" }),
     );
 
     // Same `providersUpdatedAt.current` (1_000, unchanged) and the same
