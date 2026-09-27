@@ -1230,7 +1230,7 @@ function TabStripDropIndicator(props: { readonly visible: boolean }) {
       initial={{ opacity: 0, scaleY: 0.45 }}
       animate={{ opacity: 1, scaleY: 1 }}
       transition={EPIC_TAB_DROP_INDICATOR_TRANSITION}
-      className="absolute inset-y-1 left-0 z-20 -translate-x-0.5 origin-center"
+      className="absolute top-1 bottom-0.75 left-0 z-20 -translate-x-0.5 origin-center"
     >
       <DropLine
         orientation="vertical"
