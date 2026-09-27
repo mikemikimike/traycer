@@ -121,9 +121,9 @@ describe("HomeStatusTable", () => {
     const note = screen.getByTestId("home-status-note");
     expect(note.classList.contains("w-full")).toBe(true);
     expect(
-      screen.getByRole("columnheader", { name: "Note" }).classList.contains(
-        "w-full",
-      ),
+      screen
+        .getByRole("columnheader", { name: "Note" })
+        .classList.contains("w-full"),
     ).toBe(true);
     const itemText = screen.getByText("Port-forward drain");
     expect(itemText.classList.contains("w-max")).toBe(true);
@@ -202,9 +202,9 @@ describe("HomeStatusTable", () => {
     expect(name.textContent).toBe("Update Home Status Board");
 
     await user.hover(chip);
-    expect(
-      (await screen.findByRole("tooltip")).textContent,
-    ).toContain("Update Home Status Board");
+    expect((await screen.findByRole("tooltip")).textContent).toContain(
+      "Update Home Status Board",
+    );
   });
 
   it("falls back to a generic name when the agent has none", () => {
