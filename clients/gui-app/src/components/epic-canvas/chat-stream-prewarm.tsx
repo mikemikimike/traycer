@@ -27,6 +27,13 @@ export function ChatStreamPrewarm(props: {
   return openedBeforeSnapshot ? <ActiveChatStreamPrewarm {...props} /> : null;
 }
 
+function sameKeys(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>,
+): boolean {
+  return left.size === right.size && [...left].every((key) => right.has(key));
+}
+
 function ActiveChatStreamPrewarm(props: {
   readonly epicId: string;
   readonly tabId: string;
@@ -45,10 +52,52 @@ function ActiveChatStreamPrewarm(props: {
       selectChatPrewarmRefs(canvas, mobile, pendingCreateIds, selfDeletedIds),
     [canvas, mobile, pendingCreateIds, selfDeletedIds],
   );
-  if (!visible || parked) {
+  // A tab can become hidden while its state frame is in flight. Keep leases
+  // that already started while visible through that brief handoff; releasing
+  // them into the bounded warm pool can evict the transcript before its tile
+  // acquires it. Never start a new speculative lease in a hidden pane.
+  const selectedKeys = useMemo(
+    () =>
+      new Set(
+        refs.map((ref) => sessionKeyOf([ref.instanceId, ref.hostId, ref.id])),
+      ),
+    [refs],
+  );
+  const [selection, setSelection] = useState(() => ({
+    selectedKeys,
+    startedWhileVisible: visible && !parked ? selectedKeys : new Set<string>(),
+    visible,
+    parked,
+  }));
+  if (
+    visible !== selection.visible ||
+    parked !== selection.parked ||
+    !sameKeys(selectedKeys, selection.selectedKeys)
+  ) {
+    // Adjust the remembered leases during this render so React retries before
+    // committing children; a hide must never briefly unmount an active lease.
+    let startedWhileVisible: Set<string>;
+    if (parked) {
+      startedWhileVisible = new Set();
+    } else if (visible) {
+      startedWhileVisible = selectedKeys;
+    } else {
+      startedWhileVisible = new Set(
+        [...selection.startedWhileVisible].filter((key) =>
+          selectedKeys.has(key),
+        ),
+      );
+    }
+    setSelection({ selectedKeys, startedWhileVisible, visible, parked });
+  }
+  if (parked) {
     return null;
   }
-  return refs.map((ref) => (
+  const eligibleRefs = refs.filter((ref) => {
+    const key = sessionKeyOf([ref.instanceId, ref.hostId, ref.id]);
+    return visible || selection.startedWhileVisible.has(key);
+  });
+  return eligibleRefs.map((ref) => (
     <ChatStreamPrewarmLease
       key={sessionKeyOf([ref.instanceId, ref.hostId, ref.id])}
       epicId={props.epicId}

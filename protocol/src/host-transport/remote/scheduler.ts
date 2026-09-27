@@ -59,6 +59,8 @@ export interface PrioritySchedulerOptions {
 export class PriorityScheduler {
   private readonly interactive: QueuedSource[] = [];
   private readonly bulk: QueuedSource[] = [];
+  private readonly interactiveStreamCounts = new Map<number, number>();
+  private readonly bulkStreamCounts = new Map<number, number>();
   private readonly options: PrioritySchedulerOptions;
   private readonly now: () => number;
   private readonly pacer: ChunkPacer;
@@ -99,6 +101,7 @@ export class PriorityScheduler {
     } else {
       this.interactive.push(item);
     }
+    this.noteSourceQueued(source);
     void this.pump();
   }
 
@@ -224,6 +227,7 @@ export class PriorityScheduler {
     for (const queue of [this.interactive, this.bulk]) {
       for (let index = queue.length - 1; index >= 0; index -= 1) {
         if (queue[index].source.streamId === streamId) {
+          this.noteSourceRemoved(queue[index].source);
           queue.splice(index, 1);
         }
       }
@@ -232,6 +236,9 @@ export class PriorityScheduler {
       this.chunkWindow.awaitLocalAbort(streamId);
     } else {
       this.chunkWindow.forgetStream(streamId);
+      // A freed partial-body reservation can make an already queued source
+      // eligible without a new enqueue or credit grant.
+      void this.pump();
     }
   }
 
@@ -244,6 +251,8 @@ export class PriorityScheduler {
     this.stopped = true;
     this.interactive.length = 0;
     this.bulk.length = 0;
+    this.interactiveStreamCounts.clear();
+    this.bulkStreamCounts.clear();
     this.chunkWindow.clear();
     if (this.paceResumeTimer !== null) {
       clearTimeout(this.paceResumeTimer);
@@ -296,6 +305,7 @@ export class PriorityScheduler {
       const frame = item.source.nextFrame();
       this.chunkWindow.notePulled(item.source);
       if (item.source.done) {
+        this.noteSourceRemoved(item.source);
         queue.splice(index, 1);
       } else {
         // A chunked message keeps its reassembly slot on this stream, but it
@@ -310,7 +320,11 @@ export class PriorityScheduler {
   }
 
   private rotateStreamToBack(queue: QueuedSource[], streamId: number): void {
-    if (queue.length <= 1) return;
+    const counts =
+      queue === this.bulk
+        ? this.bulkStreamCounts
+        : this.interactiveStreamCounts;
+    if (counts.size <= 1) return;
     const sameStream: QueuedSource[] = [];
     let next = 0;
     for (const item of queue) {
@@ -323,6 +337,24 @@ export class PriorityScheduler {
     for (const item of sameStream) {
       queue[next++] = item;
     }
+  }
+
+  private classStreamCounts(source: OutboundChunkSource): Map<number, number> {
+    return source.qos === QosClass.BULK
+      ? this.bulkStreamCounts
+      : this.interactiveStreamCounts;
+  }
+
+  private noteSourceQueued(source: OutboundChunkSource): void {
+    const counts = this.classStreamCounts(source);
+    counts.set(source.streamId, (counts.get(source.streamId) ?? 0) + 1);
+  }
+
+  private noteSourceRemoved(source: OutboundChunkSource): void {
+    const counts = this.classStreamCounts(source);
+    const remaining = (counts.get(source.streamId) ?? 0) - 1;
+    if (remaining === 0) counts.delete(source.streamId);
+    else counts.set(source.streamId, remaining);
   }
 
   private next(): EncodeMuxFrameInput | null {

@@ -1,4 +1,5 @@
 import { selectMobileTile } from "@/components/epic-canvas/mobile/mobile-tile-selection";
+import { sessionKeyOf } from "@traycer-clients/shared/replica-runtime";
 import {
   collectPanes,
   resolveActivePaneTab,
@@ -50,7 +51,7 @@ export function selectChatPrewarmRefs(
     ) {
       continue;
     }
-    const key = `${ref.hostId}\u0000${ref.id}`;
+    const key = sessionKeyOf([ref.hostId, ref.id]);
     if (seen.has(key)) continue;
     seen.add(key);
     refs.push({ id: ref.id, hostId: ref.hostId, instanceId: ref.instanceId });

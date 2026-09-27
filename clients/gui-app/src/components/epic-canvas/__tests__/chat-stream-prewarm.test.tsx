@@ -293,6 +293,25 @@ describe("chat stream prewarm", () => {
     ]);
   });
 
+  it("keeps distinct opaque host/chat pairs when their NUL-joined spellings collide", () => {
+    const state = canvas(
+      [
+        { id: "left", tabs: ["left-chat"], active: "left-chat" },
+        { id: "right", tabs: ["right-chat"], active: "right-chat" },
+      ],
+      {
+        "left-chat": chat("c", "left-chat", "a\u0000b"),
+        "right-chat": chat("b\u0000c", "right-chat", "a"),
+      },
+      "left",
+    );
+
+    expect(selectChatPrewarmRefs(state, false, new Set(), new Set())).toEqual([
+      { id: "c", hostId: "a\u0000b", instanceId: "left-chat" },
+      { id: "b\u0000c", hostId: "a", instanceId: "right-chat" },
+    ]);
+  });
+
   it("selects only the phone's currently selected chat", () => {
     const state = canvas(
       [
@@ -360,7 +379,19 @@ describe("chat stream prewarm", () => {
     ]);
     expect(testState.leases.get(registryKey)).toBe(1);
 
-    // Snapshot arrival starts the handoff window but must not release yet.
+    // A temporary tab hide before snapshot arrival must retain the already
+    // selected lease; its mounted shell still needs this overlap for handoff.
+    testState.visible = false;
+    prewarm.rerender(
+      <ChatStreamPrewarm
+        epicId="epic-1"
+        tabId="tab-1"
+        snapshotLoaded={false}
+      />,
+    );
+    expect(testState.leases.get(registryKey)).toBe(1);
+
+    // Snapshot arrival while hidden still retains the lease for tile handoff.
     prewarm.rerender(
       <ChatStreamPrewarm epicId="epic-1" tabId="tab-1" snapshotLoaded />,
     );
@@ -516,5 +547,33 @@ describe("chat stream prewarm", () => {
       />,
     );
     expect(testState.calls).toEqual([]);
+  });
+
+  it("releases an existing selected prewarm lease when the epic becomes parked", () => {
+    testState.canvas = canvas(
+      [{ id: "pane", tabs: ["chat"], active: "chat" }],
+      { chat: chat("chat-1", "chat", "host-a") },
+      "pane",
+    );
+    const prewarm = render(
+      <ChatStreamPrewarm
+        epicId="epic-1"
+        tabId="tab-1"
+        snapshotLoaded={false}
+      />,
+    );
+    const registryKey = "host-a\u0000chat-1";
+    expect(testState.leases.get(registryKey)).toBe(1);
+
+    testState.parked = true;
+    prewarm.rerender(
+      <ChatStreamPrewarm
+        epicId="epic-1"
+        tabId="tab-1"
+        snapshotLoaded={false}
+      />,
+    );
+
+    expect(testState.leases.has(registryKey)).toBe(false);
   });
 });

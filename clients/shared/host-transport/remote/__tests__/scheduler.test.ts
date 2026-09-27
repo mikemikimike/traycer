@@ -730,6 +730,127 @@ describe("PriorityScheduler", () => {
       vi.useRealTimers();
     }
   });
+
+  it("a peer abort releases a chunk slot and wakes a blocked client pump", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstStreamId = 1100;
+      const blockedStreamId = 1116;
+      const firstFramesByStream = new Set<number>();
+      const written: number[] = [];
+      const scheduler = new PriorityScheduler({
+        write: async (frame) => {
+          written.push(frame.streamId);
+          if (frame.type === MuxFrameType.STREAM_FRAME) {
+            firstFramesByStream.add(frame.streamId);
+          }
+        },
+        onWriteError: (error) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        },
+        initialBulkCredits: 0,
+        now: () => Date.now(),
+      });
+
+      // Sixteen partial INTERACTIVE streams occupy every reassembly slot.
+      for (
+        let streamId = firstStreamId;
+        streamId < blockedStreamId;
+        streamId += 1
+      ) {
+        scheduler.enqueue(chunkedSource(streamId, QosClass.INTERACTIVE, 8));
+      }
+      for (let i = 0; i < 100 && firstFramesByStream.size < 16; i += 1) {
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      expect(firstFramesByStream.size).toBe(16);
+
+      // Local aborts retain the reservations while their terminal messages
+      // remain outstanding, leaving the pump idle with one blocked source.
+      for (
+        let streamId = firstStreamId;
+        streamId < blockedStreamId;
+        streamId += 1
+      ) {
+        scheduler.dropStreamOutbound(streamId);
+      }
+      scheduler.enqueue(
+        chunkedSource(blockedStreamId, QosClass.INTERACTIVE, 4),
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(written).not.toContain(blockedStreamId);
+
+      // No enqueue or credit event follows. The peer-confirmed release itself
+      // must wake the scheduler and let the blocked source acquire that slot.
+      scheduler.dropStreamOutboundAfterPeerAbort(firstStreamId);
+      for (let i = 0; i < 20 && !written.includes(blockedStreamId); i += 1) {
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      expect(written).toContain(blockedStreamId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps same-class fairness after a queued source is dropped from stream counts", async () => {
+    vi.useFakeTimers();
+    try {
+      const largeStreamId = 1120;
+      const droppedStreamId = 1121;
+      const laterStreamId = 1122;
+      const written: Array<{ streamId: number; chunked: boolean }> = [];
+      const scheduler = new PriorityScheduler({
+        write: async (frame) => {
+          written.push({ streamId: frame.streamId, chunked: frame.chunked });
+        },
+        onWriteError: (error) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        },
+        initialBulkCredits: 0,
+        now: () => Date.now(),
+      });
+      const large = chunkedSource(largeStreamId, QosClass.INTERACTIVE, 8);
+      const largeFrameCount = Math.ceil(
+        large.totalBodyBytes / BULK_CHUNK_SIZE_BYTES,
+      );
+
+      scheduler.pause();
+      scheduler.enqueue(large);
+      scheduler.enqueue(messageSource(droppedStreamId, QosClass.INTERACTIVE));
+      scheduler.dropStreamOutbound(droppedStreamId);
+      scheduler.enqueue(messageSource(laterStreamId, QosClass.INTERACTIVE));
+      scheduler.resume();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(
+        written.filter((entry) => entry.streamId === droppedStreamId),
+      ).toHaveLength(0);
+      const laterIndex = written.findIndex(
+        (entry) => entry.streamId === laterStreamId,
+      );
+      const largeFinalIndex = written.reduce(
+        (last, entry, index) =>
+          entry.streamId === largeStreamId ? index : last,
+        -1,
+      );
+      expect(laterIndex).toBeGreaterThanOrEqual(0);
+      expect(laterIndex).toBeLessThan(largeFinalIndex);
+      expect(written.length).toBeLessThanOrEqual(CHUNK_PACE_BURST_FRAMES);
+
+      for (let i = 0; i < 100 && !large.done; i += 1) {
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      expect(large.done).toBe(true);
+      expect(
+        written.filter((entry) => entry.streamId === largeStreamId),
+      ).toHaveLength(largeFrameCount);
+      expect(
+        written.filter((entry) => entry.streamId === laterStreamId),
+      ).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("PriorityScheduler.queuedBytesForStream / onFrameWritten", () => {
