@@ -334,10 +334,6 @@
   :has([data-sheet-joined]) > [data-sheet-join-bridge] {
     --join-fill: var(--canvas);
     --join-radius: var(--radius-lg);
-    --join-arc:
-      transparent calc(var(--join-radius) - 1px),
-      var(--canvas-border) calc(var(--join-radius) - 1px) var(--join-radius),
-      var(--join-fill) var(--join-radius);
     display: block;
     /* The dragged anchor lives in a fixed DragOverlay in this scope. */
     position: fixed;
@@ -349,12 +345,25 @@
     background-color: var(--join-fill);
     pointer-events: none;
 
+    /* Each corner is a box whose one rounded corner, the one facing the
+       bridge (at --arc-x, --arc-y), is the arc: its border there is the
+       outline and a shadow the fill beyond. A rounded box is anti-aliased
+       like every convex corner; a gradient's hard stops are not, and
+       stair-step. The box sits at fractional device pixels, where a clip's
+       edge pixels are part-covered, so the clip stays off every edge but the
+       sheet's: the shadow is pushed toward the arc until it stops 1px short
+       of the two edges the backdrop meets, and past the bridge's edge it
+       lands on the bridge's own fill. */
     &::before,
     &::after {
       content: "";
       position: absolute;
       width: var(--join-radius);
       height: var(--join-radius);
+      border: 0 solid var(--canvas-border);
+      box-shadow: calc(var(--arc-x) * var(--join-radius) / 2)
+        calc(var(--arc-y) * var(--join-radius) / 2) 0
+        calc(var(--join-radius) / 2 - 1px) var(--join-fill);
     }
   }
 
@@ -368,16 +377,29 @@
     bottom: calc(anchor(--task-frame top) - 1px);
     border-inline: 1px solid var(--canvas-border);
 
+    &::before,
+    &::after {
+      clip-path: inset(-1px -1px 0);
+    }
+
     &::before {
       right: 100%;
       bottom: 0;
-      background: radial-gradient(circle at 0 0, var(--join-arc));
+      border-bottom-width: 1px;
+      border-right-width: 1px;
+      border-bottom-right-radius: var(--join-radius);
+      --arc-x: 1;
+      --arc-y: 1;
     }
 
     &::after {
       left: 100%;
       bottom: 0;
-      background: radial-gradient(circle at 100% 0, var(--join-arc));
+      border-bottom-width: 1px;
+      border-left-width: 1px;
+      border-bottom-left-radius: var(--join-radius);
+      --arc-x: -1;
+      --arc-y: 1;
     }
   }
 
@@ -402,14 +424,27 @@
     left: anchor(right);
     right: calc(anchor(--task-frame left) - 1px);
 
+    &::before,
+    &::after {
+      clip-path: inset(-1px 0 -1px -1px);
+    }
+
     &::before {
       right: 0;
-      background: radial-gradient(circle at 0 0, var(--join-arc));
+      border-bottom-width: 1px;
+      border-right-width: 1px;
+      border-bottom-right-radius: var(--join-radius);
+      --arc-x: 1;
+      --arc-y: 1;
     }
 
     &::after {
       right: 0;
-      background: radial-gradient(circle at 0 100%, var(--join-arc));
+      border-top-width: 1px;
+      border-right-width: 1px;
+      border-top-right-radius: var(--join-radius);
+      --arc-x: 1;
+      --arc-y: -1;
     }
   }
 
@@ -417,14 +452,27 @@
     right: anchor(left);
     left: calc(anchor(--task-frame right) - 1px);
 
+    &::before,
+    &::after {
+      clip-path: inset(-1px -1px -1px 0);
+    }
+
     &::before {
       left: 0;
-      background: radial-gradient(circle at 100% 0, var(--join-arc));
+      border-bottom-width: 1px;
+      border-left-width: 1px;
+      border-bottom-left-radius: var(--join-radius);
+      --arc-x: -1;
+      --arc-y: 1;
     }
 
     &::after {
       left: 0;
-      background: radial-gradient(circle at 100% 100%, var(--join-arc));
+      border-top-width: 1px;
+      border-left-width: 1px;
+      border-top-left-radius: var(--join-radius);
+      --arc-x: -1;
+      --arc-y: -1;
     }
   }
 }

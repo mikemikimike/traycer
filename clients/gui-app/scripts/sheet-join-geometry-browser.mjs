@@ -24,7 +24,8 @@
 //   --corners   run the seam suite instead (flush surface: arcs must land on
 //               the surface frame's own seam line - its border on the
 //               tab-facing edge - never past it, plus the top strip's first
-//               (Home) and scrolled-to-last tab) - see `runCorners`.
+//               (Home) and scrolled-to-last tab) - see `runCorners` - and
+//               the arcs' anti-aliasing - see `runArcAntialiasCheck`.
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
@@ -38,12 +39,12 @@ import { connectCdp } from "./cdp-client.mjs";
 // The bug is a full 1px error; this tolerance cleanly separates broken from
 // fixed while allowing for legitimate sub-pixel layout rounding across DPRs.
 const EPSILON = 0.025;
-/** Full preset x theme x DPR cross product. */
-const COMBOS = ["traycer-green", "amoled"].flatMap((preset) =>
-  ["light", "dark"].flatMap((theme) =>
-    [1, 1.5, 2].map((dpr) => ({ preset, theme, dpr })),
-  ),
-);
+/**
+ * The device pixel ratios every join is measured at: rounding is the only
+ * thing that differs between them. A theme or preset recolours the join and
+ * moves none of its offsets (no preset carries a radius or border token).
+ */
+const DPRS = [1, 1.5, 2];
 
 /**
  * The join variants to cover. `kind` picks which pair of invariants applies
@@ -196,7 +197,62 @@ const CORNER_VARIANTS = [
     activate: activateFirstSplit,
   },
 ];
-const CORNER_DPRS = [1, 1.5, 2];
+/**
+ * [corners mode] One middle row per bridge, so both arcs are clear of the
+ * strip's ends, across the three fills a join takes (canvas, panel, and the
+ * top strip's canvas).
+ */
+const ARC_VARIANTS = [
+  {
+    label: "left arcs, canvas",
+    query: "tabs=left&sidebar=right&header=app&surface=epic",
+    bridge: "left",
+  },
+  {
+    label: "right arcs, panel",
+    query: "tabs=right&sidebar=right&header=app&surface=epic",
+    bridge: "right",
+  },
+  {
+    label: "top arcs",
+    query: "tabs=top&header=app&surface=epic",
+    bridge: "top",
+  },
+];
+/** Where each arc's centre sits in its box, per bridge (`index.css`). */
+const ARC_CENTRES = {
+  top: {
+    before: { right: false, bottom: false },
+    after: { right: true, bottom: false },
+  },
+  left: {
+    before: { right: false, bottom: false },
+    after: { right: false, bottom: true },
+  },
+  right: {
+    before: { right: true, bottom: false },
+    after: { right: true, bottom: true },
+  },
+};
+
+/** In-page: a base64 PNG's pixels, as `at(x, y)` rgb triples. */
+const decodePngSource = `async (data) => {
+  const image = new Image();
+  await new Promise((resolve, reject) => {
+    image.addEventListener("load", resolve);
+    image.addEventListener("error", () => reject(new Error("decode failed")));
+    image.src = "data:image/png;base64," + data;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0);
+  const { data: bytes, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+  const at = (x, y) => { const i = (y * width + x) * 4; return [bytes[i], bytes[i + 1], bytes[i + 2]]; };
+  return { at, width, height };
+}`;
+
 const TOKEN_OVERRIDE_CSS =
   ":root { --shell-gap: 10px; --radius-xl: 16px; --radius-lg: 12px; }";
 
@@ -273,13 +329,6 @@ async function setPanelCollapsed(client, collapsed) {
   await evaluate(
     client,
     `window.__layoutCanvasProbe.setPanelCollapsed(${JSON.stringify(collapsed)})`,
-  );
-}
-
-async function setThemePreset(client, preset) {
-  await evaluate(
-    client,
-    `import('/src/stores/settings/settings-store.ts').then(m => m.useSettingsStore.getState().setThemePreset(${JSON.stringify(preset)}))`,
   );
 }
 
@@ -445,18 +494,16 @@ async function runOffsets(client, baseUrl) {
       joinPresenceExpression(bridgeSelector, joinedSelector),
     );
 
-    for (const combo of COMBOS) {
-      await setThemePreset(client, combo.preset);
-      await setThemeMode(client, combo.theme);
+    for (const dpr of DPRS) {
       await client.send("Emulation.setDeviceMetricsOverride", {
         width: 1400,
         height: 860,
-        deviceScaleFactor: combo.dpr,
+        deviceScaleFactor: dpr,
         mobile: false,
       });
       await settle(client);
       combinations += 1;
-      const where = `${variant.label} / ${combo.preset} / ${combo.theme} / dpr=${combo.dpr}`;
+      const where = `${variant.label} / dpr=${dpr}`;
       const result = await evaluate(
         client,
         measureExpression(bridgeSelector, joinedSelector, variant.kind),
@@ -472,7 +519,7 @@ async function runOffsets(client, baseUrl) {
   }
 
   console.log(
-    `${VARIANTS.length} variants x ${COMBOS.length} preset/theme/DPR combos = ${combinations} combinations measured`,
+    `${VARIANTS.length} variants x ${DPRS.length} DPRs = ${combinations} combinations measured`,
   );
   assert.deepEqual(
     violations,
@@ -532,7 +579,7 @@ async function runCorners(client, baseUrl) {
       joinPresenceExpression(bridgeSelector, joinedSelector),
     );
 
-    for (const dpr of CORNER_DPRS) {
+    for (const dpr of DPRS) {
       await client.send("Emulation.setDeviceMetricsOverride", {
         width: 1400,
         height: 860,
@@ -547,7 +594,7 @@ async function runCorners(client, baseUrl) {
     }
 
     await injectStyle(client, TOKEN_OVERRIDE_CSS);
-    for (const dpr of CORNER_DPRS) {
+    for (const dpr of DPRS) {
       await client.send("Emulation.setDeviceMetricsOverride", {
         width: 1400,
         height: 860,
@@ -563,12 +610,13 @@ async function runCorners(client, baseUrl) {
     await removeInjectedStyle(client);
   }
   console.log(
-    `${CORNER_VARIANTS.length} corner variants x 2 (default + enlarged tokens) x ${CORNER_DPRS.length} DPRs measured`,
+    `${CORNER_VARIANTS.length} corner variants x 2 (default + enlarged tokens) x ${DPRS.length} DPRs measured`,
   );
 
   await runTopClipRejoinCheck(client, baseUrl, violations);
   await runSideEdgeExtremesCheck(client, baseUrl, violations);
   await runTopEdgeExtremesCheck(client, baseUrl, violations);
+  await runArcAntialiasCheck(client, baseUrl, violations);
 
   assert.deepEqual(
     violations,
@@ -576,6 +624,164 @@ async function runCorners(client, baseUrl) {
     `Sheet join corner regression failed:\n${violations.join("\n")}`,
   );
   console.log("sheet join corner regression passed");
+}
+
+/**
+ * [corners mode] The arcs are anti-aliased: each concave corner's box, read
+ * off a screenshot at the device's own resolution, holds a band of blended
+ * pixels along both edges of its outline ring, as every convex corner does.
+ * Each pixel is either one of the three flat colours the corner is drawn
+ * from (what shows through it, the outline, the fill) or a blend of them. A
+ * hard-stop gradient (the bug) paints only flat colours, so its arc
+ * stair-steps: not one blended pixel at DPR 1 or 2 (at 1.5 the gradient is
+ * resampled, which blurs rather than anti-aliases it). A rounded box blends
+ * the ring's two edges; half a pixel per CSS px of radius is a floor the
+ * light theme, whose three colours sit within 27 levels, still clears. The
+ * outermost device pixel on each side is skipped: the box's own edge is not
+ * the arc.
+ */
+async function runArcAntialiasCheck(client, baseUrl, violations) {
+  let measured = 0;
+  for (const variant of ARC_VARIANTS) {
+    await openFixture(client, `${baseUrl}?${variant.query}`, variant.label);
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 1400,
+      height: 860,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await activateEpsilon(client);
+    await settle(client);
+    const bridgeSelector = `[data-sheet-join-bridge="${variant.bridge}"]`;
+    await waitFor(
+      client,
+      `the ${variant.label} join to render`,
+      joinPresenceExpression(
+        bridgeSelector,
+        `[data-sheet-joined="${variant.bridge}"]`,
+      ),
+    );
+    for (const theme of ["light", "dark"]) {
+      await setThemeMode(client, theme);
+      for (const dpr of DPRS) {
+        await client.send("Emulation.setDeviceMetricsOverride", {
+          width: 1400,
+          height: 860,
+          deviceScaleFactor: dpr,
+          mobile: false,
+        });
+        await settle(client);
+        const where = `${variant.label} / ${theme} / dpr=${dpr}`;
+        const arcs = await evaluate(client, arcBoxesExpression(variant.bridge));
+        if (arcs === null) {
+          violations.push(`${where}: no bridge to read the arcs of`);
+          continue;
+        }
+        const outline = await swatchPixel(client, "var(--canvas-border)");
+        const fill = await swatchPixel(client, arcs.fill);
+        for (const arc of arcs.boxes) {
+          // The box widened to whole device pixels, so the capture is not
+          // resampled; its outermost pixel is skipped below.
+          const snap = (v, round) => round(v * dpr) / dpr;
+          const x = snap(arc.box.x, Math.floor);
+          const y = snap(arc.box.y, Math.floor);
+          const shot = await client.send("Page.captureScreenshot", {
+            format: "png",
+            clip: {
+              x,
+              y,
+              width: snap(arc.box.x + arc.box.width, Math.ceil) - x,
+              height: snap(arc.box.y + arc.box.height, Math.ceil) - y,
+              scale: 1,
+            },
+            captureBeyondViewport: false,
+          });
+          const blended = await evaluate(
+            client,
+            arcBlendExpression(shot.data, arc.corner, outline, fill),
+          );
+          const needed = Math.floor((arc.box.width * dpr) / 2);
+          measured += 1;
+          if (blended < needed)
+            violations.push(
+              `${where}: the ${arc.pseudo} arc has ${blended} blended device pixels, fewer than ${needed}: its outline and fill are not anti-aliased`,
+            );
+        }
+      }
+    }
+  }
+  console.log(`${measured} arcs checked for anti-aliasing`);
+}
+
+/**
+ * [corners mode] Each arc's box in page px, with the corner the arc's
+ * centre sits at (away from the bridge and the sheet, where the backdrop
+ * shows through), plus the bridge's own fill.
+ */
+function arcBoxesExpression(side) {
+  return `(() => {
+    const bridge = document.querySelector('[data-sheet-join-bridge="${side}"]');
+    if (bridge === null) return null;
+    const bridgeBox = bridge.getBoundingClientRect();
+    if (bridgeBox.width === 0 || bridgeBox.height === 0) return null;
+    ${AXIS_HELPERS}
+    const box = (style) => {
+      const x = resolveAxis(style.left, style.right, parseFloat(style.width), paddingBox.left, paddingBox.right);
+      const y = resolveAxis(style.top, style.bottom, parseFloat(style.height), paddingBox.top, paddingBox.bottom);
+      return { x: x.start, y: y.start, width: x.end - x.start, height: y.end - y.start };
+    };
+    return {
+      fill: bridgeStyle.backgroundColor,
+      boxes: [
+        { pseudo: "::before", box: box(before), corner: ${JSON.stringify(ARC_CENTRES[side].before)} },
+        { pseudo: "::after", box: box(after), corner: ${JSON.stringify(ARC_CENTRES[side].after)} },
+      ],
+    };
+  })()`;
+}
+
+/** A colour as the screenshot paints it, off a swatch laid over the page. */
+async function swatchPixel(client, cssColor) {
+  await evaluate(
+    client,
+    `{
+      const node = document.createElement("div");
+      node.id = "sheet-join-swatch";
+      Object.assign(node.style, { position: "fixed", left: "0px", top: "0px", width: "8px", height: "8px", zIndex: "2147483000", background: ${JSON.stringify(cssColor)} });
+      document.body.append(node);
+    }`,
+  );
+  await settle(client);
+  const shot = await client.send("Page.captureScreenshot", {
+    format: "png",
+    clip: { x: 2, y: 2, width: 4, height: 4, scale: 1 },
+    captureBeyondViewport: false,
+  });
+  const pixel = await evaluate(
+    client,
+    `(${decodePngSource})(${JSON.stringify(shot.data)}).then(({ at }) => at(1, 1))`,
+  );
+  await evaluate(
+    client,
+    `document.getElementById("sheet-join-swatch")?.remove()`,
+  );
+  return pixel;
+}
+
+/**
+ * In-page: how many of an arc crop's inner pixels are none of its three flat
+ * colours. The backdrop is read just inside the arc's centre corner.
+ */
+function arcBlendExpression(png, corner, outline, fill) {
+  return `(${decodePngSource})(${JSON.stringify(png)}).then(({ at, width, height }) => {
+    const backdrop = at(${corner.right ? "width - 2" : "1"}, ${corner.bottom ? "height - 2" : "1"});
+    const flats = [backdrop, ${JSON.stringify(outline)}, ${JSON.stringify(fill)}];
+    const flat = (p) => flats.some((c) => Math.max(...c.map((v, i) => Math.abs(v - p[i]))) <= 1);
+    let blended = 0;
+    for (let y = 1; y < height - 1; y += 1)
+      for (let x = 1; x < width - 1; x += 1) if (!flat(at(x, y))) blended += 1;
+    return blended;
+  })`;
 }
 
 async function runTopClipRejoinCheck(client, baseUrl, violations) {
