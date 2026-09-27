@@ -241,6 +241,16 @@ if (runsFirstShard) {
       exitCode,
       runBrowserRegression("scripts/layout-settings-browser.mjs"),
     );
+    // Same gate: the sheet join's concave corners are pseudo-element offsets
+    // resolved against an anchored bridge's padding box and painted arcs.
+    // jsdom has no anchor positioning, no used-value offsets and no pixels.
+    // Ablated before wiring: arcs 1px short of the bridge's inner edge fail
+    // the offsets suite, and the hard-stop gradient arcs fail the corners
+    // suite's anti-aliasing check at DPR 1 and 2.
+    exitCode = firstFailure(
+      exitCode,
+      runBrowserRegression("scripts/sheet-join-geometry-browser.mjs"),
+    );
     // Same gate: whether a non-overflowing tab strip's scroller has ANY
     // vertical scroll range, and whether a real mouse wheel over it wobbles
     // the active tab's row by a pixel, are both layout questions - jsdom

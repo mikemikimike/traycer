@@ -125,3 +125,87 @@ export function connectCdp(webSocketDebuggerUrl) {
     });
   });
 }
+
+/**
+ * A CDP session on a page tab that can move to a fresh tab: `freshTab()`
+ * opens a new tab on about:blank, points the session at it and closes the old
+ * one, so the same session object - and every handler registered with `on`,
+ * which keeps firing on whichever tab is current - drives a new renderer
+ * process. `crashed()` reports whether the current tab's renderer is gone.
+ *
+ * Why it exists: a tab navigated from load to load keeps one renderer
+ * process, and on the unbundled Vite fixtures that process grows to 1-2 GB of
+ * retained state, then either stops booting or is killed ("Render process
+ * gone"), after which its CDP session never answers again. A fresh tab per
+ * load holds the renderer near its single-load size (tickets/12).
+ *
+ * Domains a driver enables and emulation it sets are the TAB's state: a
+ * driver re-sends them after `freshTab()`.
+ */
+export async function openTabSession(devtoolsHttpUrl) {
+  const handlers = new Map();
+  let tab = await openTab(devtoolsHttpUrl);
+  const dispatchOn = (current, method) => {
+    current.client.on(method, (params) => {
+      for (const handler of handlers.get(method) ?? []) handler(params);
+    });
+  };
+  const watch = (current) => {
+    current.client.on("Inspector.detached", () => {
+      current.crashed = true;
+    });
+    for (const method of handlers.keys()) dispatchOn(current, method);
+  };
+  watch(tab);
+  await tab.client.send("Inspector.enable", undefined);
+  return {
+    send(method, params = {}) {
+      return tab.client.send(method, params);
+    },
+    on(method, handler) {
+      if (!handlers.has(method)) {
+        handlers.set(method, new Set());
+        dispatchOn(tab, method);
+      }
+      handlers.get(method).add(handler);
+      return () => {
+        handlers.get(method)?.delete(handler);
+      };
+    },
+    crashed() {
+      return tab.crashed;
+    },
+    async freshTab() {
+      const next = await openTab(devtoolsHttpUrl);
+      watch(next);
+      await next.client.send("Inspector.enable", undefined);
+      const previous = tab;
+      tab = next;
+      await closeTab(devtoolsHttpUrl, previous);
+    },
+    async close() {
+      await closeTab(devtoolsHttpUrl, tab);
+    },
+  };
+}
+
+async function openTab(devtoolsHttpUrl) {
+  const response = await fetch(
+    new URL("/json/new?about:blank", devtoolsHttpUrl),
+    { method: "PUT" },
+  );
+  if (!response.ok) {
+    throw new Error(`Chrome could not open a page: ${response.status}`);
+  }
+  const target = await response.json();
+  if (typeof target.webSocketDebuggerUrl !== "string") {
+    throw new Error("Chrome did not return a page debugger URL");
+  }
+  const client = await connectCdp(target.webSocketDebuggerUrl);
+  return { id: target.id, client, crashed: false };
+}
+
+async function closeTab(devtoolsHttpUrl, tab) {
+  tab.client.close();
+  await fetch(new URL(`/json/close/${tab.id}`, devtoolsHttpUrl));
+}

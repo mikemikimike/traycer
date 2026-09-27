@@ -16,25 +16,30 @@
 // Chrome reports as used-value px, not the raw `calc()`/`%` - against the
 // bridge's own measured padding box.
 //
-// Usage: node scripts/sheet-join-geometry-browser.mjs [--port <n>] [--corners]
-//   --port <n>  the already-running Vite dev server to connect to for
-//               `clients/gui-app` (default 5393). This script does not spawn
-//               or manage a dev server of its own - point it at one that is
-//               already serving this workspace.
-//   --corners   run the seam suite instead (flush surface: arcs must land on
-//               the surface frame's own seam line - its border on the
-//               tab-facing edge - never past it, plus the top strip's first
-//               (Home) and scrolled-to-last tab) - see `runCorners` - and
-//               the arcs' anti-aliasing - see `runArcAntialiasCheck`.
+// Usage: node scripts/sheet-join-geometry-browser.mjs [--offsets | --corners]
+//   Runs both suites against its own Vite by default.
+//   --offsets   only the offsets suite (arcs on the bridge's true inner edge)
+//               - see `runOffsets`.
+//   --corners   only the seam suite (flush surface: arcs must land on the
+//               surface frame's own seam line - its border on the tab-facing
+//               edge - never past it, plus the top strip's first (Home) and
+//               scrolled-to-last tab) - see `runCorners` - and the arcs'
+//               anti-aliasing - see `runArcAntialiasCheck`.
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { createServer as createTcpServer } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import {
   findChrome,
   launchChromeWithDevTools,
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
-import { connectCdp } from "./cdp-client.mjs";
+import { openTabSession } from "./cdp-client.mjs";
 
 // The bug is a full 1px error; this tolerance cleanly separates broken from
 // fixed while allowing for legitimate sub-pixel layout rounding across DPRs.
@@ -404,25 +409,34 @@ const AXIS_HELPERS = `
     const after = getComputedStyle(bridge, "::after");
 `;
 
-const CORNERS_MODE = process.argv.includes("--corners");
-const portArgIndex = process.argv.indexOf("--port");
-const devServerPort =
-  portArgIndex === -1 ? 5393 : Number(process.argv[portArgIndex + 1]);
-if (!Number.isInteger(devServerPort) || devServerPort <= 0) {
-  throw new Error(`--port must be a positive integer, got ${devServerPort}`);
-}
+const suites = process.argv.includes("--offsets")
+  ? ["offsets"]
+  : process.argv.includes("--corners")
+    ? ["corners"]
+    : ["offsets", "corners"];
+const projectRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const fixturePath = "/src/__tests__/browser/layout-editor-canvas.html";
 const chromePath = await findChrome("the sheet join geometry regression");
+const vitePort = await freePort();
 let chrome;
 let chromeProfilePath;
 let client;
+let viteProcess;
+/** Fixture loads retried after a stalled boot; see `openFixture`. */
+let stalledBootRetries = 0;
 
 try {
-  const baseUrl = `http://127.0.0.1:${devServerPort}${fixturePath}`;
-  await waitForHttp(
-    baseUrl,
-    `the dev server on port ${devServerPort} (pass --port to point at a different one)`,
-  );
+  const baseUrl = `http://127.0.0.1:${vitePort}${fixturePath}`;
+  viteProcess = await spawnVite(vitePort);
+  let viteError = "";
+  viteProcess.stderr.setEncoding("utf8");
+  viteProcess.stderr.on("data", (chunk) => {
+    viteError += chunk;
+  });
+  await waitForHttp(baseUrl, viteProcess, () => viteError, "Vite");
 
   const launched = await launchChromeWithDevTools(
     chromePath,
@@ -433,29 +447,35 @@ try {
   chromeProfilePath = launched.profilePath;
   await waitForHttp(
     new URL("/json/version", launched.devtoolsHttpUrl),
+    chrome,
+    launched.readError,
     "Chrome DevTools",
   );
-  const targetResponse = await fetch(
-    new URL(`/json/new?about:blank`, launched.devtoolsHttpUrl),
-    { method: "PUT" },
-  );
-  if (!targetResponse.ok) {
-    throw new Error(`Chrome could not open a page: ${targetResponse.status}`);
-  }
-  const target = await targetResponse.json();
-  if (typeof target.webSocketDebuggerUrl !== "string") {
-    throw new Error("Chrome did not return a page debugger URL");
-  }
-  client = await connectCdp(target.webSocketDebuggerUrl);
-  await client.send("Runtime.enable", undefined);
-  await client.send("Page.enable", undefined);
-  await client.send("Network.enable", undefined);
+  client = await openTabSession(launched.devtoolsHttpUrl);
 
-  if (CORNERS_MODE) await runCorners(client, baseUrl);
-  else await runOffsets(client, baseUrl);
+  // Every selected suite runs even after one fails, so one run reports both.
+  const failures = [];
+  for (const suite of suites) {
+    try {
+      if (suite === "offsets") await runOffsets(client, baseUrl);
+      else await runCorners(client, baseUrl);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (stalledBootRetries > 1)
+    failures.push(
+      new Error(
+        `${stalledBootRetries} fixture loads stalled and were retried in a fresh tab; one is tolerated, a repeat is a regression (see openFixture)`,
+      ),
+    );
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(failures, "Both sheet join suites failed");
 } finally {
-  client?.close();
+  await client?.close();
   if (chrome !== undefined) await terminateProcessTree(chrome);
+  viteProcess?.kill("SIGTERM");
   if (chromeProfilePath !== undefined) {
     await rm(chromeProfilePath, {
       recursive: true,
@@ -1204,27 +1224,27 @@ function settle(targetClient) {
 }
 
 /**
- * Navigates and returns once the NEW document is the one being evaluated. The
- * old document carries a marker the new one cannot have, and a context
- * destroyed by the navigation is retried.
+ * Navigates and returns once the NEW document is the one being evaluated: the
+ * frame's loader is no longer the old page's (a Vite reload after it counts
+ * too). The browser answers that without asking the old page, so a page that
+ * stopped answering CDP can still be navigated away from. A context destroyed
+ * by the navigation is retried.
  */
 async function navigate(targetClient, url) {
-  try {
-    await evaluate(targetClient, "window.__sheetJoinStaleDocument = true");
-  } catch (error) {
-    if (!isNavigationContextError(error)) throw error;
-  }
+  const loaderOf = async () =>
+    (await targetClient.send("Page.getFrameTree", undefined)).frameTree.frame
+      .loaderId;
+  const previous = await loaderOf();
   await targetClient.send("Page.navigate", { url });
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    try {
-      const ready = await evaluate(
-        targetClient,
-        `window.__sheetJoinStaleDocument !== true && document.readyState === "complete"`,
-      );
-      if (ready) return;
-    } catch (error) {
-      if (!isNavigationContextError(error)) throw error;
+    if ((await loaderOf()) !== previous) {
+      try {
+        if (await evaluate(targetClient, `document.readyState === "complete"`))
+          return;
+      } catch (error) {
+        if (!isNavigationContextError(error)) throw error;
+      }
     }
     await delay(50);
   }
@@ -1238,8 +1258,49 @@ function isNavigationContextError(error) {
   );
 }
 
-/** Reload only when Vite explicitly invalidates an optimized dependency. */
+/**
+ * Loads the fixture in a fresh tab (`openTabSession`), so every load gets its
+ * own renderer: one tab navigated from load to load stalls or loses its
+ * renderer every few loads on this fixture (measured 4-6 in 30-40 loads that
+ * way, 0 in 140 with a tab per load; tickets/12).
+ *
+ * A stall that still happens is retried ONCE, in another fresh tab, loudly and
+ * counted: the run fails on a second one, so a repeat surfaces in CI instead
+ * of hiding behind the retry.
+ */
 async function openFixture(client, url, label) {
+  try {
+    await loadFixtureInFreshTab(client, url, label);
+  } catch (error) {
+    if (!(error instanceof Error) || !stalledBoot(error.message)) throw error;
+    stalledBootRetries += 1;
+    console.error(
+      `\n  WARNING ${label}: the fixture's boot stalled in a fresh tab (${error.message.split("\n")[0]}; renderer ${client.crashed() ? "gone" : "alive"}); retrying once in another fresh tab (retry ${stalledBootRetries}, a second one fails the run).\n`,
+    );
+    await loadFixtureInFreshTab(client, url, label);
+  }
+}
+
+async function loadFixtureInFreshTab(client, url, label) {
+  await client.freshTab();
+  await client.send("Runtime.enable", undefined);
+  await client.send("Page.enable", undefined);
+  await client.send("Network.enable", undefined);
+  await loadFixture(client, url, label);
+}
+
+/** A CDP timeout, or a readiness timeout on a document whose module never ran. */
+function stalledBoot(message) {
+  if (message.includes("got no answer within")) return true;
+  if (message.startsWith("The renderer was killed")) return true;
+  return (
+    message.startsWith("Timed out waiting for") &&
+    message.includes('<div id=\\"root\\"></div>')
+  );
+}
+
+/** Reload only when Vite explicitly invalidates an optimized dependency. */
+async function loadFixture(client, url, label) {
   const ready = `window.__layoutCanvasProbe?.ready === true`;
   let outdatedDeps = 0;
   const unsubscribe = client.on("Network.responseReceived", ({ response }) => {
@@ -1276,23 +1337,83 @@ async function openFixture(client, url, label) {
   }
 }
 
-async function waitForHttp(url, label) {
-  const deadline = Date.now() + 15_000;
-  let lastError;
+async function waitForHttp(url, child, readError, label) {
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
+    if (child.exitCode !== null)
+      throw new Error(`${label} exited before ready:\n${readError()}`);
     try {
       const response = await fetch(url);
       if (response.ok) return;
-      lastError = new Error(`${label} answered with ${response.status}`);
-    } catch (error) {
-      // The dev server has not opened its port yet, or isn't running.
-      lastError = error;
+    } catch {
+      // The local server has not opened its port yet.
     }
     await delay(50);
   }
-  throw new Error(
-    `Timed out waiting for ${label} at ${url}:\n${lastError?.message ?? "no response"}`,
+  throw new Error(`Timed out waiting for ${label} at ${url}:\n${readError()}`);
+}
+
+/**
+ * This run's own Vite, serving the tree as it is when the run starts, with
+ * file watching off (as `layout-editor-browser.mjs` does): in a tree several
+ * agents write at once a watcher reloads the fixture mid-suite on a peer's
+ * save. HMR stays on: it is the channel the cold dependency optimizer
+ * (`--force`) reloads the first boot through.
+ */
+async function spawnVite(port) {
+  const configDir = await mkdtemp(path.join(tmpdir(), "sheet-join-vite-"));
+  const configPath = path.join(configDir, "vite.no-watch.config.mjs");
+  await writeFile(
+    configPath,
+    [
+      `import base from ${JSON.stringify(path.join(projectRoot, "vitest.config.ts"))};`,
+      "export default { ...base, server: { ...base.server, watch: null } };",
+      "",
+    ].join("\n"),
   );
+  const requireFromHere = createRequire(import.meta.url);
+  const viteManifestPath = requireFromHere.resolve("vite/package.json");
+  const viteManifest = requireFromHere(viteManifestPath);
+  const viteEntry = path.resolve(
+    path.dirname(viteManifestPath),
+    viteManifest.bin.vite,
+  );
+  const child = spawn(
+    "node",
+    [
+      viteEntry,
+      "--config",
+      configPath,
+      "--host",
+      "127.0.0.1",
+      "--force",
+      "--port",
+      String(port),
+      "--strictPort",
+    ],
+    { cwd: projectRoot, stdio: ["ignore", "ignore", "pipe"] },
+  );
+  child.once("exit", () => {
+    void rm(configDir, { recursive: true, force: true });
+  });
+  return child;
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const server = createTcpServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("Could not allocate a free Vite port"));
+        return;
+      }
+      server.close();
+      resolve(address.port);
+    });
+  });
 }
 
 async function evaluate(targetClient, expression) {
@@ -1314,6 +1435,8 @@ async function evaluate(targetClient, expression) {
 async function waitFor(targetClient, label, expression, abortWhen) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
+    if (targetClient.crashed())
+      throw new Error(`The renderer was killed while waiting for ${label}`);
     if (abortWhen?.()) return false;
     if (await evaluate(targetClient, expression)) return true;
     await delay(50);
