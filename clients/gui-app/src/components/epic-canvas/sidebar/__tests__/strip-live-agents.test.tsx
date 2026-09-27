@@ -61,10 +61,21 @@ const openTileSpy = vi.hoisted(() =>
   vi.fn<(intent: TileOpenIntent) => NestedFocusTarget | null>(),
 );
 
-vi.mock("@/hooks/use-epic-store", () => ({
-  useEpicStore: (selector: (state: { tree: TreeSlice }) => unknown) =>
-    selector({ tree: testState.tree }),
-}));
+// `useOpenEpicHandle` stays REAL: a fixture tree stands in for the Y.Doc
+// runtime this component does not touch, but the null-handle throw a brand
+// new task's `<EpicSessionProvider>` starts with (G7) is exactly the crash
+// this suite's "still opening" cases are about, and only the real hook still
+// enforces it.
+vi.mock("@/hooks/use-epic-store", async () => {
+  const { useOpenEpicHandle } =
+    await import("@/providers/use-open-epic-handle");
+  return {
+    useEpicStore: (selector: (state: { tree: TreeSlice }) => unknown) => {
+      useOpenEpicHandle();
+      return selector({ tree: testState.tree });
+    },
+  };
+});
 
 function chatFixture(nodeId: string): ChatFixture | null {
   return Object.hasOwn(testState.chatById, nodeId)
@@ -570,5 +581,42 @@ describe("<StripLiveAgentsPortal /> per-agent activity coverage", () => {
     expect(
       screen.getByTestId("strip-live-agent-chat-attention").dataset.liveKind,
     ).toBe("approval");
+  });
+});
+
+/**
+ * G7: a brand new task's `<EpicSessionProvider>` starts with a null handle
+ * while the session opens, and `useEpicStore` (used by both `StripLiveAgents`
+ * and `LiveAgentRowButton`) throws outside one. `StripLiveAgentsPortal` wraps
+ * its content in `<EpicSessionGate fallback={null}>` so the strip's slot
+ * renders nothing during that window instead of crashing the window, then
+ * shows the list once the session hands the surface a real handle.
+ */
+describe("<StripLiveAgentsPortal /> while the session is still opening (G7)", () => {
+  it("renders nothing and does not throw with a null session handle, then lists once a real handle arrives", () => {
+    setTree([chatNode("chat-a", null, 100)]);
+    testState.activityTierById.set("chat-a", "turn");
+    const slotEl = document.createElement("div");
+    document.body.appendChild(slotEl);
+    act(() => {
+      publishLiveAgentsSlot(TAB_ID, slotEl);
+    });
+
+    const { rerender } = render(
+      <EpicSessionContext value={null}>
+        <StripLiveAgentsPortal epicId={EPIC_ID} tabId={TAB_ID} />
+      </EpicSessionContext>,
+    );
+
+    expect(screen.queryByTestId("strip-live-agents")).toBeNull();
+    expect(screen.queryByTestId("strip-live-agent-chat-a")).toBeNull();
+
+    rerender(
+      <EpicSessionContext value={handle()}>
+        <StripLiveAgentsPortal epicId={EPIC_ID} tabId={TAB_ID} />
+      </EpicSessionContext>,
+    );
+
+    expect(screen.getByTestId("strip-live-agent-chat-a")).toBeTruthy();
   });
 });

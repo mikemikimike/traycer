@@ -18,6 +18,7 @@ import { NotificationIndicatorsContext } from "@/components/notifications/notifi
 import { useEpicSessionHostId } from "@/hooks/epic/use-epic-session-host-id";
 import { useEpicTileNavigation } from "@/hooks/epic/use-epic-tile-navigation";
 import { useEpicStore } from "@/hooks/use-epic-store";
+import { EpicSessionGate } from "@/providers/epic-session-gate";
 import { tileIntent } from "@/lib/canvas/tile-open/intent";
 import {
   useEpicAgentActivityTiers,
@@ -50,7 +51,8 @@ interface LiveAgentRow {
  * The Activity view's live agents list (D9), owned by the epic surface and
  * portalled into the strip's slot under this tab's row, so it reads this
  * surface's session and no second one mounts. Nothing renders while the
- * strip does not ask for it.
+ * strip does not ask for it, nor while the session is still opening: a new
+ * task's surface mounts with a null handle, and the list reads the store.
  */
 export function StripLiveAgentsPortal(props: {
   readonly epicId: string;
@@ -59,7 +61,9 @@ export function StripLiveAgentsPortal(props: {
   const slot = useLiveAgentsSlot(props.tabId);
   if (slot === null) return null;
   return createPortal(
-    <StripLiveAgents epicId={props.epicId} tabId={props.tabId} />,
+    <EpicSessionGate fallback={null}>
+      <StripLiveAgents epicId={props.epicId} tabId={props.tabId} />
+    </EpicSessionGate>,
     slot,
   );
 }
