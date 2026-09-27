@@ -33,6 +33,8 @@ import { appLogger, describeLogError } from "@/lib/logger";
 import { FILE_EDIT_RECOVERY_DB_SUFFIX } from "@/lib/workspace/file-edit-recovery-store";
 import { fileEditRuntimeRegistry } from "@/lib/workspace/file-edit-runtime-registry";
 import { STASH_DB_NAME } from "@/lib/drafts/stash-migration";
+import { SKELETON_RESUME_DB_NAME } from "@/stores/chats/skeleton-resume-durable-cache";
+import { clearAllSkeletonsForResume } from "@/stores/chats/skeleton-resume-cache";
 
 // The `:` boundary is load-bearing: a bare `startsWith(PERSIST_PREFIX)` would
 // also sweep a hypothetical `traycer-gui-appX:foo` key. Anchoring on the colon
@@ -143,6 +145,7 @@ async function deleteRendererDatabases(): Promise<void> {
   names.add(STASH_DB_NAME);
   names.add(persistKey("tab-recovery"));
   names.add(APPEARANCE_DB_NAME);
+  names.add(SKELETON_RESUME_DB_NAME);
   // Recovery history must actually be deleted before reload. Other partitions
   // remain best-effort: a single db whose delete errors must not abort
   // the rest of the wipe or - critically - the reload (step 4), which is the
@@ -231,6 +234,7 @@ export async function clearAllPersistedStores(args: {
       error: describeLogError(error),
     });
   });
+  await clearAllSkeletonsForResume();
   await deleteRendererDatabases();
 
   // 4. Reload last.
