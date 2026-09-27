@@ -424,7 +424,7 @@ describe("chat stream prewarm", () => {
     expect(testState.registry.size()).toBe(7);
     expect(testState.events).toEqual([]);
 
-    const tileTrees = paneRefs.map((pane, index) => {
+    const tileTrees = paneRefs.map((_, index) => {
       testState.owner = "tile";
       const tile = render(
         <ChatTileLease
