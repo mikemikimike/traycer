@@ -38,6 +38,7 @@ import {
   HostRuntimeProvider,
   type HostRpcRegistry,
 } from "@/lib/host";
+import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { __resetTabNavigationControllerForTesting } from "@/lib/tab-navigation";
 import { installTabSyncCoordinator } from "@/lib/tab-sync/tab-sync-coordinator";
@@ -348,7 +349,18 @@ describe("SideStripNeedsYou", () => {
       epicId: "epic-1",
       chatId: "chat-1",
     });
-    expect(typeof input.onResult).toBe("function");
+    // The outcome is reported for the strip surface. A failed outcome keeps
+    // the row unread, so reporting it touches no feed state.
+    const track = vi.spyOn(Analytics.getInstance(), "track");
+    try {
+      input.onResult?.("failure");
+      expect(track).toHaveBeenCalledWith(
+        AnalyticsEvent.NotificationActivationCompleted,
+        expect.objectContaining({ surface: "strip", outcome: "failure" }),
+      );
+    } finally {
+      track.mockRestore();
+    }
   });
 });
 

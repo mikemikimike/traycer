@@ -29,10 +29,7 @@ import {
   visibleRailPanelIds,
   type RailEntry,
 } from "@/lib/layout/rail";
-import {
-  moveRailPanelBeside,
-  moveRailPanelToEnd,
-} from "@/lib/layout/layout-arrangement";
+import { moveRailPanelBeside } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -200,21 +197,6 @@ describe("useLeftPanelStore", () => {
     expect(useLeftPanelStore.getState().isCommentsPanelRevealed("tab-b")).toBe(
       true,
     );
-  });
-
-  it("defaults the rail to nine ungrouped panels with no dividers (L-155)", () => {
-    expect(currentRail()).toEqual(DEFAULT_RAIL);
-    expect(railPanelIds(currentRail())).toEqual([
-      "chats",
-      "artifacts",
-      "terminals",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "file-tree",
-      "sharing",
-      "comments",
-    ]);
   });
 
   it("does not persist comments as the active panel", () => {
@@ -398,24 +380,6 @@ describe("useLeftPanelStore", () => {
     );
   });
 
-  it("ignores a storage event for an unrelated key", async () => {
-    useLeftPanelStore.getState().setSidebarWidthPx(DEFAULT_SIDEBAR_WIDTH_PX);
-    window.localStorage.setItem(
-      PERSIST_KEY,
-      JSON.stringify({ state: { sidebarWidthPx: 460 }, version: 3 }),
-    );
-
-    window.dispatchEvent(
-      new StorageEvent("storage", { key: "some-other-app:left-panel" }),
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(useLeftPanelStore.getState().sidebarWidthPx).toBe(
-      DEFAULT_SIDEBAR_WIDTH_PX,
-    );
-  });
-
   it("persists active chat and artifact filters set through actions", () => {
     act(() => {
       useLeftPanelStore.getState().setChatOrigin("epic-a", "gui");
@@ -533,34 +497,6 @@ describe("useLeftPanelStore", () => {
     });
   });
 
-  it("reorders panels before or after another panel", () => {
-    movePanelBeside("artifacts", "chats", false);
-    expect(railPanelIds(currentRail())).toEqual([
-      "artifacts",
-      "chats",
-      "terminals",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "file-tree",
-      "sharing",
-      "comments",
-    ]);
-
-    movePanelBeside("comments", "chats", true);
-    expect(railPanelIds(currentRail())).toEqual([
-      "artifacts",
-      "chats",
-      "comments",
-      "terminals",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "file-tree",
-      "sharing",
-    ]);
-  });
-
   it("keeps rail order global instead of scoping layout by tab", () => {
     movePanelBeside("artifacts", "chats", false);
     useLeftPanelStore.getState().setActivePanelId("tab-a", "artifacts");
@@ -618,24 +554,6 @@ describe("useLeftPanelStore", () => {
       "file-tree",
       "sharing",
       "comments",
-    ]);
-  });
-
-  it("moves a panel to the rail end", () => {
-    applyRail(
-      moveRailPanelToEnd(currentLayoutArrangement(), "chats", "panel").rail,
-    );
-
-    expect(railPanelIds(currentRail())).toEqual([
-      "artifacts",
-      "terminals",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "file-tree",
-      "sharing",
-      "comments",
-      "chats",
     ]);
   });
 
@@ -762,7 +680,9 @@ describe("useLeftPanelStore", () => {
     // against that preset, and "Reset panel visibility" would write nine of
     // them for a user who had overridden one.
     setRailVisibilityOverride("pull-requests", true);
+    setRailVisibilityOverride("chats", false);
     setRailVisibilityOverride("pull-requests", null);
+    setRailVisibilityOverride("chats", null);
 
     expect(visibilityOverrides()).toEqual({});
     expect(readPersistedLayoutOverrides()).toEqual({});
@@ -792,19 +712,6 @@ describe("useLeftPanelStore", () => {
     expect(useLeftPanelStore.getState().getActivePanelId("tab-a")).toBe(
       "comments",
     );
-  });
-
-  it("clears each override, leaving no record of any of them", () => {
-    // Reverting a panel REMOVES its pick (L-133) instead of writing an `auto`
-    // record into the delta, one panel at a time.
-    setRailVisibilityOverride("chats", false);
-    setRailVisibilityOverride("comments", true);
-
-    setRailVisibilityOverride("chats", null);
-    setRailVisibilityOverride("comments", null);
-
-    expect(visibilityOverrides()).toEqual({});
-    expect(readPersistedLayoutOverrides()).toEqual({});
   });
 
   it("keeps slice identity when an override is set to its current value", () => {

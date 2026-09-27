@@ -19,30 +19,16 @@ import {
 
 // `useSideTabLiveAgents` reads `useAccountActivityCoverage`, which asks the
 // host directory (via `useHostBinding()`) for the account's known hosts. This
-// suite has no `HostRuntimeProvider`, so the real hook already reads `null` -
-// an unsettled fleet - for every test here except the one that opts into a
-// known-hosts list through this ref.
-const knownHostIdsRef = vi.hoisted((): { value: readonly string[] | null } => ({
-  value: null,
-}));
-
+// suite has no `HostRuntimeProvider`, so the binding is `null` - an unsettled
+// fleet - throughout.
 vi.mock("@/lib/host", () => ({
-  useHostBinding: () =>
-    knownHostIdsRef.value === null
-      ? null
-      : {
-          directory: {
-            knownHostIds: () => knownHostIdsRef.value,
-            onChange: () => ({ dispose: () => undefined }),
-          },
-        },
+  useHostBinding: () => null,
 }));
 
 afterEach(() => {
   cleanup();
   useThemeLibraryStore.setState({ panelAnimations: true });
   __resetAgentActivityStoreForTests();
-  knownHostIdsRef.value = null;
 });
 
 function agents(
@@ -158,15 +144,6 @@ describe("SideTabMeter", () => {
     expect(screen.getByTestId("side-tab-meter-more").textContent).toBe("+3");
   });
 
-  it("shows an attention pip alone when there are no live agents", () => {
-    render(
-      <SideTabMeter agents={NO_LIVE_AGENTS} attention="failed" size="tile" />,
-    );
-    const root = meter();
-    expect(pipKinds(root)).toEqual(["failed"]);
-    expect(screen.queryByTestId("side-tab-meter-more")).toBeNull();
-  });
-
   it.each([
     ["approval", "waiting"],
     ["reply", "waiting"],
@@ -238,13 +215,6 @@ describe("SideTabMeter accessible label", () => {
     expect(meter().getAttribute("aria-label")).toBe("waiting for your reply");
   });
 
-  it("is empty for an idle, unattended task - no label at all", () => {
-    render(
-      <SideTabMeter agents={NO_LIVE_AGENTS} attention={null} size="tile" />,
-    );
-    expect(meter().getAttribute("aria-label")).toBeNull();
-  });
-
   it("omits a zero tier", () => {
     render(
       <SideTabMeter
@@ -267,107 +237,90 @@ describe("SideTabMeter accessible label", () => {
   });
 });
 
+// `size` only picks class tables in `agent-meter.tsx`; the floor logic below
+// is the same for both, so one size carries it.
 describe("SideTabMeter floor (F8 round 3: R1-A1, the meter carries coverage)", () => {
-  it.each(["tile", "row"] as const)(
-    "draws the floor marker under unserved but not under covered, same counts (%s)",
-    (size) => {
-      render(
-        <SideTabMeter
-          agents={agents(2, 1, "covered")}
-          attention={null}
-          size={size}
-        />,
-      );
-      expect(screen.queryByTestId("side-tab-meter-floor")).toBeNull();
-      cleanup();
+  it("draws the floor marker under unserved but not under covered, same counts", () => {
+    render(
+      <SideTabMeter
+        agents={agents(2, 1, "covered")}
+        attention={null}
+        size="tile"
+      />,
+    );
+    expect(screen.queryByTestId("side-tab-meter-floor")).toBeNull();
+    cleanup();
 
-      render(
-        <SideTabMeter
-          agents={agents(2, 1, "unserved")}
-          attention={null}
-          size={size}
-        />,
-      );
-      expect(screen.getByTestId("side-tab-meter-floor")).not.toBeNull();
-    },
-  );
+    render(
+      <SideTabMeter
+        agents={agents(2, 1, "unserved")}
+        attention={null}
+        size="tile"
+      />,
+    );
+    expect(screen.getByTestId("side-tab-meter-floor")).not.toBeNull();
+  });
 
-  it.each(["tile", "row"] as const)(
-    "appends '+' to the label under unserved and not under covered, same counts (%s)",
-    (size) => {
-      render(
-        <SideTabMeter
-          agents={agents(2, 1, "covered")}
-          attention={null}
-          size={size}
-        />,
-      );
-      expect(meter().getAttribute("aria-label")).toBe(
-        "2 running, 1 background",
-      );
-      cleanup();
+  it("appends '+' to the label under unserved and not under covered, same counts", () => {
+    render(
+      <SideTabMeter
+        agents={agents(2, 1, "covered")}
+        attention={null}
+        size="tile"
+      />,
+    );
+    expect(meter().getAttribute("aria-label")).toBe("2 running, 1 background");
+    cleanup();
 
-      render(
-        <SideTabMeter
-          agents={agents(2, 1, "unserved")}
-          attention={null}
-          size={size}
-        />,
-      );
-      expect(meter().getAttribute("aria-label")).toBe(
-        "2+ running, 1+ background",
-      );
-    },
-  );
+    render(
+      <SideTabMeter
+        agents={agents(2, 1, "unserved")}
+        attention={null}
+        size="tile"
+      />,
+    );
+    expect(meter().getAttribute("aria-label")).toBe(
+      "2+ running, 1+ background",
+    );
+  });
 
-  it.each(["tile", "row"] as const)(
-    "treats indeterminate coverage like covered - no floor marker, plain label (%s)",
-    (size) => {
-      render(
-        <SideTabMeter
-          agents={agents(2, 1, "indeterminate")}
-          attention={null}
-          size={size}
-        />,
-      );
-      expect(screen.queryByTestId("side-tab-meter-floor")).toBeNull();
-      expect(meter().getAttribute("aria-label")).toBe(
-        "2 running, 1 background",
-      );
-    },
-  );
+  it("treats indeterminate coverage like covered - no floor marker, plain label", () => {
+    render(
+      <SideTabMeter
+        agents={agents(2, 1, "indeterminate")}
+        attention={null}
+        size="tile"
+      />,
+    );
+    expect(screen.queryByTestId("side-tab-meter-floor")).toBeNull();
+    expect(meter().getAttribute("aria-label")).toBe("2 running, 1 background");
+  });
 
-  it.each(["tile", "row"] as const)(
-    "draws no floor marker under unserved coverage with zero agents (%s)",
-    (size) => {
-      render(
-        <SideTabMeter
-          agents={agents(0, 0, "unserved")}
-          attention={null}
-          size={size}
-        />,
-      );
-      expect(screen.queryByTestId("side-tab-meter-floor")).toBeNull();
-    },
-  );
+  it("draws no floor marker under unserved coverage with zero agents", () => {
+    render(
+      <SideTabMeter
+        agents={agents(0, 0, "unserved")}
+        attention={null}
+        size="tile"
+      />,
+    );
+    expect(screen.queryByTestId("side-tab-meter-floor")).toBeNull();
+  });
 
-  it.each(["tile", "row"] as const)(
-    "still draws and announces the attention pip under unserved coverage (%s)",
-    (size) => {
-      render(
-        <SideTabMeter
-          agents={agents(2, 1, "unserved")}
-          attention="approval"
-          size={size}
-        />,
-      );
-      const root = meter();
-      expect(pipKinds(root)).toEqual(["turn", "turn", "background", "waiting"]);
-      expect(root.getAttribute("aria-label")).toBe(
-        "2+ running, 1+ background, waiting for your approval",
-      );
-    },
-  );
+  it("still draws and announces the attention pip under unserved coverage", () => {
+    render(
+      <SideTabMeter
+        agents={agents(2, 1, "unserved")}
+        attention="approval"
+        size="tile"
+      />,
+    );
+    const root = meter();
+    expect(pipKinds(root)).toEqual(["turn", "turn", "background", "waiting"]);
+    expect(root.getAttribute("aria-label")).toBe(
+      "2+ running, 1+ background, waiting for your approval",
+    );
+  });
 });
 
 describe("useSideTabLiveAgents", () => {
@@ -424,25 +377,5 @@ describe("useSideTabLiveAgents", () => {
       background: 0,
       coverage: "covered",
     });
-  });
-
-  it("draws no agent pips under unserved coverage with no agents", () => {
-    // A known second host the plane never slices: the account has two
-    // machines, this one narrowly answers for itself, the other says nothing
-    // - the honest reading of the pair is `unserved`, not idle.
-    __setHostAgentActivityHealthForTests(TEST_LOCAL_ACTIVITY_HOST_ID, {
-      connectionStatus: "open",
-      servedBy: "local",
-      cloudSyncStatus: null,
-      stateFrameSeenThisEpoch: true,
-    });
-    knownHostIdsRef.value = [TEST_LOCAL_ACTIVITY_HOST_ID, "host-b"];
-    const { result } = renderHook(() => useSideTabLiveAgents("epic-unknown"));
-    expect(result.current.coverage).toBe("unserved");
-
-    render(
-      <SideTabMeter agents={result.current} attention={null} size="tile" />,
-    );
-    expect(meter().querySelectorAll("[data-pip]")).toHaveLength(0);
   });
 });

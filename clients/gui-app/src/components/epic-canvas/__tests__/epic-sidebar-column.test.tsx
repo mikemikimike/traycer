@@ -341,19 +341,7 @@ describe("<EpicSidebarColumn />", () => {
   // floor is exercised directly through its store rather than through a real
   // rail's own measurement (that measurement is covered in
   // `epic-sidebar-rail.test.tsx`).
-  it("widens the panel past the persisted width when a mounted rail needs more room", () => {
-    act(() => {
-      useSidebarRailWidthStore
-        .getState()
-        .setRailNaturalWidthPx("other-tab", 400);
-    });
-
-    renderColumn();
-
-    expect(screen.getByTestId("epic-sidebar-column").style.width).toBe("400px");
-  });
-
-  it("settles back to the persisted width once the wider tab's rail unmounts", () => {
+  it("widens the panel past the persisted width for a wider mounted rail, and settles back once it unmounts", () => {
     act(() => {
       useSidebarRailWidthStore
         .getState()

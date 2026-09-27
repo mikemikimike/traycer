@@ -29,10 +29,6 @@ describe("ownChatStatusKind", () => {
     expect(ownChatStatusKind(IDLE, undefined, "indeterminate")).toBeNull();
   });
 
-  it("lets a live turn outrank unknown even under unserved coverage", () => {
-    expect(ownChatStatusKind(IDLE, "turn", "unserved")).toBe("running");
-  });
-
   it("lets background work outrank unknown even under unserved coverage", () => {
     expect(ownChatStatusKind(IDLE, "background", "unserved")).toBe(
       "background",

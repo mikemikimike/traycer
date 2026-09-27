@@ -312,71 +312,83 @@ function setChatGates(
 }
 
 describe("chatSessionWaitingReason", () => {
-  it("reads null for a chat with no gate", () => {
+  it.each<{
+    readonly name: string;
+    readonly gates: Pick<
+      ChatSessionState,
+      "pendingApprovals" | "pendingFileEditApprovals" | "pendingInterviews"
+    >;
+    readonly expected: "approval" | "reply" | null;
+  }>([
+    {
+      name: "reads null for a chat with no gate",
+      gates: {
+        pendingApprovals: [],
+        pendingFileEditApprovals: [],
+        pendingInterviews: [],
+      },
+      expected: null,
+    },
+    {
+      name: "reads reply for a pending interview",
+      gates: {
+        pendingApprovals: [],
+        pendingFileEditApprovals: [],
+        pendingInterviews: [INTERVIEW],
+      },
+      expected: "reply",
+    },
+    {
+      name: "reads approval for a pending command approval",
+      gates: {
+        pendingApprovals: [COMMAND_APPROVAL],
+        pendingFileEditApprovals: [],
+        pendingInterviews: [],
+      },
+      expected: "approval",
+    },
+    {
+      name: "reads null for a command approval still under the auto-judge",
+      gates: {
+        pendingApprovals: [{ ...COMMAND_APPROVAL, reviewing: "checking" }],
+        pendingFileEditApprovals: [],
+        pendingInterviews: [],
+      },
+      expected: null,
+    },
+    {
+      name: "reads approval for a plan approval",
+      gates: {
+        pendingApprovals: [
+          { ...COMMAND_APPROVAL, kind: "plan", planId: "plan-1" },
+        ],
+        pendingFileEditApprovals: [],
+        pendingInterviews: [],
+      },
+      expected: "approval",
+    },
+    {
+      name: "reads approval for a pending file-edit approval",
+      gates: {
+        pendingApprovals: [],
+        pendingFileEditApprovals: [FILE_EDIT_APPROVAL],
+        pendingInterviews: [],
+      },
+      expected: "approval",
+    },
+    {
+      name: "ranks an interview over an approval in the same chat",
+      gates: {
+        pendingApprovals: [COMMAND_APPROVAL],
+        pendingFileEditApprovals: [],
+        pendingInterviews: [INTERVIEW],
+      },
+      expected: "reply",
+    },
+  ])("$name", ({ gates, expected }) => {
     registerChatSession(AGENT_ID, []);
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBeNull();
-  });
-
-  it("reads reply for a pending interview", () => {
-    registerChatSession(AGENT_ID, []);
-    setChatGates(AGENT_ID, {
-      pendingApprovals: [],
-      pendingFileEditApprovals: [],
-      pendingInterviews: [INTERVIEW],
-    });
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBe("reply");
-  });
-
-  it("reads approval for a pending command approval", () => {
-    registerChatSession(AGENT_ID, []);
-    setChatGates(AGENT_ID, {
-      pendingApprovals: [COMMAND_APPROVAL],
-      pendingFileEditApprovals: [],
-      pendingInterviews: [],
-    });
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBe("approval");
-  });
-
-  it("reads null for a command approval still under the auto-judge", () => {
-    registerChatSession(AGENT_ID, []);
-    setChatGates(AGENT_ID, {
-      pendingApprovals: [{ ...COMMAND_APPROVAL, reviewing: "checking" }],
-      pendingFileEditApprovals: [],
-      pendingInterviews: [],
-    });
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBeNull();
-  });
-
-  it("reads approval for a plan approval", () => {
-    registerChatSession(AGENT_ID, []);
-    setChatGates(AGENT_ID, {
-      pendingApprovals: [
-        { ...COMMAND_APPROVAL, kind: "plan", planId: "plan-1" },
-      ],
-      pendingFileEditApprovals: [],
-      pendingInterviews: [],
-    });
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBe("approval");
-  });
-
-  it("reads approval for a pending file-edit approval", () => {
-    registerChatSession(AGENT_ID, []);
-    setChatGates(AGENT_ID, {
-      pendingApprovals: [],
-      pendingFileEditApprovals: [FILE_EDIT_APPROVAL],
-      pendingInterviews: [],
-    });
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBe("approval");
-  });
-
-  it("ranks an interview over an approval in the same chat", () => {
-    registerChatSession(AGENT_ID, []);
-    setChatGates(AGENT_ID, {
-      pendingApprovals: [COMMAND_APPROVAL],
-      pendingFileEditApprovals: [],
-      pendingInterviews: [INTERVIEW],
-    });
-    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBe("reply");
+    setChatGates(AGENT_ID, gates);
+    expect(chatSessionWaitingReason(chatStore(AGENT_ID))).toBe(expected);
   });
 });
 

@@ -155,10 +155,13 @@ describe("<EpicNodeTabIcon /> terminal indicators", () => {
     });
     // A non-terminal failure stays the shared chat glyph regardless of
     // surface - only `terminalFailureTone` (a resolved terminal outcome)
-    // swaps in the TUI-specific icon.
-    expect(
-      failure.querySelector('[data-status-glyph="failure"]'),
-    ).not.toBeNull();
+    // swaps in the TUI-specific icon, which shares the "failure" tone id, so
+    // the icon itself is what tells the two apart.
+    const glyph = failure.querySelector('[data-status-glyph="failure"]');
+    expect(glyph?.getAttribute("class")).toContain("lucide-message-square-x");
+    expect(glyph?.getAttribute("class")).not.toContain(
+      "lucide-square-terminal",
+    );
   });
 });
 

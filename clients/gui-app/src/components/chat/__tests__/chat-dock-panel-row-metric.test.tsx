@@ -559,38 +559,6 @@ describe("the five attached dock panels share one row metric", () => {
     });
   }
 
-  it("gives all four the same list class and the same row class", () => {
-    const lists = new Set<string>();
-    const rows = new Set<string>();
-    for (const section of DOCK_ORDER) {
-      backgroundSession = installBackgroundRowShapes();
-      renderAttached(section);
-      const body = attachedBody();
-      const list = body.firstElementChild;
-      if (list === null) throw new Error(`${section} drew no list`);
-      const row = rowsIn(body).at(0);
-      if (row === undefined) throw new Error(`${section} drew no row`);
-      // The BOX tokens only: a panel keeps its own tone and its own hover
-      // fill, and the ruling is about the metric, not about the paint.
-      lists.add(
-        CHAT_DOCK_PANEL_LIST.split(" ")
-          .filter((token) => classesOf(list).has(token))
-          .join(" "),
-      );
-      rows.add(
-        CHAT_DOCK_PANEL_ROW.split(" ")
-          .filter((token) => classesOf(row).has(token))
-          .join(" "),
-      );
-      cleanup();
-      backgroundSession.dispose();
-      backgroundSession = null;
-      disposeManagedCommandChatSessions();
-    }
-    expect([...lists]).toEqual([CHAT_DOCK_PANEL_LIST]);
-    expect([...rows]).toEqual([CHAT_DOCK_PANEL_ROW]);
-  });
-
   /**
    * The same list on its OTHER surface (R6H-06).
    *

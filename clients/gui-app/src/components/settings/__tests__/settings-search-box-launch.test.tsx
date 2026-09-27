@@ -84,25 +84,12 @@ describe("<SettingsSearch /> launch results", () => {
         source: "direct_ui",
         entry: "pointer",
         target: "mic",
+        // The region's own area, so leaving the editor returns there.
+        origin: { kind: "settings", area: LAYOUT_REGIONS.mic.surface },
       }),
     );
     expect(navigateToSettingsSectionMock).not.toHaveBeenCalled();
     expect(useSettingsSearchStore.getState().pendingReveal).toBeNull();
-  });
-
-  it("names the region's own area as the origin, so leaving returns there", () => {
-    render(<Harness />);
-    type("microphone");
-
-    fireEvent.click(
-      screen.getByTestId("settings-search-result-layout:launch:mic"),
-    );
-
-    expect(openLayoutEditorMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        origin: { kind: "settings", area: LAYOUT_REGIONS.mic.surface },
-      }),
-    );
   });
 
   // The entry method gates the editor's entry motion as well as being reported

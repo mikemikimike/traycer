@@ -1443,42 +1443,33 @@ describe("useStatusBarRateLimitSegments - sample scene", () => {
     });
   }
 
-  it("shows exactly the picked window when the selection names a weekly key", () => {
-    claudeSelection(["claude-code:sevenDay"]);
+  it.each<{ readonly name: string; readonly picks: ReadonlyArray<string> }>([
+    {
+      name: "a weekly key",
+      picks: ["claude-code:sevenDay"],
+    },
+    {
+      name: "two windows",
+      picks: ["claude-code:fiveHour", "claude-code:sevenDayOpus"],
+    },
+  ])(
+    "shows exactly the picked windows, under the keys it picked, when the selection names $name",
+    ({ picks }) => {
+      claudeSelection(picks);
 
-    const { result } = renderSampleSegments(
-      [
-        configuredProvider({
-          providerId: "claude-code",
-          lane: "ephemeralProcess",
-        }),
-      ],
-      PROFILE_SELECTION,
-    );
+      const { result } = renderSampleSegments(
+        [
+          configuredProvider({
+            providerId: "claude-code",
+            lane: "ephemeralProcess",
+          }),
+        ],
+        PROFILE_SELECTION,
+      );
 
-    expect(windowKeys(claudeSegment(result).shown)).toEqual([
-      "claude-code:sevenDay",
-    ]);
-  });
-
-  it("shows a two-window selection under the same window keys it picked", () => {
-    claudeSelection(["claude-code:fiveHour", "claude-code:sevenDayOpus"]);
-
-    const { result } = renderSampleSegments(
-      [
-        configuredProvider({
-          providerId: "claude-code",
-          lane: "ephemeralProcess",
-        }),
-      ],
-      PROFILE_SELECTION,
-    );
-
-    expect(windowKeys(claudeSegment(result).shown)).toEqual([
-      "claude-code:fiveHour",
-      "claude-code:sevenDayOpus",
-    ]);
-  });
+      expect(windowKeys(claudeSegment(result).shown)).toEqual(picks);
+    },
+  );
 
   it("falls back to the tightest sample window when the selection is Automatic", () => {
     const { result } = renderSampleSegments(
@@ -1491,8 +1482,11 @@ describe("useStatusBarRateLimitSegments - sample scene", () => {
       PROFILE_SELECTION,
     );
 
-    const segment = claudeSegment(result);
-    expect(windowKeys(segment.shown)).toEqual([segment.tightest?.windowKey]);
+    // The first segment reads sample slots 0-3 (35%, 78%, 12%, 35%), so the
+    // weekly window at 78% is the one the sample scene makes tightest.
+    expect(windowKeys(claudeSegment(result).shown)).toEqual([
+      "claude-code:sevenDay",
+    ]);
   });
 
   it("relabels a real account to the sample label", () => {

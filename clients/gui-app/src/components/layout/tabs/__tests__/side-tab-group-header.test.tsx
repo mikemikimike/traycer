@@ -1,8 +1,9 @@
 /**
- * The vertical strip's group header (S-19): the member count it is handed,
- * a click that collapses and expands the group through the tabs store, the
- * shared group editor on right-click, and a collapsed group's worst member
- * badge read from the strip's indicator batch (S-30).
+ * The vertical strip's group header (S-19): the shared group editor on
+ * right-click, mirrored off the sidebar column, and the rail's tile. The
+ * count, the click that folds the group and the collapsed group's worst
+ * member badge (S-30) are `side-tab-strip.test.tsx`'s, through the real strip;
+ * the badge ranking is `side-tab-rail-badge.test.tsx`'s.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -104,33 +105,6 @@ describe("SideTabGroupHeader", () => {
     useTabsStore.setState(useTabsStore.getInitialState(), true);
   });
 
-  it("shows the name and the member count", () => {
-    renderHeader({
-      group: seedGroup(false),
-      variant: "expanded",
-      memberEntities: [],
-      indicators: { epics: {}, chats: {} },
-      columnSide: null,
-    });
-
-    expect(header().textContent).toContain("Work");
-    expect(screen.getByTestId("side-tab-group-count").textContent).toBe("3");
-  });
-
-  it("toggles the group's collapsed state on click", () => {
-    renderHeader({
-      group: seedGroup(false),
-      variant: "expanded",
-      memberEntities: [],
-      indicators: { epics: {}, chats: {} },
-      columnSide: null,
-    });
-
-    fireEvent.click(header());
-
-    expect(useTabsStore.getState().groups?.[GROUP_ID]?.collapsed).toBe(true);
-  });
-
   it("opens the shared group editor on right-click", () => {
     renderHeader({
       group: seedGroup(false),
@@ -167,63 +141,6 @@ describe("SideTabGroupHeader", () => {
       expect(content.getAttribute("data-align")).toBe("start");
     },
   );
-
-  it("badges a collapsed group with its worst member's notification", () => {
-    renderHeader({
-      group: seedGroup(true),
-      variant: "expanded",
-      memberEntities: [{ epicId: "e-1" }, { epicId: "e-2" }, { epicId: "e-3" }],
-      indicators: {
-        epics: {
-          "e-1": { ...QUIET, unreadDone: true },
-          "e-2": { ...QUIET, pendingApproval: true },
-          "e-3": { ...QUIET, unreadFailure: true },
-        },
-        chats: {},
-      },
-      columnSide: null,
-    });
-
-    // Waiting outranks a failure and an unread result in the rail (S-17).
-    expect(
-      screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
-    ).toBe("approval");
-  });
-
-  it("breaks a tie between approval and reply members in favour of reply", () => {
-    renderHeader({
-      group: seedGroup(true),
-      variant: "expanded",
-      memberEntities: [{ epicId: "e-1" }, { epicId: "e-2" }],
-      indicators: {
-        epics: {
-          "e-1": { ...QUIET, pendingApproval: true },
-          "e-2": { ...QUIET, pendingInterview: true },
-        },
-        chats: {},
-      },
-      columnSide: null,
-    });
-
-    expect(
-      screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
-    ).toBe("reply");
-  });
-
-  it("draws no badge on an expanded group, whatever its members hold", () => {
-    renderHeader({
-      group: seedGroup(false),
-      variant: "expanded",
-      memberEntities: [{ epicId: "e-1" }],
-      indicators: {
-        epics: { "e-1": { ...QUIET, unreadFailure: true } },
-        chats: {},
-      },
-      columnSide: null,
-    });
-
-    expect(screen.queryByTestId("side-tab-group-badge")).toBeNull();
-  });
 
   it("is a tile with the name's first letter in the rail", () => {
     renderHeader({

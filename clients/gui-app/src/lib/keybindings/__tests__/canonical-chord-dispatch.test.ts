@@ -29,30 +29,34 @@ beforeEach(() => {
 });
 
 describe("resolveMatchingChord -> findActionForChord, off macOS", () => {
-  it("resolves Ctrl+Alt+N to tab.split.add", () => {
-    const chord = resolveMatchingChord(
-      keydown({ code: "KeyN", ctrlKey: true, altKey: true }),
-    );
-    expect(chord).toBe("mod+alt+n");
-    expect(findActionForChord(chord ?? "")).toBe("tab.split.add");
-  });
-
-  it("resolves Shift+Alt+M to composer.model-picker.toggle", () => {
-    const chord = resolveMatchingChord(
-      keydown({ code: "KeyM", shiftKey: true, altKey: true }),
-    );
-    expect(chord).toBe("shift+alt+m");
-    expect(findActionForChord(chord ?? "")).toBe(
-      "composer.model-picker.toggle",
-    );
-  });
-
-  it("resolves Shift+Alt+S to app.tabs.vertical.collapse", () => {
-    const chord = resolveMatchingChord(
-      keydown({ code: "KeyS", shiftKey: true, altKey: true }),
-    );
-    expect(chord).toBe("shift+alt+s");
-    expect(findActionForChord(chord ?? "")).toBe("app.tabs.vertical.collapse");
+  it.each<{
+    readonly label: string;
+    readonly init: Partial<KeyboardEventInit> & { code: string };
+    readonly chord: string;
+    readonly action: string;
+  }>([
+    {
+      label: "Ctrl+Alt+N",
+      init: { code: "KeyN", ctrlKey: true, altKey: true },
+      chord: "mod+alt+n",
+      action: "tab.split.add",
+    },
+    {
+      label: "Shift+Alt+M",
+      init: { code: "KeyM", shiftKey: true, altKey: true },
+      chord: "shift+alt+m",
+      action: "composer.model-picker.toggle",
+    },
+    {
+      label: "Shift+Alt+S",
+      init: { code: "KeyS", shiftKey: true, altKey: true },
+      chord: "shift+alt+s",
+      action: "app.tabs.vertical.collapse",
+    },
+  ])("resolves $label to $action", ({ init, chord, action }) => {
+    const resolved = resolveMatchingChord(keydown(init));
+    expect(resolved).toBe(chord);
+    expect(findActionForChord(resolved ?? "")).toBe(action);
   });
 });
 

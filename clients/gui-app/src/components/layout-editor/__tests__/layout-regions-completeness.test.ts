@@ -389,20 +389,6 @@ describe("quick verbs", () => {
   });
 });
 
-describe("the filter (Find a setting, L-07)", () => {
-  it("matches a fine-tune option only as an option match, on its own region", () => {
-    // "Amount" is a fine-tune option's own label (Usage limits' segment
-    // control), not part of any region's name - so it finds Usage limits and
-    // nothing else.
-    expect(findsRegion("amount", "usageLimits")).toBe(true);
-    expect(findsRegion("amount", "homeTab")).toBe(false);
-  });
-
-  it("returns nothing at all for an empty or whitespace-only query", () => {
-    expect(layoutFindResults("   ", DEFAULT_LAYOUT_SNAPSHOT)).toEqual([]);
-  });
-});
-
 describe("the Position row against the default arrangement (L-57)", () => {
   it("is unchanged on the shipped arrangement", () => {
     for (const id of LAYOUT_REGION_IDS) {

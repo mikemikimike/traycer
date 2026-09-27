@@ -1,16 +1,4 @@
 /**
- * DROP-IN REPLACEMENT for
- * hooks/rate-limits/__tests__/status-bar-rate-limit-lanes.test.tsx.
- *
- * Only change from the original: `useLaneProbe` takes an `editing` param
- * (default `false`, so both pre-existing calls are untouched) and a new
- * describe block at the end proves review w3 should-fix 11 ("showing hidden
- * providers for editing starts their live queries") stays fixed - entering
- * an editing session with a hidden `httpFetch` provider must NOT start its
- * polling query or its mount/queue targets, using the exact same real-stack
- * mock boundary (`MockHostMessenger`) the rest of this file already uses to
- * prove request suppression, not just option wiring.
- *
  * End-to-end proof of the load-bearing property `useStatusBarRateLimitSegments`
  * exists to guarantee: an `ephemeralProcess` provider (codex, claude-code)
  * NEVER gets read by this hook's own observer, no matter how the batches split.

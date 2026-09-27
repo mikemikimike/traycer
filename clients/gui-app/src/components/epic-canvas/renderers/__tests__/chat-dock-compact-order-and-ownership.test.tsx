@@ -360,43 +360,6 @@ function foldAllDockRegionsToChips(): void {
 }
 
 describe("compact dock chip order follows arrangement.dock (S5)", () => {
-  it("renders the chips in dockOrder, not the fixed Files -> Agents -> Background order", () => {
-    foldAllDockRegionsToChips();
-    const { arrangement } = useLayoutStore.getState();
-    // Deliberately NOT the fixed default order.
-    useLayoutStore.getState().setArrangement({
-      ...arrangement,
-      dock: ["background", "runningAgents", "changedFiles", "todo"],
-    });
-
-    renderSurfaces(
-      surfacesProps({
-        queueItems: [],
-        accumulatedFileChanges: [fileChangeRow("/repo/src/a.ts")],
-        backgroundItems: [
-          {
-            taskId: "task-1",
-            kind: "command",
-            title: "bun test",
-            blockId: "task-1-block",
-            parentTaskId: null,
-            scheduledFor: null,
-            individualStopUnavailable: null,
-          },
-        ],
-      }),
-    );
-
-    const chips = [
-      ...document.querySelectorAll("[data-testid^='chat-dock-chip-']"),
-    ].map((el) => el.getAttribute("data-testid"));
-    expect(chips).toEqual([
-      "chat-dock-chip-background",
-      "chat-dock-chip-activeAgents",
-      "chat-dock-chip-filesChanged",
-    ]);
-  });
-
   it("reordering through Move and then folding keeps the new order on the chips", () => {
     foldAllDockRegionsToChips();
     renderSurfaces(

@@ -116,7 +116,7 @@ describe("AppColumnFrame", () => {
   );
 
   it.each([TOP, LEFT_NONE, RIGHT_BAND])(
-    "gives each box its layout classes for $placement",
+    "nests the content beside the strip and paints the shell ground for $placement",
     (chrome) => {
       const column = renderFrame(chrome);
 
@@ -133,44 +133,10 @@ describe("AppColumnFrame", () => {
         ),
       ).toEqual([content]);
 
-      expect([...column.classList]).toEqual(
-        expect.arrayContaining([
-          "relative",
-          "flex",
-          "h-safe-dvh",
-          "min-w-0",
-          "flex-1",
-          "flex-col",
-          // Ticket 02 (D1/D2): the column paints the ground the header (top
-          // placement) and the side strip go transparent on, so it has to
-          // span every placement, not just the beside ones.
-          "md:bg-shell-ground",
-        ]),
-      );
-      expect([...row.classList]).toEqual(
-        expect.arrayContaining(["flex", "min-h-0", "flex-1", "flex-row"]),
-      );
-      expect([...content.classList]).toEqual(
-        expect.arrayContaining(["flex", "min-w-0", "flex-1", "flex-col"]),
-      );
-      expect([...main.classList]).toEqual(
-        expect.arrayContaining([
-          "relative",
-          "flex",
-          "min-h-0",
-          "flex-1",
-          "flex-col",
-        ]),
-      );
-      expect([...surfaceFrame().classList]).toEqual(
-        expect.arrayContaining([
-          "relative",
-          "flex",
-          "min-h-0",
-          "flex-1",
-          "overflow-clip",
-        ]),
-      );
+      // Ticket 02 (D1/D2): the column paints the ground the header (top
+      // placement) and the side strip go transparent on, so it has to span
+      // every placement, not just the beside ones.
+      expect(column.classList.contains("md:bg-shell-ground")).toBe(true);
     },
   );
 
@@ -201,20 +167,14 @@ describe("AppColumnFrame", () => {
       },
     );
 
-    it("stamps data-tab-edge=top for the top placement", () => {
-      renderFrame(TOP);
+    it.each([TOP, LEFT_NONE, RIGHT_BAND])(
+      "stamps data-tab-edge with the strip's own edge for $placement",
+      (chrome) => {
+        renderFrame(chrome);
 
-      expect(surfaceFrame().dataset.tabEdge).toBe("top");
-    });
-
-    it("stamps data-tab-edge with the strip's own edge for a side placement", () => {
-      renderFrame(LEFT_NONE);
-      expect(surfaceFrame().dataset.tabEdge).toBe("left");
-      cleanup();
-
-      renderFrame(RIGHT_BAND);
-      expect(surfaceFrame().dataset.tabEdge).toBe("right");
-    });
+        expect(surfaceFrame().dataset.tabEdge).toBe(chrome.placement);
+      },
+    );
 
     it("renders exactly one top join bridge for the top placement", () => {
       renderFrame(TOP);

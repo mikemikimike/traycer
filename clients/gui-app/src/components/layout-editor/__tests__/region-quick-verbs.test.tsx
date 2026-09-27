@@ -158,16 +158,28 @@ describe("offeredQuickVerbs", () => {
 });
 
 describe("<LayoutRegionContextMenu />", () => {
-  it("hides the region and announces it with an Undo", () => {
-    render(<Harness regionId="minimap" />);
-    openMenu();
+  // The chat display settings (audit R1, R3) take the same hide path as the
+  // minimap. Each row resolves its own toast before finishing (there is one
+  // pending-verb slot, module-wide) so it leaves nothing for a later test's
+  // own `Analytics.track` spy to catch (L-19, L-46).
+  it.each([
+    { regionId: "minimap", name: "Minimap" },
+    { regionId: "thinking", name: "Thinking" },
+    { regionId: "timestamps", name: "Timestamps" },
+  ] as const)(
+    "hides $name and announces it with an Undo",
+    ({ regionId, name }) => {
+      render(<Harness regionId={regionId} />);
+      openMenu();
 
-    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
+      fireEvent.click(screen.getByTestId(`layout-quick-verb-${regionId}-hide`));
 
-    expect(regionValue("minimap", "shown")).toBe("hidden");
-    expect(toasts.at(-1)?.message).toBe("Minimap hidden");
-    expect(toasts.at(-1)?.action.label).toBe("Undo");
-  });
+      expect(regionValue(regionId, "shown")).toBe("hidden");
+      expect(toasts.at(-1)?.message).toBe(`${name} hidden`);
+      expect(toasts.at(-1)?.action.label).toBe("Undo");
+      toasts.at(-1)?.onAutoClose?.();
+    },
+  );
 
   // A second verb replaces the first's toast rather than stacking beside it, so
   // the only Undo on screen is always the last verb's. Only one verb is ever
@@ -252,11 +264,8 @@ describe("<LayoutRegionContextMenu />", () => {
 
   // Chat display settings (audit R1, R3): Tool activity is Closed by
   // default, so its one offered verb is the size verb, worded as an
-  // open/close pair like Thinking's.
-  //
-  // Each of these three resolves its own toast before finishing (there is one
-  // pending-verb slot, module-wide) so it leaves nothing for a later test's
-  // own `Analytics.track` spy to catch (L-19, L-46).
+  // open/close pair like Thinking's. It resolves its own toast before
+  // finishing, for the same reason as the hide rows above.
   it("offers to open a closed Tool activity, and opening it sets size full", () => {
     render(<Harness regionId="toolActivity" />);
     openMenu();
@@ -265,28 +274,6 @@ describe("<LayoutRegionContextMenu />", () => {
 
     expect(regionValue("toolActivity", "size")).toBe("full");
     expect(toasts.at(-1)?.message).toBe("Tool activity open");
-    toasts.at(-1)?.onAutoClose?.();
-  });
-
-  it("offers to hide a shown Thinking", () => {
-    render(<Harness regionId="thinking" />);
-    openMenu();
-
-    fireEvent.click(screen.getByTestId("layout-quick-verb-thinking-hide"));
-
-    expect(regionValue("thinking", "shown")).toBe("hidden");
-    expect(toasts.at(-1)?.message).toBe("Thinking hidden");
-    toasts.at(-1)?.onAutoClose?.();
-  });
-
-  it("offers to hide shown Timestamps", () => {
-    render(<Harness regionId="timestamps" />);
-    openMenu();
-
-    fireEvent.click(screen.getByTestId("layout-quick-verb-timestamps-hide"));
-
-    expect(regionValue("timestamps", "shown")).toBe("hidden");
-    expect(toasts.at(-1)?.message).toBe("Timestamps hidden");
     toasts.at(-1)?.onAutoClose?.();
   });
 });
@@ -307,33 +294,25 @@ describe("layout_quick_verb analytics (L-19, L-46)", () => {
     );
   });
 
-  it("sends one event with undone: false when the toast auto-expires", () => {
-    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    render(<Harness regionId="minimap" />);
-    openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
+  it.each([
+    { how: "auto-expires", callback: "onAutoClose" },
+    { how: "is dismissed without Undo", callback: "onDismiss" },
+  ] as const)(
+    "sends one event with undone: false when the toast $how",
+    ({ callback }) => {
+      const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+      render(<Harness regionId="minimap" />);
+      openMenu();
+      fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
 
-    toasts.at(-1)?.onAutoClose?.();
+      toasts.at(-1)?.[callback]?.();
 
-    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
-      AnalyticsEvent.LayoutQuickVerb,
-      { region: "minimap", verb: "hide", undone: false },
-    );
-  });
-
-  it("sends one event with undone: false when the toast is dismissed without Undo", () => {
-    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    render(<Harness regionId="minimap" />);
-    openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-minimap-hide"));
-
-    toasts.at(-1)?.onDismiss?.();
-
-    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
-      AnalyticsEvent.LayoutQuickVerb,
-      { region: "minimap", verb: "hide", undone: false },
-    );
-  });
+      expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+        AnalyticsEvent.LayoutQuickVerb,
+        { region: "minimap", verb: "hide", undone: false },
+      );
+    },
+  );
 
   // Only one verb is ever offered at once now, so the two opens are two
   // different states of the same region - hide, then (now hidden) show.

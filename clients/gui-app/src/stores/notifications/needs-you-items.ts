@@ -23,8 +23,6 @@ export interface NeedsYouItem {
   readonly row: MergedNotificationRow;
   readonly reason: NeedsYouReason;
   readonly ask: string;
-  readonly epicId: string | null;
-  readonly chatId: string | null;
   readonly taskTitle: string;
   readonly agentTitle: string | null;
   readonly createdAt: number;
@@ -82,18 +80,10 @@ export function selectNeedsYouItems(
   for (const row of rows) {
     const reason = needsYouReasonOf(row);
     if (reason === null) continue;
-    const payload = row.payload;
-    const target =
-      payload !== null &&
-      (payload.kind === "approval" || payload.kind === "interview")
-        ? payload
-        : null;
     items.push({
       row,
       reason,
       ask: ASK_BY_REASON[reason],
-      epicId: target?.epicId ?? null,
-      chatId: target?.chatId ?? null,
       taskTitle: row.title,
       agentTitle: agentTitleOf(row),
       createdAt: row.createdAt,

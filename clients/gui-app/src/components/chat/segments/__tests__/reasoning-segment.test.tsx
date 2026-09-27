@@ -935,8 +935,11 @@ describe("<ReasoningSegment /> default disclosure follows Thinking's size", () =
     fireEvent.click(screen.getByRole("button", { name: /Thought for 12s/ }));
     expect(screen.getByText("Considering the options")).toBeTruthy();
 
-    // Re-affirming the SAME setting the block started under would collapse it
-    // again if the click choice were not sticky.
+    // Moving the setting away and back to the one the block started under
+    // would collapse it again if the click choice were not sticky.
+    act(() => {
+      useLayoutStore.getState().setRegionValues("thinking", { size: "full" });
+    });
     act(() => {
       useLayoutStore.getState().setRegionValues("thinking", { size: "chip" });
     });

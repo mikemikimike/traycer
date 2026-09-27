@@ -141,7 +141,7 @@ describe("<NotificationIndicatorIcon />", () => {
     ).toContain("text-success-foreground");
 
     rerender(renderIconContent(DEFAULT_STATE, "turn"));
-    expect(screen.getByTestId("indicator-activity-subject-1")).toBeDefined();
+    expect(glyphKind("indicator-activity-subject-1")).toBe("running");
 
     rerender(
       <NotificationIndicatorIcon

@@ -1061,8 +1061,17 @@ describe("<SideTabStrip />", () => {
 
   it("counts, lines and folds a group holding a tab and a split", async () => {
     openGroupWithTabAndSplit();
+    // Two flagged members, so the folded badge has to pick the worst:
+    // waiting outranks a failure (S-17).
     indicatorState.value = {
       epics: {
+        "e-one": {
+          unreadFailure: false,
+          unreadDone: false,
+          pendingApproval: true,
+          pendingInterview: false,
+          pendingFork: false,
+        },
         "e-three": {
           unreadFailure: true,
           unreadDone: false,
@@ -1076,6 +1085,7 @@ describe("<SideTabStrip />", () => {
     await renderStrip("/elsewhere", LEFT_STRIP);
 
     const header = screen.getByTestId("side-tab-group-header-g");
+    expect(header.textContent).toContain("Work");
     expect(within(header).getByTestId("side-tab-group-count").textContent).toBe(
       "3",
     );
@@ -1102,7 +1112,7 @@ describe("<SideTabStrip />", () => {
     expect(screen.getByTestId("side-tab-group-header-g")).toBeDefined();
     expect(
       screen.getByTestId("side-tab-group-badge").getAttribute("data-kind"),
-    ).toBe("failed");
+    ).toBe("approval");
   });
 
   describe("the leading slot's glyph presentation (D12, finding 4)", () => {
@@ -1444,7 +1454,7 @@ describe("<SideTabStrip />", () => {
         },
       );
 
-      it("leaves no easing class after a cancelled crossing", async () => {
+      it("leaves no easing class after a cancelled crossing, and a drag's start stops the toggle's running ease", async () => {
         motion.enabled = true;
         const easingClass = "transition-[width]";
         const strip = await renderStrip("/", LEFT_STRIP);
@@ -1457,6 +1467,15 @@ describe("<SideTabStrip />", () => {
 
         cancelHandle(handle);
         expect(strip.className).not.toContain(easingClass);
+
+        // The collapse toggle's ease is still running when a drag starts:
+        // the pickup lands instantly rather than easing toward the pointer.
+        fireEvent.click(screen.getByTestId("side-tab-strip-collapse"));
+        expect(strip.className).toContain(easingClass);
+        const resting = screen.getByTestId("side-tab-strip-resize-handle");
+        downHandle(resting, DRAG_ANCHOR_X);
+        expect(strip.className).not.toContain(easingClass);
+        cancelHandle(resting);
       });
     });
 
@@ -1501,6 +1520,10 @@ describe("<SideTabStrip />", () => {
       expect(useSideTabStripStore.getState().dragCollapsed).toBeNull();
 
       releaseHandle(handle);
+      expect(useSideTabStripStore.getState()).toMatchObject({
+        collapsed: false,
+        widthPx: OVER_SNAP_WIDTH,
+      });
     });
 
     it("commits the rail on release under the snap point, keeping the stored width", async () => {
@@ -1517,6 +1540,9 @@ describe("<SideTabStrip />", () => {
         dragCollapsed: null,
         widthPx: START_WIDTH,
       });
+      // Settled explicitly to the rail width (F9): after a crossing React may
+      // not rewrite an inline value it already rendered.
+      expect(strip.style.width).toBe(`${SIDE_STRIP_RAIL_WIDTH_PX}px`);
     });
 
     it("expands from the rail once a drag out passes the snap point, and stores the width", async () => {

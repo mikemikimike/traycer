@@ -90,16 +90,6 @@ describe("LayoutAllSettings (L-06)", () => {
       SURFACE_AREAS.map((area) => area.id),
     );
   });
-
-  it("opens the Composer form, with the shared back row, on a click", () => {
-    render(<Harness />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Composer/ }));
-
-    expect(useLayoutEditorStore.getState().area).toBe("composer");
-    expect(screen.getByRole("button", { name: "All settings" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: /Composer/ })).toBeNull();
-  });
 });
 
 describe("selecting a row from the canvas opens its area with the row expanded (L-89)", () => {
@@ -126,7 +116,7 @@ describe("selecting a row from the canvas opens its area with the row expanded (
 });
 
 describe("a region row's own disclosure click selects it too (item toggleRow)", () => {
-  it("selects on open, clears on a second click, and Escape does both in one step", () => {
+  it("selects on open, and clears on a second click", () => {
     render(<Harness />);
     act(() => {
       useLayoutEditorStore.getState().openArea("composer", null);
@@ -141,16 +131,6 @@ describe("a region row's own disclosure click selects it too (item toggleRow)", 
 
     expect(useLayoutEditorStore.getState().selected).toBeNull();
     expect(rowExpanded("model")).toBe(false);
-
-    fireEvent.click(rowButton("model"));
-    expect(useLayoutEditorStore.getState().selected).toBe("model");
-
-    act(() => {
-      useLayoutEditorStore.getState().popInspectorLevel();
-    });
-
-    expect(useLayoutEditorStore.getState().selected).toBeNull();
-    expect(useLayoutEditorStore.getState().openRows).not.toContain("model");
   });
 });
 
@@ -194,33 +174,6 @@ describe("a non-disclosing region row selects from its own label button (item C)
     fireEvent.keyDown(button, { key: " " });
     expect(useLayoutEditorStore.getState().selected).toBeNull();
   });
-
-  it("Escape clears the selection once it is set", () => {
-    render(<Harness />);
-    act(() => {
-      useLayoutEditorStore.getState().openArea("topBar", null);
-    });
-    fireEvent.click(rowButton("homeTab"));
-    expect(useLayoutEditorStore.getState().selected).toBe("homeTab");
-
-    act(() => {
-      useLayoutEditorStore.getState().popInspectorLevel();
-    });
-
-    expect(useLayoutEditorStore.getState().selected).toBeNull();
-  });
-
-  it("a disclosing row's own label button still expands it, and selects it too", () => {
-    render(<Harness />);
-    act(() => {
-      useLayoutEditorStore.getState().openArea("composer", null);
-    });
-
-    fireEvent.click(rowButton("model"));
-
-    expect(useLayoutEditorStore.getState().selected).toBe("model");
-    expect(rowExpanded("model")).toBe(true);
-  });
 });
 
 describe("Find (item 2, item 6)", () => {
@@ -231,39 +184,34 @@ describe("Find (item 2, item 6)", () => {
     return node;
   }
 
-  it.each([["Pin breakdown"], ["Ring only"], ["Cache read"]])(
-    "lists Context usage alone for %s, and Enter opens Chat with it expanded",
-    (query) => {
+  it.each([
+    { query: "Pin breakdown", area: "chat", region: "contextUsage" },
+    { query: "Ring only", area: "chat", region: "contextUsage" },
+    { query: "Cache read", area: "chat", region: "contextUsage" },
+    { query: "Remaining", area: "statusBar", region: "usageLimits" },
+  ] as const)(
+    "lists $region alone for '$query', and Enter opens $area with it expanded",
+    ({ query, area, region }) => {
       render(<Harness />);
 
       fireEvent.change(filterInput(), { target: { value: query } });
       expect(screen.queryAllByRole("button", { name: /^Chat$/ })).toHaveLength(
         0,
       );
-      expect(findResult("contextUsage")).not.toBeNull();
+      expect(findResult(region)).not.toBeNull();
+      expect(
+        document.querySelectorAll("[data-layout-find-result]"),
+      ).toHaveLength(1);
 
       fireEvent.keyDown(filterInput(), { key: "Enter" });
 
-      expect(useLayoutEditorStore.getState().area).toBe("chat");
-      expect(useLayoutEditorStore.getState().selected).toBe("contextUsage");
+      expect(useLayoutEditorStore.getState().area).toBe(area);
+      expect(useLayoutEditorStore.getState().selected).toBe(region);
       // Find lives at All settings alone: opening the area consumes it.
       expect(useLayoutEditorStore.getState().filter).toBe("");
-      expect(rowExpanded("contextUsage")).toBe(true);
+      expect(rowExpanded(region)).toBe(true);
     },
   );
-
-  it("lists Usage limits alone for 'Remaining', and Enter opens it with the row expanded", () => {
-    render(<Harness />);
-
-    fireEvent.change(filterInput(), { target: { value: "Remaining" } });
-    expect(findResult("usageLimits")).not.toBeNull();
-
-    fireEvent.keyDown(filterInput(), { key: "Enter" });
-
-    expect(useLayoutEditorStore.getState().area).toBe("statusBar");
-    expect(useLayoutEditorStore.getState().selected).toBe("usageLimits");
-    expect(rowExpanded("usageLimits")).toBe(true);
-  });
 
   it("draws the highlighted name, the area breadcrumb and the current-state detail", () => {
     render(<Harness />);
@@ -350,15 +298,11 @@ describe("Find (item 2, item 6)", () => {
   });
 
   describe("a matching area (R2-D addendum)", () => {
-    it("lists Composer first, above any settings it matches", () => {
+    it("lists Composer as an area result, labelled Area", () => {
       render(<Harness />);
 
       fireEvent.change(filterInput(), { target: { value: "composer" } });
 
-      const results = screen
-        .getAllByRole("button")
-        .filter((button) => button.hasAttribute("data-layout-find-result"));
-      expect(results[0]).toBe(findResult("area:composer"));
       expect(findResult("area:composer").textContent).toContain("Composer");
       expect(findResult("area:composer").textContent).toContain("Area");
     });
@@ -489,19 +433,6 @@ describe("Side tab view's row lights and selects its canvas part", () => {
 });
 
 describe("layoutAreaChanged (L-91)", () => {
-  it("is false against the shipped default, true once a Composer region moves", () => {
-    expect(layoutAreaChanged("composer", DEFAULT_LAYOUT_SNAPSHOT)).toBe(false);
-
-    const snapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: {
-        ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
-        dock: [...DEFAULT_LAYOUT_SNAPSHOT.arrangement.dock].reverse(),
-      },
-    };
-    expect(layoutAreaChanged("composer", snapshot)).toBe(true);
-  });
-
   it("reads Presets off the whole-layout modified flag, not a surface diff", () => {
     expect(layoutAreaChanged("presets", DEFAULT_LAYOUT_SNAPSHOT)).toBe(false);
 

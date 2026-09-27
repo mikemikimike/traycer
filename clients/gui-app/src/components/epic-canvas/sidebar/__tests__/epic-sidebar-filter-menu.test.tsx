@@ -98,9 +98,10 @@ describe("<ChatFilterMenu />", () => {
     ).toBe("others");
   });
 
-  // The view menu's "expand the section first" behaviour is deleted with the
-  // section collapse it existed for (L-157): the body draws one panel and
-  // always draws it whole, so there is nothing for the menu to expand.
+  // The view menu no longer expands a collapsed section before opening
+  // (deleted with L-157). The per-member collapse that returned for stacked
+  // panels (L-166) keeps a collapsed member's header, menu included, so the
+  // menu opens without expanding it.
   it("keeps the view menu open across a remount of its header", () => {
     const { rerender } = render(
       <ChatFilterMenu

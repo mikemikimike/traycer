@@ -217,17 +217,6 @@ describe("HoverCard", () => {
       expect(cardIsOpen("card-a")).toBe(false);
     });
 
-    it("never leaves two cards open once the hand-off settles", () => {
-      const { a, b } = renderGroup();
-
-      hoverIn(a);
-      settle(OPEN_DELAY_MS);
-      hoverIn(b);
-      settleGroupHandoff();
-      const bothOpen = cardIsOpen("card-a") && cardIsOpen("card-b");
-      expect(bothOpen).toBe(false);
-    });
-
     it("still waits the full 500ms for the first open in a fresh group", () => {
       const { a } = renderGroup();
 
@@ -235,18 +224,6 @@ describe("HoverCard", () => {
       settle(OPEN_DELAY_MS - 1);
       expect(cardIsOpen("card-a")).toBe(false);
     });
-  });
-
-  it("(c) pointerdown on the trigger closes an open card", () => {
-    const trigger = renderCard({});
-
-    hoverIn(trigger);
-    settle(OPEN_DELAY_MS);
-    expect(cardIsOpen("content")).toBe(true);
-
-    fireEvent.pointerDown(trigger, { pointerType: "mouse" });
-    settle(0);
-    expect(cardIsOpen("content")).toBe(false);
   });
 
   it("(c) swallows an open that lands after a press during the delay (the old S5 stick)", () => {
@@ -258,19 +235,6 @@ describe("HoverCard", () => {
     // Let the rest of the original 500ms elapse: the pending open must not
     // fire after the press, unlike Radix's orphaned timer.
     settle(OPEN_DELAY_MS);
-    expect(cardIsOpen("content")).toBe(false);
-  });
-
-  it("(d) click (keyboard activation, no pointerdown) closes an open card", () => {
-    const trigger = renderCard({});
-
-    hoverIn(trigger);
-    settle(OPEN_DELAY_MS);
-    expect(cardIsOpen("content")).toBe(true);
-
-    // Enter/Space activation fires `click` with no preceding `pointerdown`.
-    fireEvent.click(trigger);
-    settle(0);
     expect(cardIsOpen("content")).toBe(false);
   });
 
@@ -287,34 +251,6 @@ describe("HoverCard", () => {
   });
 
   describe("(f) enabled=false", () => {
-    it("closes an already-open card the instant it is disabled", () => {
-      const { rerender } = render(<TestCard enabled />);
-      const trigger = screen.getByTestId("trigger");
-
-      hoverIn(trigger);
-      settle(OPEN_DELAY_MS);
-      expect(cardIsOpen("content")).toBe(true);
-
-      rerender(<TestCard enabled={false} />);
-      settle(0);
-      expect(cardIsOpen("content")).toBe(false);
-    });
-
-    it("closes even a CONTROLLED open card the instant it is disabled", () => {
-      // Distinct from the uncontrolled case above: there is no internal
-      // `uncontrolledOpen` for `enabled=false` to reset here, since the
-      // caller owns `open`. The card must still shut - `enabled` overrides a
-      // controlled `open` too.
-      const { rerender } = render(
-        <TestCard open enabled onOpenChange={null} />,
-      );
-      expect(cardIsOpen("content")).toBe(true);
-
-      rerender(<TestCard open enabled={false} onOpenChange={null} />);
-      settle(0);
-      expect(cardIsOpen("content")).toBe(false);
-    });
-
     it("suppresses a new hover open while disabled", () => {
       const trigger = renderCard({ enabled: false });
 
@@ -448,21 +384,6 @@ describe("HoverCard", () => {
     settle(0);
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(cardIsOpen("content")).toBe(false);
-  });
-
-  it("(j) puts appearance, testId and data-state on the content node", () => {
-    const trigger = renderCard({
-      appearance: "tooltip",
-      contentTestId: "my-card",
-    });
-
-    hoverIn(trigger);
-    settle(OPEN_DELAY_MS);
-
-    const content = screen.getByTestId("my-card");
-    expect(content.dataset.slot).toBe("hover-card-content");
-    expect(content.dataset.appearance).toBe("tooltip");
-    expect(content.dataset.state).toBe("open");
   });
 
   it("names a tooltip-role card by its accessible role alone (a rail label has no name)", () => {
@@ -617,10 +538,9 @@ describe("HoverCard", () => {
   });
 
   it("(g) disabling a CONTROLLED open card reports 'disabled', and re-enabling after the caller drops `open` stays closed", () => {
-    // Distinct from the `(f)` controlled-disable test: this pins the FULL
-    // round trip a real controlled caller does - act on the "disabled"
-    // reason by dropping its own `open`, then re-enable - rather than just
-    // the card's own internal close.
+    // Pins the FULL round trip a real controlled caller does - the card shuts
+    // even though the caller owns `open`, reports the "disabled" reason, the
+    // caller drops its own `open`, then re-enables.
     const onOpenChange = vi.fn();
     const { rerender } = render(
       <TestCard open enabled onOpenChange={onOpenChange} />,

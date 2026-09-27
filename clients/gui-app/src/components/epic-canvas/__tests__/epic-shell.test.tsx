@@ -616,10 +616,6 @@ describe("<EpicShell />", () => {
     });
 
     it("draws its own bottom border once the status bar has nothing hosted there to show", () => {
-      placeArrangement({
-        tabStripPlacement: "top",
-        sidebarSide: "left",
-      });
       useLayoutStore.setState({
         arrangement: {
           ...DEFAULT_ARRANGEMENT,
@@ -632,6 +628,9 @@ describe("<EpicShell />", () => {
       expect(canvasFrame().className).not.toContain("md:border-b-0");
     });
 
+    // `seam = stripEdge === sidebarSide ? null : stripEdge`: only a side strip
+    // on the side AWAY from the sidebar meets the canvas, and only that edge
+    // drops its border. `suppressed: null` rows keep the full frame.
     it.each([
       {
         tabStripPlacement: "left",
@@ -643,34 +642,24 @@ describe("<EpicShell />", () => {
         sidebarSide: "left",
         suppressed: "md:border-e-0",
       },
+      { tabStripPlacement: "top", sidebarSide: "left", suppressed: null },
+      { tabStripPlacement: "top", sidebarSide: "right", suppressed: null },
+      { tabStripPlacement: "left", sidebarSide: "left", suppressed: null },
+      { tabStripPlacement: "right", sidebarSide: "right", suppressed: null },
     ] as const)(
-      "suppresses the seam-side border where the canvas meets the side strip: strip=$tabStripPlacement, sidebar=$sidebarSide",
+      "suppresses only the seam-side border where the canvas meets the side strip: strip=$tabStripPlacement, sidebar=$sidebarSide",
       ({ tabStripPlacement, sidebarSide, suppressed }) => {
         placeArrangement({ tabStripPlacement, sidebarSide });
         render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
 
         const frame = canvasFrame();
-        expect(frame.className).toContain(suppressed);
-        const other =
-          suppressed === "md:border-s-0" ? "md:border-e-0" : "md:border-s-0";
-        expect(frame.className).not.toContain(other);
-      },
-    );
-
-    it.each([
-      { tabStripPlacement: "top", sidebarSide: "left" },
-      { tabStripPlacement: "top", sidebarSide: "right" },
-      { tabStripPlacement: "left", sidebarSide: "left" },
-      { tabStripPlacement: "right", sidebarSide: "right" },
-    ] as const)(
-      "draws the full border with no seam suppression: strip=$tabStripPlacement, sidebar=$sidebarSide",
-      ({ tabStripPlacement, sidebarSide }) => {
-        placeArrangement({ tabStripPlacement, sidebarSide });
-        render(<EpicShell epicId={EPIC_ID} tabId={TAB_ID} active />);
-
-        const frame = canvasFrame();
-        expect(frame.className).not.toContain("md:border-s-0");
-        expect(frame.className).not.toContain("md:border-e-0");
+        for (const seamClass of ["md:border-s-0", "md:border-e-0"]) {
+          if (seamClass === suppressed) {
+            expect(frame.className).toContain(seamClass);
+          } else {
+            expect(frame.className).not.toContain(seamClass);
+          }
+        }
       },
     );
   });

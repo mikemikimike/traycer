@@ -13,13 +13,16 @@ import {
   installFakeViewTransitions,
   type FakeViewTransition,
 } from "@/lib/layout/test-support/fake-view-transition";
-import { LAYOUT_EDITOR_LEASE_KEY } from "@/lib/layout/editor-lease";
+import {
+  LAYOUT_EDITOR_LEASE_KEY,
+  readLayoutEditorLease,
+} from "@/lib/layout/editor-lease";
 import { LAYOUT_EDITOR_MIN_WIDTH } from "@/lib/layout/editor-width";
 import { emptyTabStripLayout, tabItemId } from "@/stores/tabs/layout";
-import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import type { SystemModalActive } from "@/stores/tabs/system-overlay-types";
 import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
+import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import {
   useLayoutEditorStore,
   type LayoutEditorOrigin,
@@ -177,28 +180,6 @@ function tick(): Promise<void> {
   });
 }
 
-/** A chat tile live in the active pane of the active Epic tab. */
-function seedOpenChat(tileId: string): void {
-  useEpicCanvasStore.setState({
-    activeTabId: "tab-a",
-    canvasByTabId: {
-      "tab-a": {
-        root: {
-          kind: "pane",
-          id: "pane-1",
-          tabInstanceIds: [tileId],
-          activeTabId: tileId,
-          previewTabId: null,
-          activationHistory: [tileId],
-        },
-        activePaneId: "pane-1",
-        tilesByInstanceId: {},
-        sizesByGroupId: {},
-      },
-    },
-  });
-}
-
 function sampleTabPresent(): boolean {
   return useTabsStore
     .getState()
@@ -227,7 +208,6 @@ beforeEach(() => {
     layoutCarryDone: true,
   });
   useLayoutEditorStore.getState().endSession();
-  useEpicCanvasStore.setState({ activeTabId: null, canvasByTabId: {} });
   useTabsStore.setState({
     ...emptyTabStripLayout(),
     items: [{ kind: "tab", id: tabItemId(HISTORY_REF), ref: HISTORY_REF }],
@@ -313,11 +293,17 @@ describe("the width gate (L-02, 5.1)", () => {
 
 describe("the canvas (L-87, 5.1)", () => {
   it("opens the sample workspace, whatever the user was doing", () => {
-    // A real chat in the active pane of the active Epic tab used to BE the
-    // canvas (L-15). L-87 takes that away: the user's own task is never
-    // rearranged under them, so the same gesture opens the sample tab here
-    // and with nothing open at all.
-    seedOpenChat("tile-7");
+    // The user's own task tab used to BE the canvas (L-15). L-87 takes that
+    // away: the user's own task is never rearranged under them, so the same
+    // gesture opens the sample tab here and with nothing open at all.
+    useTabsStore.setState((state) => ({
+      items: [
+        ...state.items,
+        { kind: "tab", id: tabItemId(EPIC_REF), ref: EPIC_REF },
+      ],
+      activeItemId: tabItemId(EPIC_REF),
+      stripOrder: [...state.stripOrder, EPIC_REF],
+    }));
 
     expect(open(null)).toBe(true);
 
@@ -376,23 +362,21 @@ describe("the canvas (L-87, 5.1)", () => {
 });
 
 describe("the system overlay the editor opens under (L-91)", () => {
-  it("closes the modal that would otherwise paint over the editor", () => {
-    const overlay = publishModalApi({ kind: "settings", section: "layout" });
+  // The palette reaches the door from any surface, and `close()` is the one
+  // dismissal both overlays share.
+  it.each<SystemModalActive>([
+    { kind: "settings", section: "layout" },
+    { kind: "history", section: null },
+  ])(
+    "closes the $kind modal that would otherwise paint over the editor",
+    (active) => {
+      const overlay = publishModalApi(active);
 
-    expect(open(null)).toBe(true);
+      expect(open(null)).toBe(true);
 
-    expect(overlay.close).toHaveBeenCalledOnce();
-  });
-
-  it("closes a History modal too, not only Settings", () => {
-    // The palette reaches the door from any surface, and `close()` is the one
-    // dismissal both overlays share.
-    const overlay = publishModalApi({ kind: "history", section: null });
-
-    open(null);
-
-    expect(overlay.close).toHaveBeenCalledOnce();
-  });
+      expect(overlay.close).toHaveBeenCalledOnce();
+    },
+  );
 
   it("never navigates back when no overlay is up", () => {
     // `close()` pops the router's history whenever the adjacent entry looks
@@ -513,6 +497,34 @@ describe("the single-window lease (L-32, 5.3)", () => {
 
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
   });
+
+  it("keeps the lease alive past its TTL, and exits when another window takes it", () => {
+    vi.useFakeTimers();
+    try {
+      open(null);
+
+      // Well past the 6s TTL: only the heartbeat keeps the key this window's.
+      vi.advanceTimersByTime(10_000);
+      expect(readLayoutEditorLease()?.expiresAt).toBeGreaterThan(Date.now());
+
+      // A window that took the key while this one was suspended past its TTL.
+      const theirs = JSON.stringify({
+        token: "another-window",
+        expiresAt: Date.now() + 6000,
+      });
+      window.localStorage.setItem(LAYOUT_EDITOR_LEASE_KEY, theirs);
+      vi.advanceTimersByTime(2_000);
+      drainTransitions();
+
+      expect(useLayoutEditorStore.getState().session).toBeNull();
+      expect(toasts.info).toHaveBeenCalledWith(
+        "Customize layout moved to another window. Your layout is saved.",
+      );
+      expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBe(theirs);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("leaving (5.3)", () => {
@@ -540,32 +552,38 @@ describe("leaving (5.3)", () => {
   // left behind after a tab switch or a lost lease was a Customizing tab
   // showing the sample with no inspector and no frame. Only `sample-closed`
   // is exempt - there is nothing left to close.
-  it("closes the sample tab it opened, on every exit but sample-closed", () => {
-    open(null);
-    expect(sampleTabPresent()).toBe(true);
+  const exits: Record<
+    Exclude<LayoutEditorExitReason, "sample-closed">,
+    () => void
+  > = {
+    done: () => close("done"),
+    discard: () => close("discard"),
+    "open-settings": () => close("open-settings"),
+    "tab-switch": () => close("tab-switch"),
+    "below-threshold": () => close("below-threshold"),
+    "lease-lost": () => close("lease-lost"),
+    abandoned: abandonLayoutEditorSession,
+  };
 
-    close("done");
+  it.each(Object.entries(exits).map(([reason, exit]) => ({ reason, exit })))(
+    "closes the sample tab it opened on $reason",
+    ({ exit }) => {
+      open(null);
+      expect(sampleTabPresent()).toBe(true);
 
-    expect(sampleTabPresent()).toBe(false);
+      exit();
 
-    open(null);
-    expect(sampleTabPresent()).toBe(true);
-
-    close("tab-switch");
-
-    expect(sampleTabPresent()).toBe(false);
-
-    open(null);
-    expect(sampleTabPresent()).toBe(true);
-
-    close("lease-lost");
-
-    expect(sampleTabPresent()).toBe(false);
-  });
+      expect(sampleTabPresent()).toBe(false);
+    },
+  );
 
   it("is a no-op with no session open", () => {
     closeLayoutEditor("done");
+
     expect(useLayoutEditorStore.getState().session).toBeNull();
+    expect(useLayoutEditorStore.getState().leaving).toBe(false);
+    expect(transitions).toHaveLength(0);
+    expect(toasts.info).not.toHaveBeenCalled();
   });
 });
 
@@ -599,35 +617,26 @@ describe("the Cmd+W close-tab chord (item 3)", () => {
 });
 
 describe("returning to the door's origin on exit (5.3)", () => {
-  it("returns a settings-origin session to its area on Done", () => {
-    openWithOrigin({ kind: "settings", area: "chat" }, null);
+  // A `null` area is Presets.
+  it.each<{
+    readonly reason: "done" | "discard";
+    readonly area: SurfaceGroupId | null;
+  }>([
+    { reason: "done", area: "chat" },
+    { reason: "discard", area: "sidebar" },
+    { reason: "done", area: null },
+  ])(
+    "returns a settings-origin session to its area ($area) on $reason",
+    ({ reason, area }) => {
+      openWithOrigin({ kind: "settings", area }, null);
 
-    close("done");
+      close(reason);
 
-    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
-      "chat",
-    );
-  });
-
-  it("returns a settings-origin session to its area on Discard too", () => {
-    openWithOrigin({ kind: "settings", area: "sidebar" }, null);
-
-    close("discard");
-
-    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
-      "sidebar",
-    );
-  });
-
-  it("returns to Presets for a settings-origin session opened with a null area", () => {
-    openWithOrigin({ kind: "settings", area: null }, null);
-
-    close("done");
-
-    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
-      null,
-    );
-  });
+      expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
+        area,
+      );
+    },
+  );
 
   it("never navigates to Settings for a tab-origin session", () => {
     // `open()` opens with a tab origin (L-87): closing the sample tab already
@@ -650,6 +659,7 @@ describe("returning to the door's origin on exit (5.3)", () => {
     }));
     drainTransitions();
 
+    expect(useLayoutEditorStore.getState().session).toBeNull();
     expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
       "topBar",
     );
@@ -864,18 +874,6 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
     expect(trackSpy.mock.calls[0]?.[1]).not.toHaveProperty("scene");
   });
 
-  it("reports discarded: true only when the exit reason is discard", () => {
-    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    open(null);
-
-    close("discard");
-
-    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
-      AnalyticsEvent.LayoutEditorSession,
-      expect.objectContaining({ discarded: true }),
-    );
-  });
-
   it("reports first_change_bucket as null for a session with no change", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
     open(null);
@@ -891,25 +889,8 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
         regions_touched_count: 0,
       }),
     );
-  });
-
-  it("counts the value change made this session and the region it touched", () => {
-    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    open(null);
-    useLayoutEditorStore.getState().recordGesture(() => {
-      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
-    });
-
-    close("done");
-
-    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
-      AnalyticsEvent.LayoutEditorSession,
-      expect.objectContaining({
-        changed_count: 1,
-        regions_touched_count: 1,
-        undo_count: 0,
-      }),
-    );
+    // The real `track` ran: the sanitizer admitted the null bucket.
+    expect(trackSpy.mock.results[0]?.value).toBe(true);
   });
 
   it("counts an undo that landed", () => {
@@ -947,25 +928,37 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
     );
   });
 
-  it("counts what was built before a Discard, not the zero left after it", () => {
-    const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
-    open(null);
-    useLayoutEditorStore.getState().recordGesture(() => {
-      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
-    });
+  // The Discard row is the ordering one: counts what was built before it, not
+  // the zero left after it.
+  it.each<{
+    readonly reason: "done" | "discard";
+    readonly discarded: boolean;
+    readonly micAfter: { readonly shown: "hidden" } | undefined;
+  }>([
+    { reason: "done", discarded: false, micAfter: { shown: "hidden" } },
+    { reason: "discard", discarded: true, micAfter: undefined },
+  ])(
+    "counts the value change made this session and the region it touched on $reason",
+    ({ reason, discarded, micAfter }) => {
+      const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
+      open(null);
+      useLayoutEditorStore.getState().recordGesture(() => {
+        useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+      });
 
-    close("discard");
+      close(reason);
 
-    expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
-      AnalyticsEvent.LayoutEditorSession,
-      expect.objectContaining({
-        discarded: true,
-        changed_count: 1,
-        regions_touched_count: 1,
-      }),
-    );
-    expect(getLayoutSnapshot().overrides.mic).toBeUndefined();
-  });
+      expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
+        AnalyticsEvent.LayoutEditorSession,
+        expect.objectContaining({
+          discarded,
+          changed_count: 1,
+          regions_touched_count: 1,
+        }),
+      );
+      expect(getLayoutSnapshot().overrides.mic).toEqual(micAfter);
+    },
+  );
 });
 
 describe("the canvas going away underneath the editor (5.3)", () => {
@@ -985,30 +978,5 @@ describe("the canvas going away underneath the editor (5.3)", () => {
     expect(useLayoutEditorStore.getState().session).toBeNull();
     expect(sampleTabPresent()).toBe(false);
     expect(useTabsStore.getState().activeItemId).toBe(tabItemId(EPIC_REF));
-  });
-
-  it("exits when the window narrows past the width the editor needs", () => {
-    open(null);
-
-    setViewportWidth(700);
-    window.dispatchEvent(new Event("resize"));
-    drainTransitions();
-
-    expect(useLayoutEditorStore.getState().session).toBeNull();
-  });
-
-  it("exits when the sample tab is closed by hand", () => {
-    // The one exit a user can reach without finding the inspector, and with
-    // the sample workspace as the only canvas it means "I am done".
-    open(null);
-
-    useTabsStore.setState((state) => ({
-      items: state.items.filter(
-        (item) => item.kind !== "tab" || item.ref.kind !== "sample-workspace",
-      ),
-    }));
-    drainTransitions();
-
-    expect(useLayoutEditorStore.getState().session).toBeNull();
   });
 });

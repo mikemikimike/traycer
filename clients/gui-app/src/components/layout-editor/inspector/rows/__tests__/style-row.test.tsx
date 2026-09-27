@@ -13,9 +13,9 @@ import {
 /**
  * Model has two style rows sharing one component (`region-grammar.ts`): its
  * chip Style and its picker footer's Reasoning control. This covers the
- * second one - both rows rendering with their own label, a click writing the
- * example's patch, and the per-row revert only appearing once the value has
- * actually moved off the last-applied preset (L-133).
+ * second one - its checked example, a click writing the example's patch, and
+ * the per-row revert only appearing once the value has actually moved off the
+ * last-applied preset (L-133).
  */
 
 function modelStyleRow(key: string) {
@@ -56,19 +56,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useLayoutEditorStore.getState().endSession();
-});
-
-describe("<StyleRow /> Model's two rows", () => {
-  it("renders each under its own label", () => {
-    renderModelStyleRow("style");
-    expect(screen.getByRole("radiogroup", { name: "Style" })).not.toBeNull();
-
-    cleanup();
-    renderModelStyleRow("reasoningControl");
-    expect(
-      screen.getByRole("radiogroup", { name: "Reasoning control" }),
-    ).not.toBeNull();
-  });
 });
 
 describe("<StyleRow /> Model's Reasoning control", () => {

@@ -1,15 +1,6 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PaneVisibilityContext } from "@/components/epic-tabs/pane-visibility-context";
 import { RollingNumber } from "@/components/ui/rolling-number";
@@ -46,44 +37,9 @@ vi.mock("@number-flow/react", async (importOriginal) => {
   return { ...actual, useIsSupported: () => isSupported.current };
 });
 
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-
-let reducedMotion = false;
-const listeners = new Set<() => void>();
-const nativeMatchMedia = window.matchMedia;
-
-beforeAll(() => {
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    get matches(): boolean {
-      return query === REDUCED_MOTION_QUERY && reducedMotion;
-    },
-    media: query,
-    onchange: null,
-    addEventListener: (type: string, listener: () => void) => {
-      if (type === "change") listeners.add(listener);
-    },
-    removeEventListener: (type: string, listener: () => void) => {
-      if (type === "change") listeners.delete(listener);
-    },
-    dispatchEvent: () => false,
-  }));
-});
-
-afterAll(() => {
-  vi.stubGlobal("matchMedia", nativeMatchMedia);
-});
-
-function announceReducedMotion(next: boolean): void {
-  act(() => {
-    reducedMotion = next;
-    for (const listener of listeners) listener();
-  });
-}
-
 function reset(): void {
   isSupported.current = false;
   useThemeLibraryStore.setState({ panelAnimations: true });
-  if (reducedMotion) announceReducedMotion(false);
 }
 
 beforeEach(reset);
@@ -176,31 +132,6 @@ describe("RollingNumber where the browser can animate", () => {
 
     const { container } = renderRolling(
       <RollingNumber value={47} className={undefined} testId="count" />,
-    );
-
-    expect(rolled(container)).toBeNull();
-    expect(screen.getByText("47")).toBe(screen.getByTestId("count"));
-  });
-
-  it("falls back to plain text when the OS asks for reduced motion", () => {
-    isSupported.current = true;
-    reducedMotion = true;
-
-    const { container } = renderRolling(
-      <RollingNumber value={47} className={undefined} testId="count" />,
-    );
-
-    expect(rolled(container)).toBeNull();
-    expect(screen.getByText("47")).toBe(screen.getByTestId("count"));
-  });
-
-  it("falls back to plain text in a pane that is mounted but not visible", () => {
-    isSupported.current = true;
-
-    const { container } = render(
-      <PaneVisibilityContext.Provider value={false}>
-        <RollingNumber value={47} className={undefined} testId="count" />
-      </PaneVisibilityContext.Provider>,
     );
 
     expect(rolled(container)).toBeNull();

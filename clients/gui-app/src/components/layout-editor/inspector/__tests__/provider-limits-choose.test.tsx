@@ -12,7 +12,6 @@ import {
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
 import { USAGE_PROVIDER_LEVEL } from "@/components/layout-editor/regions/usage-provider-level";
-import { ResetLayoutButton } from "@/components/layout-editor/inspector/presets-block";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
@@ -146,20 +145,6 @@ describe('the provider row\'s "Choose..." checklist (L-96, I-14)', () => {
     expect(selection().limitKeys).toEqual(["5h"]);
   });
 
-  it("clears the picks on the way back to Automatic", () => {
-    render(<ProviderLimitsControl providerId={PROVIDER} />);
-    fireEvent.click(screen.getByRole("radio", { name: "Choose..." }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Weekly" }));
-    expect(selection().limitKeys).toHaveLength(2);
-
-    fireEvent.click(
-      screen.getByRole("radio", { name: "Automatic (recommended)" }),
-    );
-
-    expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
-    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
-  });
-
   it("leaves NOTHING changed on the way back to Automatic (R1-03)", () => {
     render(<ProviderLimitsControl providerId={PROVIDER} />);
     fireEvent.click(screen.getByRole("radio", { name: "Choose..." }));
@@ -176,34 +161,8 @@ describe('the provider row\'s "Choose..." checklist (L-96, I-14)', () => {
     expect(providerChanged(arrangement(), PROVIDER)).toBe(false);
     expect(usageProvidersChanged(arrangement())).toBe(false);
     expect(resetWouldChange(getLayoutSnapshot())).toBe(false);
-  });
-
-  it("leaves Reset layout… disabled too, once a picked limit goes back to Automatic", () => {
-    render(
-      <>
-        <ProviderLimitsControl providerId={PROVIDER} />
-        <ResetLayoutButton />
-      </>,
-    );
-    fireEvent.click(screen.getByRole("radio", { name: "Choose..." }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Weekly" }));
-    expect(selection().limitKeys).toEqual(["5h", "week"]);
-    expect(
-      screen
-        .getByRole("button", { name: "Reset layout…" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
-
-    fireEvent.click(
-      screen.getByRole("radio", { name: "Automatic (recommended)" }),
-    );
-
-    expect(arrangement().providerLimits).toEqual({});
-    expect(
-      screen
-        .getByRole("button", { name: "Reset layout…" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+    // And the checklist goes with the picks.
+    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
   });
 
   it("keeps a pick the host no longer reports when another is ticked (R1-16)", () => {
@@ -243,20 +202,6 @@ describe('the provider row\'s "Choose..." checklist (L-96, I-14)', () => {
     expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
   });
 
-  it("says so and stays Automatic when the provider has reported nothing", () => {
-    live.windows = [];
-    live.drawnKeys = [];
-    render(<ProviderLimitsControl providerId={PROVIDER} />);
-
-    expect(screen.getByText(USAGE_PROVIDER_LEVEL.limitsEmpty)).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("radio", { name: "Choose..." }));
-
-    expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
-    expect(limitsMode()).toBe("Automatic (recommended)");
-    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
-  });
-
   it("disables Choose... with a reason while empty, and the reason names an element aria-describedby actually points at", () => {
     live.windows = [];
     live.drawnKeys = [];
@@ -275,9 +220,10 @@ describe('the provider row\'s "Choose..." checklist (L-96, I-14)', () => {
     fireEvent.click(choose);
     expect(limitsMode()).toBe("Automatic (recommended)");
     expect(selection()).toEqual(AUTOMATIC_LIMIT_SELECTION);
+    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
   });
 
-  it("shows Automatic over a STALE stored pick once the reading goes empty, without discarding the pick", () => {
+  it("shows Automatic over a STALE stored pick while the reading is empty, and re-activates it once the host warms back up", () => {
     // The bug this guards: the segmented value used to key off
     // `selection.limitKeys.length > 0` alone, ignoring `windows.length` - so
     // a provider that had a stored pick and then reported nothing showed
@@ -288,26 +234,14 @@ describe('the provider row\'s "Choose..." checklist (L-96, I-14)', () => {
     });
     live.windows = [];
     live.drawnKeys = [];
-    render(<ProviderLimitsControl providerId={PROVIDER} />);
-
+    const { rerender } = render(
+      <ProviderLimitsControl providerId={PROVIDER} />,
+    );
     expect(limitsMode()).toBe("Automatic (recommended)");
     expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
     // Untouched: an empty reading must not rewrite or clear the arrangement,
     // only change what is DRAWN from it.
     expect(selection()).toEqual({ limitKeys: ["5h", "week"] });
-  });
-
-  it("re-activates the stale pick once the watched host warms back up, in catalog order", () => {
-    useLayoutStore.getState().setArrangement({
-      ...useLayoutStore.getState().arrangement,
-      providerLimits: { [PROVIDER]: { limitKeys: ["5h", "week"] } },
-    });
-    live.windows = [];
-    live.drawnKeys = [];
-    const { rerender } = render(
-      <ProviderLimitsControl providerId={PROVIDER} />,
-    );
-    expect(limitsMode()).toBe("Automatic (recommended)");
 
     live.windows = [limitWindow("5h", "5h"), limitWindow("week", "Weekly")];
     live.drawnKeys = ["5h"];
@@ -323,32 +257,24 @@ describe('the provider row\'s "Choose..." checklist (L-96, I-14)', () => {
 });
 
 describe("credit-only providers (isWindowedRateLimitProvider: false) never get a Limits pick", () => {
-  it("draws nothing at all, even when fed live windows", () => {
+  it("draws nothing at all, even when fed live windows and a stale stored pick", () => {
     // The mocked reader (top of file) always calls through to `children` with
     // whatever `live` holds - non-empty by `beforeEach` - so this proves
     // `provider-limits.tsx`'s OWN `isWindowedRateLimitProvider` guard, not the
-    // reader's bypass (that half is `provider-limit-windows.test.tsx`'s).
+    // reader's bypass (that half is `provider-limit-windows.test.tsx`'s). The
+    // stored pick is left over from when this id was (or is later) a
+    // windowed provider: migrated state the UI cannot write today, which must
+    // never surface as a checklist.
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      providerLimits: { [CREDIT_PROVIDER]: { limitKeys: ["5h"] } },
+    });
     const { container } = render(
       <ProviderLimitsControl providerId={CREDIT_PROVIDER} />,
     );
 
     expect(screen.queryByRole("radiogroup", { name: "Limits" })).toBeNull();
     expect(container.firstChild).toBeNull();
-  });
-
-  it("stays pick-less even with a stale stored selection for it (no fabricated checklist)", () => {
-    // A pick left over from when this id was (or is later) a windowed
-    // provider - migrated arrangement state, not something the UI can write
-    // for a credit-only provider today. Must never surface as a checklist.
-    useLayoutStore.getState().setArrangement({
-      ...useLayoutStore.getState().arrangement,
-      providerLimits: { [CREDIT_PROVIDER]: { limitKeys: ["5h"] } },
-    });
-
-    render(<ProviderLimitsControl providerId={CREDIT_PROVIDER} />);
-
-    expect(screen.queryByRole("radiogroup", { name: "Limits" })).toBeNull();
-    expect(screen.queryByRole("group", { name: "Limits to draw" })).toBeNull();
   });
 });
 

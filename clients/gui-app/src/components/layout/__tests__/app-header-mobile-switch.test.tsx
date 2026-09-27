@@ -106,11 +106,20 @@ describe("AppHeader mobile/desktop switch", () => {
     cleanup();
   });
 
-  it("renders the mobile hamburger header below md", () => {
+  it("renders the mobile hamburger header below md, forcing the top placement", () => {
     mobileState.value = true;
-    render(<AppHeader variant="app" />);
+    useLayoutStore.setState({
+      arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
+    });
+    render(
+      <>
+        <AppHeader variant="app" />
+        <PlacementProbe />
+      </>,
+    );
     expect(screen.getByRole("button", { name: "Open menu" })).not.toBeNull();
     expect(screen.queryByRole("tablist", { name: "Open tabs" })).toBeNull();
+    expect(screen.getByTestId("placement").textContent).toBe("top");
   });
 
   it("renders the desktop tab-strip header at >=md", () => {
@@ -128,43 +137,7 @@ describe("AppHeader mobile/desktop switch", () => {
     expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
   });
 
-  it("keeps the shared desktop menu and tab row at a narrow Linux window", () => {
-    mobileState.value = true;
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <RunnerHostProvider runnerHost={createDesktopHost()}>
-          <AppHeader variant="app" />
-        </RunnerHostProvider>
-      </QueryClientProvider>,
-    );
-
-    expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
-    expect(
-      screen.getAllByRole("navigation", { name: "Application menu" }),
-    ).toHaveLength(1);
-    expect(
-      screen.getAllByRole("menuitem").map((item) => item.textContent),
-    ).toEqual(["File", "Edit", "View", "Window", "Help"]);
-    expect(screen.getByRole("tablist", { name: "Open tabs" })).not.toBeNull();
-  });
-
-  it("draws the mobile header and forces the top placement below md", () => {
-    mobileState.value = true;
-    useLayoutStore.setState({
-      arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
-    });
-    render(
-      <>
-        <AppHeader variant="app" />
-        <PlacementProbe />
-      </>,
-    );
-
-    expect(screen.getByRole("button", { name: "Open menu" })).not.toBeNull();
-    expect(screen.getByTestId("placement").textContent).toBe("top");
-  });
-
-  it("keeps a stored left placement at a narrow window with desktop menus active", () => {
+  it("keeps the shared desktop menu, tab row and stored placement at a narrow Linux window", () => {
     mobileState.value = true;
     useLayoutStore.setState({
       arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
@@ -179,6 +152,13 @@ describe("AppHeader mobile/desktop switch", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Open menu" })).toBeNull();
+    expect(
+      screen.getAllByRole("navigation", { name: "Application menu" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual(["File", "Edit", "View", "Window", "Help"]);
+    expect(screen.getByRole("tablist", { name: "Open tabs" })).not.toBeNull();
     expect(screen.getByTestId("placement").textContent).toBe("left");
   });
 });

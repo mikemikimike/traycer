@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tabAutoTint } from "../tab-identity";
 
-/** The exact hue set D11 allows: greens through cyans, then violets through
- * magentas - amber, red and the info blue are left out. */
-const ALLOWED_HUES = new Set([
-  125, 140, 155, 170, 185, 200, 280, 295, 310, 325,
-]);
+/** The hues D11 leaves out: amber, red and the info blue that marks unread. */
 const FORBIDDEN_HUE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0, 60], // red/amber
   [210, 260], // the info blue range
@@ -18,18 +14,12 @@ function hueOf(tint: string): number {
 }
 
 describe("tabAutoTint", () => {
+  // A literal, not a second call: the hash has to agree across sessions and
+  // machines, so a change to it (or to the hue table) must show up here.
   it("is stable for the same epic id", () => {
-    const first = tabAutoTint("epic-123");
-    const second = tabAutoTint("epic-123");
-    expect(first).toBe(second);
-  });
-
-  it("differs across most distinct epic ids", () => {
-    const ids = Array.from({ length: 30 }, (_, index) => `epic-${index}`);
-    const tints = new Set(ids.map((id) => tabAutoTint(id)));
-    // A 10-hue set over 30 ids must collide sometimes; the point is that it is
-    // not the SAME tint for everything.
-    expect(tints.size).toBeGreaterThan(1);
+    expect(tabAutoTint("epic-123")).toBe(
+      "light-dark(oklch(0.6 0.13 140), oklch(0.72 0.12 140))",
+    );
   });
 
   it("returns a light-dark() oklch pair", () => {
@@ -39,14 +29,17 @@ describe("tabAutoTint", () => {
     );
   });
 
-  it("never picks a hue outside the allowed set", () => {
+  it("spreads distinct ids over the palette and never lands on a status hue", () => {
+    const hues = new Set<number>();
     for (let index = 0; index < 200; index += 1) {
       const hue = hueOf(tabAutoTint(`epic-${String(index)}`));
-      expect(ALLOWED_HUES.has(hue)).toBe(true);
+      hues.add(hue);
       for (const [from, to] of FORBIDDEN_HUE_RANGES) {
         expect(hue < from || hue > to).toBe(true);
       }
     }
+    // 200 ids over a 10-hue table: nearly every hue is reached.
+    expect(hues.size).toBeGreaterThanOrEqual(8);
   });
 
   it("uses the same hue for both the light and dark oklch calls", () => {

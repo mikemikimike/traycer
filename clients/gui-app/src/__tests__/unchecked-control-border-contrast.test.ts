@@ -72,15 +72,13 @@ function switchOffTokens(): {
 }
 
 const SWITCH_OFF = switchOffTokens();
-const CHECKBOX_BORDER = uncheckedBorder("checkbox.tsx");
-const RADIO_BORDER = uncheckedBorder("radio-group.tsx");
+const UNCHECKED_OUTLINES: ReadonlyArray<readonly [string, UncheckedBorder]> = [
+  ["checkbox", uncheckedBorder("checkbox.tsx")],
+  ["radio", uncheckedBorder("radio-group.tsx")],
+];
 const MIN_CONTRAST = 3;
 
 describe("unchecked checkbox/radio border and off switch contrast", () => {
-  it("radio-group.tsx outlines its item exactly as checkbox.tsx does", () => {
-    expect(RADIO_BORDER).toEqual(CHECKBOX_BORDER);
-  });
-
   it.each(["light", "dark"] as const)(
     "clears 3:1 against background/card/popover and the selected-row tint in every preset, mode=%s",
     (mode: ResolvedThemeMode) => {
@@ -89,7 +87,6 @@ describe("unchecked checkbox/radio border and off switch contrast", () => {
         const tokens = resolveThemeTokens(preset, mode);
         const foreground = themeToken(tokens, "--foreground");
         const background = themeToken(tokens, "--background");
-        const border = themeToken(tokens, CHECKBOX_BORDER.token);
         const surfaces: Record<string, string> = {
           background,
           card: themeToken(tokens, "--card"),
@@ -115,16 +112,18 @@ describe("unchecked checkbox/radio border and off switch contrast", () => {
               );
             }
           }
-          const drawn = compositeOverBackground(
-            border,
-            CHECKBOX_BORDER.alpha,
-            surfaceColor,
-          );
-          const contrast = contrastRatio(drawn, surfaceColor);
-          if (contrast < MIN_CONTRAST) {
-            violations.push(
-              `${preset}/${surfaceName}: contrast ${contrast.toFixed(4)} (${CHECKBOX_BORDER.token} at ${CHECKBOX_BORDER.alpha})`,
+          for (const [control, outline] of UNCHECKED_OUTLINES) {
+            const drawn = compositeOverBackground(
+              themeToken(tokens, outline.token),
+              outline.alpha,
+              surfaceColor,
             );
+            const contrast = contrastRatio(drawn, surfaceColor);
+            if (contrast < MIN_CONTRAST) {
+              violations.push(
+                `${preset}/${surfaceName}: ${control} contrast ${contrast.toFixed(4)} (${outline.token} at ${outline.alpha})`,
+              );
+            }
           }
         }
       }

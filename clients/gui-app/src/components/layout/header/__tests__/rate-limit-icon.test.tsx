@@ -633,30 +633,21 @@ describe("<RateLimitIconButton />", () => {
       ]);
     }
 
-    it("names a populated readout from its provider, window and used percentage", () => {
-      cluster = twoProviderCluster();
-      renderReadout();
+    // The desktop header's inline readings are named the same way as the
+    // readout.
+    it.each(["readout", "inline"] as const)(
+      "names populated %s readings from their provider, window and used percentage",
+      (form) => {
+        cluster = twoProviderCluster();
+        render(tree(form));
 
-      expect(
-        screen.getByRole("button", {
-          name: "Usage limits: Codex 19% used, Claude Code 62% used",
-        }),
-      ).toBeTruthy();
-    });
-
-    it("switches to remaining phrasing under the remaining amount preference", () => {
-      cluster = twoProviderCluster();
-      useLayoutStore
-        .getState()
-        .setRegionValues("usageLimits", { amount: "remaining" });
-      renderReadout();
-
-      expect(
-        screen.getByRole("button", {
-          name: "Usage limits: Codex 81% remaining, Claude Code 38% remaining",
-        }),
-      ).toBeTruthy();
-    });
+        expect(
+          screen.getByRole("button", {
+            name: "Usage limits: Codex 19% used, Claude Code 62% used",
+          }),
+        ).toBeTruthy();
+      },
+    );
 
     it("names an empty readout plainly", () => {
       cluster = { kind: "no-providers" };
@@ -670,17 +661,6 @@ describe("<RateLimitIconButton />", () => {
       renderIcon();
 
       expect(screen.getByRole("button", { name: "Usage limits" })).toBeTruthy();
-    });
-
-    it("names the desktop header's inline readings the same way as the readout", () => {
-      cluster = twoProviderCluster();
-      renderInline();
-
-      expect(
-        screen.getByRole("button", {
-          name: "Usage limits: Codex 19% used, Claude Code 62% used",
-        }),
-      ).toBeTruthy();
     });
   });
 
@@ -764,6 +744,12 @@ describe("<RateLimitIconButton />", () => {
       expect(restyled.textContent).toContain("30% 5h");
       expect(restyled.textContent).toContain("60% 5h");
       expect(screen.queryByTestId("status-bar-provider-mini-bar")).toBeNull();
+      // The accessible name follows the same amount setting.
+      expect(
+        screen.getByRole("button", {
+          name: "Usage limits: Codex 30% remaining, Claude Code 60% remaining",
+        }),
+      ).toBeTruthy();
     });
   });
 
@@ -771,45 +757,28 @@ describe("<RateLimitIconButton />", () => {
   // way the status bar's cluster does: HTTP providers are not in the
   // background poll, and the phone footer is opt-in and off by default, so a
   // glyph that left fetching to the footer read a cold cache (G6 review A).
-  describe("fetch mode by form", () => {
-    it("asks the selector for live mode in the glyph form (phone header)", () => {
-      renderIcon();
-      expect(useStatusBarRateLimitSegmentsCalled).toBe(true);
+  // The glyph's own fetch is proven over the real selector in
+  // `rate-limit-icon-glyph-fetch.test.tsx`.
+  it.each(["tile", "readout", "inline"] as const)(
+    "asks the selector for live mode in the %s form",
+    (form) => {
+      render(tree(form));
       expect(lastMode).toBe("live");
-    });
-
-    it("asks the selector for live mode in the tile form", () => {
-      render(tree("tile"));
-      expect(lastMode).toBe("live");
-    });
-
-    it("asks the selector for live mode in the readout form", () => {
-      renderReadout();
-      expect(lastMode).toBe("live");
-    });
-
-    it("asks the selector for live mode in the inline form", () => {
-      renderInline();
-      expect(lastMode).toBe("live");
-    });
-  });
+    },
+  );
 
   // The header glyph reads `useSampleScene()` itself (C12) - the same wiring
   // `StatusBarRateLimitCluster` gets from its caller - rather than the
   // sample scene routing through it another way.
-  describe("sample scene (C12)", () => {
-    it("asks the selector for sample readings inside SampleSceneContext", () => {
+  it.each([true, false])(
+    "asks the selector for sample readings exactly when inside the sample scene (%s)",
+    (inside) => {
       render(
-        <SampleSceneContext.Provider value>
+        <SampleSceneContext.Provider value={inside}>
           {iconTree()}
         </SampleSceneContext.Provider>,
       );
-      expect(lastSample).toBe(true);
-    });
-
-    it("asks the selector for real readings outside SampleSceneContext", () => {
-      renderIcon();
-      expect(lastSample).toBe(false);
-    });
-  });
+      expect(lastSample).toBe(inside);
+    },
+  );
 });

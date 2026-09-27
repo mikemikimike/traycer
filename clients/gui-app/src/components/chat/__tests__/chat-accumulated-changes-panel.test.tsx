@@ -201,10 +201,11 @@ describe("<ChatAccumulatedChangesPanel />", () => {
 
   // The header carries TOTALS that move several times while a turn writes, and
   // it is one line, so a roll there is the whole of what a roll is for. The
-  // per-file rows below it are the other half of that decision and are covered
-  // where the choice is made (`diff-line-deltas.test.tsx`): a turn touching
-  // twelve files would roll twelve rows at once, which is the same failure
-  // this repo already recorded and fixed for the chip's attention ring.
+  // per-file rows below it are the other half of that decision and print
+  // plain text (`FileChangeHeader`, or `DiffLineDeltas` with `rolling={false}`
+  // on an artifact row): a turn touching twelve files would roll twelve rows
+  // at once, which is the same failure this repo already recorded and fixed
+  // for the chip's attention ring.
   //
   // jsdom cannot see the roll itself - the number renders as plain text
   // wherever it cannot animate - so what is read here is the structure only

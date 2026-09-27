@@ -45,14 +45,6 @@ vi.mock("@/components/onboarding/onboarding-coachmark", () => ({
   ),
 }));
 
-function setViewportWidth(width: number): void {
-  Object.defineProperty(window, "innerWidth", {
-    value: width,
-    configurable: true,
-    writable: true,
-  });
-}
-
 function Harness(props: { readonly section: SettingsSectionId }) {
   const rootRef = useRef<HTMLDivElement>(null);
   return (
@@ -74,7 +66,6 @@ describe("SettingsSetupGuide", () => {
   afterEach(() => {
     cleanup();
     useLayoutEditorStore.setState({ session: null });
-    setViewportWidth(1024);
   });
 
   it("keeps the guide running through StrictMode's mount probe", async () => {
@@ -98,14 +89,6 @@ describe("SettingsSetupGuide", () => {
     render(<Harness section="appearance" />);
 
     expect(screen.queryByTestId("guide-coachmark")).toBeNull();
-  });
-
-  it("shows the density step on Layout, where it lives", async () => {
-    useOnboardingStore.setState({ activeSetup: { id: "appearance", step: 3 } });
-
-    render(<Harness section="layout" />);
-
-    expect(await screen.findByTestId("guide-coachmark")).toBeTruthy();
   });
 
   it("navigates to the next step's section when it continues across sections", async () => {

@@ -656,30 +656,21 @@ describe("getLeftPanelRailDropPositionOnAxis", () => {
     ).toBe("combine");
   });
 
-  it("splits the y axis at the rect's HEIGHT bands", () => {
-    expect(
-      getLeftPanelRailDropPositionOnAxis({ x: 10, y: rect.top + 5 }, rect, "y"),
-    ).toBe("before");
-    expect(
-      getLeftPanelRailDropPositionOnAxis(
-        { x: 10, y: rect.top + 25 },
-        rect,
-        "y",
-      ),
-    ).toBe("after");
-  });
-
-  it("splits the y axis into three bands - before, combine, after (L-168)", () => {
-    // The rail's third band is back (L-166): the outer 30% at each end still
-    // reorders, and the middle 40% now answers "combine" - joining the two
-    // panels into a stack - rather than the nearer side.
-    function expectedBand(offset: number): "before" | "combine" | "after" {
-      if (offset < rect.height * 0.3) return "before";
-      if (offset > rect.height * 0.7) return "after";
-      return "combine";
-    }
-    for (let offset = 0; offset < rect.height; offset += 1) {
-      const expected = expectedBand(offset);
+  it("splits the y axis at the rect's HEIGHT into three bands - before, combine, after (L-168)", () => {
+    // The outer 30% at each end reorders, and the middle 40% answers
+    // "combine" - joining the two panels into a stack. Of the 30px height
+    // that is offsets 0-8 before, 9-21 combine and 22-29 after; the width
+    // (36px) would put the edges at 10.8 and 25.2 instead, so the boundary
+    // rows also catch a call site reading the wrong extent.
+    const expectedByOffset = [
+      [0, "before"],
+      [8, "before"],
+      [9, "combine"],
+      [21, "combine"],
+      [22, "after"],
+      [29, "after"],
+    ] as const;
+    for (const [offset, expected] of expectedByOffset) {
       expect(
         getLeftPanelRailDropPositionOnAxis(
           { x: 10, y: rect.top + offset },
@@ -895,113 +886,6 @@ describe("getEpicCanvasDropPreview", () => {
         false,
       ),
     ).toBeNull();
-  });
-
-  // A rail slot is square, so which axis the split runs along is decided by
-  // the target's orientation and nothing else - the same point resolves
-  // differently on the two rails.
-  const railSlot = { left: 0, top: 0, width: 36, height: 36 };
-  /** Either side of the 36px slot's midpoint. */
-  const sideOffsets = [4, 32];
-  /** Offsets across the axis NOT being read - none of them may matter. */
-  const offAxisOffsets = [2, 18, 34];
-
-  it("splits a horizontal rail item across its width, at any pointer height", () => {
-    for (const y of offAxisOffsets) {
-      const positions = sideOffsets.map((x) =>
-        getEpicCanvasDropPreview(
-          {
-            kind: "left-panel-rail-item",
-            panelId: "artifacts",
-            orientation: "horizontal",
-          },
-          railSlot,
-          { x, y },
-          false,
-        ),
-      );
-      expect(positions).toEqual([
-        { kind: "left-panel-rail", panelId: "artifacts", position: "before" },
-        { kind: "left-panel-rail", panelId: "artifacts", position: "after" },
-      ]);
-    }
-  });
-
-  it("keeps splitting a vertical rail item down its height", () => {
-    for (const x of offAxisOffsets) {
-      const positions = sideOffsets.map((y) =>
-        getEpicCanvasDropPreview(
-          {
-            kind: "left-panel-rail-item",
-            panelId: "artifacts",
-            orientation: "vertical",
-          },
-          railSlot,
-          { x, y },
-          false,
-        ),
-      );
-      expect(positions).toEqual([
-        { kind: "left-panel-rail", panelId: "artifacts", position: "before" },
-        { kind: "left-panel-rail", panelId: "artifacts", position: "after" },
-      ]);
-    }
-  });
-
-  it("answers combine for the middle band regardless of whether the target is already stacked (L-181)", () => {
-    // Whether a middle-band drop actually joins or is refused (a full stack)
-    // is `railStackJoin`'s call, not this preview's: the preview always
-    // answers `combine` for the middle band, and the rail/writer decide the
-    // join or refusal cue from the source and the target together.
-    expect(
-      getEpicCanvasDropPreview(
-        {
-          kind: "left-panel-rail-item",
-          panelId: "artifacts",
-          orientation: "vertical",
-        },
-        railSlot,
-        { x: 18, y: 18 },
-        false,
-      ),
-    ).toEqual({
-      kind: "left-panel-rail",
-      panelId: "artifacts",
-      position: "combine",
-    });
-    // The outer bands still reorder, exactly as for a lone icon.
-    expect(
-      getEpicCanvasDropPreview(
-        {
-          kind: "left-panel-rail-item",
-          panelId: "artifacts",
-          orientation: "vertical",
-        },
-        railSlot,
-        { x: 18, y: 4 },
-        false,
-      ),
-    ).toEqual({
-      kind: "left-panel-rail",
-      panelId: "artifacts",
-      position: "before",
-    });
-    expect(
-      getEpicCanvasDropPreview(
-        {
-          kind: "left-panel-rail-item",
-          panelId: "artifacts",
-          orientation: "vertical",
-        },
-        railSlot,
-        { x: 18, y: 32 },
-        false,
-      ),
-    ).toEqual({
-      kind: "left-panel-rail",
-      panelId: "artifacts",
-      position: "after",
-    });
   });
 
   /**

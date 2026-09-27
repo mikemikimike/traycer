@@ -406,7 +406,7 @@ describe("desktop app update UI", () => {
     expect(screen.queryByTestId("app-update-row")).toBeNull();
   });
 
-  it("row layout: keeps every state but blocked to one cut line, with the full label in a tooltip", async () => {
+  it("row layout: keeps every state but blocked to one cut line, with the full label in a tooltip, and dims only a blocked icon", async () => {
     const bridge = new FakeAppUpdatesBridge({
       ...readySnapshot(1),
       installInFlight: true,
@@ -416,6 +416,18 @@ describe("desktop app update UI", () => {
     const row = await screen.findByTestId("app-update-row");
     expect(row.className.split(" ")).toContain("h-8");
     expect(row.lastElementChild?.className.split(" ")).toContain("truncate");
+    // In-flight is disabled, but not blocked - its icon stays at full
+    // strength (a `disabled:` variant never matches a span).
+    expect(row.firstElementChild?.className).not.toContain("opacity-60");
+    // The restart announcement is exposed in row mode too (finding 5), and
+    // the action label stays the stable "Restart to update to v…" - not
+    // renamed to describe the in-flight state.
+    expect(
+      within(row).getByRole("status", {
+        name: "Restarting to install the update",
+      }),
+    ).toBeTruthy();
+    expect(row.getAttribute("aria-label")).toBe("Restart to update to v1.2.3");
     // Disabled while restarting, so the tooltip hangs off the row's wrapper.
     const wrapper = row.parentElement;
     if (wrapper === null) throw new Error("expected the row's tooltip wrapper");
@@ -437,25 +449,7 @@ describe("desktop app update UI", () => {
     renderWithHost(<AppUpdateHeaderButton layout="row" />, blockedBridge);
     const blockedRow = await screen.findByTestId("app-update-row");
     expect(blockedRow.className.split(" ")).toContain("min-h-8");
-    const blockedWrapper = blockedRow.parentElement;
-    if (blockedWrapper === null) throw new Error("expected a parent");
-    fireEvent.pointerMove(blockedWrapper);
-    fireEvent.focus(blockedWrapper);
-    fireEvent.pointerMove(blockedRow);
-    expect(screen.queryByRole("tooltip")).toBeNull();
-  });
-
-  it("row layout: dims the icon span when blocked, not while merely in flight; the icon button stays dimmed too", async () => {
-    const blockedBridge = new FakeAppUpdatesBridge({
-      ...availableSnapshot(1),
-      installBlockedReason:
-        "Move Traycer to your Applications folder to install updates.",
-    });
-    renderWithHost(<AppUpdateHeaderButton layout="row" />, blockedBridge);
-
-    const blockedRow = await screen.findByTestId("app-update-row");
-    const blockedIcon = blockedRow.firstElementChild;
-    expect(blockedIcon?.className).toContain("opacity-60");
+    expect(blockedRow.firstElementChild?.className).toContain("opacity-60");
     // A real reason is a full line the row wraps, not truncates (finding 6):
     // the row is disabled, its accessible name is the whole reason, and the
     // label element carries no `truncate` class that would clip it.
@@ -463,32 +457,13 @@ describe("desktop app update UI", () => {
     expect(blockedRow.getAttribute("aria-label")).toBe(
       "Move Traycer to your Applications folder to install updates.",
     );
-    const blockedLabel = blockedRow.lastElementChild;
-    expect(blockedLabel?.className).not.toContain("truncate");
-    cleanup();
-
-    // In-flight is disabled, but not blocked - its icon stays at full
-    // strength (a `disabled:` variant never matches a span).
-    const inFlightBridge = new FakeAppUpdatesBridge({
-      ...readySnapshot(1),
-      installInFlight: true,
-    });
-    renderWithHost(<AppUpdateHeaderButton layout="row" />, inFlightBridge);
-
-    const inFlightRow = await screen.findByTestId("app-update-row");
-    const inFlightIcon = inFlightRow.firstElementChild;
-    expect(inFlightIcon?.className).not.toContain("opacity-60");
-    // The restart announcement is exposed in row mode too (finding 5), and
-    // the action label stays the stable "Restart to update to v…" - not
-    // renamed to describe the in-flight state.
-    expect(
-      within(inFlightRow).getByRole("status", {
-        name: "Restarting to install the update",
-      }),
-    ).toBeTruthy();
-    expect(inFlightRow.getAttribute("aria-label")).toBe(
-      "Restart to update to v1.2.3",
-    );
+    expect(blockedRow.lastElementChild?.className).not.toContain("truncate");
+    const blockedWrapper = blockedRow.parentElement;
+    if (blockedWrapper === null) throw new Error("expected a parent");
+    fireEvent.pointerMove(blockedWrapper);
+    fireEvent.focus(blockedWrapper);
+    fireEvent.pointerMove(blockedRow);
+    expect(screen.queryByRole("tooltip")).toBeNull();
     cleanup();
 
     // The icon layout's own button still carries the disabled variant.

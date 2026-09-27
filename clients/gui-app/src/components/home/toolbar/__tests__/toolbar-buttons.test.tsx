@@ -110,11 +110,26 @@ describe("composer toolbar chips (L-88)", () => {
     }
   });
 
-  it("keeps hover off a disabled chip instead of lighting it", () => {
+  // What the parity check above cannot see is a call site whose `className`
+  // tailwind-merges a state away. The access pill is that call site.
+  it("keeps every state the redesign owes a bordered chip, and hover off a disabled one", () => {
     const trigger = renderAccessTrigger({ compact: false, disabled: true });
-
-    expect(trigger.hasAttribute("disabled")).toBe(true);
     const classes = classesOf(trigger);
+
+    for (const prefix of [
+      "hover:",
+      "focus-visible:",
+      "active:scale-",
+      "data-[state=open]:",
+      "disabled:",
+      "motion-reduce:",
+    ]) {
+      expect(
+        classes.some((state) => state.startsWith(prefix)),
+        `no ${prefix} state on the access chip`,
+      ).toBe(true);
+    }
+    expect(trigger.hasAttribute("disabled")).toBe(true);
     expect(classes).toContain("disabled:opacity-50");
     expect(classes).toContain("disabled:hover:bg-background");
     expect(classes).toContain("disabled:hover:text-muted-foreground");

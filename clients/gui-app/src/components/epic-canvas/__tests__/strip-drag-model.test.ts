@@ -48,7 +48,17 @@ function geometryFor(
   sourceIndex: number,
   mergeable: ReadonlyArray<boolean> | null,
 ): StripDragGeometry {
-  const built = slots(widths, mergeable, 0);
+  return gappedGeometryFor(widths, sourceIndex, mergeable, 0);
+}
+
+/** `geometryFor` over a strip whose measured advance carries `gap`. */
+function gappedGeometryFor(
+  widths: ReadonlyArray<number>,
+  sourceIndex: number,
+  mergeable: ReadonlyArray<boolean> | null,
+  gap: number,
+): StripDragGeometry {
+  const built = slots(widths, mergeable, gap);
   if (sourceIndex < 0 || sourceIndex >= built.length) {
     throw new Error("bad source index");
   }
@@ -259,6 +269,36 @@ describe("header strip drag model", () => {
           expect(indices[i]).toBeGreaterThanOrEqual(indices[i - 1] ?? 0);
         }
       }
+    });
+
+    // The model is one-dimensional: a side strip feeds it y positions and row
+    // heights. What it adds over the tables above is a measured gap in every
+    // advance (the strip's 2px row gap) and a split pair as one taller item.
+    it("holds on a gapped strip of rows, from every source", () => {
+      const heights = [32, 32, 66, 32, 32];
+      for (let source = 0; source < heights.length; source += 1) {
+        const geometry = gappedGeometryFor(heights, source, null, 2);
+        const indices = sweep(
+          geometry,
+          range(ORIGIN - 100, ORIGIN + 350, 1),
+        ).map((state) => state.targetIndex);
+        for (let i = 2; i < indices.length; i += 1) {
+          const alternating =
+            indices[i] === indices[i - 2] && indices[i] !== indices[i - 1];
+          expect(alternating).toBe(false);
+        }
+      }
+      const fromTop = sweep(
+        gappedGeometryFor(heights, 0, null, 2),
+        range(ORIGIN, ORIGIN + 300, 1),
+      ).map((state) => state.targetIndex);
+      for (let i = 1; i < fromTop.length; i += 1) {
+        expect(fromTop[i]).toBeGreaterThanOrEqual(fromTop[i - 1] ?? 0);
+        expect(
+          Math.abs((fromTop[i] ?? 0) - (fromTop[i - 1] ?? 0)),
+        ).toBeLessThanOrEqual(1);
+      }
+      expect(fromTop.at(-1)).toBe(heights.length - 1);
     });
   });
 
@@ -836,138 +876,6 @@ describe("header strip drag model", () => {
       expect(provisionalStripOrder(["a", "b"], 0, 0)).toEqual(["a", "b"]);
       expect(provisionalStripOrder(["a", "b"], 0, 5)).toEqual(["a", "b"]);
       expect(provisionalStripOrder(["a", "b"], -1, 1)).toEqual(["a", "b"]);
-    });
-  });
-
-  describe("vertical strip: row heights as extents", () => {
-    // A side strip feeds the same 1-D model with y positions and row heights:
-    // 32px rows, a split pair as one 66px item (two rows and their gap), and
-    // the strip's 2px row gap carried by the measured advance.
-    const ROW_HEIGHTS: ReadonlyArray<number> = [32, 32, 66, 32, 32];
-    const ROW_GAP = 2;
-
-    function rowGeometry(
-      heights: ReadonlyArray<number>,
-      sourceIndex: number,
-      gap: number,
-    ): StripDragGeometry {
-      const built = slots(heights, null, gap);
-      if (sourceIndex < 0 || sourceIndex >= built.length) {
-        throw new Error("bad source index");
-      }
-      const source = built[sourceIndex];
-      return {
-        slots: built,
-        sourceIndex,
-        grabOffset: source.extent / 2,
-        sourceInitialStart: ORIGIN + source.contentStart,
-        sourceExtent: source.extent,
-        bandStart: 0,
-        bandEnd: 240,
-      };
-    }
-
-    it("never decreases the index under a downward sweep", () => {
-      const geometry = rowGeometry(ROW_HEIGHTS, 0, ROW_GAP);
-      const indices = sweep(geometry, range(ORIGIN, ORIGIN + 300, 1)).map(
-        (state) => state.targetIndex,
-      );
-      for (let i = 1; i < indices.length; i += 1) {
-        expect(indices[i]).toBeGreaterThanOrEqual(indices[i - 1] ?? 0);
-        expect(
-          Math.abs((indices[i] ?? 0) - (indices[i - 1] ?? 0)),
-        ).toBeLessThanOrEqual(1);
-      }
-      expect(indices.at(-1)).toBe(ROW_HEIGHTS.length - 1);
-    });
-
-    it("never increases the index under an upward sweep", () => {
-      const geometry = rowGeometry(
-        ROW_HEIGHTS,
-        ROW_HEIGHTS.length - 1,
-        ROW_GAP,
-      );
-      const indices = sweep(
-        geometry,
-        range(ORIGIN - 100, ORIGIN + 300, 1)
-          .slice()
-          .reverse(),
-      ).map((state) => state.targetIndex);
-      for (let i = 1; i < indices.length; i += 1) {
-        expect(indices[i]).toBeLessThanOrEqual(indices[i - 1] ?? 0);
-      }
-      expect(indices.at(-1)).toBe(0);
-    });
-
-    it("never alternates from any source row", () => {
-      for (let source = 0; source < ROW_HEIGHTS.length; source += 1) {
-        const geometry = rowGeometry(ROW_HEIGHTS, source, ROW_GAP);
-        const indices = sweep(
-          geometry,
-          range(ORIGIN - 100, ORIGIN + 350, 1),
-        ).map((state) => state.targetIndex);
-        for (let i = 2; i < indices.length; i += 1) {
-          const alternating =
-            indices[i] === indices[i - 2] && indices[i] !== indices[i - 1];
-          expect(alternating).toBe(false);
-        }
-      }
-    });
-
-    it("reverses a swap only after travelling back the source row's height", () => {
-      const geometry = rowGeometry([32, 66, 32], 0, 0);
-      let previous: StripDragState | null = null;
-      let swapForward: number | null = null;
-      for (let y = ORIGIN; y < ORIGIN + 200; y += 1) {
-        previous = resolveStripDragState({
-          geometry,
-          contentOrigin: ORIGIN,
-          pointer: y,
-          previous,
-        });
-        if (previous.targetIndex === 1) {
-          swapForward = y;
-          break;
-        }
-      }
-      expect(swapForward).not.toBeNull();
-      let swapBack: number | null = null;
-      for (let y = swapForward ?? 0; y > ORIGIN - 200; y -= 1) {
-        previous = resolveStripDragState({
-          geometry,
-          contentOrigin: ORIGIN,
-          pointer: y,
-          previous,
-        });
-        if (previous.targetIndex === 0) {
-          swapBack = y;
-          break;
-        }
-      }
-      expect(swapBack).not.toBeNull();
-      const measured = (swapForward ?? 0) - (swapBack ?? 0);
-      expect(measured).toBeGreaterThanOrEqual(swapHysteresisPx(32));
-      expect(measured).toBeLessThanOrEqual(swapHysteresisPx(32) + 2);
-    });
-
-    it("merges into the top half from above and the bottom half from below", () => {
-      const fromAbove = rowGeometry([32, 32, 32], 0, ROW_GAP);
-      // Row 1 spans 34..66 in content space; its centre is at 50.
-      const above = resolveStripDragState({
-        geometry: fromAbove,
-        contentOrigin: ORIGIN,
-        pointer: pointerForCentre(fromAbove, ORIGIN + 45),
-        previous: null,
-      });
-      expect(above.kind === "merge" ? above.targetSide : null).toBe("left");
-      const fromBelow = rowGeometry([32, 32, 32], 2, ROW_GAP);
-      const below = resolveStripDragState({
-        geometry: fromBelow,
-        contentOrigin: ORIGIN,
-        pointer: pointerForCentre(fromBelow, ORIGIN + 55),
-        previous: null,
-      });
-      expect(below.kind === "merge" ? below.targetSide : null).toBe("right");
     });
   });
 });

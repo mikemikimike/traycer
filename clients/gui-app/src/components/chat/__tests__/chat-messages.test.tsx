@@ -1,4 +1,3 @@
-import { TileMinimapScope } from "@/components/epic-canvas/tile-minimap/tile-minimap-scope";
 import {
   act,
   cleanup,
@@ -784,7 +783,6 @@ async function selectLastChatTurnMinimapItem(): Promise<void> {
 }
 
 interface RenderChatMessagesOptions {
-  readonly tileMinimapInstanceId?: string;
   readonly messages: ReadonlyArray<ChatMessageModel>;
   /**
    * Tab-key half of the dual-key identity (ticket 15). Prefer this over a
@@ -1005,22 +1003,12 @@ function renderChatMessages(options: RenderChatMessagesOptions) {
       </TileFindContext.Provider>
     );
   };
-  const jsx = (): ReactNode => {
-    const inner = contentWithFindContext();
-    const scoped =
-      options.tileMinimapInstanceId === undefined ? (
-        inner
-      ) : (
-        <TileMinimapScope tileInstanceId={options.tileMinimapInstanceId}>
-          {inner}
-        </TileMinimapScope>
-      );
-    return options.strictMode === true ? (
-      <StrictMode>{scoped}</StrictMode>
+  const jsx = (): ReactNode =>
+    options.strictMode === true ? (
+      <StrictMode>{contentWithFindContext()}</StrictMode>
     ) : (
-      scoped
+      contentWithFindContext()
     );
-  };
 
   const result = render(jsx());
   return {

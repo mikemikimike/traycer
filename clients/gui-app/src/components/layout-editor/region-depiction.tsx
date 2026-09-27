@@ -365,27 +365,6 @@ const INERT_DIFF_OPENER: ChatSnapshotDiffOpener = {
 // ── Per-region renderers ────────────────────────────────────────────────────
 
 /**
- * One provider's usage segment, framed in whichever surface the cluster is
- * hosted on.
- *
- * Exported for the one caller that draws a SEGMENT rather than the cluster: a
- * provider's own second level, whose stage is a picture of that provider's
- * reading alone.
- */
-export function depictUsageProvider(
-  providerId: RateLimitProviderId,
-  values: UsageLimitsValues,
-  arrangement: LayoutArrangement,
-  windows: ReadonlyArray<StatusBarRateLimitWindow> | null,
-): ReactNode {
-  return (
-    <HostContextFrame host={barHostContext(arrangement, "usageLimits")}>
-      {depictUsageProviderSegment(providerId, values, windows)}
-    </HostContextFrame>
-  );
-}
-
-/**
  * The segment itself, which the cluster repeats once per shown provider.
  *
  * `windows` is the one place a picture is drawn from live numbers rather than

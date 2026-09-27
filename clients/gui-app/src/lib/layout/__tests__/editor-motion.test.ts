@@ -299,18 +299,11 @@ describe("the named groups (5.2)", () => {
     ).toBe(false);
   });
 
-  it("un-names them when the transition is skipped or rejected", async () => {
-    const apply = vi.fn();
-    enter("right", apply);
-    // The update callback runs even for a transition that is then skipped, so
-    // the editor's final state is the same and only the animation is lost.
-    startedTransition().runUpdate();
+  it("un-names them when finished rejects (the update callback threw)", async () => {
+    enter("right", () => undefined);
     startedTransition().reject();
-
-    await expect(startedTransition().finished).rejects.toThrow("skipped");
     await tick();
 
-    expect(apply).toHaveBeenCalledTimes(1);
     expect(
       document.documentElement.hasAttribute("data-layout-transition"),
     ).toBe(false);
@@ -374,7 +367,11 @@ describe("the fallback exit (5.2)", () => {
   });
 
   it("does not hold an ENTRY back for anything", () => {
-    mountInspector();
+    // A re-open inside the previous session's slide-out (G3-05): the panel is
+    // still wearing the exit attribute and its exit animation is still pending.
+    const inspector = mountInspector();
+    stubExitAnimation(inspector);
+    inspector.setAttribute("data-exiting", "1");
     const apply = vi.fn();
 
     runLayoutEditorMotion({
@@ -385,6 +382,7 @@ describe("the fallback exit (5.2)", () => {
     });
 
     expect(apply).toHaveBeenCalledTimes(1);
+    expect(inspector.hasAttribute("data-exiting")).toBe(false);
   });
 });
 

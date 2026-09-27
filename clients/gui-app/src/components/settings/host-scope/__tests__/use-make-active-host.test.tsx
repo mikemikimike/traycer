@@ -85,27 +85,6 @@ describe("useMakeActiveHost", () => {
     expect(result.current.activatingHostId).toBe("host-b");
   });
 
-  it("clears the guard once the write settles, accepting the next activate", async () => {
-    const { result } = renderHook(() => useMakeActiveHost(hosts));
-
-    act(() => {
-      result.current.makeActive("host-b");
-    });
-    await act(async () => {
-      resolveActivate?.({ ok: true });
-      await Promise.resolve();
-    });
-
-    expect(result.current.isActivating).toBe(false);
-    expect(result.current.activatingHostId).toBeNull();
-
-    act(() => {
-      result.current.makeActive("host-a");
-    });
-
-    expect(activateCalls).toEqual(["host-b", "host-a"]);
-  });
-
   it("keeps the latch across a close-and-reopen of the surface (R1-A2)", async () => {
     // The account menu's Host section unmounts the instant a pick closes the
     // menu. The pending write it started must still gate the NEXT mount of

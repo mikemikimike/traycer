@@ -106,39 +106,17 @@ describe("<StatusBarKeybindingBridge />", () => {
     act(() => {
       dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
     });
+    // The strip was still holding the monitor, so the surface toggle empties
+    // it; the reading already up there is not dragged back down, and neither
+    // reading changes ends (L-156).
     expect(hosts()).toEqual(["header", "header"]);
+    expect(useLayoutStore.getState().arrangement.resourceSide).toBe("right");
 
     act(() => {
       dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
     });
     expect(hosts()).toEqual(["header", "status-bar"]);
     expect(useLayoutStore.getState().arrangement.usageSide).toBe("right");
-  });
-
-  it("moves what the strip still holds, and leaves the sides alone (L-156)", () => {
-    act(() => {
-      useLayoutStore.getState().setArrangement({
-        ...useLayoutStore.getState().arrangement,
-        usageHost: "header",
-        usageSide: "right",
-      });
-    });
-
-    render(<StatusBarKeybindingBridge />);
-
-    act(() => {
-      dispatchAction("app.status-bar.toggle", NOOP_ROUTER);
-    });
-
-    // The strip was still holding the monitor, so the surface toggle empties
-    // it; the reading already up there is not dragged back down, and neither
-    // reading changes ends.
-    expect(hosts()).toEqual(["header", "header"]);
-    const { arrangement } = useLayoutStore.getState();
-    expect([arrangement.usageSide, arrangement.resourceSide]).toEqual([
-      "right",
-      "right",
-    ]);
   });
 
   it("registers nothing in the installed mobile app", () => {

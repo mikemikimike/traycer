@@ -20,7 +20,8 @@
  * overlay position: a real Chrome repro had a vertical split frame at
  * (8, 242, 224x72) with its second member at (10, 280, 220x32) render the
  * overlay at (10, 290) after a 10px downward drag instead of the
- * frame-anchored (8, 252).
+ * frame-anchored (8, 252). The horizontal strip's origin is
+ * `drag-overlay-chip.test.tsx`'s real split-drag cases.
  */
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -370,30 +371,6 @@ describe("strip drag overlay origin: split frame vs grabbed member", () => {
     moveTo(drag, 120, 306);
     expect(renderedOverlayPosition()).toEqual({ top: 252, left: 8 });
     releaseAt(drag, 120, 306);
-  });
-
-  it("anchors a horizontal split's overlay to the frame's origin, not the grabbed member's", async () => {
-    // Mirrors the vertical repro with axes swapped: frame (242, 8, 72x224),
-    // second member (280, 10, 32x220). This is the path the deleted DOM
-    // `translateX` hack used to own.
-    const view = await mountSplitStrip({
-      axisId: "x",
-      edge: "top",
-      stripRect: rect(0, 0, 1000, 100),
-      frameRect: rect(242, 8, 72, 224),
-      grabbedMemberRect: rect(280, 10, 32, 220),
-    });
-    const member = view.getByTestId("split-member-right");
-    const drag = pressAndActivate(member, {
-      x: 296,
-      y: 120,
-      activateX: 296 + EPIC_CANVAS_DRAG_ACTIVATION_DISTANCE + 1,
-      activateY: 120,
-      pointerId: 22,
-    });
-    moveTo(drag, 306, 120); // +10px right
-    expect(renderedOverlayPosition()).toEqual({ top: 8, left: 252 });
-    releaseAt(drag, 306, 120);
   });
 
   it("reverts to the grabbed member's own origin once tear-off previews, not the frame's", async () => {

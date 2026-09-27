@@ -149,8 +149,7 @@ function ring(): HTMLElement | null {
 const MOUSE = { pointerType: "mouse" } as const;
 
 /**
- * A node whose viewport box is a mutable fact, which is what a reflow is: a
- * dock switch moves the app column sideways without resizing anything in it.
+ * A node whose viewport box is a mutable fact, which is what a reflow is.
  */
 function movable(node: HTMLElement, rect: DOMRect): (next: DOMRect) => void {
   let current = rect;
@@ -172,11 +171,6 @@ async function flushFrame(): Promise<void> {
   });
 }
 
-/** Long enough for a ring to arrive AND for a parking loop to have parked. */
-async function flushFrames(count: number): Promise<void> {
-  for (let index = 0; index < count; index += 1) await flushFrame();
-}
-
 beforeEach(() => {
   useLayoutStore.setState({
     ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -190,8 +184,6 @@ afterEach(() => {
   cancelLayoutDrag();
   cleanup();
   useLayoutEditorStore.getState().endSession();
-  useLayoutEditorStore.getState().setDockMode("right");
-  document.documentElement.removeAttribute("data-reduce-panel-motion");
 });
 
 describe("the session's canvas", () => {
@@ -214,6 +206,15 @@ describe("the session's canvas", () => {
     expect(view.getByTestId("column").getAttribute("data-layout-editing")).toBe(
       "1",
     );
+    // The editing outline (L-87) is ONE rule on
+    // `[data-layout-column][data-layout-editing="1"]`, so the compound
+    // selector has to resolve to the column itself - not the document
+    // element, a wrapper or a descendant.
+    expect([
+      ...document.querySelectorAll(
+        '[data-layout-column][data-layout-editing="1"]',
+      ),
+    ]).toEqual([view.getByTestId("column")]);
 
     act(() => {
       useLayoutEditorStore.getState().endSession();
@@ -224,37 +225,6 @@ describe("the session's canvas", () => {
     expect(view.getByTestId("column").hasAttribute("data-layout-editing")).toBe(
       false,
     );
-  });
-
-  // The editing outline (L-87) is ONE rule on
-  // `[data-layout-column][data-layout-editing="1"]`: `app-shell.tsx` writes
-  // the first attribute and hands that same node to this hook, which writes
-  // the second. `layout-editor-contrast.test.ts` reads the rule; this is the
-  // other half - the compound selector actually resolving to an element. It
-  // goes red for the whole family of "the marker landed somewhere else"
-  // mistakes: on the document element, on a wrapper, on a descendant.
-  it("marks the column itself, so the outline's selector resolves", () => {
-    const view = render(
-      <Canvas
-        regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
-      />,
-    );
-    const outlined = (): ReadonlyArray<Element> => [
-      ...document.querySelectorAll(
-        '[data-layout-column][data-layout-editing="1"]',
-      ),
-    ];
-    expect(outlined()).toEqual([]);
-
-    openSession();
-
-    expect(outlined()).toEqual([view.getByTestId("column")]);
-
-    act(() => {
-      useLayoutEditorStore.getState().endSession();
-    });
-
-    expect(outlined()).toEqual([]);
   });
 
   it("resolves a pointer inside a region to the region, not to the node under it", () => {
@@ -437,40 +407,6 @@ describe("the session's canvas", () => {
     expect(layoutDragActive()).toBe(true);
   });
 
-  it("keeps the ring on a region the dock switch moved sideways (L-90)", async () => {
-    // The owner's bug, driven through the real path: `setDockMode` writes the
-    // EDITOR store, and the app column reflows 320px sideways beside the
-    // panel. The selected region does not change size, nothing scrolls and no
-    // window resize fires, so every wake the parked loop listened for stays
-    // silent - and the ring used to be left drawn around the inspector.
-    document.documentElement.setAttribute("data-reduce-panel-motion", "");
-    openSession();
-    const view = render(
-      <Canvas
-        regions={[{ regionId: "minimap", instanceId: "tile-a", testId: "map" }]}
-      />,
-    );
-    const move = movable(
-      view.getByTestId("map"),
-      new DOMRect(700, 120, 200, 30),
-    );
-    act(() => {
-      useLayoutEditorStore.getState().select("minimap");
-    });
-    // Several frames, so the ring has ARRIVED and any design that parks on
-    // arrival has parked before the switch below.
-    await flushFrames(4);
-    expect(ring()?.style.transform).toBe("translate(697.00px, 117.00px)");
-
-    move(new DOMRect(380, 120, 200, 30));
-    act(() => {
-      useLayoutEditorStore.getState().setDockMode("left");
-    });
-    await flushFrame();
-
-    expect(ring()?.style.transform).toBe("translate(377.00px, 117.00px)");
-  });
-
   it("puts the ring on one instance, and hides it with no selection", async () => {
     openSession();
     const view = render(
@@ -523,20 +459,6 @@ describe("a region part (data-layout-region-part)", () => {
     expect(useLayoutEditorStore.getState().selected).toBe("model");
   });
 
-  it("leaves data-layout-region on the registered node alone - the part never carries it", () => {
-    openSession();
-    const view = render(
-      <PartCanvas regionId="model" instanceId="tile-a" testId="model" />,
-    );
-
-    expect(document.querySelector('[data-layout-region="model"]')).toBe(
-      view.getByTestId("model"),
-    );
-    expect(view.getByTestId("part").hasAttribute("data-layout-region")).toBe(
-      false,
-    );
-  });
-
   it("anchors the hover chip and the selection ring to the registered node, not the part", async () => {
     openSession();
     const view = render(
@@ -547,8 +469,10 @@ describe("a region part (data-layout-region-part)", () => {
     movable(view.getByTestId("model"), new DOMRect(700, 120, 200, 30));
 
     fireEvent.pointerMove(view.getByTestId("part-inner"), MOUSE);
-    expect(chip()?.style.left).not.toBe("0px");
-    expect(chip()?.style.left).not.toBe("");
+    // jsdom's column is 0x0, so the chip's `left` clamps to the same 6px
+    // whichever node it measured; `top` is the half that tells them apart
+    // (114px off the node, 6px off the part).
+    expect(chip()?.style.top).toBe("114px");
 
     fireEvent.pointerDown(view.getByTestId("part-inner"));
     await flushFrame();

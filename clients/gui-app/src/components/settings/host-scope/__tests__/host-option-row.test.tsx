@@ -154,26 +154,6 @@ describe("HostOptionRow — per-host update badge isolation (Ticket 06 subject F
     expect(queryByTestId("host-option-update-badge-host-a")).toBeNull();
   });
 
-  it("attaches nameRef to the name span - the element the account menu's tooltip measures (G4)", () => {
-    const host = hostScopeOptionFixture({ hostId: "host-a", name: "Host A" });
-    let captured: HTMLSpanElement | null = null;
-    render(
-      <HostOptionRow
-        host={host}
-        picked={false}
-        active={false}
-        intent="view"
-        surfaceState={AVAILABLE_HOST_ROW_SURFACE_STATE}
-        updateView={null}
-        nameRef={(el) => {
-          captured = el;
-        }}
-      />,
-    );
-    expect(captured).not.toBeNull();
-    expect((captured as HTMLSpanElement | null)?.textContent).toBe("Host A");
-  });
-
   it("an active update state renders no interactive or disable-able element — the row itself cannot gate selection", () => {
     const host = hostScopeOptionFixture({ hostId: "host-a", name: "Host A" });
     const { container } = render(

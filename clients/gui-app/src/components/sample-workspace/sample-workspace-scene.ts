@@ -440,8 +440,6 @@ export const SAMPLE_NEEDS_YOU_ITEMS: ReadonlyArray<NeedsYouItem> = [
     },
     reason: "reply",
     ask: "Question waiting",
-    epicId: SAMPLE_EPIC_ID,
-    chatId: SAMPLE_LIVE_AGENTS[0].nodeId,
     taskTitle: SAMPLE_TASK_TITLE,
     agentTitle: SAMPLE_LIVE_AGENTS[0].title,
     createdAt: SAMPLE_LIVE_AGENTS[0].updatedAt,

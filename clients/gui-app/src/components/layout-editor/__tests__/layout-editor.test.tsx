@@ -99,16 +99,16 @@ function escape(target: EventTarget): void {
   );
 }
 
-function chord(shift: boolean): void {
-  document.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "z",
-      metaKey: true,
-      shiftKey: shift,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
+function chord(shift: boolean): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "z",
+    metaKey: true,
+    shiftKey: shift,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.dispatchEvent(event);
+  return event;
 }
 
 beforeEach(() => {
@@ -206,10 +206,12 @@ describe("the mounted editor root", () => {
       useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
 
-    act(() => {
-      chord(false);
-    });
+    // `endSession` empties the history, so a leaked listener's undo would be
+    // a no-op; the harm it would do is swallowing Cmd+Z in the app's own
+    // text fields, which is what `defaultPrevented` shows.
+    const event = chord(false);
 
+    expect(event.defaultPrevented).toBe(false);
     expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
   });
 
@@ -259,13 +261,21 @@ describe("the mounted editor root", () => {
   it("leaves Escape alone when no session is open", () => {
     const column = mountColumn();
     render(<LayoutEditor column={column} />);
+    const event = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
 
     act(() => {
-      escape(document.body);
+      document.body.dispatchEvent(event);
     });
 
     expect(useLayoutEditorStore.getState().session).toBeNull();
     expect(useLayoutEditorStore.getState().selected).toBeNull();
+    // The ladder is armed only while a session is live: outside one, Escape
+    // belongs to whatever else in the app is listening for it.
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("leaves Escape to an overlay that has taken focus", () => {
@@ -544,9 +554,7 @@ describe("the inspector chrome", () => {
 
     const doneItem = screen.getByRole("menuitem", { name: /^Done/ });
     expect(doneItem.querySelector("svg")).toBeNull();
-    const spacer = doneItem.querySelector('[aria-hidden="true"]');
-    expect(spacer).not.toBeNull();
-    expect(spacer?.className).toContain("size-4");
+    expect(doneItem.querySelector('[aria-hidden="true"]')).not.toBeNull();
 
     const discardItem = screen.getByRole("menuitem", {
       name: /Discard session changes/,

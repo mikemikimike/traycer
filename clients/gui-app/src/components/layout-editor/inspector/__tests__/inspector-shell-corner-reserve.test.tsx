@@ -41,32 +41,26 @@ afterEach(() => {
 });
 
 describe("inspector header corner reserve", () => {
-  it("keeps the traffic-light reserve when docked left", () => {
+  it("keeps the traffic-light reserve docked left alone, following a live dock change", () => {
     setDockMode("left");
     const header = renderHeader();
     expect(header.classList.contains(CORNER_RESERVE_CLASS)).toBe(true);
     expect(header.classList.contains("pl-3.5")).toBe(true);
-  });
 
-  for (const dockMode of ["right", "float"] as const) {
-    it(`takes no reserve when docked ${dockMode}`, () => {
-      setDockMode(dockMode);
-      const header = renderHeader();
-      expect(header.classList.contains(CORNER_RESERVE_CLASS)).toBe(false);
-      expect(header.classList.contains("pl-3.5")).toBe(true);
-    });
-  }
-
-  it("follows a live dock change", () => {
-    setDockMode("left");
-    const header = renderHeader();
-    act(() => {
-      setDockMode("right");
-    });
-    expect(header.classList.contains(CORNER_RESERVE_CLASS)).toBe(false);
-    act(() => {
-      setDockMode("left");
-    });
-    expect(header.classList.contains(CORNER_RESERVE_CLASS)).toBe(true);
+    for (const [dockMode, reserved] of [
+      ["right", false],
+      ["float", false],
+      ["left", true],
+    ] as const) {
+      act(() => {
+        setDockMode(dockMode);
+      });
+      expect(header.classList.contains(CORNER_RESERVE_CLASS), dockMode).toBe(
+        reserved,
+      );
+      // The reserve is added on top of the header's own padding, never in
+      // place of it.
+      expect(header.classList.contains("pl-3.5"), dockMode).toBe(true);
+    }
   });
 });

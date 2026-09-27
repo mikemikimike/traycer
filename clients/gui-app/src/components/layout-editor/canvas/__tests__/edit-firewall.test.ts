@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  FIREWALLED_EVENT_TYPES,
-  installEditFirewall,
-} from "@/components/layout-editor/canvas/edit-firewall";
+import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
 
 /**
  * The firewall is asserted through the app's OWN handlers (4.4): a listener on
@@ -11,6 +8,28 @@ import {
  * restate the implementation; asserting that the app never heard the gesture
  * is the outcome the rule exists for.
  */
+
+/**
+ * Named rather than read from the module's own list: a test that iterates the
+ * same array cannot notice a gesture leaving it. The drag-and-drop and paste
+ * five are here because the composer carries real handlers for all of them
+ * (C-16).
+ */
+const SWALLOWED_EVENT_TYPES = [
+  "click",
+  "dblclick",
+  "auxclick",
+  "pointerdown",
+  "keydown",
+  "keypress",
+  "submit",
+  "dragstart",
+  "dragenter",
+  "dragover",
+  "dragleave",
+  "drop",
+  "paste",
+];
 
 let teardown: (() => void) | null = null;
 
@@ -33,7 +52,7 @@ function mountColumn(): Column {
   // `contextmenu` is no longer on the swallowed list (L-129) but is still a
   // gesture this suite listens for, because whether the app hears it is now
   // the question rather than a given.
-  for (const type of [...FIREWALLED_EVENT_TYPES, "contextmenu", "wheel"]) {
+  for (const type of [...SWALLOWED_EVENT_TYPES, "contextmenu", "wheel"]) {
     control.addEventListener(type, () => {
       heard.push(type);
     });
@@ -58,28 +77,13 @@ describe("the edit firewall (4.4)", () => {
   it("swallows every listed gesture before the app hears it", () => {
     const { control, heard } = mountColumn();
 
-    for (const type of FIREWALLED_EVENT_TYPES) {
+    for (const type of SWALLOWED_EVENT_TYPES) {
       control.dispatchEvent(
         new Event(type, { bubbles: true, cancelable: true }),
       );
     }
 
     expect(heard).toEqual([]);
-  });
-
-  it("covers the drag-and-drop and paste set the composer really handles (C-16)", () => {
-    // Named rather than derived from the export: the point of the list is
-    // that these five are on it, and a test that reads the same array cannot
-    // notice one leaving.
-    for (const type of [
-      "dragenter",
-      "dragover",
-      "dragleave",
-      "drop",
-      "paste",
-    ]) {
-      expect(FIREWALLED_EVENT_TYPES).toContain(type);
-    }
   });
 
   /**
@@ -176,16 +180,6 @@ describe("the edit firewall (4.4)", () => {
     control.dispatchEvent(
       new Event("keydown", { bubbles: true, cancelable: true }),
     );
-    expect(heard).toEqual([]);
-  });
-
-  it("still swallows a click elsewhere in the column", () => {
-    const { control, heard } = mountColumn();
-
-    control.dispatchEvent(
-      new Event("click", { bubbles: true, cancelable: true }),
-    );
-
     expect(heard).toEqual([]);
   });
 

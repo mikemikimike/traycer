@@ -89,18 +89,25 @@ for (const platform of ["win32", "linux"] as const) {
   });
 }
 
-it("drops the drag region while a title-bar overlay is open", () => {
-  renderHeader(createDesktopHost("linux"), "boot");
-  const header = screen.getByTestId("desktop-menu-header");
-  expect(header.className).toContain("[-webkit-app-region:drag]");
+it.each([
+  ["boot", "desktop-menu-header"],
+  ["title-band", "app-title-band"],
+] as const)(
+  "drops the drag region while a title-bar overlay is open (%s)",
+  (variant, testId) => {
+    renderHeader(createDesktopHost("linux"), variant);
+    const row = screen.getByTestId(testId);
+    expect(row.classList.contains("[-webkit-app-region:drag]")).toBe(true);
 
-  act(() => {
-    useTitleBarDragStore
-      .getState()
-      .setSuppressed("desktop-menu-header-test", true);
-  });
-  expect(header.className).toContain("[-webkit-app-region:no-drag]");
-});
+    act(() => {
+      useTitleBarDragStore
+        .getState()
+        .setSuppressed("desktop-menu-header-test", true);
+    });
+    expect(row.classList.contains("[-webkit-app-region:no-drag]")).toBe(true);
+    expect(row.classList.contains("[-webkit-app-region:drag]")).toBe(false);
+  },
+);
 
 it("reserves the same h-10 boot slot when desktop menus are inactive", () => {
   const { container } = render(
@@ -139,9 +146,9 @@ describe("title-band variant", () => {
       expect(band.classList.contains(WINDOW_TRAILING_INSET_CLASS)).toBe(true);
       expect(band.classList.contains("after:h-px")).toBe(true);
       expect(band.classList.contains("flex")).toBe(true);
+      // A menu-bearing band displays even without a window-controls overlay.
       expect(band.classList.contains("hidden")).toBe(false);
       expect(band.classList.contains("wco:flex")).toBe(false);
-      expect(band.dataset.titleBandMenus).toBe("active");
       expect(
         screen.getAllByRole("navigation", { name: "Application menu" }),
       ).toHaveLength(1);
@@ -164,24 +171,9 @@ describe("title-band variant", () => {
     expect(band.classList.contains(WINDOW_LEADING_INSET_CLASS)).toBe(false);
     expect(band.classList.contains("[-webkit-app-region:drag]")).toBe(true);
     expect(band.getAttribute("aria-hidden")).toBe("true");
-    expect(band.hasAttribute("data-title-band-menus")).toBe(false);
     expect(band.childElementCount).toBe(0);
     expect(
       screen.queryByRole("navigation", { name: "Application menu" }),
     ).toBeNull();
-  });
-
-  it("drops the drag region while a title-bar overlay is open", () => {
-    renderHeader(createDesktopHost("win32"), "title-band");
-    const band = screen.getByTestId("app-title-band");
-    expect(band.classList.contains("[-webkit-app-region:drag]")).toBe(true);
-
-    act(() => {
-      useTitleBarDragStore
-        .getState()
-        .setSuppressed("desktop-menu-header-test", true);
-    });
-    expect(band.classList.contains("[-webkit-app-region:no-drag]")).toBe(true);
-    expect(band.classList.contains("[-webkit-app-region:drag]")).toBe(false);
   });
 });

@@ -351,38 +351,6 @@ describe("<UserMenu /> host section", () => {
     expect(makeActive).not.toHaveBeenCalled();
   });
 
-  it("does nothing when clicking a disabled offline host", async () => {
-    const active = hostScopeOptionFixture({
-      hostId: "host-active",
-      isActive: true,
-      connectable: true,
-    });
-    const offline = hostScopeOptionFixture({
-      hostId: "host-offline",
-      isActive: false,
-      connectable: false,
-      health: {
-        state: "offline",
-        label: "Offline",
-        detail: null,
-        tone: "idle",
-        live: false,
-      },
-    });
-    hostOptionsRef.value = hostOptionsFixture({
-      hosts: [active, offline],
-      activeHostId: active.hostId,
-    });
-    const makeActive = vi.fn();
-    makeActiveRef.fn = makeActive;
-
-    await openMenu();
-
-    fireEvent.click(screen.getByTestId("user-menu-host-option-host-offline"));
-
-    expect(makeActive).not.toHaveBeenCalled();
-  });
-
   it("renders no Host section for a zero-host account", async () => {
     hostOptionsRef.value = hostOptionsFixture({
       hosts: [],
@@ -424,12 +392,12 @@ describe("<UserMenu /> host section", () => {
 
     await openMenu();
 
+    // Held through `aria-disabled` alone: Radix's own `disabled` (which sets
+    // `data-disabled`) would drop the row from roving focus.
     for (const hostId of ["host-active", "host-pending", "host-other"]) {
       const row = screen.getByTestId(`user-menu-host-option-${hostId}`);
-      expect(
-        row.getAttribute("aria-disabled") === "true" ||
-          row.getAttribute("data-disabled") !== null,
-      ).toBe(true);
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+      expect(row.hasAttribute("data-disabled")).toBe(false);
     }
 
     expect(

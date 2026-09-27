@@ -3,10 +3,12 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import { setMobileApp } from "@/lib/mobile-app";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutSnapshot,
@@ -21,7 +23,9 @@ import {
  * round trip has to be lossless and each pick has to be ONE undo step. The
  * two option sets either side of it - the rail's three and everything else's
  * two - are here because "one control per row" is only true if every row
- * reaches its whole value through it.
+ * reaches its whole value through it. Access (never hidden, and gone on a
+ * narrow page) and the Microphone (gone in the installed mobile app, disabled
+ * while voice input is off) are the gates the same one control carries.
  *
  * Rendered live off the store rather than off a captured snapshot: what a pick
  * writes is only half of it, and the other half is what the control reads back
@@ -116,7 +120,7 @@ describe("a sizeable region's Full row / Chip / Hidden", () => {
     expect(historyDepth()).toBe(before + 1);
   });
 
-  it("leaves the size alone when Hidden is picked, so a chip ghost is a chip", () => {
+  it("leaves the size alone when Hidden is picked, so a hidden chip comes back as a chip", () => {
     render(<LiveControl regionId="changedFiles" />);
 
     pick("Chip");
@@ -131,13 +135,7 @@ describe("a sizeable region's Full row / Chip / Hidden", () => {
         .getByRole("radio", { name: "Hidden" })
         .getAttribute("aria-checked"),
     ).toBe("true");
-  });
 
-  it("round-trips: a hidden chip comes back as a chip", () => {
-    render(<LiveControl regionId="changedFiles" />);
-
-    pick("Chip");
-    pick("Hidden");
     pick("Chip");
 
     expect(changedFiles().shown).toBe("shown");
@@ -192,6 +190,53 @@ describe("the option set a region's own value asks for", () => {
 
     expect(minimap().shown).toBe("hidden");
     expect(historyDepth()).toBe(1);
+  });
+});
+
+describe("a region with no `shown` leaf at all (regionHides false)", () => {
+  it("gives Access Icon and label/Icon only only, no Hidden", () => {
+    render(<LiveControl regionId="access" />);
+
+    expect(optionLabels()).toEqual(["Icon and label", "Icon only"]);
+  });
+
+  it("drops Access's own display control on a narrow page - it has no applicable size", () => {
+    const original = window.innerWidth;
+    window.innerWidth = 500;
+    try {
+      render(<LiveControl regionId="access" />);
+      expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    } finally {
+      window.innerWidth = original;
+    }
+  });
+});
+
+describe("Microphone's own control (mobile absence, voice-off gating)", () => {
+  afterEach(() => {
+    setMobileApp(false);
+    useSettingsStore.setState({ voiceInputEnabled: true });
+  });
+
+  it("is absent in the installed mobile app", () => {
+    setMobileApp(true);
+    render(<LiveControl regionId="mic" />);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+  });
+
+  it("disables every option and names the reason when voice input is off", () => {
+    useSettingsStore.setState({ voiceInputEnabled: false });
+    render(<LiveControl regionId="mic" />);
+
+    const options = screen.getAllByRole("radio");
+    expect(options.every((option) => option.hasAttribute("disabled"))).toBe(
+      true,
+    );
+    const describedById = options[0]?.getAttribute("aria-describedby");
+    expect(describedById).not.toBeNull();
+    expect(document.getElementById(describedById as string)?.textContent).toBe(
+      "Enable Voice input in General settings to show the microphone.",
+    );
   });
 });
 

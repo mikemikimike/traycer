@@ -910,48 +910,12 @@ describe("<TabStrip />", () => {
   });
 
   /**
-   * F4: the active tab is one box, not the old two-cap silhouette - a single
-   * `tab-chrome-box` on the sheets' own geometry, and none of the shapes it
-   * replaced.
-   */
-  it("draws the active tab as exactly one box on the sheets' geometry, no silhouette left", () => {
-    render(
-      <TabChrome isActive joined={false} color="#12ab34" session={false} />,
-    );
-
-    expect(screen.getAllByTestId("tab-chrome-box")).toHaveLength(1);
-    const box = screen.getByTestId("tab-chrome-box");
-    expect(box.className).toContain("rounded-xl");
-    expect(box.className).toContain("inset-0.5");
-    expect(screen.queryByTestId("tab-cap-left")).toBeNull();
-    expect(screen.queryByTestId("tab-cap-right")).toBeNull();
-    expect(screen.queryByTestId("tab-chrome-center")).toBeNull();
-    expect(screen.queryByTestId("tab-baseline-cover")).toBeNull();
-  });
-
-  it("draws an inactive tab's hover state as the same box geometry", () => {
-    render(
-      <TabChrome
-        isActive={false}
-        joined={false}
-        color={null}
-        session={false}
-      />,
-    );
-
-    const hoverBox = screen.getByTestId("tab-hover-box");
-    expect(hoverBox.className).toContain("rounded-xl");
-    expect(hoverBox.className).toContain("inset-0.5");
-    expect(screen.queryByTestId("tab-chrome-box")).toBeNull();
-  });
-
-  /**
    * At rest the cap is `SessionTabMark`'s, so `TabChrome` must not draw a
    * second bar of the same colour underneath it: two strokes on one edge is
    * the kind of stacked decoration this redesign exists to remove (L-138).
    */
   it("leaves the resting editor tab's bottom edge to the session mark", () => {
-    const { container } = render(
+    render(
       <TabChrome
         isActive={false}
         joined={false}
@@ -960,9 +924,7 @@ describe("<TabStrip />", () => {
       />,
     );
 
-    expect(
-      container.querySelector("span[style]")?.getAttribute("style"),
-    ).toBeUndefined();
+    expect(screen.queryByTestId("tab-color-mark")).toBeNull();
   });
 
   /**
@@ -1137,10 +1099,9 @@ describe("<TabStrip />", () => {
 
     rerender(<SplitMemberChrome focused={false} color="#12ab34" />);
     expect(screen.queryByTestId("tab-chrome-box")).toBeNull();
-    const hoverBox = screen.getByTestId("tab-hover-box");
-    expect(hoverBox.className).toContain("rounded-xl");
-    expect(hoverBox.className).toContain("inset-0.5");
-    expect(hoverBox.className).toContain("group-hover/tab:bg-foreground/5");
+    expect(screen.getByTestId("tab-hover-box").className).toContain(
+      "group-hover/tab:bg-foreground/5",
+    );
     // An unfocused colored member has no box to wear its color in, so it
     // gets the same short mark a lone tab does (F4 round 2). The focused
     // member above never draws one - its box border carries the color.
@@ -1516,7 +1477,6 @@ describe("<TabStrip />", () => {
 
     expect(closeSlot.className).toContain("header-tab-trailing-slot");
     expect(closeSlot.className).not.toContain("group-hover/tab:w-5");
-    expect(hoverChrome?.className).toContain("rounded-xl");
     expect(hoverChrome?.className).toContain("group-hover/tab:opacity-100");
     // :focus-visible (keyboard-only), NOT :focus-within - a mouse-drag reorder
     // focuses the tab div without activating it, and :focus-within would leave

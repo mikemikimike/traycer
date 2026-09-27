@@ -100,11 +100,12 @@ vi.mock("@dnd-kit/core", () => ({
   },
 }));
 
-// The chips follow the Resource monitor's own Shown switch now (L-60), so the
-// row asks this hook rather than reading a settings field. Non-empty here,
-// which is what a shown monitor answers.
+// The chips follow the Resource monitor's own region values now (L-60), so
+// the row asks this hook rather than reading a settings field. A deliberate
+// subset here, so the chip assertions below prove the row passes the hook's
+// answer through rather than a default of its own.
 vi.mock("@/hooks/resources/use-navigator-resource-metrics", () => ({
-  useNavigatorResourceMetrics: () => ["cpu", "memory", "processes"],
+  useNavigatorResourceMetrics: () => ["memory"],
 }));
 vi.mock("@/components/resources/resource-usage-chip", () => ({
   NavigatorResourceHotspotChip: (props: {
@@ -294,22 +295,20 @@ describe("terminal sidebar fleet identity consumers", () => {
       draggableCalls.calls.map((call) => call.data.tile.hostId).sort(),
     ).toEqual([HOST_A, HOST_B].sort());
 
-    // The metrics a chip draws are no longer a setting - every reading prints,
-    // unconditionally (L-28) - so this pins the fixed default rather than a
-    // configured subset.
+    // Each row's chip carries the hook's metrics for its OWN host.
     expect(resourceChipCalls.calls).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "terminal",
           ownerId: SHARED_ID,
           hostId: HOST_A,
-          metrics: ["cpu", "memory", "processes"],
+          metrics: ["memory"],
         }),
         expect.objectContaining({
           kind: "terminal",
           ownerId: SHARED_ID,
           hostId: HOST_B,
-          metrics: ["cpu", "memory", "processes"],
+          metrics: ["memory"],
         }),
       ]),
     );

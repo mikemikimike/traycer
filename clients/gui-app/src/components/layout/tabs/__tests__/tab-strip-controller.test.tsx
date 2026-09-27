@@ -1,16 +1,15 @@
 /**
  * `useTabStripController` is the strip's behaviour without its layout, so a
- * presentation other than the header strip can mount over it. This suite
- * mounts a trivial list presentation (no scroller, no drag, no dialogs) over
- * the real controller and pins what that second presentation relies on:
+ * presentation other than the header strip can mount over it. This suite pins:
  *
- *  - the `tab.split.*` and `epic.close` keybinding handlers are registered by
- *    the controller exactly once each, and released on unmount;
- *  - `isEmptyLanding` is true only with Home off, no tabs, and route `/`;
+ *  - the `tab.split.*` and `epic.close` keybinding handlers are registered
+ *    exactly once each under the real header `TabStrip` and released on
+ *    unmount (`side-tab-strip.test.tsx` counts the same over the side strip),
+ *    so a presentation that registered any of these ids itself would read two
+ *    live registrations;
+ *  - `isEmptyLanding`, read through a trivial list presentation, is true only
+ *    with no tabs on route `/` (Home drawn is `tab-strip-home-placement`'s);
  *  - the dialogs are handed back as a node for the presentation to place.
- *
- * The same count runs over the real header `TabStrip`, so a presentation that
- * registered any of these ids itself would read two live registrations.
  */
 import { isValidElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,22 +222,6 @@ describe("useTabStripController", () => {
     resetStores();
   });
 
-  it("registers tab.split.* and epic.close exactly once and releases them on unmount", async () => {
-    openEpicTab("e-a");
-    await renderAt("/elsewhere");
-
-    for (const id of KEYBINDING_IDS) {
-      expect(registrations.live.get(id)).toBe(1);
-      expect(registrations.peak.get(id)).toBe(1);
-    }
-
-    cleanup();
-
-    for (const id of KEYBINDING_IDS) {
-      expect(registrations.live.get(id)).toBe(0);
-    }
-  });
-
   it("keeps one live registration per id under the real header strip", async () => {
     openEpicTab("e-a");
     render(<RouterProvider router={buildRouter("/elsewhere", <TabStrip />)} />);
@@ -259,12 +242,6 @@ describe("useTabStripController", () => {
   it("reports an empty landing only with Home off, no tabs and route /", async () => {
     const list = await renderAt("/");
     expect(list.getAttribute("data-empty-landing")).toBe("true");
-  });
-
-  it("is not an empty landing with Home drawn", async () => {
-    setHomeTabEnabled(true);
-    const list = await renderAt("/");
-    expect(list.getAttribute("data-empty-landing")).toBe("false");
   });
 
   it("is not an empty landing with a tab open", async () => {

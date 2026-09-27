@@ -108,16 +108,27 @@ function frameClasses(host: HostContextId): ReadonlySet<string> {
   return new Set(frame.classList);
 }
 
-const ALL_HOSTS: ReadonlyArray<HostContextId> = [
-  "top-bar",
-  "status-bar",
-  "toolbar",
-  "composer-foot",
-  "dock",
-  "chip-strip",
-  "rail",
-  "chat",
-];
+/**
+ * Keyed by the union, so a host added to production is a compile error here
+ * until this file either renders it or says why not.
+ */
+const HOSTS: Readonly<Record<HostContextId, true>> = {
+  "top-bar": true,
+  "status-bar": true,
+  toolbar: true,
+  "composer-foot": true,
+  dock: true,
+  "chip-strip": true,
+  rail: true,
+  chat: true,
+};
+
+function isHost(key: string): key is HostContextId {
+  return Object.hasOwn(HOSTS, key);
+}
+
+const ALL_HOSTS: ReadonlyArray<HostContextId> =
+  Object.keys(HOSTS).filter(isHost);
 
 /**
  * The frame's OWN chrome, derived rather than restated: it is what every host's

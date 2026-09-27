@@ -47,8 +47,6 @@ export function DesktopMenuHeader(props: DesktopMenuHeaderProps): ReactNode {
     return (
       <div
         data-testid="app-title-band"
-        // A menu-bearing band is displayed even without a window-controls overlay.
-        data-title-band-menus={active ? "active" : undefined}
         aria-hidden={active ? undefined : true}
         className={cn(
           "h-[var(--app-title-band-height)] md:bg-transparent md:after:hidden",

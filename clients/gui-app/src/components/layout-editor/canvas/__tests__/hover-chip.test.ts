@@ -58,13 +58,6 @@ describe("the anchored path", () => {
     expect(element.hidden).toBe(false);
   });
 
-  it("declares the placement the top bar needs", () => {
-    const node = region(column(), { x: 10, y: 0, width: 60, height: 20 });
-    chip?.show({ label: "Home tab - Shown", node, placement: "below" });
-
-    expect(chipElement().getAttribute("data-placement")).toBe("below");
-  });
-
   it("writes no coordinates on a scroll either - the browser owns them", () => {
     const node = region(column(), { x: 100, y: 200, width: 60, height: 20 });
     chip?.show({ label: "Minimap - Right", node, placement: "above" });

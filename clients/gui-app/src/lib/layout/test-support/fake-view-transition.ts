@@ -16,13 +16,11 @@ export class FakeViewTransition {
   private settle: (() => void) | null = null;
   private fail: (() => void) | null = null;
   readonly finished: Promise<void>;
-  readonly ready = Promise.resolve();
-  readonly updateCallbackDone = Promise.resolve();
 
   constructor(private readonly update: () => void) {
     this.finished = new Promise<void>((resolve, reject) => {
       this.settle = resolve;
-      this.fail = () => reject(new Error("skipped"));
+      this.fail = () => reject(new Error("update callback threw"));
     });
   }
 
@@ -34,13 +32,12 @@ export class FakeViewTransition {
     this.settle?.();
   }
 
-  /** What `skipTransition()` and a throwing callback both look like from here. */
+  /**
+   * What a throwing update callback looks like from here. A skipped transition
+   * fulfils `finished` instead, which is `finish()`.
+   */
   reject(): void {
     this.fail?.();
-  }
-
-  skipTransition(): void {
-    this.finish();
   }
 }
 

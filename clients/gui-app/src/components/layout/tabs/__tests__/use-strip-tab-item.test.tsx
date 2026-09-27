@@ -129,15 +129,7 @@ const NO_PROMPT_LIT_INDICATORS: SurfaceNotificationIndicators = {
   chats: {},
 };
 
-interface Recorded {
-  readonly pinned: Array<{
-    readonly epicId: string;
-    readonly pinned: boolean;
-    readonly displayName: string;
-  }>;
-}
-
-function makeInput(recorded: Recorded): StripTabItemInput {
+function makeInput(): StripTabItemInput {
   return {
     tab: EPIC_TAB,
     index: 0,
@@ -158,9 +150,7 @@ function makeInput(recorded: Recorded): StripTabItemInput {
     },
     isTaskPinPending: false,
     onTaskPinMenuOpen: () => undefined,
-    onSetTaskPinned: (epicId, pinned, displayName) => {
-      recorded.pinned.push({ epicId, pinned, displayName });
-    },
+    onSetTaskPinned: () => undefined,
   };
 }
 
@@ -351,10 +341,6 @@ function registerChatWaitingOnApproval(): void {
   });
 }
 
-function emptyRecorded(): Recorded {
-  return { pinned: [] };
-}
-
 beforeEach(() => {
   navigation.calls.length = 0;
   // A cloud-homed epic's rename and History pin are cloud capabilities.
@@ -372,7 +358,7 @@ afterEach(() => {
 describe("useStripTabItem through a bare presentation", () => {
   it("carries the tab's root attributes", async () => {
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       IDLE_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -387,7 +373,7 @@ describe("useStripTabItem through a bare presentation", () => {
 
   it("activates on Enter and Space, and not on other keys", async () => {
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       IDLE_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -402,7 +388,7 @@ describe("useStripTabItem through a bare presentation", () => {
 
   it("activates the tab the moment a drag picks it up, before any release", async () => {
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       IDLE_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -428,7 +414,7 @@ describe("useStripTabItem through a bare presentation", () => {
 
   it("opens the context menu on a long press, and a moving touch cancels it", async () => {
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       IDLE_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -465,7 +451,7 @@ describe("useStripTabItem through a bare presentation", () => {
     const writes: EpicWriteCommandIntent[] = [];
     registerEditableEpic(writes);
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       IDLE_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -498,25 +484,9 @@ describe("useStripTabItem through a bare presentation", () => {
     ).toBeNull();
   });
 
-  it("pins the task to History with the tab's display name", async () => {
-    const recorded = emptyRecorded();
-    await renderInApp(
-      <BareRow input={makeInput(recorded)} />,
-      IDLE_LEADER,
-      NO_PROMPT_LIT_INDICATORS,
-    );
-
-    fireEvent.contextMenu(screen.getByTestId(`tab-epic-${EPIC_TAB.id}`));
-    fireEvent.click(await screen.findByText("Pin Task in History"));
-
-    expect(recorded.pinned).toEqual([
-      { epicId: EPIC_ID, pinned: true, displayName: "Row task" },
-    ]);
-  });
-
   it("shows the Alt-digit badge only while the header-tab scope owns alt", async () => {
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       IDLE_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -524,7 +494,7 @@ describe("useStripTabItem through a bare presentation", () => {
     cleanup();
 
     await renderInApp(
-      <BareRow input={makeInput(emptyRecorded())} />,
+      <BareRow input={makeInput()} />,
       ALT_LEADER,
       NO_PROMPT_LIT_INDICATORS,
     );
@@ -533,31 +503,9 @@ describe("useStripTabItem through a bare presentation", () => {
 });
 
 describe("TabItem waiting state", () => {
-  it("shows the approval glyph for a warm chat's pending approval when no prompt notification is lit", async () => {
-    registerChatWaitingOnApproval();
-    const input = makeInput(emptyRecorded());
-    await renderInApp(
-      <TabItem
-        {...input}
-        chrome="own"
-        includeMotionFrame={false}
-        offsetX={0}
-        showSeparatorAfter={false}
-        showDropIndicatorBefore={false}
-        showDropIndicatorAfter={false}
-      />,
-      IDLE_LEADER,
-      NO_PROMPT_LIT_INDICATORS,
-    );
-
-    expect(
-      screen.getByTestId(`header-tab-approval-${EPIC_TAB.id}`),
-    ).toBeDefined();
-  });
-
   it("shows no waiting glyph once the approval resolves", async () => {
     registerChatWaitingOnApproval();
-    const input = makeInput(emptyRecorded());
+    const input = makeInput();
     await renderInApp(
       <TabItem
         {...input}

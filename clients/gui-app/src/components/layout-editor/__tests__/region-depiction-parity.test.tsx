@@ -372,15 +372,6 @@ describe("the depictions drawn from their own markup", () => {
 describe("the depiction layer's imports", () => {
   const source = readFileSync(DEPICTION_FILE, "utf8");
 
-  it("names each leaf's real module", () => {
-    for (const leafCase of LEAF_CASES) {
-      expect(
-        source,
-        `${leafCase.regionId} -> ${leafCase.leafModule}`,
-      ).toContain(`from "${leafCase.leafModule}"`);
-    }
-  });
-
   /**
    * A look-alike has to live somewhere, and the one place a reviewer would not
    * look is beside the depictions. Nothing under `layout-editor/` may be drawn

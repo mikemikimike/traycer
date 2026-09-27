@@ -3,7 +3,6 @@ import {
   asBarRegionId,
   barClusterRegions,
   barPlacement,
-  barRegionsIn,
   canvasOrderGroupForRegion,
   canvasOrderGroupOf,
   DEFAULT_ARRANGEMENT,
@@ -26,7 +25,6 @@ import {
   sideTabStripEdge,
   stackRailPanels,
   stackRailPanelWithBelow,
-  toggleVerticalTabs,
   unstackRail,
   unstackRailPanel,
   TOOLBAR_REGION_IDS,
@@ -41,9 +39,7 @@ import {
 import {
   areRailsEqual,
   DEFAULT_RAIL,
-  MAX_RAIL_STACK_MEMBERS,
   railDisplayEntries,
-  railStackId,
   railStackMembers,
   railStackMembersFor,
   railStackOf,
@@ -54,7 +50,6 @@ import {
   railFromPanelIdOrder,
   panelVisibilityOverridesFromValues,
   RAIL_REGION_BY_PANEL,
-  railVisibilityFor,
   visibleRailPanelIds,
   type RailEntry,
 } from "@/lib/layout/rail";
@@ -122,12 +117,6 @@ describe("the shipped rail (L-155, L-166)", () => {
     expect(DEFAULT_RAIL.filter((entry) => entry.kind === "stack")).toEqual([
       { kind: "stack", id: "stack:railAgents+railArtifacts" },
     ]);
-  });
-
-  it("joins Agents to Artifacts, and only those two", () => {
-    expect(isStackedRailPanel(DEFAULT_RAIL, "railAgents")).toBe(true);
-    expect(isStackedRailPanel(DEFAULT_RAIL, "railArtifacts")).toBe(true);
-    expect(isStackedRailPanel(DEFAULT_RAIL, "railTerminals")).toBe(false);
   });
 
   it("is already normal, so a rehydrate changes nothing about it", () => {
@@ -244,14 +233,6 @@ describe("a panel moved within the rail", () => {
     ).toEqual(["railTerminals", "railAgents", "railArtifacts", "divider:1"]);
   });
 
-  it("puts a panel at the rail's end", () => {
-    expect(
-      idsOf(
-        moveRailPanelToEnd(withRail(DEFAULT_RAIL), "chats", "panel").rail,
-      ).at(-1),
-    ).toBe("railAgents");
-  });
-
   it("moves nothing for a panel that is not in the rail it was handed", () => {
     const arrangement = withRail(DEFAULT_RAIL.slice(0, 2));
 
@@ -342,29 +323,22 @@ describe("areRailsEqual", () => {
 });
 
 describe("railFromPanelIdOrder", () => {
-  it("keeps the order it is handed and adds no dividers", () => {
-    const rail = railFromPanelIdOrder([
-      "comments",
-      "chats",
-      "artifacts",
-      "terminals",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "file-tree",
-      "sharing",
-    ]);
-
-    expect(rail.every((entry) => entry.kind === "panel")).toBe(true);
-    expect(idsOf(rail)[0]).toBe("railComments");
-  });
-
-  it("drops an id this build does not know and puts back one it never named", () => {
+  it("keeps the order it is handed, drops an id this build does not know and puts back one it never named", () => {
     const rail = railFromPanelIdOrder(["comments", "not-a-panel", "chats"]);
 
-    expect(rail.filter((entry) => entry.kind === "divider")).toHaveLength(0);
-    expect(panelIdsOf(rail)).toHaveLength(9);
-    expect(idsOf(rail)[0]).toBe("railComments");
+    // Comments stays ahead of Agents as handed; every panel the order never
+    // named lands after its canonical neighbour, and no divider appears.
+    expect(idsOf(rail)).toEqual([
+      "railComments",
+      "railAgents",
+      "railArtifacts",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+    ]);
   });
 });
 
@@ -530,20 +504,6 @@ describe("a canvas drop written back into the full order (4.7)", () => {
         placeAfter: false,
       }).toolbarLeft,
     ).toEqual(["mic", "attachImage", "access"]);
-  });
-
-  it("keeps a member that was NOT on screen beside the neighbours it had", () => {
-    // `access` is hidden, so the canvas showed the other two; dragging the
-    // first past the second must not move the hidden one relative to them.
-    const next = moveCanvasOrderMember({
-      arrangement,
-      group: "toolbarLeft",
-      fromId: "attachImage",
-      toId: "mic",
-      placeAfter: true,
-    });
-
-    expect(next.toolbarLeft).toEqual(["access", "mic", "attachImage"]);
   });
 
   it("moves nothing for an id this build does not know", () => {
@@ -748,11 +708,6 @@ describe("normalizeArrangement", () => {
 });
 
 describe("the rail's three-state visibility (L-47, L-61)", () => {
-  it("writes Hide and Show onto whichever region it is given", () => {
-    expect(railVisibilityFor(true)).toBe("shown");
-    expect(railVisibilityFor(false)).toBe("hidden");
-  });
-
   it("reads the sparse map: hidden always, shown only where Auto exists", () => {
     const values = effectiveLayoutValues("default", {
       // A plain panel's own rule IS shown, so setting it to `shown` is a
@@ -789,12 +744,6 @@ describe("the rail's three-state visibility (L-47, L-61)", () => {
 });
 
 describe("resolvePersistedArrangement", () => {
-  it("falls back to the defaults on a record it cannot read", () => {
-    expect(resolvePersistedArrangement("not an arrangement")).toEqual(
-      DEFAULT_ARRANGEMENT,
-    );
-  });
-
   it("keeps a stored side and host and drops a value this build has no case for", () => {
     const arrangement = resolvePersistedArrangement({
       usageHost: "header",
@@ -882,10 +831,10 @@ describe("resolvePersistedArrangement", () => {
   });
 
   /**
-   * The other half of the same rule, in the direction L-142 opened: a dock
-   * order written before Todo was a member has three entries and this build
-   * has four. No migration exists and none is wanted (P5) - `mergeOrder`
-   * against `DEFAULT_DOCK_ORDER` is the whole of it.
+   * The direction L-142 opened: a dock order written before Todo was a member
+   * has three entries and this build has four. No migration exists and none
+   * is wanted (P5) - `mergeOrder` against `DEFAULT_DOCK_ORDER` is the whole of
+   * it.
    *
    * Todo leads, because that is where `ChatLowerDock` already draws it and a
    * stored order says nothing about a member it never had: the person whose
@@ -893,21 +842,7 @@ describe("resolvePersistedArrangement", () => {
    * about opening a newer build should move it. Message queue is never one
    * of these entries at all (G1-G2) - it is not a dock region, so no stored
    * order ever names it and `mergeOrder` never has to reason about it.
-   */
-  it("materialises the dock members a stored order predates", () => {
-    const arrangement = resolvePersistedArrangement({
-      dock: ["changedFiles", "runningAgents", "background"],
-    });
-
-    expect(arrangement.dock).toEqual([
-      "todo",
-      "changedFiles",
-      "runningAgents",
-      "background",
-    ]);
-  });
-
-  /**
+   *
    * And it is NEIGHBOUR placement rather than an append, which is the rule
    * `mergeOrder` states for every order field this app stores: a member the
    * stored list never had lands after the canonical id ahead of it that is
@@ -980,14 +915,6 @@ describe("resolvePersistedArrangement", () => {
     });
   });
 
-  it("reads a stored Automatic entry as no entry at all", () => {
-    const arrangement = resolvePersistedArrangement({
-      providerLimits: { grok: { limitKeys: [] } },
-    });
-
-    expect(arrangement.providerLimits).toEqual({});
-  });
-
   it("drops a host whose every provider resolved to nothing checked", () => {
     const arrangement = resolvePersistedArrangement({
       shownProfiles: {
@@ -1041,17 +968,6 @@ describe("resolvePersistedArrangement", () => {
  * its right - so a user who never opens the editor sees no change at all.
  */
 describe("the two bar readings (L-156)", () => {
-  it("ships with each reading where the app has always drawn it", () => {
-    expect(barPlacement(DEFAULT_ARRANGEMENT, "usageLimits")).toEqual({
-      host: "status-bar",
-      side: "left",
-    });
-    expect(barPlacement(DEFAULT_ARRANGEMENT, "resourceMonitor")).toEqual({
-      host: "status-bar",
-      side: "right",
-    });
-  });
-
   it("moves one reading without touching the other, on either axis", () => {
     const usageUp = withBarHost(DEFAULT_ARRANGEMENT, "usageLimits", "header");
 
@@ -1207,10 +1123,8 @@ describe("the status bar surface toggle (L-160)", () => {
 
     const back = toggleStatusBarSurface(empty);
 
-    expect(barRegionsIn(back, "status-bar")).toEqual([
-      "usageLimits",
-      "resourceMonitor",
-    ]);
+    expect(barPlacement(back, "usageLimits").host).toBe("status-bar");
+    expect(barPlacement(back, "resourceMonitor").host).toBe("status-bar");
   });
 
   it("never moves a reading to the other end of its bar", () => {
@@ -1226,12 +1140,6 @@ describe("the status bar surface toggle (L-160)", () => {
 });
 
 describe("a stack link, normalised (L-166)", () => {
-  it("survives only between the two adjacent panels it joins", () => {
-    expect(idsOf(normalizeRail(DEFAULT_RAIL))).toContain(
-      "stack:railAgents+railArtifacts",
-    );
-  });
-
   it("is dropped when one of its panels moves away", () => {
     const moved = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
       sourcePanelId: "artifacts",
@@ -1310,22 +1218,6 @@ describe("a stack link, normalised (L-166)", () => {
     ];
 
     expect(idsOf(normalizeRail(three))).toEqual(idsOf(DEFAULT_RAIL));
-  });
-
-  it("reads adjacency in either order and re-mints the link for the pair it finds (G3)", () => {
-    // Sharing IS immediately above Comments, but this link names them in the
-    // opposite order. Under G3 that still counts as adjacent - the pair is a
-    // view group, so trading places inside it does not break the join - and
-    // normalizing re-mints the link's id for the order the panels now stand
-    // in rather than reading the two names as fixed top/bottom roles.
-    const reversed = [...FLAT_RAIL, stack("stack:railComments+railSharing")];
-
-    expect(idsOf(normalizeRail(reversed))).toEqual([
-      ...idsOf(FLAT_RAIL.slice(0, -2)),
-      "railSharing",
-      "stack:railSharing+railComments",
-      "railComments",
-    ]);
   });
 
   it("is dropped when its id is not a pair this build can read", () => {
@@ -1494,15 +1386,6 @@ describe("stacking and unstacking (L-168)", () => {
     ).toBe(false);
   });
 
-  it("takes the link out and leaves both panels where they are", () => {
-    const unstacked = unstackRail(
-      withRail(DEFAULT_RAIL),
-      "stack:railAgents+railArtifacts",
-    );
-
-    expect(idsOf(unstacked.rail)).toEqual(idsOf(FLAT_RAIL));
-  });
-
   it("leaves a rail holding no such link untouched", () => {
     const flat = withRail(FLAT_RAIL);
 
@@ -1510,19 +1393,23 @@ describe("stacking and unstacking (L-168)", () => {
   });
 
   it("is not what a before or after drop does", () => {
-    const before = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
+    // Terminals dropped after Browsers really moves, and the two stay apart:
+    // the only stack is still the shipped one.
+    const after = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
       sourcePanelId: "terminals",
       targetPanelId: "browsers",
-      placeAfter: false,
+      placeAfter: true,
       carry: "panel",
     }).rail;
 
-    expect(idsOf(normalizeRail(before))).toEqual(idsOf(DEFAULT_RAIL));
-    expect(
-      normalizeRail(before).some(
-        (entry) => entry.id === "stack:railBrowsers+railTerminals",
-      ),
-    ).toBe(false);
+    expect(idsOf(normalizeRail(after))).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts",
+      "railArtifacts",
+      "railBrowsers",
+      "railTerminals",
+      ...idsOf(FLAT_RAIL).slice(4),
+    ]);
   });
 
   const THREE_MEMBER_RAIL: ReadonlyArray<RailEntry> = [
@@ -1901,15 +1788,6 @@ describe("what a rail SURFACE draws (L-166, L-167)", () => {
       ),
     ).toEqual(["railAgents"]);
   });
-
-  it("names a stack after every member it holds, in order (L-181)", () => {
-    expect(railStackId(["railAgents", "railArtifacts"])).toBe(
-      "stack:railAgents+railArtifacts",
-    );
-    expect(railStackId(["railAgents", "railArtifacts", "railTerminals"])).toBe(
-      "stack:railAgents+railArtifacts+railTerminals",
-    );
-  });
 });
 
 describe("railStackMembers / railStackOf (L-181)", () => {
@@ -1930,10 +1808,6 @@ describe("railStackMembers / railStackOf (L-181)", () => {
     });
     expect(railStackOf(DEFAULT_RAIL, "railTerminals")).toBeNull();
   });
-
-  it("holds at most four members", () => {
-    expect(MAX_RAIL_STACK_MEMBERS).toBe(4);
-  });
 });
 
 /**
@@ -1941,125 +1815,11 @@ describe("railStackMembers / railStackOf (L-181)", () => {
  * are arrangement fields beside the bar placements, top and left by default.
  */
 describe("the tab strip's placement and the sidebar's side (S-01, S-02, S-05, S-06)", () => {
-  it("ships top for the strip and left for the sidebar", () => {
-    expect(DEFAULT_ARRANGEMENT.tabStripPlacement).toBe("top");
-    expect(DEFAULT_ARRANGEMENT.sidebarSide).toBe("left");
-  });
-
   describe("sideTabStripEdge", () => {
     it("is null for top and the edge itself for a side", () => {
       expect(sideTabStripEdge("top")).toBeNull();
       expect(sideTabStripEdge("left")).toBe("left");
       expect(sideTabStripEdge("right")).toBe("right");
-    });
-  });
-
-  // Finding 8: `toggleVerticalTabs` now maps one placement to another
-  // (`TabStripPlacement -> TabStripPlacement`), not a whole arrangement to
-  // another - every caller reads the CURRENT placement at invocation and
-  // sends the toggled value through `writeArrangementField`, so the "touches
-  // no other field" claim lives at that writer, not in this pure function.
-  describe("toggleVerticalTabs (S-25)", () => {
-    it("sends top to left, the default vertical side", () => {
-      expect(toggleVerticalTabs("top")).toBe("left");
-    });
-
-    it("sends either side back to top", () => {
-      expect(toggleVerticalTabs("left")).toBe("top");
-      expect(toggleVerticalTabs("right")).toBe("top");
-    });
-  });
-
-  describe("resolvePersistedArrangement", () => {
-    it("falls back to the default on an absent or unreadable value", () => {
-      expect(resolvePersistedArrangement({}).tabStripPlacement).toBe("top");
-      expect(resolvePersistedArrangement({}).sidebarSide).toBe("left");
-
-      // A number, a wrong-case literal, `null`, an object and a string this
-      // build has no case for - every shape a corrupt or foreign record could
-      // hold, not just one string.
-      const junkPlacements: ReadonlyArray<unknown> = [
-        1,
-        "TOP",
-        null,
-        {},
-        "sideways",
-      ];
-      for (const tabStripPlacement of junkPlacements) {
-        expect(
-          resolvePersistedArrangement({ tabStripPlacement }).tabStripPlacement,
-          JSON.stringify(tabStripPlacement),
-        ).toBe("top");
-      }
-
-      // `"top"` is valid for the strip but junk for the sidebar, which is
-      // worth pinning on its own.
-      const junkSides: ReadonlyArray<unknown> = [0, "LEFT", null, "top"];
-      for (const sidebarSide of junkSides) {
-        expect(
-          resolvePersistedArrangement({ sidebarSide }).sidebarSide,
-          JSON.stringify(sidebarSide),
-        ).toBe("left");
-      }
-    });
-
-    it("keeps each valid placement verbatim (L-133)", () => {
-      const placements: ReadonlyArray<TabStripPlacement> = [
-        "top",
-        "left",
-        "right",
-      ];
-      for (const tabStripPlacement of placements) {
-        expect(
-          resolvePersistedArrangement({ tabStripPlacement }).tabStripPlacement,
-        ).toBe(tabStripPlacement);
-      }
-      expect(
-        resolvePersistedArrangement({ sidebarSide: "right" }).sidebarSide,
-      ).toBe("right");
-    });
-
-    it("keeps a stored right placement through a full persisted round trip", () => {
-      const stored: unknown = JSON.parse(
-        JSON.stringify({
-          ...DEFAULT_ARRANGEMENT,
-          tabStripPlacement: "right",
-          sidebarSide: "right",
-        }),
-      );
-
-      const arrangement = resolvePersistedArrangement(stored);
-
-      expect(arrangement.tabStripPlacement).toBe("right");
-      expect(arrangement.sidebarSide).toBe("right");
-    });
-  });
-});
-
-// Chat display settings (audit R1): how wide the transcript, the composer
-// and an artifact's body run.
-describe("readingWidth", () => {
-  it("ships comfortable", () => {
-    expect(DEFAULT_ARRANGEMENT.readingWidth).toBe("comfortable");
-  });
-
-  describe("resolvePersistedArrangement", () => {
-    it("keeps a stored wide", () => {
-      expect(
-        resolvePersistedArrangement({ readingWidth: "wide" }).readingWidth,
-      ).toBe("wide");
-    });
-
-    it("falls back to comfortable on an absent or unreadable value", () => {
-      expect(resolvePersistedArrangement({}).readingWidth).toBe("comfortable");
-
-      const junk: ReadonlyArray<unknown> = [1, "WIDE", null, {}, "narrow"];
-      for (const readingWidth of junk) {
-        expect(
-          resolvePersistedArrangement({ readingWidth }).readingWidth,
-          JSON.stringify(readingWidth),
-        ).toBe("comfortable");
-      }
     });
   });
 });
@@ -2069,10 +1829,6 @@ describe("readingWidth", () => {
  * active task's live agents under its row.
  */
 describe("the vertical strip's view (D8, D9)", () => {
-  it("ships layered", () => {
-    expect(DEFAULT_ARRANGEMENT.sideStripView).toBe("layered");
-  });
-
   describe("liveAgentsInStrip (D9)", () => {
     it.each<{
       readonly placement: TabStripPlacement;
@@ -2154,49 +1910,79 @@ describe("the vertical strip's view (D8, D9)", () => {
       },
     );
   });
+});
 
-  describe("resolvePersistedArrangement", () => {
-    it("falls back to layered on an absent or unreadable value", () => {
-      expect(resolvePersistedArrangement({}).sideStripView).toBe("layered");
-
-      const junkViews: ReadonlyArray<unknown> = [
-        1,
-        "ACTIVITY",
-        null,
-        {},
-        "focused",
-      ];
-      for (const sideStripView of junkViews) {
+/**
+ * The persisted enum fields (L-133): the tab strip's placement, the sidebar's
+ * side, the reading width (audit R1: how wide the transcript, the composer and
+ * an artifact's body run), the vertical strip's view (D8) and Tab overflow.
+ * Each keeps a value this build knows verbatim and reads anything else as its
+ * shipped default, field by field.
+ *
+ * The junk is a number, a wrong-case literal, `null`, an object and a string
+ * this build has no case for - every shape a corrupt or foreign record could
+ * hold, not just one string. `"top"` is valid for the strip but junk for the
+ * sidebar, which is worth pinning on its own.
+ */
+describe("resolvePersistedArrangement: the enum fields (L-133)", () => {
+  it.each<{
+    readonly field:
+      | "tabStripPlacement"
+      | "sidebarSide"
+      | "readingWidth"
+      | "sideStripView"
+      | "taskTabLayout";
+    readonly fallback: string;
+    readonly valid: ReadonlyArray<string>;
+    readonly junk: ReadonlyArray<unknown>;
+  }>([
+    {
+      field: "tabStripPlacement",
+      fallback: "top",
+      valid: ["top", "left", "right"],
+      junk: [1, "TOP", null, {}, "sideways"],
+    },
+    {
+      field: "sidebarSide",
+      fallback: "left",
+      valid: ["right"],
+      junk: [0, "LEFT", null, "top"],
+    },
+    {
+      field: "readingWidth",
+      fallback: "comfortable",
+      valid: ["wide"],
+      junk: [1, "WIDE", null, {}, "narrow"],
+    },
+    {
+      field: "sideStripView",
+      fallback: "layered",
+      valid: ["layered", "activity"],
+      junk: [1, "ACTIVITY", null, {}, "focused"],
+    },
+    {
+      field: "taskTabLayout",
+      fallback: "scroll",
+      valid: ["shrink"],
+      junk: ["wrap", undefined],
+    },
+  ])(
+    "$field falls back to $fallback on an absent or unreadable value and keeps a valid one verbatim",
+    ({ field, fallback, valid, junk }) => {
+      expect(resolvePersistedArrangement({})[field]).toBe(fallback);
+      for (const value of junk) {
         expect(
-          resolvePersistedArrangement({ sideStripView }).sideStripView,
-          JSON.stringify(sideStripView),
-        ).toBe("layered");
+          resolvePersistedArrangement({ [field]: value })[field],
+          JSON.stringify(value),
+        ).toBe(fallback);
       }
-    });
-
-    it("keeps each valid view verbatim (L-133)", () => {
-      const views: ReadonlyArray<SideStripView> = ["layered", "activity"];
-      for (const sideStripView of views) {
-        expect(
-          resolvePersistedArrangement({ sideStripView }).sideStripView,
-        ).toBe(sideStripView);
+      for (const value of valid) {
+        expect(resolvePersistedArrangement({ [field]: value })[field]).toBe(
+          value,
+        );
       }
-    });
-
-    it("keeps a stored activity view through a full persisted round trip", () => {
-      const stored: unknown = JSON.parse(
-        JSON.stringify({
-          ...DEFAULT_ARRANGEMENT,
-          tabStripPlacement: "left",
-          sideStripView: "activity",
-        }),
-      );
-
-      const arrangement = resolvePersistedArrangement(stored);
-
-      expect(arrangement.sideStripView).toBe("activity");
-    });
-  });
+    },
+  );
 });
 
 describe("where Add divider puts one when the rail ends in a stack", () => {

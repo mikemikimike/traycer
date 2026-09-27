@@ -152,49 +152,43 @@ function expectGroundResizeHandleLine(handle: HTMLElement): void {
 }
 
 describe("<EpicSidebarColumn /> side (S-06)", () => {
-  it("matches today's order and classes with the default (left) side", () => {
-    renderColumn("left");
+  // DOM order is focus order, and the handle finds its panel by sibling
+  // lookup, so a right sidebar mirrors the fragment. The handle is the same
+  // shared ground line on both sides: no resting `before:bg-*`.
+  it.each([
+    {
+      side: "left",
+      order: ["epic-sidebar-column", "epic-sidebar-resize-handle"],
+      paneBorder: "md:border-e",
+    },
+    {
+      side: "right",
+      order: ["epic-sidebar-resize-handle", "epic-sidebar-column"],
+      paneBorder: "md:border-s",
+    },
+  ] as const)(
+    "orders the fragment for a $side sidebar, with the same ground resize line",
+    ({ side, order, paneBorder }) => {
+      renderColumn(side);
 
-    expect(wrapperChildTestIds()).toEqual([
-      "epic-sidebar-column",
-      "epic-sidebar-resize-handle",
-    ]);
-    const panel = screen.getByTestId("epic-sidebar-column");
-    // One-sheet design: no `data-shell-sheet` marker on the panel any more.
-    expect(panel.dataset.shellSheet).toBeUndefined();
-    // Flush surface: the panel no longer draws a pane divider against the
-    // content pane - only the epic canvas frame draws a border now.
-    expect(panel.className).not.toContain("md:border-e");
-    expect(panel.className).not.toContain("md:border-canvas-border");
-    const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    // One-sheet design: the handle lost its centred `--shell-gap` hit
-    // target margin - there is no ground gap to centre in any more. It
-    // still carries the shared ground hover/drag line, with no resting
-    // `before:bg-*` - only the hover/active variants.
-    expect(handle.className).not.toContain("md:mx-[calc(var(--shell-gap)/-2)]");
-    expect(handle.className).toContain("md:w-0");
-    expectGroundResizeHandleLine(handle);
-  });
-
-  it("orders the fragment [handle, panel] for a right sidebar with the same centred hit target", () => {
-    renderColumn("right");
-
-    expect(wrapperChildTestIds()).toEqual([
-      "epic-sidebar-resize-handle",
-      "epic-sidebar-column",
-    ]);
-    const panel = screen.getByTestId("epic-sidebar-column");
-    expect(panel.dataset.shellSheet).toBeUndefined();
-    // Flush surface: no pane divider on the panel, either side.
-    expect(panel.className).not.toContain("md:border-s");
-    expect(panel.className).not.toContain("md:border-canvas-border");
-    const handle = screen.getByTestId("epic-sidebar-resize-handle");
-    // No side-specific classes left to mirror: the ground hover/drag line
-    // is the same on both sides now.
-    expect(handle.className).not.toContain("md:mx-[calc(var(--shell-gap)/-2)]");
-    expect(handle.className).toContain("md:w-0");
-    expectGroundResizeHandleLine(handle);
-  });
+      expect(wrapperChildTestIds()).toEqual(order);
+      const panel = screen.getByTestId("epic-sidebar-column");
+      // One-sheet design: no `data-shell-sheet` marker on the panel any more.
+      expect(panel.dataset.shellSheet).toBeUndefined();
+      // Flush surface: the panel no longer draws a pane divider against the
+      // content pane - only the epic canvas frame draws a border now.
+      expect(panel.className).not.toContain(paneBorder);
+      expect(panel.className).not.toContain("md:border-canvas-border");
+      const handle = screen.getByTestId("epic-sidebar-resize-handle");
+      // One-sheet design: the handle lost its centred `--shell-gap` hit
+      // target margin - there is no ground gap to centre in any more.
+      expect(handle.className).not.toContain(
+        "md:mx-[calc(var(--shell-gap)/-2)]",
+      );
+      expect(handle.className).toContain("md:w-0");
+      expectGroundResizeHandleLine(handle);
+    },
+  );
 
   it("puts the collapsed rail at the pane's outer edge on both sides, itself a sheet", () => {
     act(() => {

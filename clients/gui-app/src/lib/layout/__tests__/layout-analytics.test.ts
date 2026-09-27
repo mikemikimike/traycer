@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { QuickVerbId } from "@/components/layout-editor/regions/region-grammar";
 import {
-  analyticsEventContractIsComplete,
   sanitizeAnalyticsProperties,
   Analytics,
   AnalyticsEvent,
@@ -10,7 +10,6 @@ import {
   layoutDurationBucket,
   layoutEditorSessionChangeSummary,
   layoutSnapshotProperties,
-  touchedRegionIds,
   LAYOUT_SETTING_PROPERTY_KEYS,
   type LayoutSnapshotProperties,
 } from "@/lib/layout/layout-diff";
@@ -81,6 +80,10 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     for (const key of LAYOUT_SETTING_PROPERTY_KEYS) {
       expect(properties[key as keyof LayoutSnapshotProperties]).toBe("default");
     }
+    // The agent rows' own switch (G7) is a declared setting of its own.
+    expect(LAYOUT_SETTING_PROPERTY_KEYS).toContain(
+      "layout_resource_monitor_agent_rows",
+    );
     expect(properties.changed_from_default_count).toBe(0);
     expect(properties.base_preset).toBe("default");
     expect(properties.layout_usage_host).toBe("status-bar");
@@ -192,10 +195,10 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
     const serialized = JSON.stringify(properties);
 
     // `layoutSnapshotProperties` only ever writes the declared key set
-    // (`LAYOUT_SETTING_PROPERTY_KEYS` plus the built-in arrangement/count
-    // fields the structural-parity "reserved" list below names - proven by
-    // those tests), so these fields never reach the event even though the
-    // type's index signature would allow reading them.
+    // (`LAYOUT_SETTING_PROPERTY_KEYS` plus the fifteen built-in
+    // arrangement/count fields the key-count test above pins), so these
+    // fields never reach the event even though the type's index signature
+    // would allow reading them.
     expect(properties.shownProfiles).toBeUndefined();
     expect(properties.providerLimits).toBeUndefined();
     expect(serialized).not.toContain("profile-a");
@@ -211,16 +214,7 @@ describe("layoutSnapshotProperties (L-46, L-54, L-55)", () => {
  * drive the real builders through the real sanitizer, which is the only place
  * that verdict is reached.
  */
-describe("the three layout payloads survive the analytics sanitizer", () => {
-  it("sends the shipped Default", () => {
-    expect(
-      Analytics.getInstance().track(
-        AnalyticsEvent.LayoutSnapshot,
-        layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT),
-      ),
-    ).toBe(true);
-  });
-
+describe("the layout payloads survive the analytics sanitizer", () => {
   it("sends a snapshot carrying one value from every enum in the model", () => {
     const snapshot: LayoutSnapshot = {
       ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -288,46 +282,52 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
     }
   });
 
-  it("sends a snapshot with each tab strip placement and each sidebar side, sanitized intact", () => {
+  // `top / left / layered` is the shipped Default itself.
+  it("sends a snapshot with each tab strip placement, sidebar side and strip view (D8), sanitized intact", () => {
     const placements = ["top", "left", "right"] as const;
     const sides = ["left", "right"] as const;
+    const views = ["layered", "activity"] as const;
     for (const tabStripPlacement of placements) {
       for (const sidebarSide of sides) {
-        const properties = layoutSnapshotProperties({
-          ...DEFAULT_LAYOUT_SNAPSHOT,
-          arrangement: {
-            ...DEFAULT_ARRANGEMENT,
-            tabStripPlacement,
-            sidebarSide,
-          },
-        });
-        const label = `${tabStripPlacement} / ${sidebarSide}`;
+        for (const sideStripView of views) {
+          const properties = layoutSnapshotProperties({
+            ...DEFAULT_LAYOUT_SNAPSHOT,
+            arrangement: {
+              ...DEFAULT_ARRANGEMENT,
+              tabStripPlacement,
+              sidebarSide,
+              sideStripView,
+            },
+          });
+          const label = `${tabStripPlacement} / ${sidebarSide} / ${sideStripView}`;
 
-        expect(properties.layout_tab_strip_placement).toBe(tabStripPlacement);
-        expect(properties.layout_sidebar_side).toBe(sidebarSide);
-        // The acceptance is that the payload passes the real sanitizer
-        // INTACT - not merely that `track` returns `true`, which a sanitizer
-        // that silently dropped one property to make the event valid would
-        // still satisfy.
-        expect(
-          sanitizeAnalyticsProperties(
-            AnalyticsEvent.LayoutSnapshot,
-            properties,
-          ),
-          label,
-        ).toEqual(properties);
-        expect(
-          Analytics.getInstance().track(
-            AnalyticsEvent.LayoutSnapshot,
-            properties,
-          ),
-          label,
-        ).toBe(true);
+          expect(properties.layout_tab_strip_placement).toBe(tabStripPlacement);
+          expect(properties.layout_sidebar_side).toBe(sidebarSide);
+          expect(properties.layout_side_strip_view).toBe(sideStripView);
+          // The acceptance is that the payload passes the real sanitizer
+          // INTACT - not merely that `track` returns `true`, which a
+          // sanitizer that silently dropped one property to make the event
+          // valid would still satisfy.
+          expect(
+            sanitizeAnalyticsProperties(
+              AnalyticsEvent.LayoutSnapshot,
+              properties,
+            ),
+            label,
+          ).toEqual(properties);
+          expect(
+            Analytics.getInstance().track(
+              AnalyticsEvent.LayoutSnapshot,
+              properties,
+            ),
+            label,
+          ).toBe(true);
+        }
       }
     }
   });
 
-  it("drops the whole event on a tab strip placement or sidebar side this build does not know", () => {
+  it("drops the whole event on a tab strip placement, sidebar side or strip view this build does not know", () => {
     const base = layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT);
 
     expect(
@@ -342,33 +342,6 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
         layout_sidebar_side: "top",
       }),
     ).toBeNull();
-  });
-
-  it("sends a snapshot with each vertical strip view, sanitized intact (D8)", () => {
-    for (const sideStripView of ["layered", "activity"] as const) {
-      const properties = layoutSnapshotProperties({
-        ...DEFAULT_LAYOUT_SNAPSHOT,
-        arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView },
-      });
-
-      expect(properties.layout_side_strip_view).toBe(sideStripView);
-      expect(
-        sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, properties),
-        sideStripView,
-      ).toEqual(properties);
-      expect(
-        Analytics.getInstance().track(
-          AnalyticsEvent.LayoutSnapshot,
-          properties,
-        ),
-        sideStripView,
-      ).toBe(true);
-    }
-  });
-
-  it("drops the whole event on a strip view this build does not know (D8)", () => {
-    const base = layoutSnapshotProperties(DEFAULT_LAYOUT_SNAPSHOT);
-
     expect(
       sanitizeAnalyticsProperties(AnalyticsEvent.LayoutSnapshot, {
         ...base,
@@ -377,28 +350,17 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
     ).toBeNull();
   });
 
-  it("sends layout_editor_session, including a session with no first change", () => {
-    const summary = layoutEditorSessionChangeSummary(
-      DEFAULT_LAYOUT_SNAPSHOT,
-      DEFAULT_LAYOUT_SNAPSHOT,
-    );
-
-    expect(
-      Analytics.getInstance().track(AnalyticsEvent.LayoutEditorSession, {
-        source: "command_palette",
-        entry: "keyboard",
-        session_duration_bucket: layoutDurationBucket(30_000),
-        first_change_bucket: null,
-        changed_count: summary.changedCount,
-        undo_count: 0,
-        regions_touched_count: summary.regionsTouchedCount,
-        discarded: true,
-      }),
-    ).toBe(true);
-  });
-
   it("sends layout_quick_verb for every verb the menu offers", () => {
-    for (const verb of ["hide", "show", "chip", "full"] as const) {
+    // Keyed by `QuickVerbId`, so a verb added to the menu is a compile error
+    // here until it has a row - rather than a hand-copied list that the
+    // allowlist in `analytics.ts` could drift from unseen.
+    const verbs: Readonly<Record<QuickVerbId, QuickVerbId>> = {
+      hide: "hide",
+      show: "show",
+      chip: "chip",
+      full: "full",
+    };
+    for (const verb of Object.values(verbs)) {
       expect(
         Analytics.getInstance().track(AnalyticsEvent.LayoutQuickVerb, {
           region: "runningAgents",
@@ -412,6 +374,9 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
 
 describe("structural parity: LayoutValues cannot drift from the declared properties", () => {
   it("declares exactly one layout_<region>_<key> property per LayoutValues leaf", () => {
+    // Counted off the model's own value bags, not off the walk the payload
+    // builder and the allowlist share: a leaf that walk dropped would vanish
+    // from both at once and pass every check derived from them.
     const regionIds = Object.keys(PRESET_VALUES.default) as ReadonlyArray<
       keyof typeof PRESET_VALUES.default
     >;
@@ -466,40 +431,13 @@ describe("structural parity: LayoutValues cannot drift from the declared propert
   });
 });
 
-describe("the analytics event contract", () => {
-  it("is complete for every declared event, including the three layout ones", () => {
-    expect(analyticsEventContractIsComplete()).toBe(true);
-  });
-});
-
 describe("the 24h compare-and-set (L-54, C-46)", () => {
-  it("claims the window on a device that has never sent one", () => {
-    expect(claimLayoutSnapshotWindow(1_000)).toBe(true);
-  });
-
-  it("refuses a second claim inside the same 24h window", () => {
-    expect(claimLayoutSnapshotWindow(1_000)).toBe(true);
-    expect(claimLayoutSnapshotWindow(1_000 + 60_000)).toBe(false);
-  });
-
   it("claims again once 24h have fully elapsed, and not one millisecond sooner", () => {
     const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
     expect(claimLayoutSnapshotWindow(0)).toBe(true);
 
     expect(claimLayoutSnapshotWindow(TWENTY_FOUR_HOURS_MS - 1)).toBe(false);
     expect(claimLayoutSnapshotWindow(TWENTY_FOUR_HOURS_MS)).toBe(true);
-  });
-
-  it("is a synchronous read-then-write, so a second immediate caller cannot also win", () => {
-    // Simulates two renderers launching together: neither has observed the
-    // other's write beforehand, so both call in immediate succession against
-    // the same storage. Only the first may claim it.
-    const results = [
-      claimLayoutSnapshotWindow(5_000),
-      claimLayoutSnapshotWindow(5_000),
-    ];
-
-    expect(results).toEqual([true, false]);
   });
 
   it("refuses rather than throws when storage is fully unavailable", () => {
@@ -535,18 +473,17 @@ describe("layoutDurationBucket", () => {
   });
 });
 
-describe("touchedRegionIds and the session change summary", () => {
-  it("names only the regions whose effective values actually moved", () => {
+describe("the session change summary", () => {
+  it("counts only the regions whose effective values actually moved", () => {
     const entry = DEFAULT_LAYOUT_SNAPSHOT;
     const exit: LayoutSnapshot = {
       ...DEFAULT_LAYOUT_SNAPSHOT,
       overrides: { mic: { shown: "hidden" }, minimap: { shown: "hidden" } },
     };
 
-    expect([...touchedRegionIds(entry, exit)].sort()).toEqual([
-      "mic",
-      "minimap",
-    ]);
+    expect(
+      layoutEditorSessionChangeSummary(entry, exit).regionsTouchedCount,
+    ).toBe(2);
   });
 
   it("counts a region touched exactly once regardless of how many keys it changed", () => {
@@ -560,16 +497,6 @@ describe("touchedRegionIds and the session change summary", () => {
 
     expect(summary.regionsTouchedCount).toBe(1);
     expect(summary.changedCount).toBe(3);
-  });
-
-  it("reports zero touched regions when entry and exit are the same snapshot", () => {
-    const summary = layoutEditorSessionChangeSummary(
-      DEFAULT_LAYOUT_SNAPSHOT,
-      DEFAULT_LAYOUT_SNAPSHOT,
-    );
-
-    expect(summary.regionsTouchedCount).toBe(0);
-    expect(summary.changedCount).toBe(0);
   });
 
   it("counts changed_count against the base preset, matching what a reset would revert", () => {

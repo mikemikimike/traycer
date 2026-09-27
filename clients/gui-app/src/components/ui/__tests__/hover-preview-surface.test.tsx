@@ -102,6 +102,7 @@ describe("hover-preview surface", () => {
     // overridden by it, so the attribute itself is the contract, not just a
     // debugging label.
     expect(content.getAttribute("data-appearance")).toBe("tooltip");
+    expect(content.getAttribute("data-state")).toBe("open");
     const tokens = content.className.split(/\s+/);
     expect(tokens).toContain("bg-foreground");
     expect(tokens).toContain("text-background");

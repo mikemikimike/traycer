@@ -33,6 +33,7 @@ import {
   HostRuntimeProvider,
   type HostRpcRegistry,
 } from "@/lib/host";
+import { formatChordForDisplay } from "@/lib/keybindings/chord";
 import { __resetTabNavigationControllerForTesting } from "@/lib/tab-navigation";
 import { installTabSyncCoordinator } from "@/lib/tab-sync/tab-sync-coordinator";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
@@ -335,11 +336,11 @@ describe("SideStripNavRows", () => {
     renderStrip("left");
     await screen.findByTestId("side-tab-strip");
 
-    const row = screen.getByTestId("side-strip-all-tasks");
-    expect(row.textContent).toContain("All tasks");
-    expect(row.textContent.length).toBeGreaterThan("All tasks".length);
-
-    fireEvent.click(row);
+    const chord = useKeybindingStore.getState().bindings["app.history.open"];
+    if (chord === null) throw new Error("expected a default binding");
+    expect(screen.getByTestId("side-strip-all-tasks").textContent).toBe(
+      `All tasks${formatChordForDisplay(chord)}`,
+    );
   });
 
   it("hides the All tasks shortcut text once its binding is cleared", async () => {

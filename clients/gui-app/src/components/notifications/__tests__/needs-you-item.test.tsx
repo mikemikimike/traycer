@@ -11,8 +11,6 @@ function buildItem(overrides: Partial<NeedsYouItemData>): NeedsYouItemData {
     row: ROW,
     reason: "approval",
     ask: "Approval requested",
-    epicId: "epic-1",
-    chatId: "chat-1",
     taskTitle: "Deploy checkout fix",
     agentTitle: "Deploy agent",
     createdAt: Date.now(),
@@ -36,19 +34,6 @@ describe("<NeedsYouItem />", () => {
 
     fireEvent.click(button);
     expect(onActivate).toHaveBeenCalledWith(ROW);
-  });
-
-  it("shows the reply reason and its own ask", () => {
-    render(
-      <NeedsYouItem
-        item={buildItem({ reason: "reply", ask: "Question waiting" })}
-        onActivate={() => undefined}
-      />,
-    );
-
-    const button = screen.getByTestId("needs-you-item");
-    expect(button.getAttribute("data-needs-you-reason")).toBe("reply");
-    expect(button.textContent).toContain("Question waiting");
   });
 
   it("gives approval and reply distinct icons, not colour alone", () => {

@@ -2,15 +2,16 @@
  * Escape and the coachmark's own dismiss button both call `focusGuideTarget`
  * before closing (`onboarding-coachmark.tsx`), so a guide step aimed at
  * Settings ▸ Layout's `[data-layout-areas]` root has to land somewhere
- * sensible when the person backs out of it. Narrow only - see
- * `guide-target-layout-areas.test.tsx`'s header comment for why the desktop
- * case is not asserted here (same `firstReachable` gap, same evidence).
+ * sensible when the person backs out of it. Narrow only: jsdom's
+ * `querySelectorAll` does not sort a grouped selector's matches into document
+ * order, so on the desktop rail `firstReachable` meets the first tab before
+ * the tablist - an engine artifact a real browser does not share. The
+ * tablist hand-off itself is a unit case in `guide-target.test.ts`.
  */
 import { useRef, type ReactNode } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { computePosition } from "@floating-ui/dom";
 import { OnboardingCoachmark } from "@/components/onboarding/onboarding-coachmark";
 import { LayoutSettingsPanel } from "@/components/settings/panels/layout-settings-panel";
 import {
@@ -67,8 +68,6 @@ vi.mock("@floating-ui/dom", () => ({
   flip: () => ({ name: "flip", fn: () => ({}) }),
   shift: () => ({ name: "shift", fn: () => ({}) }),
 }));
-
-void computePosition;
 
 function stubGetClientRects(): () => void {
   const original = Object.getOwnPropertyDescriptor(

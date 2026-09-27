@@ -335,46 +335,25 @@ describe("MobileAppHeader", () => {
     ).not.toBeNull();
   });
 
-  it("shows the resource monitor only when the global toggle is on", async () => {
-    useLayoutStore
-      .getState()
-      .setRegionValues("resourceMonitor", { shown: "shown" });
-    renderAt("/");
-    expect(
-      await screen.findByRole("button", { name: "Resource monitor" }),
-    ).not.toBeNull();
-
-    cleanup();
-    useLayoutStore
-      .getState()
-      .setRegionValues("resourceMonitor", { shown: "hidden" });
-    renderAt("/");
-    await screen.findByRole("button", { name: "Open menu" });
-    expect(
-      screen.queryByRole("button", { name: "Resource monitor" }),
-    ).toBeNull();
-  });
-
   // G6: the phone header drew the usage glyph whatever the switch said, the
-  // same bug class the resource-monitor gate above never had. Mirrors "shows
-  // the resource monitor only when the global toggle is on".
-  it("shows the rate-limit glyph only when the usageLimits toggle is on", async () => {
-    useLayoutStore
-      .getState()
-      .setRegionValues("usageLimits", { shown: "shown" });
-    renderAt("/");
-    expect(
-      await screen.findByRole("button", { name: "Usage limits" }),
-    ).not.toBeNull();
+  // same bug class the resource-monitor gate never had.
+  it.each([
+    ["resourceMonitor", "Resource monitor"],
+    ["usageLimits", "Usage limits"],
+  ] as const)(
+    "shows the %s control only when its toggle is on",
+    async (region, name) => {
+      useLayoutStore.getState().setRegionValues(region, { shown: "shown" });
+      renderAt("/");
+      expect(await screen.findByRole("button", { name })).not.toBeNull();
 
-    cleanup();
-    useLayoutStore
-      .getState()
-      .setRegionValues("usageLimits", { shown: "hidden" });
-    renderAt("/");
-    await screen.findByRole("button", { name: "Open menu" });
-    expect(screen.queryByRole("button", { name: "Usage limits" })).toBeNull();
-  });
+      cleanup();
+      useLayoutStore.getState().setRegionValues(region, { shown: "hidden" });
+      renderAt("/");
+      await screen.findByRole("button", { name: "Open menu" });
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    },
+  );
 
   it("renders the presented epic tab's registered right actions", async () => {
     useMobileHeaderStore

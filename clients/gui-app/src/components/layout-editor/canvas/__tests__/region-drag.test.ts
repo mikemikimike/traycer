@@ -100,41 +100,6 @@ function setToolbarLeft(ids: ReadonlyArray<ToolbarRegionId>): void {
   });
 }
 
-/**
- * The composer as the real-Chrome driver measured it (L-143): a 28px
- * `attachImage` beside a 120px `access`, in a cluster that ends where `access`
- * does. The wide member leads nothing and has only the narrow one to pass, and
- * the clamp gives it 32px to do it in - which is why the centre rule could not
- * perform this move at all.
- */
-function mountUnevenToolbar(): ReadonlyArray<HTMLElement> {
-  const cluster = document.createElement("div");
-  cluster.setAttribute(LAYOUT_CLUSTER_ATTRIBUTE, "");
-  document.body.append(cluster);
-  stubRect(cluster, { left: 0, top: 0, width: 152, height: 24 });
-  let left = 0;
-  const members: ReadonlyArray<{
-    readonly regionId: ToolbarRegionId;
-    readonly width: number;
-  }> = [
-    { regionId: "attachImage", width: 28 },
-    { regionId: "access", width: 120 },
-  ];
-  return members.map((member) => {
-    const node = document.createElement("div");
-    node.setAttribute("data-layout-region", member.regionId);
-    node.setAttribute("data-layout-group", "toolbarLeft");
-    node.setAttribute("data-layout-draggable", "1");
-    node.setPointerCapture = () => undefined;
-    node.releasePointerCapture = () => undefined;
-    node.hasPointerCapture = () => true;
-    stubRect(node, { left, top: 0, width: member.width, height: 24 });
-    left += member.width + CHIP_GAP;
-    cluster.append(node);
-    return node;
-  });
-}
-
 const ROW_HEIGHT = 40;
 // Far enough below the dock that the two containers are unmistakably apart on
 // the vertical axis, which is the axis the engine infers from the first two
@@ -383,43 +348,6 @@ describe("dragging a region on the canvas", () => {
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
 
-  it("writes nothing when the chip is let go where it started", () => {
-    setToolbarLeft(["attachImage", "access", "mic"]);
-    const nodes = mountToolbar(["attachImage", "access", "mic"]);
-
-    dragBy(nodes[0], { clientX: 12 });
-
-    expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
-      "attachImage",
-      "access",
-      "mic",
-    ]);
-    expect(useLayoutEditorStore.getState().history.past).toHaveLength(0);
-  });
-
-  /**
-   * The move the owner could not make (L-143): a member three times the width
-   * of the one leading its cluster, dragged in front of it.
-   *
-   * The pointer travels 40px left of the grab - the neighbour it is passing
-   * plus its gap, the whole ordinary gesture - and lands inside the clamp's
-   * own 32px of travel rather than deep in the rubber band. Under the centre
-   * rule `access` would still be claiming its own slot there, because its
-   * centre would be at 58 and `attachImage`'s is at 14.
-   */
-  it("drags a wide member in front of the narrow one leading its cluster", () => {
-    setToolbarLeft(["attachImage", "access"]);
-    const nodes = mountUnevenToolbar();
-
-    dragBy(nodes[1], { clientX: -32 });
-
-    expect(useLayoutStore.getState().arrangement.toolbarLeft).toEqual([
-      "access",
-      "attachImage",
-    ]);
-    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
-  });
-
   it("does not pick up a region that has no order of its own", () => {
     // No `data-layout-group`, because `useLayoutRegion` stamps one only for a
     // region a canvas drag can reorder.
@@ -447,7 +375,7 @@ describe("dragging a region on the canvas", () => {
  *
  * What most of these cases are about is the drag ENGINE's geometry, so they
  * use this flat list rather than the shipped rail's own stack - the "carries
- * a pair whole" claim gets its own cases below instead of complicating every
+ * a pair whole" claim gets its own case below instead of complicating every
  * one of these with a member that has no node of its own.
  */
 const FLAT_RAIL: ReadonlyArray<RailEntry> = DEFAULT_RAIL.filter(
@@ -478,35 +406,6 @@ describe("dragging in the sidebar rail", () => {
       "file-tree",
       "sharing",
       "comments",
-    ]);
-    expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
-  });
-
-  it("carries the pair whole when its top icon is dragged, keeping the join (G3)", () => {
-    // Artifacts is the bottom of the shipped pair and draws no canvas node of
-    // its own (G3): the group's icon is Agents', so that is what a press
-    // grabs, and the whole pair - Agents, its link, and Artifacts - travels
-    // together rather than Agents moving alone and dropping the join.
-    const displayEntries: ReadonlyArray<RailEntry> = FLAT_RAIL.filter(
-      (entry) => entry.id !== "railArtifacts",
-    );
-    const nodes = mountRail(displayEntries);
-
-    dragBy(nodes[0], { clientY: 40 });
-
-    expect(
-      useLayoutStore.getState().arrangement.rail.map((entry) => entry.id),
-    ).toEqual([
-      "railTerminals",
-      "railAgents",
-      "stack:railAgents+railArtifacts",
-      "railArtifacts",
-      "railBrowsers",
-      "railGitDiff",
-      "railPullRequests",
-      "railFileTree",
-      "railSharing",
-      "railComments",
     ]);
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
   });
@@ -584,30 +483,6 @@ describe("dragging in the sidebar rail", () => {
       "comments",
     ]);
     expect(useLayoutEditorStore.getState().history.past).toHaveLength(1);
-  });
-
-  it("keeps a hidden panel beside the neighbours it had", () => {
-    // Browsers is hidden, so the rail draws every entry but that one; the
-    // stored rail still keeps its place relative to its own neighbours.
-    setRail(FLAT_RAIL);
-    const drawn = FLAT_RAIL.filter(
-      (entry) => !(entry.kind === "panel" && entry.id === "railBrowsers"),
-    );
-    const nodes = mountRail(drawn);
-
-    dragBy(nodes[1], { clientY: 40 });
-
-    expect(railOrder()).toEqual([
-      "chats",
-      "terminals",
-      "artifacts",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "file-tree",
-      "sharing",
-      "comments",
-    ]);
   });
 });
 

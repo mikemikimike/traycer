@@ -3,14 +3,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { SideTabRailBadge } from "../side-strip/side-tab-rail-badge";
 import {
   railBadgeOf,
-  RAIL_BADGE_TONE,
   worstRailBadge,
   type RailBadgeKind,
 } from "../side-strip/rail-badge-kind";
-import {
-  SIDE_TAB_BADGE_CLASS,
-  SIDE_TAB_RAIL_BADGE_CLASS,
-} from "../side-strip/side-strip-tokens";
+import { SIDE_TAB_BADGE_CLASS } from "../side-strip/side-strip-tokens";
 import {
   EMPTY_NOTIFICATION_INDICATOR_STATE,
   type NotificationIndicatorState,
@@ -113,24 +109,25 @@ describe("worstRailBadge", () => {
 });
 
 describe("SideTabRailBadge", () => {
+  // The names and glyphs are written out, not read from the tone table the
+  // badge renders from, so a kind wired to the wrong tone fails here.
   it.each([
-    ["approval", SIDE_TAB_RAIL_BADGE_CLASS],
-    ["reply", SIDE_TAB_RAIL_BADGE_CLASS],
-    ["failed", SIDE_TAB_RAIL_BADGE_CLASS],
-    ["unread", SIDE_TAB_RAIL_BADGE_CLASS],
-  ] as const)("renders the %s glyph on a tile badge", (kind, sizeClass) => {
-    render(<SideTabRailBadge kind={kind} size="tile" testId="badge" />);
-    const badge = screen.getByTestId("badge");
-    expect(badge.dataset.kind).toBe(kind);
-    for (const token of sizeClass.split(" ")) {
-      expect(badge.classList.contains(token)).toBe(true);
-    }
-    const tone = RAIL_BADGE_TONE[kind];
-    expect(badge.getAttribute("aria-label")).toBe(tone.title);
-    expect(
-      badge.querySelector(`[data-status-glyph="${tone.testId}"]`),
-    ).not.toBeNull();
-  });
+    ["approval", "Task waiting for your approval", "approval"],
+    ["reply", "Task waiting for your interview response", "interview"],
+    ["failed", "Task needs attention", "failure"],
+    ["unread", "Task completed", "done"],
+  ] as const)(
+    "renders the %s badge as %j with its glyph",
+    (kind, label, glyph) => {
+      render(<SideTabRailBadge kind={kind} size="tile" testId="badge" />);
+      const badge = screen.getByTestId("badge");
+      expect(badge.dataset.kind).toBe(kind);
+      expect(badge.getAttribute("aria-label")).toBe(label);
+      expect(
+        badge.querySelector(`[data-status-glyph="${glyph}"]`),
+      ).not.toBeNull();
+    },
+  );
 
   it("renders on a leading-slot badge with the smaller glyph size", () => {
     render(<SideTabRailBadge kind="approval" size="leading" testId="badge" />);
@@ -144,22 +141,5 @@ describe("SideTabRailBadge", () => {
     // The wrapper already carries the accessible name; the inner glyph must
     // not double it up for assistive tech.
     expect(glyph?.getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("gives approval an icon distinct from reply's, not colour alone", () => {
-    render(<SideTabRailBadge kind="approval" size="tile" testId="a" />);
-    render(<SideTabRailBadge kind="reply" size="tile" testId="b" />);
-    const approvalGlyph = screen
-      .getByTestId("a")
-      .querySelector('[data-status-glyph="approval"]');
-    const replyGlyph = screen
-      .getByTestId("b")
-      .querySelector('[data-status-glyph="interview"]');
-    expect(
-      approvalGlyph?.classList.contains("lucide-message-square-warning"),
-    ).toBe(true);
-    expect(
-      replyGlyph?.classList.contains("lucide-message-square-question-mark"),
-    ).toBe(true);
   });
 });

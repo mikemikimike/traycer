@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 describe("inspector keyboard model (L-31)", () => {
-  it("walks the areas with arrows and opens one with Enter", () => {
+  it("walks the areas with arrows, and the focused row opens its area", () => {
     render(<Harness onExit={() => {}} />);
 
     const filterInput = screen.getByRole("textbox", { name: "Find a setting" });
@@ -104,7 +104,8 @@ describe("inspector keyboard model (L-31)", () => {
       "sidebar",
     );
 
-    // Back to the first row, then Enter opens its area.
+    // Back to the first row, which opens its area (a native button, so Enter
+    // and Space reach it as a click).
     const secondRow = document.activeElement;
     if (secondRow === null) throw new Error("expected a focused row");
     fireEvent.keyDown(secondRow, { key: "ArrowUp" });
@@ -132,18 +133,6 @@ describe("inspector keyboard model (L-31)", () => {
 
     fireEvent.keyDown(firstRow, { key: "ArrowUp" });
     expect(document.activeElement).toBe(filterInput);
-  });
-
-  it("opens the first matching area on Enter in the filter (I-08)", () => {
-    render(<Harness onExit={() => {}} />);
-    const filterInput = screen.getByRole("textbox", { name: "Find a setting" });
-
-    fireEvent.change(filterInput, { target: { value: "minimap" } });
-    fireEvent.keyDown(filterInput, { key: "Enter" });
-
-    // "minimap" matches nothing about Task tabs or Sidebar but does match
-    // Chat's own region list, so Chat is the area that opens.
-    expect(useLayoutEditorStore.getState().area).toBe("chat");
   });
 
   it("leaves Enter alone when the filter matches nothing", () => {

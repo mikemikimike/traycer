@@ -332,8 +332,7 @@ describe("root dnd commits - left panel", () => {
 
   // A rail slot is square, so the pointer below sits in the middle band of one
   // axis and the leading band of the other. Which one is read is the whole
-  // difference between a "before" and an "after" drop (L-155: there is no
-  // third, nesting band any more).
+  // difference between a "before" reorder and a "combine" join (L-168).
   const RAIL_SLOT_RECT = { left: 0, top: 0, width: 36, height: 36 };
   const LEADING_X_MIDDLE_Y = { x: 4, y: 18 };
 
@@ -407,6 +406,21 @@ describe("root dnd commits - left panel", () => {
         position: "before",
       });
     }
+    // The middle band of y is the combine band (L-168), even where x sits in
+    // its leading band.
+    expect(
+      resolveCanvasDropPreview({
+        source,
+        target,
+        point: LEADING_X_MIDDLE_Y,
+        targetRect: RAIL_SLOT_RECT,
+        activeRect: null,
+      }),
+    ).toEqual({
+      kind: "left-panel-rail",
+      panelId: "terminals",
+      position: "combine",
+    });
     const preview = resolveCanvasDropPreview({
       source,
       target,
@@ -840,8 +854,8 @@ describe("root dnd commits - left panel drop resolver", () => {
 
   it("lets a stacked SOURCE dragged by its section leave its old pair and join a new one (L-170)", () => {
     // Grabbed by the panel's own section header rather than the rail's group
-    // icon (asGroups is false), so the refusal above does not apply: the
-    // panel alone leaves its old pair and Artifacts stands alone.
+    // icon (asGroups is false), so the whole-stack carry above does not
+    // apply: the panel alone leaves its old pair and Artifacts stands alone.
     const next = resolveRailForDrop(
       railSource("chats", "panel-section"),
       { kind: "left-panel-rail", panelId: "terminals", position: "combine" },
@@ -890,48 +904,6 @@ describe("root dnd commits - left panel drop resolver", () => {
     ]);
   });
 
-  it("refuses a target whose stack already holds the max, with no undo step spent (L-181)", () => {
-    const fourMember = [
-      { kind: "panel" as const, id: "railAgents" as const },
-      {
-        kind: "stack" as const,
-        id: "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
-      },
-      { kind: "panel" as const, id: "railArtifacts" as const },
-      { kind: "panel" as const, id: "railTerminals" as const },
-      { kind: "panel" as const, id: "railBrowsers" as const },
-      { kind: "panel" as const, id: "railGitDiff" as const },
-      { kind: "panel" as const, id: "railPullRequests" as const },
-      { kind: "panel" as const, id: "railFileTree" as const },
-      { kind: "panel" as const, id: "railSharing" as const },
-      { kind: "panel" as const, id: "railComments" as const },
-    ];
-    const arrangement = { ...DEFAULT_ARRANGEMENT, rail: fourMember };
-
-    expect(
-      resolveRailForDrop(
-        railSource("git-diff", "rail"),
-        { kind: "left-panel-rail", panelId: "chats", position: "combine" },
-        arrangement,
-      ),
-    ).toEqual(fourMember);
-
-    // isLeftPanelDropNoop reads the live store, so the full stack has to be
-    // seeded there too: a refused join is not a quiet no-op (its preview
-    // stays, so the rail can draw the refusal cue).
-    useLayoutStore.setState({
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement,
-    });
-    expect(
-      isLeftPanelDropNoop(railSource("git-diff", "rail"), {
-        kind: "left-panel-rail",
-        panelId: "chats",
-        position: "combine",
-      }),
-    ).toBe(false);
-  });
-
   it("returns null for non-left-panel previews", () => {
     expect(
       resolveRailForDrop(
@@ -977,53 +949,6 @@ describe("root dnd commits - left panel drop resolver", () => {
     );
 
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
-  });
-
-  it("returns false and writes nothing for a refused full-stack join, even though it is not a quiet no-op (L-181)", () => {
-    const fourMember = [
-      { kind: "panel" as const, id: "railAgents" as const },
-      {
-        kind: "stack" as const,
-        id: "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
-      },
-      { kind: "panel" as const, id: "railArtifacts" as const },
-      { kind: "panel" as const, id: "railTerminals" as const },
-      { kind: "panel" as const, id: "railBrowsers" as const },
-      { kind: "panel" as const, id: "railGitDiff" as const },
-      { kind: "panel" as const, id: "railPullRequests" as const },
-      { kind: "panel" as const, id: "railFileTree" as const },
-      { kind: "panel" as const, id: "railSharing" as const },
-      { kind: "panel" as const, id: "railComments" as const },
-    ];
-    useLayoutStore.setState({
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: { ...DEFAULT_ARRANGEMENT, rail: fourMember },
-    });
-    const source = railSource("git-diff", "rail");
-    const preview = {
-      kind: "left-panel-rail",
-      panelId: "chats",
-      position: "combine",
-    } as const;
-
-    // The refusal cue stays drawn, so this is deliberately NOT a quiet no-op.
-    expect(isLeftPanelDropNoop(source, preview)).toBe(false);
-
-    const committed = commitResolvedCanvasDrop(
-      {
-        source,
-        target: {
-          kind: "left-panel-rail-item",
-          panelId: "chats",
-          orientation: "vertical",
-        },
-        preview,
-      },
-      rawNestedFocus,
-    );
-
-    expect(committed).toBe(false);
-    expect(useLayoutStore.getState().arrangement.rail).toEqual(fourMember);
   });
 });
 

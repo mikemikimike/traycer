@@ -10,8 +10,8 @@ import { DiffLineDeltas } from "@/components/chat/diff-line-deltas";
  * rolling number renders as plain text - so what these read is the structure
  * only the rolling branch produces: the digits inside an element of their own,
  * beside a sign that stays a bare text node whatever happens. That is the
- * independent output of the prop. Whether the digits travel is the browser
- * driver's claim (`scripts/motion-browser.mjs`).
+ * independent output of the prop. How the digits travel is the rolling
+ * primitive's own concern (`components/ui/__tests__/rolling-number.test.tsx`).
  */
 function deltas(counts: { additions: number; deletions: number }) {
   return render(

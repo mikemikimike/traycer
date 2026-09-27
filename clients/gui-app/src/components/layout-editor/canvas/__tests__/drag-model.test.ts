@@ -144,6 +144,13 @@ const SLOT_CASES: ReadonlyArray<SlotCase> = [
     claims: 1,
   },
   {
+    name: "y equal, up, one back",
+    slots: rowSlots,
+    index: 2,
+    offset: -25,
+    claims: 1,
+  },
+  {
     name: "y equal, up, two back",
     slots: rowSlots,
     index: 2,
@@ -303,12 +310,6 @@ describe("which slot the dragged member claims", () => {
     expect(targetSlotOf(slotCase.slots, slotCase.index, slotCase.offset)).toBe(
       slotCase.claims,
     );
-  });
-
-  it("claims the furthest neighbour it has passed, in both directions", () => {
-    expect(targetSlotOf(rowSlots, 0, 60)).toBe(2);
-    expect(targetSlotOf(rowSlots, 2, -60)).toBe(0);
-    expect(targetSlotOf(rowSlots, 2, -25)).toBe(1);
   });
 
   /**

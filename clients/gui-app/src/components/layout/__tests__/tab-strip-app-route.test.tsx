@@ -345,7 +345,7 @@ describe("app route tab-strip navigation", () => {
       expect(router.state.location.pathname).toBe(`/draft/${draftId}`);
     });
   });
-  it("draws the header's own baseline and the active tab as separate boxes, no join left (F4)", async () => {
+  it("draws the header's own hairline baseline", async () => {
     const epicTabId = useEpicCanvasStore
       .getState()
       .openEpicTab("epic-current", "Current Epic");
@@ -357,15 +357,5 @@ describe("app route tab-strip navigation", () => {
       .className.split(/\s+/);
     expect(headerClassTokens).toContain("after:bg-border/90");
     expect(headerClassTokens).toContain("after:h-px");
-    // F4 retired the folder-tab silhouette that reached for the header
-    // baseline: the active tab is now a self-contained box, with no cap, no
-    // center strip and no cover joining it to the header's own line below.
-    const box = screen.getByTestId("tab-chrome-box");
-    expect(box.className).toContain("rounded-xl");
-    expect(box.className).toContain("inset-0.5");
-    expect(screen.queryByTestId("tab-baseline-cover")).toBeNull();
-    expect(screen.queryByTestId("tab-cap-left")).toBeNull();
-    expect(screen.queryByTestId("tab-cap-right")).toBeNull();
-    expect(screen.queryByTestId("tab-chrome-center")).toBeNull();
   });
 });

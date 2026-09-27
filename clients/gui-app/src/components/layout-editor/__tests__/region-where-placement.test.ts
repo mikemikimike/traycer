@@ -138,23 +138,6 @@ describe("edgeSideOptions", () => {
 describe("the index state word of a bar reading", () => {
   const values = effectiveLayoutValues("default", {});
 
-  it("names the tab strip, left or right, at the top", () => {
-    expect(
-      regionStateWord(
-        "usageLimits",
-        values,
-        arrangementWith("top", "header", "left"),
-      ),
-    ).toBe("Tab strip, left");
-    expect(
-      regionStateWord(
-        "resourceMonitor",
-        values,
-        arrangementWith("top", "header", "right"),
-      ),
-    ).toBe("Tab strip, right");
-  });
-
   it.each<TabStripPlacement>(["left", "right"])(
     "names the tab strip, start or end, with the tabs at the %s",
     (placement) => {

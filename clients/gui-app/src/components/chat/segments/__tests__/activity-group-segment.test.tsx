@@ -1123,8 +1123,13 @@ describe("<ActivityGroupSegment /> default open follows the Chat display setting
     fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     expect(screen.queryByText("echo hi")).toBeNull();
 
-    // Setting still says Expanded (unchanged), which alone would open the
-    // group - the reader's own close has to win regardless.
+    // The setting moves away and back to Expanded, which alone would open
+    // the group - the reader's own close has to win regardless.
+    act(() => {
+      useLayoutStore
+        .getState()
+        .setRegionValues("toolActivity", { size: "chip" });
+    });
     act(() => {
       useLayoutStore
         .getState()
@@ -1141,8 +1146,13 @@ describe("<ActivityGroupSegment /> default open follows the Chat display setting
     fireEvent.click(screen.getByRole("button", { name: /Ran 1 command/ }));
     expect(screen.getByText("echo hi")).toBeTruthy();
 
-    // Setting still says Collapsed (unchanged), which alone would close the
-    // group - the reader's own open has to win regardless.
+    // The setting moves away and back to Collapsed, which alone would close
+    // the group - the reader's own open has to win regardless.
+    act(() => {
+      useLayoutStore
+        .getState()
+        .setRegionValues("toolActivity", { size: "full" });
+    });
     act(() => {
       useLayoutStore
         .getState()

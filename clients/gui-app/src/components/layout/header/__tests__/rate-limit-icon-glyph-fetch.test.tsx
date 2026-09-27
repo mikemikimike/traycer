@@ -1,7 +1,7 @@
 /**
  * Proves the G6 review-A fix at the one level `rate-limit-icon.test.tsx`
  * cannot reach: that file mocks `useStatusBarRateLimitSegments` at the
- * boundary, so it can only prove the glyph ASKS for `mode: "live"` - not that
+ * boundary, so it can only prove a trigger ASKS for `mode: "live"` - not that
  * asking for it actually starts a fetch. This file runs the real hook over a
  * real `HostClient` + `MockHostMessenger`, the same real-stack pattern
  * `status-bar-rate-limit-lanes.test.tsx` uses, but mounts the actual
@@ -10,7 +10,7 @@
  * glyph's behalf.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import type { HostRequester } from "@traycer-clients/shared/host-client/host-client";
 import { HostClient } from "@traycer-clients/shared/host-client/host-client";
@@ -182,9 +182,5 @@ describe('<RateLimitIconButton form="glyph" /> fetches its own httpFetch provide
     await waitFor(() =>
       expect(harness.calledProviderIds).toContain("opencode"),
     );
-
-    // The popover is closed by default - this fetch happened without it, and
-    // without a footer, which is exactly the "no other fetcher" claim above.
-    expect(screen.queryByTestId("rate-limit-popover")).toBeNull();
   });
 });

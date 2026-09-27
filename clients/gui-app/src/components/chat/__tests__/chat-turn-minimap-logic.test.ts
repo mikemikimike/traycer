@@ -307,43 +307,28 @@ describe("chatTurnMinimapItems caching", () => {
  * only direct coverage when the old overlay suite went.
  */
 describe("shouldRunChatTurnMinimapRail", () => {
-  it("runs only where the rail can actually paint", () => {
-    expect(
-      shouldRunChatTurnMinimapRail({
-        shown: true,
-        coarsePointer: false,
-        mobileViewport: false,
-      }),
-    ).toBe(true);
-  });
-
-  it("stands down for a touch pointer, which never hovers it", () => {
-    expect(
-      shouldRunChatTurnMinimapRail({
-        shown: true,
-        coarsePointer: true,
-        mobileViewport: false,
-      }),
-    ).toBe(false);
-  });
-
-  it("stands down below the breakpoint that hides it", () => {
-    expect(
-      shouldRunChatTurnMinimapRail({
-        shown: true,
-        coarsePointer: false,
-        mobileViewport: true,
-      }),
-    ).toBe(false);
-  });
-
-  it("stands down when the layout hides the minimap", () => {
-    expect(
-      shouldRunChatTurnMinimapRail({
-        shown: false,
-        coarsePointer: false,
-        mobileViewport: false,
-      }),
-    ).toBe(false);
+  it.each([
+    {
+      name: "runs where the rail can actually paint",
+      input: { shown: true, coarsePointer: false, mobileViewport: false },
+      expected: true,
+    },
+    {
+      name: "stands down for a touch pointer, which never hovers it",
+      input: { shown: true, coarsePointer: true, mobileViewport: false },
+      expected: false,
+    },
+    {
+      name: "stands down below the breakpoint that hides it",
+      input: { shown: true, coarsePointer: false, mobileViewport: true },
+      expected: false,
+    },
+    {
+      name: "stands down when the layout hides the minimap",
+      input: { shown: false, coarsePointer: false, mobileViewport: false },
+      expected: false,
+    },
+  ] as const)("$name", ({ input, expected }) => {
+    expect(shouldRunChatTurnMinimapRail(input)).toBe(expected);
   });
 });

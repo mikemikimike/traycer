@@ -309,7 +309,8 @@ function slotMotion(): {
  *
  * jsdom answers 0 to every layout question, so without this the panel is
  * never scrolling and the handle is never drawn - which is the honest
- * rendering of a jsdom panel, and why the two handle suites below say so.
+ * rendering of a jsdom panel (the handle's own suite is
+ * `chat-dock-panel-pane-height.test.tsx`).
  */
 function stubPanelScrolling(): void {
   vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(
@@ -425,17 +426,6 @@ function stubBoxHeight(node: Element, read: () => number): void {
 }
 
 describe("compact pills are a one-at-a-time switcher", () => {
-  it("opens nothing until a pill is clicked", () => {
-    render(<DockHarness chatId={CHAT_ID} />);
-
-    expect(attachedSections()).toEqual([]);
-    expect(
-      screen
-        .getByTestId("chat-dock-chip-filesChanged")
-        .getAttribute("aria-pressed"),
-    ).toBe("false");
-  });
-
   it("attaches exactly one panel, and a second pill REPLACES it", () => {
     render(<DockHarness chatId={CHAT_ID} />);
 
@@ -452,15 +442,6 @@ describe("compact pills are a one-at-a-time switcher", () => {
     ).toBeNull();
   });
 
-  it("closes when the open pill is clicked again", () => {
-    render(<DockHarness chatId={CHAT_ID} />);
-
-    clickPill("filesChanged");
-    clickPill("filesChanged");
-
-    expect(attachedSections()).toEqual([]);
-  });
-
   it("keeps focus on the pill across a swap", () => {
     render(<DockHarness chatId={CHAT_ID} />);
 
@@ -473,6 +454,7 @@ describe("compact pills are a one-at-a-time switcher", () => {
   });
 
   it("marks the open pill pressed and points it at the panel it controls", () => {
+    stubPanelScrolling();
     render(<DockHarness chatId={CHAT_ID} />);
 
     clickPill("filesChanged");
@@ -487,25 +469,18 @@ describe("compact pills are a one-at-a-time switcher", () => {
     expect(slot.getAttribute("id")).toBe("dock-panel-1");
     expect(slot.getAttribute("role")).toBe("region");
     expect(slot.getAttribute("aria-label")).toBe("Files changed");
+    // The handle names the same section it resizes.
+    expect(
+      screen
+        .getByTestId("chat-dock-attached-panel-resize")
+        .getAttribute("aria-label"),
+    ).toBe("Resize the Files changed panel");
     // The pill that is NOT open points at nothing.
     expect(
       screen
         .getByTestId("chat-dock-chip-background")
         .getAttribute("aria-controls"),
     ).toBeNull();
-  });
-
-  it("draws the attached panel with no collapsible header of its own", () => {
-    render(<DockHarness chatId={CHAT_ID} />);
-
-    clickPill("filesChanged");
-
-    // The pill IS the header: the collapsible root the full row draws is gone,
-    // and the rows are on screen without a second click.
-    expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Undo changes to /repo/src/app.ts" }),
-    ).not.toBeNull();
   });
 
   it("puts the attached panel above the fixed full rows", () => {
@@ -553,38 +528,6 @@ describe("compact pills are a one-at-a-time switcher", () => {
     // Another conversation is another answer - and nothing auto-opens there.
     render(<DockHarness chatId={OTHER_CHAT_ID} />);
     expect(attachedSections()).toEqual([]);
-  });
-});
-
-describe("the attached panel's height", () => {
-  it("resizes from the handle and remembers the choice", () => {
-    stubPanelScrolling();
-    render(<DockHarness chatId={CHAT_ID} />);
-    clickPill("filesChanged");
-
-    const handle = screen.getByTestId("chat-dock-attached-panel-resize");
-    expect(handle.getAttribute("aria-valuenow")).toBe("33");
-
-    fireEvent.keyDown(handle, { key: "ArrowUp" });
-    expect(handle.getAttribute("aria-valuenow")).toBe("35");
-    expect(useSettingsStore.getState().chatDockPanelHeight).toBeCloseTo(0.35);
-
-    // Double-click is the way back to the default.
-    fireEvent.doubleClick(handle);
-    expect(handle.getAttribute("aria-valuenow")).toBe("33");
-  });
-
-  it("refuses a height that would bury the transcript", () => {
-    stubPanelScrolling();
-    render(<DockHarness chatId={CHAT_ID} />);
-    clickPill("filesChanged");
-
-    const handle = screen.getByTestId("chat-dock-attached-panel-resize");
-    fireEvent.keyDown(handle, { key: "Home" });
-    expect(handle.getAttribute("aria-valuenow")).toBe("50");
-
-    fireEvent.keyDown(handle, { key: "ArrowUp" });
-    expect(handle.getAttribute("aria-valuenow")).toBe("50");
   });
 });
 
@@ -724,28 +667,6 @@ describe("the attached panel's motion", () => {
   });
 });
 
-// L-164: the cap is only doing something while the body is showing less than
-// it holds, so that is the only time the handle that sets it is offered.
-describe("the attached panel's resize handle", () => {
-  it("is absent while the panel is hugging content that fits", () => {
-    render(<DockHarness chatId={CHAT_ID} />);
-    clickPill("filesChanged");
-
-    // Nothing to resize: dragging would have written `aria-valuenow`, the
-    // store and `localStorage` without moving a pixel.
-    expect(screen.queryByTestId("chat-dock-attached-panel-resize")).toBeNull();
-  });
-
-  it("appears as soon as the body is showing less than it holds", () => {
-    stubPanelScrolling();
-    render(<DockHarness chatId={CHAT_ID} />);
-    clickPill("filesChanged");
-
-    const handle = screen.getByTestId("chat-dock-attached-panel-resize");
-    expect(handle.getAttribute("aria-valuenow")).toBe("33");
-  });
-});
-
 describe("the attached panel's motion contract", () => {
   const source = readFileSync(
     path.join(
@@ -755,14 +676,41 @@ describe("the attached panel's motion contract", () => {
     ),
     "utf8",
   );
+  const stylesheet = readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "index.css",
+    ),
+    "utf8",
+  );
 
   it("stays inside the ruling's ceiling, on the app's own curve", () => {
-    // Grow and collapse: under 250ms, ease-out, exit a touch quicker.
-    expect(source).toContain("duration: 0.22");
-    expect(source).toContain("duration: 0.18");
-    expect(source).toContain("ease: [0.32, 0.72, 0, 1]");
-    // The swap: 150ms, with the blur that bridges two legible lists.
-    expect(source).toContain("duration: 0.15");
+    // Every duration this file hands motion is under the 250ms ceiling, so a
+    // retune inside it passes and a slower one does not.
+    const durations = [...source.matchAll(/\bduration: ([\d.]+)/g)].map(
+      (match) => Number(match[1]),
+    );
+    expect(durations.length).toBeGreaterThan(0);
+    for (const duration of durations) {
+      expect(duration).toBeLessThan(0.25);
+    }
+    // Every cubic curve is the app's own spring, read off the stylesheet
+    // rather than restated here.
+    const spring = /--ease-spring: cubic-bezier\(([^)]*)\)/.exec(
+      stylesheet,
+    )?.[1];
+    expect(spring).toBeDefined();
+    const curves = [...source.matchAll(/\bease: \[([^\]]*)\]/g)].map(
+      (match) => match[1],
+    );
+    expect(curves.length).toBeGreaterThan(0);
+    for (const curve of curves) {
+      expect(curve).toBe(spring);
+    }
+    // The swap's blur that bridges two legible lists.
     expect(source).toContain('filter: "blur(2px)"');
     expect(source).toContain('filter: "blur(0px)"');
   });

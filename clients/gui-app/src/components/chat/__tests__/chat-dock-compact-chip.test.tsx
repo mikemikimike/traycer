@@ -109,7 +109,9 @@ describe("<ChatDockCompactChip />", () => {
   // The Files changed chip prints two measurements: the count, then the lines,
   // in the panel's own tones. `null` is every other chip, which counts one
   // thing and must gain no second span for it.
-  it("prints the line deltas after the short form, in the panel's tones", () => {
+  // The tones are `DiffLineDeltas`' own (`diff-line-deltas.test.tsx`); what is
+  // this chip's is where the pair sits.
+  it("prints the line deltas after the short form", () => {
     renderChip({
       ...baseProps(),
       text: "3",
@@ -121,11 +123,7 @@ describe("<ChatDockCompactChip />", () => {
     const additions = part(chip, "data-diff-additions");
     const deletions = part(chip, "data-diff-deletions");
     expect(additions.textContent).toBe("+12");
-    expect(additions.getAttribute("class")).toContain(
-      "text-success-foreground",
-    );
     expect(deletions.textContent).toBe("−4");
-    expect(deletions.getAttribute("class")).toContain("text-destructive");
   });
 
   it("omits a zero side, and the whole delta group for a chip with none", () => {
@@ -402,34 +400,10 @@ describe("<ChatDockCompactChip />", () => {
   });
 
   // The strip's half of the first-paint rule. A chip mounted inside a
-  // suppressed arrival swallows its pulse once and for all: the flip that
-  // follows re-renders it, and a chip that was there for the chat opening must
-  // not ring a commit later instead.
+  // suppressed arrival swallows its mount pulse for good - pinned through the
+  // strip in `chat-dock-compact-strip.test.tsx` ("first paint") - but the
+  // token still moving IS news, whenever the chip mounted.
   describe("under a suppressed arrival", () => {
-    it("swallows the mount pulse, and keeps swallowing it after the flip", () => {
-      const props = { ...baseProps(), pulseToken: "3" };
-      const { rerender } = render(
-        <TooltipProvider delayDuration={0}>
-          <ChatDockChipArrival suppressed>
-            <ChatDockCompactChip {...props} />
-          </ChatDockChipArrival>
-        </TooltipProvider>,
-      );
-
-      expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBeNull();
-
-      rerender(
-        <TooltipProvider delayDuration={0}>
-          <ChatDockChipArrival suppressed={false}>
-            <ChatDockCompactChip {...props} />
-          </ChatDockChipArrival>
-        </TooltipProvider>,
-      );
-
-      expect(screen.getByTestId("chip").getAttribute("data-pulse")).toBeNull();
-    });
-
-    // ...and the token still moving IS news, whenever the chip mounted.
     it("still pulses when the token changes afterwards", () => {
       const props = { ...baseProps(), pulseToken: "3" };
       const { rerender } = render(

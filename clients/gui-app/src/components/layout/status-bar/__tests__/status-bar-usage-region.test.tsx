@@ -110,15 +110,8 @@ afterEach(() => {
 });
 
 describe("the usage cluster as one region", () => {
-  it("registers nothing while no session is open", () => {
+  it("registers the row that holds every segment exactly once, not a segment", () => {
     renderCluster();
-
-    expect(registered()).toHaveLength(0);
-  });
-
-  it("registers exactly once for a cluster of several accounts", () => {
-    renderCluster();
-
     act(() => {
       useLayoutEditorStore.getState().beginSession({
         entry: "pointer",
@@ -129,19 +122,6 @@ describe("the usage cluster as one region", () => {
     });
 
     expect(registered()).toHaveLength(1);
-  });
-
-  it("registers the row that holds every segment, not a segment", () => {
-    renderCluster();
-    act(() => {
-      useLayoutEditorStore.getState().beginSession({
-        entry: "pointer",
-        source: "direct_ui",
-        startedAt: 0,
-        origin: { kind: "tab" },
-      });
-    });
-
     const node = registered()[0];
     const segments = [...document.querySelectorAll("[data-provider-id]")];
 

@@ -27,17 +27,6 @@ afterEach(() => {
 });
 
 describe("setSidebarSide", () => {
-  it("writes only sidebarSide, leaving every other arrangement field", () => {
-    const before = useLayoutStore.getState().arrangement;
-
-    setSidebarSide("right");
-
-    expect(useLayoutStore.getState().arrangement).toEqual({
-      ...before,
-      sidebarSide: "right",
-    });
-  });
-
   it("is one recorded gesture inside a layout editor session, and undo restores it", () => {
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
@@ -62,10 +51,14 @@ describe("setSidebarSide", () => {
         usageHost: "header",
       },
     });
+    const before = useLayoutStore.getState().arrangement;
 
     setSidebarSide("right");
 
-    expect(useLayoutStore.getState().arrangement.usageHost).toBe("header");
-    expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+    // Every other field is the live one, the moved `usageHost` included.
+    expect(useLayoutStore.getState().arrangement).toEqual({
+      ...before,
+      sidebarSide: "right",
+    });
   });
 });

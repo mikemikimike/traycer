@@ -487,7 +487,7 @@ export function barClusterRegionsAt(
 }
 
 /** The readings one bar is holding, in the model's own order. */
-export function barRegionsIn(
+function barRegionsIn(
   arrangement: LayoutArrangement,
   host: BarHost,
 ): ReadonlyArray<BarRegionId> {

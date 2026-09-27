@@ -84,27 +84,24 @@ function writtenPulseValues(): ReadonlyArray<string> {
 
 describe("the dock chip's attention ring", () => {
   it("animates every value the chip can write", () => {
-    const animated = animatedPulseValues();
+    // The scan below is exhaustive only while `pulseAttribute` is the one
+    // writer. The SHAPE, not the locals' current names: one write, and it is
+    // the decision function's return value rather than an expression
+    // assembled at the call site. Renaming a local is not a behaviour change;
+    // calling anything else there is.
+    const attributes = [...chip.matchAll(/data-pulse=\{([^}]*)\}/g)].map(
+      (match) => match[1],
+    );
+    expect(attributes).toHaveLength(1);
+    expect(attributes[0]).toMatch(/^pulseAttribute\(/);
 
+    const animated = animatedPulseValues();
     writtenPulseValues().forEach((value) => {
       expect(animated).toContain(value);
     });
   });
 
-  it("writes the attribute from that one decision and nowhere else", () => {
-    const attributes = [...chip.matchAll(/data-pulse=\{([^}]*)\}/g)].map(
-      (match) => match[1],
-    );
-
-    // The SHAPE, not the locals' current names: one write, and it is the
-    // decision function's return value rather than an expression assembled at
-    // the call site. Renaming a local is not a behaviour change; calling
-    // anything else there is.
-    expect(attributes).toHaveLength(1);
-    expect(attributes[0]).toMatch(/^pulseAttribute\(/);
-  });
-
-  it("gives the failure variant a ring as well as a colour", () => {
+  it("rings in the primary tone by default and the destructive one for a failure", () => {
     const coloured = chipRules.filter((rule) =>
       rule.body.includes("--dock-chip-ring-color:"),
     );
@@ -124,14 +121,13 @@ describe("the dock chip's attention ring", () => {
     expect(
       coloured.some((rule) => rule.body.includes("var(--color-destructive)")),
     ).toBe(true);
-  });
 
-  it("reads its colour through the variable, with the shipped primary as the fallback", () => {
+    // The keyframe reads the tone through the variable, so a variant needs no
+    // keyframe of its own, and falls back to the shipped primary.
     const keyframe = /@keyframes chat-dock-chip-pulse \{([\s\S]*?)\n\}/.exec(
       css,
     );
     if (keyframe === null) throw new Error("no chip pulse keyframe");
-
     expect(keyframe[1].replace(/\s+/g, " ")).toContain(
       "var(--dock-chip-ring-color, var(--color-primary))",
     );

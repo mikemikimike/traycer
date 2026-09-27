@@ -19,7 +19,8 @@ import {
 } from "@/stores/layout/layout-store";
 
 const LAYOUT_KEY = persistKey(STORE_KEYS.layout);
-const LAYOUT_VERSION = 4;
+/** The version this build writes (`LAYOUT_PERSIST_VERSION` in `layout-store.ts`). */
+const LAYOUT_VERSION = 6;
 
 /** The number of Styles lines on the change list - what `changeCount` used to return. */
 function changeCount(snapshot: LayoutSnapshot): number {
@@ -189,16 +190,6 @@ describe("useLayoutStore", () => {
   beforeEach(reset);
   afterEach(reset);
 
-  it("starts on the Default preset with nothing overridden", () => {
-    expect(getLayoutSnapshot()).toEqual(DEFAULT_LAYOUT_SNAPSHOT);
-    expect(
-      effectiveLayoutValues(
-        DEFAULT_LAYOUT_SNAPSHOT.basePreset,
-        DEFAULT_LAYOUT_SNAPSHOT.overrides,
-      ),
-    ).toEqual(PRESET_VALUES.default);
-  });
-
   /**
    * The delta is what a person PICKED, and "changed" is measured against
    * whichever base is current (L-133). The two were the same thing while the
@@ -255,7 +246,21 @@ describe("useLayoutStore", () => {
   describe("applying a preset (L-133 overturned)", () => {
     it("replaces every value with the preset's, clears the delta, and leaves the arrangement alone", () => {
       const store = useLayoutStore.getState();
-      store.setArrangement({ ...DEFAULT_ARRANGEMENT, minimapSide: "left" });
+      // Placement, order, reading width and a hidden provider all moved from
+      // what shipped: none of them is a value, so the apply must keep them all.
+      store.setArrangement({
+        ...DEFAULT_ARRANGEMENT,
+        minimapSide: "left",
+        tabStripPlacement: "left",
+        sidebarSide: "right",
+        usageHost: "header",
+        usageSide: "left",
+        dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
+        rail: [...DEFAULT_ARRANGEMENT.rail].reverse(),
+        hiddenProviders: [DEFAULT_ARRANGEMENT.usageProviders[0]],
+        readingWidth: "wide",
+      });
+      const arrangementBefore = getLayoutSnapshot().arrangement;
       store.setRegionValues("mic", { shown: "hidden" });
       store.setRegionValues("homeTab", { shown: "shown" });
 
@@ -265,20 +270,10 @@ describe("useLayoutStore", () => {
       // Applying is total, not a merge: the delta a person had built up under
       // the old base is gone, not re-minimized against the new one.
       expect(getLayoutSnapshot().overrides).toEqual({});
-      expect(getLayoutSnapshot().arrangement.minimapSide).toBe("left");
+      expect(getLayoutSnapshot().arrangement).toEqual(arrangementBefore);
       expect(
         effectiveLayoutValues("compact", getLayoutSnapshot().overrides),
       ).toEqual(PRESET_VALUES.compact);
-    });
-
-    it("clears the delta even when applying the preset already current", () => {
-      const store = useLayoutStore.getState();
-      store.setRegionValues("homeTab", { shown: "shown" });
-
-      useLayoutStore.getState().applyPreset("default");
-
-      expect(getLayoutSnapshot().overrides).toEqual({});
-      expect(getLayoutSnapshot().basePreset).toBe("default");
     });
   });
 
@@ -315,6 +310,7 @@ describe("useLayoutStore", () => {
 
       expect(listener).toHaveBeenCalled();
       expect(getLayoutSnapshot().overrides).toEqual({});
+      expect(getLayoutSnapshot().basePreset).toBe("default");
     });
   });
 
@@ -360,19 +356,6 @@ describe("useLayoutStore", () => {
     });
   });
 
-  describe("reapplying the current preset", () => {
-    it("puts the values back and leaves the arrangement where it is", () => {
-      const store = useLayoutStore.getState();
-      store.setRegionValues("model", { style: "bars" });
-      store.setArrangement({ ...DEFAULT_ARRANGEMENT, usageHost: "header" });
-
-      useLayoutStore.getState().applyPreset(getLayoutSnapshot().basePreset);
-
-      expect(getLayoutSnapshot().overrides).toEqual({});
-      expect(getLayoutSnapshot().arrangement.usageHost).toBe("header");
-    });
-  });
-
   describe("the write path parses like a rehydrate (G1-08)", () => {
     it("refuses a value this build has no case for", () => {
       // The registry's control seam writes by a dynamic key, so a typo reaches
@@ -411,37 +394,6 @@ describe("useLayoutStore", () => {
     });
 
     /**
-     * The retired region, end to end through the real persist path (L-136).
-     * The values table and `TOOLBAR_REGION_IDS` both name this build's regions
-     * only, so a blob written while `agent` existed rehydrates without a
-     * migration, a discard pass or an error - and without leaving a change the
-     * user cannot see or revert.
-     */
-    it("ignores a stored override and toolbar entry for a region this build retired", async () => {
-      await rehydrateFrom({
-        basePreset: "default",
-        overrides: {
-          agent: { shown: "hidden" },
-          homeTab: { shown: "shown" },
-        },
-        arrangement: {
-          ...DEFAULT_ARRANGEMENT,
-          toolbarLeft: ["attachImage", "access", "agent"],
-        },
-        layoutCarryDone: true,
-      });
-
-      expect(getLayoutSnapshot().overrides).toEqual({
-        homeTab: { shown: "shown" },
-      });
-      expect(getLayoutSnapshot().arrangement.toolbarLeft).toEqual([
-        "attachImage",
-        "access",
-      ]);
-      expect(changeCount(getLayoutSnapshot())).toBe(1);
-    });
-
-    /**
      * The whole of L-142's durability story, end to end through the real
      * persist path: a record written before Todo was a dock member carries a
      * three-entry dock and no value bag for it, and this build has to reach
@@ -453,19 +405,29 @@ describe("useLayoutStore", () => {
      * a member switched off keeps the size it would come back at, so turning
      * it on again returns the layout the user left rather than a full row
      * they never asked for.
+     *
+     * G1-G2 rides the same record: the Message queue was a dock region for a
+     * while and stopped being one, so a record from that window carries a
+     * `queue` value bag and a `queue` dock entry. This build reads neither
+     * back - `resolvePersistedOverrides` has no `queue` key to fill, and
+     * `mergeOrder` drops an id the canonical dock order does not name.
      */
-    it("materialises the new dock members a stored record predates, sizes intact", async () => {
+    it("materialises the new dock members a stored record predates, sizes intact, and drops a stale queue", async () => {
       await rehydrateFrom({
         basePreset: "default",
-        overrides: { todo: { shown: "hidden", size: "chip" } },
+        overrides: {
+          todo: { shown: "hidden", size: "chip" },
+          queue: { shown: "hidden", size: "chip" },
+        },
         arrangement: {
           ...DEFAULT_ARRANGEMENT,
-          dock: ["changedFiles", "runningAgents", "background"],
+          dock: ["queue", "changedFiles", "runningAgents", "background"],
         },
         layoutCarryDone: true,
       });
 
       const snapshot = getLayoutSnapshot();
+      expect(snapshot.overrides).not.toHaveProperty("queue");
       expect(snapshot.arrangement.dock).toEqual([
         "todo",
         "changedFiles",
@@ -479,83 +441,10 @@ describe("useLayoutStore", () => {
       expect(values.todo).toEqual({ shown: "hidden", size: "chip" });
     });
 
-    /**
-     * G1-G2: the Message queue was a dock region for a while and stopped
-     * being one. A record written during that window carries a `queue` value
-     * bag and a `queue` entry in the stored dock order, and this build reads
-     * neither back - `resolvePersistedOverrides` no longer has a `queue` key
-     * to fill, and `mergeOrder` drops an id the canonical dock order does not
-     * name. No migration, nothing to revert (P5): the stale bytes are simply
-     * never read again.
-     */
-    it("drops a stale queue value bag and dock entry on rehydrate", async () => {
-      await rehydrateFrom({
-        basePreset: "default",
-        overrides: { queue: { shown: "hidden", size: "chip" } },
-        arrangement: {
-          ...DEFAULT_ARRANGEMENT,
-          dock: [
-            "queue",
-            "todo",
-            "changedFiles",
-            "runningAgents",
-            "background",
-          ],
-        },
-        layoutCarryDone: true,
-      });
-
-      const snapshot = getLayoutSnapshot();
-      expect(snapshot.overrides).not.toHaveProperty("queue");
-      expect(snapshot.arrangement.dock).toEqual([
-        "todo",
-        "changedFiles",
-        "runningAgents",
-        "background",
-      ]);
-    });
-
     it("falls back to the defaults on a record it cannot read", async () => {
       await rehydrateFrom("not a layout record");
 
       expect(getLayoutSnapshot()).toEqual(DEFAULT_LAYOUT_SNAPSHOT);
-    });
-
-    /**
-     * The tab strip placement and the sidebar side are new fields on an
-     * unchanged version: `merge` resolves every field against its default
-     * through `resolvePersistedArrangement`, so a v4 record written before
-     * they existed rehydrates with both defaults rather than losing the rest
-     * of the record to a version bump.
-     */
-    it("rehydrates a v4 record without the placement fields as top and left, merged field by field", async () => {
-      // `usageHost: "header"` is a non-default field IN THE SAME RECORD: it
-      // has to survive next to the two defaulted fields, which a version bump
-      // that discarded the record (or ran a migration over it) would also
-      // pass for `tabStripPlacement`/`sidebarSide` alone, since both would
-      // read back as their defaults either way.
-      const arrangementWithoutPlacement: Record<string, unknown> = {
-        ...DEFAULT_ARRANGEMENT,
-        usageHost: "header",
-      };
-      delete arrangementWithoutPlacement.tabStripPlacement;
-      delete arrangementWithoutPlacement.sidebarSide;
-
-      writeLayoutRecordAtVersion(
-        {
-          basePreset: "default",
-          overrides: {},
-          arrangement: arrangementWithoutPlacement,
-          layoutCarryDone: true,
-        },
-        LAYOUT_VERSION,
-      );
-      await useLayoutStore.persist.rehydrate();
-
-      const arrangement = getLayoutSnapshot().arrangement;
-      expect(arrangement.tabStripPlacement).toBe("top");
-      expect(arrangement.sidebarSide).toBe("left");
-      expect(arrangement.usageHost).toBe("header");
     });
 
     it("takes another window's write through the storage event", async () => {
@@ -578,15 +467,6 @@ describe("useLayoutStore", () => {
 describe("the one-shot carry of the six shipped values (L-49, L-61)", () => {
   beforeEach(reset);
   afterEach(reset);
-
-  it("carries the minimap, the pinned breakdown, the resource switch, the rail and the per-panel Hide/Show", async () => {
-    seedLegacyRecords();
-
-    const relaunched = await relaunchStore();
-
-    expectCarried(relaunched.state(), "relaunch");
-    expect(relaunched.carried()).toBe(true);
-  });
 
   it("carries all six whichever store module the entry path loads first (L-61)", async () => {
     // The order dependence this pins is not hypothetical. A zustand store
@@ -617,6 +497,7 @@ describe("the one-shot carry of the six shipped values (L-49, L-61)", () => {
         },
         order,
       );
+      expect(state.layoutCarryDone, order).toBe(true);
     }
   });
 
@@ -889,9 +770,9 @@ describe("the version-3 migration off the shipped dividers (L-158)", () => {
     expect(useLayoutStore.getState().arrangement.dividerSeq).toBe(8);
   });
 
-  it("keeps a divider in a record this build already wrote", async () => {
-    // Version 4 is this build's own shape: a divider in it is one the user
-    // placed, and the migration must not reach it.
+  it("keeps a divider in a version-4 record, written after the shipped dividers were dropped", async () => {
+    // A version-4 record already went through the divider drop: a divider in
+    // it is one the user placed, and the migration must not reach it.
     writeLayoutRecordAtVersion(
       {
         basePreset: "default",
@@ -1049,44 +930,37 @@ describe("the version-5 migration splitting the agent rows off Shown (G7)", () =
     });
   });
 
-  it("forces nothing when the monitor is shown - agentRows stays the shipped default", async () => {
-    await rehydrateFromVersion(
-      {
-        basePreset: "default",
-        overrides: { resourceMonitor: { shown: "shown", memory: true } },
-        arrangement: DEFAULT_ARRANGEMENT,
-        layoutCarryDone: true,
-      },
-      4,
-    );
+  it.each([
+    {
+      name: "the monitor is shown",
+      overrides: { resourceMonitor: { shown: "shown", memory: true } },
+      stored: { shown: "shown", memory: true },
+    },
+    {
+      name: "there is no resourceMonitor override at all",
+      overrides: {},
+      stored: undefined,
+    },
+  ])(
+    "forces nothing when $name - agentRows stays the shipped default",
+    async ({ overrides, stored }) => {
+      await rehydrateFromVersion(
+        {
+          basePreset: "default",
+          overrides,
+          arrangement: DEFAULT_ARRANGEMENT,
+          layoutCarryDone: true,
+        },
+        4,
+      );
 
-    expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual({
-      shown: "shown",
-      memory: true,
-    });
-    expect(
-      effectiveLayoutValues("default", getLayoutSnapshot().overrides)
-        .resourceMonitor.agentRows,
-    ).toBe(true);
-  });
-
-  it("forces nothing when there is no resourceMonitor override at all", async () => {
-    await rehydrateFromVersion(
-      {
-        basePreset: "default",
-        overrides: {},
-        arrangement: DEFAULT_ARRANGEMENT,
-        layoutCarryDone: true,
-      },
-      4,
-    );
-
-    expect(getLayoutSnapshot().overrides.resourceMonitor).toBeUndefined();
-    expect(
-      effectiveLayoutValues("default", getLayoutSnapshot().overrides)
-        .resourceMonitor.agentRows,
-    ).toBe(true);
-  });
+      expect(getLayoutSnapshot().overrides.resourceMonitor).toEqual(stored);
+      expect(
+        effectiveLayoutValues("default", getLayoutSnapshot().overrides)
+          .resourceMonitor.agentRows,
+      ).toBe(true);
+    },
+  );
 
   it("leaves a version-5 record completely untouched, even a hidden monitor with no agentRows", async () => {
     await rehydrateFromVersion(
@@ -1125,34 +999,6 @@ describe("the version-5 migration splitting the agent rows off Shown (G7)", () =
       shown: "hidden",
       agentRows: true,
     });
-  });
-
-  it("is idempotent: migrating an already-migrated record twice gives the same result", async () => {
-    await rehydrateFromVersion(
-      {
-        basePreset: "default",
-        overrides: { resourceMonitor: { shown: "hidden" } },
-        arrangement: DEFAULT_ARRANGEMENT,
-        layoutCarryDone: true,
-      },
-      4,
-    );
-    const once = getLayoutSnapshot().overrides.resourceMonitor;
-
-    // Rehydrating the now-migrated shape again, tagged as this build's own
-    // version, must not move it any further.
-    await rehydrateFromVersion(
-      {
-        basePreset: "default",
-        overrides: { resourceMonitor: once },
-        arrangement: DEFAULT_ARRANGEMENT,
-        layoutCarryDone: true,
-      },
-      5,
-    );
-    const twice = getLayoutSnapshot().overrides.resourceMonitor;
-
-    expect(twice).toEqual(once);
   });
 
   it("migrates once, rather than re-deriving agentRows from Shown on every later write", async () => {

@@ -161,15 +161,9 @@ describe("the pill panel hugs its content, up to a share of the chat pane", () =
     expect(cap).not.toContain("vh)");
     // The pane is the nearest SIZE container, so the share resolves against
     // it and against nothing else on the way up.
-    expect(cap).toBe(
-      chatDockPanelHeightCss(
-        Math.round(CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO * 100),
-      ),
-    );
-    // A pane too short for the floor lowers the cap rather than being buried.
-    expect(cap).toContain(
-      `min(${Math.round(CHAT_DOCK_PANEL_MAX_HEIGHT_RATIO * 100)}cqh,`,
-    );
+    // The default third, floored at 6rem, and a pane too short for the floor
+    // lowers the cap rather than being buried.
+    expect(cap).toBe("min(50cqh, max(6rem, 33cqh))");
   });
 
   it("clamps to half the pane and to a usable minimum", () => {
@@ -182,8 +176,6 @@ describe("the pill panel hugs its content, up to a share of the chat pane", () =
     expect(clampChatDockPanelHeightRatio(Number.NaN)).toBe(
       CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
     );
-    // Half of a 400px pane is 200px, not half of the 768px window.
-    expect(CHAT_DOCK_PANEL_MAX_HEIGHT_RATIO * PANE_HEIGHT).toBe(200);
     expect(chatDockPanelHeightCss(12)).toBe("min(50cqh, max(6rem, 12cqh))");
   });
 
@@ -223,23 +215,17 @@ describe("the pill panel hugs its content, up to a share of the chat pane", () =
     // Keyboard resize and the double-click reset still land on the same scale.
     fireEvent.keyDown(grip, { key: "ArrowUp" });
     expect(handle().getAttribute("aria-valuenow")).toBe("35");
+    // The step is the stored preference, not only the handle's reading.
+    expect(useSettingsStore.getState().chatDockPanelHeight).toBeCloseTo(0.35);
     fireEvent.keyDown(grip, { key: "Home" });
+    expect(handle().getAttribute("aria-valuenow")).toBe("50");
+    // Half the pane is a ceiling: a further step cannot bury the transcript.
+    fireEvent.keyDown(grip, { key: "ArrowUp" });
     expect(handle().getAttribute("aria-valuenow")).toBe("50");
     fireEvent.doubleClick(grip);
     expect(handle().getAttribute("aria-valuenow")).toBe("33");
     expect(handle().getAttribute("aria-valuetext")).toBe(
       "33% of the chat pane",
-    );
-  });
-
-  it("names the open section on the region the pill controls", () => {
-    renderScrollingPanelInPane(PANE_HEIGHT);
-
-    expect(slot().getAttribute("id")).toBe("dock-panel-1");
-    expect(slot().getAttribute("role")).toBe("region");
-    expect(slot().getAttribute("aria-label")).toBe("Files changed");
-    expect(handle().getAttribute("aria-label")).toBe(
-      "Resize the Files changed panel",
     );
   });
 
@@ -258,9 +244,7 @@ describe("the pill panel hugs its content, up to a share of the chat pane", () =
       CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
     );
     expect(slot().style.getPropertyValue(CHAT_DOCK_PANEL_HEIGHT_PROPERTY)).toBe(
-      chatDockPanelHeightCss(
-        Math.round(CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO * 100),
-      ),
+      "min(50cqh, max(6rem, 33cqh))",
     );
 
     cleanup();

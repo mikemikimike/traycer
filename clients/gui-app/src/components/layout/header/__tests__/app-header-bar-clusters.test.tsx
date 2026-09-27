@@ -132,6 +132,16 @@ describe("the header's bar clusters (L-156)", () => {
     render(<AppHeader variant="app" />);
 
     expect(beforeTabs(screen.getByTestId("header-usage-trigger"))).toBe(false);
+    cleanup();
+
+    // The monitor ships on the right, so moving it up without touching its
+    // side puts it after the tabs.
+    place({ usageHost: "header", resourceHost: "header" });
+    render(<AppHeader variant="app" />);
+
+    expect(beforeTabs(screen.getByTestId("header-resource-trigger"))).toBe(
+      false,
+    );
   });
 
   it("hands both readings the header's own form, not the strip's glyph (G6)", () => {
@@ -153,65 +163,14 @@ describe("the header's bar clusters (L-156)", () => {
     // The monitor's trigger is here and the gauge is not: before L-156 this
     // state was unreachable, because one field moved both.
     expect(headerRegions()).toEqual(["resourceMonitor"]);
-    expect(screen.getByTestId("header-resource-trigger")).not.toBeNull();
     expect(screen.queryByTestId("header-usage-trigger")).toBeNull();
-  });
-
-  it("puts usage limits first where both share one end of the header", () => {
-    place({ usageHost: "header", resourceHost: "header" });
-    render(<AppHeader variant="app" />);
-
-    // Usage ships on the left and the monitor on the right, so moving both
-    // up without touching their sides leaves one at each end.
-    expect(headerRegions()).toEqual(["usageLimits", "resourceMonitor"]);
-    expect(beforeTabs(screen.getByTestId("header-usage-trigger"))).toBe(true);
-    expect(beforeTabs(screen.getByTestId("header-resource-trigger"))).toBe(
-      false,
-    );
-    cleanup();
-
-    place({
-      usageHost: "header",
-      usageSide: "right",
-      resourceHost: "header",
-      resourceSide: "right",
-    });
-    render(<AppHeader variant="app" />);
-
-    expect(headerRegions()).toEqual(["usageLimits", "resourceMonitor"]);
-    expect(beforeTabs(screen.getByTestId("header-usage-trigger"))).toBe(false);
-  });
-
-  it("claims the resource chord wherever it draws the monitor", () => {
     // One handler slot, two possible owners, and they are exclusive by
     // placement on a desktop viewport: the strip draws the monitor only while
     // `resourceHost` names the strip, so the header's claim is unconditional
     // wherever the header is the one drawing it.
-    place({ resourceHost: "header" });
-    render(<AppHeader variant="app" />);
-
-    const triggers = screen.getAllByTestId("header-resource-trigger");
-    expect(triggers).toHaveLength(1);
-    expect(triggers[0].getAttribute("data-claims-open-action")).toBe("true");
-    cleanup();
-
-    place({ resourceHost: "status-bar" });
-    render(<AppHeader variant="app" />);
-
-    expect(screen.queryByTestId("header-resource-trigger")).toBeNull();
-  });
-
-  it("draws one usage trigger, and only while the gauge names the header", () => {
-    place({ usageHost: "header" });
-    render(<AppHeader variant="app" />);
-
-    expect(screen.getAllByTestId("header-usage-trigger")).toHaveLength(1);
-    cleanup();
-
-    place({ usageHost: "status-bar" });
-    render(<AppHeader variant="app" />);
-
-    expect(screen.queryByTestId("header-usage-trigger")).toBeNull();
+    expect(
+      screen.getByTestId("header-resource-trigger").dataset.claimsOpenAction,
+    ).toBe("true");
   });
 
   it("keeps a hidden reading pointable in the header, under its own name", () => {

@@ -259,7 +259,7 @@ describe("SideStripReadings", () => {
     await screen.findByTestId("side-tab-strip");
 
     const row = screen.getByTestId("side-strip-readings");
-    expect(row.className).toContain("hidden");
+    expect(row.classList.contains("hidden")).toBe(true);
     expect(screen.queryByTestId("rate-limit-header-button")).toBeNull();
     expect(screen.queryByTestId("resource-monitor-header-button")).toBeNull();
   });
@@ -275,7 +275,7 @@ describe("SideStripReadings", () => {
     await screen.findByTestId("side-tab-strip");
 
     const row = screen.getByTestId("side-strip-readings");
-    expect(row.className).not.toContain("hidden");
+    expect(row.classList.contains("hidden")).toBe(false);
     expect(row.className).toContain("grid");
     expect(row.className).toContain("grid-flow-col");
 
@@ -297,7 +297,7 @@ describe("SideStripReadings", () => {
     await screen.findByTestId("side-tab-strip");
 
     const row = screen.getByTestId("side-strip-readings");
-    expect(row.className).not.toContain("hidden");
+    expect(row.classList.contains("hidden")).toBe(false);
     expect(screen.getByTestId("rate-limit-header-button")).toBeTruthy();
     expect(screen.queryByTestId("resource-monitor-header-button")).toBeNull();
   });

@@ -347,7 +347,7 @@ function glyphBars(
 /** The glyph's two slots. */
 const GLYPH_BAR_COUNT = 2;
 
-export function RateLimitGlyph({
+function RateLimitGlyph({
   bars,
 }: {
   readonly bars: ReadonlyArray<GlyphBar>;

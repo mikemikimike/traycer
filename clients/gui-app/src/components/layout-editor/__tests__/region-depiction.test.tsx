@@ -189,10 +189,14 @@ describe("what a depiction draws", () => {
   });
 
   it("draws a region that is switched off, because the stage dims instead", () => {
-    const { container } = render(
-      depictRegion("access", { size: "full" }, DEFAULT_ARRANGEMENT),
+    render(
+      depictRegion(
+        "attachImage",
+        { ...SHIPPED_DEFAULT_VALUES.attachImage, shown: "hidden" },
+        DEFAULT_ARRANGEMENT,
+      ),
     );
-    expect(container.textContent).toContain("Full access");
+    expect(screen.getByLabelText("Attach image")).toBeTruthy();
   });
 
   it("draws one rail icon per panel, from the sidebar's own definition", () => {
@@ -312,19 +316,5 @@ describe("what a depiction draws", () => {
     );
     expect(repeatedNeighbour).toHaveLength(0);
     expect(new Set(readings).size).toBe(3);
-  });
-});
-
-describe("the clip", () => {
-  it("leaves an unclipped depiction unmasked", () => {
-    const { container } = render(
-      depictRegion(
-        "attachImage",
-        SHIPPED_DEFAULT_VALUES.attachImage,
-        DEFAULT_ARRANGEMENT,
-      ),
-    );
-    expect(frameOf("attachImage", container).dataset.clipped).toBe("false");
-    expect(screen.getByLabelText("Attach image")).toBeTruthy();
   });
 });

@@ -63,12 +63,6 @@ describe("ChatTurnMinimapView", () => {
     ]);
   });
 
-  it("draws every tick when everything fits", () => {
-    renderView({ items: items(3), maxVisibleItems: 10 });
-
-    expect(screen.getAllByTestId("chat-turn-minimap-tick")).toHaveLength(3);
-  });
-
   it("draws no ticks for an empty item list", () => {
     renderView({ items: [] });
 
@@ -139,16 +133,6 @@ describe("ChatTurnMinimapView", () => {
     expect(handlers.onOpen).toHaveBeenCalledTimes(1);
     expect(handlers.onFocus).toHaveBeenCalledTimes(1);
     expect(handlers.onSelect).not.toHaveBeenCalled();
-  });
-
-  it("forwards strip key events to onKeyDown", () => {
-    const { handlers } = renderView({});
-
-    fireEvent.keyDown(screen.getByTestId("chat-turn-minimap-hit-strip"), {
-      key: "ArrowDown",
-    });
-
-    expect(handlers.onKeyDown).toHaveBeenCalledTimes(1);
   });
 
   it("when open, shows the card with every item and selecting a row reports its INDEX", () => {

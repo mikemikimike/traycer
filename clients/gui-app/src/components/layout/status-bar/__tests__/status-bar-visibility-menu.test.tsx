@@ -142,19 +142,6 @@ describe("<StatusBarVisibilityMenu />", () => {
     );
   });
 
-  it("offers the bar's own region as a quick verb", () => {
-    renderMenu(PROVIDERS, BOTH_READINGS);
-    openMenu();
-
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: "Hide Usage limits" }),
-    );
-
-    expect(useLayoutStore.getState().overrides.usageLimits?.shown).toBe(
-      "hidden",
-    );
-  });
-
   it("'Move to header' takes everything the strip is holding, and only that", () => {
     useLayoutStore.getState().setArrangement({
       ...useLayoutStore.getState().arrangement,
@@ -194,6 +181,7 @@ describe("<StatusBarVisibilityMenu />", () => {
 
     const { arrangement } = useLayoutStore.getState();
     expect(arrangement.resourceHost).toBe("header");
+    expect(arrangement.usageHost).toBe("header");
     expect(arrangement.usageSide).toBe("right");
   });
 

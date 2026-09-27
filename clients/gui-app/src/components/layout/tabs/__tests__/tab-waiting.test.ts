@@ -110,38 +110,100 @@ describe("tabWaitingReason", () => {
   );
 });
 
+interface MergeCase {
+  readonly name: string;
+  readonly input: NotificationIndicatorState;
+  readonly reason: EpicWaitingReason | null;
+  readonly pendingInterview: boolean;
+  readonly pendingApproval: boolean;
+  readonly sameObject: boolean;
+}
+
+const MERGE_CASES: readonly MergeCase[] = [
+  {
+    name: "no reason keeps the indicator as it is",
+    input: indicator(false, true),
+    reason: null,
+    pendingInterview: false,
+    pendingApproval: true,
+    sameObject: true,
+  },
+  {
+    name: "a reply lights the interview bit",
+    input: indicator(false, false),
+    reason: "reply",
+    pendingInterview: true,
+    pendingApproval: false,
+    sameObject: false,
+  },
+  {
+    name: "a reply leaves a lit approval bit lit",
+    input: indicator(false, true),
+    reason: "reply",
+    pendingInterview: true,
+    pendingApproval: true,
+    sameObject: false,
+  },
+  {
+    name: "a reply with both bits already lit is a no-op",
+    input: indicator(true, true),
+    reason: "reply",
+    pendingInterview: true,
+    pendingApproval: true,
+    sameObject: true,
+  },
+  {
+    name: "a reply over a lit interview bit is a no-op",
+    input: indicator(true, false),
+    reason: "reply",
+    pendingInterview: true,
+    pendingApproval: false,
+    sameObject: true,
+  },
+  {
+    name: "an approval lights the approval bit",
+    input: indicator(false, false),
+    reason: "approval",
+    pendingInterview: false,
+    pendingApproval: true,
+    sameObject: false,
+  },
+  {
+    name: "an approval over a lit approval bit is a no-op",
+    input: indicator(false, true),
+    reason: "approval",
+    pendingInterview: false,
+    pendingApproval: true,
+    sameObject: true,
+  },
+  {
+    name: "an approval leaves a lit interview bit lit",
+    input: indicator(true, false),
+    reason: "approval",
+    pendingInterview: true,
+    pendingApproval: true,
+    sameObject: false,
+  },
+];
+
 describe("withWaitingIndicator", () => {
-  it.each(CASES)(
-    "interview=$pendingInterview approval=$pendingApproval session=$session ORs the session reason in",
-    ({ pendingInterview, pendingApproval, session }) => {
-      const input = indicator(pendingInterview, pendingApproval);
-      const merged = withWaitingIndicator(input, session);
-      expect(merged.pendingInterview).toBe(
-        pendingInterview || session === "reply",
-      );
-      expect(merged.pendingApproval).toBe(
-        pendingApproval || session === "approval",
-      );
+  it.each(MERGE_CASES)(
+    "$name",
+    ({ input, reason, pendingInterview, pendingApproval, sameObject }) => {
+      const before = { ...input };
+      const merged = withWaitingIndicator(input, reason);
+      expect(merged.pendingInterview).toBe(pendingInterview);
+      expect(merged.pendingApproval).toBe(pendingApproval);
       // Every other field rides through untouched.
       expect({
         ...merged,
         pendingInterview: input.pendingInterview,
         pendingApproval: input.pendingApproval,
       }).toEqual(input);
-      const changed =
-        (session === "reply" && !pendingInterview) ||
-        (session === "approval" && !pendingApproval);
-      if (changed) {
-        expect(merged).not.toBe(input);
-      } else {
-        expect(merged).toBe(input);
-      }
+      // The same object when nothing changed, so memoised readers stay put.
+      expect(merged === input).toBe(sameObject);
+      // Never mutates its input.
+      expect(input).toEqual(before);
     },
   );
-
-  it("does not mutate the input when it adds a bit", () => {
-    const input = indicator(false, false);
-    withWaitingIndicator(input, "approval");
-    expect(input.pendingApproval).toBe(false);
-  });
 });

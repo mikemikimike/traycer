@@ -268,10 +268,11 @@ describe("settings search", () => {
       ).toEqual([]);
     });
 
-    it("offers every region in the installed mobile app too", () => {
+    it("offers every region but the microphone in the installed mobile app too", () => {
       // A region the strip does not host is hosted by the header instead, so
-      // no shell withholds one - the switch that used to gate the whole page
-      // is gone with the page.
+      // no shell withholds one for that reason - the switch that used to gate
+      // the whole page is gone with the page. The mic alone follows its own
+      // row's availability, which the mobile app lacks.
       const cases: ReadonlyArray<readonly [string, string]> = [
         ["minimap", "minimap"],
         ["usage limits", "usageLimits"],
@@ -280,6 +281,7 @@ describe("settings search", () => {
       for (const [query, region] of cases) {
         expect(launchesFor(query, MOBILE), query).toContain(region);
       }
+      expect(launchesFor("microphone", MOBILE)).not.toContain("mic");
     });
 
     it("still lets the page win on its own name", () => {

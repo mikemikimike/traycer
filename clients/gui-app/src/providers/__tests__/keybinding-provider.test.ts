@@ -974,24 +974,8 @@ describe("<KeybindingProvider /> and AltGr (Ctrl+Alt presented as AltGraph)", ()
 
       expect(calls.length).toBe(0);
       expect(event?.defaultPrevented).toBe(false);
-    } finally {
-      unregister();
-    }
-  });
 
-  it("dispatches tab.split.add on the identical chord with no AltGraph", () => {
-    const calls: Array<void> = [];
-    const unregister = registerDynamicActionHandler("tab.split.add", () => {
-      calls.push(undefined);
-    });
-    render(
-      createElement(KeybindingProvider, {
-        router: buildProviderRouterSource("/epics/e1"),
-        children: null,
-      }),
-    );
-    try {
-      let event: KeyboardEvent | undefined;
+      // Sanity: the identical chord with no AltGraph dispatches.
       act(() => {
         event = fireWindowKeyDown({
           code: "KeyN",
@@ -999,7 +983,6 @@ describe("<KeybindingProvider /> and AltGr (Ctrl+Alt presented as AltGraph)", ()
           altKey: true,
         });
       });
-
       expect(calls.length).toBe(1);
       expect(event?.defaultPrevented).toBe(true);
     } finally {

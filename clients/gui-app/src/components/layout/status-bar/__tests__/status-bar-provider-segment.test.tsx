@@ -9,10 +9,7 @@ import type {
   StatusBarRateLimitWindow,
 } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import type { RateLimitWindowKind } from "@/lib/rate-limits/rate-limit-window-catalog";
-import {
-  rateLimitWindowSeverityTextClassName,
-  RUNNING_LOW_TEXT_CLASS_NAME,
-} from "@/lib/rate-limits/window-severity";
+import { RUNNING_LOW_TEXT_CLASS_NAME } from "@/lib/rate-limits/window-severity";
 import type { RateLimitWindowSeverity } from "@/lib/rate-limits/window-severity";
 import type { AmountMode } from "@/lib/layout/layout-values";
 
@@ -941,6 +938,11 @@ describe("<StatusBarProviderSegment />", () => {
       },
     );
 
+    const SEVERITY_TONE: Readonly<Record<RateLimitWindowSeverity, string>> = {
+      healthy: "text-info-foreground",
+      running_low: RUNNING_LOW_TEXT_CLASS_NAME,
+      limited: "text-destructive",
+    };
     const SEVERITIES: ReadonlyArray<RateLimitWindowSeverity> = [
       "healthy",
       "running_low",
@@ -966,9 +968,11 @@ describe("<StatusBarProviderSegment />", () => {
           "status-bar-window-percent-codex:primary",
         );
         // The tone plus the crossfade it crosses a threshold with, and nothing
-        // else: this span is the only tinted part of the reading.
+        // else: this span is the only tinted part of the reading. The tone is
+        // spelled out per severity, so a mapping that swaps two tones fails
+        // here rather than agreeing with itself.
         expect(percentSpan.className).toBe(
-          `${rateLimitWindowSeverityTextClassName(severity)} transition-colors duration-200 ease-out`,
+          `${SEVERITY_TONE[severity]} transition-colors duration-200 ease-out`,
         );
       },
     );

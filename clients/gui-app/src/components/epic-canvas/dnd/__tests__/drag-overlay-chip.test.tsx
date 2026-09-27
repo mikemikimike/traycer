@@ -65,10 +65,7 @@ import {
   MANAGED_COMMAND_OUTPUT_DND_TYPE,
   WORKSPACE_FOLDER_DND_TYPE,
 } from "@/components/epic-canvas/dnd/dnd";
-import {
-  LEFT_PANEL_DEFINITIONS,
-  type LeftPanelMetadataDefinition,
-} from "@/components/epic-canvas/sidebar/left-panel-registry";
+import { LEFT_PANEL_DEFINITIONS } from "@/components/epic-canvas/sidebar/left-panel-registry";
 import { useEpicDndStore } from "@/components/epic-canvas/dnd/dnd-store";
 import { makeGitBundleDiffTile } from "@/lib/git/git-diff-tile";
 import { makeManagedCommandOutputTileRef } from "@/stores/epics/canvas/tile-schema/managed-command-output-tile";
@@ -350,47 +347,26 @@ describe("<EpicRootDragOverlayContent />", () => {
      * `size-9`), not the old titled chip: a chip three tiles wide covered the
      * neighbours and the drop line the user was aiming at.
      */
-    describe("wraps the left-panel rail tile", () => {
-      function panelDefinition(id: string): LeftPanelMetadataDefinition {
-        const panel = LEFT_PANEL_DEFINITIONS.find(
-          (definition) => definition.id === id,
-        );
-        if (panel === undefined) throw new Error(`no panel definition: ${id}`);
-        return panel;
-      }
-
-      function startRailDrag(panel: LeftPanelMetadataDefinition): void {
-        const source: EpicCanvasLeftPanelRailDragData = {
-          kind: LEFT_PANEL_RAIL_ITEM_DND_TYPE,
-          viewTabId: "view-tab-1",
-          panelId: panel.id,
-          origin: "rail",
-        };
-        useEpicDndStore.getState().canvasDragStarted(source, null);
-      }
-
-      const railDragPanels: ReadonlyArray<LeftPanelMetadataDefinition> = [
-        panelDefinition("terminals"),
-        // "chats" is the top of the shipped chats/artifacts stack (G3): a
-        // stacked group source still carries only the top panel's id, so the
-        // overlay draws the same single tile for it.
-        LEFT_PANEL_DEFINITIONS[0],
-      ];
-
-      it.each(railDragPanels)(
-        "draws the $title rail tile with no title text",
-        (panel) => {
-          startRailDrag(panel);
-          render(<EpicRootDragOverlayContent />);
-
-          const marker = overlayMarker();
-          const overlay = screen.getByTestId("left-panel-rail-drag-overlay");
-          expect(marker.contains(overlay)).toBe(true);
-          expect(overlay.className).toContain("size-9");
-          expect(overlay.querySelector("svg")).not.toBeNull();
-          expect(screen.queryByText(panel.title)).toBeNull();
-        },
+    it("wraps the left-panel rail tile, drawn with no title text", () => {
+      const panel = LEFT_PANEL_DEFINITIONS.find(
+        (definition) => definition.id === "terminals",
       );
+      if (panel === undefined) throw new Error("no terminals panel definition");
+      const source: EpicCanvasLeftPanelRailDragData = {
+        kind: LEFT_PANEL_RAIL_ITEM_DND_TYPE,
+        viewTabId: "view-tab-1",
+        panelId: panel.id,
+        origin: "rail",
+      };
+      useEpicDndStore.getState().canvasDragStarted(source, null);
+      render(<EpicRootDragOverlayContent />);
+
+      const marker = overlayMarker();
+      const overlay = screen.getByTestId("left-panel-rail-drag-overlay");
+      expect(marker.contains(overlay)).toBe(true);
+      expect(overlay.className).toContain("size-9");
+      expect(overlay.querySelector("svg")).not.toBeNull();
+      expect(screen.queryByText(panel.title)).toBeNull();
     });
   });
 
@@ -831,30 +807,6 @@ describe("<EpicRootDragOverlayContent />", () => {
         left: parseFloat(outer.style.left) + Number(match[1]) + innerOffset,
       };
     }
-
-    it("anchors the group overlay to the frame's origin during a real drag of the grabbed right member", async () => {
-      seedSplitGroup("right", { kind: "tab" });
-      const { rightEl } = await mountRealSplitDrag({
-        stripRect: rect(0, 0, 1000, 40),
-        frameRect: rect(100, 0, 480, 40),
-        leftMemberRect: rect(100, 0, 190, 40),
-        rightMemberRect: rect(340, 0, 190, 40),
-      });
-
-      const drag = pressAndActivate(rightEl, 340, 16, 31);
-      moveTo(drag, 350, 16); // +10px right of press
-
-      // Frame-anchored (100) plus the 10px move: the whole pair's overlay
-      // tracks the FRAME's origin, not the narrower right member's own slot
-      // within it - the path the deleted DOM `translateX` hack used to own.
-      expect(renderedOverlayPosition()).toEqual({ top: 0, left: 110 });
-      const overlay = screen.getByTestId("header-tab-drag-overlay");
-      expect(overlay.style.width).toBe("480px");
-      expect(within(overlay).getByText("Left Epic")).toBeTruthy();
-      expect(within(overlay).getByText("Right Epic")).toBeTruthy();
-
-      releaseAt(drag, 350, 16);
-    });
 
     it("still renders the plain single-title overlay for an ordinary (non-split) tab drag", () => {
       useEpicCanvasStore

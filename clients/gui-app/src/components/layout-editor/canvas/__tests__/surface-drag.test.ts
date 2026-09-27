@@ -42,27 +42,33 @@ afterEach(() => {
 });
 
 describe("dropZonesOf", () => {
-  it("bands the tab strip's three edges at a quarter of the container", () => {
-    const zones = dropZonesOf(rect(100, 50, 200, 120), [
-      "top",
-      "left",
-      "right",
-    ]);
-
-    expect(zones).toEqual([
-      { edge: "top", rect: { left: 100, top: 50, width: 200, height: 30 } },
-      { edge: "left", rect: { left: 100, top: 50, width: 50, height: 120 } },
-      { edge: "right", rect: { left: 250, top: 50, width: 50, height: 120 } },
-    ]);
-  });
-
-  it("bands only the sidebar's two side edges, no top", () => {
-    const zones = dropZonesOf(rect(0, 0, 200, 100), ["left", "right"]);
-
-    expect(zones).toEqual([
-      { edge: "left", rect: { left: 0, top: 0, width: 50, height: 100 } },
-      { edge: "right", rect: { left: 150, top: 0, width: 50, height: 100 } },
-    ]);
+  it.each([
+    {
+      surface: "the tab strip's three edges",
+      edges: ["top", "left", "right"] as const,
+      zones: [
+        { edge: "top", rect: { left: 100, top: 50, width: 200, height: 30 } },
+        { edge: "left", rect: { left: 100, top: 50, width: 50, height: 120 } },
+        {
+          edge: "right",
+          rect: { left: 250, top: 50, width: 50, height: 120 },
+        },
+      ],
+    },
+    {
+      // The sidebar cannot go on top, so it must not be offered a top band.
+      surface: "only the sidebar's two side edges, no top",
+      edges: ["left", "right"] as const,
+      zones: [
+        { edge: "left", rect: { left: 100, top: 50, width: 50, height: 120 } },
+        {
+          edge: "right",
+          rect: { left: 250, top: 50, width: 50, height: 120 },
+        },
+      ],
+    },
+  ])("bands $surface at a quarter of the container", ({ edges, zones }) => {
+    expect(dropZonesOf(rect(100, 50, 200, 120), edges)).toEqual(zones);
   });
 });
 
@@ -182,24 +188,7 @@ describe("armSurfaceDrag", () => {
 
     release();
     expect(zoneElements()).toEqual([]);
-  });
-
-  it("paints two zones for the sidebar, left and right only", () => {
-    const fixture = mount();
-
-    press(fixture, {
-      edges: ["left", "right"],
-      current: "left",
-      onDrop: vi.fn(),
-      origin: { x: 10, y: 50 },
-    });
-    moveTo(16, 50); // crosses the 6px threshold
-
-    expect(
-      zoneElements().map((el) => el.getAttribute("data-layout-drop-zone")),
-    ).toEqual(["left", "right"]);
-
-    release();
+    expect(layoutDragActive()).toBe(false);
   });
 
   it("marks the current edge, and lights the one under the pointer", () => {
@@ -214,6 +203,10 @@ describe("armSurfaceDrag", () => {
     moveTo(10, 56); // crosses the threshold, landing inside the left band
 
     const zones = zoneElements();
+    // Two edges offered, two zones painted: no top band for the sidebar.
+    expect(zones.map((el) => el.getAttribute("data-layout-drop-zone"))).toEqual(
+      ["left", "right"],
+    );
     const leftZone = zones.find(
       (el) => el.getAttribute("data-layout-drop-zone") === "left",
     );
@@ -292,27 +285,6 @@ describe("armSurfaceDrag", () => {
     release();
 
     expect(onDrop).not.toHaveBeenCalled();
-  });
-
-  it("removes the zones and the dragging mark on release either way", () => {
-    const fixture = mount();
-
-    press(fixture, {
-      edges: ["top", "left", "right"],
-      current: "top",
-      onDrop: vi.fn(),
-      origin: { x: 100, y: 50 },
-    });
-    moveTo(100, 44);
-    expect(zoneElements().length).toBe(3);
-
-    release();
-
-    expect(zoneElements()).toEqual([]);
-    expect(fixture.node.hasAttribute("data-layout-surface-dragging")).toBe(
-      false,
-    );
-    expect(layoutDragActive()).toBe(false);
   });
 
   it("leaves a press that never travelled alone", () => {

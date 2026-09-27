@@ -1303,9 +1303,11 @@ describe("<AppStatusBar /> reading placement (L-156)", () => {
       // The resource panel's owner is the popover the strip mounts, so its
       // presence IS the claim; the flag it carries is asserted beside it.
       expect(
-        screen.queryByTestId("status-bar-resource-segment") !== null,
+        screen
+          .queryByTestId("resource-monitor-popover")
+          ?.getAttribute("data-claims-open-action") ?? null,
         JSON.stringify(one.patch),
-      ).toBe(one.resources);
+      ).toBe(one.resources ? "true" : null);
       cleanup();
       useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
     }

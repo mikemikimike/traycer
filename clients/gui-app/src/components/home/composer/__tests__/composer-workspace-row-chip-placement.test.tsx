@@ -13,7 +13,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
  * at its left edge, inside `ChatLowerDock`, where the artifact draws them and
  * where a chip is adjacent to the row it opens. What this suite pins is the
  * negative half of that move: the workspace row is back to the two leaves it
- * names, so a strip mounted here - the state the move corrects - fails it.
+ * names, so a strip mounted beside the picker - the state the move corrects -
+ * fails it.
  *
  * The row's `overflow-hidden` is why the move matters beyond looks: it clipped
  * anything a child overhung with, which is what sliced the per-region mark off
@@ -62,20 +63,16 @@ describe("composer workspace row chip placement", () => {
     cleanup();
   });
 
-  it("no longer hosts the compact strip, even with chips in context", () => {
-    renderRow();
-
-    expect(screen.queryByTestId("chat-dock-compact-strip")).toBeNull();
-    const picker = screen.getByTestId("picker-stub");
-    expect(picker.parentElement?.childElementCount).toBe(1);
-  });
-
-  it("keeps the picker ahead of the context-usage cluster", () => {
+  it("keeps the picker alone in its cell, ahead of the context-usage cluster", () => {
     renderRow();
 
     const picker = screen.getByTestId("picker-stub");
     const usage = screen.getByTestId("usage-chip-stub");
 
+    // No compact strip anywhere in the row, and nothing shares the picker's
+    // cell, even with chips in context.
+    expect(screen.queryByTestId("chat-dock-compact-strip")).toBeNull();
+    expect(picker.parentElement?.childElementCount).toBe(1);
     expect(
       picker.compareDocumentPosition(usage) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

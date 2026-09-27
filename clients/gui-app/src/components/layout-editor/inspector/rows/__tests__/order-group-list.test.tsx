@@ -124,6 +124,15 @@ afterEach(() => {
   useLayoutEditorStore.getState().endSession();
 });
 
+/** Watched providers that leave the list with nothing to draw. */
+const EMPTY_CASES: ReadonlyArray<{
+  readonly providerIds: ReadonlyArray<RateLimitProviderId>;
+  readonly usageProviders: ReadonlyArray<RateLimitProviderId>;
+}> = [
+  { providerIds: [], usageProviders: CATALOG_ORDER },
+  { providerIds: ["kilocode"], usageProviders: ["codex", "claude-code"] },
+];
+
 describe("the usage-providers list is filtered to the watched host's own providers", () => {
   it("draws only the watched providerIds, in the catalog's own order", () => {
     usage.providerIds = ["claude-code", "openrouter"];
@@ -137,28 +146,22 @@ describe("the usage-providers list is filtered to the watched host's own provide
     expect(rowOrder()).toEqual(["claude-code", "openrouter"]);
   });
 
-  it("falls back to the empty-state line when nothing is visible", () => {
-    usage.providerIds = [];
-    render(renderList(arrangement({})));
+  // The second row names providers outside `arrangement.usageProviders`
+  // entirely - a defensive case `Array.includes` already covers, but the one
+  // place a hand-rolled filter could plausibly invert the check. It needs its
+  // own restricted `usageProviders` (unlike the full canonical catalog the
+  // other cases share), since every real provider id is by definition inside
+  // the full catalog.
+  it.each(EMPTY_CASES)(
+    "falls back to the empty-state line when nothing is visible (watched $providerIds)",
+    ({ providerIds, usageProviders }) => {
+      usage.providerIds = providerIds;
+      render(renderList(arrangement({ usageProviders })));
 
-    expect(screen.getByText("stub: no providers")).not.toBeNull();
-    expect(rowOrder()).toEqual([]);
-  });
-
-  it("stays empty when the watched host reports providers this arrangement never listed", () => {
-    // providerIds naming something outside `arrangement.usageProviders`
-    // entirely - a defensive case `Array.includes` already covers, but the
-    // one place a hand-rolled filter could plausibly invert the check. Needs
-    // its own restricted `usageProviders` (unlike the full canonical catalog
-    // the other cases share), since every real provider id is by definition
-    // inside the full catalog.
-    usage.providerIds = ["kilocode"];
-    render(
-      renderList(arrangement({ usageProviders: ["codex", "claude-code"] })),
-    );
-
-    expect(screen.getByText("stub: no providers")).not.toBeNull();
-  });
+      expect(screen.getByText("stub: no providers")).not.toBeNull();
+      expect(rowOrder()).toEqual([]);
+    },
+  );
 });
 
 describe("reordering the visible providers preserves the omitted ones' own slots", () => {
@@ -169,6 +172,12 @@ describe("reordering the visible providers preserves the omitted ones' own slots
     usage.providerIds = ["claude-code", "kilocode"];
     render(renderList(arrangement({})));
     expect(rowOrder()).toEqual(["claude-code", "kilocode"]);
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+      origin: { kind: "tab" },
+    });
 
     fireEvent.keyDown(row("claude-code"), { key: "ArrowDown", altKey: true });
 
@@ -195,31 +204,8 @@ describe("reordering the visible providers preserves the omitted ones' own slots
       "cursor",
       "antigravity",
     ]);
-  });
 
-  it("is one undoable gesture, same as every other arrangement write", () => {
-    usage.providerIds = ["claude-code", "kilocode"];
-    render(renderList(arrangement({})));
-    useLayoutEditorStore.getState().beginSession({
-      entry: "pointer",
-      source: "direct_ui",
-      startedAt: 0,
-      origin: { kind: "tab" },
-    });
-
-    fireEvent.keyDown(row("claude-code"), { key: "ArrowDown", altKey: true });
-    expect(useLayoutStore.getState().arrangement.usageProviders).toEqual([
-      "codex",
-      "kilocode",
-      "openrouter",
-      "claude-code",
-      "grok",
-      "huggingface",
-      "opencode",
-      "cursor",
-      "antigravity",
-    ]);
-
+    // One undoable gesture, same as every other arrangement write.
     useLayoutEditorStore.getState().undo();
     expect(useLayoutStore.getState().arrangement.usageProviders).toEqual(
       CATALOG_ORDER,

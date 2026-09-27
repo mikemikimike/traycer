@@ -2,12 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   changedControlKeys,
   isControlValueChanged,
-  readControlValue,
   revertControlValue,
   revertControlValues,
   writeControlValue,
 } from "@/components/layout-editor/inspector/region-control-io";
-import { PRESET_VALUES } from "@/lib/layout/layout-presets";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -19,9 +17,10 @@ import {
  * The dynamic half of the region grammar, which is the seam a reviewer is
  * right to distrust: a control names its key as a string, so nothing in the
  * type system stops a registry typo from reaching the store. What this suite
- * pins is that the seam is sound anyway - the write path parses, the revert
- * path only touches keys the region really has, and a multi-key revert is one
- * undo step rather than five.
+ * pins is that the seam is sound anyway - the revert path only touches keys
+ * the region really has, and a multi-key revert is one undo step rather than
+ * five. That the write path parses is the store's own contract
+ * (`layout-store.test.ts`, "the write path parses like a rehydrate").
  */
 
 function reset(): void {
@@ -35,20 +34,6 @@ function reset(): void {
 
 beforeEach(reset);
 afterEach(reset);
-
-describe("reading one control's value", () => {
-  it("hands back the region's own leaf, whatever shape it is", () => {
-    const values = PRESET_VALUES.default;
-
-    expect(readControlValue(values.model, "style")).toBe(values.model.style);
-    expect(readControlValue(values.usageLimits, "bar")).toBe(
-      values.usageLimits.bar,
-    );
-    expect(readControlValue(values.contextUsage, "pinnedFields")).toEqual(
-      values.contextUsage.pinnedFields,
-    );
-  });
-});
 
 describe("writing and reverting", () => {
   it("writes through the gesture path and reports the key as changed", () => {
@@ -83,32 +68,38 @@ describe("writing and reverting", () => {
   });
 
   it("makes a multi-key revert ONE write, so it is one undo step", () => {
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+      origin: { kind: "tab" },
+    });
     writeControlValue("usageLimits", "bar", false);
     writeControlValue("usageLimits", "word", false);
+    const depth = useLayoutEditorStore.getState().history.past.length;
 
-    let notifications = 0;
-    const unsubscribe = useLayoutStore.subscribe(() => {
-      notifications += 1;
-    });
     revertControlValues("usageLimits", ["bar", "word"]);
-    unsubscribe();
 
-    expect(notifications).toBe(1);
     expect(getLayoutSnapshot().overrides).toEqual({});
+    expect(useLayoutEditorStore.getState().history.past).toHaveLength(
+      depth + 1,
+    );
+
+    useLayoutEditorStore.getState().undo();
+
+    expect(getLayoutSnapshot().overrides).toEqual({
+      usageLimits: { bar: false, word: false },
+    });
   });
 
-  it("ignores a key the region does not have rather than writing it", () => {
-    // The membership test is a real one (`key in base`), not a predicate that
-    // only claims to be: a registry typo reverts nothing instead of persisting
-    // a field no build reads (G1-08).
-    revertControlValues("model", ["stlye", "style"]);
+  it("reverts nothing for a key the region does not have", () => {
+    // Against a region that HAS a change, so the answer comes from the
+    // per-key membership test rather than from there being nothing to revert:
+    // a registry typo touches nothing (G1-08).
+    writeControlValue("model", "style", "bars");
 
-    expect(getLayoutSnapshot().overrides).toEqual({});
-  });
+    revertControlValues("model", ["stlye"]);
 
-  it("refuses a value this build has no case for", () => {
-    writeControlValue("mic", "shown", "sideways");
-
-    expect(getLayoutSnapshot().overrides).toEqual({});
+    expect(getLayoutSnapshot().overrides).toEqual({ model: { style: "bars" } });
   });
 });

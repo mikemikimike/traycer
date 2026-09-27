@@ -63,13 +63,10 @@ afterEach(() => {
 });
 
 describe("<TabStripKeybindingBridge />", () => {
-  it("moves the tabs from the top to the left", () => {
-    render(<TabStripKeybindingBridge />);
-
-    expect(toggle()).toBe(true);
-    expect(placement()).toBe("left");
-  });
-
+  // The top -> left -> top round trip through the mounted shell is
+  // app-shell-lifecycle-bridges' "registers the vertical-tabs toggle in either
+  // placement". This file owns the rest of the chord's mapping and what the
+  // shell test cannot see.
   it("brings the tabs back to the top from the right", () => {
     setPlacement("right");
     render(<TabStripKeybindingBridge />);
@@ -109,6 +106,12 @@ describe("<TabStripKeybindingBridge />", () => {
   // rows - a gesture that touches a field this action does not own would be
   // a second write path.
   it("touches only tabStripPlacement", () => {
+    // A non-default field first: against the default arrangement, a write
+    // rebuilt from `DEFAULT_ARRANGEMENT` would look identical.
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      taskTabLayout: "shrink",
+    });
     const before = useLayoutStore.getState().arrangement;
     render(<TabStripKeybindingBridge />);
 

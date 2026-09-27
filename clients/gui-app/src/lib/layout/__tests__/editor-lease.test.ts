@@ -89,7 +89,7 @@ describe("layout editor lease: expiry", () => {
     });
   });
 
-  it("refreshLayoutEditorLock reports free once the held lease's time has passed", async () => {
+  it("the watcher reports free on its own poll once the other window's lease has passed", async () => {
     const { lease, store } = await freshLease();
     lease.initializeLayoutEditorWindow("me");
     localStorage.setItem(
@@ -97,21 +97,25 @@ describe("layout editor lease: expiry", () => {
       JSON.stringify({ token: "other-window", expiresAt: 5_000 }),
     );
 
-    expect(lease.refreshLayoutEditorLock()).toBe(true);
+    // Expiry emits no storage event, so only the 2s poll can notice it.
+    const stop = lease.watchLayoutEditorLease(vi.fn());
     expect(store.getState().lockedBy).toBe("other-window");
 
-    vi.setSystemTime(5_001);
+    vi.advanceTimersByTime(4_000);
+    expect(store.getState().lockedBy).toBe("other-window");
 
-    expect(lease.refreshLayoutEditorLock()).toBe(false);
+    vi.advanceTimersByTime(2_000);
     expect(store.getState().lockedBy).toBe("none");
+    stop();
   });
 
   it("ignores a malformed lease record instead of locking forever", async () => {
-    const { lease } = await freshLease();
+    const { lease, store } = await freshLease();
+    lease.initializeLayoutEditorWindow("me");
     localStorage.setItem(lease.LAYOUT_EDITOR_LEASE_KEY, "{not json");
 
-    expect(lease.readLayoutEditorLease()).toBeNull();
-    expect(lease.refreshLayoutEditorLock()).toBe(false);
+    expect(lease.acquireLayoutEditorLease()).toBe(true);
+    expect(store.getState().lockedBy).toBe("none");
   });
 });
 

@@ -20,6 +20,8 @@ import { NO_LIVE_AGENTS } from "../side-strip/side-tab-live-agents";
 import type { AgentActivityCoverage } from "@/lib/agent-activity";
 import {
   SIDE_SPLIT_PAIR_CLASS,
+  SIDE_SPLIT_PAIR_COLLAPSED_HAIRLINE_CLASS,
+  SIDE_SPLIT_PAIR_EXPANDED_HAIRLINE_CLASS,
   SIDE_TAB_ACTIVE_CLASS,
   SIDE_TAB_GROUP_LINE_CLASS,
   SIDE_TAB_GROUP_LINE_SEAT_CLASS,
@@ -844,6 +846,7 @@ describe("SideSplitRowPair", () => {
       );
       const pair = screen.getByTestId("split-tab-group-s1");
       expect(pair).toBe(ref.current);
+      expect(pair.dataset.sideSplitPair).toBe(variant);
       expect(pair.dataset.stripItemMergeable).toBe("false");
       expect(hasClasses(pair, SIDE_SPLIT_PAIR_CLASS)).toBe(true);
       expect(hasClasses(pair, "rounded-xl p-0.5 flex-col")).toBe(true);
@@ -860,6 +863,15 @@ describe("SideSplitRowPair", () => {
       ).firstElementChild;
       expect(
         hairline !== null && hasClasses(hairline, "h-px bg-border/60"),
+      ).toBe(true);
+      expect(
+        hairline !== null &&
+          hasClasses(
+            hairline,
+            variant === "expanded"
+              ? SIDE_SPLIT_PAIR_EXPANDED_HAIRLINE_CLASS
+              : SIDE_SPLIT_PAIR_COLLAPSED_HAIRLINE_CLASS,
+          ),
       ).toBe(true);
     },
   );

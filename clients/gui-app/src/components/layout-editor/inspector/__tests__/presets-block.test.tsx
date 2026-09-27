@@ -100,55 +100,51 @@ function toastAction(): { readonly onClick: () => void } {
 }
 
 describe("the apply toast is only good while its values are the ones it wrote (item 1)", () => {
-  it("dismisses on an editor discard, and a later Undo changes nothing", () => {
-    act(() => {
-      useLayoutEditorStore.getState().beginSession({
-        entry: "pointer",
-        source: "direct_ui",
-        startedAt: 0,
-        origin: { kind: "tab" },
+  it.each([
+    {
+      change: "an editor discard",
+      inSession: true,
+      act: () => {
+        act(() => {
+          useLayoutEditorStore.getState().discard();
+        });
+      },
+    },
+    {
+      change: "Reset layout",
+      inSession: false,
+      act: () => {
+        fireEvent.click(screen.getByRole("button", { name: "Reset layout…" }));
+        fireEvent.click(screen.getByTestId("confirm-action"));
+      },
+    },
+    {
+      change: "a later value edit",
+      inSession: false,
+      act: () => {
+        act(() => {
+          useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+        });
+      },
+    },
+  ])("dismisses on $change, and a later Undo changes nothing", (testCase) => {
+    if (testCase.inSession) {
+      act(() => {
+        useLayoutEditorStore.getState().beginSession({
+          entry: "pointer",
+          source: "direct_ui",
+          startedAt: 0,
+          origin: { kind: "tab" },
+        });
       });
-    });
+    }
     render(<PresetsAndReset />);
     fireEvent.click(screen.getByRole("button", { name: "Apply Compact" }));
     const action = toastAction();
 
-    act(() => {
-      useLayoutEditorStore.getState().discard();
-    });
-
-    expect(toast.dismiss).toHaveBeenCalledWith("layout-preset-applied");
-    const before = useLayoutStore.getState();
-    act(() => {
-      action.onClick();
-    });
-    expect(useLayoutStore.getState()).toBe(before);
-  });
-
-  it("dismisses on Reset layout, and a later Undo changes nothing", () => {
-    render(<PresetsAndReset />);
-    fireEvent.click(screen.getByRole("button", { name: "Apply Compact" }));
-    const action = toastAction();
-
-    fireEvent.click(screen.getByRole("button", { name: "Reset layout…" }));
-    fireEvent.click(screen.getByTestId("confirm-action"));
-
-    expect(toast.dismiss).toHaveBeenCalledWith("layout-preset-applied");
-    const before = useLayoutStore.getState();
-    act(() => {
-      action.onClick();
-    });
-    expect(useLayoutStore.getState()).toBe(before);
-  });
-
-  it("dismisses on a later value edit, and a later Undo changes nothing", () => {
-    render(<PresetsAndReset />);
-    fireEvent.click(screen.getByRole("button", { name: "Apply Compact" }));
-    const action = toastAction();
-
-    act(() => {
-      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
-    });
+    // Each row wraps its own step: Reset's two clicks must render the
+    // confirm in between, which one enclosing `act` would batch away.
+    testCase.act();
 
     expect(toast.dismiss).toHaveBeenCalledWith("layout-preset-applied");
     const before = useLayoutStore.getState();
@@ -178,6 +174,12 @@ describe("Reset layout's confirm, in both hosts (L-20, P-6)", () => {
       fireEvent.click(screen.getByRole("button", { name: "Reset layout…" }));
       expect(screen.getByRole("dialog")).not.toBeNull();
       expect(screen.getByText("Reset layout?")).not.toBeNull();
+      // The one thing the hosts differ by: the editor can undo it.
+      expect(
+        screen
+          .getByRole("dialog")
+          .textContent.includes("In the editor you can undo this with"),
+      ).toBe(host === "inspector");
 
       fireEvent.click(screen.getByTestId("confirm-cancel"));
       expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(

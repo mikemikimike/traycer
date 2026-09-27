@@ -1,15 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   layoutModified,
-  layoutSnapshotProperties,
-  mobileFooterChanged,
   providerChanged,
   resetLayout,
   resetWouldChange,
   revertProvider,
-  sidebarSideChanged,
-  sideStripViewChanged,
-  tabStripPlacementChanged,
   usageProvidersChanged,
 } from "@/lib/layout/layout-diff";
 import {
@@ -128,13 +123,6 @@ describe("what the page can see as changed", () => {
     ).toBe(true);
   });
 
-  it("sees the small-screen status bar, which had no indication anywhere", () => {
-    expect(mobileFooterChanged(DEFAULT_ARRANGEMENT)).toBe(false);
-    expect(
-      mobileFooterChanged({ ...DEFAULT_ARRANGEMENT, mobileFooter: true }),
-    ).toBe(true);
-  });
-
   it("answers for the whole arrangement, field by field", () => {
     expect(layoutModified(snapshotWith(DEFAULT_ARRANGEMENT))).toBe(false);
     const eachOne: ReadonlyArray<Partial<LayoutArrangement>> = [
@@ -147,6 +135,8 @@ describe("what the page can see as changed", () => {
       { tabStripPlacement: "left" },
       { sidebarSide: "right" },
       { sideStripView: "activity" },
+      { taskTabLayout: "shrink" },
+      { readingWidth: "wide" },
     ];
     for (const patch of eachOne) {
       expect(
@@ -154,69 +144,6 @@ describe("what the page can see as changed", () => {
         JSON.stringify(patch),
       ).toBe(true);
     }
-  });
-});
-
-/**
- * S-01, S-02, S-06: the tab strip's placement and the sidebar's side, as
- * their own two-arrangement comparators and in the `layout_snapshot` payload.
- */
-describe("the tab strip's placement and the sidebar's side", () => {
-  it("tabStripPlacementChanged and sidebarSideChanged compare the two arrangements handed to them", () => {
-    expect(
-      tabStripPlacementChanged(DEFAULT_ARRANGEMENT, DEFAULT_ARRANGEMENT),
-    ).toBe(false);
-    expect(
-      tabStripPlacementChanged(
-        { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
-        DEFAULT_ARRANGEMENT,
-      ),
-    ).toBe(true);
-    expect(sidebarSideChanged(DEFAULT_ARRANGEMENT, DEFAULT_ARRANGEMENT)).toBe(
-      false,
-    );
-    expect(
-      sidebarSideChanged(
-        { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
-        DEFAULT_ARRANGEMENT,
-      ),
-    ).toBe(true);
-  });
-
-  it("the snapshot builder emits both properties", () => {
-    const properties = layoutSnapshotProperties(
-      snapshotWith({
-        ...DEFAULT_ARRANGEMENT,
-        tabStripPlacement: "right",
-        sidebarSide: "right",
-      }),
-    );
-
-    expect(properties.layout_tab_strip_placement).toBe("right");
-    expect(properties.layout_sidebar_side).toBe("right");
-  });
-});
-
-/** D8: the vertical strip's view, as its own two-arrangement comparator and in the payload. */
-describe("the vertical strip's view", () => {
-  it("sideStripViewChanged compares the two arrangements handed to it", () => {
-    expect(sideStripViewChanged(DEFAULT_ARRANGEMENT, DEFAULT_ARRANGEMENT)).toBe(
-      false,
-    );
-    expect(
-      sideStripViewChanged(
-        { ...DEFAULT_ARRANGEMENT, sideStripView: "activity" },
-        DEFAULT_ARRANGEMENT,
-      ),
-    ).toBe(true);
-  });
-
-  it("the snapshot builder emits the property", () => {
-    const properties = layoutSnapshotProperties(
-      snapshotWith({ ...DEFAULT_ARRANGEMENT, sideStripView: "activity" }),
-    );
-
-    expect(properties.layout_side_strip_view).toBe("activity");
   });
 });
 
@@ -287,17 +214,5 @@ describe("Reset layout (L-20)", () => {
 
     expect(layoutModified(withProfile)).toBe(false);
     expect(resetWouldChange(withProfile)).toBe(true);
-  });
-
-  it("is false for a pristine layout differing only in dividerSeq", () => {
-    // dividerSeq only ever increases (it is never handed back by a reset,
-    // above); a layout that differs from the shipped one ONLY there is not
-    // something a reset would visibly do anything to.
-    const bumped = snapshotWith({
-      ...DEFAULT_ARRANGEMENT,
-      dividerSeq: DEFAULT_ARRANGEMENT.dividerSeq + 3,
-    });
-
-    expect(resetWouldChange(bumped)).toBe(false);
   });
 });

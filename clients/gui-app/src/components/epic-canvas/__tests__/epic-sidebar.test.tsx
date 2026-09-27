@@ -439,55 +439,23 @@ describe("<EpicLeftPanelRail />", () => {
     for (const child of Array.from(rail.children)) {
       expect(child.className).not.toMatch(/\bm[xytrbl]?-\d/);
     }
-    // The group's button carries every member's name (G3), not just the top
-    // panel's own title.
-    expect(
-      screen.getByTestId("epic-rail-chats").getAttribute("aria-label"),
-    ).toBe("Agents · Artifacts");
-  });
-
-  it("draws eight icons for nine panels, with the shipped pair inside one group", () => {
-    testState.activeArtifactId = "artifact-1";
-    testState.activeArtifact = { kind: "spec" };
-    useLeftPanelStore.getState().revealCommentsPanel(TAB_ID);
-
-    render(
-      <EpicLeftPanelRail
-        epicId={EPIC_ID}
-        tabId={TAB_ID}
-        orientation="vertical"
-      />,
-    );
-
-    for (const testId of [
-      "epic-rail-chats",
-      "epic-rail-terminals",
-      "epic-rail-browsers",
-      "epic-rail-git-diff",
-      "epic-rail-pull-requests",
-      "epic-rail-file-tree",
-      "epic-rail-sharing",
-      "epic-rail-comments",
-    ]) {
-      expect(screen.getByTestId(testId)).not.toBeNull();
-    }
-    // Artifacts is the bottom of the shipped pair (G3): its icon does not draw
-    // its own button, the top's stands in for it.
-    expect(screen.queryByTestId("epic-rail-artifacts")).toBeNull();
-
-    // Exactly one group on the rail, and it holds exactly the two members
-    // of the shipped pair - not a third icon, and not either of them loose.
-    expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(1);
+    // The capsule holds exactly the shipped pair, and draws ONE button for
+    // it - the top's; Artifacts (the bottom, G3) draws none of its own.
     const stack = screen.getByTestId("epic-rail-stack");
     expect(stack.getAttribute("data-rail-stack")).toBe(
       "stack:railAgents+railArtifacts",
     );
-    // ONE button inside it - the top's, never the bottom's too.
     expect(
       Array.from(stack.querySelectorAll("button")).map((button) =>
         button.getAttribute("data-testid"),
       ),
     ).toEqual(["epic-rail-chats"]);
+    expect(screen.queryByTestId("epic-rail-artifacts")).toBeNull();
+    // The group's button carries every member's name (G3), not just the top
+    // panel's own title.
+    expect(
+      screen.getByTestId("epic-rail-chats").getAttribute("aria-label"),
+    ).toBe("Agents · Artifacts");
   });
 
   it("labels, counts and lights a 3-member stack's one icon for every member (L-181)", () => {
@@ -559,23 +527,6 @@ describe("<EpicLeftPanelRail />", () => {
     expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
   });
 
-  it("collapses the main panel on a click of the group icon while it is showing", () => {
-    render(
-      <EpicLeftPanelRail
-        epicId={EPIC_ID}
-        tabId={TAB_ID}
-        orientation="vertical"
-      />,
-    );
-
-    expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe("chats");
-    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(false);
-
-    fireEvent.click(screen.getByTestId("epic-rail-chats"));
-
-    expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(true);
-  });
-
   it("reopens a member whose own section is collapsed, instead of collapsing the column", () => {
     useLeftPanelStore.getState().togglePanelSectionCollapsed("artifacts");
     render(
@@ -591,6 +542,9 @@ describe("<EpicLeftPanelRail />", () => {
     expect(useLeftPanelStore.getState().getActivePanelId(TAB_ID)).toBe(
       "artifacts",
     );
+    expect(
+      useLeftPanelStore.getState().panelSectionCollapsedByPanelId.artifacts,
+    ).toBe(false);
     expect(useLeftPanelStore.getState().isMainCollapsed(TAB_ID)).toBe(false);
   });
 
@@ -800,9 +754,9 @@ describe("<EpicLeftPanelRail />", () => {
       });
     });
 
-    expect(screen.getByTestId("epic-rail-git-diff").className).toContain(
-      "ring-primary",
-    );
+    const target = screen.getByTestId("epic-rail-git-diff");
+    expect(target.className).toContain("ring-primary");
+    expect(target.className.split(/\s+/)).not.toContain("bg-accent");
     expect(screen.getByTestId("epic-rail-terminals").className).not.toContain(
       "ring-primary",
     );
@@ -932,20 +886,6 @@ describe("<EpicLeftPanelRail />", () => {
 
     afterEach(() => {
       useLayoutEditorStore.getState().endSession();
-    });
-
-    it("draws nothing between panels at rest, so the shipped rail is its buttons", () => {
-      renderRail(true);
-
-      const rail = screen.getByTestId("epic-sidebar-rail");
-      // Every child is a panel button or the shipped pair's capsule: no
-      // divider entry exists on the shipped rail, so there is nothing else to
-      // draw between them (L-155, L-167).
-      for (const child of rail.children) {
-        const isCapsule = child.getAttribute("data-rail-stack") !== null;
-        expect(isCapsule || child.tagName === "BUTTON").toBe(true);
-      }
-      expect(screen.queryAllByTestId("epic-rail-divider")).toHaveLength(0);
     });
 
     it("draws an added divider as a plain resting spacer outside a session", () => {
@@ -1443,8 +1383,8 @@ describe("<EpicLeftPanelRail />", () => {
  * The sidebar body draws the one panel the rail says is active, and it draws
  * it WHOLE (L-157, R5R-01).
  *
- * Per-panel section collapse is deleted, and the case that forced it is an
- * upgrade rather than a gesture: a user who collapsed Artifacts while it was
+ * Per-panel section collapse belongs to a stacked member only (L-166), and the
+ * case that forced that is an upgrade rather than a gesture: a user who collapsed Artifacts while it was
  * stacked under Chats had `{artifacts: true}` written to localStorage, which
  * was harmless while a sibling took the space. With one panel in the body a
  * honoured flag is a title row over an empty column, and the rail cannot clear
@@ -1500,24 +1440,13 @@ describe("the displayed panel is never collapsed (L-157)", () => {
       screen.getByTestId("epic-left-panel-section-terminals").children.length,
     ).toBeGreaterThan(1);
   });
-
-  it("offers no collapse control on the section header", () => {
-    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
-    renderHost();
-
-    // The chevron and the title-as-button are both gone: the sidebar's one
-    // collapse lives on the rail, as `mainCollapsedByTabId`.
-    expect(screen.queryByRole("button", { name: /^Collapse /u })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Expand /u })).toBeNull();
-  });
 });
 
 /**
  * A stacked pair shares the body as two sections with a resize handle
- * between them; a lone panel is the one section above (L-166). The lone-panel
- * half is already covered by "offers no collapse control on the section
- * header" above - this describes the split the OTHER shape draws, and that
- * the same rail with its link removed collapses back to the lone shape.
+ * between them; a lone panel is the one section above (L-166). This describes
+ * the split the stacked shape draws, and that the same rail with its link
+ * removed collapses back to the lone, uncollapsible shape.
  *
  * Terminals with Browsers rather than the shipped Agents-with-Artifacts pair,
  * because those two panels' bodies render without an epic session - the same
@@ -1726,6 +1655,19 @@ describe("a stacked pair vs a lone panel in the body (L-166)", () => {
       expect(flexGrowOf("browsers")).toBeCloseTo(0.7);
       expect(
         screen.getByRole("button", { name: "Expand Git Diff" }),
+      ).not.toBeNull();
+    });
+
+    it("keeps a collapsed member's header actions reachable while its body is hidden", () => {
+      stackThree();
+      collapse("git-diff");
+      renderHost();
+
+      expect(screen.queryByTestId("epic-test-git-diff-body")).toBeNull();
+      // The header is all a collapsed member draws, so it is the only way to
+      // the panel's own actions until the user expands it again.
+      expect(
+        screen.getByRole("button", { name: "More Git Diff actions" }),
       ).not.toBeNull();
     });
 
@@ -2043,14 +1985,6 @@ describe("the horizontal rail's reported natural width (bug #1)", () => {
     restoreLayout = null;
   });
 
-  it("publishes the span of its children plus its padding under the tab id once mounted horizontally", () => {
-    restoreLayout = stubRailLayout(344);
-
-    renderHorizontalRail();
-
-    expect(reportedWidth()).toBe(344 + RAIL_PADDING_PX);
-  });
-
   it("reports the children's span, not the width the rail was stretched to", () => {
     restoreLayout = stubRailLayout(250);
     // A `w-full` scroller's scrollWidth and clientWidth never drop below its
@@ -2093,7 +2027,7 @@ describe("the horizontal rail's reported natural width (bug #1)", () => {
     expect(reportedWidth()).toBeUndefined();
   });
 
-  it("clears its reported width once the horizontal rail unmounts", () => {
+  it("publishes the span of its children plus its padding under the tab id once mounted horizontally, and clears it on unmount", () => {
     restoreLayout = stubRailLayout(344);
 
     const view = renderHorizontalRail();

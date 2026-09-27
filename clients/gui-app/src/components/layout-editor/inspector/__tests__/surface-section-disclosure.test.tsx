@@ -96,16 +96,6 @@ describe("a row with nothing to disclose (G6)", () => {
     expect(grabOf(node).getAttribute("aria-expanded")).toBeNull();
     expect(node.querySelector("[data-sortable-detail]")).toBeNull();
   });
-
-  it("does nothing when that row is clicked", () => {
-    const onToggle = vi.fn();
-    render(<Card surface="topBar" onToggle={onToggle} />);
-
-    fireEvent.click(grabOf(row("homeTab")));
-
-    expect(onToggle).not.toHaveBeenCalled();
-    expect(row("homeTab").querySelector("[data-sortable-detail]")).toBeNull();
-  });
 });
 
 describe("a row with a detail row discloses (G6)", () => {

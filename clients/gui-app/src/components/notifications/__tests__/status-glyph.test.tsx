@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { StatusGlyph } from "../status-glyph";
+import { StatusGlyph, type StatusGlyphStatus } from "../status-glyph";
 import {
   APPROVAL_TONE,
   DONE_TONE,
@@ -20,6 +20,13 @@ const TONE_CASES: ReadonlyArray<readonly [string, IndicatorTone, string]> = [
   ["interview", INTERVIEW_TONE, "lucide-message-square-question-mark"],
   ["approval", APPROVAL_TONE, "lucide-message-square-warning"],
   ["browser", NOTIFICATION_STATUS_TONES.browser, "lucide-globe-alert"],
+];
+
+/** Every branch, keyed by the `data-status-glyph` value it draws. */
+const STATUS_CASES: ReadonlyArray<readonly [string, StatusGlyphStatus]> = [
+  ...TONE_CASES.map(([, tone]) => [tone.testId, tone] as const),
+  ["running", "running"],
+  ["background", "background"],
 ];
 
 describe("StatusGlyph", () => {
@@ -43,37 +50,38 @@ describe("StatusGlyph", () => {
     },
   );
 
-  it.each(TONE_CASES)(
-    "hides the %s tone from assistive tech when label is null",
-    (_name, tone) => {
+  it.each(STATUS_CASES)(
+    "hides the %s glyph from assistive tech when label is null",
+    (glyphId, status) => {
       render(
         <StatusGlyph
-          status={tone}
+          status={status}
           className="size-3"
           testId={undefined}
           label={null}
         />,
       );
-      const glyph = document.querySelector(
-        `[data-status-glyph="${tone.testId}"]`,
-      );
+      const glyph = document.querySelector(`[data-status-glyph="${glyphId}"]`);
       expect(glyph?.getAttribute("aria-hidden")).toBe("true");
       expect(glyph?.getAttribute("role")).toBeNull();
     },
   );
 
-  it("exposes an accessible name for a tone when a label is given", () => {
-    render(
-      <StatusGlyph
-        status={APPROVAL_TONE}
-        className="size-3"
-        testId={undefined}
-        label="Needs approval"
-      />,
-    );
-    const glyph = screen.getByRole("img", { name: "Needs approval" });
-    expect(glyph.getAttribute("data-status-glyph")).toBe("approval");
-  });
+  it.each(STATUS_CASES)(
+    "exposes an accessible name for the %s glyph when a label is given",
+    (glyphId, status) => {
+      render(
+        <StatusGlyph
+          status={status}
+          className="size-3"
+          testId={undefined}
+          label="Status label"
+        />,
+      );
+      const glyph = screen.getByRole("img", { name: "Status label" });
+      expect(glyph.getAttribute("data-status-glyph")).toBe(glyphId);
+    },
+  );
 
   it("carries a testId onto the tone icon", () => {
     render(
@@ -87,37 +95,6 @@ describe("StatusGlyph", () => {
     expect(screen.getByTestId("failure-glyph")).toBe(
       document.querySelector('[data-status-glyph="failure"]'),
     );
-  });
-
-  it("gives approval and interview distinct icons, not colour alone", () => {
-    render(
-      <StatusGlyph
-        status={APPROVAL_TONE}
-        className="size-3"
-        testId={undefined}
-        label={null}
-      />,
-    );
-    render(
-      <StatusGlyph
-        status={INTERVIEW_TONE}
-        className="size-3"
-        testId={undefined}
-        label={null}
-      />,
-    );
-    const approvalGlyph = document.querySelector(
-      '[data-status-glyph="approval"]',
-    );
-    const interviewGlyph = document.querySelector(
-      '[data-status-glyph="interview"]',
-    );
-    expect(
-      approvalGlyph?.classList.contains("lucide-message-square-warning"),
-    ).toBe(true);
-    expect(
-      interviewGlyph?.classList.contains("lucide-message-square-question-mark"),
-    ).toBe(true);
   });
 
   it("marks the running glyph on its wrapping span, with the spinner inside", () => {
@@ -137,34 +114,6 @@ describe("StatusGlyph", () => {
     ).not.toBeNull();
   });
 
-  it("hides the running glyph from assistive tech when label is null", () => {
-    render(
-      <StatusGlyph
-        status="running"
-        className="size-3"
-        testId={undefined}
-        label={null}
-      />,
-    );
-    const glyph = document.querySelector('[data-status-glyph="running"]');
-    expect(glyph?.getAttribute("aria-hidden")).toBe("true");
-    expect(glyph?.getAttribute("role")).toBeNull();
-  });
-
-  it("exposes an accessible name for the running glyph when a label is given", () => {
-    render(
-      <StatusGlyph
-        status="running"
-        className="size-3"
-        testId={undefined}
-        label="Agent in progress"
-      />,
-    );
-    expect(
-      screen.getByRole("img", { name: "Agent in progress" }),
-    ).not.toBeNull();
-  });
-
   it("renders the background glyph as the muted message-square-clock icon", () => {
     render(
       <StatusGlyph
@@ -179,33 +128,5 @@ describe("StatusGlyph", () => {
     expect(glyph?.classList.contains("lucide-message-square-clock")).toBe(true);
     expect(glyph?.classList.contains("text-muted-foreground")).toBe(true);
     expect(glyph).toBe(screen.getByTestId("background-glyph"));
-  });
-
-  it("hides the background glyph from assistive tech when label is null", () => {
-    render(
-      <StatusGlyph
-        status="background"
-        className="size-3"
-        testId={undefined}
-        label={null}
-      />,
-    );
-    const glyph = document.querySelector('[data-status-glyph="background"]');
-    expect(glyph?.getAttribute("aria-hidden")).toBe("true");
-    expect(glyph?.getAttribute("role")).toBeNull();
-  });
-
-  it("exposes an accessible name for the background glyph when a label is given", () => {
-    render(
-      <StatusGlyph
-        status="background"
-        className="size-3"
-        testId={undefined}
-        label="Background activity — agent idle"
-      />,
-    );
-    expect(
-      screen.getByRole("img", { name: "Background activity — agent idle" }),
-    ).not.toBeNull();
   });
 });

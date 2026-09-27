@@ -151,16 +151,6 @@ afterEach(() => {
 });
 
 describe("StatusBarRateLimitCluster in the sample scene", () => {
-  it("asks the segments hook for the sample scene's own readings", () => {
-    renderCluster(true);
-    expect(mocks.lastSample).toBe(true);
-  });
-
-  it("asks the segments hook for the real readings outside the sample scene", () => {
-    renderCluster(false);
-    expect(mocks.lastSample).toBe(false);
-  });
-
   it("labels an already-sampled segments cluster, and says so in the accessible name", () => {
     mocks.cluster = {
       kind: "segments",
@@ -168,6 +158,8 @@ describe("StatusBarRateLimitCluster in the sample scene", () => {
     };
     renderCluster(true);
 
+    // The readings themselves are the sample scene's own.
+    expect(mocks.lastSample).toBe(true);
     expect(
       trigger().getAttribute("aria-label")?.startsWith("Sample readings · "),
     ).toBe(true);
@@ -181,6 +173,7 @@ describe("StatusBarRateLimitCluster in the sample scene", () => {
     };
     renderCluster(false);
 
+    expect(mocks.lastSample).toBe(false);
     expect(
       trigger().getAttribute("aria-label")?.startsWith("Sample readings"),
     ).toBe(false);

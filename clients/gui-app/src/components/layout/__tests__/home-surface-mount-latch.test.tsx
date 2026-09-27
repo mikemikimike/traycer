@@ -146,10 +146,15 @@ describe("the Home surface's mount", () => {
     // chunk load after the mount appears, not with it.
     expect(await screen.findByTestId("home-focus-view")).toBeDefined();
     expect(focusModel.calls).toBeGreaterThan(0);
+    const home = screen.getByTestId(HOME_SURFACE);
 
     selectItem("tab:epic:working");
     const hidden = screen.getByTestId(HOME_SURFACE);
+    // Retained, not remounted: the same node, now merely hidden.
+    expect(hidden).toBe(home);
     expect(hidden.getAttribute("data-visible")).toBe("false");
+    // Home is a route sheet like every other non-epic surface, retained or not.
+    expect(hidden.dataset.shellSheet).toBe("route");
   });
 
   it("unmounts when the tab is turned off", async () => {

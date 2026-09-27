@@ -654,7 +654,7 @@ export function layoutDurationBucket(durationMs: number): LayoutDurationBucket {
  * snapshot carries (a preset switch mid-session still counts as touching
  * whatever it visibly changed).
  */
-export function touchedRegionIds(
+function touchedRegionIds(
   from: LayoutSnapshot,
   to: LayoutSnapshot,
 ): ReadonlyArray<RegionId> {

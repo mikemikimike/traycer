@@ -8,15 +8,9 @@ import { resolvePersistedOverrides } from "@/lib/layout/layout-values-persist";
 import type { RegionId } from "@/lib/layout/region-id";
 
 describe("regionValuesHidden", () => {
-  it("is true for a value bag whose shown is hidden", () => {
+  it("is true only for a shown leaf that says hidden, and never throws without one", () => {
     expect(regionValuesHidden({ shown: "hidden", size: "full" })).toBe(true);
-  });
-
-  it("is false for a value bag whose shown is shown", () => {
     expect(regionValuesHidden({ shown: "shown", size: "full" })).toBe(false);
-  });
-
-  it("is false, never throws, for a value bag with no shown leaf at all", () => {
     const access: AccessValues = { size: "chip" };
     expect(regionValuesHidden(access)).toBe(false);
   });
@@ -34,33 +28,28 @@ describe("HideableRegionId (checked indirectly, since it is a compile-time type)
   });
 });
 
-describe("model.reasoningControl per preset", () => {
+describe("what each preset ships", () => {
   it("ships Slider on Default and Compact, and List on Detailed", () => {
     expect(PRESET_VALUES.default.model.reasoningControl).toBe("slider");
     expect(PRESET_VALUES.compact.model.reasoningControl).toBe("slider");
     expect(PRESET_VALUES.detailed.model.reasoningControl).toBe("list");
   });
-});
 
-// Chat display settings (audit R1, R3): Tool activity, Thinking and
-// Timestamps per preset.
-describe("toolActivity/thinking/timestamps per preset", () => {
-  it("ships Default: toolActivity chip, thinking shown+chip, timestamps shown", () => {
+  // Chat display settings (audit R1, R3): Tool activity, Thinking and
+  // Timestamps per preset.
+  it("ships toolActivity, thinking and timestamps per preset", () => {
+    // Default: toolActivity chip, thinking shown+chip, timestamps shown.
     expect(PRESET_VALUES.default.toolActivity).toEqual({ size: "chip" });
     expect(PRESET_VALUES.default.thinking).toEqual({
       shown: "shown",
       size: "chip",
     });
     expect(PRESET_VALUES.default.timestamps).toEqual({ shown: "shown" });
-  });
-
-  it("ships Compact: thinking and timestamps hidden, toolActivity still chip", () => {
+    // Compact: thinking and timestamps hidden, toolActivity still chip.
     expect(PRESET_VALUES.compact.toolActivity).toEqual({ size: "chip" });
     expect(PRESET_VALUES.compact.thinking.shown).toBe("hidden");
     expect(PRESET_VALUES.compact.timestamps.shown).toBe("hidden");
-  });
-
-  it("ships Detailed: toolActivity and thinking both full, thinking shown", () => {
+    // Detailed: toolActivity and thinking both full, thinking shown.
     expect(PRESET_VALUES.detailed.toolActivity).toEqual({ size: "full" });
     expect(PRESET_VALUES.detailed.thinking).toEqual({
       shown: "shown",
@@ -106,25 +95,15 @@ describe("resolvePersistedOverrides on model.reasoningControl", () => {
 
 // Chat display settings (audit R1, R3).
 describe("resolvePersistedOverrides on toolActivity/thinking/timestamps", () => {
-  it("keeps a valid toolActivity patch (Access's one-leaf size shape)", () => {
-    expect(
-      resolvePersistedOverrides({ toolActivity: { size: "full" } })
-        .toolActivity,
-    ).toEqual({ size: "full" });
-  });
-
-  it("keeps a valid thinking patch (shown and size)", () => {
-    expect(
-      resolvePersistedOverrides({
-        thinking: { shown: "hidden", size: "full" },
-      }).thinking,
-    ).toEqual({ shown: "hidden", size: "full" });
-  });
-
-  it("keeps a valid timestamps patch (shown alone)", () => {
-    expect(
-      resolvePersistedOverrides({ timestamps: { shown: "hidden" } }).timestamps,
-    ).toEqual({ shown: "hidden" });
+  it("keeps a valid patch for each: toolActivity (Access's one-leaf size shape), thinking (shown and size), timestamps (shown alone)", () => {
+    const overrides = resolvePersistedOverrides({
+      toolActivity: { size: "full" },
+      thinking: { shown: "hidden", size: "full" },
+      timestamps: { shown: "hidden" },
+    });
+    expect(overrides.toolActivity).toEqual({ size: "full" });
+    expect(overrides.thinking).toEqual({ shown: "hidden", size: "full" });
+    expect(overrides.timestamps).toEqual({ shown: "hidden" });
   });
 
   it("drops a value outside each union rather than passing it through", () => {

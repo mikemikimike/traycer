@@ -282,10 +282,7 @@ vi.mock("@/hooks/host/use-refresh-rate-limit-usage-on-traycer-turn", () => ({
 import { RateLimitPopover } from "@/components/layout/header/rate-limit-popover";
 import { useRateLimitPopoverStore } from "@/stores/rate-limits/rate-limit-popover-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
-import {
-  statusBarShownProfileIds,
-  type StatusBarShownProfiles,
-} from "@/lib/layout/layout-arrangement";
+import type { StatusBarShownProfiles } from "@/lib/layout/layout-arrangement";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 const NOW = Date.now();
@@ -311,45 +308,6 @@ const SINGLE_HOST_SCOPE = hostScopeFixture({});
 
 function resultKey(providerId: string, profileId: string | null): string {
   return profileId === null ? providerId : `${providerId}:${profileId}`;
-}
-
-/**
- * One account checked or unchecked for the strip, on one host - the test
- * double for `withProfileShown` in `rate-limit-popover.tsx` (module-private
- * there), which is the only production writer of `arrangement.shownProfiles`.
- * An emptied entry is REMOVED rather than left as `[]`, matching what the
- * arrangement's own resolver does on rehydration.
- */
-function setStatusBarProfileShown(
-  hostId: string,
-  providerId: RateLimitProviderId,
-  profileId: string | null,
-  shown: boolean,
-): void {
-  const arrangement = useLayoutStore.getState().arrangement;
-  const current = statusBarShownProfileIds(
-    arrangement.shownProfiles,
-    hostId,
-    providerId,
-  );
-  if (current.includes(profileId) === shown) return;
-  const next = shown
-    ? [...current, profileId]
-    : current.filter((candidate) => candidate !== profileId);
-  const hostShown: Record<string, ReadonlyArray<string | null>> = {
-    ...arrangement.shownProfiles[hostId],
-  };
-  if (next.length === 0) delete hostShown[providerId];
-  else hostShown[providerId] = next;
-  const nextShownProfiles: Record<string, StatusBarShownProfiles[string]> = {
-    ...arrangement.shownProfiles,
-  };
-  if (Object.keys(hostShown).length === 0) delete nextShownProfiles[hostId];
-  else nextShownProfiles[hostId] = hostShown;
-  useLayoutStore.getState().setArrangement({
-    ...arrangement,
-    shownProfiles: nextShownProfiles,
-  });
 }
 
 /**
@@ -1623,23 +1581,23 @@ describe("<RateLimitPopover /> rail", () => {
         .setRegionValues("usageLimits", { shown: shown ? "shown" : "hidden" });
     }
 
-    it("offers the eye on every card under the status-bar placement", () => {
-      configureTwoAccountProviders();
-      setStatusBarPlacement("status-bar");
-      renderPopover();
-
-      expect(statusBarEyes()).toHaveLength(4);
-    });
+    /** A real check in the store for the viewed host. */
+    function checkWorkProfile(): StatusBarShownProfiles {
+      const checked: StatusBarShownProfiles = {
+        "host-a": { codex: ["work-profile"] },
+      };
+      useLayoutStore.getState().setArrangement({
+        ...useLayoutStore.getState().arrangement,
+        shownProfiles: checked,
+      });
+      return checked;
+    }
 
     it("draws neither the eye nor the highlight while usageLimits is hidden, and keeps the checks for its return", () => {
       configureTwoAccountProviders();
       // A real check in the store for the viewed host, and the selection the
       // caller would resolve from it.
-      setStatusBarProfileShown("host-a", "codex", "work-profile", true);
-      const checked = { "host-a": { codex: ["work-profile"] } };
-      expect(useLayoutStore.getState().arrangement.shownProfiles).toEqual(
-        checked,
-      );
+      const checked = checkWorkProfile();
       mocks.profileSelection = {
         shownProfiles: { codex: ["work-profile"] },
         lastProfileByHarness: { claude: "personal-profile" },
@@ -1683,7 +1641,7 @@ describe("<RateLimitPopover /> rail", () => {
     // still on screen, so the eye and the highlight stay with it.
     it("keeps the eye and the highlight under the header placement, since the reading still draws there", () => {
       configureTwoAccountProviders();
-      setStatusBarProfileShown("host-a", "codex", "work-profile", true);
+      checkWorkProfile();
       mocks.profileSelection = {
         shownProfiles: { codex: ["work-profile"] },
         lastProfileByHarness: { claude: "personal-profile" },

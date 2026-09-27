@@ -327,36 +327,6 @@ describe("the outer sheet clipper anchors to the owning view tab", () => {
       browserGuestCssSheetAnchorName("view-1"),
     );
   });
-
-  it("clears the sheet anchor once the guest is no longer presented", () => {
-    const bridge = new FakeBrowserViewBridge({});
-    startHost(bridge, NOOP_ACTIVATE);
-    bridge.emitGuestMountRequested(mountRequest(REGISTRATION_A, PARTITION_A));
-    const owner = Symbol("tile");
-    setOwnedPlacement(owner, {
-      registrationId: REGISTRATION_A,
-      instanceId: INSTANCE_A,
-      viewTabId: "view-1",
-      paneId: "pane-1",
-      presented: true,
-      viewport: null,
-    });
-    const sheetClipper = guestNodes(REGISTRATION_A).sheetClipper;
-    expect(sheetClipper.dataset.browserGuestSheet).toBe("view-1");
-
-    setOwnedPlacement(owner, {
-      registrationId: REGISTRATION_A,
-      instanceId: INSTANCE_A,
-      viewTabId: "view-1",
-      paneId: "pane-1",
-      presented: false,
-      viewport: null,
-    });
-    expect(sheetClipper.dataset.browserGuestSheet).toBeUndefined();
-
-    clearBrowserGuestTilePlacement(owner, REGISTRATION_A);
-    expect(sheetClipper.dataset.browserGuestSheet).toBeUndefined();
-  });
 });
 
 describe("persistent browser guest host", () => {

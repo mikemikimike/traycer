@@ -5,14 +5,8 @@
  * way), and live counts through the real `agent-activity-store`. A cold epic
  * (no registry session) must show counts only, never invented names.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  cleanup,
-  render,
-  renderHook,
-  screen,
-} from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type {
   ChatProjection,
   TuiAgentProjection,
@@ -31,36 +25,10 @@ import type { AgentActivityCoverage } from "@/lib/agent-activity";
 import {
   __resetAgentActivityStoreForTests,
   __setAgentActivityStateForTests,
-  __setHostAgentActivityHealthForTests,
 } from "@/stores/agent-activity-store";
 import { SideTabHoverCardBody } from "../side-strip/side-tab-hover-card";
 import type { SideTabLiveAgents } from "../side-strip/agent-meter";
-import {
-  NO_LIVE_AGENTS,
-  sideTabAgentCounts,
-  useSideTabLiveAgents,
-} from "../side-strip/side-tab-live-agents";
-
-// `useSideTabLiveAgents` (used by the single "end to end" case below) reads
-// `useAccountActivityCoverage`, which asks the host directory through
-// `useHostBinding()`. This suite has no `HostRuntimeProvider`, so the real
-// hook already reads `null` - unsettled - everywhere except that one case,
-// which opts into a known-hosts list through this ref.
-const knownHostIdsRef = vi.hoisted((): { value: readonly string[] | null } => ({
-  value: null,
-}));
-
-vi.mock("@/lib/host", () => ({
-  useHostBinding: () =>
-    knownHostIdsRef.value === null
-      ? null
-      : {
-          directory: {
-            knownHostIds: () => knownHostIdsRef.value,
-            onChange: () => ({ dispose: () => undefined }),
-          },
-        },
-}));
+import { NO_LIVE_AGENTS } from "../side-strip/side-tab-live-agents";
 
 const fakeStreamClientFactory: EpicStreamClientFactory = () => ({
   applyUpdate: () => undefined,
@@ -153,7 +121,6 @@ afterEach(() => {
   for (const handle of handles) handle.dispose();
   handles.length = 0;
   __resetAgentActivityStoreForTests();
-  knownHostIdsRef.value = null;
 });
 
 describe("SideTabHoverCardBody", () => {
@@ -442,48 +409,5 @@ describe("SideTabHoverCardBody under unserved/indeterminate coverage (F8 round 2
     expect(state.textContent).toBe("Idle");
     expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
     expect(screen.queryByTestId("side-tab-hover-card-partial")).toBeNull();
-  });
-
-  it("reads plain Idle with no unknown glyph or partial notice end to end, when a single narrow-plane host is the account's only known host", () => {
-    const HOST_A = "host-a";
-    // Narrow (non-fleet-spanning) but covers itself, and is the account's
-    // sole known host - `selectKnownHostsActivityCoverage` reads this as
-    // `covered`, not `unserved`: the whole reason the account-wide selector
-    // exists rather than reusing the per-host one directly.
-    __setHostAgentActivityHealthForTests(HOST_A, {
-      connectionStatus: "open",
-      servedBy: "local",
-      cloudSyncStatus: null,
-      stateFrameSeenThisEpoch: true,
-    });
-    knownHostIdsRef.value = [HOST_A];
-
-    const { result } = renderHook(() => useSideTabLiveAgents("epic-unknown"));
-    expect(result.current.coverage).toBe("covered");
-
-    render(
-      <SideTabHoverCardBody
-        title="Fix login"
-        epicId={null}
-        badge={null}
-        agents={result.current}
-      />,
-    );
-    const state = screen.getByTestId("side-tab-hover-card-state");
-    expect(state.textContent).toBe("Idle");
-    expect(screen.queryByTestId("side-tab-hover-card-unknown")).toBeNull();
-    expect(screen.queryByTestId("side-tab-hover-card-partial")).toBeNull();
-  });
-});
-
-describe("sideTabAgentCounts", () => {
-  it("joins running and background counts with a middle dot", () => {
-    expect(sideTabAgentCounts(agents(3, 1, "covered"))).toBe(
-      "3 running · 1 background",
-    );
-  });
-
-  it("is null with no live agent", () => {
-    expect(sideTabAgentCounts(NO_LIVE_AGENTS)).toBeNull();
   });
 });

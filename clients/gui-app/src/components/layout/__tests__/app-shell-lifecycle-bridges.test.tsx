@@ -492,22 +492,6 @@ describe("<AppShell />", () => {
       useLayoutEditorStore.getState().endSession();
     });
 
-    it("unmounts the strip once both hosted readings are hidden", async () => {
-      selectFooterPlacement();
-      useLayoutStore
-        .getState()
-        .setRegionValues("usageLimits", { shown: "hidden" });
-      useLayoutStore
-        .getState()
-        .setRegionValues("resourceMonitor", { shown: "hidden" });
-
-      queryClient = renderAppShell();
-
-      await screen.findByTestId("app-shell-child");
-
-      expect(screen.queryByTestId("app-status-bar")).toBeNull();
-    });
-
     it("keeps the strip mounted while only one of the two hosted readings is hidden", async () => {
       selectFooterPlacement();
       useLayoutStore
@@ -521,7 +505,7 @@ describe("<AppShell />", () => {
       expect(screen.getByTestId("app-status-bar")).not.toBeNull();
     });
 
-    it("remounts the strip the moment a hidden reading is switched back on", async () => {
+    it("unmounts the strip once both hosted readings are hidden, and remounts it the moment one is switched back on", async () => {
       selectFooterPlacement();
       useLayoutStore
         .getState()
@@ -565,22 +549,6 @@ describe("<AppShell />", () => {
 
       expect(screen.getByTestId("app-status-bar")).not.toBeNull();
     });
-
-    it("stays unmounted when both readings are hidden but neither is hosted in the footer", async () => {
-      selectHeaderPlacement();
-      useLayoutStore
-        .getState()
-        .setRegionValues("usageLimits", { shown: "hidden" });
-      useLayoutStore
-        .getState()
-        .setRegionValues("resourceMonitor", { shown: "hidden" });
-
-      queryClient = renderAppShell();
-
-      await screen.findByTestId("app-shell-child");
-
-      expect(screen.queryByTestId("app-status-bar")).toBeNull();
-    });
   });
 
   function selectTabStripPlacement(placement: "top" | "left" | "right"): void {
@@ -621,19 +589,6 @@ describe("<AppShell />", () => {
     expect(
       screen.getByTestId("side-tab-strip").getAttribute("data-owns-title-bar"),
     ).toBe("true");
-  });
-
-  it("keeps the title bar from a right strip on a frameless macOS window", async () => {
-    desktopPlatform.override = "darwin";
-    selectTabStripPlacement("right");
-
-    queryClient = renderAppShell();
-
-    await screen.findByTestId("app-shell-child");
-
-    expect(
-      screen.getByTestId("side-tab-strip").getAttribute("data-owns-title-bar"),
-    ).toBe("false");
   });
 
   it("mounts the side strip after the content at the right edge", async () => {

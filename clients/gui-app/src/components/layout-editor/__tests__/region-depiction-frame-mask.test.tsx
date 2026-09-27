@@ -5,22 +5,16 @@ import { HostContextFrame } from "@/components/layout-editor/region-depiction-fr
 /**
  * The clip fade's own contract (L-45), separate from `region-depiction-frame-parity.test.tsx`'s
  * class-string parity: that `data-clipped` actually tracks real overflow
- * (both on a content change and on a real resize), and that the CSS the frame
- * ships for the clipped state is the exact declared gradient - a transparent
- * stop 8px short of the true edge, not a hard boundary, so a mutated stop or
- * a mutated `data-[clipped=true]:` conditional both fail a case here.
+ * (both on a content change and on a real resize), and that the fade the
+ * frame ships only ever applies in the clipped state.
  *
  * jsdom computes no layout, so `mask-image` never actually paints; what a
  * suite here CAN assert is the two things production code controls directly:
  * the `data-clipped` attribute (driven by the real `scrollWidth`/`clientWidth`
- * read) and the literal class string Tailwind emits for it (the public CSS
- * output the coordinator's own Chrome pass verifies renders correctly).
+ * read) and the `data-[clipped=true]:` conditional on the mask classes.
  */
 
-const CLIPPED_MASK_CLASS =
-  "data-[clipped=true]:[mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent_calc(100%-8px))]";
-const CLIPPED_WEBKIT_MASK_CLASS =
-  "data-[clipped=true]:[-webkit-mask-image:linear-gradient(to_right,black_calc(100%-48px),transparent_calc(100%-8px))]";
+const CLIPPED = "data-[clipped=true]:";
 
 /** Fires only for the frame under test, never a stray ancestor/descendant. */
 function stubOverflow(scrollWidth: number, clientWidth: number): () => void {
@@ -97,15 +91,37 @@ describe("HostContextFrame's clip fade (L-45)", () => {
     globalThis.ResizeObserver = originalResizeObserver;
   });
 
-  it("always ships the exact clipped-state gradient as a conditional class, in both the standard and WebKit mask properties", () => {
+  it("ships the fade only as a clipped-state class, in both the standard and WebKit mask properties", () => {
     // No overflow stub needed: Tailwind's `data-[clipped=true]:` variant is a
     // static class in the DOM's class list either way - the CSS engine, not
-    // JS, decides whether it applies, based on the sibling attribute. Asserting
-    // the class string pins BOTH the conditional prefix and the exact gradient
-    // stops, so a mutation to either fails this.
+    // JS, decides whether it applies. An unconditional mask would fade a
+    // full-width dock row whose right edge nothing was hiding.
     render(<HostContextFrame host="toolbar">short</HostContextFrame>);
-    expect(frame().className).toContain(CLIPPED_MASK_CLASS);
-    expect(frame().className).toContain(CLIPPED_WEBKIT_MASK_CLASS);
+    const masks = frame()
+      .className.split(/\s+/)
+      .filter((name) => name.includes("mask-image"));
+    expect(masks.filter((name) => !name.startsWith(CLIPPED))).toEqual([]);
+    expect(
+      masks.some((name) => name.startsWith(`${CLIPPED}[mask-image:`)),
+    ).toBe(true);
+    expect(
+      masks.some((name) => name.startsWith(`${CLIPPED}[-webkit-mask-image:`)),
+    ).toBe(true);
+    // Each is a FADE (L-45): opaque content, then a real run of fading, ending
+    // transparent before the right edge. An opaque gradient, or stops that
+    // meet or cross (which CSS clamps into a hard cut), would leave the
+    // clipped picture meeting a hard boundary.
+    for (const mask of masks) {
+      const stops =
+        /linear-gradient\(to_right,black_calc\(100%-(\d+)px\),transparent_calc\(100%-(\d+)px\)\)\]$/.exec(
+          mask,
+        );
+      expect(stops, mask).not.toBeNull();
+      const blackInset = Number(stops?.[1]);
+      const transparentInset = Number(stops?.[2]);
+      expect(transparentInset, mask).toBeGreaterThan(0);
+      expect(blackInset, mask).toBeGreaterThan(transparentInset);
+    }
   });
 
   it("does not mark itself clipped when the content fits", () => {

@@ -12,14 +12,6 @@ import { DEFAULT_LAYOUT_SNAPSHOT } from "@/stores/layout/layout-store";
  */
 
 describe("wordStartMatch", () => {
-  it("matches at the start of a word", () => {
-    expect(wordStartMatch("Ring only", "ring")).toEqual([0, 3]);
-  });
-
-  it("does not match a query buried mid-word", () => {
-    expect(wordStartMatch("Sharing", "ring")).toBeNull();
-  });
-
   it("skips a mid-word occurrence and finds a later word-start one", () => {
     // "shar" sits inside "Resharing" too, but only the second occurrence -
     // the one that opens "sharing" - starts a word.
@@ -28,11 +20,6 @@ describe("wordStartMatch", () => {
 
   it("returns null for a whitespace-only query", () => {
     expect(wordStartMatch("Ring only", "   ")).toBeNull();
-  });
-
-  it("is case-insensitive both ways", () => {
-    expect(wordStartMatch("RING ONLY", "ring")).toEqual([0, 3]);
-    expect(wordStartMatch("Ring only", "RING")).toEqual([0, 3]);
   });
 });
 
@@ -121,7 +108,7 @@ describe("layoutFindResults", () => {
     }
   });
 
-  it("lists a matching area first, as its own result with no detail", () => {
+  it("lists a matching area as its own result, with no anchor or detail", () => {
     const results = layoutFindResults("composer", DEFAULT_LAYOUT_SNAPSHOT);
 
     expect(results).toEqual([

@@ -255,43 +255,25 @@ describe("ProviderLimitWindowsReader's routing (credit-only bypass, unusable exp
     expect(segments).not.toHaveBeenCalled();
   });
 
-  it("still mounts the read when the unreachable host is the FOLLOWED active one, not an explicit pick", () => {
-    // No explicit pick: `hasExplicitPick && !isHostScopeUsable(status)` is
-    // false, so the reader does not gate here - a merely-offline active host
-    // is routine (`WatchHostScope.hasExplicitPick`'s own doc), and the
-    // passive read's own `cluster.kind !== "segments"` handling is what
-    // answers for it instead.
-    watchScope.current = {
-      scope: { hostId: "host-1", status: "unreachable" },
-      hasExplicitPick: false,
-    };
+  // An unreachable host with no explicit pick is the FOLLOWED active one:
+  // `hasExplicitPick && !isHostScopeUsable(status)` is false, so the reader
+  // does not gate - a merely-offline active host is routine
+  // (`WatchHostScope.hasExplicitPick`'s own doc), and the passive read's own
+  // `cluster.kind !== "segments"` handling is what answers for it instead.
+  it.each([
+    { hostId: "host-1", status: "unreachable", hasExplicitPick: false },
+    { hostId: "host-1", status: "following", hasExplicitPick: false },
+    { hostId: "picked-host", status: "ready", hasExplicitPick: true },
+  ])(
+    "mounts the read for a $status host (explicit pick: $hasExplicitPick)",
+    ({ hostId, status, hasExplicitPick }) => {
+      watchScope.current = { scope: { hostId, status }, hasExplicitPick };
 
-    renderReader(PROVIDER);
+      renderReader(PROVIDER);
 
-    expect(segments).toHaveBeenCalled();
-  });
-
-  it("mounts the read for `following`, even with no explicit pick", () => {
-    watchScope.current = {
-      scope: { hostId: "host-1", status: "following" },
-      hasExplicitPick: false,
-    };
-
-    renderReader(PROVIDER);
-
-    expect(segments).toHaveBeenCalled();
-  });
-
-  it("mounts the read for a `ready` explicit pick", () => {
-    watchScope.current = {
-      scope: { hostId: "picked-host", status: "ready" },
-      hasExplicitPick: true,
-    };
-
-    renderReader(PROVIDER);
-
-    expect(segments).toHaveBeenCalled();
-  });
+      expect(segments).toHaveBeenCalled();
+    },
+  );
 });
 
 /**

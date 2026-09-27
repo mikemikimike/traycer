@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_ARRANGEMENT,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import {
   EMPTY_LAYOUT_HISTORY,
   LAYOUT_HISTORY_CAP,
@@ -40,69 +43,6 @@ describe("undo and redo", () => {
 
     expect(undoLayout(EMPTY_LAYOUT_HISTORY, current)).toBeNull();
     expect(redoLayout(EMPTY_LAYOUT_HISTORY, current)).toBeNull();
-  });
-
-  it("drops the redo stack when a new gesture branches off it", () => {
-    const first = withModelStyle("text");
-    const second = withModelStyle("bars");
-    const history = recordLayoutChange(EMPTY_LAYOUT_HISTORY, first);
-    const undone = undoLayout(history, second);
-
-    const branched = recordLayoutChange(
-      undone?.history ?? EMPTY_LAYOUT_HISTORY,
-      first,
-    );
-
-    expect(branched.future).toEqual([]);
-    expect(redoLayout(branched, first)).toBeNull();
-  });
-
-  // `undoLayout`/`redoLayout` hand back a stored snapshot VERBATIM (they
-  // never reach `rebaseArrangement`), so this pins that the two new fields
-  // travel through `LayoutSnapshot` untouched, alongside every other field -
-  // not the `pick`-per-field logic `rebaseArrangement` adds, which the
-  // "rebasing the entry snapshot" cases below cover.
-  it("carries the tab strip placement and the sidebar side through a stored travel step", () => {
-    const before: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: {
-        ...DEFAULT_ARRANGEMENT,
-        tabStripPlacement: "left",
-        sidebarSide: "right",
-      },
-    };
-    const after: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: DEFAULT_ARRANGEMENT,
-    };
-    const history = recordLayoutChange(EMPTY_LAYOUT_HISTORY, before);
-
-    const undone = undoLayout(history, after);
-    expect(undone?.snapshot.arrangement.tabStripPlacement).toBe("left");
-    expect(undone?.snapshot.arrangement.sidebarSide).toBe("right");
-
-    const redone = redoLayout(undone?.history ?? EMPTY_LAYOUT_HISTORY, before);
-    expect(redone?.snapshot.arrangement.tabStripPlacement).toBe("top");
-    expect(redone?.snapshot.arrangement.sidebarSide).toBe("left");
-  });
-
-  // D8: same pin as above, for the vertical strip's view.
-  it("carries the vertical strip's view through a stored travel step", () => {
-    const before: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView: "activity" },
-    };
-    const after: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: DEFAULT_ARRANGEMENT,
-    };
-    const history = recordLayoutChange(EMPTY_LAYOUT_HISTORY, before);
-
-    const undone = undoLayout(history, after);
-    expect(undone?.snapshot.arrangement.sideStripView).toBe("activity");
-
-    const redone = redoLayout(undone?.history ?? EMPTY_LAYOUT_HISTORY, before);
-    expect(redone?.snapshot.arrangement.sideStripView).toBe("layered");
   });
 
   it("keeps the newest entries once the cap is reached", () => {
@@ -155,52 +95,41 @@ describe("rebasing the entry snapshot on an external write", () => {
    * that collapsed both onto whichever wrote last would pass every other
    * case here, since they all move at most one non-default field.
    */
-  it("keeps the entry's own tab strip placement while taking the other writer's sidebar side", () => {
-    const placementEntry: LayoutSnapshot = {
+  const ownVersusTheirs: ReadonlyArray<{
+    readonly name: string;
+    readonly own: Partial<LayoutArrangement>;
+    readonly theirs: Partial<LayoutArrangement>;
+  }> = [
+    {
+      name: "tab strip placement while taking the other writer's sidebar side",
+      own: { tabStripPlacement: "left" },
+      theirs: { sidebarSide: "right" },
+    },
+    {
+      name: "sidebar side while taking the other writer's tab strip placement",
+      own: { sidebarSide: "right" },
+      theirs: { tabStripPlacement: "left" },
+    },
+    {
+      name: "strip view while taking the other writer's sidebar side (D8)",
+      own: { sideStripView: "activity" },
+      theirs: { sidebarSide: "right" },
+    },
+  ];
+
+  it.each(ownVersusTheirs)("keeps the entry's own $name", ({ own, theirs }) => {
+    const ownEntry: LayoutSnapshot = {
       ...entry,
-      arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
+      arrangement: { ...DEFAULT_ARRANGEMENT, ...own },
     };
     const next: LayoutSnapshot = {
       ...previous,
-      arrangement: { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
+      arrangement: { ...DEFAULT_ARRANGEMENT, ...theirs },
     };
 
-    const rebased = rebaseLayoutSnapshot(placementEntry, previous, next);
+    const rebased = rebaseLayoutSnapshot(ownEntry, previous, next);
 
-    expect(rebased.arrangement.tabStripPlacement).toBe("left");
-    expect(rebased.arrangement.sidebarSide).toBe("right");
-  });
-
-  it("keeps the entry's own sidebar side while taking the other writer's tab strip placement", () => {
-    const sideEntry: LayoutSnapshot = {
-      ...entry,
-      arrangement: { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
-    };
-    const next: LayoutSnapshot = {
-      ...previous,
-      arrangement: { ...DEFAULT_ARRANGEMENT, tabStripPlacement: "left" },
-    };
-
-    const rebased = rebaseLayoutSnapshot(sideEntry, previous, next);
-
-    expect(rebased.arrangement.sidebarSide).toBe("right");
-    expect(rebased.arrangement.tabStripPlacement).toBe("left");
-  });
-
-  it("keeps the entry's own strip view while taking the other writer's sidebar side (D8)", () => {
-    const viewEntry: LayoutSnapshot = {
-      ...entry,
-      arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView: "activity" },
-    };
-    const next: LayoutSnapshot = {
-      ...previous,
-      arrangement: { ...DEFAULT_ARRANGEMENT, sidebarSide: "right" },
-    };
-
-    const rebased = rebaseLayoutSnapshot(viewEntry, previous, next);
-
-    expect(rebased.arrangement.sideStripView).toBe("activity");
-    expect(rebased.arrangement.sidebarSide).toBe("right");
+    expect(rebased.arrangement).toMatchObject({ ...own, ...theirs });
   });
 
   it("takes a region the other writer changed and leaves a region it did not", () => {

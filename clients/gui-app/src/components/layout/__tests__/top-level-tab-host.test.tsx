@@ -1,4 +1,3 @@
-import { appColumnChrome } from "@/components/layout/header/app-title-band-kind";
 import { use, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { UseNavigateResult } from "@tanstack/react-router";
 import type { InterviewQuestion } from "@traycer/protocol/persistence/epic/schemas";
@@ -27,8 +26,6 @@ import {
   MAX_RETAINED_TOP_LEVEL_SURFACES,
   TopLevelTabHost,
 } from "@/components/layout/top-level-tab-host";
-import { AppColumnFrame } from "@/components/layout/app-column-frame";
-import type { TabStripPlacement } from "@/lib/layout/layout-arrangement";
 import {
   HostReadinessControllerContext,
   type HostReadinessController,
@@ -302,7 +299,6 @@ const DRAFT_A: TabRef = { kind: "draft", id: "draft-a" };
 const DRAFT_B: TabRef = { kind: "draft", id: "draft-b" };
 const HISTORY: TabRef = { kind: "history", id: "history" };
 const SETTINGS: TabRef = { kind: "settings", id: "settings" };
-const HOME: TabRef = { kind: "home", id: "home" };
 
 const UNAVAILABLE_DEFAULT_HOST_CONTROLLER: HostReadinessController = {
   readinessFor: () => ({ kind: "restoring-request-context" }),
@@ -844,11 +840,9 @@ describe("<TopLevelTabHost />", () => {
  * two sheets (panel/content) internally, proven separately in
  * `epic-sidebar-side.test.tsx` against the REAL (unmocked) `EpicSurface`.
  * `EpicSurface` is mocked here, so this suite can only speak to the mount
- * wrapper's own marker, not the epic surface's internal structure.
- *
- * Wrapped in the REAL `AppColumnFrame` (not just the mount in isolation), so
- * the same render proves both halves together: the surface frame carries the
- * right per-placement utility AND the route sheet it contains.
+ * wrapper's own marker, not the epic surface's internal structure. The
+ * surface frame around the mount is `app-column-frame.test.tsx`'s, and Home's
+ * retained marker is `home-surface-mount-latch.test.tsx`'s.
  */
 describe("TopLevelSurfaceMount: single-sheet route marker (D1/D2)", () => {
   beforeEach(() => {
@@ -866,31 +860,6 @@ describe("TopLevelSurfaceMount: single-sheet route marker (D1/D2)", () => {
     useLandingDraftStore.setState(useLandingDraftStore.getInitialState(), true);
     useLayoutStore.setState(useLayoutStore.getInitialState(), true);
   });
-
-  function renderHostInColumn(placement: TabStripPlacement) {
-    return render(
-      <AppColumnFrame
-        {...appColumnChrome({ placement, platform: null, frameless: false })}
-        columnRef={() => undefined}
-        header={<header />}
-        strip={<nav />}
-        banners={<div />}
-        surface={<TopLevelTabHost />}
-        mainTail={null}
-        tail={null}
-      />,
-    );
-  }
-
-  function surfaceFrame(): HTMLElement {
-    // One-sheet design: no tray wrapper around the surface frame any more,
-    // so it is `<main>`'s own direct child.
-    const frame = document.querySelector<HTMLElement>(
-      "[data-layout-column] main > div",
-    );
-    if (frame === null) throw new Error("surface frame not rendered");
-    return frame;
-  }
 
   it.each([
     ["draft", DRAFT_A],
@@ -915,45 +884,6 @@ describe("TopLevelSurfaceMount: single-sheet route marker (D1/D2)", () => {
     render(<TopLevelTabHost />);
 
     expect(surfaceRef(EPIC_A).hasAttribute("data-shell-sheet")).toBe(false);
-  });
-
-  it.each(["top", "left", "right"] as const)(
-    "holds the route sheet inside the placement's own surface frame, and no marker on the epic mount, placement=%s",
-    (placement) => {
-      seedSources([EPIC_A, HISTORY]);
-      setSplit(EPIC_A, HISTORY, "left");
-
-      renderHostInColumn(placement);
-
-      const frame = surfaceFrame();
-      // The beside-left/beside-right utilities are gone: every placement
-      // gets the same plain `task-surface-frame`.
-      expect(frame.classList.contains("md:task-surface-frame")).toBe(true);
-      expect(frame.contains(surfaceRef(HISTORY))).toBe(true);
-      expect(surfaceRef(HISTORY).dataset.shellSheet).toBe("route");
-      expect(surfaceRef(EPIC_A).hasAttribute("data-shell-sheet")).toBe(false);
-    },
-  );
-
-  it("keeps Home's route sheet marker once it is retained (mounted, then switched away from)", () => {
-    // The default preset ships homeTab hidden; Home only activates on a null
-    // selection once this is explicitly shown (`useRegionShown("homeTab")`).
-    useLayoutStore.getState().setRegionValues("homeTab", { shown: "shown" });
-    // No items, activeItemId null - the untouched initial layout state,
-    // which is exactly what makes Home the active surface once shown.
-    renderHostInColumn("top");
-    const home = surfaceRef(HOME);
-    expect(home.dataset.shellSheet).toBe("route");
-    expect(home.dataset.visible).toBe("true");
-
-    seedSources([HISTORY]);
-    act(() => setSingle(HISTORY, [HISTORY]));
-
-    // Retained, not remounted: same node, still carrying its sheet marker,
-    // now merely hidden rather than gone.
-    expect(surfaceRef(HOME)).toBe(home);
-    expect(home.dataset.shellSheet).toBe("route");
-    expect(home.dataset.visible).toBe("false");
   });
 });
 
