@@ -211,8 +211,7 @@ export function SortableList<Id extends string>(
       // row's disclosure opened is the DETAIL's, not the row's. Without the
       // second test a space pressed on a checkbox label inside an expanded
       // card would pick the whole row up (L-95's in-place levels).
-      // The row's own label button is the row, so it alone is let through.
-      if (target.closest("button:not([data-row-grab])") !== null) return null;
+      if (target.closest(ROW_CONTROL_SELECTOR) !== null) return null;
       if (target.closest(DETAIL_SELECTOR) !== null) return null;
       const id = target
         .closest("[data-sortable-id]")
@@ -315,7 +314,7 @@ export function SortableList<Id extends string>(
     // A control in the row is a control, not a handle.
     if (
       event.target instanceof Element &&
-      event.target.closest("button") !== null
+      event.target.closest(ROW_CONTROL_SELECTOR) !== null
     )
       return;
     armLayoutDrag({
@@ -813,6 +812,14 @@ function SortableStackMembers(props: {
     </ul>
   );
 }
+
+/**
+ * A control in the row, which a press or a key on it belongs to rather than to
+ * the row. The row's own grab is a `<button>` too, and it IS the row: the grip,
+ * the name and a divider's line are all inside it, so a test for any button
+ * refused every drag that started where a hand would take hold.
+ */
+const ROW_CONTROL_SELECTOR = "button:not([data-row-grab])";
 
 /** Everything the row's disclosure opened, which the row itself must not claim. */
 const DETAIL_SELECTOR = "[data-sortable-detail]";

@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { armLayoutDrag } from "@/components/layout-editor/canvas/drag-engine";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
 import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
@@ -37,6 +38,23 @@ import {
 } from "@/stores/layout/layout-store";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
+
+/**
+ * The engine that owns the real pointer machinery (rAF, springs,
+ * `pointercapture`) is replaced by a spy: what these tests are about is which
+ * press starts a drag, not the drag itself, which `canvas/__tests__/drag-engine.test.ts`
+ * already covers on its own.
+ */
+vi.mock(
+  "@/components/layout-editor/canvas/drag-engine",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/components/layout-editor/canvas/drag-engine")
+      >();
+    return { ...actual, armLayoutDrag: vi.fn() };
+  },
+);
 
 /**
  * The inspector's sortable list, through the section that draws it (L-24,
@@ -871,5 +889,219 @@ describe("a keyboard step goes past a row that cannot move (G6)", () => {
       "railComments",
     ]);
     expect(historyDepth()).toBe(1);
+  });
+});
+
+/**
+ * The pointer path's own guard (G6): `handlePointerDown` refused every press
+ * inside the grab because the old selector, `closest("button")`, matched the
+ * grab itself - the row's own `<button data-row-grab>` wraps the grip, the
+ * name and, on a divider, its label and rule. A divider row could never be
+ * dragged. `ROW_CONTROL_SELECTOR` excludes the grab button by name instead, so
+ * only a REAL control - a Remove or a Stack button, drawn as the grab's
+ * sibling - refuses the press.
+ */
+describe("a pointer press inside the grab arms the drag (G6)", () => {
+  const armSpy = vi.mocked(armLayoutDrag);
+
+  beforeEach(() => {
+    armSpy.mockClear();
+  });
+
+  function pointerItem(options: {
+    readonly id: string;
+    readonly label: string;
+    readonly movable: boolean;
+    readonly divider: boolean;
+    readonly onRemove: (() => void) | null;
+    readonly onStack: (() => void) | null;
+  }): SortableListItem<string> {
+    return {
+      id: options.id,
+      label: options.label,
+      icon: null,
+      glyph: null,
+      divider: options.divider,
+      movable: options.movable,
+      dimmed: false,
+      hint: null,
+      control: null,
+      revert: null,
+      detail: null,
+      open: false,
+      onToggleOpen: null,
+      onRemove: options.onRemove,
+      removeLabel: null,
+      onStack: options.onStack,
+      stackMembers: null,
+    };
+  }
+
+  function unorderedList(
+    items: ReadonlyArray<SortableListItem<string>>,
+  ): ReactNode {
+    return (
+      <SortableList
+        label="Test list"
+        selectedId={null}
+        items={items}
+        onMove={null}
+      />
+    );
+  }
+
+  function press(target: Element): void {
+    fireEvent.pointerDown(target, { button: 0, pointerId: 1 });
+  }
+
+  /** The `onDrop` the most recent `armLayoutDrag` call was given. */
+  function dropLastArm(toIndex: number): void {
+    const input = armSpy.mock.calls.at(-1)?.[0];
+    if (input === undefined) throw new Error("armLayoutDrag was not called");
+    input.onDrop(0, toIndex);
+  }
+
+  it("arms a divider row's drag from its grip, its label and its rule", () => {
+    const onMove = vi.fn();
+    const items = [
+      pointerItem({
+        id: "divider",
+        label: "Divider",
+        movable: true,
+        divider: true,
+        onRemove: null,
+        onStack: null,
+      }),
+      pointerItem({
+        id: "A",
+        label: "A",
+        movable: true,
+        divider: false,
+        onRemove: null,
+        onStack: null,
+      }),
+      pointerItem({
+        id: "B",
+        label: "B",
+        movable: true,
+        divider: false,
+        onRemove: null,
+        onStack: null,
+      }),
+    ];
+    render(bareList(items, onMove));
+    const dividerRow = row("divider", document);
+    const grip = dividerRow.querySelector("[data-row-grip]");
+    if (grip === null) throw new Error("divider row has no grip");
+    const rule = dividerRow.querySelector("[data-divider-rule]");
+    if (rule === null) throw new Error("divider row has no rule");
+
+    press(grip);
+    expect(armSpy).toHaveBeenCalledTimes(1);
+    dropLastArm(2);
+    expect(onMove).toHaveBeenNthCalledWith(1, "divider", 2);
+
+    press(within(dividerRow).getByText("Divider"));
+    expect(armSpy).toHaveBeenCalledTimes(2);
+    dropLastArm(1);
+    expect(onMove).toHaveBeenNthCalledWith(2, "divider", 1);
+
+    press(rule);
+    expect(armSpy).toHaveBeenCalledTimes(3);
+    dropLastArm(0);
+    expect(onMove).toHaveBeenNthCalledWith(3, "divider", 0);
+  });
+
+  it("arms a regular row's drag from its name", () => {
+    const onMove = vi.fn();
+    const items = [
+      pointerItem({
+        id: "A",
+        label: "A",
+        movable: true,
+        divider: false,
+        onRemove: null,
+        onStack: null,
+      }),
+      pointerItem({
+        id: "B",
+        label: "B",
+        movable: true,
+        divider: false,
+        onRemove: null,
+        onStack: null,
+      }),
+    ];
+    render(bareList(items, onMove));
+
+    press(within(row("A", document)).getByText("A"));
+
+    expect(armSpy).toHaveBeenCalledTimes(1);
+    dropLastArm(1);
+    expect(onMove).toHaveBeenCalledWith("A", 1);
+  });
+
+  it("does not arm a press on the row's own control button", () => {
+    const onMove = vi.fn();
+    const items = [
+      pointerItem({
+        id: "divider",
+        label: "Divider",
+        movable: true,
+        divider: true,
+        onRemove: vi.fn(),
+        onStack: null,
+      }),
+      pointerItem({
+        id: "A",
+        label: "A",
+        movable: true,
+        divider: false,
+        onRemove: null,
+        onStack: vi.fn(),
+      }),
+    ];
+    render(bareList(items, onMove));
+
+    press(
+      within(row("divider", document)).getByRole("button", {
+        name: /^Remove /i,
+      }),
+    );
+    press(within(row("A", document)).getByRole("button", { name: /^Stack /i }));
+
+    expect(armSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not arm an unmovable row, nor any row in an unordered list", () => {
+    const onMove = vi.fn();
+    const withLink = [
+      pointerItem({
+        id: "A",
+        label: "A",
+        movable: true,
+        divider: false,
+        onRemove: null,
+        onStack: null,
+      }),
+      pointerItem({
+        id: "L",
+        label: "L",
+        movable: false,
+        divider: false,
+        onRemove: null,
+        onStack: null,
+      }),
+    ];
+    render(bareList(withLink, onMove));
+
+    press(grabOf(row("L", document)));
+    expect(armSpy).not.toHaveBeenCalled();
+
+    cleanup();
+    render(unorderedList(withLink));
+
+    press(grabOf(row("A", document)));
+    expect(armSpy).not.toHaveBeenCalled();
   });
 });

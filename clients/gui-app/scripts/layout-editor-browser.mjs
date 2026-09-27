@@ -6799,7 +6799,9 @@ const KEY_CODES = {
   Home: 36,
   End: 35,
   ArrowLeft: 37,
+  ArrowUp: 38,
   ArrowRight: 39,
+  ArrowDown: 40,
 };
 
 /**
@@ -7620,8 +7622,9 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
           }
         }
         await saveShot(client, shotName("ungrouped"));
+        const dividerMoves = await checkDividerRowMoves(client, fail, shotName);
         say(
-          `rest, tooltip, lit, keyboard, vertical, editing count and index, reorder (${String(depthAfter - depth)} step), a three-member stack's middle Unstack and ungroup checked`,
+          `rest, tooltip, lit, keyboard, vertical, editing count and index, reorder (${String(depthAfter - depth)} step), a three-member stack's middle Unstack, ungroup and ${String(dividerMoves)} divider row moves checked`,
         );
         await evaluate(client, "window.__layoutCanvasProbe.endSession()");
         await settle(client, 300);
@@ -7640,8 +7643,138 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator, named and tooltipped for both members; it lights with the group, works by keyboard, draws the same in the collapsed vertical rail, counts its members only while the editor customizes the rail, which lists them in order; reordering the members swaps the icon and name in one history step, a third member joins and a real click on the stack row's middle Unstack takes it out in one history step, and ungrouping gives each its own icon",
+    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator, named and tooltipped for both members; it lights with the group, works by keyboard, draws the same in the collapsed vertical rail, counts its members only while the editor customizes the rail, which lists them in order; reordering the members swaps the icon and name in one history step, a third member joins and a real click on the stack row's middle Unstack takes it out in one history step, ungrouping gives each its own icon, and a divider added with Add divider moves by a real drag on its grip and on its line and by Space, ArrowUp, Space, each in one history step",
   );
+}
+
+/**
+ * A divider added with "+ Add divider" moves like any other row of the
+ * Sidebar panels list: a REAL drag taken by its grip, and another by its line,
+ * each one history step, then Space, ArrowUp, Space. The grip, the name and
+ * the line all sit inside the row's grab `<button>`, which a guard refusing
+ * every press inside a button once made undraggable. Returns the moves made.
+ */
+async function checkDividerRowMoves(client, fail, shotName) {
+  const list =
+    '[data-layout-inspector] [role="group"][aria-label="Sidebar panels"]';
+  const order = () =>
+    evaluate(
+      client,
+      `[...document.querySelectorAll(${JSON.stringify(`${list} > [data-sortable-id]`)})].map((row) => row.getAttribute("data-sortable-id"))`,
+    );
+  const depth = () =>
+    evaluate(client, "window.__layoutCanvasProbe.historyDepth()");
+  const added = await evaluate(
+    client,
+    `(() => {
+      const button = [...document.querySelectorAll("[data-layout-inspector] button")].find((node) => node.textContent.trim() === "Add divider");
+      button?.click();
+      return button !== undefined;
+    })()`,
+  );
+  if (!added) {
+    fail("divider moves: the Sidebar panels list has no Add divider");
+    return 0;
+  }
+  await settle(client, 400);
+  let moves = 0;
+  // Down past the panel below it by the grip, then back up by the line.
+  for (const [part, step] of [
+    ["[data-row-grip]", 1],
+    ["[data-divider-rule]", -1],
+  ]) {
+    const rows = await order();
+    const index = rows.findIndex((id) => id.startsWith("divider:"));
+    const neighbour = rows[index + step];
+    if (index < 0 || neighbour === undefined) {
+      fail(
+        `divider moves: no divider with a row beside it in ${rows.join(", ")}`,
+      );
+      return moves;
+    }
+    const row = `${list} > [data-sortable-id="${rows[index]}"]`;
+    await evaluate(
+      client,
+      `document.querySelector(${JSON.stringify(row)})?.scrollIntoView({ block: "center" })`,
+    );
+    await flush(client);
+    const from = await rectOf(client, `${row} ${part}`);
+    const past = await rectOf(
+      client,
+      `${list} > [data-sortable-id="${neighbour}"]`,
+    );
+    if (from === null || past === null) {
+      fail(`divider moves: the divider row has no ${part}`);
+      return moves;
+    }
+    const before = await depth();
+    const mid = await dragPointer(
+      client,
+      from,
+      { x: from.cx, y: step > 0 ? past.y + past.height - 2 : past.y + 2 },
+      null,
+    );
+    const expected = [...rows];
+    expected.splice(index, 1);
+    expected.splice(index + step, 0, rows[index]);
+    const after = await order();
+    // A sortable row carries no region or member id, so the lift is read
+    // off its transform rather than off `mid.dragging`.
+    if (mid.transform === null)
+      fail(`divider moves: a real drag by its ${part} never lifted the row`);
+    if (after.join(",") !== expected.join(","))
+      fail(
+        `divider moves: dragged by its ${part}, the list reads ${after.join(", ")}, expected ${expected.join(", ")}`,
+      );
+    else if ((await depth()) !== before + 1)
+      fail(`divider moves: the drag by its ${part} was not one history step`);
+    else moves += 1;
+    await saveShot(
+      client,
+      shotName(`divider-drag-${step > 0 ? "down" : "up"}`),
+    );
+  }
+  // The keyboard: Space picks it up, ArrowUp moves it, Space drops it.
+  const rows = await order();
+  const index = rows.findIndex((id) => id.startsWith("divider:"));
+  if (index < 1) {
+    fail(`divider moves: no row above the divider in ${rows.join(", ")}`);
+    return moves;
+  }
+  await evaluate(
+    client,
+    `document.querySelector(${JSON.stringify(`${list} > [data-sortable-id="${rows[index]}"] [data-row-grab]`)})?.focus()`,
+  );
+  const before = await depth();
+  const space = {
+    key: " ",
+    code: "Space",
+    windowsVirtualKeyCode: 32,
+    text: " ",
+  };
+  for (const key of ["Space", "ArrowUp", "Space"]) {
+    if (key === "Space") {
+      await client.send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        ...space,
+      });
+      await delay(60);
+      await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...space });
+    } else await pressKey(client, key);
+    await settle(client, 200);
+  }
+  const expected = [...rows];
+  expected.splice(index, 1);
+  expected.splice(index - 1, 0, rows[index]);
+  const after = await order();
+  if (after.join(",") !== expected.join(","))
+    fail(
+      `divider moves: Space, ArrowUp, Space left ${after.join(", ")}, expected ${expected.join(", ")}`,
+    );
+  else if ((await depth()) !== before + 1)
+    fail("divider moves: the keyboard move was not one history step");
+  else moves += 1;
+  return moves;
 }
 
 // --- side placements: shared helpers ---------------------------------------
