@@ -16,6 +16,8 @@ const CONNECT_TIMEOUT_MS = 15_000;
 // second; the long waits live in the drivers' Node-side polling loops, each
 // iteration of which is a separate command.
 const COMMAND_TIMEOUT_MS = 30_000;
+// How long disposing of a session's tab may wait on Chrome's HTTP endpoint.
+const TAB_CLOSE_TIMEOUT_MS = 2_000;
 
 /**
  * Opens a CDP session on `webSocketDebuggerUrl` and resolves to
@@ -150,10 +152,15 @@ export async function openTabSession(devtoolsHttpUrl) {
       for (const handler of handlers.get(method) ?? []) handler(params);
     });
   };
+  // Chrome reports a renderer that crashed or was killed as
+  // `Inspector.targetCrashed`, and some exits only as `Inspector.detached`
+  // ("Render process gone"): either one means this tab will never answer.
   const watch = (current) => {
-    current.client.on("Inspector.detached", () => {
+    const markCrashed = () => {
       current.crashed = true;
-    });
+    };
+    current.client.on("Inspector.targetCrashed", markCrashed);
+    current.client.on("Inspector.detached", markCrashed);
     for (const method of handlers.keys()) dispatchOn(current, method);
   };
   watch(tab);
@@ -205,7 +212,19 @@ async function openTab(devtoolsHttpUrl) {
   return { id: target.id, client, crashed: false };
 }
 
+/**
+ * Closes a tab and never rejects, within `TAB_CLOSE_TIMEOUT_MS`: disposal runs
+ * in the drivers' `finally`, ahead of terminating Chrome and Vite, so it must
+ * not depend on a live DevTools endpoint. A browser that is already gone has
+ * no tab left to close.
+ */
 async function closeTab(devtoolsHttpUrl, tab) {
   tab.client.close();
-  await fetch(new URL(`/json/close/${tab.id}`, devtoolsHttpUrl));
+  try {
+    await fetch(new URL(`/json/close/${tab.id}`, devtoolsHttpUrl), {
+      signal: AbortSignal.timeout(TAB_CLOSE_TIMEOUT_MS),
+    });
+  } catch {
+    // The endpoint is gone or slow; the tab dies with the browser.
+  }
 }
