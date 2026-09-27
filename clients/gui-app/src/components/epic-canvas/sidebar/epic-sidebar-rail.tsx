@@ -24,13 +24,16 @@ import {
 } from "@/lib/layout/rail";
 import {
   isStackedRailPanel,
+  railStackJoin,
   type EdgeSide,
+  type RailStackJoin,
 } from "@/lib/layout/layout-arrangement";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { RailContextMenuContent } from "@/components/epic-canvas/sidebar/rail-context-menu-content";
 import { DropLine } from "@/components/ui/drop-line";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
 import { LeftPanelRailStack } from "@/components/epic-canvas/sidebar/left-panel-rail-stack";
+import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
 import { useRailDividersEditing } from "@/components/epic-canvas/sidebar/use-rail-dividers-editing";
 import {
   getLeftPanelRailDragId,
@@ -38,12 +41,15 @@ import {
   getLeftPanelRailListDropId,
   getPaneScopedDndId,
   LEFT_PANEL_RAIL_ITEM_DND_TYPE,
+  railDragCarry,
   type EpicCanvasDropTargetData,
   type EpicCanvasLeftPanelRailDragData,
   type LeftPanelRailDropPosition,
 } from "@/components/epic-canvas/dnd/dnd";
 import { useDragSourceDisabled } from "@/components/epic-canvas/dnd/use-drag-source-disabled";
 import {
+  useEpicDndInteractionLocked,
+  useLeftPanelRailDragSource,
   useLeftPanelRailDropPreview,
   useLeftPanelSectionDragSource,
 } from "@/components/epic-canvas/dnd/dnd-store";
@@ -70,6 +76,8 @@ import {
   type LeftPanelMetadataDefinition,
 } from "@/components/epic-canvas/sidebar/left-panel-registry";
 import {
+  LEFT_PANEL_RAIL_COMBINE_TARGET_CLASS,
+  LEFT_PANEL_RAIL_REFUSED_TARGET_CLASS,
   LEFT_PANEL_RAIL_TAB_UNDERLINE_CLASS,
   LEFT_PANEL_RAIL_TILE_CLASS,
   railGroupLabel,
@@ -87,7 +95,6 @@ import {
   usePrPresenceStore,
 } from "@/stores/epics/pr-presence-store";
 import { useSidebarRailWidthStore } from "@/stores/epics/sidebar-rail-width-store";
-import { type LucideIcon } from "lucide-react";
 
 export type RailOrientation = "vertical" | "horizontal";
 
@@ -111,24 +118,22 @@ interface EpicLeftPanelRailContentProps {
 }
 
 /**
- * One thing the rail draws: a panel's icon, a stacked pair's ONE group icon
- * (G3), or a divider (L-155).
+ * One thing the rail draws: a panel's icon, a stack's ONE group icon (G3,
+ * L-181), or a divider (L-155).
  *
  * Every divider the rail holds is drawn, at rest as well as in a session: at
  * rest it is extra space and in a session a handle (L-140), and both of those
  * are `LeftPanelRailDivider`'s answer rather than this list's. Which panels
  * are drawn, and which pairs survive as pairs, is `railDisplayEntries`'
  * answer, not a second copy of the rule here (R5R-05, L-166) - so a hidden
- * panel leaves its partner standing alone on the rail and in the body by the
- * same walk.
+ * member leaves its stack on the rail and in the body by the same walk.
  */
 type RailItem =
   | { readonly kind: "panel"; readonly panel: LeftPanelMetadataDefinition }
   | {
       readonly kind: "stack";
       readonly id: string;
-      readonly top: LeftPanelMetadataDefinition;
-      readonly bottom: LeftPanelMetadataDefinition;
+      readonly members: ReadonlyArray<LeftPanelMetadataDefinition>;
     }
   | { readonly kind: "divider"; readonly id: string };
 
@@ -152,8 +157,9 @@ function railItems(
     return {
       kind: "stack",
       id: entry.id,
-      top: getLeftPanelDefinition(leftPanelIdForRailRegion(entry.top)),
-      bottom: getLeftPanelDefinition(leftPanelIdForRailRegion(entry.bottom)),
+      members: entry.members.map((member) =>
+        getLeftPanelDefinition(leftPanelIdForRailRegion(member)),
+      ),
     };
   });
 }
@@ -164,7 +170,7 @@ function railItemPanels(
 ): ReadonlyArray<LeftPanelMetadataDefinition> {
   return items.flatMap((item): LeftPanelMetadataDefinition[] => {
     if (item.kind === "divider") return [];
-    return item.kind === "panel" ? [item.panel] : [item.top, item.bottom];
+    return item.kind === "panel" ? [item.panel] : [...item.members];
   });
 }
 
@@ -172,7 +178,9 @@ function railItemPanels(
  * VS Code-style mini rail. Always visible (~3rem wide). Clicking an inactive
  * icon switches the active panel and expands the main panel if collapsed.
  * Clicking the already-active icon toggles main panel collapse. Dragging an
- * icon before or after another reorders the rail (L-155).
+ * icon before or after another reorders the rail (L-155), and onto another's
+ * middle adds it to that icon's stack (L-168, L-181); a stack's icon carries
+ * its whole stack.
  */
 export function EpicLeftPanelRail(props: EpicLeftPanelRailProps) {
   const { epicId, tabId, orientation } = props;
@@ -276,8 +284,12 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
     data: railListDropData,
   });
   // The horizontal rail's own unclamped content width (bug #1): every icon
-  // and divider is `shrink-0`, so `scrollWidth` is the room this tab's rail
-  // actually needs regardless of how narrow the sidebar currently is.
+  // and divider is `shrink-0`, so the run from the first to the last of them,
+  // plus the rail's padding, is the room this tab's rail actually needs
+  // regardless of how wide or narrow the sidebar currently is. Not
+  // `scrollWidth`: the rail is `w-full`, and a scroller's `scrollWidth` never
+  // reads below its own width, so a rail measured at 500px made 500px the
+  // sidebar's minimum.
   // Reported into the shared store so the sidebar's one global width never
   // clips whichever tab is on screen (`sidebar-rail-width-store.ts`). Not a
   // concern for the collapsed vertical rail, which is a fixed `w-12` outside
@@ -293,7 +305,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
     if (orientation !== "horizontal") return;
     const element = horizontalRailRef.current;
     if (element === null) return;
-    setRailNaturalWidthPx(tabId, element.scrollWidth);
+    setRailNaturalWidthPx(tabId, railContentWidthPx(element));
   }, [orientation, items, dividersEditing, tabId, setRailNaturalWidthPx]);
   useLayoutEffect(() => {
     if (orientation !== "horizontal") return;
@@ -312,13 +324,29 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
       ? null
       : getLeftPanelDefinition(panelSectionDragSource.panelId);
   const dropAtRailEnd = railPanelDropPreview?.kind === "left-panel-rail-list";
+  // What this tab's rail drag carries, whatever it was grabbed off, so a
+  // middle-band preview can be read as a join, a refusal or nothing (L-181).
+  const dragSource = useLeftPanelRailDragSource(tabId);
+  const dropCueFor = (
+    targetPanelId: LeftPanelId,
+  ): Exclude<RailStackJoin, "same"> | null => {
+    if (dragSource === null || previewPositionFor(targetPanelId) !== "combine")
+      return null;
+    const join = railStackJoin(
+      rail,
+      dragSource.panelId,
+      targetPanelId,
+      railDragCarry(dragSource),
+    );
+    return join === "same" ? null : join;
+  };
   // The band the drop is in, for whichever icon it is over. `combine` lights
   // the icon itself, because the panel being carried is going INTO it (L-168);
   // `before` and `after` draw a boundary slot beside it, because it is going
   // next to it. The icon used to light on `isOver` alone, which said "into
   // this one" for all three.
   // Whether this panel's SECTION is collapsed the way the body draws it: the
-  // flag only means anything while the panel is half of a pair, which is the
+  // flag only means anything while the panel is in a stack, which is the
   // same reading `LeftPanelSectionContent` applies.
   const sectionCollapsed = useCallback(
     (panelId: LeftPanelId): boolean =>
@@ -362,10 +390,10 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
     ],
   );
 
-  // A group's icon (G3) is lit while either member is the displayed panel, and
+  // A stack's icon (G3) is lit while any member is the displayed panel, and
   // clicking it is the same three answers a panel's icon gives: collapse the
-  // column when the group is showing, put back a member section the user
-  // collapsed, and otherwise open the group on its top panel.
+  // column when the stack is showing, put back a member section the user
+  // collapsed, and otherwise open the stack on its top panel.
   const handleGroupClick = useCallback(
     (members: ReadonlyArray<LeftPanelId>) => {
       const showing = members.some((member) => member === displayedPanelId);
@@ -435,11 +463,13 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                 );
               }
               if (item.kind === "stack") {
-                // One icon for the pair (G3): the top panel's, named for both,
-                // and the group moves whole when it is dragged. Before/after
-                // previews read off the top, which is the drop target.
-                const members = [item.top.id, item.bottom.id];
-                const previewPosition = previewPositionFor(item.top.id);
+                // One icon for the stack (G3, L-181): the top panel's, named
+                // for every member, and the whole stack moves when it is
+                // dragged. Previews and the join cue read off the top, which
+                // is the drop target.
+                const members = item.members.map((member) => member.id);
+                const top = item.members[0];
+                const previewPosition = previewPositionFor(top.id);
                 return (
                   <Fragment key={item.id}>
                     {previewPosition === "before" ? (
@@ -455,18 +485,16 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                     >
                       <RailPanelButton
                         tabId={tabId}
-                        panel={item.top}
-                        label={railGroupLabel([
-                          item.top.title,
-                          item.bottom.title,
-                        ])}
+                        panel={top}
+                        label={railGroupLabel(
+                          item.members.map((member) => member.title),
+                        )}
                         orientation={orientation}
                         active={
                           members.some((id) => id === displayedPanelId) &&
                           !collapsed
                         }
-                        combining={false}
-                        stacked
+                        dropCue={dropCueFor(top.id)}
                         onClick={() => handleGroupClick(members)}
                         onContextMenu={setContextPanelId}
                       />
@@ -496,15 +524,7 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
                     label={item.panel.title}
                     orientation={orientation}
                     active={panelId === displayedPanelId && !collapsed}
-                    combining={previewPosition === "combine"}
-                    // Read off the MODEL, not off what this rail drew (L-170):
-                    // a panel whose partner is hidden draws as a lone icon and
-                    // is still half of a pair, so asking the drawn shape let it
-                    // offer a combine the writer then refused.
-                    stacked={isStackedRailPanel(
-                      rail,
-                      railRegionForLeftPanelId(panelId),
-                    )}
+                    dropCue={dropCueFor(panelId)}
                     onClick={() => handleClick(panelId)}
                     onContextMenu={setContextPanelId}
                   />
@@ -532,6 +552,23 @@ function EpicLeftPanelRailContent(props: EpicLeftPanelRailContentProps) {
       </ContextMenu>
     </HoverCardGroup>
   );
+}
+
+function railContentWidthPx(rail: HTMLElement): number {
+  const style = getComputedStyle(rail);
+  const padding =
+    Number.parseFloat(style.paddingLeft) +
+    Number.parseFloat(style.paddingRight);
+  let left = Infinity;
+  let right = -Infinity;
+  for (const child of rail.children) {
+    const rect = child.getBoundingClientRect();
+    // A `display: contents` wrapper has no box of its own.
+    if (rect.width === 0) continue;
+    left = Math.min(left, rect.left);
+    right = Math.max(right, rect.right);
+  }
+  return right > left ? right - left + padding : padding;
 }
 
 function RailBoundaryPreview(props: {
@@ -593,14 +630,11 @@ interface RailPanelButtonProps {
   readonly label: string;
   readonly orientation: RailOrientation;
   readonly active: boolean;
-  /** The drop is aimed at this icon's MIDDLE band, which stacks the two. */
-  readonly combining: boolean;
   /**
-   * Already half of a pair, which is what refuses a combine drop on it: the
-   * drop target carries it, so the middle band answers no preview and nothing
-   * is highlighted for a gesture that would commit nothing (L-166, L-168).
+   * What a drop aimed at this icon's MIDDLE band would do (L-181): join its
+   * stack, or be refused because the stack is full.
    */
-  readonly stacked: boolean;
+  readonly dropCue: Exclude<RailStackJoin, "same"> | null;
   readonly onClick: () => void;
   /** Reports the panel under the pointer to the rail-wide context menu. */
   readonly onContextMenu: (panelId: LeftPanelId) => void;
@@ -613,8 +647,7 @@ function RailPanelButton(props: RailPanelButtonProps) {
     label,
     orientation,
     active,
-    combining,
-    stacked,
+    dropCue,
     onClick,
     onContextMenu,
   } = props;
@@ -650,9 +683,8 @@ function RailPanelButton(props: RailPanelButtonProps) {
       viewTabId: tabId,
       panelId: panel.id,
       orientation,
-      stacked,
     }),
-    [orientation, panel.id, stacked, tabId],
+    [orientation, panel.id, tabId],
   );
   const { setNodeRef: dropRef } = useDroppable({
     id: getPaneScopedDndId(tabId, getLeftPanelRailDropId(panel.id)),
@@ -667,12 +699,12 @@ function RailPanelButton(props: RailPanelButtonProps) {
     <RailButton
       buttonRef={setButtonRef}
       handleListeners={listeners}
-      icon={panel.icon}
+      panelId={panel.id}
       label={label}
       orientation={orientation}
       active={active}
       isDragSource={isDragging}
-      isDropTarget={combining}
+      dropCue={dropCue}
       testId={`epic-rail-${panel.id}`}
       onClick={onClick}
       onContextMenu={handleContextMenu}
@@ -680,15 +712,15 @@ function RailPanelButton(props: RailPanelButtonProps) {
   );
 }
 
-interface RailButtonProps {
+export interface RailButtonProps {
   readonly buttonRef: (element: HTMLElement | null) => void;
   readonly handleListeners: DraggableSyntheticListeners;
-  readonly icon: LucideIcon;
+  readonly panelId: LeftPanelId;
   readonly label: string;
   readonly orientation: RailOrientation;
   readonly active: boolean;
   readonly isDragSource: boolean;
-  readonly isDropTarget: boolean;
+  readonly dropCue: Exclude<RailStackJoin, "same"> | null;
   readonly testId: string;
   readonly onClick: () => void;
   readonly onContextMenu: () => void;
@@ -700,22 +732,29 @@ const RAIL_ACTIVE_INDICATOR_CLASS: Readonly<Record<EdgeSide, string>> = {
   right: "absolute inset-y-1 right-0 rounded-r-none rounded-l",
 };
 
-function RailButton(props: RailButtonProps) {
+/**
+ * One rail tile, presentational: the live rail wires it to dnd and the panel
+ * store, and the sample workspace's sidebar draws the same tile (F3).
+ */
+export function RailButton(props: RailButtonProps) {
   const {
     buttonRef,
     handleListeners,
-    icon: Icon,
+    panelId,
     label,
     orientation,
     active,
     isDragSource,
-    isDropTarget,
+    dropCue,
     testId,
     onClick,
     onContextMenu,
   } = props;
   const sidebarSide = use(ColumnEdgeContext) ?? "left";
   const placement = useColumnOverlayPlacement("row");
+  // No labels mid-drag: a neighbour's label popping under the pointer covers
+  // the drop line and the combine highlight the user is reading.
+  const dragInFlight = useEpicDndInteractionLocked();
   const activeClass =
     orientation === "vertical"
       ? "bg-accent text-accent-foreground hover:bg-accent"
@@ -736,7 +775,7 @@ function RailButton(props: RailButtonProps) {
         orientation === "vertical" ? (placement?.align ?? "center") : "center"
       }
       sideOffset={4}
-      enabled={!isDragSource}
+      enabled={!dragInFlight}
       open={null}
       onOpenChange={null}
       testId={null}
@@ -757,14 +796,15 @@ function RailButton(props: RailButtonProps) {
             LEFT_PANEL_RAIL_TILE_CLASS,
             active && activeClass,
             isDragSource && "cursor-grabbing opacity-50",
-            isDropTarget && "bg-accent/70",
+            dropCue === "join" && LEFT_PANEL_RAIL_COMBINE_TARGET_CLASS,
+            dropCue === "full" && LEFT_PANEL_RAIL_REFUSED_TARGET_CLASS,
           )}
         >
           <span
             {...handleListeners}
             className="flex size-full items-center justify-center"
           >
-            <Icon className="size-4" />
+            <LeftPanelRailIcon panelId={panelId} hidden={false} />
             {active ? (
               <DropLine
                 orientation={orientation}

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import { createRoot } from "react-dom/client";
+import { Info } from "lucide-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -87,6 +89,7 @@ import {
   useSidebarWidthPx,
 } from "@/stores/epics/left-panel-store";
 import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
+import type { LeftPanelId } from "@/lib/left-panel-ids";
 import type { EpicCanvasTileRef } from "@/stores/epics/canvas/types";
 import { useAuthStore } from "@/stores/auth/auth-store";
 import type { EpicStreamClientFactory } from "@/stores/epics/open-epic/store";
@@ -105,6 +108,7 @@ import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
   useLayoutStore,
+  useStatusBarShown,
 } from "@/stores/layout/layout-store";
 import { sampleWorkspaceTabModule } from "@/stores/tabs/kinds/sample-workspace";
 import { tabItemId } from "@/stores/tabs/layout";
@@ -120,7 +124,6 @@ import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import type { SystemTabModalApi } from "@/stores/tabs/use-system-tab-modal";
 import { SettingsDensityContext } from "@/providers/settings-density-context";
 import { AppStatusBar } from "@/components/layout/status-bar/app-status-bar";
-import { USAGE_LIMITS_REGION } from "@/components/layout-editor/regions/status-bar-regions";
 import { focusGuideTarget } from "@/components/onboarding/guide-target";
 import { NavigatorResourceHotspotChip } from "@/components/resources/resource-usage-chip";
 import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
@@ -262,7 +265,7 @@ interface CanvasVariant {
   readonly surface: FixtureSurface;
   readonly sidebar: EdgeSide;
   readonly view: SideStripView;
-  /** Signed in, so the foot draws the account row and the strip the Inbox. */
+  /** Signed in, so the foot draws the account row and the strip the Notifications. */
   readonly account: boolean;
   /**
    * Three hosts in the directory (staging round 1, F5): two dialable, one
@@ -317,14 +320,24 @@ interface LayoutCanvasProbe {
   readonly unfoldDockPills: () => void;
   readonly setMicShown: (shown: boolean) => void;
   /**
-   * One of Usage limits' own Style examples, written as its Style row writes
-   * it - so the driver can show the strip's reading follows Style (G6).
+   * One of the two combinations the deleted Style row used to write as a
+   * named example (T2, L-10 partial): now written field by field, the way
+   * the "Show" checks and "Amount" segment write them - so the driver can
+   * show the strip's reading follows those fields (G6).
    */
-  readonly applyUsageStyle: (exampleId: string) => void;
+  readonly applyUsageStyle: (exampleId: "barOnly" | "barPercent") => void;
   /** A Settings search result for `anchor` on the Layout page (H2). */
   readonly revealSetting: (anchor: string) => void;
   /** The editor door's deep link to a region's row, as the width gate sends it (H2). */
   readonly landOnRegion: (regionId: RegionId) => void;
+  /**
+   * Publishes the Settings modal API `landOnRegion` publishes, so an in-page
+   * control that takes the same door (the Sidebar's "Choose metrics") can be
+   * clicked for real (L-174).
+   */
+  readonly openSettingsApi: () => void;
+  /** The region's area, opened with no row selected, so its row can be hovered. */
+  readonly openAreaOf: (regionId: RegionId) => void;
   /** A setup guide step's focus return onto the element at `selector` (H2). */
   readonly focusGuideTarget: (selector: string) => boolean;
   /** Hidden AND Chip, the shape whose only picture used to be the row it never takes. */
@@ -346,6 +359,11 @@ interface LayoutCanvasProbe {
    * join costs (L-166, L-168).
    */
   readonly stackTerminalsWithBrowsers: () => void;
+  /**
+   * One panel added to another's stack through the rail's own writer, inside a
+   * recorded gesture, so the driver can grow a stack past two (L-181).
+   */
+  readonly stackPanelInto: (source: LeftPanelId, target: LeftPanelId) => void;
   /**
    * One rail entry moved to an index through the Position list's own writer,
    * inside a recorded gesture: how a group's members trade places (G3).
@@ -835,9 +853,12 @@ function buildProbe(): LayoutCanvasProbe {
       resetLayout();
     },
     beginSession: () => {
-      useLayoutEditorStore
-        .getState()
-        .beginSession({ entry: "pointer", source: "direct_ui", startedAt: 0 });
+      useLayoutEditorStore.getState().beginSession({
+        entry: "pointer",
+        source: "direct_ui",
+        startedAt: 0,
+        origin: { kind: "tab" },
+      });
     },
     endSession: () => {
       useLayoutEditorStore.getState().endSession();
@@ -877,17 +898,36 @@ function buildProbe(): LayoutCanvasProbe {
       setSystemTabModalApi(SETTINGS_OPEN_API);
       navigateToLayoutRegion(regionId);
     },
+    openSettingsApi: () => {
+      setSystemTabModalApi(SETTINGS_OPEN_API);
+    },
+    openAreaOf: (regionId) => {
+      useLayoutEditorStore
+        .getState()
+        .openArea(LAYOUT_REGIONS[regionId].surface, null);
+    },
     focusGuideTarget: (selector) => {
       const target = document.querySelector<HTMLElement>(selector);
       return target !== null && focusGuideTarget(target);
     },
     applyUsageStyle: (exampleId) => {
-      for (const row of USAGE_LIMITS_REGION.rows) {
-        if (row.kind !== "style") continue;
-        const example = row.examples.find((entry) => entry.id === exampleId);
-        if (example === undefined) throw new Error(`no Style ${exampleId}`);
-        useLayoutStore.getState().setRegionValues("usageLimits", example.patch);
-      }
+      const patch =
+        exampleId === "barOnly"
+          ? {
+              bar: true,
+              percent: false,
+              word: false,
+              reset: false,
+              amount: "used" as const,
+            }
+          : {
+              bar: true,
+              percent: true,
+              word: false,
+              reset: false,
+              amount: "used" as const,
+            };
+      useLayoutStore.getState().setRegionValues("usageLimits", patch);
     },
     hideChangedFilesAsChip: () => {
       useLayoutStore
@@ -908,7 +948,17 @@ function buildProbe(): LayoutCanvasProbe {
         useLayoutStore
           .getState()
           .setArrangement(
-            stackRailPanels(arrangement, "browsers", "terminals"),
+            stackRailPanels(arrangement, "browsers", "terminals", "panel"),
+          );
+      });
+    },
+    stackPanelInto: (source, target) => {
+      useLayoutEditorStore.getState().recordGesture(() => {
+        const { arrangement } = useLayoutStore.getState();
+        useLayoutStore
+          .getState()
+          .setArrangement(
+            stackRailPanels(arrangement, source, target, "panel"),
           );
       });
     },
@@ -1022,15 +1072,24 @@ function SampleRouteSheet(): ReactNode {
       data-shell-sheet="route"
       className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-clip"
     >
-      {/* The canvas's own caption, from `sample-workspace-surface.tsx`:
-          passive rather than a region, and the one band of the column's
-          side edges that nothing opaque paints over. */}
-      <p
-        data-layout-passive
-        className="shrink-0 border-b px-4 py-2 text-ui-sm text-muted-foreground"
+      {/* The sample notice, mirrored from `sample-workspace-surface.tsx`: the
+          third half of the amber signal with the Customizing tab and the
+          frame (design craft 2.3). Not dimmed, for the same reason the tab
+          is not. */}
+      <div
+        data-sample-notice
+        className="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-warning-foreground/40 bg-warning-foreground/14 px-3 text-ui-xs font-medium text-warning-foreground"
       >
-        Sample content. Changes apply to your layout.
-      </p>
+        <span className="flex min-w-0 items-center gap-2">
+          <Info aria-hidden className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Sample workspace. Changes apply to your layout.
+          </span>
+        </span>
+        <span className="truncate font-normal opacity-80">
+          Point at any part of the app to change it.
+        </span>
+      </div>
       <SampleWorkspaceBody />
     </div>
   );
@@ -1241,6 +1300,14 @@ function EpicSurfaceStandIn(): ReactNode {
   const sidebarSide = useArrangementValue("sidebarSide");
   const sidebarWidthPx = useSidebarWidthPx();
   const mainCollapsed = useMainPanelCollapsed(EPIC_SURFACE_ID);
+  // `CanvasColumn`'s own border (epic-shell.tsx): the epic canvas is the
+  // only bordered thing on the flush surface, suppressed on whichever edge
+  // already carries the surface frame's own seam line or the status bar's
+  // top border. Mirrored here since this stand-in renders `TileSurfaceSlot`
+  // directly rather than through the real `EpicShell`.
+  const stripEdge = sideTabStripEdge(useArrangementValue("tabStripPlacement"));
+  const canvasSeam = stripEdge === sidebarSide ? null : stripEdge;
+  const statusBarShown = useStatusBarShown();
   const handle = (
     <SidebarWidthResizeHandle side={sidebarSide} hidden={mainCollapsed} />
   );
@@ -1312,14 +1379,24 @@ function EpicSurfaceStandIn(): ReactNode {
             )
           }
         >
-          <TileSurfaceSlot
-            node={EPIC_SURFACE_CHAT}
-            epicId={EPIC_SURFACE_ID}
-            paneId="fixture-epsilon-pane"
-            viewTabId={EPIC_SURFACE_ID}
-            tabSelected
-            canvasPaneActive
-          />
+          <div
+            data-epic-canvas-frame
+            className={cn(
+              "min-h-0 flex-1 border border-canvas-border/70 max-md:border-0",
+              canvasSeam === "left" && "md:border-s-0",
+              canvasSeam === "right" && "md:border-e-0",
+              statusBarShown && "md:border-b-0",
+            )}
+          >
+            <TileSurfaceSlot
+              node={EPIC_SURFACE_CHAT}
+              epicId={EPIC_SURFACE_ID}
+              paneId="fixture-epsilon-pane"
+              viewTabId={EPIC_SURFACE_ID}
+              tabSelected
+              canvasPaneActive
+            />
+          </div>
         </EpicSurfaceSheets>
       </EpicSessionContext>
       <StableTileSurfaceHost renderRecordBody={renderFixtureHostedBody} />

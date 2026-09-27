@@ -1,17 +1,11 @@
 import { useId, type ReactNode } from "react";
-import { Gauge } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Switch } from "@/components/ui/switch";
-import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
+import { LayoutFormRow } from "@/components/layout-editor/inspector/rows/layout-form-row";
 import {
   ProviderLimitWindowsReader,
   type ProviderLimitWindows,
 } from "@/components/layout-editor/inspector/provider-limit-windows";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
-import { useLayoutUsage } from "@/components/layout-editor/inspector/use-layout-usage";
-import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
-import { toggleHiddenProvider } from "@/components/layout-editor/layout-gestures";
-import { depictUsageProvider } from "@/components/layout-editor/region-depiction";
 import type { StatusBarRateLimitWindow } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import {
   AUTOMATIC_LIMIT_SELECTION,
@@ -20,126 +14,28 @@ import {
   type StatusBarProviderLimitSelection,
 } from "@/lib/layout/layout-arrangement";
 import { USAGE_PROVIDER_LEVEL } from "@/components/layout-editor/regions/usage-provider-level";
-import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
-import { providerDisplayName } from "@/lib/provider-ordering";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import { isWindowedRateLimitProvider } from "@/lib/rate-limits/rate-limit-window-catalog";
 import { cn } from "@/lib/utils";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
-interface ProviderLevelProps {
+interface ProviderLimitsProps {
   readonly providerId: RateLimitProviderId;
 }
 
 /**
- * One provider's own screen (L-26): that provider's own segment on the
- * specimen stage, a Shown switch writing `hiddenProviders`, and the Limits
- * pick (`Automatic` the default). The way back is the shell's shared
- * `InspectorBackRow` (L-89), not a breadcrumb of this level's own - drawing
- * one here is what left the section level, which asked for none, with no way
- * back at all (I-01).
- *
- * The prototype's "Segment details" block is a known, deliberate deviation NOT
- * carried over (C-23, upheld by L-96): two of its three rows wrote a global
- * usage-limits value from a per-provider screen.
+ * A provider row's disclosure: `Automatic` or `Choose...` plus that provider's
+ * own window checklist (L-96, L-123). The row above it already names the
+ * provider and carries its `Shown | Hidden` control.
  *
  * `Choose...` opens a checklist of this provider's OWN live windows, read
  * through `ProviderLimitWindowsReader` - the strip's own read, observed
- * passively, never a query of this level's own (L-96).
- *
- * The level asks for those windows ONCE and hands them down (R3-15): the stage
- * draws what the strip is drawing and the pick below it operates on the same
- * list, so two subscriptions to the same provider were two answers to one
- * question.
+ * passively, never a query of this row's own (L-96). The dim belongs here:
+ * "everything below Shown is greyed" is the same rule whichever control wrote
+ * `hiddenProviders`.
  */
-export function ProviderLevel(props: ProviderLevelProps): ReactNode {
-  return (
-    <ProviderLimitWindowsReader providerId={props.providerId}>
-      {(limits) => (
-        <ProviderLevelBody providerId={props.providerId} limits={limits} />
-      )}
-    </ProviderLimitWindowsReader>
-  );
-}
-
-function ProviderLevelBody(
-  props: ProviderLevelProps & {
-    readonly limits: ProviderLimitWindows;
-  },
-): ReactNode {
-  const { providerId, limits } = props;
-  const basePreset = useLayoutStore((state) => state.basePreset);
-  const overrides = useLayoutStore((state) => state.overrides);
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  const { windows, drawnKeys } = limits;
-  const { hostName } = useLayoutUsage();
-  const drawnWindows = windows.filter((window) =>
-    drawnKeys.includes(window.windowKey),
-  );
-  const values = effectiveLayoutValues(basePreset, overrides);
-  const providerName = providerDisplayName(providerId);
-  const shown = !arrangement.hiddenProviders.includes(providerId);
-
-  return (
-    <div className="flex flex-col">
-      {isWindowedRateLimitProvider(providerId) ? (
-        <SpecimenStage
-          off={!shown}
-          label={drawnWindows.length > 0 ? `Live · ${hostName}` : null}
-        >
-          {depictUsageProvider(
-            providerId,
-            values.usageLimits,
-            arrangement,
-            drawnWindows,
-          )}
-        </SpecimenStage>
-      ) : null}
-      <div className="flex items-start gap-2.5 px-3.5 pt-3.5 pb-3">
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-foreground">
-          <Gauge className="size-3.5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-ui-sm font-medium">{providerName}</div>
-          <div className="mt-0.5 text-ui-xs text-muted-foreground">
-            {USAGE_PROVIDER_LEVEL.where}
-          </div>
-        </div>
-        <Switch
-          aria-label={`Show ${providerName}`}
-          checked={shown}
-          onCheckedChange={(next) => {
-            toggleHiddenProvider(providerId, arrangement, next);
-          }}
-        />
-      </div>
-      <ProviderLimitsPick providerId={providerId} limits={limits} />
-    </div>
-  );
-}
-
-/**
- * The Limits pick alone: `Automatic` or `Choose...` plus that provider's own
- * window checklist, with nothing around it (L-96, L-123).
- *
- * The part both hosts draw, and the whole of what the PAGE draws: a provider
- * row there already names the provider and carries its `Shown | Hidden`
- * control, so a stage and an icon-tile header repeating both inside the row's
- * own disclosure was the "page inside a row inside a row" that put a
- * provider's limits five levels down. {@link ProviderLevel} is this plus the
- * stage and the header, for the dock, where the level IS the screen.
- *
- * The dim belongs here rather than to either host: "everything below Shown is
- * greyed" is the grammar's own rule (L-08), and it is the same rule whichever
- * control above it wrote `hiddenProviders`.
- *
- * The PAGE's entry point, and the whole of what it draws: a provider row there
- * has no stage above it to share a reading with, so this is where the windows
- * are read for that host. {@link ProviderLevel} has a stage, so it reads them
- * once itself and passes them straight to {@link ProviderLimitsPick} (R3-15).
- */
-export function ProviderLimitsControl(props: ProviderLevelProps): ReactNode {
+export function ProviderLimitsControl(props: ProviderLimitsProps): ReactNode {
   return (
     <ProviderLimitWindowsReader providerId={props.providerId}>
       {(limits) => (
@@ -191,8 +87,11 @@ function ProviderLimitsPick(props: {
         !shown && "pointer-events-none opacity-40",
       )}
     >
-      <InspectorRow
-        top
+      <LayoutFormRow
+        anchor={null}
+        icon={null}
+        onRevert={null}
+        revertLabel=""
         // The two options read "Automatic (recommended)" and "Choose...",
         // about 200px of a 292px content box: inline, the label column was
         // handed what was left and broke at every space (I-05). A control

@@ -109,6 +109,28 @@ describe("KeybindingsSettingsPanel - flag-gated actions", () => {
 
     expect(screen.getByText("Go to Home")).not.toBeNull();
   });
+
+  it("omits Collapse vertical tabs while the tabs are at the top", () => {
+    renderPanel();
+
+    expect(screen.queryByText("Collapse vertical tabs")).toBeNull();
+  });
+
+  it.each([{ placement: "left" as const }, { placement: "right" as const }])(
+    "lists Collapse vertical tabs once the tabs are at the side ($placement)",
+    ({ placement }) => {
+      useLayoutStore.setState({
+        arrangement: {
+          ...useLayoutStore.getState().arrangement,
+          tabStripPlacement: placement,
+        },
+      });
+
+      renderPanel();
+
+      expect(screen.getByText("Collapse vertical tabs")).not.toBeNull();
+    },
+  );
 });
 
 describe("KeybindingsSettingsPanel - Global shortcuts (T2)", () => {

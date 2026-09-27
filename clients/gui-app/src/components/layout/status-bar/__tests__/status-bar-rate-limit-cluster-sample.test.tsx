@@ -11,6 +11,7 @@ import type {
 } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import type { RateLimitProfileSelection } from "@/hooks/rate-limits/use-rate-limit-profile-selection";
 import { SampleSceneContext } from "@/components/sample-workspace/sample-scene-context";
+import { SAMPLE_USAGE_USED_PERCENT } from "@/components/sample-workspace/sample-workspace-scene";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
@@ -20,6 +21,8 @@ import { useRateLimitPopoverStore } from "@/stores/rate-limits/rate-limit-popove
 interface MockState {
   cluster: StatusBarRateLimitClusterModel;
   refresh: StatusBarRateLimitRefreshModel;
+  /** What the cluster last asked the segments hook for - the `sample` wiring. */
+  lastSample: boolean | null;
 }
 
 const mocks = vi.hoisted<MockState>(() => ({
@@ -30,8 +33,16 @@ const mocks = vi.hoisted<MockState>(() => ({
     httpRefetches: [],
     httpFetching: false,
   },
+  lastSample: null,
 }));
 
+// The substitution that used to live in the cluster component (reading the
+// hook's cluster, then swapping in invented numbers) now lives INSIDE
+// `useStatusBarRateLimitSegments` itself (C12): the cluster component only
+// forwards `sample` to it and trusts back whatever cluster it returns. So this
+// mock stands in for an ALREADY-SUBSTITUTED cluster - the readings substitution
+// itself is covered by the hook's own tests - and records the `sample` flag
+// the component wired through, to prove that plumbing still holds.
 vi.mock(
   "@/hooks/rate-limits/use-status-bar-rate-limit-segments",
   async (importOriginal) => {
@@ -41,11 +52,14 @@ vi.mock(
       >();
     return {
       ...actual,
-      useStatusBarRateLimitSegments: () => ({
-        cluster: mocks.cluster,
-        mountTargets: [],
-        refresh: mocks.refresh,
-      }),
+      useStatusBarRateLimitSegments: (args: { readonly sample: boolean }) => {
+        mocks.lastSample = args.sample;
+        return {
+          cluster: mocks.cluster,
+          mountTargets: [],
+          refresh: mocks.refresh,
+        };
+      },
     };
   },
 );
@@ -133,60 +147,48 @@ afterEach(() => {
     httpRefetches: [],
     httpFetching: false,
   };
+  mocks.lastSample = null;
 });
 
 describe("StatusBarRateLimitCluster in the sample scene", () => {
-  it("shows the labelled sample reading for cold providers, and says so in the accessible name", () => {
+  it("asks the segments hook for the sample scene's own readings", () => {
+    renderCluster(true);
+    expect(mocks.lastSample).toBe(true);
+  });
+
+  it("asks the segments hook for the real readings outside the sample scene", () => {
+    renderCluster(false);
+    expect(mocks.lastSample).toBe(false);
+  });
+
+  it("labels an already-sampled segments cluster, and says so in the accessible name", () => {
     mocks.cluster = {
       kind: "segments",
-      segments: [segment("claude-code", "cold"), segment("codex", "cold")],
+      segments: [segment("claude-code", "live"), segment("codex", "live")],
     };
     renderCluster(true);
 
     expect(
       trigger().getAttribute("aria-label")?.startsWith("Sample readings · "),
     ).toBe(true);
-    // The invented 57% / 82% readings are what the strip now describes.
-    expect(trigger().getAttribute("aria-label")).toMatch(/57/);
     expect(screen.getByText("Sample")).not.toBeNull();
   });
 
-  it("shows nothing invented outside the sample scene (a normal chat)", () => {
+  it("shows nothing labelled as sample outside the sample scene", () => {
     mocks.cluster = {
       kind: "segments",
-      segments: [segment("claude-code", "cold"), segment("codex", "cold")],
+      segments: [segment("claude-code", "live"), segment("codex", "live")],
     };
     renderCluster(false);
 
     expect(
       trigger().getAttribute("aria-label")?.startsWith("Sample readings"),
     ).toBe(false);
-    expect(trigger().getAttribute("aria-label")).not.toMatch(/57/);
     expect(screen.queryByText("Sample")).toBeNull();
   });
 
-  it("leaves real readings alone even in the sample scene", () => {
-    mocks.cluster = {
-      kind: "segments",
-      segments: [segment("claude-code", "cold"), segment("codex", "live")],
-    };
-    renderCluster(true);
-
-    expect(
-      trigger().getAttribute("aria-label")?.startsWith("Sample readings"),
-    ).toBe(false);
-    expect(screen.queryByText("Sample")).toBeNull();
-    expect(trigger().getAttribute("aria-label")).toMatch(/33/);
-  });
-
-  it("does not sample providers that answered 'unavailable'", () => {
-    mocks.cluster = {
-      kind: "segments",
-      segments: [
-        segment("claude-code", "unavailable"),
-        segment("codex", "unavailable"),
-      ],
-    };
+  it("gives no sample label to a hidden cluster even inside the sample scene", () => {
+    mocks.cluster = { kind: "hidden" };
     renderCluster(true);
 
     expect(
@@ -195,12 +197,18 @@ describe("StatusBarRateLimitCluster in the sample scene", () => {
     expect(screen.queryByText("Sample")).toBeNull();
   });
 
-  it("labels a no-providers strip with a sample usage figure only in the sample scene", () => {
+  it("labels a no-providers strip with the fallback sample usage figure only in the sample scene", () => {
     mocks.cluster = { kind: "no-providers" };
     renderCluster(true);
 
     expect(screen.getByText("Sample")).not.toBeNull();
-    expect(screen.getByText(/Usage · (57% used|43% left)/)).not.toBeNull();
+    expect(
+      screen.getByText(
+        new RegExp(
+          `Usage · (${SAMPLE_USAGE_USED_PERCENT}% used|${100 - SAMPLE_USAGE_USED_PERCENT}% left)`,
+        ),
+      ),
+    ).not.toBeNull();
 
     cleanup();
     renderCluster(false);

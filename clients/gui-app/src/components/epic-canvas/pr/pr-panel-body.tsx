@@ -162,7 +162,11 @@ function PrPanelHostPicker(props: { readonly pin: SurfaceHostPin }): ReactNode {
   );
 }
 
-function PrPanelBodyContent(props: {
+/**
+ * The panel's list for rows already in hand. Exported for the sample
+ * workspace's sidebar, which draws the same list from sample rows (F3).
+ */
+export function PrPanelBodyContent(props: {
   readonly epicId: string;
   readonly tabId: string;
   readonly hostId: string | null;

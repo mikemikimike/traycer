@@ -26,9 +26,10 @@ import {
  * The composer's eight regions: the four dock rows above the message box, and
  * the four toolbar elements below it.
  *
- * They share three row shapes, which is why they share a file: a dock row's
- * order, a toolbar cluster's order, and the full-row/chip size that only the
- * elements which shrink rather than disappear have.
+ * They share two row shapes, which is why they share a file: a dock row's
+ * order and a toolbar cluster's order. A dock row's Full row / Chip / Hidden
+ * and Access's Icon and label / Icon only are each ONE display control, drawn
+ * from the value shape rather than declared as a row (L-128 overturned).
  *
  * Todo is a dock row like the other three (L-139, L-142) and so its entry is a
  * copy of `BACKGROUND_REGION` down to the row list. The Message queue is not a
@@ -47,15 +48,15 @@ const TOOLBAR_RIGHT_ORDER_ROW = {
   group: "toolbarRight",
 } as const;
 
-const DOCK_SIZE_ROW = {
-  kind: "size",
-  description: "A full row, or a chip in the compact strip.",
-} as const;
-
 const MODEL_EXAMPLES: ReadonlyArray<StyleExample<"model">> = [
   { id: "text", label: "Text", patch: { style: "text" } },
   { id: "bars", label: "Bars", patch: { style: "bars" } },
   { id: "barsText", label: "Bars and text", patch: { style: "bars-text" } },
+];
+
+const REASONING_CONTROL_EXAMPLES: ReadonlyArray<StyleExample<"model">> = [
+  { id: "slider", label: "Slider", patch: { reasoningControl: "slider" } },
+  { id: "list", label: "List", patch: { reasoningControl: "list" } },
 ];
 
 export const RUNNING_AGENTS_REGION: LayoutRegion<"runningAgents"> = {
@@ -67,7 +68,7 @@ export const RUNNING_AGENTS_REGION: LayoutRegion<"runningAgents"> = {
   whereByHost: null,
   hint: null,
   keywords: ["agents", "running", "active", "work"],
-  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
+  rows: [DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
 };
@@ -81,21 +82,21 @@ export const CHANGED_FILES_REGION: LayoutRegion<"changedFiles"> = {
   whereByHost: null,
   hint: null,
   keywords: ["changed", "files", "diff", "edits", "added", "removed"],
-  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
+  rows: [DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
 };
 
 export const BACKGROUND_REGION: LayoutRegion<"background"> = {
   id: "background",
-  name: "Background",
+  name: "Background tasks",
   surface: "composer",
   icon: History,
   where: "Composer - above the message box",
   whereByHost: null,
   hint: null,
   keywords: ["background", "shell", "tasks", "running"],
-  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
+  rows: [DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
 };
@@ -110,7 +111,7 @@ export const TODO_REGION: LayoutRegion<"todo"> = {
   whereByHost: null,
   hint: null,
   keywords: ["todo", "todos", "tasks", "checklist", "plan", "progress"],
-  rows: [DOCK_SIZE_ROW, DOCK_ORDER_ROW],
+  rows: [DOCK_ORDER_ROW],
   quickVerbs: SIZED_VERBS,
   stateWord: sizedStateWord,
 };
@@ -138,13 +139,7 @@ export const ACCESS_REGION: LayoutRegion<"access"> = {
   whereByHost: null,
   hint: null,
   keywords: ["access", "supervised", "permissions", "approval"],
-  rows: [
-    {
-      kind: "size",
-      description: "The chip keeps the shield icon only.",
-    },
-    TOOLBAR_LEFT_ORDER_ROW,
-  ],
+  rows: [TOOLBAR_LEFT_ORDER_ROW],
   // No Hide: the pill is a floor, never hidden (G6).
   quickVerbs: SIZE_ONLY_VERBS,
   stateWord: accessStateWord,
@@ -160,11 +155,12 @@ export const MODEL_REGION: LayoutRegion<"model"> = {
   hint: null,
   keywords: ["model", "chip", "effort", "medium", "bars", "reasoning"],
   rows: [
+    { kind: "style", key: "style", label: "Style", examples: MODEL_EXAMPLES },
     {
       kind: "style",
-      description: null,
-      specimen: "region",
-      examples: MODEL_EXAMPLES,
+      key: "reasoningControl",
+      label: "Reasoning control",
+      examples: REASONING_CONTROL_EXAMPLES,
     },
     TOOLBAR_RIGHT_ORDER_ROW,
   ],

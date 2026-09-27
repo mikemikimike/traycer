@@ -1,15 +1,19 @@
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
   type TransitionEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import { useLayoutSurface } from "@/components/layout-editor/use-layout-surface";
 import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
 import { HoverCardGroup } from "@/components/ui/hover-card";
 import { isFramelessDesktop } from "@/components/layout/header/title-bar-drag";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
+import { registerDynamicActionHandler } from "@/lib/keybindings/dispatch";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
 import { useWindowsBridgeHydrated } from "@/providers/windows-bridge-context";
@@ -60,9 +64,21 @@ export function SideTabStrip(props: {
   const collapsed = useSideStripCollapsed();
   const widthPx = useSideTabStripStore((state) => state.widthPx);
   const variant: SideTabRowVariant = collapsed ? "collapsed" : "expanded";
-  const widthEasing = useCollapseWidthEasing();
-  const dragClass = useStripDragClass();
   const stripRef = useRef<HTMLElement | null>(null);
+  const widthEasing = useCollapseWidthEasing(stripRef);
+  const stopWidthEasing = widthEasing.stop;
+  // The keyboard's collapse is instant (L-165); only this strip registers it,
+  // so the action exists exactly while the tabs are at the side.
+  useEffect(
+    () =>
+      registerDynamicActionHandler("app.tabs.vertical.collapse", () => {
+        stopWidthEasing();
+        const { collapsed, setCollapsed } = useSideTabStripStore.getState();
+        setCollapsed(!collapsed);
+      }),
+    [stopWidthEasing],
+  );
+  const dragClass = useStripDragClass();
   const surfaceRef = useLayoutSurface("topBar");
   const bindStrip = useCallback(
     (node: HTMLElement | null) => {
@@ -94,10 +110,10 @@ export function SideTabStrip(props: {
               (collapsed
                 ? "wco:min-w-[var(--window-leading-inset)]"
                 : SIDE_STRIP_TITLE_ROW_MIN_WIDTH_CLASS),
-            // Collapse and expand ease the width once; a handle drag, a nudge and
-            // a window resize change it instantly (L-165).
+            // The collapse button and a handle drag's snap-point crossing ease
+            // the width once; everything else changes it instantly (L-165).
             widthEasing.easing &&
-              "transition-[width] duration-(--panel-motion-duration) ease-spring [.traycer-panel-resizing_&]:transition-none",
+              "transition-[width] duration-(--panel-motion-duration) ease-spring",
             dragClass,
           )}
           style={{ width: collapsed ? SIDE_STRIP_RAIL_WIDTH_PX : widthPx }}
@@ -140,7 +156,12 @@ export function SideTabStrip(props: {
             row and drawn only while one exists (`index.css`). */}
           <div data-strip-drag-overlay-host className="contents" />
           <span aria-hidden data-sheet-join-bridge={edge} />
-          <SideStripResizeHandle edge={edge} stripRef={stripRef} />
+          <SideStripResizeHandle
+            edge={edge}
+            stripRef={stripRef}
+            easeWidth={widthEasing.ease}
+            stopWidthEasing={widthEasing.stop}
+          />
           {controller.dialogs}
         </nav>
       </HoverCardGroup>
@@ -159,28 +180,55 @@ function useStripDragClass(): string | undefined {
 }
 
 /**
- * Whether the width is easing between the rail and the expanded strip. Only
- * the collapse toggle starts it, and only while motion is enabled; the end of
- * that width transition clears it, so no other width change ever animates -
- * a handle release that snaps to or from the rail changes the width in the
- * same frame and never turns it on (L-165).
+ * Whether the width is easing between the rail and the expanded strip (L-165).
+ * Two things start it, and only while motion is enabled: the collapse button,
+ * and a handle drag's frame that crosses the snap point, a discrete jump
+ * between 192 and 60 rather than pointer tracking. The end of that width
+ * transition clears it, and so does `stop`, synchronously, so the keyboard's
+ * collapse, a drag's start, its release and Escape all land instantly. The
+ * width a drag writes while the ease runs retargets it. A nudge and a window
+ * resize never turn it on.
+ *
+ * `stop` also cancels the running transition itself: Chromium keeps it running
+ * when the class goes but the inline width stays the value it was easing to,
+ * which is exactly a release on the snap target.
  */
-function useCollapseWidthEasing(): {
+function useCollapseWidthEasing(stripRef: RefObject<HTMLElement | null>): {
   readonly easing: boolean;
   readonly toggle: () => void;
+  readonly ease: () => void;
+  readonly stop: () => void;
   readonly settle: (event: TransitionEvent<HTMLElement>) => void;
 } {
   const motionEnabled = useMotionEnabled();
   const [easing, setEasing] = useState(false);
+  const ease = (): void => {
+    setEasing(motionEnabled);
+  };
   const toggle = (): void => {
     const { collapsed, setCollapsed } = useSideTabStripStore.getState();
-    setEasing(motionEnabled);
+    ease();
     setCollapsed(!collapsed);
   };
+  const stop = useCallback((): void => {
+    flushSync(() => {
+      setEasing(false);
+    });
+    const strip = stripRef.current;
+    // jsdom has no Web Animations.
+    if (strip === null || !("getAnimations" in strip)) return;
+    for (const animation of strip.getAnimations()) {
+      if (
+        animation instanceof CSSTransition &&
+        animation.transitionProperty === "width"
+      )
+        animation.cancel();
+    }
+  }, [stripRef]);
   const settle = (event: TransitionEvent<HTMLElement>): void => {
     if (event.target !== event.currentTarget) return;
     if (event.propertyName !== "width") return;
     setEasing(false);
   };
-  return { easing, toggle, settle };
+  return { easing, toggle, ease, stop, settle };
 }

@@ -65,7 +65,10 @@ import {
   MANAGED_COMMAND_OUTPUT_DND_TYPE,
   WORKSPACE_FOLDER_DND_TYPE,
 } from "@/components/epic-canvas/dnd/dnd";
-import { LEFT_PANEL_DEFINITIONS } from "@/components/epic-canvas/sidebar/left-panel-registry";
+import {
+  LEFT_PANEL_DEFINITIONS,
+  type LeftPanelMetadataDefinition,
+} from "@/components/epic-canvas/sidebar/left-panel-registry";
 import { useEpicDndStore } from "@/components/epic-canvas/dnd/dnd-store";
 import { makeGitBundleDiffTile } from "@/lib/git/git-diff-tile";
 import { makeManagedCommandOutputTileRef } from "@/stores/epics/canvas/tile-schema/managed-command-output-tile";
@@ -342,19 +345,52 @@ describe("<EpicRootDragOverlayContent />", () => {
       expect(marker.contains(screen.getByText("Folder chip"))).toBe(true);
     });
 
-    it("wraps the left-panel rail chip", () => {
-      const panel = LEFT_PANEL_DEFINITIONS[0];
-      const source: EpicCanvasLeftPanelRailDragData = {
-        kind: LEFT_PANEL_RAIL_ITEM_DND_TYPE,
-        viewTabId: "view-tab-1",
-        panelId: panel.id,
-        origin: "rail",
-      };
-      useEpicDndStore.getState().canvasDragStarted(source, null);
-      render(<EpicRootDragOverlayContent />);
+    /**
+     * A rail icon drags as its own tile (`LEFT_PANEL_RAIL_TILE_CLASS`, so
+     * `size-9`), not the old titled chip: a chip three tiles wide covered the
+     * neighbours and the drop line the user was aiming at.
+     */
+    describe("wraps the left-panel rail tile", () => {
+      function panelDefinition(id: string): LeftPanelMetadataDefinition {
+        const panel = LEFT_PANEL_DEFINITIONS.find(
+          (definition) => definition.id === id,
+        );
+        if (panel === undefined) throw new Error(`no panel definition: ${id}`);
+        return panel;
+      }
 
-      const marker = overlayMarker();
-      expect(marker.contains(screen.getByText(panel.title))).toBe(true);
+      function startRailDrag(panel: LeftPanelMetadataDefinition): void {
+        const source: EpicCanvasLeftPanelRailDragData = {
+          kind: LEFT_PANEL_RAIL_ITEM_DND_TYPE,
+          viewTabId: "view-tab-1",
+          panelId: panel.id,
+          origin: "rail",
+        };
+        useEpicDndStore.getState().canvasDragStarted(source, null);
+      }
+
+      const railDragPanels: ReadonlyArray<LeftPanelMetadataDefinition> = [
+        panelDefinition("terminals"),
+        // "chats" is the top of the shipped chats/artifacts stack (G3): a
+        // stacked group source still carries only the top panel's id, so the
+        // overlay draws the same single tile for it.
+        LEFT_PANEL_DEFINITIONS[0],
+      ];
+
+      it.each(railDragPanels)(
+        "draws the $title rail tile with no title text",
+        (panel) => {
+          startRailDrag(panel);
+          render(<EpicRootDragOverlayContent />);
+
+          const marker = overlayMarker();
+          const overlay = screen.getByTestId("left-panel-rail-drag-overlay");
+          expect(marker.contains(overlay)).toBe(true);
+          expect(overlay.className).toContain("size-9");
+          expect(overlay.querySelector("svg")).not.toBeNull();
+          expect(screen.queryByText(panel.title)).toBeNull();
+        },
+      );
     });
   });
 

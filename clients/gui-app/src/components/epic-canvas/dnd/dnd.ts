@@ -25,6 +25,7 @@ import {
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
 import { LEFT_PANEL_IDS, type LeftPanelId } from "@/lib/left-panel-ids";
+import type { RailDragCarry } from "@/lib/layout/layout-arrangement";
 import type { NodeFamily } from "@/lib/reparent-rules";
 
 /**
@@ -166,6 +167,16 @@ export interface EpicCanvasLeftPanelRailDragData {
 }
 
 /**
+ * What a rail drag carries (L-181): the rail's icon stands for its whole
+ * stack, and a section header is one panel, which is how a member leaves.
+ */
+export function railDragCarry(
+  source: EpicCanvasLeftPanelRailDragData,
+): RailDragCarry {
+  return source.origin === "rail" ? "stack" : "panel";
+}
+
+/**
  * A same-epic artifact reference dragged out of a chat message (a block
  * card or an inline chip). Self-describing: it carries the artifact's
  * IDENTITY so `sourceToTileRef` builds the tile ref directly, with no
@@ -231,10 +242,9 @@ export interface ComposerAttachmentDropTargetData {
 /**
  * What a drop on a rail icon means (L-168).
  *
- * `before` and `after` only reorder. `combine` is the middle band, and it is
- * back: it joins the two panels into a STACK that shares the sidebar body
- * (L-166), which is a thing the rail has again rather than the group model
- * L-155 deleted.
+ * `before` and `after` only reorder. `combine` is the middle band: it adds the
+ * carried panel to the target's STACK, which shares the sidebar body (L-166,
+ * L-181), or makes a stack of the two.
  */
 export type LeftPanelRailDropPosition = "before" | "after" | "combine";
 
@@ -281,15 +291,6 @@ export type EpicCanvasDropTargetData =
       readonly viewTabId?: string;
       readonly panelId: LeftPanelId;
       readonly orientation: LeftPanelRailOrientation;
-      /**
-       * This icon is already half of a stacked pair, so its middle band takes
-       * no drop: a stack joins exactly two panels (L-166), and neither growing
-       * a run of three nor silently replacing a member is what the gesture
-       * asked for. Carried on the TARGET because the rail is the surface that
-       * knows, and answering `null` here is what keeps a refused drop from
-       * highlighting anything.
-       */
-      readonly stacked: boolean;
     }
   | {
       readonly kind: "left-panel-rail-list";
@@ -327,7 +328,6 @@ type EpicCanvasLeftPanelDropTargetData =
       readonly viewTabId?: string;
       readonly panelId: LeftPanelId;
       readonly orientation: LeftPanelRailOrientation;
-      readonly stacked: boolean;
     }
   | {
       readonly kind: "left-panel-rail-list";
@@ -363,13 +363,6 @@ export type EpicCanvasDropPreview =
   | {
       readonly kind: "left-panel-rail-list";
       readonly viewTabId?: string;
-    }
-  | {
-      readonly kind: "left-panel-section";
-      readonly viewTabId?: string;
-      readonly panelId: LeftPanelId;
-      /** The body has two bands, not three: a stack is made on the rail. */
-      readonly position: Exclude<LeftPanelRailDropPosition, "combine">;
     }
   | null;
 
@@ -877,9 +870,6 @@ function readLeftPanelDropTargetData(
       viewTabId: value.viewTabId,
       panelId: value.panelId,
       orientation: value.orientation,
-      // A rail written by an older build says nothing here, and "not stacked"
-      // is the right reading of silence: it is the shape every rail had.
-      stacked: value.stacked === true,
     };
   }
   if (value.kind === "left-panel-rail-list") {
@@ -983,40 +973,6 @@ export function getLeftPanelRailDropPositionOnAxis(
   return "combine";
 }
 
-/** One drawn section of the sidebar body: which panel it is, and where. */
-export interface LeftPanelSectionRect {
-  readonly panelId: LeftPanelId;
-  readonly rect: RectLike;
-}
-
-/**
- * A drop of a rail icon onto the sidebar BODY: the top half of the section
- * under the pointer means "before that panel", the bottom half "after".
- *
- * The same midpoint rule the rail icons use, on a bigger target. What the
- * caller passes is the section the POINTER is in, not the one the body is
- * focused on (L-170): a stacked pair draws two, and resolving both halves
- * against the active panel put the boundary line on the wrong section and
- * committed a placement that broke the pair.
- */
-export function getLeftPanelBodyDropPreview(
-  target: Extract<
-    EpicCanvasDropTargetData,
-    { readonly kind: "left-panel-body" }
-  >,
-  section: LeftPanelSectionRect | null,
-  point: PointLike,
-): EpicCanvasDropPreview {
-  if (section === null) return null;
-  return {
-    kind: "left-panel-section",
-    viewTabId: target.viewTabId,
-    panelId: section.panelId,
-    position:
-      point.y < section.rect.top + section.rect.height / 2 ? "before" : "after",
-  };
-}
-
 export function getEpicCanvasDropPreview(
   target: EpicCanvasDropTargetData,
   rect: RectLike | null,
@@ -1074,10 +1030,10 @@ export function getEpicCanvasDropPreview(
       rect,
       target.orientation === "horizontal" ? "x" : "y",
     );
-    // An icon that is already half of a pair takes no combine: answering null
-    // rather than a side is what makes the refusal silent instead of turning
-    // an aimed stack into an unaimed reorder (L-166).
-    if (position === "combine" && target.stacked) return null;
+    // Whether the middle band can join is the rail's answer, not the
+    // target's: it depends on the source too, so the rail draws the join or
+    // the refusal from `railStackJoin` and the commit obeys the same answer
+    // (L-181). A refused middle band still answers `combine`, never a side.
     return {
       kind: "left-panel-rail",
       viewTabId: target.viewTabId,
@@ -1091,7 +1047,20 @@ export function getEpicCanvasDropPreview(
       viewTabId: target.viewTabId,
     };
   }
-  if (target.kind === "left-panel-body") return null;
+  if (target.kind === "left-panel-body") {
+    // The open body is the stack it draws, so a drop anywhere on it means
+    // INTO that stack (L-182): the same middle-band join its rail icon takes,
+    // aimed at the stack's top panel, which is the icon that stands for it.
+    // What the join does with what is carried (join, full, already there) is
+    // the rail's own `railStackJoin`, read by the rail, the body and the
+    // commit alike.
+    return {
+      kind: "left-panel-rail",
+      viewTabId: target.viewTabId,
+      panelId: target.panelId,
+      position: "combine",
+    };
+  }
   // Sidebar reparent targets render their own row/panel highlight (via the
   // dnd-store reparent selectors), never a canvas drop preview.
   if (target.kind === "sidebar-reparent-row") return null;

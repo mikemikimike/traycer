@@ -13,7 +13,7 @@
  */
 
 /** The row's own tab stop, inside the card that carries its id. */
-const ROW_GRAB_SELECTOR = '[role="button"]';
+const ROW_GRAB_SELECTOR = "[data-row-grab]";
 
 /**
  * Focus one row, given the card `layoutRegionRowSelector` found.

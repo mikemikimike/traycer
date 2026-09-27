@@ -10,10 +10,7 @@ import {
   regionFacts,
   regionStateWord,
 } from "@/components/layout-editor/regions/region-facts";
-import {
-  fineTuneMatchesFilter,
-  regionMatchesFilter,
-} from "@/components/layout-editor/regions/region-filter-match";
+import { layoutFindResults } from "@/components/layout-editor/regions/region-filter-match";
 import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import {
   positionAxisChanged,
@@ -48,6 +45,8 @@ const STATE_WORDS: ReadonlyArray<string> = [
   "Auto",
   "Chip",
   "Full row",
+  "Icon only",
+  "Icon and label",
   "Left",
   "Right",
   // The two bar readings say both halves of where they are (L-156).
@@ -55,20 +54,37 @@ const STATE_WORDS: ReadonlyArray<string> = [
   "Status bar, right",
   "Tab strip, left",
   "Tab strip, right",
-  "Tab strip, first",
-  "Tab strip, last",
+  "Tab strip, start",
+  "Tab strip, end",
   "Text",
-  "Ring",
+  "Ring and number",
   "Ring only",
   "Bars",
-  "Bars + text",
+  "Bars and text",
+  // Tool activity and Thinking's disclosure default (audit R1, R3).
+  "Open",
+  "Closed",
 ];
 
 /**
- * `shown` is the header's own switch rather than a grammar row (L-08), so it
- * is the one leaf a section does not reach through `rows`.
+ * `shown` and `size` are the header's own display control rather than a
+ * grammar row (L-08, L-128 overturned): `RegionDisplayControl` draws both off
+ * the value shape directly, so they are the leaves a section does not reach
+ * through `rows`.
  */
-const HEADER_KEY = "shown";
+const HEADER_KEYS: ReadonlySet<string> = new Set(["shown", "size"]);
+
+/**
+ * `resourceMonitor.agentRows` tunes the SIDEBAR (the readings on each agent
+ * and terminal row), not the monitor itself (G7): its control now lives on
+ * `ResourceReadingsRow`, a Sidebar-surface row rather than one of this
+ * region's own grammar rows.
+ */
+const SURFACE_OWNED_LEAVES: Readonly<
+  Partial<Record<RegionId, ReadonlyArray<string>>>
+> = {
+  resourceMonitor: ["agentRows"],
+};
 
 const EVERY_REGION_HIDDEN: LayoutOverrides = {
   homeTab: { shown: "hidden" },
@@ -76,12 +92,15 @@ const EVERY_REGION_HIDDEN: LayoutOverrides = {
   resourceMonitor: { shown: "hidden" },
   minimap: { shown: "hidden" },
   contextUsage: { shown: "hidden" },
+  thinking: { shown: "hidden" },
+  timestamps: { shown: "hidden" },
   runningAgents: { shown: "hidden" },
   changedFiles: { shown: "hidden" },
   background: { shown: "hidden" },
   todo: { shown: "hidden" },
   attachImage: { shown: "hidden" },
-  // Access and Model have no Shown (G6) - the floor is never hidden.
+  // Access, Model and Tool activity have no Shown (G6) - each floor is never
+  // hidden.
   mic: { shown: "hidden" },
   railAgents: { shown: "hidden" },
   railTerminals: { shown: "hidden" },
@@ -111,18 +130,26 @@ const MOVED_ARRANGEMENT = {
   minimapSide: "left" as const,
 };
 
+/** Whether `query` finds `id` through Find a setting - by name, option, state or keyword. */
+function findsRegion(query: string, id: RegionId): boolean {
+  return layoutFindResults(query, DEFAULT_LAYOUT_SNAPSHOT).some(
+    (result) => result.region === id,
+  );
+}
+
 /** Which value keys a region's grammar rows can write. */
 function keysReachableFromRows(region: RegionId): ReadonlyArray<string> {
   const entry = LAYOUT_REGIONS[region];
   return entry.rows.flatMap((row): string[] => {
-    if (row.kind === "size") return ["size"];
     if (row.kind === "style") {
       return row.examples.flatMap((example) => Object.keys(example.patch));
     }
     if (row.kind === "fine-tune") {
       return row.rows.flatMap((fineTuneRow): string[] => {
         const control = fineTuneRow.control;
-        return control.kind === "checks" ? [...control.keys] : [control.key];
+        return control.kind === "checks"
+          ? control.options.map((option) => option.key)
+          : [control.key];
       });
     }
     return [];
@@ -130,9 +157,9 @@ function keysReachableFromRows(region: RegionId): ReadonlyArray<string> {
 }
 
 describe("the region registry covers every region", () => {
-  it("lists all twenty-two regions, grouped by surface", () => {
-    expect(LAYOUT_REGION_IDS).toHaveLength(22);
-    expect(new Set(LAYOUT_REGION_IDS).size).toBe(22);
+  it("lists all twenty-five regions, grouped by surface", () => {
+    expect(LAYOUT_REGION_IDS).toHaveLength(25);
+    expect(new Set(LAYOUT_REGION_IDS).size).toBe(25);
     const surfaceOrder = LAYOUT_REGION_IDS.map(
       (id) => regionFacts(id).surface,
     ).map((surface) =>
@@ -148,9 +175,9 @@ describe("the region registry covers every region", () => {
       expect(entry.name.length, id).toBeGreaterThan(0);
       expect(entry.where.length, id).toBeGreaterThan(0);
       expect(entry.keywords.length, id).toBeGreaterThan(0);
-      expect(regionMatchesFilter(id, entry.name), id).toBe(true);
+      expect(findsRegion(entry.name, id), id).toBe(true);
       for (const keyword of entry.keywords) {
-        expect(regionMatchesFilter(id, keyword), `${id}:${keyword}`).toBe(true);
+        expect(findsRegion(keyword, id), `${id}:${keyword}`).toBe(true);
       }
     }
   });
@@ -178,10 +205,10 @@ describe("the region registry covers every region", () => {
     for (const id of dockMembers) {
       const entry = regionFacts(id);
       expect(entry.surface, id).toBe("composer");
-      expect(
-        entry.rows.some((row) => row.kind === "size"),
-        id,
-      ).toBe(true);
+      // Full row / Chip is `RegionDisplayControl`'s own display control now
+      // (L-128 overturned), read off the value shape rather than off a
+      // grammar row (there is no more "size" row kind).
+      expect("size" in SHIPPED_DEFAULT_VALUES[id], id).toBe(true);
       expect(entry.quickVerbs.includes("chip"), id).toBe(true);
       expect(entry.quickVerbs.includes("full"), id).toBe(true);
     }
@@ -195,10 +222,10 @@ describe("the region registry covers every region", () => {
 
   it("spells out the presence rule only where a panel has one", () => {
     expect(regionFacts("railPullRequests").hint).toBe(
-      "Auto - appears when this repo has pull requests",
+      "Auto: appears when this task has pull requests.",
     );
     expect(regionFacts("railComments").hint).toBe(
-      "Auto - appears when an artifact is open",
+      "Auto: appears after you open or start a comment on the active artifact.",
     );
     for (const id of ["railAgents", "railTerminals", "railFileTree"] as const) {
       expect(regionFacts(id).hint, id).toBeNull();
@@ -207,10 +234,11 @@ describe("the region registry covers every region", () => {
 });
 
 describe("every value leaf is reachable from a row", () => {
-  it("leaves nothing but the header's own switch off the grammar", () => {
+  it("leaves nothing but the header's own display control off the grammar", () => {
     for (const id of LAYOUT_REGION_IDS) {
+      const surfaceOwned = SURFACE_OWNED_LEAVES[id] ?? [];
       const leaves = Object.keys(SHIPPED_DEFAULT_VALUES[id]).filter(
-        (key) => key !== HEADER_KEY,
+        (key) => !HEADER_KEYS.has(key) && !surfaceOwned.includes(key),
       );
       const reachable = new Set(keysReachableFromRows(id));
       for (const leaf of leaves) {
@@ -224,8 +252,6 @@ describe("every value leaf is reachable from a row", () => {
       (row) => row.kind === "fine-tune",
     );
     expect(fineTune?.kind).toBe("fine-tune");
-    // "metrics" by id, not by position: `agentRows` (G7) now sits ahead of
-    // it in the same fine-tune section.
     const metricsRow =
       fineTune?.kind === "fine-tune"
         ? fineTune.rows.find((row) => row.id === "metrics")
@@ -233,8 +259,11 @@ describe("every value leaf is reachable from a row", () => {
     const control = metricsRow?.control ?? null;
     expect(control?.kind).toBe("checks");
     if (control?.kind !== "checks") return;
-    expect(control.options.map((option) => option.value)).toEqual([
-      ...control.keys,
+    expect(control.options.map((option) => option.key)).toEqual([
+      "cpu",
+      "memory",
+      "processes",
+      "ramShare",
     ]);
     expect(control.options.map((option) => option.label)).toEqual([
       "CPU",
@@ -307,7 +336,7 @@ describe("state words", () => {
     ).toBe("Full row");
     expect(
       regionStateWord("model", PRESET_VALUES.detailed, DEFAULT_ARRANGEMENT),
-    ).toBe("Bars + text");
+    ).toBe("Bars and text");
     expect(
       regionStateWord(
         "contextUsage",
@@ -326,33 +355,51 @@ describe("state words", () => {
 });
 
 describe("quick verbs", () => {
-  it("offers chip and full exactly where a Size row exists", () => {
+  it("offers chip and full exactly where the region has a Size leaf", () => {
     for (const id of LAYOUT_REGION_IDS) {
       const entry = regionFacts(id);
-      const sized = entry.rows.some((row) => row.kind === "size");
+      const sized = "size" in SHIPPED_DEFAULT_VALUES[id];
       expect(entry.quickVerbs.includes("chip"), id).toBe(sized);
       expect(entry.quickVerbs.includes("full"), id).toBe(sized);
     }
   });
 
   it("names the region in the copy that reads better with it", () => {
-    expect(quickVerbLabel("hide", "Minimap")).toBe("Hide Minimap");
-    expect(quickVerbLabel("chip", "Access")).toBe("Show as chip");
-    expect(quickVerbToast("chip", "Access")).toBe("Access is a chip");
-    expect(quickVerbToast("full", "Access")).toBe("Access is a full row");
+    expect(quickVerbLabel("hide", "minimap", "Minimap")).toBe("Hide Minimap");
+    expect(quickVerbLabel("chip", "changedFiles", "Changed files")).toBe(
+      "Show as chip",
+    );
+    expect(quickVerbToast("chip", "changedFiles", "Changed files")).toBe(
+      "Changed files is a chip",
+    );
+    expect(quickVerbToast("full", "changedFiles", "Changed files")).toBe(
+      "Changed files is a full row",
+    );
+    // Access's size reads as its own words, the ones its control uses (C11).
+    expect(quickVerbLabel("chip", "access", "Access")).toBe("Show icon only");
+    expect(quickVerbLabel("full", "access", "Access")).toBe(
+      "Show icon and label",
+    );
+    expect(quickVerbToast("chip", "access", "Access")).toBe(
+      "Access shows its icon only",
+    );
+    expect(quickVerbToast("full", "access", "Access")).toBe(
+      "Access shows its icon and label",
+    );
   });
 });
 
-describe("the filter", () => {
-  it("matches a fine-tune label only as a fine-tune match", () => {
-    expect(regionMatchesFilter("usageLimits", "time until reset")).toBe(false);
-    expect(fineTuneMatchesFilter("usageLimits", "time until reset")).toBe(true);
-    expect(fineTuneMatchesFilter("homeTab", "time until reset")).toBe(false);
+describe("the filter (Find a setting, L-07)", () => {
+  it("matches a fine-tune option only as an option match, on its own region", () => {
+    // "Amount" is a fine-tune option's own label (Usage limits' segment
+    // control), not part of any region's name - so it finds Usage limits and
+    // nothing else.
+    expect(findsRegion("amount", "usageLimits")).toBe(true);
+    expect(findsRegion("amount", "homeTab")).toBe(false);
   });
 
-  it("matches everything on an empty query and nothing inside Fine-tune", () => {
-    expect(regionMatchesFilter("homeTab", "   ")).toBe(true);
-    expect(fineTuneMatchesFilter("usageLimits", "   ")).toBe(false);
+  it("returns nothing at all for an empty or whitespace-only query", () => {
+    expect(layoutFindResults("   ", DEFAULT_LAYOUT_SNAPSHOT)).toEqual([]);
   });
 });
 

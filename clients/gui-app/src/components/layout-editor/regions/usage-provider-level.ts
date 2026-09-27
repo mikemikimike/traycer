@@ -1,17 +1,10 @@
 import type { SegmentOption } from "@/components/layout-editor/regions/region-grammar";
 
 /**
- * One provider's own screen, reached from the Usage limits section's children
- * row (L-26): which of that provider's limits its segment draws, and whether it
- * draws at all.
- *
- * Everything here is about ONE provider. The prototype's "Segment details"
- * block is deliberately not carried over: two of its three rows wrote a global
- * value from a per-provider screen, which is the one mistake a second level
- * makes easy (C-23).
+ * One provider row's disclosure (L-26): which of that provider's limits its
+ * segment draws. Everything here is about ONE provider (C-23).
  */
 export const USAGE_PROVIDER_LEVEL = {
-  where: "Status bar - one segment of the usage cluster",
   limitsLabel: "Limits",
   limitsDescription: "Automatic follows the plan reported by the provider.",
   limitsOptions: [
@@ -26,5 +19,6 @@ export const USAGE_PROVIDER_LEVEL = {
    * the ordinary state of one nobody has used this session - and with nothing
    * to pick, `Automatic` is the only answer there is.
    */
-  limitsEmpty: "The watched host has not reported this provider's limits yet.",
+  limitsEmpty:
+    "No limits reported yet. Automatic will use the tightest reported limit.",
 };

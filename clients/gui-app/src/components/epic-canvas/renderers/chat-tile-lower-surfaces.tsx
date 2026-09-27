@@ -1,3 +1,4 @@
+import { useReadingWidthClass } from "@/lib/layout-overrides";
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Lock } from "lucide-react";
 import type {
@@ -907,7 +908,7 @@ function PendingApprovalQueues(props: {
 
 /**
  * The box every centered lower surface is painted in: the edge-lane outer, the
- * `max-w-3xl` column, the canvas fill, the top and bottom spacing, and the
+ * reading column, the canvas fill, the top and bottom spacing, and the
  * pseudo-element that seals the seam over the transcript's scrollbar.
  *
  * Exported for ONE other caller, the layout editor's sample workspace (L-87,
@@ -921,11 +922,13 @@ export function ComposerSlotShell(props: {
   readonly topSpacing: ChatLowerSurfaceTopSpacing;
   readonly bottomSpacing: ComposerSlotBottomSpacing;
 }) {
+  const readingWidth = useReadingWidthClass();
   return (
     <div className="pointer-events-none px-4">
       <div
         className={cn(
-          "pointer-events-auto relative mx-auto w-full max-w-3xl bg-canvas",
+          "pointer-events-auto relative mx-auto w-full bg-canvas",
+          readingWidth,
           props.topSpacing === "normal" ? "pt-4" : "pt-0",
           props.bottomSpacing === "normal" ? "pb-4" : "pb-0",
           props.bottomSpacing === "normal" &&

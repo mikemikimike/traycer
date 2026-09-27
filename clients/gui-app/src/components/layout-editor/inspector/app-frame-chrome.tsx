@@ -9,7 +9,6 @@ import {
   ChevronsUpDown,
   History,
   House,
-  Inbox,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -76,24 +75,15 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * The app's frame around the regions, in one copy.
- *
- * Two surfaces draw a picture of the app: the preset cards, which are a whole
- * scaled window (L-43), and the Settings page's surface specimens, which are
- * one surface at 1:1 (L-95). Everything in them that is NOT a region - the tab
- * labels, the header's icon cluster, the composer's box and its two toolbar
+ * The app's frame around the regions, for the preset cards' miniatures: the
+ * tab labels, the header's icon cluster, the composer's box and its toolbar
  * clusters, the rail's dividers, and the dock's split into pills above one
- * joined frame - existed twice, so the next change to the composer's shape had
- * to be made in two files or the two pictures disagreed about what the app
- * looks like (R1-04). They had already drifted: the two drew the header's
- * resource monitor in different host frames, and only one of them tucked the
- * dock under the composer.
+ * joined frame - everything in the picture that is NOT a region.
  *
- * What stays with each caller is PLACEMENT - the miniature draws these inside
- * a 1000x620 frame with the app's own bars and paddings, the specimen draws
- * one of them on a stage - so nothing here takes a size or a padding. The
- * side strip takes its edge and whether it is collapsed: both are what the
- * strip IS at that placement, not a size choice a caller makes.
+ * Placement stays with the caller (the miniature draws these inside a
+ * 1000x620 frame with the app's own bars and paddings), so nothing here takes
+ * a size or a padding. The side strip takes its edge and whether it is
+ * collapsed: both are what the strip IS at that placement.
  */
 export interface AppFrame {
   readonly values: LayoutValues;
@@ -101,7 +91,7 @@ export interface AppFrame {
 }
 
 /** A task tab in the picture, which is chrome rather than a region. */
-export interface AppFrameTask {
+interface AppFrameTask {
   /** Seeds the auto tint (D11), as an epic id does. */
   readonly id: string;
   readonly label: string;
@@ -216,10 +206,7 @@ export function AppFrameTopBar({ values, arrangement }: AppFrame): ReactNode {
  * original markup, untouched. The side strip draws the same tasks through
  * `AppFrameSideStrip`, as rows or rail tiles.
  */
-export function AppFrameTabEntries({
-  values,
-  arrangement,
-}: AppFrame): ReactNode {
+function AppFrameTabEntries({ values, arrangement }: AppFrame): ReactNode {
   return (
     <>
       <AppFrameRegion
@@ -258,10 +245,10 @@ function AppFrameTaskChip(props: { readonly task: AppFrameTask }): ReactNode {
 
 /**
  * The vertical strip as the shell draws it on the ground (D3-D6, F1, F7): the
- * top row (history arrows, the collapse toggle), the Inbox and All tasks
+ * top row (history arrows, the collapse toggle), the Notifications and All tasks
  * rows, Home, the primary New Task row, "Tasks" and its count, the task rows,
  * and the foot with the header-hosted readings over the account row.
- * Collapsed, the 60px rail as one centred column: the expand, Inbox, All
+ * Collapsed, the 60px rail as one centred column: the expand, Notifications, All
  * tasks and New Task tiles, a divider, Home and a 40x44 tile per task (its
  * monogram chip over its meter), then the avatar.
  *
@@ -303,7 +290,7 @@ export function AppFrameSideStrip({
         <div className="flex flex-col items-center">
           <div className={cn(SIDE_STRIP_RAIL_NAV_CLASS, "pt-2")}>
             <AppFrameNavTile icon={CollapseIcon} primary={false} />
-            <AppFrameNavTile icon={Inbox} primary={false} />
+            <AppFrameNavTile icon={Bell} primary={false} />
             <AppFrameNavTile icon={History} primary={false} />
             <AppFrameNavTile icon={Plus} primary />
           </div>
@@ -324,7 +311,7 @@ export function AppFrameSideStrip({
             <span className="flex-1" />
             <CollapseIcon aria-hidden className="size-4 shrink-0" />
           </div>
-          <AppFrameNavRow icon={Inbox} label="Inbox" />
+          <AppFrameNavRow icon={Bell} label="Notifications" />
           <AppFrameNavRow icon={History} label="All tasks" />
           {home ? <AppFrameNavRow icon={House} label="Home" /> : null}
           <span
@@ -415,7 +402,7 @@ const COLLAPSE_ICON: Readonly<
   right: { collapse: PanelRightClose, expand: PanelRightOpen },
 };
 
-/** An expanded nav row (Inbox, All tasks, Home): the row's own box and type. */
+/** An expanded nav row (Notifications, All tasks, Home): the row's own box and type. */
 function AppFrameNavRow(props: {
   readonly icon: LucideIcon;
   readonly label: string;
@@ -788,12 +775,12 @@ function AppFrameBarCluster(props: {
  * the panel sheet as the expanded panel draws it. Each panel brings its own
  * rail frame, so this adds no spacing of its own.
  *
- * A stacked pair is drawn as the same one group icon the real rail draws,
- * through the same component (L-11, G3): the card is a picture of the app at
- * rest, where a group shows its top panel's icon and no count.
+ * A stack is drawn as the same one group icon the real rail draws, through
+ * the same component (L-11, G3, L-181): the card is a picture of the app at
+ * rest, where a stack shows its top panel's icon and no count.
  *
  * A panel the user hid leaves a gap exactly as it leaves one in the rail;
- * `auto` is not off, so only `hidden` does. It leaves its group too, which
+ * `auto` is not off, so only `hidden` does. It leaves its stack too, which
  * is what `railDisplayEntries` answers for every rail at once.
  */
 export function AppFrameRailEntries({
@@ -816,10 +803,10 @@ export function AppFrameRailEntries({
         <LeftPanelRailStack
           key={entry.id}
           stackId={entry.id}
-          memberCount={2}
+          memberCount={entry.members.length}
           showCount={false}
         >
-          {depictRailRegion(entry.top, values, arrangement)}
+          {depictRailRegion(entry.members[0], values, arrangement)}
         </LeftPanelRailStack>
       );
     }

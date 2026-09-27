@@ -1,5 +1,5 @@
 import { createElement, lazy } from "react";
-import { PanelsTopLeft } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import type { HeaderTab, TabKindModule } from "@/stores/tabs/types";
 import { TAB_KIND_SPLIT_ELIGIBILITY } from "@/stores/tabs/tab-kind-policy";
 
@@ -21,7 +21,8 @@ const tab: Extract<HeaderTab, { kind: "sample-workspace" }> = {
   // rendered as "Sample"). One word, always whole, and it answers the question
   // the amber is there to answer.
   name: "Customizing",
-  icon: PanelsTopLeft,
+  // The same sliders the "Customize layout..." menu item wears.
+  icon: SlidersHorizontal,
   canDuplicate: false,
   canOpenInNewWindow: false,
   // The one tab that is a MODE rather than a place, and the colour that says

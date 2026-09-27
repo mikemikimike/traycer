@@ -4186,7 +4186,38 @@ describe("<HarnessModelPicker />", () => {
     expect(selections.at(-1)?.harnessId).toBe("claude");
   });
 
-  it("renders thinking effort buttons in the picker footer", async () => {
+  it("renders the thinking-effort slider in the picker footer", async () => {
+    const { reasoningChanges } = renderPicker({
+      reasoning: "high",
+      storeModels: [
+        model({
+          slug: "gpt-5.5",
+          label: "GPT-5.5",
+          supportedReasoningEfforts: [
+            { id: "low", label: "Low", description: null },
+            { id: "high", label: "High", description: null },
+          ],
+        }),
+      ],
+    });
+
+    await openPicker();
+
+    expect(
+      screen.getByRole("group", { name: "Thinking effort" }),
+    ).not.toBeNull();
+    const slider = screen.getByRole("slider", { name: "Thinking effort" });
+    expect(slider.getAttribute("aria-valuetext")).toBe("High");
+
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+
+    expect(reasoningChanges).toEqual(["low"]);
+  });
+
+  it("renders thinking effort buttons in the picker footer under the list setting", async () => {
+    useLayoutStore
+      .getState()
+      .setRegionValues("model", { reasoningControl: "list" });
     const { reasoningChanges } = renderPicker({
       reasoning: "high",
       storeModels: [
@@ -4213,6 +4244,68 @@ describe("<HarnessModelPicker />", () => {
     fireEvent.click(screen.getByRole("button", { name: "Low" }));
 
     expect(reasoningChanges).toEqual(["low"]);
+  });
+
+  it("lights the slider's max treatment when the sub-leader digit lands on the last stop", async () => {
+    // The ⌥-digit chord reaches the level through `usePickerLeaderScope`,
+    // never touching the slider - so this is the route that proves the max
+    // treatment is a reading of the VALUE inside a presented picker, not of
+    // a gesture some handler in the strip happened to see. The sparkle field
+    // is gated on the picker's own `visibleOpen`, which only the real picker
+    // threads through.
+    renderPicker({
+      reasoning: "low",
+      storeModels: [
+        model({
+          slug: "gpt-5.5",
+          label: "GPT-5.5",
+          supportedReasoningEfforts: [
+            { id: "low", label: "Low", description: null },
+            { id: "high", label: "High", description: null },
+          ],
+        }),
+      ],
+    });
+
+    await openPicker();
+    expect(screen.queryByTestId("model-reasoning-max-sparkles")).toBeNull();
+
+    act(() => {
+      fireLeaderDigit(2, "alt", false);
+    });
+
+    const slider = screen.getByTestId("model-reasoning-slider");
+    expect(slider.getAttribute("data-max")).toBe("true");
+    expect(screen.getByTestId("model-reasoning-max-sparkles")).not.toBeNull();
+    expect(screen.getByTestId("model-reasoning-range").className).toContain(
+      "reasoning-effort-max-range",
+    );
+  });
+
+  it("leaves the slider static when the sub-leader digit lands short of the last stop", async () => {
+    renderPicker({
+      reasoning: "high",
+      storeModels: [
+        model({
+          slug: "gpt-5.5",
+          label: "GPT-5.5",
+          supportedReasoningEfforts: [
+            { id: "low", label: "Low", description: null },
+            { id: "high", label: "High", description: null },
+          ],
+        }),
+      ],
+    });
+
+    await openPicker();
+    act(() => {
+      fireLeaderDigit(1, "alt", false);
+    });
+
+    expect(
+      screen.getByTestId("model-reasoning-slider").getAttribute("data-max"),
+    ).toBeNull();
+    expect(screen.queryByTestId("model-reasoning-max-sparkles")).toBeNull();
   });
 
   it("renders fast mode controls in the picker footer", async () => {

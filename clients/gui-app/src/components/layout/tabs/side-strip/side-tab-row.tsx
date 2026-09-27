@@ -478,6 +478,7 @@ function ExpandedContent(props: SideTabRowProps) {
       >
         <TrailingContent
           active={props.active}
+          onFill={props.session === "active"}
           leaderBadge={props.leaderBadge}
           close={props.close}
           waitingLabel={props.waitingLabel}
@@ -498,6 +499,8 @@ function ExpandedContent(props: SideTabRowProps) {
  */
 function TrailingContent(props: {
   readonly active: boolean;
+  /** The row is the solid session fill, so its close takes the label colour. */
+  readonly onFill: boolean;
   readonly leaderBadge: ReactNode | null;
   readonly close: SideTabRowClose | null;
   readonly waitingLabel: "Approve" | "Reply" | null;
@@ -530,7 +533,7 @@ function TrailingContent(props: {
           <Button
             type="button"
             size="icon-sm"
-            variant="muted"
+            variant={props.onFill ? "on-fill" : "muted"}
             aria-label={close.label}
             data-testid={close.testId}
             disabled={close.disabled}

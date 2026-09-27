@@ -17,7 +17,6 @@ import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-worksp
 import { SAMPLE_TURNS } from "@/components/sample-workspace/sample-workspace-scene";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
-import { clearRailVisibilityOverrides } from "@/lib/layout/rail-view";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
@@ -141,6 +140,7 @@ function renderSession() {
       entry: "pointer",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
   });
   return rendered;
@@ -189,7 +189,6 @@ beforeEach(() => {
     dockMode: "right",
     lockedBy: "none",
   });
-  clearRailVisibilityOverrides();
 });
 
 afterEach(() => {
@@ -199,14 +198,16 @@ afterEach(() => {
 });
 
 describe("SampleWorkspaceBody - content", () => {
-  it("renders a scrollable transcript of every sample turn, with one tool block", () => {
+  it("renders a scrollable transcript of every sample turn, with its tool activity row", () => {
     renderBody();
 
     expect(screen.getByLabelText("Sample conversation")).not.toBeNull();
     expect(document.querySelectorAll("[data-sample-turn]")).toHaveLength(
       SAMPLE_TURNS.length,
     );
-    expect(screen.getAllByText(/Sample tool/)).toHaveLength(1);
+    expect(
+      document.querySelectorAll('[data-layout-region="toolActivity"]'),
+    ).toHaveLength(1);
   });
 
   // L-98: the dock rows are the REAL panels fed sample data, not look-alike
@@ -232,7 +233,8 @@ describe("SampleWorkspaceBody - content", () => {
     expect(screen.getByTestId("queued-message-rows")).not.toBeNull();
 
     expect(screen.getByText("Describe the next change…")).not.toBeNull();
-    expect(screen.getByText("Sample workspace")).not.toBeNull();
+    // No second "Sample workspace" caption in the workspace row: the sample
+    // notice banner above the canvas is the one caption now (design craft 2.3).
     expect(screen.getByTestId("context-usage-meter")).not.toBeNull();
   });
 
@@ -401,6 +403,48 @@ describe("SampleWorkspaceBody - quick verbs on every pointable region", () => {
     expect(menuNames()).toEqual(["changedFiles"]);
   });
 
+  // G3-10: the timestamps, the activity rows and the minimap share ONE menu
+  // around the transcript, resolved from the region under the pointer. No item
+  // in the transcript owns a trigger of its own.
+  it("offers a timestamp's verbs from the transcript's one menu", () => {
+    renderBody();
+
+    const stamp = screen.getAllByTestId("chat-message-timestamp")[0];
+    fireEvent.contextMenu(stamp);
+
+    expect(menuNames()).toEqual(["timestamps"]);
+  });
+
+  it("offers an activity row's verbs from the transcript's one menu", () => {
+    renderBody();
+
+    rightClickRegion("toolActivity");
+
+    expect(menuNames()).toEqual(["toolActivity"]);
+  });
+
+  it("opens no menu on plain reply text, which is content rather than a region", () => {
+    renderBody();
+
+    const replies = document.querySelectorAll<HTMLElement>(
+      "[data-sample-turn] [data-layout-passive]",
+    );
+    fireEvent.contextMenu(innermost(replies[replies.length - 1]));
+
+    expect(menuNames()).toEqual([]);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("mounts no menu trigger inside the transcript itself", () => {
+    renderBody();
+
+    expect(
+      screen
+        .getByLabelText("Sample conversation")
+        .querySelectorAll("[data-slot='context-menu-trigger']"),
+    ).toHaveLength(0);
+  });
+
   it("offers the minimap's verbs, at rest and in a session", () => {
     renderBody();
 
@@ -412,6 +456,7 @@ describe("SampleWorkspaceBody - quick verbs on every pointable region", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
     });
     rightClickRegion("minimap");
@@ -478,12 +523,73 @@ describe("SampleWorkspaceBody - a hidden dock member's ghost", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
       useLayoutEditorStore.getState().select("changedFiles");
     });
 
     expect(screen.getByTestId("chat-dock-chip-filesChanged")).not.toBeNull();
     expect(screen.queryByTestId("accumulated-changes-panel")).toBeNull();
+  });
+});
+
+describe("SampleWorkspaceBody - a Hidden minimap", () => {
+  // Hidden reads as absent, the way the real chat draws it, until the editor
+  // points at the region (L-14): the sample canvas keeps no "Hidden" caption
+  // in the minimap's place.
+  it("draws nothing and no placeholder at rest, materialises under the pointer, and goes again after", () => {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      overrides: { minimap: { shown: "hidden" } },
+      layoutCarryDone: true,
+    });
+    renderSession();
+
+    expect(screen.queryByTestId("chat-turn-minimap")).toBeNull();
+    expect(screen.queryByText("Hidden")).toBeNull();
+
+    act(() => {
+      useLayoutEditorStore.getState().setHovered("minimap");
+    });
+
+    expect(screen.getByTestId("chat-turn-minimap")).not.toBeNull();
+    expect(screen.queryByText("Hidden")).toBeNull();
+
+    act(() => {
+      useLayoutEditorStore.getState().setHovered(null);
+    });
+
+    expect(screen.queryByTestId("chat-turn-minimap")).toBeNull();
+    expect(screen.queryByText("Hidden")).toBeNull();
+  });
+});
+
+/**
+ * The passive dim puts `opacity` and `filter` on whatever carries the marker,
+ * so it is correct only on a leaf: a box that exists (a `contents` wrapper has
+ * none, which makes the dim a silent no-op) and that holds no region (an
+ * ancestor's `filter` dims the editable chrome under it, inverting the signal
+ * the editor exists to give). Whether an element is a leaf is a fact about the
+ * tree it sits in, so it is asserted on the mounted canvas rather than
+ * counted in source text.
+ */
+describe("SampleWorkspaceBody - the passive dim's markers", () => {
+  it("sit only on boxes that exist and that hold no region", () => {
+    renderSession();
+    // Model pointed at brings its picker's parts onto the canvas too.
+    act(() => {
+      useLayoutEditorStore.getState().select("model");
+    });
+
+    const markers = document.querySelectorAll<HTMLElement>(
+      "[data-layout-passive], [data-layout-passive-members]",
+    );
+    expect(markers.length).toBeGreaterThan(0);
+    for (const marker of markers) {
+      expect(marker.classList.contains("contents")).toBe(false);
+      // A boolean, so a failure does not pretty-print a whole subtree.
+      expect(marker.querySelector("[data-layout-region]") !== null).toBe(false);
+    }
   });
 });
 
@@ -501,6 +607,7 @@ describe("SampleWorkspaceBody - sample labelling", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
     });
     expect(screen.getByTestId("sample-probe").textContent).toBe("sample");

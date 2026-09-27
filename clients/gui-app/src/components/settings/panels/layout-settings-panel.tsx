@@ -9,39 +9,22 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import {
-  LayoutTemplate,
-  MessageSquare,
-  PanelBottom,
-  PanelLeft,
-  PanelTop,
-  SquarePen,
-  type LucideIcon,
-} from "lucide-react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { focusSortableRowGrab } from "@/components/layout-editor/inspector/first-row-focus";
+import {
+  LAYOUT_AREAS,
+  layoutAreaChanged,
+  type LayoutAreaId,
+} from "@/components/layout-editor/inspector/layout-areas";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import {
   PresetsBlock,
-  ResetEverythingButton,
+  ResetLayoutButton,
 } from "@/components/layout-editor/inspector/presets-block";
-import {
-  SidebarSideRow,
-  SideStripViewRow,
-  TabStripPositionRow,
-} from "@/components/layout-editor/inspector/rows/surface-placement-rows";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
 import { layoutRegionRowSelector } from "@/components/layout-editor/layout-search.definitions";
-import {
-  SURFACE_GROUPS,
-  type SurfaceGroupId,
-} from "@/components/layout-editor/regions/region-grammar";
-import {
-  resetSurface,
-  surfaceChanged,
-} from "@/components/layout-editor/regions/surface-diff";
+import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
-import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import {
   SettingsDetailHeader,
@@ -53,41 +36,29 @@ import { SettingsPanelShell } from "@/components/settings/settings-panel-shell";
 import { SettingsRow } from "@/components/settings/settings-row";
 import { scrollPaneToCenter } from "@/components/settings/use-settings-anchor-reveal";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
-import { TaskTabLayoutRow } from "@/components/settings/panels/layout/tabs-layout-group";
 import { Button } from "@/components/ui/button";
-import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
-import { Switch } from "@/components/ui/switch";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useLayoutEditorFitsWindow } from "@/lib/layout/editor-width";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
-import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
-import { mobileFooterChanged } from "@/lib/layout/layout-diff";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import { activateTabIntent } from "@/lib/tab-navigation";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import {
-  readPendingLayoutRegion,
-  subscribePendingLayoutRegion,
-  takePendingLayoutRegion,
+  readPendingLayoutLanding,
+  subscribePendingLayoutLanding,
+  takePendingLayoutLanding,
 } from "@/lib/settings-navigation";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
-import {
-  getLayoutSnapshot,
-  useLayoutSnapshot,
-  useLayoutStore,
-} from "@/stores/layout/layout-store";
+import { useLayoutSnapshot } from "@/stores/layout/layout-store";
 
 /**
  * The full-width host for the layout form (L-03): one area at a time, in
  * Settings ▸ Providers' master-detail layout (H2).
  *
- * Not a second form: every list, control and write below belongs to
- * `components/layout-editor/inspector/`, and the inspector draws the same ones.
- * What differs is COMPOSITION. The dock filters by selection; this page lists
- * the areas - Presets, then one per SURFACE - in a rail, and draws the one
- * picked beside it. Inside a surface's area the region is a ROW, and each order
- * group the surface owns is one list (L-92, L-95).
+ * Not a second form: the areas, the Presets block and each area's rows are the
+ * ones the editor inspector draws (`inspector/layout-form.tsx`). What differs
+ * is the navigation around them: this page lists the areas in a rail and draws
+ * the one picked beside it, where the inspector opens an area from its All
+ * settings level with a back row.
  *
  * The areas are a vertical tab list, so the arrow keys walk them. Every area
  * stays mounted, hidden while another is picked (`forceMount` makes Radix drop
@@ -101,7 +72,6 @@ import {
 export function LayoutSettingsPanel(): ReactNode {
   const isMobile = useIsMobileViewport();
   const snapshot = useLayoutSnapshot();
-  const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
   const [area, setArea] = useState<LayoutAreaId>("presets");
   const [openRows, setOpenRows] = useState<ReadonlyArray<string>>([]);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -125,10 +95,7 @@ export function LayoutSettingsPanel(): ReactNode {
   useAreaStartsAtTop(rootRef, area);
 
   const changed = (id: LayoutAreaId): boolean =>
-    id === "presets"
-      ? snapshot.basePreset !== "default"
-      : surfaceChanged(snapshot, id) ||
-        (id === "topBar" && taskTabLayout !== DEFAULT_TASK_TAB_LAYOUT);
+    layoutAreaChanged(id, snapshot);
 
   return (
     <SettingsPanelShell
@@ -136,7 +103,7 @@ export function LayoutSettingsPanel(): ReactNode {
       // Desktop only, as on Providers: on a phone the description's own width
       // wraps the action onto a row of its own (see the Providers panel).
       description={isMobile ? undefined : LAYOUT.page.description}
-      headerAction={<OpenEditorAction />}
+      headerAction={<OpenEditorAction area={area} />}
       // Desktop only, as on Providers: the card fills the settings pane and the
       // picked area's body owns the scroll. A phone has one scroll container
       // already, so there the card is sized by its contents.
@@ -216,17 +183,7 @@ export function LayoutSettingsPanel(): ReactNode {
                       badge={null}
                       description={entry.description}
                       footer={null}
-                      action={
-                        // Presets carries its own two resets in its body, "Reset
-                        // to <preset>" and "Reset everything"; a third here
-                        // would be a choice with no answer.
-                        entry.id !== "presets" && changed(entry.id) ? (
-                          <ResetAreaButton
-                            surface={entry.id}
-                            label={entry.label}
-                          />
-                        ) : null
-                      }
+                      action={null}
                     />
                   </div>
                   {/* From `md` up the scroll owner, so the rail and the area's
@@ -241,6 +198,9 @@ export function LayoutSettingsPanel(): ReactNode {
                       snapshot={snapshot}
                       openRows={openRows}
                       onToggleRow={toggleRow}
+                      onShowPresets={() => {
+                        setArea("presets");
+                      }}
                     />
                   </div>
                 </TabsPrimitive.Content>
@@ -253,12 +213,13 @@ export function LayoutSettingsPanel(): ReactNode {
   );
 }
 
-/** One area's rows: the presets and the floor, or one surface's card. */
+/** One area's card: the Presets block and Reset layout, or a surface's form. */
 function LayoutAreaBody(props: {
   readonly area: LayoutAreaId;
   readonly snapshot: LayoutSnapshot;
   readonly openRows: ReadonlyArray<string>;
   readonly onToggleRow: (rowId: string) => void;
+  readonly onShowPresets: () => void;
 }): ReactNode {
   const { area, snapshot } = props;
   if (area === "presets") {
@@ -271,10 +232,20 @@ function LayoutAreaBody(props: {
           dataTestId="layout-presets-group"
           fill={false}
         >
-          {/* No canvas here, so a preset hover previews nothing (L-43). */}
-          <PresetsBlock onPreviewPreset={noop} />
+          <PresetsBlock reveal={props.onShowPresets} />
         </SettingsGroup>
-        <ResetEverythingCard snapshot={snapshot} />
+        <SettingsGroup
+          group={LAYOUT.definitions.resetLayout}
+          showTitle={false}
+          tone="danger"
+          dataTestId="layout-reset-group"
+          fill={false}
+        >
+          <SettingsRow
+            row={LAYOUT.definitions.resetLayoutAction}
+            control={<ResetLayoutButton />}
+          />
+        </SettingsGroup>
       </>
     );
   }
@@ -289,69 +260,19 @@ function LayoutAreaBody(props: {
       <SurfaceSection
         surface={area}
         snapshot={snapshot}
-        filter=""
         openRows={props.openRows}
         onToggleRow={props.onToggleRow}
-        surfaceRows={surfaceRowsFor(area)}
+        onSelectRow={null}
+        selectedRow={null}
       />
     </SettingsGroup>
   );
 }
 
-type LayoutAreaId = "presets" | SurfaceGroupId;
-
-/** Presets first - the coarsest control here - then the surfaces in reading order. */
-const LAYOUT_AREAS: ReadonlyArray<{
-  readonly id: LayoutAreaId;
-  readonly label: string;
-  readonly icon: LucideIcon;
-  readonly description: string;
-}> = [
-  {
-    id: "presets",
-    label: LAYOUT.definitions.presets.label,
-    icon: LayoutTemplate,
-    description: "How much the app shows at once, in one pick.",
-  },
-  {
-    id: "topBar",
-    label: LAYOUT.definitions.topBar.label,
-    icon: PanelTop,
-    description: "Where task tabs sit, how they fit, and the Home tab.",
-  },
-  {
-    id: "sidebar",
-    label: LAYOUT.definitions.sidebar.label,
-    icon: PanelLeft,
-    description: "Which side the sidebar takes, and the panels on its rail.",
-  },
-  {
-    id: "chat",
-    label: LAYOUT.definitions.chat.label,
-    icon: MessageSquare,
-    description: "What sits beside a conversation as you read it.",
-  },
-  {
-    id: "composer",
-    label: LAYOUT.definitions.composer.label,
-    icon: SquarePen,
-    description: "What sits above the message box, and on its toolbar.",
-  },
-  {
-    id: "statusBar",
-    label: LAYOUT.definitions.statusBar.label,
-    icon: PanelBottom,
-    description: "Usage limits and resources, and which bar draws each.",
-  },
-];
-
-/** The shipped task tab layout, which a changed Tabs area is measured against. */
-const DEFAULT_TASK_TAB_LAYOUT = "scroll";
-
 /** Which area holds each settings-definition group; anything else is on no area. */
 const AREA_FOR_GROUP: Readonly<Record<string, LayoutAreaId>> = {
   presets: "presets",
-  resetEverything: "presets",
+  resetLayout: "presets",
   ...Object.fromEntries(SURFACE_GROUPS.map((group) => [group.id, group.id])),
 };
 
@@ -405,7 +326,7 @@ function useAreaStartsAtTop(
   }, [root, area]);
 }
 
-/** The same dot a changed region row draws, said in words for a screen reader. */
+/** The same dot a changed row draws, said in words for a screen reader. */
 function ChangedDot(): ReactNode {
   return (
     <>
@@ -416,109 +337,6 @@ function ChangedDot(): ReactNode {
       />
       <span className="sr-only">, changed</span>
     </>
-  );
-}
-
-/**
- * One area back to what shipped, confirmed first: like "Reset everything",
- * this host has no Undo (L-108).
- */
-function ResetAreaButton(props: {
-  readonly surface: SurfaceGroupId;
-  readonly label: string;
-}): ReactNode {
-  const { surface, label } = props;
-  const [confirming, setConfirming] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  // Set on confirm: the reset clears the area's changed flag, which unmounts
-  // this button - the dialog's opener - so its focus return has nowhere to go.
-  // The area's panel stays mounted and takes it instead. Cancel leaves it
-  // `null` and the opener, still there, gets focus back as usual.
-  const resetPanelRef = useRef<HTMLElement | null>(null);
-  return (
-    <>
-      <Button
-        ref={buttonRef}
-        type="button"
-        variant="ghost"
-        size="sm"
-        aria-label={`Reset ${label}`}
-        onClick={() => {
-          setConfirming(true);
-        }}
-      >
-        Reset
-      </Button>
-      <ConfirmDestructiveDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        title={`Reset ${label}?`}
-        description={`Every ${label} setting, and where each of its pieces sits, goes back to how the app shipped. The rest of the layout is left alone. This cannot be undone here.`}
-        cascadeSummary={null}
-        actionLabel="Reset"
-        isPending={false}
-        blockedReason={null}
-        onCloseAutoFocus={(event) => {
-          const panel = resetPanelRef.current;
-          if (panel === null) return;
-          resetPanelRef.current = null;
-          event.preventDefault();
-          panel.focus({ preventScroll: true });
-        }}
-        onConfirm={() => {
-          resetPanelRef.current =
-            buttonRef.current?.closest<HTMLElement>('[role="tabpanel"]') ??
-            null;
-          setConfirming(false);
-          if (surface === "topBar") {
-            useSettingsStore
-              .getState()
-              .setTaskTabLayout(DEFAULT_TASK_TAB_LAYOUT);
-          }
-          useLayoutEditorStore.getState().recordGesture(() => {
-            useLayoutStore
-              .getState()
-              .replaceAll(resetSurface(getLayoutSnapshot(), surface));
-          });
-        }}
-      />
-    </>
-  );
-}
-
-/** A surface area's own rows, which belong to no region (D7, L-51). */
-function surfaceRowsFor(surface: SurfaceGroupId): ReactNode | null {
-  if (surface === "statusBar") return <StatusBarSurfaceRows />;
-  if (surface === "topBar") return <TabsSurfaceRows />;
-  if (surface === "sidebar") return <SidebarSurfaceRows />;
-  return null;
-}
-
-/**
- * The floor, last on the page and the only card with a tone (redesign 4.4,
- * L-20).
- *
- * It renders whether or not anything has changed, with its button disabled on
- * a layout nobody has touched: showing the floor and saying you are standing
- * on it is clearer than a card that vanishes (5.8). The confirm inside the
- * button stays, because this host has no Undo (L-108).
- */
-function ResetEverythingCard(props: {
-  readonly snapshot: LayoutSnapshot;
-}): ReactNode {
-  return (
-    <SettingsGroup
-      group={LAYOUT.definitions.resetEverything}
-      showTitle
-      tone="danger"
-      dataTestId="layout-reset-group"
-      fill={false}
-    >
-      <SettingsRow
-        row={LAYOUT.definitions.resetEverythingAction}
-        control={<ResetEverythingButton snapshot={props.snapshot} />}
-      />
-    </SettingsGroup>
   );
 }
 
@@ -534,7 +352,7 @@ function ResetEverythingCard(props: {
  * its place, because it is still the guide's final coachmark target (L-50)
  * and the search result "Customize layout" lands on it.
  */
-function OpenEditorAction(): ReactNode {
+function OpenEditorAction(props: { readonly area: LayoutAreaId }): ReactNode {
   const navigate = useNavigate();
   const fits = useLayoutEditorFitsWindow();
   return (
@@ -548,11 +366,16 @@ function OpenEditorAction(): ReactNode {
               source: "direct_ui",
               entry: "pointer",
               target: null,
-              navigate,
+              origin: {
+                kind: "settings",
+                area: props.area === "presets" ? null : props.area,
+              },
+              navigateToTabIntent: (intent) =>
+                activateTabIntent(navigate, intent, undefined),
             });
           }}
         >
-          Open the editor
+          Customize layout
         </Button>
       ) : (
         // The button's own height, so the line sits where the button would.
@@ -565,101 +388,7 @@ function OpenEditorAction(): ReactNode {
 }
 
 /**
- * The Tabs card's surface tier: where the strip sits, what a vertical strip
- * shows, then how its tabs fit.
- * Both close with a `SettingsRow` rule, which the Home row under them needs.
- */
-function TabsSurfaceRows(): ReactNode {
-  return (
-    <>
-      <TabStripPositionRow />
-      <SideStripViewRow />
-      <TaskTabLayoutRow />
-    </>
-  );
-}
-
-/**
- * The Sidebar card's surface tier: which side of the task canvas it takes.
- *
- * Wrapped so the row is its container's last child and drops its own rule:
- * the panel list under it already draws one on its top edge.
- */
-function SidebarSurfaceRows(): ReactNode {
-  return (
-    <div>
-      <SidebarSideRow />
-    </div>
-  );
-}
-
-/**
- * The named slot for the Status bar's SURFACE tier, holding the one row that
- * belongs to the surface rather than to a region on it.
- *
- * `mobileFooter` decides whether the strip exists at all on a narrow viewport
- * (L-51). Where the two readings live is a per-REGION pick (L-156), so it is
- * drawn on their own rows and not here; the slot stays because the tier does,
- * and the next surface-level row on this card belongs in it.
- */
-function StatusBarSurfaceRows(): ReactNode {
-  return <MobileFooterRow />;
-}
-
-/**
- * Whether the strip is drawn at all on a narrow viewport (L-51).
- *
- * Drawn only by this host, and only in the installed mobile app: every other
- * build draws the footer whenever `usageHost` says so, so the switch would
- * pick between two identical outcomes. It is also one of the three arrangement
- * fields that had no changed indication and no revert anywhere (P-6).
- */
-function MobileFooterRow(): ReactNode {
-  const availability = useSettingsAvailabilityContext();
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  if (!LAYOUT.definitions.mobileFooter.availableWhen(availability)) return null;
-  const changed = mobileFooterChanged(arrangement);
-  return (
-    <SettingsRow
-      row={LAYOUT.definitions.mobileFooter}
-      control={
-        <div className="flex items-center gap-1.5">
-          <Switch
-            checked={arrangement.mobileFooter}
-            onCheckedChange={(checked) => {
-              writeArrangement({ ...arrangement, mobileFooter: checked });
-            }}
-            aria-label={LAYOUT.definitions.mobileFooter.label}
-          />
-          {changed ? <RevertMobileFooter /> : null}
-        </div>
-      }
-    />
-  );
-}
-
-function RevertMobileFooter(): ReactNode {
-  const arrangement = useLayoutStore((state) => state.arrangement);
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      aria-label="Revert the small-screen status bar"
-      onClick={() => {
-        writeArrangement({
-          ...arrangement,
-          mobileFooter: DEFAULT_ARRANGEMENT.mobileFooter,
-        });
-      }}
-    >
-      Revert
-    </Button>
-  );
-}
-
-/**
- * Landing on a region row (A.5 gap 1).
+ * Landing on a region row (A.5 gap 1), or on an area.
  *
  * Below the editor's width threshold the door redirects here instead of
  * opening a canvas, and until now it discarded the region the user had asked
@@ -697,21 +426,28 @@ function useLayoutRegionLanding(input: {
 }): void {
   const { paneRef, tab, setTab, openRows, setOpenRows } = input;
   const pending = useSyncExternalStore(
-    subscribePendingLayoutRegion,
-    readPendingLayoutRegion,
-    readPendingLayoutRegion,
+    subscribePendingLayoutLanding,
+    readPendingLayoutLanding,
+    readPendingLayoutLanding,
   );
 
   useEffect(() => {
     if (pending === null) return;
-    const regionId = pending.regionId;
+    // An area landing (the editor's Done, back to where it was opened from)
+    // is only the pick.
+    if (pending.target.kind === "area") {
+      takePendingLayoutLanding();
+      setTab(pending.target.area ?? "presets");
+      return;
+    }
+    const regionId = pending.target.regionId;
     const surface = LAYOUT_REGIONS[regionId].surface;
     const elsewhere = tab !== surface;
     const closed = !openRows.includes(regionId);
     if (elsewhere) setTab(surface);
     if (closed) setOpenRows((current) => [...current, regionId]);
     if (elsewhere || closed) return;
-    takePendingLayoutRegion();
+    takePendingLayoutLanding();
     const row = paneRef.current?.querySelector(
       layoutRegionRowSelector(regionId),
     );
@@ -731,6 +467,3 @@ function useLayoutRegionLanding(input: {
 /** The same mark every settings-search result leaves (`settings-search.css`). */
 const LANDING_FLASH_ATTRIBUTE = "data-settings-anchor-flash";
 const LANDING_FLASH_MS = 1800;
-
-/** No canvas to preview onto, and no index row to walk to. */
-function noop(): void {}

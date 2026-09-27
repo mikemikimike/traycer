@@ -89,14 +89,17 @@
    transition, because an app whose text reflows over 220ms is the thing P2
    forbids. What animates is the panel arriving over its own slot.
 
-   320px is the plan's one frozen inspector width: this is an instrument
+   380px is the plan's one frozen inspector width: this is an instrument
    panel like DevTools, and a fluid width would change the measured width of
-   the specimen stage, which is the thing the user is judging.
+   the specimen stage, which is the thing the user is judging. 380 is what
+   one line needs: the longest label ("Background tasks") beside the widest
+   member control (Full row | Chip | Hidden) with the grip, icon and chevron
+   columns, measured in the fixture; at 320 those labels kept 46px of 111.
    --------------------------------------------------------------- */
 
 [data-layout-inspector] {
   display: flex;
-  width: 320px;
+  width: 380px;
   max-width: 100%;
   min-height: 0;
   flex: none;
@@ -292,7 +295,7 @@
 }
 
 /* The prototype fills the group with `height: 100%` alone, which squashes a
-   full-width bitmap into a 320px-narrower box and visibly compresses the app's
+   full-width bitmap into a 380px-narrower box and visibly compresses the app's
    own text - the one thing P2 forbids. `cover` with equal heights scales by
    1 and crops instead, so every glyph keeps its size and the right edge slides
    under the arriving inspector (C-14). */
@@ -487,16 +490,16 @@
 
 /* A focused row, written HERE for the same reason the lift above is: this file
    owns the row's states, and the alternative was one arbitrary variant chained
-   five times on a single `className` - `has-[[role=button]:focus-visible]:` in
+   five times on a single `className` - `has-[[data-row-grab]:focus-visible]:` in
    front of every declaration, a shape that appears nowhere else in this app
    (R3-18). The indicator belongs to the ROW rather than to the grab inside it,
    because the row is what the keyboard operates.
 
    INSET, because the settings card clips its content
    (`settings-group.tsx`'s `overflow-clip`) and an outset ring on the first or
-   last row was sliced off along the card's edge. At the dock's 320px an inset
+   last row was sliced off along the card's edge. At the dock's 380px an inset
    3px band still reads. */
-[data-sortable-id]:has([role="button"]:focus-visible) {
+[data-sortable-id]:has([data-row-grab]:focus-visible) {
   z-index: 10;
   border-radius: var(--radius-lg);
   box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
@@ -551,13 +554,41 @@
   anchor-name: --layout-region;
 }
 
-[data-layout-editing="1"] [data-layout-region][data-layout-anchor~="hover"] {
+[data-layout-editing="1"] [data-layout-region][data-layout-anchor~="hover"],
+[data-layout-editing="1"] [data-layout-cue][data-layout-anchor~="hover"] {
   anchor-name: --layout-hover-region;
 }
 
 [data-layout-editing="1"]
   [data-layout-region][data-layout-anchor~="hover"][data-layout-anchor~="selected"] {
   anchor-name: --layout-region, --layout-hover-region;
+}
+
+/* The sample composer's Model chip also anchors the sample picker
+   (`sample-model-picker.tsx`), in every state the editor's own names can be
+   in. `anchor-name` is one list, so each state spells all of its names. */
+[data-layout-editing="1"]
+  [data-sample-model-anchor]
+  [data-layout-region="model"] {
+  anchor-name: --sample-model-chip;
+}
+
+[data-layout-editing="1"]
+  [data-sample-model-anchor]
+  [data-layout-region="model"][data-layout-anchor~="selected"] {
+  anchor-name: --sample-model-chip, --layout-region;
+}
+
+[data-layout-editing="1"]
+  [data-sample-model-anchor]
+  [data-layout-region="model"][data-layout-anchor~="hover"] {
+  anchor-name: --sample-model-chip, --layout-hover-region;
+}
+
+[data-layout-editing="1"]
+  [data-sample-model-anchor]
+  [data-layout-region="model"][data-layout-anchor~="hover"][data-layout-anchor~="selected"] {
+  anchor-name: --sample-model-chip, --layout-region, --layout-hover-region;
 }
 
 /* ---------------------------------------------------------------

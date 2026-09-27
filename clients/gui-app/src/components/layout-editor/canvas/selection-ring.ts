@@ -23,7 +23,7 @@ import { prefersReducedMotion } from "@/lib/layout/editor-motion";
  * LIST - a `ResizeObserver` on the node, window `scroll` and `resize`, a preset
  * preview, a layout-store write - and the owner found the hole in that list
  * live: switching the inspector's dock side writes the EDITOR store and moves
- * the app column 320px sideways without resizing anything, so none of the four
+ * the app column 380px sideways without resizing anything, so none of the four
  * fired and the ring stayed at its old viewport coordinates, drawn around the
  * inspector's "Discard changes".
  *

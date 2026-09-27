@@ -20,7 +20,7 @@ import {
  */
 
 /** Section 6's frozen float geometry. */
-export const FLOAT_DOCK_WIDTH = 320;
+export const FLOAT_DOCK_WIDTH = 380;
 const FLOAT_DOCK_MAX_HEIGHT = 560;
 const FLOAT_DOCK_VIEWPORT_MARGIN = 92;
 /** How close to a side edge a release has to land to dock there. */

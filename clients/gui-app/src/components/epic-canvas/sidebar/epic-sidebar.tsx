@@ -23,9 +23,14 @@ import {
   getLeftPanelBodyDropId,
   getPaneScopedDndId,
   getSidebarReparentPanelDropId,
-  type EpicCanvasDropPreview,
+  LEFT_PANEL_RAIL_ITEM_DND_TYPE,
+  railDragCarry,
   type EpicCanvasDropTargetData,
 } from "@/components/epic-canvas/dnd/dnd";
+import {
+  railStackJoin,
+  type RailStackJoin,
+} from "@/lib/layout/layout-arrangement";
 import {
   useEpicDndStore,
   useSidebarReparentRootActive,
@@ -104,7 +109,6 @@ import { CommentsPanelSkeleton } from "@/components/epic-canvas/skeletons/commen
 import { FileTreePanelSkeleton } from "@/components/epic-canvas/skeletons/file-tree-panel-skeleton";
 import { TerminalsPanelSkeleton } from "@/components/epic-canvas/skeletons/terminals-panel-skeleton";
 import { CommentSidebarPanel } from "@/components/comments";
-import { DropLine } from "@/components/ui/drop-line";
 import { Sidebar } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -621,14 +625,14 @@ function getLeftPanelDefinition(
 /**
  * What the sidebar body draws: the active panel, and the panels drawn with it.
  *
- * One panel where it stands alone in the rail, and two where the rail joins it
- * to its neighbour with a stack link (L-166) - top and bottom, sharing the
- * column. Which of the two is ACTIVE still decides the highlight, the focus
- * and what `data-left-panel-id` says; both are drawn either way.
+ * One panel where it stands alone in the rail, and every member where the rail
+ * stacks it (L-166, L-181) - top to bottom, sharing the column. Which member
+ * is ACTIVE still decides the highlight, the focus and what
+ * `data-left-panel-id` says; all are drawn either way.
  *
  * Resolved through the same helpers the rail draws with, so an active panel
- * the user has hidden leaves the two agreeing, and a hidden partner leaves the
- * survivor standing alone in the body exactly as it stands alone on the rail.
+ * the user has hidden leaves the two agreeing, and a hidden member leaves the
+ * body exactly as it leaves the rail's stack icon.
  */
 interface DisplayedPanels {
   readonly active: LeftPanelDefinition;
@@ -734,7 +738,6 @@ export function EpicLeftPanelHost(props: EpicLeftPanelHostProps) {
         <LeftPanelBody
           epicId={epicId}
           tabId={tabId}
-          activePanelId={displayed.active.id}
           panels={displayed.panels}
         />
       </LinkTargetProvider>
@@ -795,12 +798,7 @@ export function EpicLeftPanelLoadingHost(props: EpicLeftPanelHostProps) {
       data-left-panel-id={displayed.active.id}
       data-session-ready="false"
     >
-      <LeftPanelBody
-        epicId={epicId}
-        tabId={tabId}
-        activePanelId={displayed.active.id}
-        panels={displayed.panels}
-      />
+      <LeftPanelBody epicId={epicId} tabId={tabId} panels={displayed.panels} />
     </Sidebar>
   );
 }
@@ -815,99 +813,49 @@ function PanelBodyDropRegion(props: { readonly children: ReactNode }) {
   );
 }
 
-type PanelSectionBoundaryEdge = "top" | "bottom";
-
-function PanelSectionBoundaryLine(props: {
-  readonly edge: PanelSectionBoundaryEdge;
-}) {
-  return (
-    <div
-      aria-hidden
-      data-edge={props.edge}
-      className={cn(
-        "pointer-events-none absolute left-7 right-7 z-20",
-        props.edge === "top" ? "top-0" : "bottom-0",
-      )}
-    >
-      <DropLine
-        orientation="horizontal"
-        glow
-        className="w-full"
-        testId="epic-left-panel-section-drop-preview"
-      />
-    </div>
-  );
-}
-
-function getSectionBoundaryEdge(
-  panelId: LeftPanelId,
-  dropPreview: EpicCanvasDropPreview,
-): PanelSectionBoundaryEdge | null {
-  if (dropPreview?.kind !== "left-panel-section") return null;
-  if (dropPreview.panelId !== panelId) return null;
-  return dropPreview.position === "before" ? "top" : "bottom";
-}
-
 /**
  * The sidebar body: the panels the rail says are drawn, and the drop target
  * around them.
  *
- * One section where the active panel stands alone, and two - top and bottom,
- * with a resize handle between them - where the rail joins it to its
- * neighbour (L-166).
+ * One section where the displayed panel stands alone, and one per member,
+ * with a resize handle between each two, where the rail stacks it (L-166,
+ * L-181).
  *
- * One droppable for the whole body, and the SECTION under the pointer is what
- * the drop is resolved against (L-170). The droppable's id still names the
- * active panel, because it identifies the target rather than describing the
- * aim; the preview reads the sections out of this element and picks the one
- * the pointer is actually in. Naming the active panel for both was fine while
- * the body drew one section, and silently wrong the moment it drew two: a drop
- * aimed at the lower half resolved against the upper panel, drew its boundary
- * line somewhere else and committed a placement that broke the pair.
+ * The whole body is ONE drop target, and it means INTO this stack (L-182):
+ * dropping a rail icon anywhere on the open panel joins the stack exactly as
+ * a drop on the middle of its rail icon does. So the droppable names the
+ * stack's top panel, the icon that stands for it, and the preview and commit
+ * are the rail's own. The frame draws the same answer the icon does - the
+ * join, or the refusal for a stack that would pass the cap - and a drop that
+ * would do nothing (a member onto its own stack) draws nothing.
  */
-function LeftPanelBody(props: {
+export function LeftPanelBody(props: {
   readonly epicId: string;
   readonly tabId: string;
-  readonly activePanelId: LeftPanelId;
   readonly panels: ReadonlyArray<LeftPanelDefinition>;
 }) {
-  const { epicId, tabId, activePanelId, panels } = props;
-  const bodyDropId = getLeftPanelBodyDropId(epicId, activePanelId);
+  const { epicId, tabId, panels } = props;
+  const top = panels[0].id;
   const bodyDropData = useMemo<EpicCanvasDropTargetData>(
     () => ({
       kind: "left-panel-body",
       viewTabId: tabId,
-      panelId: activePanelId,
+      panelId: top,
     }),
-    [activePanelId, tabId],
+    [top, tabId],
   );
   const { setNodeRef: bodyDropRef } = useDroppable({
-    id: getPaneScopedDndId(tabId, bodyDropId),
+    id: getPaneScopedDndId(tabId, getLeftPanelBodyDropId(epicId, top)),
     data: bodyDropData,
   });
-  // Narrow selector: only a left-panel-section preview tick re-renders this
-  // body; canvas strip/body preview ticks never reach it.
-  const sectionDropPreview = useEpicDndStore((s) =>
-    s.dropPreview?.kind === "left-panel-section" &&
-    s.dropPreview.viewTabId === tabId &&
-    s.activeSource?.kind === "left-panel-rail-item" &&
-    s.activeSource.viewTabId === tabId
-      ? s.dropPreview
-      : null,
-  );
+  const dropCue = useLeftPanelBodyDropCue(tabId, top);
   return (
     <div
       ref={bodyDropRef}
-      data-dnd-droppable-id={getPaneScopedDndId(tabId, bodyDropId)}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       {panels.length >= 2 ? (
-        <StackedPanelSections
-          epicId={epicId}
-          tabId={tabId}
-          panels={panels}
-          dropPreview={sectionDropPreview}
-        />
+        <StackedPanelSections epicId={epicId} tabId={tabId} panels={panels} />
       ) : (
         <LeftPanelSection
           epicId={epicId}
@@ -918,9 +866,17 @@ function LeftPanelBody(props: {
           // is inert rather than obeyed (L-157, R5R-01).
           collapsible={false}
           collapsed={false}
-          boundaryEdge={getSectionBoundaryEdge(
-            panels[0].id,
-            sectionDropPreview,
+        />
+      )}
+      {dropCue === null ? null : (
+        <div
+          aria-hidden
+          data-body-drop-cue={dropCue}
+          className={cn(
+            "pointer-events-none absolute inset-0 z-20 ring-2 ring-inset",
+            dropCue === "join"
+              ? "bg-primary/5 ring-primary"
+              : "bg-destructive/5 ring-destructive",
           )}
         />
       )}
@@ -929,20 +885,47 @@ function LeftPanelBody(props: {
 }
 
 /**
- * The split a stack draws in the body: two sections and the handle between
- * them, on the weights the user last dragged the handle to (L-166).
+ * What a drop on this body would do right now, from the same answer the rail
+ * draws on the stack's icon (L-182): the preview is the stack's middle-band
+ * join, so `railStackJoin` decides between the join cue and the refusal.
+ * Re-renders only when a rail drag in this tab aims at this stack.
+ */
+function useLeftPanelBodyDropCue(
+  tabId: string,
+  top: LeftPanelId,
+): Exclude<RailStackJoin, "same"> | null {
+  const rail = useLayoutRail();
+  const source = useEpicDndStore((s) =>
+    s.dropPreview?.kind === "left-panel-rail" &&
+    s.dropPreview.position === "combine" &&
+    s.dropPreview.panelId === top &&
+    s.dropPreview.viewTabId === tabId &&
+    s.activeSource?.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE &&
+    s.activeSource.viewTabId === tabId
+      ? s.activeSource
+      : null,
+  );
+  if (source === null) return null;
+  const join = railStackJoin(rail, source.panelId, top, railDragCarry(source));
+  return join === "same" ? null : join;
+}
+
+/**
+ * The split a stack draws in the body: one section per member and a handle
+ * between each two, on the weights the user last dragged them to (L-166,
+ * L-181).
  *
  * The stored weights are an arbitrary-sum unit - the shape the shipped build
  * wrote, kept so an upgrading user's split comes back - and the resize engine
  * works on fractions, so they are normalised live: a handle drag mutates DOM
- * only, then commits fractions which map back to weights preserving the pair's
- * current weight sum.
+ * only, then commits fractions which map back to weights preserving the
+ * stack's current weight sum.
  *
- * A COLLAPSED section hands its space to its partner rather than leaving a gap:
- * it goes `flex-none` at its header height, the partner keeps `flex-1`, and no
- * handle is drawn, because there is nothing left to split. That is what makes
- * a per-section collapse safe here and unsafe on a lone panel - a lone panel
- * has no partner to hand its space to, which is the empty column R5R-01 found.
+ * A COLLAPSED section hands its space to the open members rather than leaving
+ * a gap: it goes `flex-none` at its header height, and the handles and
+ * weights are the open members' alone. That is what makes a per-section collapse
+ * safe here and unsafe on a lone panel - a lone panel has no other member to
+ * hand its space to, which is the empty column R5R-01 found.
  */
 const SECTION_SPLIT_GROUP_ID = "epic-left-panel-sections";
 /** Old `minSize="2rem"` floor, now enforced by the custom handle. */
@@ -952,9 +935,8 @@ function StackedPanelSections(props: {
   readonly epicId: string;
   readonly tabId: string;
   readonly panels: ReadonlyArray<LeftPanelDefinition>;
-  readonly dropPreview: EpicCanvasDropPreview;
 }) {
-  const { epicId, tabId, panels, dropPreview } = props;
+  const { epicId, tabId, panels } = props;
   const setPanelSectionWeights = useEpicLeftPanelStore(
     (s) => s.setPanelSectionWeights,
   );
@@ -964,66 +946,83 @@ function StackedPanelSections(props: {
   const collapsedById = useEpicLeftPanelStore(
     (s) => s.panelSectionCollapsedByPanelId,
   );
-  const { fractions, referenceSum } = useMemo(() => {
-    const fallback = 100 / panels.length;
-    const weights = panels.map((panel) => {
+  // At least one member is open, whatever the flags say (L-170, L-181). The
+  // flags are per panel and outlive the stack: unstacking or hiding the one
+  // member that was open leaves a stack of members that were all collapsed,
+  // and drawing that as title rows over an empty column is the state the
+  // last-open rule exists to rule out. The top member opens in that case; its
+  // flag is left alone, so the rule costs nothing once another member opens.
+  const { collapsedFlags, expanded, fractions, referenceSum } = useMemo(() => {
+    const allCollapsed = panels.every(
+      (panel) => collapsedById[panel.id] === true,
+    );
+    const flags = panels.map(
+      (panel, index) =>
+        collapsedById[panel.id] === true && !(allCollapsed && index === 0),
+    );
+    const open = panels.filter((_panel, index) => !flags[index]);
+    const fallback = 100 / open.length;
+    const weights = open.map((panel) => {
       const stored = weightsByPanelId[panel.id];
       if (stored === undefined || stored <= 0) return fallback;
       return stored;
     });
     const sum = weights.reduce((acc, weight) => acc + weight, 0);
     return {
+      collapsedFlags: flags,
+      expanded: open,
       fractions: weights.map((weight) => weight / sum),
       referenceSum: sum,
     };
-  }, [panels, weightsByPanelId]);
+  }, [panels, collapsedById, weightsByPanelId]);
   const handleCommitSizes = useCallback(
     (_groupId: string, sizes: ReadonlyArray<number>) => {
       setPanelSectionWeights(
-        panels.map((panel, panelIndex) => ({
+        expanded.map((panel, panelIndex) => ({
           panelId: panel.id,
           weight: (sizes[panelIndex] ?? 0) * referenceSum,
         })),
       );
     },
-    [panels, referenceSum, setPanelSectionWeights],
+    [expanded, referenceSum, setPanelSectionWeights],
   );
   // Whether this member may be collapsed: never the last expanded one of the
-  // pair (L-170). A collapse hands its space to the PARTNER, so collapsing
-  // both would leave two title rows over an empty column - a promise the code
-  // makes and could not keep. A member that is already collapsed keeps its
-  // control, because that control is its Expand.
-  const collapsibleFor = (panel: LeftPanelDefinition): boolean =>
-    collapsedById[panel.id] === true ||
-    !panels.some(
-      (other) => other.id !== panel.id && collapsedById[other.id] === true,
+  // stack (L-170, L-181). A member that is collapsed keeps its control,
+  // because that control is its Expand.
+  const collapsibleFor = (collapsed: boolean): boolean =>
+    collapsed || expanded.length > 1;
+  // The open members split the column on their stored weights with a handle
+  // between each two; a collapsed member is its header alone, drawn inside
+  // the split child of the open member above it (or ahead of the split when
+  // it is above them all), so every handle sits between two split children
+  // and resizes only open members.
+  const leading: ReactNode[] = [];
+  const groups: { panel: LeftPanelDefinition; trailing: ReactNode[] }[] = [];
+  panels.forEach((panel, index) => {
+    const collapsed = collapsedFlags[index];
+    const section = (
+      <LeftPanelSection
+        key={panel.id}
+        epicId={epicId}
+        tabId={tabId}
+        panel={panel}
+        collapsible={collapsibleFor(collapsed)}
+        collapsed={collapsed}
+      />
     );
-  const anyCollapsed = panels.some((panel) => collapsedById[panel.id] === true);
-  if (anyCollapsed) {
-    return (
-      <>
-        {panels.map((panel) => (
-          <LeftPanelSection
-            key={panel.id}
-            epicId={epicId}
-            tabId={tabId}
-            panel={panel}
-            collapsible={collapsibleFor(panel)}
-            collapsed={collapsedById[panel.id] === true}
-            boundaryEdge={getSectionBoundaryEdge(panel.id, dropPreview)}
-          />
-        ))}
-      </>
-    );
-  }
+    if (!collapsed) groups.push({ panel, trailing: [section] });
+    else if (groups.length === 0) leading.push(section);
+    else groups[groups.length - 1].trailing.push(section);
+  });
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {panels.map((panel, panelIndex) => (
-        <Fragment key={panel.id}>
-          {panelIndex > 0 ? (
+      {leading}
+      {groups.map((group, groupIndex) => (
+        <Fragment key={group.panel.id}>
+          {groupIndex > 0 ? (
             <SplitResizeHandle
               groupId={SECTION_SPLIT_GROUP_ID}
-              index={panelIndex - 1}
+              index={groupIndex - 1}
               direction="vertical"
               sizes={fractions}
               minChildPx={SECTION_MIN_PX}
@@ -1035,21 +1034,12 @@ function StackedPanelSections(props: {
             data-split-child
             className="relative min-h-0 min-w-0"
             style={{
-              flexGrow: fractions[panelIndex],
+              flexGrow: fractions[groupIndex],
               flexBasis: 0,
               flexShrink: 1,
             }}
           >
-            <div className="flex h-full min-h-0 flex-col">
-              <LeftPanelSection
-                epicId={epicId}
-                tabId={tabId}
-                panel={panel}
-                collapsible
-                collapsed={false}
-                boundaryEdge={getSectionBoundaryEdge(panel.id, dropPreview)}
-              />
-            </div>
+            <div className="flex h-full min-h-0 flex-col">{group.trailing}</div>
           </div>
         </Fragment>
       ))}
@@ -1064,7 +1054,6 @@ function LeftPanelSection(props: {
   /** Whether this section offers a collapse control at all (L-157, L-170). */
   readonly collapsible: boolean;
   readonly collapsed: boolean;
-  readonly boundaryEdge: PanelSectionBoundaryEdge | null;
 }) {
   if (
     isSidebarBulkSelectionPanelId(props.panel.id) &&
@@ -1078,7 +1067,6 @@ function LeftPanelSection(props: {
           panel={props.panel}
           collapsible={props.collapsible}
           collapsed={props.collapsed}
-          boundaryEdge={props.boundaryEdge}
         />
         <SidebarBulkDeleteController
           epicId={props.epicId}
@@ -1094,7 +1082,6 @@ function LeftPanelSection(props: {
       panel={props.panel}
       collapsible={props.collapsible}
       collapsed={props.collapsed}
-      boundaryEdge={props.boundaryEdge}
     />
   );
 }
@@ -1105,13 +1092,12 @@ function LeftPanelSectionContent(props: {
   readonly panel: LeftPanelDefinition;
   readonly collapsible: boolean;
   readonly collapsed: boolean;
-  readonly boundaryEdge: PanelSectionBoundaryEdge | null;
 }) {
   const Body = props.panel.Body;
   // Both facts are decided by the BODY, which is the only thing that can see
-  // the pair: whether this section may be collapsed at all, and whether it is.
-  // A lone panel is never either (L-157), and the last expanded member of a
-  // pair is never collapsible (L-170).
+  // the stack: whether this section may be collapsed at all, and whether it
+  // is. A lone panel is never either (L-157), and the last expanded member of
+  // a stack is never collapsible (L-170).
   const collapsed = props.collapsed;
   return (
     <section
@@ -1134,9 +1120,6 @@ function LeftPanelSectionContent(props: {
           <Body epicId={props.epicId} tabId={props.tabId} />
         </PanelBodyDropRegion>
       )}
-      {props.boundaryEdge !== null ? (
-        <PanelSectionBoundaryLine edge={props.boundaryEdge} />
-      ) : null}
     </section>
   );
 }

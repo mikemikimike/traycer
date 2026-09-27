@@ -59,7 +59,10 @@ import {
 } from "@/components/epic-canvas/surface-host/hosted-tile-dom";
 import { evictChatTabPersistenceForEpic } from "@/stores/chats/chat-tab-persistence-eviction";
 import { getOrCreateActivityGroupOpenStore } from "@/stores/chats/activity-group-open-store-core";
-import type { ActivityGroupOpenState } from "@/stores/chats/activity-group-open-store-context";
+import type {
+  ActivityGroupOpenChoices,
+  ActivityGroupOpenState,
+} from "@/stores/chats/activity-group-open-store-context";
 import { getOrCreateA2AOpenStore } from "@/stores/chats/a2a-open-store-context";
 import { useToolOpenStore } from "@/stores/chats/tool-open-store";
 import { useSubagentOpenStore } from "@/stores/chats/subagent-open-store";
@@ -261,10 +264,10 @@ vi.mock(
     return {
       ...actual,
       createActivityGroupOpenStore: (
-        initialOpenIds: ReadonlySet<string> | null,
+        initialChoices: ActivityGroupOpenChoices | null,
       ) =>
         wrapWithSetOpenTracking(
-          actual.createActivityGroupOpenStore(initialOpenIds),
+          actual.createActivityGroupOpenStore(initialChoices),
         ),
       getOrCreateActivityGroupOpenStore: (
         identity: ChatTabPersistenceIdentity,

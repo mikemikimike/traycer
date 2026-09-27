@@ -6,6 +6,8 @@ import {
 import { useGlobalResourceProjection } from "@/stores/resources/resources-registry";
 import { useRegionValues } from "@/lib/layout-overrides";
 import { shownResourceMetrics } from "@/lib/layout/layout-values";
+import { useSampleScene } from "@/components/sample-workspace/sample-scene-context";
+import { SAMPLE_RESOURCE_VALUES } from "@/components/sample-workspace/sample-workspace-scene";
 
 /**
  * The resource segment's readings, as a hook two surfaces can ask for.
@@ -39,7 +41,8 @@ export function useStatusBarResourceMetricViews(input: {
   const projection = useGlobalResourceProjection();
   // Answered against this subtree's stream binding.
   const globalStreamUnsupported = useGlobalResourcesUnsupported(input.hostId);
-  return statusBarResourceMetricViews({
+  const sample = useSampleScene();
+  const views = statusBarResourceMetricViews({
     metrics,
     projection,
     watchedHostId: input.hostId,
@@ -47,4 +50,11 @@ export function useStatusBarResourceMetricViews(input: {
     globalStreamUnsupported,
     hostLabel: input.hostLabel,
   });
+  // The sample shell prints sample readings, never the host's own (C12).
+  if (!sample) return views;
+  return views.map((view) => ({
+    ...view,
+    value: SAMPLE_RESOURCE_VALUES[view.metric],
+    unavailableReason: null,
+  }));
 }

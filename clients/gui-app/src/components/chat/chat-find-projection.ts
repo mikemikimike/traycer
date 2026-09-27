@@ -104,12 +104,15 @@ export function buildChatFindRows(
    * wrong disclosure - matches counted but impossible to paint or navigate to.
    */
   promotedToolBlockIds: ReadonlySet<string>,
+  /** Layout > Chat > Thinking is Hidden; the renderer draws no reasoning. */
+  hideReasoning: boolean,
 ): ReadonlyArray<ChatFindRow> {
   return messages.map((message) => {
     const units = chatFindUnitsForMessage(
       message,
       tileInstanceId,
       promotedToolBlockIds,
+      hideReasoning,
     );
     return {
       messageId: message.id,
@@ -164,12 +167,14 @@ function chatFindUnitsForMessage(
   message: ChatMessageModel,
   tileInstanceId: string,
   promotedToolBlockIds: ReadonlySet<string>,
+  hideReasoning: boolean,
 ): ReadonlyArray<ChatFindUnit> {
   if (message.role === "assistant") {
     const turnState = message.runState === null ? "complete" : "active";
     return buildChatActivityTimeline(message.segments, {
       turnState,
       promotedToolBlockIds,
+      hideReasoning,
     }).flatMap((item) => timelineItemSearchUnits(item, tileInstanceId));
   }
 

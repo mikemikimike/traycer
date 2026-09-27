@@ -43,6 +43,7 @@ function beginSampleSession() {
     entry: "pointer",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
   return useLayoutEditorStore.getState().session;
 }

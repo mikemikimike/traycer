@@ -43,6 +43,7 @@ describe("setSidebarSide", () => {
       entry: "pointer",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
 
     setSidebarSide("right");

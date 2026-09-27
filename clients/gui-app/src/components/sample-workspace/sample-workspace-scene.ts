@@ -12,8 +12,72 @@ import type { AccumulatedChangeRow } from "@/lib/chat/accumulated-change-rows";
 import type { ChatRestoreContextValue } from "@/components/chat/chat-restore-context-core";
 import type { PinnedTodoSnapshot } from "@/components/chat/chat-pinned-todos";
 import type { AgentRow } from "@/hooks/agent/use-agent-stop-controls";
+import type { RateLimitWindowKind } from "@/lib/rate-limits/rate-limit-window-catalog";
+import type { ResourceMetric } from "@/lib/layout/layout-values";
+import type { PrLightItem } from "@traycer/protocol/host/pr-schemas";
+import type { CommentThreadWire } from "@traycer/protocol/host/epic/unary-schemas";
+import type { MessageSegment } from "@/stores/composer/chat-store";
 
-export const SAMPLE_USAGE_USED_PERCENT = 57;
+/**
+ * One sample data set for the canvas and every picture of it (C12): the
+ * sample status bar, the depictions and the Style examples all read these, so
+ * the form and the canvas can never print two different readings.
+ */
+export interface SampleUsageReading {
+  readonly durationMinutes: number;
+  readonly usedPercent: number;
+  /** How far off the reset is, so the countdown differs per window too. */
+  readonly resetsInMinutes: number;
+  readonly kind: RateLimitWindowKind;
+}
+
+/**
+ * The three readings a sample usage segment is taken from, by rotation.
+ *
+ * One short window part-way through, one long one further along and one day
+ * window barely started: three different percentages, durations and
+ * countdowns, so no two neighbouring segments print the same string. All
+ * three stay under `classifyProviderRateLimitWindow`'s warning thresholds - a
+ * picture of the grammar is not a picture of a person about to run out.
+ */
+const SAMPLE_USAGE_READINGS: ReadonlyArray<SampleUsageReading> = [
+  {
+    durationMinutes: 5 * 60,
+    usedPercent: 35,
+    resetsInMinutes: 59,
+    kind: "session",
+  },
+  {
+    durationMinutes: 7 * 24 * 60,
+    usedPercent: 78,
+    resetsInMinutes: 2 * 24 * 60 + 12 * 60,
+    kind: "weekly",
+  },
+  {
+    durationMinutes: 24 * 60,
+    usedPercent: 12,
+    resetsInMinutes: 6 * 60 + 20,
+    kind: "period",
+  },
+];
+
+export function sampleUsageReading(index: number): SampleUsageReading {
+  return SAMPLE_USAGE_READINGS[index % SAMPLE_USAGE_READINGS.length];
+}
+
+export const SAMPLE_USAGE_USED_PERCENT = SAMPLE_USAGE_READINGS[0].usedPercent;
+
+/** The name a sample usage segment prints where a real account's would go. */
+export const SAMPLE_ACCOUNT_LABEL = "Sample account";
+
+/** The resource segment's sample readings, in the strip's own wording. */
+export const SAMPLE_RESOURCE_VALUES: Readonly<Record<ResourceMetric, string>> =
+  {
+    cpu: "12%",
+    memory: "1.2 GB",
+    processes: "6",
+    ramShare: "8%",
+  };
 export const SAMPLE_CHANGED_FILE = {
   path: "src/task-list.tsx",
   additions: 12,
@@ -257,22 +321,217 @@ export const SAMPLE_TOOLBAR_VALUES: ComposerToolbarValues = {
   serviceTier: "",
 };
 export const SAMPLE_TILE_ID = "sample-workspace";
+/** Context left in the sample chat: room to spare, so nothing reads as a warning. */
+export const SAMPLE_CONTEXT_PERCENT_LEFT = 36;
 export const CONTEXT_USAGE_PREVIEW_SAMPLE: TokenUsage = {
   inputTokens: 56,
   outputTokens: 3,
-  totalTokens: 946_959,
-  contextTokens: 946_956,
-  cacheReadInputTokens: 945_800,
+  totalTokens: 640_000,
+  contextTokens: 640_000,
+  cacheReadInputTokens: 638_841,
   cacheCreationInputTokens: 1_100,
   contextWindow: 1_000_000,
 };
+/** When the sample's pull requests and comments are stamped from. */
+const SAMPLE_EPOCH = Date.now();
+const MINUTE_MS = 60_000;
+
+/** The task's name, as the sidebar's task header names it. */
+export const SAMPLE_TASK_TITLE = "Sample task";
+
+/**
+ * The Agents panel's rows: how long ago each was last active, and what each is
+ * using. The three add up to the status bar's sample resource reading.
+ */
+export const SAMPLE_SIDEBAR_AGENTS: ReadonlyArray<{
+  readonly id: string;
+  readonly title: string;
+  readonly idleMinutes: number;
+  readonly resources: {
+    readonly cpuPercent: number;
+    readonly rssBytes: number;
+    readonly processCount: number;
+  };
+}> = [
+  {
+    id: "sample-sidebar-agent-1",
+    title: "Plan the migration",
+    idleMinutes: 0,
+    resources: { cpuPercent: 7, rssBytes: 640 * 2 ** 20, processCount: 3 },
+  },
+  {
+    id: "sample-sidebar-agent-2",
+    title: "Write the tests",
+    idleMinutes: 10,
+    resources: { cpuPercent: 4, rssBytes: 384 * 2 ** 20, processCount: 2 },
+  },
+  {
+    id: "sample-sidebar-agent-3",
+    title: "Rebuild the index",
+    idleMinutes: 18,
+    resources: { cpuPercent: 1, rssBytes: 205 * 2 ** 20, processCount: 1 },
+  },
+];
+
+/** The Artifacts panel's rows; the first is the open, commented artifact. */
+export const SAMPLE_SIDEBAR_ARTIFACTS: ReadonlyArray<{
+  readonly id: string;
+  readonly name: string;
+}> = [
+  { id: "sample-sidebar-artifact-1", name: "Onboarding flow spec" },
+  { id: "sample-sidebar-artifact-2", name: "Release notes draft" },
+];
+
+/** The artifact open in the sample task, which the comment threads are on. */
+export const SAMPLE_OPEN_ARTIFACT_ID = SAMPLE_SIDEBAR_ARTIFACTS[0].id;
+
+const SAMPLE_REPO = { owner: "sample", repo: "task-app" } as const;
+
+function samplePullRequest(
+  item: Pick<
+    PrLightItem,
+    | "state"
+    | "title"
+    | "headRefName"
+    | "additions"
+    | "deletions"
+    | "checksRollup"
+    | "reviewDecision"
+    | "commentCount"
+  > & { readonly prNumber: number; readonly updatedMinutesAgo: number },
+): PrLightItem {
+  const updatedAt = SAMPLE_EPOCH - item.updatedMinutesAgo * MINUTE_MS;
+  return {
+    githubHost: "github.com",
+    base: { ...SAMPLE_REPO, prNumber: item.prNumber },
+    // No URL: a sample PR has nowhere to open.
+    prUrl: null,
+    state: item.state,
+    liveness: "live",
+    observedAt: updatedAt,
+    isDraft: false,
+    title: item.title,
+    baseRefName: "main",
+    headRefName: item.headRefName,
+    additions: item.additions,
+    deletions: item.deletions,
+    checksRollup: item.checksRollup,
+    reviewDecision: item.reviewDecision,
+    commentCount: item.commentCount,
+    updatedAt,
+    repoIdentifier: SAMPLE_REPO,
+    repoRole: "superproject",
+    linkGroupKey: null,
+    owners: [],
+  };
+}
+
+/** The Pull requests panel's rows: the task's open change and a merged one. */
+export const SAMPLE_PULL_REQUESTS: ReadonlyArray<PrLightItem> = [
+  samplePullRequest({
+    prNumber: 42,
+    state: "open",
+    title: "Group related tasks in the list",
+    headRefName: "sample/group-tasks",
+    additions: 128,
+    deletions: 34,
+    checksRollup: { success: 4, failure: 0, pending: 1, total: 5 },
+    reviewDecision: "review_required",
+    commentCount: 2,
+    updatedMinutesAgo: 12,
+  }),
+  samplePullRequest({
+    prNumber: 41,
+    state: "merged",
+    title: "Add an empty state to the task list",
+    headRefName: "sample/empty-state",
+    additions: 46,
+    deletions: 8,
+    checksRollup: { success: 5, failure: 0, pending: 0, total: 5 },
+    reviewDecision: "approved",
+    commentCount: 1,
+    updatedMinutesAgo: 3 * 60,
+  }),
+];
+
+function sampleCommentThread(thread: {
+  readonly threadId: string;
+  readonly quotedText: string;
+  readonly minutesAgo: number;
+  readonly comments: ReadonlyArray<{
+    readonly handle: string;
+    readonly text: string;
+  }>;
+}): CommentThreadWire {
+  const createdAt = SAMPLE_EPOCH - thread.minutesAgo * MINUTE_MS;
+  const first = thread.comments[0];
+  return {
+    threadId: thread.threadId,
+    resolved: false,
+    createdAt,
+    data: {
+      createdByUserId: `sample-user-${first.handle}`,
+      createdByHandle: first.handle,
+      quotedText: thread.quotedText,
+    },
+    comments: thread.comments.map((comment, index) => ({
+      commentId: `${thread.threadId}-${index}`,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: comment.text }],
+          },
+        ],
+      },
+      createdAt: createdAt + index * MINUTE_MS,
+      updatedAt: null,
+      author: {
+        userId: `sample-user-${comment.handle}`,
+        fallbackHandle: comment.handle,
+      },
+    })),
+  };
+}
+
+/** The Comments panel's threads, on the open artifact. */
+export const SAMPLE_COMMENT_THREADS: ReadonlyArray<CommentThreadWire> = [
+  sampleCommentThread({
+    threadId: "sample-thread-1",
+    quotedText: "Completed tasks move to the bottom of the list",
+    minutesAgo: 40,
+    comments: [
+      {
+        handle: "alex",
+        text: "Should they stay in place until the list is refreshed?",
+      },
+      { handle: "sam", text: "Good call, moving them right away is jarring." },
+    ],
+  }),
+  sampleCommentThread({
+    threadId: "sample-thread-2",
+    quotedText: "Show the empty state when no tasks match",
+    minutesAgo: 25,
+    comments: [
+      { handle: "sam", text: "Let's add a shortcut to clear the filter here." },
+    ],
+  }),
+];
+
+/**
+ * Whether the sample task has what each Auto panel waits for, read off the
+ * fixtures themselves, so a panel is present exactly when it has rows to
+ * show (C2, C3).
+ */
 export const SAMPLE_RAIL_PRESENCE: Omit<
   LeftPanelAvailabilityContext,
   "visibilityOverrideById"
 > = {
-  commentsPanelRevealed: false,
-  hasActiveCommentableArtifact: false,
-  hasPullRequests: false,
+  commentsPanelRevealed: SAMPLE_COMMENT_THREADS.length > 0,
+  // `SAMPLE_OPEN_ARTIFACT_ID` is always the open artifact.
+  hasActiveCommentableArtifact: true,
+  hasPullRequests: SAMPLE_PULL_REQUESTS.length > 0,
 };
 export const SAMPLE_TURNS = [
   {
@@ -316,6 +575,70 @@ export const SAMPLE_TURNS = [
       "The task list has clearer grouping, responsive spacing, a useful empty state and a predictable keyboard order. One file changed, and the background check is running. This conversation and its counts are sample content for configuring your layout.",
   },
 ];
+/**
+ * When each sample prompt was sent: today, a minute apart, ending at 10:42.
+ * Today so the stamp reads as a clock time the way a fresh chat's does.
+ */
+export function sampleSentAt(turnIndex: number): number {
+  const sent = new Date();
+  sent.setHours(10, 42 - (SAMPLE_TURNS.length - 1 - turnIndex), 0, 0);
+  return sent.getTime();
+}
+
+/** What a picture of a timestamp prints, matching the last sample prompt. */
+export const SAMPLE_MESSAGE_TIME_LABEL = "10:42 AM";
+
+/**
+ * The agent's work inside two sample turns, drawn through the real activity
+ * rows so Tool activity and Thinking each have a row on the canvas: a run of
+ * reasoning alone before one reply, and a run of commands before the last.
+ * The last two turns, because the conversation opens scrolled to its end.
+ */
+export const SAMPLE_TURN_ACTIVITY: Readonly<
+  Partial<Record<number, ReadonlyArray<MessageSegment>>>
+> = {
+  [SAMPLE_TURNS.length - 2]: [
+    {
+      id: "sample-reasoning",
+      kind: "reasoning",
+      markdown:
+        "The palette tokens already carry completion and focus in both themes, so nothing new is needed.",
+      isStreaming: false,
+      durationMs: 4000,
+    },
+  ],
+  [SAMPLE_TURNS.length - 1]: [
+    {
+      id: "sample-command-search",
+      kind: "command",
+      command: "rg --files src/components/tasks",
+      cwd: null,
+      exitCode: 0,
+      isStreaming: false,
+      endState: null,
+      progress: null,
+      startedAt: 0,
+      backgroundTask: false,
+      stopped: false,
+      parentId: null,
+    },
+    {
+      id: "sample-command-test",
+      kind: "command",
+      command: "bun run vitest run src/components/tasks",
+      cwd: null,
+      exitCode: 0,
+      isStreaming: false,
+      endState: null,
+      progress: null,
+      startedAt: 0,
+      backgroundTask: false,
+      stopped: false,
+      parentId: null,
+    },
+  ],
+};
+
 export const SAMPLE_MINIMAP_ITEMS: ReadonlyArray<ChatTurnMinimapItem> =
   SAMPLE_TURNS.map((turn, index) => ({
     key: `sample-turn-${index}`,

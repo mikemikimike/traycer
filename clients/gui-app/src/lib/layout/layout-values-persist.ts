@@ -6,7 +6,7 @@ import {
   type LayoutOverrides,
   type LayoutValues,
   type ModelValues,
-  type RailValues,
+  type AutoRailValues,
   type ResourceMonitorValues,
   type ShownValues,
   type SizedValues,
@@ -47,6 +47,10 @@ export function resolvePersistedOverrides(value: unknown): LayoutOverrides {
     resourceMonitor: resourceMonitorPatch(stored.resourceMonitor),
     minimap: shownPatch(stored.minimap),
     contextUsage: contextUsagePatch(stored.contextUsage),
+    // The same one-leaf `size` shape as Access, so the same resolver.
+    toolActivity: accessPatch(stored.toolActivity),
+    thinking: sizedPatch(stored.thinking),
+    timestamps: shownPatch(stored.timestamps),
     runningAgents: sizedPatch(stored.runningAgents),
     changedFiles: sizedPatch(stored.changedFiles),
     background: sizedPatch(stored.background),
@@ -60,10 +64,10 @@ export function resolvePersistedOverrides(value: unknown): LayoutOverrides {
     railBrowsers: railPatch(stored.railBrowsers),
     railArtifacts: railPatch(stored.railArtifacts),
     railGitDiff: railPatch(stored.railGitDiff),
-    railPullRequests: railPatch(stored.railPullRequests),
+    railPullRequests: autoRailPatch(stored.railPullRequests),
     railFileTree: railPatch(stored.railFileTree),
     railSharing: railPatch(stored.railSharing),
-    railComments: railPatch(stored.railComments),
+    railComments: autoRailPatch(stored.railComments),
   };
   // The table above states every region, so one the resolver found nothing
   // valid in is present and empty; dropping those is what keeps `Object.keys`
@@ -103,7 +107,16 @@ function sizedPatch(value: unknown): Partial<SizedValues> {
   };
 }
 
-function railPatch(value: unknown): Partial<RailValues> {
+/**
+ * An always-present rail panel. An earlier build stored `auto` for "follow the
+ * panel's rule", and that rule was "always", so it reads as `shown`.
+ */
+function railPatch(value: unknown): Partial<ShownValues> {
+  const stored: Record<string, unknown> = isRecord(value) ? value : {};
+  return stored.shown === "auto" ? { shown: "shown" } : shownPatch(value);
+}
+
+function autoRailPatch(value: unknown): Partial<AutoRailValues> {
   const stored: Record<string, unknown> = isRecord(value) ? value : {};
   return stored.shown === "auto" ||
     stored.shown === "shown" ||
@@ -189,6 +202,10 @@ function modelPatch(value: unknown): Partial<ModelValues> {
     stored.style === "bars" ||
     stored.style === "bars-text"
       ? { style: stored.style }
+      : {}),
+    ...(stored.reasoningControl === "slider" ||
+    stored.reasoningControl === "list"
+      ? { reasoningControl: stored.reasoningControl }
       : {}),
   };
 }

@@ -3,6 +3,7 @@ import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import {
   AUTOMATIC_LIMIT_SELECTION,
   BAR_REGION_IDS,
+  isAutomaticLimitSelection,
   DEFAULT_ARRANGEMENT,
   DEFAULT_DOCK_ORDER,
   DEFAULT_TOOLBAR_LEFT,
@@ -16,6 +17,8 @@ import {
   type StatusBarProviderLimits,
   type StatusBarProviderLimitSelection,
   type SideStripView,
+  type ReadingWidth,
+  type TaskTabLayout,
   type StatusBarShownProfiles,
   type TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
@@ -70,6 +73,7 @@ export function normalizeArrangement(
     toolbarLeft: keptOrder(arrangement.toolbarLeft, toolbar.left),
     toolbarRight: keptOrder(arrangement.toolbarRight, toolbar.right),
     rail,
+    providerLimits: withoutAutomaticLimits(arrangement.providerLimits),
     usageProviders: keptOrder(
       arrangement.usageProviders,
       mergeOrder(arrangement.usageProviders, USAGE_PROVIDER_IDS),
@@ -89,6 +93,21 @@ function keptOrder<Id extends string>(
   normalized: ReadonlyArray<Id>,
 ): ReadonlyArray<Id> {
   return sameFieldList(stored, normalized) ? stored : normalized;
+}
+
+/**
+ * The limits with every Automatic entry dropped, since Automatic IS the absent
+ * key: a stored default-equal entry would read as a change it is not. Kept as
+ * itself when there was none to drop.
+ */
+function withoutAutomaticLimits(
+  limits: StatusBarProviderLimits,
+): StatusBarProviderLimits {
+  const entries = Object.entries(limits);
+  const kept = entries.filter(
+    ([, selection]) => !isAutomaticLimitSelection(selection),
+  );
+  return kept.length === entries.length ? limits : Object.fromEntries(kept);
 }
 
 /** {@link keptOrder} for the rail, which is entries rather than ids. */
@@ -128,6 +147,8 @@ const ARRANGEMENT_FIELDS: ReadonlyArray<keyof LayoutArrangement> = [
   "tabStripPlacement",
   "sidebarSide",
   "sideStripView",
+  "taskTabLayout",
+  "readingWidth",
 ];
 
 /**
@@ -220,6 +241,14 @@ export function resolvePersistedArrangement(value: unknown): LayoutArrangement {
     sideStripView: persistedSideStripView(
       stored.sideStripView,
       DEFAULT_ARRANGEMENT.sideStripView,
+    ),
+    taskTabLayout: persistedTaskTabLayout(
+      stored.taskTabLayout,
+      DEFAULT_ARRANGEMENT.taskTabLayout,
+    ),
+    readingWidth: persistedReadingWidth(
+      stored.readingWidth,
+      DEFAULT_ARRANGEMENT.readingWidth,
     ),
   });
 }
@@ -436,6 +465,20 @@ function persistedSideStripView(
   return value === "layered" || value === "activity" ? value : fallback;
 }
 
+function persistedTaskTabLayout(
+  value: unknown,
+  fallback: TaskTabLayout,
+): TaskTabLayout {
+  return value === "scroll" || value === "shrink" ? value : fallback;
+}
+
+function persistedReadingWidth(
+  value: unknown,
+  fallback: ReadingWidth,
+): ReadingWidth {
+  return value === "comfortable" || value === "wide" ? value : fallback;
+}
+
 /** The remembered set, holding only ids this build has a reading for (L-160). */
 function persistedBarRegionIds(value: unknown): ReadonlyArray<BarRegionId> {
   if (!Array.isArray(value)) return DEFAULT_ARRANGEMENT.statusBarParked;
@@ -473,8 +516,8 @@ function readRailEntries(
     if (entry.kind === "divider") {
       return [{ kind: "divider", id: entry.id }];
     }
-    // A link's id is re-minted from its position by `normalizeRail`, so the
-    // stored one is read only to keep the entry in place (L-166).
+    // A stack's id names its members; `normalizeRail` keeps the ones that
+    // still stand side by side (L-166, L-181).
     if (entry.kind === "stack") {
       return [{ kind: "stack", id: entry.id }];
     }

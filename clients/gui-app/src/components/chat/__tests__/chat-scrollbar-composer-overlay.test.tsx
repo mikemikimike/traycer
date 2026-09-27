@@ -379,9 +379,10 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
     it("keeps full-width wrappers as edge lanes; centered children own bg-canvas, spacing, and the main 1px seal", () => {
       const source = sourceOf("components/chat/composer/chat-composer.tsx");
 
-      // Rate-limit banner: outer edge-lane only; centered owns paint + pt-4.
+      // Rate-limit banner: outer edge-lane only; centered owns paint + pt-4,
+      // width from the readingWidth token rather than a hardcoded max-w.
       expect(source).toMatch(
-        /topBannerKind === "rate-limit"[\s\S]*?className="pointer-events-none px-4"[\s\S]*?className="pointer-events-auto mx-auto w-full max-w-3xl bg-canvas pt-4"/,
+        /topBannerKind === "rate-limit"[\s\S]*?className="pointer-events-none px-4"[\s\S]*?"pointer-events-auto mx-auto w-full bg-canvas pt-4",\s*\n\s*readingWidth,/,
       );
       // Main composer: outer edge-lane only (no vertical padding / bg-canvas).
       expect(source).toMatch(
@@ -390,7 +391,7 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
       // Centered backplate: relative, paint, pb-4, pointer-free 1px seal with
       // after:content-[''] so the pseudo-element actually renders.
       expect(source).toContain(
-        `pointer-events-auto relative mx-auto w-full max-w-3xl bg-canvas pb-4 ${BOTTOM_SEAL_CLASSES}`,
+        `pointer-events-auto relative mx-auto w-full bg-canvas pb-4 ${BOTTOM_SEAL_CLASSES}`,
       );
       // Vertical top spacing stays on the centered child, not the outer.
       expect(source).toMatch(
@@ -468,8 +469,9 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
 
       expect(shellSource).toContain('className="pointer-events-none px-4"');
       expect(shellSource).toContain(
-        '"pointer-events-auto relative mx-auto w-full max-w-3xl bg-canvas"',
+        '"pointer-events-auto relative mx-auto w-full bg-canvas"',
       );
+      expect(shellSource).toMatch(/\breadingWidth,/);
       expect(shellSource).toMatch(
         /props\.topSpacing === "normal" \? "pt-4" : "pt-0"/,
       );
@@ -487,7 +489,7 @@ describe("chat scrollbar + lower composer overlay pointer isolation", () => {
       );
       // Seal must not be unconditional on the base class string.
       expect(shellSource).not.toMatch(
-        /"pointer-events-auto relative mx-auto w-full max-w-3xl bg-canvas[^"]*after:h-px/,
+        /"pointer-events-auto relative mx-auto w-full bg-canvas[^"]*after:h-px/,
       );
     });
   });

@@ -76,7 +76,7 @@ function renderScope() {
 
 afterEach(async () => {
   // The latch is module-level (R1-A2), keyed by the mocked `authority` this
-  // whole file shares — an unresolved `activate` from one test is still the
+  // whole file shares - an unresolved `activate` from one test is still the
   // authority's pending entry in the next one. Settle it before resetting, or
   // the next test's precondition ("nothing in flight") is false before it
   // even runs.

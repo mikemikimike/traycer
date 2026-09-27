@@ -1,6 +1,6 @@
 /**
  * D7 (overlay placement): the real `SideTabStrip` provides `ColumnEdgeContext`
- * with its own edge, and the strip's real Inbox drawer (`SideStripNavRows`,
+ * with its own edge, and the strip's real Notifications drawer (`SideStripNavRows`,
  * top block) and real `UserMenu` (foot's account row) must actually read it
  * through that boundary - a context wired at the wrong layer would still pass
  * a unit test on the hook alone. Everything else in the strip (rows, keybinding
@@ -127,9 +127,19 @@ vi.mock(
     };
   },
 );
-vi.mock("@/hooks/epic/use-epic-task-pinned-states-query", () => ({
-  useEpicTaskPinnedStates: () => new Map(),
-}));
+vi.mock(
+  "@/hooks/epic/use-epic-task-pinned-states-query",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/hooks/epic/use-epic-task-pinned-states-query")
+      >();
+    return {
+      ...actual,
+      useEpicTaskPinnedStates: () => new Map(),
+    };
+  },
+);
 vi.mock("@/hooks/epic/use-epic-set-pinned-mutation", async (importOriginal) => {
   const actual =
     await importOriginal<

@@ -58,6 +58,8 @@ import {
   type StatusBarProviderLimitSelection,
 } from "@/lib/layout/layout-arrangement";
 import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import { sampleProviderRateLimits } from "@/components/sample-workspace/sample-rate-limit-readings";
+import { SAMPLE_ACCOUNT_LABEL } from "@/components/sample-workspace/sample-workspace-scene";
 
 /**
  * The status bar's left cluster, from the watched host's provider inventory to
@@ -447,6 +449,7 @@ interface ToSegmentsContext {
   readonly providerLimits: StatusBarProviderLimits;
   readonly hiddenProviders: ReadonlyArray<RateLimitProviderId>;
   readonly now: number;
+  readonly sample: boolean;
 }
 
 function toSegments(
@@ -463,7 +466,19 @@ function toSegments(
     // transient failure is being ridden out. Resolved once and handed to both
     // halves, so the state a segment reports and the windows it draws can never
     // describe two different snapshots.
-    const retained = resolveRetainedProviderRateLimits(envelope);
+    //
+    // In the sample scene the invented snapshot takes the reading's place here,
+    // before the catalog and the selection, so a sample segment draws the
+    // user's picked windows under their real keys (C12). A provider with no
+    // sample windows reads nothing rather than its real envelope, which drops
+    // its segment: the scene never shows a real reading.
+    const retained = context.sample
+      ? sampleProviderRateLimits(
+          target.provider.providerId,
+          target.order,
+          context.now,
+        )
+      : resolveRetainedProviderRateLimits(envelope);
     const windows = liveWindows(retained, context.now);
     const shown = shownWindows(
       windows,
@@ -477,9 +492,14 @@ function toSegments(
       segment: {
         providerId: target.provider.providerId,
         profileId: target.profileId,
-        account: target.account,
+        account:
+          !context.sample || target.account === null
+            ? target.account
+            : { ...target.account, label: SAMPLE_ACCOUNT_LABEL },
         hidden: context.hiddenProviders.includes(target.provider.providerId),
-        ...segmentState(retained, envelope, query.isError),
+        ...(context.sample
+          ? { state: "live" as const, reason: null }
+          : segmentState(retained, envelope, query.isError)),
         windows,
         shown,
         tightest: tightestRateLimitWindow(shown),
@@ -563,6 +583,12 @@ export function useStatusBarRateLimitSegments(input: {
    * being filtered out before it can register a hotspot.
    */
   readonly editing: boolean;
+  /**
+   * The sample scene is up: every segment reads an invented snapshot instead
+   * of the user's, and names its account "Sample account". Fetching is left
+   * exactly as it is - the real strip beside the scene still owns it.
+   */
+  readonly sample: boolean;
 }): StatusBarRateLimitSegments {
   const passive = input.mode === "passive";
   const client = useHostClient();
@@ -647,16 +673,19 @@ export function useStatusBarRateLimitSegments(input: {
         providerLimits,
         hiddenProviders,
         now,
+        sample: input.sample,
       }),
       ...toSegments(httpPolling, httpPollingQueries, {
         providerLimits,
         hiddenProviders,
         now,
+        sample: input.sample,
       }),
       ...toSegments(httpObserved, httpObservedQueries, {
         providerLimits,
         hiddenProviders,
         now,
+        sample: input.sample,
       }),
     ]
       .sort((left, right) => left.order - right.order)

@@ -66,16 +66,10 @@ Generated — don't hand-edit: `src/routeTree.gen.ts`, `dist/`, `.tanstack/`.
 - **`cn(...)`** from `@/lib/utils` for all composed `className`s. No template
   literals / `+` / `.join(" ")`. Static single strings OK.
 - **Fluid layout sizing** — `w-full`, `max-w-*`, viewport caps. No fixed px/rem
-  for layout surfaces (icons / touch targets OK). Two recorded exceptions, both
-  the same case — a SIMULATED viewport, where the pixel size is the thing being
-  simulated rather than a layout choice:
-  - The layout editor's preset miniature frame
-    (`components/layout-editor/inspector/presets-block.tsx`) draws a 1000×620
-    app frame and scales it uniformly by `boxWidth / 1000`, so the card is a
-    picture of a real window at a real width rather than a reflow of one. The
-    frame is inside a `w-full` box with an `aspect-ratio`, so the CARD is
-    fluid and only the simulated viewport inside it is fixed.
-  - The layout inspector is 320px wide (`layout-editor.css`), always under
+  for layout surfaces (icons / touch targets OK). One recorded exception, a
+  SIMULATED viewport, where the pixel size is the thing being simulated
+  rather than a layout choice:
+  - The layout inspector is 380px wide (`layout-editor.css`), always under
     `max-width: 100%`. It is an instrument panel like DevTools: a fluid width
     would change the measured width of the specimen stage, which is the thing
     the user is judging.

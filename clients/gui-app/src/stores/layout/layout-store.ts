@@ -33,7 +33,6 @@ import {
 } from "@/lib/layout/legacy-layout-records";
 import type {
   LayoutSnapshot,
-  LayoutValueKeysByRegion,
   LayoutValuePatches,
 } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -46,14 +45,10 @@ import {
 
 /**
  * The one store the layout editor writes and every chrome surface reads
- * (L-21): a density preset, the user's own per-region delta and where things
- * live - the {@link LayoutSnapshot} triple, plus the writers for it.
- *
- * The delta is what a person PICKED, not what happens to differ from the
- * current preset (L-133). Which of those picks is a CHANGE is a question
- * about the base that is current right now, and `layout-diff.ts` answers it by
- * difference at every point it is asked - the row's dot, its revert, the
- * header count and the analytics snapshot.
+ * (L-21): the last-applied preset, the user's own per-region delta on top of
+ * it and where things live - the {@link LayoutSnapshot} triple, plus the
+ * writers for it. Which values are a CHANGE is answered by difference against
+ * the last-applied preset (`layout-diff.ts`).
  */
 export interface LayoutStoreState extends LayoutSnapshot {
   /**
@@ -61,34 +56,22 @@ export interface LayoutStoreState extends LayoutSnapshot {
    * L-61). Persisted in this same blob, which is what makes it one-shot.
    */
   readonly layoutCarryDone: boolean;
-  readonly setBasePreset: (preset: LayoutPresetId) => void;
+  /**
+   * Every value replaced by the preset's, the arrangement untouched: the
+   * delta is cleared and `basePreset` becomes the last-applied preset.
+   */
+  readonly applyPreset: (preset: LayoutPresetId) => void;
   readonly setRegionValues: <K extends RegionId>(
     region: K,
     patch: Partial<LayoutValues[K]>,
   ) => void;
-  readonly setRegionValuesMany: (patches: LayoutValuePatches) => void;
   /**
-   * Those keys taken OUT of one region's delta, which is what a revert is
-   * (L-133).
-   *
-   * Distinct from writing the base preset's value back, and the difference is
-   * the whole of L-133: the delta holds what a person picked, so writing the
-   * base value records a pick for it - pinning the region to today's density
-   * rather than letting it follow the next one. Reverting removes the answer.
+   * Those keys taken OUT of one region's delta, which is what a revert is:
+   * the value falls back to the last-applied preset's.
    */
   readonly clearRegionValues: (
     region: RegionId,
     keys: ReadonlyArray<string>,
-  ) => void;
-  /**
-   * The same revert across several regions, in ONE write (G1-09).
-   *
-   * "Reset panel visibility" takes the answer back for all nine rail regions
-   * at once, and nine separate writes are nine renders and, inside a session,
-   * nine snapshots taken of a layout that is mid-change.
-   */
-  readonly clearRegionValuesMany: (
-    keysByRegion: LayoutValueKeysByRegion,
   ) => void;
   readonly setArrangement: (arrangement: LayoutArrangement) => void;
   readonly replaceAll: (next: LayoutSnapshot) => void;
@@ -114,9 +97,10 @@ const LAYOUT_PERSIST_KEY = persistKey(STORE_KEYS.layout);
  * a dogfooder would be the one user in the world whose sidebar never draws
  * Agents and Artifacts together. The five values that DID ship are carried
  * separately, below. Version 5 splits the agent rows' resource readings off
- * the monitor's Shown (G7, `withSplitResourceReadings`).
+ * the monitor's Shown (G7, `withSplitResourceReadings`). Version 6 moves Tab
+ * overflow in from the settings store (`withCarriedTaskTabLayout`).
  */
-const LAYOUT_PERSIST_VERSION = 5;
+const LAYOUT_PERSIST_VERSION = 6;
 
 const SHIPPED_CARRY = carryShippedLayoutValues();
 
@@ -131,31 +115,22 @@ export const useLayoutStore = create<LayoutStoreState>()(
       // user had changed in between (G1-24).
       ...(SHIPPED_CARRY ?? DEFAULT_LAYOUT_SNAPSHOT),
       layoutCarryDone: SHIPPED_CARRY !== null,
-      setBasePreset: (basePreset) => {
-        const state = get();
-        if (state.basePreset === basePreset) return;
-        // The preset, and NOTHING else (L-133). It used to re-minimize the
-        // delta against the new base, which reads as tidying and is a
-        // deletion: every per-region change the incoming preset happened to
-        // agree with was dropped, so switching density and switching back lost
-        // the user's own picks - and on the Settings page, which has no Undo
-        // (L-108), lost them for good. The picks stay; whether any of them is
-        // a CHANGE is a question about the current base and is answered by
-        // difference wherever it is asked (`layout-diff.ts`).
-        set({ basePreset });
+      applyPreset: (basePreset) => {
+        // Re-applying the untouched current preset writes nothing: a set here
+        // would still persist and rehydrate every other window.
+        const current = get();
+        if (
+          current.basePreset === basePreset &&
+          Object.keys(current.overrides).length === 0
+        )
+          return;
+        set({ basePreset, overrides: {} });
       },
       setRegionValues: (region, patch) => {
         set(nextOverrides(get(), { [region]: patch }));
       },
-      setRegionValuesMany: (patches) => {
-        set(nextOverrides(get(), patches));
-      },
       clearRegionValues: (region, keys) => {
         const next = clearedOverrides(get(), { [region]: keys });
-        if (next !== null) set(next);
-      },
-      clearRegionValuesMany: (keysByRegion) => {
-        const next = clearedOverrides(get(), keysByRegion);
         if (next !== null) set(next);
       },
       setArrangement: (arrangement) => {
@@ -315,6 +290,18 @@ export function isHomeTabEnabled(): boolean {
 }
 
 /**
+ * Non-hook read of Thinking's Shown, for the lazy transcript projections (Find,
+ * a block reveal) that must group runs exactly as the renderer does.
+ */
+export function isThinkingShown(): boolean {
+  const state = useLayoutStore.getState();
+  return (
+    (state.overrides.thinking?.shown ??
+      PRESET_VALUES[state.basePreset].thinking.shown) === "shown"
+  );
+}
+
+/**
  * The five values that actually shipped, carried into this store once (L-49,
  * L-61), or `null` when there is nothing to carry.
  *
@@ -369,6 +356,7 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
     minimapSide: settings.chatTurnMinimapSide,
     pinnedContextFieldOrder: settings.pinnedContextBreakdownOrder,
     rail: carriedRail(leftPanel.panelGroups),
+    taskTabLayout: settings.taskTabLayout,
   };
   const carried: LayoutSnapshot = {
     basePreset: DEFAULT_LAYOUT_SNAPSHOT.basePreset,
@@ -472,16 +460,20 @@ function carriedRail(value: unknown): ReadonlyArray<RailEntry> {
   const panelIds = groups.flat();
   if (panelIds.length === 0) return DEFAULT_ARRANGEMENT.rail;
   const rail = railFromPanelIdOrder(panelIds);
+  // A group carries every member it still has (L-181), not only its first
+  // two: a stack is the members its id names.
   const links = groups.flatMap((group): RailEntry[] => {
-    if (group.length < 2) return [];
-    const top = carriedRailRegion(group[0]);
-    const bottom = carriedRailRegion(group[1]);
-    if (top === null || bottom === null) return [];
-    return [{ kind: "stack", id: railStackId(top, bottom) }];
+    const members = group.flatMap((panelId) => {
+      const regionId = carriedRailRegion(panelId);
+      return regionId === null ? [] : [regionId];
+    });
+    return members.length < 2
+      ? []
+      : [{ kind: "stack", id: railStackId(members) }];
   });
-  // Appended rather than threaded in: a link IS the pair its id names, so
-  // `normalizeRail` puts each one where it belongs and drops any whose pair
-  // this build did not end up placing side by side.
+  // Appended rather than threaded in: a stack IS the members its id names, so
+  // `normalizeRail` puts each one where it belongs and keeps only the members
+  // this build ended up placing side by side.
   return normalizeRail([...rail, ...links]);
 }
 
@@ -524,7 +516,30 @@ function migrateLayoutPersistedState(
   if (!isRecord(persistedState)) return persistedState;
   const railed =
     version >= 4 ? persistedState : migrateRail(persistedState, version);
-  return version >= 5 ? railed : withSplitResourceReadings(railed);
+  const split = version >= 5 ? railed : withSplitResourceReadings(railed);
+  return version >= 6 ? split : withCarriedTaskTabLayout(split);
+}
+
+/**
+ * Version 6: Tab overflow used to live in the settings store as
+ * `taskTabLayout`, outside the layout, so Undo, Discard and Reset layout could
+ * not reach it. The settings record as this launch found it carries the value
+ * over once; the arrangement resolver decides whether it is one this build
+ * knows.
+ */
+function withCarriedTaskTabLayout(
+  persistedState: Record<string, unknown>,
+): Record<string, unknown> {
+  const arrangement = isRecord(persistedState.arrangement)
+    ? persistedState.arrangement
+    : {};
+  return {
+    ...persistedState,
+    arrangement: {
+      ...arrangement,
+      taskTabLayout: legacySettingsRecord().taskTabLayout,
+    },
+  };
 }
 
 /**
@@ -587,7 +602,7 @@ function withDefaultStack(
   }
   return [
     ...rail.slice(0, agents + 1),
-    { kind: "stack", id: railStackId("railAgents", "railArtifacts") },
+    { kind: "stack", id: railStackId(["railAgents", "railArtifacts"]) },
     ...rail.slice(agents + 1),
   ];
 }

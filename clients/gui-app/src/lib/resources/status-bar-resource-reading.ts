@@ -245,7 +245,7 @@ function unavailableReason(input: {
  *
  * `label: value` per metric, in the order they are drawn, so the name matches
  * the readout left to right. An unavailable metric says so rather than being
- * dropped — a name that silently omitted it would leave a reader who turned
+ * dropped - a name that silently omitted it would leave a reader who turned
  * the metric on with no way to tell it from one this build never draws.
  */
 export function statusBarResourceSegmentLabel(

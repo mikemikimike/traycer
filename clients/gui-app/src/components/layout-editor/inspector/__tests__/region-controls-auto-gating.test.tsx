@@ -1,10 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  RegionDisplayControl,
-  RegionShownControl,
-} from "@/components/layout-editor/inspector/region-controls";
+import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import { setMobileApp } from "@/lib/mobile-app";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
@@ -18,23 +15,14 @@ import {
 } from "@/stores/layout/layout-store";
 
 /**
- * Item 4 - rail Auto (G6): `regionHides` (has a `shown` leaf at all) and
- * `offersAuto` (a rail panel with its own presence rule) gate both controls.
+ * Item 4 - rail Auto (G6, L-128 overturned): `RegionDisplayControl` is the
+ * ONE display control in both hosts now, so it alone carries every gate -
+ * `regionHides` (has a `shown` leaf at all), `isAutoRailRegionId` (Pull
+ * requests and Comments only, L-93 overturned) and the sizeable/Access split.
  *
- * Rendered live off the store, like `region-display-control.test.tsx`, so a
- * click is checked against what actually got WRITTEN rather than only
- * against the control's own redraw.
+ * Rendered live off the store, so a click is checked against what actually
+ * got WRITTEN rather than only against the control's own redraw.
  */
-
-function LiveShownControl(props: { readonly regionId: RegionId }): ReactNode {
-  const snapshot = useLayoutSnapshot();
-  return (
-    <RegionShownControl
-      regionId={props.regionId}
-      values={effectiveLayoutValues(snapshot.basePreset, snapshot.overrides)}
-    />
-  );
-}
 
 function LiveDisplayControl(props: { readonly regionId: RegionId }): ReactNode {
   const snapshot = useLayoutSnapshot();
@@ -65,6 +53,7 @@ beforeEach(() => {
     entry: "keyboard",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 });
 
@@ -73,40 +62,42 @@ afterEach(() => {
   useLayoutEditorStore.getState().endSession();
 });
 
-describe("RegionShownControl on a rail panel with no presence rule (offersAuto false)", () => {
-  it("renders a plain switch, not the tri-state radiogroup", () => {
+describe("a rail panel with no presence rule of its own (isAutoRailRegionId false)", () => {
+  it("offers only Shown/Hidden, no Auto", () => {
     expect(regionFacts("railAgents").hint).toBeNull();
 
-    render(<LiveShownControl regionId="railAgents" />);
+    render(<LiveDisplayControl regionId="railAgents" />);
 
-    expect(screen.queryByRole("radiogroup")).toBeNull();
-    expect(screen.getByRole("switch", { name: "Show Agents" })).not.toBeNull();
+    const group = screen.getByRole("radiogroup", { name: "Agents display" });
+    expect(
+      [...group.querySelectorAll('[role="radio"]')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["Shown", "Hidden"]);
   });
 
-  it("still writes the rail's three-state value, not a plain boolean", () => {
-    render(<LiveShownControl regionId="railAgents" />);
-    expect(shownOf("railAgents")).toBe("auto");
+  it("writes the plain Visibility literal, never `auto`", () => {
+    render(<LiveDisplayControl regionId="railAgents" />);
+    expect(shownOf("railAgents")).toBe("shown");
 
-    fireEvent.click(screen.getByRole("switch", { name: "Show Agents" }));
-    // Off writes `hidden`, same as the tri-state control's Hidden option.
+    fireEvent.click(screen.getByRole("radio", { name: "Hidden" }));
     expect(shownOf("railAgents")).toBe("hidden");
 
-    fireEvent.click(screen.getByRole("switch", { name: "Show Agents" }));
-    // Back on writes the rail's own "on" value, `auto` - never the literal
-    // `shown` a plain region's switch would write.
-    expect(shownOf("railAgents")).toBe("auto");
+    fireEvent.click(screen.getByRole("radio", { name: "Shown" }));
+    // Back on writes the literal `shown` - never `auto`, which this panel's
+    // value can no longer even hold (L-93 overturned).
+    expect(shownOf("railAgents")).toBe("shown");
   });
 });
 
-describe("RegionShownControl on a rail panel WITH a presence rule (offersAuto true)", () => {
-  it("keeps the tri-state radiogroup", () => {
+describe("a rail panel WITH a presence rule of its own (isAutoRailRegionId true)", () => {
+  it("keeps the tri-state radiogroup for Pull requests", () => {
     expect(regionFacts("railPullRequests").hint).not.toBeNull();
 
-    render(<LiveShownControl regionId="railPullRequests" />);
+    render(<LiveDisplayControl regionId="railPullRequests" />);
 
-    expect(screen.queryByRole("switch")).toBeNull();
     const group = screen.getByRole("radiogroup", {
-      name: "Pull Requests visibility",
+      name: "Pull Requests display",
     });
     expect(
       [...group.querySelectorAll('[role="radio"]')].map(
@@ -118,28 +109,27 @@ describe("RegionShownControl on a rail panel WITH a presence rule (offersAuto tr
   it("keeps the tri-state radiogroup for the other hinted panel too (Comments)", () => {
     expect(regionFacts("railComments").hint).not.toBeNull();
 
-    render(<LiveShownControl regionId="railComments" />);
+    render(<LiveDisplayControl regionId="railComments" />);
 
-    expect(screen.getByRole("radiogroup")).not.toBeNull();
-    expect(screen.queryByRole("switch")).toBeNull();
+    const group = screen.getByRole("radiogroup", {
+      name: "Comments display",
+    });
+    expect(
+      [...group.querySelectorAll('[role="radio"]')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["Auto", "Shown", "Hidden"]);
   });
 });
 
 describe("a region with no `shown` leaf at all (regionHides false)", () => {
-  it("gives Access no Shown control whatsoever", () => {
-    render(<LiveShownControl regionId="access" />);
-
-    expect(screen.queryByRole("switch")).toBeNull();
-    expect(screen.queryByRole("radiogroup")).toBeNull();
-  });
-
-  it("gives Access Full row/Chip only, no Hidden, from the display control", () => {
+  it("gives Access Icon and label/Icon only only, no Hidden", () => {
     render(<LiveDisplayControl regionId="access" />);
 
     const options = screen
       .getAllByRole("radio")
       .map((option) => option.textContent);
-    expect(options).toEqual(["Full row", "Chip"]);
+    expect(options).toEqual(["Icon and label", "Icon only"]);
     expect(screen.queryByText("Hidden")).toBeNull();
   });
 
@@ -161,24 +151,21 @@ describe("Microphone's own control (mobile absence, voice-off gating)", () => {
     useSettingsStore.setState({ voiceInputEnabled: true });
   });
 
-  it("is absent in the installed mobile app, on both the page's and the dock's controls", () => {
+  it("is absent in the installed mobile app", () => {
     setMobileApp(true);
     render(<LiveDisplayControl regionId="mic" />);
     expect(screen.queryByRole("radiogroup")).toBeNull();
-    expect(screen.queryByRole("switch")).toBeNull();
-    cleanup();
-
-    render(<LiveShownControl regionId="mic" />);
-    expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  it("disables the dock's switch and names the reason when voice input is off", () => {
+  it("disables every option and names the reason when voice input is off", () => {
     useSettingsStore.setState({ voiceInputEnabled: false });
-    render(<LiveShownControl regionId="mic" />);
+    render(<LiveDisplayControl regionId="mic" />);
 
-    const toggle = screen.getByRole("switch", { name: "Show Microphone" });
-    expect(toggle.hasAttribute("disabled")).toBe(true);
-    const describedById = toggle.getAttribute("aria-describedby");
+    const options = screen.getAllByRole("radio");
+    expect(options.every((option) => option.hasAttribute("disabled"))).toBe(
+      true,
+    );
+    const describedById = options[0]?.getAttribute("aria-describedby");
     expect(describedById).not.toBeNull();
     expect(document.getElementById(describedById as string)?.textContent).toBe(
       "Enable Voice input in General settings to show the microphone.",

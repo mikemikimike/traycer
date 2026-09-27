@@ -15,14 +15,8 @@ import type { RegionId } from "@/lib/layout/region-id";
 
 /**
  * A region's Position row measured against, and put back to, the shipped
- * arrangement (L-57).
- *
- * The header's change count is values only, because that is exactly what
- * "Reset to Compact" puts back and the two have to agree. An arrangement
- * change is still a change a person made, so it earns a dot in the index and a
- * revert on the row it belongs to - measured against the DEFAULT arrangement
- * rather than against the base preset, which by construction has no opinion
- * about position.
+ * arrangement: a preset has no opinion about position, so the DEFAULT
+ * arrangement is the baseline for its dot and its revert.
  */
 
 /**

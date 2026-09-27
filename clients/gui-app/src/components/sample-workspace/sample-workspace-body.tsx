@@ -1,9 +1,11 @@
 import { useCoarsePointer } from "@/hooks/ui/use-coarse-pointer";
 import { resolveMinimapVisibleItemCapacity } from "@/components/minimap/minimap-track-geometry";
-import { useEffect, useId, useRef, useState } from "react";
-import { Wrench } from "lucide-react";
-import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { LayoutRegionContextMenu } from "@/components/layout-editor/region-quick-verbs";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useLayoutRegion,
+  useRegionGhost,
+} from "@/components/layout-editor/use-layout-region";
+import { LayoutClusterContextMenu } from "@/components/layout-editor/region-quick-verbs";
 import {
   ChatLowerDock,
   type DockRowHotspot,
@@ -16,7 +18,11 @@ import {
   ChatDiffTargetContext,
   type ChatSnapshotDiffOpener,
 } from "@/components/chat/chat-diff-target";
-import { SegmentRow } from "@/components/chat/segments/segment-row";
+import { buildChatActivityTimeline } from "@/components/chat/chat-activity-groups";
+import { ChatSenderOverline } from "@/components/chat/chat-message-timestamp";
+import { ActivityGroupSegment } from "@/components/chat/segments/activity-group-segment";
+import { ActivityGroupOpenStoreProvider } from "@/stores/chats/activity-group-open-store";
+import { ChatFindForceStoreProvider } from "@/stores/chats/chat-find-force-store";
 import {
   ChatUserMessageContent,
   UserMessageBubble,
@@ -33,16 +39,17 @@ import { createComposerPickerStore } from "@/components/chat/composer/picker/com
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
 import {
   useArrangementValue,
+  useReadingWidthClass,
   useRegionShown,
   useRegionValues,
 } from "@/lib/layout-overrides";
 import { chatDockSection } from "@/lib/chat/chat-dock-sections";
-import { SampleWorkspaceRail } from "./sample-workspace-rail";
+import { SampleWorkspaceSidebar } from "./sample-workspace-sidebar";
+import { SampleModelPicker } from "./sample-model-picker";
 import {
   CONTEXT_USAGE_PREVIEW_SAMPLE,
   SAMPLE_AGENT_DESCENDANTS,
   SAMPLE_BACKGROUND_ITEMS,
-  SAMPLE_CHANGED_FILE,
   SAMPLE_CHAT_ID,
   SAMPLE_DICTATION,
   SAMPLE_DOCK,
@@ -56,7 +63,9 @@ import {
   SAMPLE_TILE_ID,
   SAMPLE_TODO,
   SAMPLE_TOOLBAR_VALUES,
+  SAMPLE_TURN_ACTIVITY,
   SAMPLE_TURNS,
+  sampleSentAt,
   SAMPLE_VIEW_TAB_ID,
   sampleNoop,
   sampleNoopAction,
@@ -187,7 +196,7 @@ export function SampleWorkspaceBody() {
       <div className="flex min-h-0 flex-1 bg-canvas" data-sample-workspace-body>
         {/* DOM order follows `sidebarSide` (S-06), never CSS `order`, so the
             layout editor's sample scene shows the real side. */}
-        {sidebarSide === "right" ? null : <SampleWorkspaceRail />}
+        {sidebarSide === "right" ? null : <SampleWorkspaceSidebar />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <SampleTranscript />
           {/* The two contexts the real dock panels resolve before they draw:
@@ -255,7 +264,7 @@ export function SampleWorkspaceBody() {
                 />
                 {/* The REAL composer stack, not a copy of its classes
                     (L-87): `ComposerSlotShell` owns the edge lanes, the
-                    `max-w-3xl` column, the canvas fill, the top and bottom
+                    reading column, the canvas fill, the top and bottom
                     spacing and the seam seal, and `relative flex flex-col
                     gap-3` is the composer's own inner rhythm
                     (`chat-composer.tsx`). The scene used to hand-roll both
@@ -277,7 +286,17 @@ export function SampleWorkspaceBody() {
                     topSpacing="connected"
                     bottomSpacing="normal"
                   >
-                    <div className="relative flex flex-col gap-3">
+                    {/* Its Model chip anchors the sample picker
+                        (`layout-editor.css`). */}
+                    <div
+                      data-sample-model-anchor
+                      className="relative flex flex-col gap-3"
+                    >
+                      {/* Ahead of the chip in document order on purpose:
+                          it is a part of the Model region, not its node, so
+                          no lookup of the region depends on which comes
+                          first. */}
+                      <SampleModelPicker />
                       <ComposerShell
                         pickerStore={pickerStore}
                         onDragOver={sampleNoop}
@@ -326,12 +345,10 @@ export function SampleWorkspaceBody() {
                       <ComposerWorkspaceRow
                         workspaceControls={
                           <>
-                            <span
-                              data-layout-passive
-                              className="min-w-0 text-ui-xs text-muted-foreground"
-                            >
-                              Sample workspace
-                            </span>
+                            {/* The workspace chips' cell, left empty: the sample
+                                notice above the canvas is the one caption, so
+                                there is no second one here (design craft 2.3). */}
+                            <span />
                             <ContextUsageChip
                               usage={CONTEXT_USAGE_PREVIEW_SAMPLE}
                               onCompact={sampleNoop}
@@ -346,9 +363,38 @@ export function SampleWorkspaceBody() {
             </ChatDiffTargetContext.Provider>
           </TabHostContext.Provider>
         </div>
-        {sidebarSide === "right" ? <SampleWorkspaceRail /> : null}
+        {sidebarSide === "right" ? <SampleWorkspaceSidebar /> : null}
       </div>
     </ComposerTileIdProvider>
+  );
+}
+
+const SAMPLE_NO_PROMOTED_BLOCKS: ReadonlySet<string> = new Set();
+
+/**
+ * One sample turn's agent work, through the same timeline builder and the same
+ * activity row the transcript uses, so Tool activity and Thinking are drawn -
+ * and open, fold or hide - exactly as they would in a chat. The rows name
+ * themselves as regions, which is what makes them canvas targets.
+ *
+ * Passive by construction: a fresh open store per mount, and commands that
+ * have already finished, so nothing streams, fetches or persists.
+ */
+function SampleTurnActivity(props: {
+  readonly turnIndex: number;
+  readonly hideReasoning: boolean;
+}) {
+  const segments = SAMPLE_TURN_ACTIVITY[props.turnIndex] ?? [];
+  if (segments.length === 0) return null;
+  const timeline = buildChatActivityTimeline(segments, {
+    turnState: "complete",
+    promotedToolBlockIds: SAMPLE_NO_PROMOTED_BLOCKS,
+    hideReasoning: props.hideReasoning,
+  });
+  return timeline.map((item) =>
+    item.kind === "activity_group" ? (
+      <ActivityGroupSegment key={item.id} group={item.group} />
+    ) : null,
   );
 }
 
@@ -357,17 +403,22 @@ function SampleTranscript() {
   const content = useRef<HTMLDivElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [capacity, setCapacity] = useState(12);
+  const readingWidth = useReadingWidthClass();
+  // Thinking hidden leaves the reasoning run out, as the real transcript does,
+  // unless the editor is pointing at it (L-14).
+  const thinkingShown = useRegionShown("thinking");
+  const thinkingGhost = useRegionGhost("thinking");
+  const hideReasoning = !(thinkingShown || thinkingGhost);
   const shown = useRegionShown("minimap");
   const side = useArrangementValue("minimapSide");
   const coarsePointer = useCoarsePointer();
-  let minimapCondition: string | null = null;
-  if (coarsePointer)
-    minimapCondition = "Minimap is unavailable with a coarse pointer";
-  if (!shown) minimapCondition = "Hidden";
-  const { ref: minimapRef } = useLayoutRegion({
+  const { ref: minimapRef, ghost: minimapGhost } = useLayoutRegion({
     regionId: "minimap",
     instanceId: SAMPLE_TILE_ID,
   });
+  // Hidden is absent at rest and the real rail while the editor points at it
+  // (L-14), as in the real transcript.
+  const minimapDrawn = shown || minimapGhost;
   useEffect(() => {
     const scroller = viewport.current;
     const turns = content.current;
@@ -401,97 +452,107 @@ function SampleTranscript() {
       scroller.removeEventListener("scroll", measure);
     };
   }, []);
-  return (
-    <div className="relative min-h-0 flex-1">
-      {/* `opacity-only`, for the reason `chat-timeline.tsx` carries the same
-          value: a full-height scroller under a `filter` is a continuously
-          repainting filtered layer the size of the pane. This is the canvas the
-          editor always opens now (L-87), so without it nothing on screen reads
-          as calm content under lit chrome (C-03). The minimap region is a
-          SIBLING of this scroller, so the marker never sits above a region. */}
+  let minimap: ReactNode = null;
+  if (minimapDrawn && coarsePointer)
+    minimap = (
       <div
-        ref={viewport}
-        data-layout-passive="opacity-only"
-        className="h-full overflow-y-auto px-4"
-        aria-label="Sample conversation"
-      >
-        <div ref={content} className="mx-auto max-w-3xl space-y-8 py-6">
-          {SAMPLE_TURNS.map((turn, index) => (
-            <div key={turn.prompt} data-sample-turn className="space-y-4">
-              <div className="ml-auto w-fit max-w-full">
-                <UserMessageBubble>
-                  <ChatUserMessageContent
-                    content={turn.prompt}
-                    attachments={[]}
-                  />
-                </UserMessageBubble>
-              </div>
-              {index === 0 ? (
-                <SegmentRow
-                  open={false}
-                  onOpenChange={sampleNoop}
-                  header={
-                    <>
-                      <Wrench className="size-4" />
-                      <span>Read {SAMPLE_CHANGED_FILE.path} · Sample tool</span>
-                    </>
-                  }
-                  headerAction={null}
-                  body={null}
-                  tone="default"
-                  stickyHeader={false}
-                  headerFindUnitId={null}
-                  bodyFindUnitId={null}
-                  expandable={false}
-                  className={undefined}
-                  footer={null}
-                />
-              ) : null}
-              <TextSegment
-                findUnitId={null}
-                markdown={turn.reply}
-                isStreaming={false}
-                nextStepActions={null}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-      {/* The minimap's own quick verbs (L-144), on both of the things this
-          site can draw: the rail itself, and the stand-in that explains why
-          there is none. The wrapper is `display: contents`, so neither one's
-          absolute placement moves. */}
-      <LayoutRegionContextMenu regionId="minimap">
-        {minimapCondition !== null ? (
-          <div
-            ref={minimapRef}
-            className={cn(
-              "absolute top-1/2 rounded border border-dashed p-2 text-ui-xs text-muted-foreground",
-              side === "left" ? "left-3" : "right-3",
-            )}
-          >
-            {minimapCondition}
-          </div>
-        ) : (
-          <ChatTurnMinimapView
-            items={SAMPLE_MINIMAP_ITEMS}
-            currentIndex={currentIndex}
-            cursorIndex={currentIndex}
-            maxVisibleItems={capacity}
-            bottomInset={0}
-            hitStripWidth={24}
-            side={side}
-            open={false}
-            ref={minimapRef}
-            hitStripRef={null}
-            onOpen={sampleNoop}
-            onFocus={sampleNoop}
-            onKeyDown={sampleNoop}
-            onCursorIndexChange={sampleNoop}
-            onSelect={sampleNoop}
-          />
+        ref={minimapRef}
+        className={cn(
+          "absolute top-1/2 rounded border border-dashed p-2 text-ui-xs text-muted-foreground",
+          side === "left" ? "left-3" : "right-3",
         )}
-      </LayoutRegionContextMenu>
-    </div>
+      >
+        Minimap is unavailable with a coarse pointer
+      </div>
+    );
+  else if (minimapDrawn)
+    minimap = (
+      <ChatTurnMinimapView
+        items={SAMPLE_MINIMAP_ITEMS}
+        currentIndex={currentIndex}
+        cursorIndex={currentIndex}
+        maxVisibleItems={capacity}
+        bottomInset={0}
+        hitStripWidth={24}
+        side={side}
+        open={false}
+        ref={minimapRef}
+        hitStripRef={null}
+        onOpen={sampleNoop}
+        onFocus={sampleNoop}
+        onKeyDown={sampleNoop}
+        onCursorIndexChange={sampleNoop}
+        onSelect={sampleNoop}
+      />
+    );
+  return (
+    // One menu for the whole transcript, naming the region under the pointer
+    // (G3-10): the timestamps, activity rows and the minimap - the rail or
+    // the stand-in that explains why there is none (L-144).
+    <LayoutClusterContextMenu>
+      <div className="relative min-h-0 flex-1">
+        {/* The conversation's CONTENT is marked passive leaf by leaf - each
+          prompt bubble and each reply - so it reads as calm content under lit
+          chrome (C-03, L-87). Not the scroller: the transcript now holds
+          regions of its own (the activity rows and the timestamps, L-175,
+          L-178), and a marker on their ancestor would dim them with it. The
+          minimap region is a SIBLING of this scroller for the same reason. */}
+        <ChatFindForceStoreProvider tileInstanceId={SAMPLE_TILE_ID}>
+          <ActivityGroupOpenStoreProvider store={null}>
+            <div
+              ref={viewport}
+              className="h-full overflow-y-auto"
+              aria-label="Sample conversation"
+            >
+              {/* The real row's column and inset (`chat-timeline.tsx`), so the
+                sample reads at a chat's width and clears the minimap. */}
+              <div
+                ref={content}
+                className={cn(
+                  "mx-auto w-full space-y-8 px-6 py-6",
+                  readingWidth,
+                )}
+              >
+                {SAMPLE_TURNS.map((turn, index) => (
+                  <div key={turn.prompt} data-sample-turn className="space-y-4">
+                    {/* The real sender overline, so the stamp in it is the
+                      Timestamps region itself. */}
+                    <div className="flex flex-col items-end gap-1.5">
+                      <ChatSenderOverline
+                        label="You"
+                        sentAt={sampleSentAt(index)}
+                        stamped
+                        instanceId={`sample-turn-${index}`}
+                      />
+                      <div data-layout-passive className="w-fit max-w-full">
+                        <UserMessageBubble>
+                          <ChatUserMessageContent
+                            content={turn.prompt}
+                            attachments={[]}
+                          />
+                        </UserMessageBubble>
+                      </div>
+                    </div>
+                    <SampleTurnActivity
+                      turnIndex={index}
+                      hideReasoning={hideReasoning}
+                    />
+                    <div data-layout-passive>
+                      <TextSegment
+                        findUnitId={null}
+                        markdown={turn.reply}
+                        isStreaming={false}
+                        nextStepActions={null}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </ActivityGroupOpenStoreProvider>
+        </ChatFindForceStoreProvider>
+        {minimap}
+      </div>
+    </LayoutClusterContextMenu>
   );
 }

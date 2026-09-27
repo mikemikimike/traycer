@@ -35,13 +35,7 @@ export interface SortableListItem<Id extends string> {
   readonly id: Id;
   readonly label: string;
   readonly icon: LucideIcon | null;
-  /**
-   * The real component at 1:1 in place of the registry's icon (L-120): the
-   * rail's own button on a Sidebar row, where the list IS the picture the page
-   * used to draw on a plinth above it. `null` on every other list, whose
-   * depictions are either too wide to be a glyph or already in the surface's
-   * band.
-   */
+  /** A provider's logo in place of the registry's icon, else `null`. */
   readonly glyph: ReactNode;
   /** A divider (L-155) rather than a region: a rule, with no state. */
   readonly divider: boolean;
@@ -57,8 +51,6 @@ export interface SortableListItem<Id extends string> {
   readonly movable: boolean;
   /** Drawn muted: the member is hidden. */
   readonly dimmed: boolean;
-  /** Differs from what shipped - the row's own changed dot (L-20, P-7). */
-  readonly changed: boolean;
   /**
    * The presence rule (L-47), where one exists. Drawn as the first line of the
    * row's DISCLOSURE rather than under its name (R3-08): a hint that is
@@ -68,23 +60,23 @@ export interface SortableListItem<Id extends string> {
    * still hears it without opening anything.
    */
   readonly hint: string | null;
-  /**
-   * The row's ONE state control (L-121). `null` in the dock, where the section
-   * header above the list owns it and a second copy on the row would be D5
-   * again.
-   */
+  /** The row's ONE state control (L-121), or `null` for a divider or link. */
   readonly control: ReactNode;
   /**
-   * Putting this row back, drawn in a slot the row reserves whether or not
-   * there is anything to put in it (L-122). Kept apart from
-   * {@link SortableListItem.control} for exactly that reason: a revert that
-   * shares the control's box moves the whole right-hand column the moment a
-   * value changes (LV2-11).
+   * Putting this row back, drawn after the row's name while it differs from
+   * what shipped - which is also how the row says it changed. Kept apart from
+   * {@link SortableListItem.control} so a value changing never moves the
+   * control column (LV2-11).
    */
   readonly revert: ReactNode;
   /** What this row's disclosure opens IN PLACE (L-89), or `null` for none. */
   readonly detail: ReactNode;
   readonly open: boolean;
+  /**
+   * What pressing the row does: open or close its disclosure, or, on a row
+   * with none, whatever the host makes of it (the editor selects the region).
+   * `null` for a row that does nothing when pressed.
+   */
   readonly onToggleOpen: (() => void) | null;
   /** Taking the item out of the list altogether: a rail divider or a stack link. */
   readonly onRemove: (() => void) | null;
@@ -100,8 +92,18 @@ export interface SortableListItem<Id extends string> {
    * link could go and nowhere else.
    */
   readonly onStack: (() => void) | null;
-  /** Opening a second level as its own screen (the dock's provider level). */
-  readonly onActivate: (() => void) | null;
+  /**
+   * A stack row's members (L-181), each with its own way out of the stack, or
+   * `null` on every other row.
+   */
+  readonly stackMembers: ReadonlyArray<SortableStackMember> | null;
+}
+
+/** One member listed on a stack row, and taking it out of the stack. */
+export interface SortableStackMember {
+  readonly id: string;
+  readonly label: string;
+  readonly onUnstack: () => void;
 }
 
 interface SortableListProps<Id extends string> {
@@ -136,14 +138,10 @@ interface KeyboardGrab<Id extends string> {
 }
 
 /**
- * The layout form's one row list (L-24, L-95): the sortable siblings of the
- * Position row in the dock, and the surface card's whole body on the page.
- *
- * The two hosts differ by COMPOSITION and by nothing else. The page draws the
- * list with `selectedId: null` and a control slot on every row; the inspector
- * draws the SAME list for one region with `selectedId` on its row and the
- * controls in the section header above it. Neither has a row component of its
- * own (L-03).
+ * The layout form's one row list (L-24, L-95), the same in both hosts: every
+ * row carries its control, its reserved revert, extra and chevron slots, and a
+ * disclosure that opens in place. The editor's canvas selection is the
+ * `selectedId` row.
  *
  * Three ways to move an item, all landing on the same one-index-at-a-time
  * write:
@@ -153,9 +151,7 @@ interface KeyboardGrab<Id extends string> {
  * - Space to grab, arrows to move, Space to drop and Escape to put it back,
  *   which is the path that works without a pointer and without knowing the
  *   modifier. The grab moves nothing until it is dropped, exactly as the drag
- *   writes nothing until the release, and it is never animated - a bounce
- *   belongs to a gesture that carried momentum, and a key press carries none
- *   (L-29).
+ *   writes nothing until the release, and it is never animated (L-29).
  */
 export function SortableList<Id extends string>(
   props: SortableListProps<Id>,
@@ -169,19 +165,6 @@ export function SortableList<Id extends string>(
   const [grab, setGrab] = useState<KeyboardGrab<Id> | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const ordered = onMove !== null;
-  // Reserved by the LIST rather than by the row, and on a capability rather
-  // than on a value: a slot that appeared the moment a row became changed
-  // would shift that row's controls by its own width, which is the jump
-  // LV2-11 measured. Every page row can be reverted, and a list with a
-  // removable member (the rail's dividers) reserves it in the dock too.
-  const reserveSlot = page || items.some((item) => item.onRemove !== null);
-  // The Stack verb is per-ROW - the two stacked panels have none and the last
-  // panel has none - so it gets a slot of its own on the same terms (L-122,
-  // L-170). Rendered inline it moved the whole control column by its own width
-  // on the rows that happened to carry it, and moved it again the moment a
-  // stack was made or removed, which is exactly the jump the Remove slot is
-  // reserved to prevent.
-  const reserveStackSlot = items.some((item) => item.onStack !== null);
   const gutter = sortableRowPadding(page, compact);
 
   // While an item is grabbed the list draws where it WOULD land. Nothing is
@@ -228,7 +211,8 @@ export function SortableList<Id extends string>(
       // row's disclosure opened is the DETAIL's, not the row's. Without the
       // second test a space pressed on a checkbox label inside an expanded
       // card would pick the whole row up (L-95's in-place levels).
-      if (target.closest("button") !== null) return null;
+      // The row's own label button is the row, so it alone is let through.
+      if (target.closest("button:not([data-row-grab])") !== null) return null;
       if (target.closest(DETAIL_SELECTOR) !== null) return null;
       const id = target
         .closest("[data-sortable-id]")
@@ -376,8 +360,6 @@ export function SortableList<Id extends string>(
             instructionsId={ordered ? instructionsId : null}
             page={page}
             gutter={gutter}
-            reserveSlot={reserveSlot}
-            reserveStackSlot={reserveStackSlot}
             selected={item.id === selectedId}
             grabbed={grab?.id === item.id}
             onPointerDown={(event) => {
@@ -421,8 +403,6 @@ function SortableRow<Id extends string>(props: {
   readonly instructionsId: string | null;
   readonly page: boolean;
   readonly gutter: SortableRowPadding;
-  readonly reserveSlot: boolean;
-  readonly reserveStackSlot: boolean;
   readonly selected: boolean;
   readonly grabbed: boolean;
   readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -433,8 +413,6 @@ function SortableRow<Id extends string>(props: {
     instructionsId,
     page,
     gutter,
-    reserveSlot,
-    reserveStackSlot,
     selected,
     grabbed,
     onPointerDown,
@@ -462,7 +440,7 @@ function SortableRow<Id extends string>(props: {
       data-grabbed={grabbed ? "1" : undefined}
       className={cn(
         "relative border-b border-border/40 transition-[background-color,box-shadow] duration-100 ease-out last:border-b-0",
-        selected && "bg-foreground/6",
+        selected && "bg-foreground/6 shadow-[inset_2px_0_0_var(--ring)]",
       )}
       // On the row rather than on the grab line inside it: a focus leaving
       // anything in this row - the grab line, a control, a control in its
@@ -473,9 +451,17 @@ function SortableRow<Id extends string>(props: {
         item={item}
         instructionsId={item.movable ? instructionsId : null}
         hintId={item.hint === null ? null : hintId}
-        padding={item.divider ? gutter.divider : gutter.row}
-        reserveSlot={reserveSlot}
-        reserveStackSlot={reserveStackSlot}
+        // A divider and a stack link are joins between members, not members,
+        // so both take the hairline's half-height row (LV2-12).
+        padding={item.divider || !item.movable ? gutter.divider : gutter.row}
+        page={page}
+        // A press that selects rather than discloses is a toggle, so it says
+        // whether it is on.
+        pressed={
+          item.detail === null && item.onToggleOpen !== null
+            ? selected
+            : undefined
+        }
         onPointerDown={onPointerDown}
       />
       {open ? (
@@ -517,18 +503,19 @@ function SortableRowHint(props: {
     );
   }
   return (
-    <p
-      id={id}
-      className={cn(
-        "max-w-[72ch] text-pretty text-muted-foreground",
-        padding,
-        // After the gutter, which carries the row's own type scale: a
-        // description reads a notch under the name it belongs to.
-        page ? "text-ui-sm" : "text-ui-xs",
-      )}
-    >
-      {hint}
-    </p>
+    <div className={padding}>
+      {/* In the label column, under the name it explains, a notch under the
+        name's own type scale. */}
+      <p
+        id={id}
+        className={cn(
+          "ml-11 max-w-[72ch] text-pretty text-muted-foreground",
+          page ? "text-ui-sm" : "text-ui-xs",
+        )}
+      >
+        {hint}
+      </p>
+    </div>
   );
 }
 
@@ -566,8 +553,10 @@ function SortableRowLine<Id extends string>(props: {
   readonly hintId: string | null;
   /** The row's own gutter and type scale, decided once by the list. */
   readonly padding: string;
-  readonly reserveSlot: boolean;
-  readonly reserveStackSlot: boolean;
+  /** The page host, whose rows alone wrap, and only below `md`. */
+  readonly page: boolean;
+  /** `aria-pressed` for a row whose press selects it, else `undefined`. */
+  readonly pressed: boolean | undefined;
   readonly onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }): ReactNode {
   const {
@@ -575,8 +564,8 @@ function SortableRowLine<Id extends string>(props: {
     instructionsId,
     hintId,
     padding,
-    reserveSlot,
-    reserveStackSlot,
+    page,
+    pressed,
     onPointerDown,
   } = props;
   const onRemove = item.onRemove;
@@ -587,30 +576,39 @@ function SortableRowLine<Id extends string>(props: {
   return (
     <div
       data-row-line
-      className={cn("flex touch-none flex-col", padding)}
+      className={cn(
+        // One line in both hosts: the name (and its revert) on the left, the
+        // control on the right, vertically centred. Only the page below `md`,
+        // a phone's one layout surface, drops the control under the name (L-64).
+        "flex touch-none items-center gap-2",
+        page && "max-md:flex-wrap max-md:gap-y-3",
+        item.dimmed && "text-muted-foreground",
+        padding,
+      )}
       onPointerDown={onPointerDown}
     >
-      <div
-        className={cn(
-          // Below `md` the controls drop to their own line under the name and
-          // stay right-aligned there, which is the only way a row carrying a
-          // three-option control lays out on the one layout surface a phone
-          // has (L-64).
-          "flex items-center gap-2 max-md:flex-wrap max-md:gap-y-3",
-          item.dimmed && "text-muted-foreground",
-        )}
-      >
-        <div
+      <div className={rowNameBlockClass(item, page)}>
+        <button
           // Every row, not only the ones that open something: a row that can be
           // focused, grabbed and moved has an operation whether or not it also
-          // has a destination.
-          role="button"
+          // has a destination. Its press is the list's own key and click
+          // handling, which is why it has no `onClick`.
+          type="button"
+          // The selector every host, style and driver finds the row's grab by.
+          data-row-grab
           aria-describedby={described === "" ? undefined : described}
           aria-expanded={item.detail === null ? undefined : item.open}
-          tabIndex={0}
-          className="flex min-w-0 flex-1 items-center gap-2 focus-visible:outline-none max-md:basis-full"
+          aria-pressed={pressed}
+          className={cn(
+            "flex min-w-0 items-center gap-2 text-left focus-visible:outline-none",
+            item.divider && "flex-1",
+          )}
         >
-          {instructionsId === null ? null : (
+          {/* The grip's column is kept on rows that cannot move, so every
+            row's icon and name start on one line. */}
+          {instructionsId === null ? (
+            <span aria-hidden className="size-3.5 shrink-0" />
+          ) : (
             <GripVertical
               aria-hidden
               data-row-grip
@@ -634,108 +632,98 @@ function SortableRowLine<Id extends string>(props: {
           ) : (
             <SortableRowName item={item} />
           )}
-        </div>
-        <div className="flex max-w-full shrink-0 items-center gap-1.5 max-md:ml-auto">
-          {item.control}
-          {/* The counterpart of the link row's Remove (L-168), on the panel
-            ABOVE where the link would go, in a slot the list reserves for the
-            whole column (L-122). Offered only where it can be taken: the
-            builder returns `null` unless the row below is a panel and neither
-            is already stacked. */}
-          {reserveStackSlot ? (
-            <div
-              data-stack-slot
-              className="flex size-6 shrink-0 items-center justify-center"
-            >
-              {onStack === null ? null : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Stack ${item.label.toLowerCase()} with the panel below`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStack();
-                  }}
-                >
-                  <Rows2 />
-                </Button>
-              )}
-            </div>
-          ) : null}
-          {/* Fixed, and empty when there is nothing to put in it: the
-            right-hand column of a list must not move because one row's value
-            changed (L-122, LV2-11). A divider's Remove is the same slot - it
-            is that row's one verb. */}
-          {reserveSlot ? (
-            <div
-              data-revert-slot
-              className="flex size-6 shrink-0 items-center justify-center"
-            >
-              {onRemove === null ? (
-                item.revert
-              ) : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={
-                    item.removeLabel ?? `Remove ${item.label.toLowerCase()}`
-                  }
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemove();
-                  }}
-                >
-                  <X />
-                </Button>
-              )}
-            </div>
-          ) : null}
-          {item.detail === null ? null : (
-            <ChevronRight
-              aria-hidden
-              className={cn(
-                "size-3.5 shrink-0 text-muted-foreground transition-transform",
-                item.open && "rotate-90",
-              )}
-            />
-          )}
-        </div>
+        </button>
+        {/* The revert follows the name it puts back, so the control column
+          never moves when a value changes (L-122, LV2-11). */}
+        {item.revert === null ? null : (
+          <span className="-my-1 flex shrink-0">{item.revert}</span>
+        )}
+        <SortableStackMembers members={item.stackMembers} />
       </div>
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-1",
+          page && "max-md:ml-auto",
+        )}
+      >
+        {/* The Stack verb (L-168), on the panel ABOVE where the link would
+          go, offered only where it can be taken. */}
+        {onStack === null ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Stack ${item.label.toLowerCase()} with the panel below`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onStack();
+            }}
+          >
+            <Rows2 />
+          </Button>
+        )}
+        {item.control}
+        {/* A divider's or a stack link's one verb, in the control column. */}
+        {onRemove === null ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={
+              item.removeLabel ?? `Remove ${item.label.toLowerCase()}`
+            }
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+          >
+            <X />
+          </Button>
+        )}
+      </div>
+      {/* The chevron's slot is reserved on every row, so controls share one
+        right edge from row to row. */}
+      {item.detail === null ? (
+        <span aria-hidden className="size-3.5 shrink-0" />
+      ) : (
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            item.open && "rotate-90",
+          )}
+        />
+      )}
     </div>
   );
 }
 
 /**
- * What stands where the row's icon goes: the real component at 1:1 where the
- * item carries one (L-120), the registry's icon otherwise, and nothing at all
- * for a row with neither.
- *
- * Its own component because the three cases are one question about one item,
- * and asking it inline made the row line a nested ternary inside a row that
- * already branches on the divider, the hint, the revert slot and the chevron.
+ * The row's icon column: a provider's logo where the item carries one, the
+ * registry's icon otherwise, and an empty slot of the same size for a row with
+ * neither, so every name starts on one line.
  */
 function SortableRowGlyph<Id extends string>(props: {
   readonly item: SortableListItem<Id>;
 }): ReactNode {
   const { item } = props;
   if (item.glyph !== null) {
-    // The real component, at 1:1 and taking no part in the page: `inert`
-    // removes hit testing, focus and the a11y tree in one, so a picture of a
-    // button is never a second button (L-77, L-120). Dimmed to the canvas's
-    // own passive value when the region is hidden (L-79).
     return (
       <span
-        inert
+        aria-hidden
         data-row-glyph
-        className={cn("shrink-0", item.dimmed && "opacity-45")}
+        className={cn(
+          "flex size-3.5 shrink-0 items-center justify-center [&>svg]:size-3.5",
+          item.dimmed && "opacity-45",
+        )}
       >
         {item.glyph}
       </span>
     );
   }
-  if (item.icon === null) return null;
+  if (item.icon === null) {
+    return <span aria-hidden className="size-3.5 shrink-0" />;
+  }
   // Every glyph carries a hook of its own, so a test can name THIS row's icon
   // rather than counting the SVGs in the line and breaking on the next
   // legitimate one (R1-19).
@@ -747,38 +735,91 @@ function SortableRowGlyph<Id extends string>(props: {
   );
 }
 
-/** A member's name and its changed dot; the presence rule is a sibling (R2-08). */
+/**
+ * A member's name. A changed row says so with the revert after its name, so it
+ * draws no dot of its own; the presence rule is a sibling (R2-08).
+ */
 function SortableRowName<Id extends string>(props: {
   readonly item: SortableListItem<Id>;
 }): ReactNode {
   const { item } = props;
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
-      <span className="min-w-0 truncate">{item.label}</span>
-      {item.changed ? (
-        <span
-          aria-hidden
-          data-testid="changed-dot"
-          className="size-1.5 shrink-0 rounded-full bg-info"
-        />
-      ) : null}
+      <span
+        className={cn(
+          "min-w-0 truncate",
+          // The stack link is the one row that is not a member: it reads as
+          // the quiet join between the two panels around it.
+          item.movable ? "font-medium" : "text-muted-foreground",
+        )}
+      >
+        {item.label}
+      </span>
     </div>
+  );
+}
+
+/**
+ * The row's name block: its grab, its revert and, on a stack row, the member
+ * chips, which wrap under the name when they do not fit its line (L-181).
+ */
+function rowNameBlockClass<Id extends string>(
+  item: SortableListItem<Id>,
+  page: boolean,
+): string {
+  return cn(
+    "flex min-w-0 flex-1 items-center gap-1",
+    item.stackMembers !== null && "flex-wrap gap-y-1.5",
+    page && "max-md:basis-full",
+  );
+}
+
+/**
+ * A stack row's members as chips, each with its own Unstack (L-181), wrapping
+ * under the row's name when four do not fit on its line.
+ */
+function SortableStackMembers(props: {
+  readonly members: ReadonlyArray<SortableStackMember> | null;
+}): ReactNode {
+  if (props.members === null) return null;
+  return (
+    <ul
+      aria-label="Panels in this stack"
+      // A line of its own under the row's name, indented past the grip and
+      // icon columns to where the name starts (the list's own 44px gutter).
+      className="flex min-w-0 basis-full flex-wrap items-center gap-1 pl-11"
+    >
+      {props.members.map((member) => (
+        <li
+          key={member.id}
+          data-stack-member={member.id}
+          className="flex items-center gap-1 rounded-md bg-foreground/5 pl-1.5 text-ui-xs"
+        >
+          {member.label}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Unstack ${member.label}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              member.onUnstack();
+            }}
+          >
+            <X />
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 /** Everything the row's disclosure opened, which the row itself must not claim. */
 const DETAIL_SELECTOR = "[data-sortable-detail]";
 
-/**
- * What pressing a row does: open its own disclosure in place, or open the
- * screen it names. Never both - a row has one destination.
- */
+/** What pressing a row does: open or close its own disclosure in place. */
 function activate<Id extends string>(item: SortableListItem<Id>): void {
-  if (item.onToggleOpen !== null) {
-    item.onToggleOpen();
-    return;
-  }
-  item.onActivate?.();
+  item.onToggleOpen?.();
 }
 
 function arrowDelta(key: string): number | null {

@@ -1,6 +1,6 @@
 import { act, cleanup, render } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PaneVisibilityContext } from "@/components/epic-tabs/pane-visibility-context";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -27,6 +27,7 @@ function openSession(): void {
       entry: "pointer",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
   });
 }
@@ -252,5 +253,61 @@ describe("decoration", () => {
     expect(view.getByTestId("b").getAttribute("data-layout-anchor")).toBe(
       "selected",
     );
+  });
+});
+
+/**
+ * A transcript can hold a timestamp per message, so hovering the region must
+ * cost work per INSTANCE, not per instance squared: each instance decides
+ * whether it is the on-screen anchor, and that decision used to re-measure
+ * every other instance (1600 rect reads for 40 stamps).
+ */
+describe("a region with many instances", () => {
+  const COUNT = 40;
+  const hadElementFromPoint = "elementFromPoint" in document;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (hadElementFromPoint) return;
+    Reflect.deleteProperty(document, "elementFromPoint");
+  });
+
+  it("measures each instance once on hover, and anchors exactly the on-screen one", () => {
+    const view = render(
+      <>
+        {Array.from({ length: COUNT }, (_, index) => (
+          <Region
+            key={index}
+            regionId="timestamps"
+            instanceId={`stamp-${index}`}
+            testId={`stamp-${index}`}
+          />
+        ))}
+      </>,
+    );
+    openSession();
+    const last = view.getByTestId(`stamp-${COUNT - 1}`);
+    // Every other instance is scrolled off screen: only the last one is what
+    // a hit test at its point finds.
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => last,
+    });
+    const rects = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(() => new DOMRect(5, 5, 10, 10));
+
+    act(() => {
+      useLayoutEditorStore.getState().setHovered("timestamps");
+    });
+
+    expect(rects.mock.calls.length).toBeGreaterThan(0);
+    expect(rects.mock.calls.length).toBeLessThanOrEqual(COUNT);
+    const anchored = view.container.querySelectorAll(
+      '[data-layout-anchor~="hover"]',
+    );
+    expect(anchored).toHaveLength(1);
+    expect(anchored[0]).toBe(last);
   });
 });

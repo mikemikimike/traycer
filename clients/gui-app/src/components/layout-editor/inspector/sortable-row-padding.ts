@@ -26,8 +26,9 @@ export function sortableRowPadding(
 ): SortableRowPadding {
   if (!page) {
     return {
-      row: "px-2.5 py-1.5 text-ui-sm",
-      divider: "px-2.5 py-0.5 text-ui-sm",
+      // The inspector's own edge (its header, back row and area heading).
+      row: "px-3.5 py-1.5 text-ui-sm",
+      divider: "px-3.5 py-0.5 text-ui-sm",
     };
   }
   return compact

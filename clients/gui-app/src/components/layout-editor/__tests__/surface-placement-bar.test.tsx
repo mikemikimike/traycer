@@ -33,6 +33,7 @@ function beginSession(): void {
     entry: "keyboard",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 }
 
@@ -342,7 +343,7 @@ describe("the tab strip bar's View pair", () => {
       .getByRole("radiogroup", { name: "Tabs view" })
       .querySelectorAll("[role='radio']");
     expect(Array.from(options).map((option) => option.textContent)).toEqual([
-      "Layered",
+      "Tabs only",
       "Activity",
     ]);
   });

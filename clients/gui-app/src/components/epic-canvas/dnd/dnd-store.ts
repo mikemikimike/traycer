@@ -128,16 +128,6 @@ function matchingLeftPanelDropPreviewEqual(
   ) {
     return left.viewTabId === right.viewTabId;
   }
-  if (
-    left.kind === "left-panel-section" &&
-    right.kind === "left-panel-section"
-  ) {
-    return (
-      left.viewTabId === right.viewTabId &&
-      left.panelId === right.panelId &&
-      left.position === right.position
-    );
-  }
   return false;
 }
 
@@ -650,6 +640,22 @@ export function useLeftPanelRailDropPreview(
     s.activeSource?.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE &&
     s.activeSource.viewTabId === viewTabId
       ? s.dropPreview
+      : null,
+  );
+}
+
+/**
+ * The rail drag in THIS tab, from either origin, so the rail can say what a
+ * middle-band drop would do with what it carries (L-181). Re-renders on drag
+ * start/end only.
+ */
+export function useLeftPanelRailDragSource(
+  viewTabId: string,
+): EpicCanvasLeftPanelRailDragData | null {
+  return useEpicDndStore((s) =>
+    s.activeSource?.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE &&
+    s.activeSource.viewTabId === viewTabId
+      ? s.activeSource
       : null,
   );
 }

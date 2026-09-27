@@ -19,8 +19,10 @@ import { useSettingsSearchStore } from "@/stores/settings/settings-search-store"
 import { navigateToSettingsSection } from "@/lib/settings-navigation";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
+import { activateTabIntent } from "@/lib/tab-navigation";
 import type { LayoutEditorEntryMethod } from "@/stores/layout/layout-editor-store";
 import { Badge } from "@/components/ui/badge";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 
 /** Scopes the highlight's scroll query to this list. See `moveHighlight`. */
 const RESULTS_SELECTOR = "[data-settings-search-results]";
@@ -90,7 +92,14 @@ export function SettingsSearch(props: SettingsSearchProps): ReactNode {
         source: "direct_ui",
         entry: entryMethod,
         target: entry.launch,
-        navigate,
+        // Done returns to the page that has the region's own row (L-95),
+        // not to Presets, which the user never visited.
+        origin: {
+          kind: "settings",
+          area: LAYOUT_REGIONS[entry.launch].surface,
+        },
+        navigateToTabIntent: (intent) =>
+          activateTabIntent(navigate, intent, undefined),
       });
       return;
     }

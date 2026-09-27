@@ -3,7 +3,9 @@ import type {
   LayoutArrangement,
   OrderGroupId,
   BarHost,
+  ReadingWidth,
   SideStripView,
+  TaskTabLayout,
   TabStripPlacement,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
@@ -35,11 +37,11 @@ export const SURFACE_GROUPS: ReadonlyArray<{
   readonly id: SurfaceGroupId;
   readonly label: string;
 }> = [
-  { id: "topBar", label: "Tabs" },
+  { id: "topBar", label: "Task tabs" },
   { id: "sidebar", label: "Sidebar" },
   { id: "chat", label: "Chat" },
   { id: "composer", label: "Composer" },
-  { id: "statusBar", label: "Status bar" },
+  { id: "statusBar", label: "Usage and resources" },
 ];
 
 /**
@@ -59,14 +61,13 @@ export interface SegmentOption {
 }
 
 /**
- * How one fine-tune row is operated.
+ * How one detail row is operated.
  *
- * `switch` is a two-state key, which is a `boolean` on most regions and a
- * `Visibility` on the two that spell it out; the renderer reads the region's
- * own value type. `checks` is one boolean key per option, paired by position,
- * so `options[i].value` is `keys[i]`. `field-checks` is the other shape a check
- * list has: ONE key holding the list of what is checked, which is also the list
- * a drag reorders.
+ * `switch` is an independent boolean feature; a `Visibility` is a `segment`
+ * like every other visibility choice. `checks` is one boolean key per option, for fields shown at
+ * the same time; an option can require another key to be on, and is disabled
+ * while it is off. `field-checks` is the other shape a check list has: ONE key
+ * holding the list of what is checked.
  */
 export type ControlSpec<K extends RegionId> =
   | { readonly kind: "switch"; readonly key: keyof LayoutValues[K] & string }
@@ -77,14 +78,20 @@ export type ControlSpec<K extends RegionId> =
     }
   | {
       readonly kind: "checks";
-      readonly keys: ReadonlyArray<keyof LayoutValues[K] & string>;
-      readonly options: ReadonlyArray<SegmentOption>;
+      readonly options: ReadonlyArray<CheckOption<K>>;
     }
   | {
       readonly kind: "field-checks";
       readonly key: keyof LayoutValues[K] & string;
       readonly options: ReadonlyArray<SegmentOption>;
     };
+
+export interface CheckOption<K extends RegionId> {
+  readonly key: keyof LayoutValues[K] & string;
+  readonly label: string;
+  /** A boolean key this option only means something with, or `null`. */
+  readonly requires: (keyof LayoutValues[K] & string) | null;
+}
 
 export interface FineTuneRow<K extends RegionId> {
   readonly id: string;
@@ -98,35 +105,28 @@ export interface FineTuneRow<K extends RegionId> {
    */
   readonly pinsTransient: boolean;
   /**
-   * Whether the row stays operable while its region is Hidden. A fine-tune row
-   * normally tunes the region itself, so a hidden region greys it; the one
-   * exception is a setting about ANOTHER surface that only lives here beside
-   * its sibling (the agent rows' resource readings, G7).
+   * A boolean key of the same region this row only means something with: the
+   * row stays visible and disabled while it is off. `null` for most rows.
    */
-  readonly whileHidden: boolean;
+  readonly requires: (keyof LayoutValues[K] & string) | null;
+  /**
+   * A boolean key of the same region that keeps this row editable while the
+   * region is Hidden: something other than the region itself still reads the
+   * row (the Resource monitor's Metrics, which agent rows follow, L-174).
+   * `null` for most rows, which grey with their region.
+   */
+  readonly liveWhileHidden: (keyof LayoutValues[K] & string) | null;
   readonly control: ControlSpec<K>;
 }
 
+/** One named value of a single-value style enum, drawn as the real thing. */
 export interface StyleExample<K extends RegionId> {
   readonly id: string;
   readonly label: string;
   readonly patch: Partial<LayoutValues[K]>;
 }
 
-/**
- * What ONE Style example draws (L-10).
- *
- * `region` is the region itself, which is one element for every region that
- * has a Style block but one. The usage cluster repeats a segment per shown
- * provider, so drawing the region there asked a 260px example row for eight
- * segments and clipped it after two (I-06); `usage-provider` is the specimen
- * the prototype picks instead - a single provider's segment, which is what
- * the reading actually looks like.
- */
-export type StyleSpecimen = "region" | "usage-provider";
-
 export type GrammarRow<K extends RegionId> =
-  | { readonly kind: "size"; readonly description: string }
   | { readonly kind: "position-host"; readonly description: string }
   | { readonly kind: "position-side"; readonly description: string }
   // Names its group and nothing else: how the list is operated, whether its
@@ -136,8 +136,9 @@ export type GrammarRow<K extends RegionId> =
   | { readonly kind: "position-order"; readonly group: OrderGroupId }
   | {
       readonly kind: "style";
-      readonly description: string | null;
-      readonly specimen: StyleSpecimen;
+      /** The one key every example writes, and the row's own label. */
+      readonly key: keyof LayoutValues[K] & string;
+      readonly label: string;
       readonly examples: ReadonlyArray<StyleExample<K>>;
     }
   | { readonly kind: "fine-tune"; readonly rows: ReadonlyArray<FineTuneRow<K>> }
@@ -173,9 +174,53 @@ export interface LayoutRegion<K extends RegionId> {
 
 // ── Shared option sets ──────────────────────────────────────────────────────
 
-export const SIZE_OPTIONS: ReadonlyArray<SegmentOption> = [
+/** A dock row's one display control: `size` and `shown` read together. */
+export const DOCK_DISPLAY_OPTIONS: ReadonlyArray<SegmentOption> = [
   { value: "full", label: "Full row" },
   { value: "chip", label: "Chip" },
+  { value: "hidden", label: "Hidden" },
+];
+
+/** Access's `size`, which has no Hidden (G6). */
+export const ACCESS_DISPLAY_OPTIONS: ReadonlyArray<SegmentOption> = [
+  { value: "full", label: "Icon and label" },
+  { value: "chip", label: "Icon only" },
+];
+
+/**
+ * Tool activity's `size`, which has no Hidden. Open and Closed rather than
+ * Expanded and Collapsed: Thinking's three options have to fit beside its name
+ * and revert in the 380px inspector. The long words stay as search keywords.
+ */
+export const DISCLOSURE_OPTIONS: ReadonlyArray<SegmentOption> = [
+  { value: "full", label: "Open" },
+  { value: "chip", label: "Closed" },
+];
+
+/** Thinking's `size` and `shown` read together, as a dock row's are. */
+export const DISCLOSURE_HIDDEN_OPTIONS: ReadonlyArray<SegmentOption> = [
+  ...DISCLOSURE_OPTIONS,
+  { value: "hidden", label: "Hidden" },
+];
+
+/** How wide the transcript, the composer and an artifact read. */
+export const READING_WIDTH_OPTIONS: ReadonlyArray<{
+  readonly value: ReadingWidth;
+  readonly label: string;
+}> = [
+  { value: "comfortable", label: "Comfortable" },
+  { value: "wide", label: "Wide" },
+];
+
+export const SHOWN_HIDDEN_OPTIONS: ReadonlyArray<SegmentOption> = [
+  { value: "shown", label: "Shown" },
+  { value: "hidden", label: "Hidden" },
+];
+
+/** Pull requests and Comments only (L-93 overturned). */
+export const AUTO_SHOWN_HIDDEN_OPTIONS: ReadonlyArray<SegmentOption> = [
+  { value: "auto", label: "Auto" },
+  ...SHOWN_HIDDEN_OPTIONS,
 ];
 
 /** Where the task tabs sit; the Tabs surface's Position row and tab menus. */
@@ -192,8 +237,17 @@ export const SIDE_STRIP_VIEW_OPTIONS: ReadonlyArray<{
   readonly value: SideStripView;
   readonly label: string;
 }> = [
-  { value: "layered", label: "Layered" },
+  { value: "layered", label: "Tabs only" },
   { value: "activity", label: "Activity" },
+];
+
+/** How tabs fit a horizontal strip. */
+export const TAB_OVERFLOW_OPTIONS: ReadonlyArray<{
+  readonly value: TaskTabLayout;
+  readonly label: string;
+}> = [
+  { value: "scroll", label: "Scroll" },
+  { value: "shrink", label: "Shrink to fit" },
 ];
 
 export const EDGE_SIDE_OPTIONS: ReadonlyArray<SegmentOption> = [
@@ -213,26 +267,34 @@ export const BAR_HOST_OPTIONS: ReadonlyArray<SegmentOption> = [
 ];
 
 /**
- * The two ends of a bar reading's bar. In the vertical strip's foot the
- * readings stack, so `left` and `right` read as "First" and "Last" there;
- * every other bar is horizontal and keeps "Left" and "Right".
+ * The two ends of a bar reading's area. In a horizontal bar they are Left and
+ * Right; in the side tabs' foot the readings stack above the account, so the
+ * same stored `left` / `right` read as Start and End there, with
+ * {@link SIDE_TAB_ALIGNMENT_HELPER} saying what that means.
  */
 export function edgeSideOptions(
   host: BarHost,
   placement: TabStripPlacement,
 ): ReadonlyArray<SegmentOption> {
-  if (host === "header" && placement !== "top") {
+  if (sideTabFootAlignment(host, placement)) {
     return [
-      { value: "left", label: "First" },
-      { value: "right", label: "Last" },
+      { value: "left", label: "Start" },
+      { value: "right", label: "End" },
     ];
   }
   return EDGE_SIDE_OPTIONS;
 }
 
-/** Shown under the examples when the values match none of them. */
-export const NO_EXAMPLE_MATCH_COPY =
-  "Custom - no example matches the fine-tune below.";
+/** Whether a reading's Alignment is read as Start/End in the side tabs' foot. */
+export function sideTabFootAlignment(
+  host: BarHost,
+  placement: TabStripPlacement,
+): boolean {
+  return host === "header" && placement !== "top";
+}
+
+export const SIDE_TAB_ALIGNMENT_HELPER =
+  "In side tabs, readings sit above the account. Start comes before End.";
 
 // ── Shared verb sets ────────────────────────────────────────────────────────
 

@@ -1,8 +1,15 @@
-import { LayoutUsageContext } from "@/components/layout-editor/inspector/use-layout-usage";
-import { NoLayoutUsageProviders } from "@/components/layout-editor/inspector/provider-limit-windows";
 import type { ReactNode } from "react";
 import {
+  SAMPLE_CONTEXT_PERCENT_LEFT,
+  SAMPLE_RESOURCE_VALUES,
+  sampleUsageReading,
+  type SampleUsageReading,
+} from "@/components/sample-workspace/sample-workspace-scene";
+import {
   Bot,
+  Box,
+  Brain,
+  ChevronRight,
   Cpu,
   FileDiff,
   History,
@@ -22,6 +29,7 @@ import { ChatDockCompactChip } from "@/components/chat/chat-dock-compact-chip";
 import { PinnedTodoPanel } from "@/components/chat/chat-pinned-stack";
 import { contextUsageTone } from "@/components/chat/context-usage";
 import {
+  SAMPLE_MESSAGE_TIME_LABEL,
   SAMPLE_RESTORE,
   SAMPLE_TODO,
 } from "@/components/sample-workspace/sample-workspace-scene";
@@ -29,6 +37,7 @@ import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-r
 import { ComposerAttachImageTrigger } from "@/components/home/toolbar/composer-attach-image-button";
 import { ToolbarIconButton } from "@/components/home/toolbar/toolbar-buttons";
 import { HarnessModelTrigger } from "@/components/home/pickers/harness-model-trigger";
+import { ModelFooterDepiction } from "@/components/home/pickers/model-footer-depiction";
 import { PermissionsTrigger } from "@/components/home/pickers/permissions-picker";
 import { StatusBarUsageReadings } from "@/components/layout/status-bar/status-bar-usage-readings";
 import { TabStripHomeItemView } from "@/components/layout/tabs/tab-strip-home-item";
@@ -50,7 +59,6 @@ import { leftPanelIdForRailRegion } from "@/lib/layout/rail";
 import {
   formatCompactWindowDuration,
   isWindowedRateLimitProvider,
-  type RateLimitWindowKind,
 } from "@/lib/rate-limits/rate-limit-window-catalog";
 import { tightestRateLimitWindow } from "@/lib/rate-limits/tightest-window";
 import type {
@@ -157,6 +165,9 @@ const HOST_BY_REGION: Readonly<Record<RegionId, HostContextId>> = {
   usageLimits: "status-bar",
   resourceMonitor: "status-bar",
   minimap: "chat",
+  toolActivity: "chat",
+  thinking: "chat",
+  timestamps: "chat",
   contextUsage: "composer-foot",
   runningAgents: "dock",
   changedFiles: "dock",
@@ -219,6 +230,22 @@ export function regionDepiction<K extends RegionId>(
 }
 
 /**
+ * What one style row's examples draw: the region itself, except for Model's
+ * Reasoning control, whose values change the picker's footer rather than the
+ * chip.
+ */
+export function regionStyleDepiction(
+  region: RegionId,
+  styleKey: string,
+  values: LayoutValues,
+  arrangement: LayoutArrangement,
+): ReactNode {
+  if (region === "model" && styleKey === "reasoningControl")
+    return <ModelFooterDepiction control={values.model.reasoningControl} />;
+  return regionDepiction(region, values, arrangement);
+}
+
+/**
  * Every full-size dock row in ONE joined frame (L-97).
  *
  * The real `ChatLowerDock` is one bordered surface tucked under the composer
@@ -272,66 +299,21 @@ function depictDockRow<K extends DockRegionId>(
 // ── Specimen data ───────────────────────────────────────────────────────────
 
 /**
- * The numbers every picture is drawn from.
- *
- * Fixed rather than live, for the reason the passivity contract gives: a
- * depiction that read the watched host would be a second mount of the chrome
- * it is a picture of. They are chosen so that every switch in the grammar has
- * something to change - a reading part-way through a window, a countdown that
- * has not expired, a diff with both signs, a context window with room left.
- */
-const SPECIMEN_CONTEXT_PERCENT_LEFT = 36;
-
-interface SpecimenReading {
-  readonly durationMinutes: number;
-  readonly usedPercent: number;
-  /** How far off the reset is, so the countdown differs per window too. */
-  readonly resetsInMinutes: number;
-  readonly kind: RateLimitWindowKind;
-}
-
-/**
- * The three readings a provider's specimen window is taken from, by rotation.
- *
- * One short window part-way through, one long one further along and one day
- * window barely started: three different percentages, three different
- * durations and three different countdowns, so no two segments of the strip
- * can print the same string however they are ordered. All three stay under
- * `classifyProviderRateLimitWindow`'s warning thresholds - a picture of the
- * grammar is not a picture of a person about to run out.
- */
-const SPECIMEN_READINGS: ReadonlyArray<SpecimenReading> = [
-  {
-    durationMinutes: 5 * 60,
-    usedPercent: 35,
-    resetsInMinutes: 59,
-    kind: "session",
-  },
-  {
-    durationMinutes: 7 * 24 * 60,
-    usedPercent: 78,
-    resetsInMinutes: 2 * 24 * 60 + 12 * 60,
-    kind: "weekly",
-  },
-  {
-    durationMinutes: 24 * 60,
-    usedPercent: 12,
-    resetsInMinutes: 6 * 60 + 20,
-    kind: "period",
-  },
-];
-
-/**
  * One provider's specimen reading, by its place in the CATALOG.
  *
  * `USAGE_PROVIDER_IDS` and not `arrangement.usageProviders`: the reading is a
  * fact about the provider, so dragging the strip into another order, or hiding
  * one provider, must not renumber everybody else's picture.
  */
-function specimenReadingFor(providerId: RateLimitProviderId): SpecimenReading {
-  const catalogIndex = USAGE_PROVIDER_IDS.indexOf(providerId);
-  const place = catalogIndex < 0 ? 0 : catalogIndex;
-  return SPECIMEN_READINGS[place % SPECIMEN_READINGS.length];
+function specimenReadingFor(
+  providerId: RateLimitProviderId,
+): SampleUsageReading {
+  // Placed among the providers that draw at all, so two windowed providers
+  // either side of a windowless one never land on the same reading (LV2-19).
+  const catalogIndex = USAGE_PROVIDER_IDS.filter(
+    isWindowedRateLimitProvider,
+  ).indexOf(providerId);
+  return sampleUsageReading(catalogIndex < 0 ? 0 : catalogIndex);
 }
 
 /**
@@ -459,33 +441,30 @@ function depictUsageProviderSegment(
   );
 }
 
-/** Sample readings for the watched host's renderable providers, in saved order. */
+/**
+ * EVERY shown provider that reports windows, in the arrangement's own order
+ * (P2, R3-03).
+ *
+ * The arrangement is the whole answer: a caller that wants only the watched
+ * host's providers narrows it first (`useLiveUsageArrangement`), so a picture
+ * reads no context of the editor's own. A provider with no limit windows has
+ * nothing to draw and is left out rather than drawn as an empty segment.
+ */
 function depictUsageLimits(
   values: UsageLimitsValues,
   arrangement: LayoutArrangement,
 ): ReactNode {
-  return (
-    <LayoutUsageContext.Consumer>
-      {(usage) => {
-        const providerIds = usage?.providerIds ?? [];
-        if (providerIds.length === 0) return <NoLayoutUsageProviders />;
-        return arrangement.usageProviders
-          .filter(
-            (id) =>
-              providerIds.includes(id) &&
-              !arrangement.hiddenProviders.includes(id),
-          )
-          .map((providerId) => (
-            <span
-              key={providerId}
-              className="inline-flex shrink-0 items-center"
-            >
-              {depictUsageProviderSegment(providerId, values, null)}
-            </span>
-          ));
-      }}
-    </LayoutUsageContext.Consumer>
-  );
+  return arrangement.usageProviders
+    .filter(
+      (id) =>
+        isWindowedRateLimitProvider(id) &&
+        !arrangement.hiddenProviders.includes(id),
+    )
+    .map((providerId) => (
+      <span key={providerId} className="inline-flex shrink-0 items-center">
+        {depictUsageProviderSegment(providerId, values, null)}
+      </span>
+    ));
 }
 
 /**
@@ -501,10 +480,10 @@ const RESOURCE_SPECIMEN: ReadonlyArray<{
   readonly label: string;
   readonly value: string;
 }> = [
-  { key: "cpu", label: "cpu", value: "4.6%" },
-  { key: "memory", label: "mem", value: "1.2 GB" },
-  { key: "processes", label: "procs", value: "6" },
-  { key: "ramShare", label: "ram", value: "8%" },
+  { key: "cpu", label: "cpu", value: SAMPLE_RESOURCE_VALUES.cpu },
+  { key: "memory", label: "mem", value: SAMPLE_RESOURCE_VALUES.memory },
+  { key: "processes", label: "procs", value: SAMPLE_RESOURCE_VALUES.processes },
+  { key: "ramShare", label: "ram", value: SAMPLE_RESOURCE_VALUES.ramShare },
 ];
 
 function depictResourceMonitor(values: ResourceMonitorValues): ReactNode {
@@ -528,6 +507,55 @@ function depictResourceMonitor(values: ResourceMonitorValues): ReactNode {
           <span className="truncate">{reading.value}</span>
         </span>
       ))}
+    </span>
+  );
+}
+
+/**
+ * A transcript row with a disclosure, open or folded: an activity run's
+ * summary, or a reasoning block's "Thought for" line. Drawn from the rows' own
+ * classes (`activity-group-segment.tsx`, `reasoning-segment.tsx`) rather than
+ * through them, because both read their open state from per-chat stores a
+ * picture must not mount.
+ */
+function depictTranscriptDisclosure(props: {
+  readonly icon: typeof Box;
+  readonly label: string;
+  readonly detail: string;
+  readonly open: boolean;
+}): ReactNode {
+  const Icon = props.icon;
+  return (
+    <span className="flex min-w-0 flex-col justify-center gap-0.5 px-2 text-ui-sm text-muted-foreground">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <Icon className="size-3.5 shrink-0" aria-hidden />
+        <span className="min-w-0 truncate">{props.label}</span>
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground/65",
+            props.open && "rotate-90",
+          )}
+          aria-hidden
+        />
+      </span>
+      {props.open ? (
+        <span className="ml-1.5 truncate border-l border-border/35 pl-3 text-ui-xs">
+          {props.detail}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** The sender overline's stamp, as `ChatMessageTimestamp` draws it. */
+function depictTimestamp(): ReactNode {
+  return (
+    <span className="flex items-center px-2 text-overline font-medium text-muted-foreground/60">
+      <span className="uppercase">You</span>
+      <span aria-hidden> · </span>
+      <span className="font-normal tabular-nums text-muted-foreground/50">
+        {SAMPLE_MESSAGE_TIME_LABEL}
+      </span>
     </span>
   );
 }
@@ -563,7 +591,7 @@ const CONTEXT_RING_RADIUS = 8.5;
 const CONTEXT_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_RING_RADIUS;
 
 function depictContextUsage(values: ContextUsageValues): ReactNode {
-  const percent = SPECIMEN_CONTEXT_PERCENT_LEFT;
+  const percent = SAMPLE_CONTEXT_PERCENT_LEFT;
   return (
     <span
       className={cn(
@@ -792,6 +820,21 @@ const REGION_DEPICTIONS: {
   usageLimits: depictUsageLimits,
   resourceMonitor: depictResourceMonitor,
   minimap: (_values, arrangement) => depictMinimap(arrangement),
+  toolActivity: (values) =>
+    depictTranscriptDisclosure({
+      icon: Box,
+      label: "Explored 3 files, ran 1 command",
+      detail: "Read src/lib/session.ts",
+      open: values.size === "full",
+    }),
+  thinking: (values) =>
+    depictTranscriptDisclosure({
+      icon: Brain,
+      label: "Thought for 4s",
+      detail: "The token refresh races the retry...",
+      open: values.size === "full",
+    }),
+  timestamps: depictTimestamp,
   contextUsage: depictContextUsage,
   runningAgents: depictRunningAgents,
   changedFiles: depictChangedFiles,

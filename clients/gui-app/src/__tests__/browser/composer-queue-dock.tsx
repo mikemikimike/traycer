@@ -97,7 +97,7 @@ probeWindow.__probeRowRecipe = cn(
   CHAT_DOCK_PANEL_ROW_TEXT,
 );
 probeWindow.__probePreset = (preset) => {
-  useLayoutStore.getState().setBasePreset(preset);
+  useLayoutStore.getState().applyPreset(preset);
 };
 probeWindow.__probeTheme = (mode) => {
   useSettingsStore.getState().setTheme(mode);

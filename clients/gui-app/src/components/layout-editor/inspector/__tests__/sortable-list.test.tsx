@@ -1,12 +1,16 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
 import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import { RegionDisplayControl } from "@/components/layout-editor/inspector/region-controls";
-import { RegionSection } from "@/components/layout-editor/inspector/region-section";
-import { ProvidersChildrenRow } from "@/components/layout-editor/inspector/rows/children-row";
 import {
   BARE_ROW,
   regionRowItems,
@@ -17,11 +21,12 @@ import {
   type SortableListItem,
 } from "@/components/layout-editor/inspector/sortable-list";
 import { SurfaceSection } from "@/components/layout-editor/inspector/surface-section";
-import { regionDepiction } from "@/components/layout-editor/region-depiction";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import {
   ORDER_GROUPS,
   orderGroupInstruction,
+  orderGroupListLabel,
 } from "@/components/layout-editor/regions/surface-groups";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import { DEFAULT_RAIL, railDividerId } from "@/lib/layout/rail";
@@ -46,7 +51,14 @@ import type { RegionId } from "@/lib/layout/region-id";
 function section(regionId: RegionId, onExit: () => void): ReactNode {
   return (
     <InspectorShell onExit={onExit}>
-      <RegionSection regionId={regionId} onOpenProvider={vi.fn()} />
+      <SurfaceSection
+        surface={LAYOUT_REGIONS[regionId].surface}
+        snapshot={snapshot()}
+        openRows={[]}
+        onToggleRow={vi.fn()}
+        onSelectRow={null}
+        selectedRow={regionId}
+      />
     </InspectorShell>
   );
 }
@@ -67,10 +79,10 @@ function chatCard(
       <SurfaceSection
         surface="chat"
         snapshot={snapshot()}
-        filter=""
         openRows={openRows}
         onToggleRow={onToggleRow}
-        surfaceRows={null}
+        onSelectRow={null}
+        selectedRow={null}
       />
     </LayoutFormHostContext>
   );
@@ -85,19 +97,25 @@ function snapshot(): LayoutSnapshot {
   };
 }
 
-function row(id: string): HTMLElement {
-  const node = document.querySelector(`[data-sortable-id="${id}"]`);
+/**
+ * `scope` narrows to one order group's own list, needed only where a surface
+ * draws more than one (composer's dock, toolbarLeft and toolbarRight): every
+ * other surface under test here has a single sortable list, so its rows are
+ * unambiguous straight off `document`.
+ */
+function row(id: string, scope: ParentNode): HTMLElement {
+  const node = scope.querySelector(`[data-sortable-id="${id}"]`);
   if (!(node instanceof HTMLElement)) throw new Error(`no such row: ${id}`);
   return node;
 }
 
-function rows(): ReadonlyArray<HTMLElement> {
-  return [...document.querySelectorAll<HTMLElement>("[data-sortable-id]")];
+function rows(scope: ParentNode): ReadonlyArray<HTMLElement> {
+  return [...scope.querySelectorAll<HTMLElement>("[data-sortable-id]")];
 }
 
 /** The element carrying the row's operation, which is never the whole line. */
 function grabOf(rowNode: HTMLElement): HTMLElement {
-  const node = rowNode.querySelector('[role="button"]');
+  const node = rowNode.querySelector("[data-row-grab]");
   if (!(node instanceof HTMLElement)) throw new Error("row has no grab");
   return node;
 }
@@ -123,10 +141,23 @@ const INTERACTIVE =
 /** A row's ONE state control, whatever shape its options take (L-121). */
 const STATE_CONTROL = '[role="radiogroup"], [role="switch"]';
 
-function rowOrder(): ReadonlyArray<string> {
-  return [...document.querySelectorAll("[data-sortable-id]")].map(
-    (node) => node.getAttribute("data-sortable-id") ?? "",
-  );
+function rowOrder(scope: ParentNode): ReadonlyArray<string> {
+  return rows(scope).map((node) => node.getAttribute("data-sortable-id") ?? "");
+}
+
+/** The dock's own list, scoped out of composer's other two (toolbarLeft/Right). */
+function dockGroup(): HTMLElement {
+  return screen.getByRole("group", { name: orderGroupListLabel("dock") });
+}
+
+/**
+ * The dock list's own announcement, a SIBLING of its `role="group"` rather
+ * than a descendant (`SortableList` renders the two side by side) - composer
+ * draws three ordered lists, so the unscoped `announcement()` below would read
+ * whichever of the three happened to render last.
+ */
+function dockAnnouncement(): string {
+  return dockGroup().nextElementSibling?.textContent ?? "";
 }
 
 function announcement(): string {
@@ -173,6 +204,7 @@ beforeEach(() => {
     entry: "keyboard",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 });
 
@@ -185,11 +217,11 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
   it("grabs with space, moves with the arrows and drops as one history entry", () => {
     render(section("runningAgents", vi.fn()));
     const start = dockOrder();
-    const grabbed = row(start[0]);
+    const grabbed = row(start[0], dockGroup());
 
     fireEvent.keyDown(grabbed, { key: " " });
 
-    expect(announcement()).toContain("Grabbed");
+    expect(dockAnnouncement()).toContain("Grabbed");
     // A grab moves nothing yet: the list shows where it would land.
     expect(dockOrder()).toEqual(start);
 
@@ -198,16 +230,18 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
 
     const movedDownTwo = [start[1], start[2], start[0], ...start.slice(3)];
 
-    expect(rowOrder()).toEqual(movedDownTwo);
+    expect(rowOrder(dockGroup())).toEqual(movedDownTwo);
     expect(dockOrder()).toEqual(start);
-    expect(announcement()).toContain(`position 3 of ${String(start.length)}`);
+    expect(dockAnnouncement()).toContain(
+      `position 3 of ${String(start.length)}`,
+    );
 
     fireEvent.keyDown(grabbed, { key: " " });
 
     expect(dockOrder()).toEqual(movedDownTwo);
     // Two arrow presses, one entry: undo puts the row back where it was.
     expect(historyDepth()).toBe(1);
-    expect(announcement()).toContain("Dropped");
+    expect(dockAnnouncement()).toContain("Dropped");
 
     useLayoutEditorStore.getState().undo();
 
@@ -218,18 +252,22 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
     const onExit = vi.fn();
     render(section("runningAgents", onExit));
     const start = dockOrder();
-    const grabbed = row(start[0]);
+    const grabbed = row(start[0], dockGroup());
 
     fireEvent.keyDown(grabbed, { key: " " });
     fireEvent.keyDown(grabbed, { key: "ArrowDown" });
-    expect(rowOrder()).toEqual([start[1], start[0], ...start.slice(2)]);
+    expect(rowOrder(dockGroup())).toEqual([
+      start[1],
+      start[0],
+      ...start.slice(2),
+    ]);
 
     fireEvent.keyDown(grabbed, { key: "Escape" });
 
-    expect(rowOrder()).toEqual(start);
+    expect(rowOrder(dockGroup())).toEqual(start);
     expect(dockOrder()).toEqual(start);
     expect(historyDepth()).toBe(0);
-    expect(announcement()).toContain("Cancelled");
+    expect(dockAnnouncement()).toContain("Cancelled");
     // The section is still open and the editor is still here: a cancelled
     // grab is its own rung of the Escape ladder.
     expect(onExit).not.toHaveBeenCalled();
@@ -239,13 +277,13 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
   it("drops a grab that loses focus rather than leaving it swallowing arrows", () => {
     render(section("runningAgents", vi.fn()));
     const start = dockOrder();
-    const grabbed = row(start[0]);
+    const grabbed = row(start[0], dockGroup());
 
     fireEvent.keyDown(grabbed, { key: " " });
     fireEvent.keyDown(grabbed, { key: "ArrowDown" });
     fireEvent.blur(grabbed);
 
-    expect(rowOrder()).toEqual(start);
+    expect(rowOrder(dockGroup())).toEqual(start);
     expect(dockOrder()).toEqual(start);
     expect(historyDepth()).toBe(0);
   });
@@ -254,7 +292,10 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
     render(section("runningAgents", vi.fn()));
     const start = dockOrder();
 
-    fireEvent.keyDown(row(start[2]), { key: "ArrowUp", altKey: true });
+    fireEvent.keyDown(row(start[2], dockGroup()), {
+      key: "ArrowUp",
+      altKey: true,
+    });
 
     expect(dockOrder()).toEqual([
       start[0],
@@ -269,7 +310,7 @@ describe("the sortable list's keyboard path (L-24, L-31)", () => {
     render(section("runningAgents", vi.fn()));
     const start = dockOrder();
 
-    fireEvent.keyDown(row(start[0]), { key: "ArrowDown" });
+    fireEvent.keyDown(row(start[0], dockGroup()), { key: "ArrowDown" });
 
     expect(dockOrder()).toEqual(start);
     expect(historyDepth()).toBe(0);
@@ -284,11 +325,11 @@ describe("what a row claims as its own (R1-02)", () => {
     seedRailDivider();
     render(section("railAgents", vi.fn()));
 
-    const decorated = rows().filter(
+    const decorated = rows(document).filter(
       (node) => node.querySelectorAll(INTERACTIVE).length > 1,
     );
     expect(decorated.length).toBeGreaterThan(0);
-    for (const rowNode of rows()) {
+    for (const rowNode of rows(document)) {
       expect(
         grabOf(rowNode).querySelectorAll(INTERACTIVE),
         rowNode.getAttribute("data-sortable-id") ?? "",
@@ -299,13 +340,13 @@ describe("what a row claims as its own (R1-02)", () => {
   it("keeps the page's row controls out of the grab, and out of its name", () => {
     render(chatCard([], vi.fn()));
 
-    const minimap = row("minimap");
+    const minimap = row("minimap", document);
     // The row really does carry controls - a side choice and a Shown switch -
     // so the emptiness asserted below is a place, not an absence.
     expect(
       minimap.querySelectorAll('[role="radio"], [role="switch"]').length,
     ).toBeGreaterThan(1);
-    for (const rowNode of rows()) {
+    for (const rowNode of rows(document)) {
       expect(grabOf(rowNode).querySelectorAll(INTERACTIVE)).toHaveLength(0);
     }
 
@@ -324,13 +365,32 @@ describe("what a row claims as its own (R1-02)", () => {
     render(chatCard([], toggled));
     // Context usage is the chat row with something behind it (Style and
     // Fine-tune); the minimap row has no disclosure at all.
-    const grab = grabOf(row("contextUsage"));
+    const grab = grabOf(row("contextUsage", document));
 
     fireEvent.keyDown(grab, { key: " " });
     fireEvent.keyDown(grab, { key: "Enter" });
 
     expect(toggled.mock.calls).toEqual([["contextUsage"], ["contextUsage"]]);
     expect(grab.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("a region row's one line in the dock host (L-64)", () => {
+  it("never wraps the label under the control, which sits after it as a sibling", () => {
+    render(section("runningAgents", vi.fn()));
+    const line = row(dockOrder()[0], dockGroup()).querySelector(
+      "[data-row-line]",
+    );
+    if (line === null) throw new Error("row has no line");
+
+    // The page host alone wraps, and only below `md` - the dock host never
+    // carries the wrap classes at all.
+    expect(line.className).not.toMatch(/flex-wrap|basis-full/);
+
+    const [labelCluster, controlColumn] = [...line.children];
+    expect(labelCluster.querySelector("[data-row-grab]")).not.toBeNull();
+    expect(controlColumn.querySelectorAll(STATE_CONTROL)).toHaveLength(1);
+    expect(controlColumn.previousElementSibling).toBe(labelCluster);
   });
 });
 
@@ -359,11 +419,7 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
       const changed = regionId === CHANGED;
       return {
         ...BARE_ROW,
-        changed,
         hint: regionFacts(regionId).hint,
-        // The real rail button, which is what the Sidebar card draws instead
-        // of the plinth the owner complained about (L-120).
-        glyph: regionDepiction(regionId, values, snap.arrangement),
         control: <RegionDisplayControl regionId={regionId} values={values} />,
         revert: changed ? (
           <RevertButton
@@ -389,27 +445,29 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
     );
   }
 
-  it("reserves the revert's slot on every row, filled on one of them", () => {
+  it("shows a revert only on the changed row, with no reserved slot on the rest", () => {
     render(<PageRowList openIds={[]} />);
 
-    // The box exists whether or not there is anything in it, which is what
-    // stops the control column moving when a value changes (LV2-11).
+    // No empty box is left behind on the row that has not changed.
     expect(
-      rows().map((node) => node.querySelectorAll("[data-revert-slot]").length),
-    ).toEqual([1, 1]);
+      within(row("railAgents", document)).queryByRole("button", {
+        name: /^Revert /,
+      }),
+    ).toBeNull();
     expect(screen.getAllByRole("button", { name: /^Revert / })).toHaveLength(1);
-    expect(
-      row(CHANGED).querySelector("[data-revert-slot]")?.childElementCount,
-    ).toBe(1);
-    expect(
-      row("railAgents").querySelector("[data-revert-slot]")?.childElementCount,
-    ).toBe(0);
+    const revert = within(row(CHANGED, document)).getByRole("button", {
+      name: `Revert ${regionFacts(CHANGED).name}`,
+    });
+    // Right after the name, in the same cluster as the grab (L-122, LV2-11).
+    expect(grabOf(row(CHANGED, document)).parentElement?.contains(revert)).toBe(
+      true,
+    );
   });
 
   it("gives a row exactly one state control, outside its grab", () => {
     render(<PageRowList openIds={[]} />);
 
-    for (const node of rows()) {
+    for (const node of rows(document)) {
       expect(node.querySelectorAll(STATE_CONTROL)).toHaveLength(1);
       // Still true with a real component drawn inside the grab: the glyph is
       // `inert`, so the picture of a rail button is not a second button.
@@ -425,7 +483,7 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   it("describes the row by its presence rule instead of naming itself from it", () => {
     render(<PageRowList openIds={[]} />);
     const hint = regionFacts(CHANGED).hint;
-    const grab = grabOf(row(CHANGED));
+    const grab = grabOf(row(CHANGED, document));
 
     expect(hint).not.toBeNull();
     expect(grab.textContent).toBe(regionFacts(CHANGED).name);
@@ -455,13 +513,13 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
   it("keeps the presence rule out of the row's line, and in its disclosure", () => {
     render(<PageRowList openIds={[]} />);
     const hint = regionFacts(CHANGED).hint;
-    const closed = ruleOf(row(CHANGED));
+    const closed = ruleOf(row(CHANGED, document));
 
     // Still reachable without opening anything, and still costing no height.
     expect(closed.className).toContain("sr-only");
     // The line is the padding box every row draws, hinted or not, and the rule
     // is outside it on both - which is the whole of the fix.
-    for (const node of rows()) {
+    for (const node of rows(document)) {
       const line = node.querySelector("[data-row-line]");
       expect(line).not.toBeNull();
       expect(line?.contains(closed)).toBe(false);
@@ -469,26 +527,26 @@ describe("the page's row anatomy (L-120, L-121, L-122, R2-08)", () => {
 
     cleanup();
     render(<PageRowList openIds={[CHANGED]} />);
-    const opened = ruleOf(row(CHANGED));
-    const detail = row(CHANGED).querySelector("[data-sortable-detail]");
+    const opened = ruleOf(row(CHANGED, document));
+    const detail = row(CHANGED, document).querySelector(
+      "[data-sortable-detail]",
+    );
 
-    // Opened, it is the first thing the row says about itself.
-    expect(detail?.firstElementChild).toBe(opened);
+    // Opened, it is the first thing the row says about itself: the first
+    // element of the disclosure is the rule's own gutter, holding it.
+    expect(detail?.firstElementChild?.contains(opened)).toBe(true);
     expect(opened.className).not.toContain("sr-only");
     expect(opened.textContent).toBe(hint);
   });
 
-  it("draws the real component as the row's glyph, in place of the icon", () => {
+  it("draws the registry icon for a rail row, now that the rail carries no glyph of its own (L-120)", () => {
     render(<PageRowList openIds={[]} />);
-    const glyph = row("railAgents").querySelector("[data-row-glyph]");
+    const rail = row("railAgents", document);
 
-    expect(glyph).not.toBeNull();
-    expect(glyph?.hasAttribute("inert")).toBe(true);
-    expect(glyph?.querySelector("svg")).not.toBeNull();
-    // One picture per row: the registry icon is not drawn beside it.
-    expect(row("railAgents").querySelectorAll("[data-row-icon]")).toHaveLength(
-      0,
-    );
+    expect(rail.querySelector("[data-row-icon]")).not.toBeNull();
+    // The rail's real button used to sit here instead; only a provider row
+    // still carries a glyph.
+    expect(rail.querySelectorAll("[data-row-glyph]")).toHaveLength(0);
   });
 });
 
@@ -509,24 +567,29 @@ describe("the list header, in both hosts (R3-11)", () => {
         <SurfaceSection
           surface="statusBar"
           snapshot={snapshot()}
-          filter=""
           openRows={[]}
           onToggleRow={vi.fn()}
-          surfaceRows={null}
+          onSelectRow={null}
+          selectedRow={null}
         />
       </LayoutFormHostContext>
     );
   }
 
-  /** The same list in the dock, under Usage limits (L-26). */
+  /** The same list in the dock, under Usage limits (L-26): the same
+   * `SurfaceSection`, only the host context differs (L-03). */
   function providersLevel(): ReactNode {
-    const snap = snapshot();
     return (
-      <ProvidersChildrenRow
-        values={effectiveLayoutValues(snap.basePreset, snap.overrides)}
-        arrangement={snap.arrangement}
-        onOpenProvider={null}
-      />
+      <LayoutFormHostContext value="inspector">
+        <SurfaceSection
+          surface="statusBar"
+          snapshot={snapshot()}
+          openRows={[]}
+          onToggleRow={vi.fn()}
+          onSelectRow={null}
+          selectedRow={null}
+        />
+      </LayoutFormHostContext>
     );
   }
 
@@ -547,9 +610,14 @@ describe("the list header, in both hosts (R3-11)", () => {
 
   function headingOf(): HTMLElement {
     return screen.getByRole("heading", {
-      name: ORDER_GROUPS.usageProviders.label ?? "",
+      name: ORDER_GROUPS.usageProviders.label,
       level: 3,
     });
+  }
+
+  /** The heading and its revert share a row; the instruction is that row's sibling. */
+  function instructionOf(heading: HTMLElement): string | undefined {
+    return heading.parentElement?.nextElementSibling?.textContent ?? undefined;
   }
 
   it("draws one header shape wherever the list is drawn", () => {
@@ -557,7 +625,7 @@ describe("the list header, in both hosts (R3-11)", () => {
 
     render(statusBarCard());
     const onPage = headingOf();
-    expect(onPage.nextElementSibling?.textContent).toBe(words);
+    expect(instructionOf(onPage)).toBe(words);
     const pageShape = [
       shapeOf(onPage.parentElement),
       shapeOf(onPage.parentElement?.parentElement),
@@ -569,11 +637,31 @@ describe("the list header, in both hosts (R3-11)", () => {
 
     // Same words, said once, in the same box: the instruction is the header's
     // description on both hosts rather than a footnote under one of them.
-    expect(inDock.nextElementSibling?.textContent).toBe(words);
+    expect(instructionOf(inDock)).toBe(words);
     expect([
       shapeOf(inDock.parentElement),
       shapeOf(inDock.parentElement?.parentElement),
     ]).toEqual(pageShape);
+  });
+
+  it("names the rail list 'Panels'", () => {
+    render(section("railAgents", vi.fn()));
+
+    expect(
+      screen.getByRole("heading", { name: "Panels", level: 3 }),
+    ).toBeDefined();
+  });
+
+  it("states the message-queue rule as part of the dock's own instruction", () => {
+    render(section("runningAgents", vi.fn()));
+    const heading = screen.getByRole("heading", {
+      name: ORDER_GROUPS.dock.label,
+      level: 3,
+    });
+
+    expect(instructionOf(heading)).toContain(
+      "The message queue stays next to the message box.",
+    );
   });
 });
 
@@ -621,17 +709,31 @@ describe("the rail's dividers as items (L-25)", () => {
     seedRailDivider();
     render(section("railAgents", vi.fn()));
     const dividerId = railIds().find((id) => id.startsWith("divider:")) ?? "";
-    const dividerRow = row(dividerId);
+    const dividerRow = row(dividerId, document);
 
     // A hairline spanning the row, and no state to speak of: the thing that
     // represents a boundary used to be the emptiest item in the list (LV2-12).
     expect(dividerRow.querySelector("[data-divider-rule]")).not.toBeNull();
     expect(dividerRow.querySelectorAll(STATE_CONTROL)).toHaveLength(0);
-    // Its one verb sits in the same reserved slot a member's revert does, so
-    // the column does not move between the two kinds of row.
+    // Its one verb sits in the row's own control column.
     expect(
-      dividerRow.querySelector("[data-revert-slot]")?.querySelector("button"),
-    ).not.toBeNull();
+      within(dividerRow).getByRole("button", { name: "Remove divider" }),
+    ).toBeDefined();
+  });
+
+  it("gives every row kind the same two 14px slots before its label (grip/spacer + icon/spacer)", () => {
+    seedRailDivider();
+    render(section("railAgents", vi.fn()));
+    const dividerId = railIds().find((id) => id.startsWith("divider:")) ?? "";
+    const stackId = railIds().find((id) => id.startsWith("stack:")) ?? "";
+
+    // A movable panel, a divider and the unmovable stack link: three
+    // different builders, the same two leading slots on every one of them.
+    for (const id of ["railAgents", dividerId, stackId]) {
+      const [grip, icon] = [...grabOf(row(id, document)).children];
+      expect(grip.getAttribute("class")).toContain("size-3.5");
+      expect(icon.getAttribute("class")).toContain("size-3.5");
+    }
   });
 
   it("moves a divider like any other item", () => {
@@ -639,7 +741,7 @@ describe("the rail's dividers as items (L-25)", () => {
     render(section("railAgents", vi.fn()));
     const before = railIds();
     const dividerId = before.find((id) => id.startsWith("divider:")) ?? "";
-    const grabbed = row(dividerId);
+    const grabbed = row(dividerId, document);
 
     fireEvent.keyDown(grabbed, { key: " " });
     fireEvent.keyDown(grabbed, { key: "ArrowUp" });
@@ -665,7 +767,6 @@ function testItem(id: string, movable: boolean): SortableListItem<string> {
     divider: false,
     movable,
     dimmed: false,
-    changed: false,
     hint: null,
     control: null,
     revert: null,
@@ -675,7 +776,7 @@ function testItem(id: string, movable: boolean): SortableListItem<string> {
     onRemove: null,
     removeLabel: null,
     onStack: null,
-    onActivate: null,
+    stackMembers: null,
   };
 }
 
@@ -705,7 +806,7 @@ describe("a keyboard step goes past a row that cannot move (G6)", () => {
     const onMove = vi.fn();
     render(bareList(WITH_LINK, onMove));
 
-    fireEvent.keyDown(row("A"), { key: "ArrowDown", altKey: true });
+    fireEvent.keyDown(row("A", document), { key: "ArrowDown", altKey: true });
 
     expect(onMove.mock.calls).toEqual([["A", 2]]);
     expect(announcement()).toBe("Moved A, position 3 of 4.");
@@ -715,7 +816,7 @@ describe("a keyboard step goes past a row that cannot move (G6)", () => {
     const onMove = vi.fn();
     render(bareList(WITH_LINK, onMove));
 
-    fireEvent.keyDown(row("B"), { key: "ArrowUp", altKey: true });
+    fireEvent.keyDown(row("B", document), { key: "ArrowUp", altKey: true });
 
     expect(onMove.mock.calls).toEqual([["B", 0]]);
     expect(announcement()).toBe("Moved B, position 1 of 4.");
@@ -724,7 +825,7 @@ describe("a keyboard step goes past a row that cannot move (G6)", () => {
   it("skips the link in grab mode too, dropping where the nudge would land", () => {
     const onMove = vi.fn();
     render(bareList(WITH_LINK, onMove));
-    const grabbed = row("A");
+    const grabbed = row("A", document);
 
     fireEvent.keyDown(grabbed, { key: " " });
     fireEvent.keyDown(grabbed, { key: "ArrowDown" });
@@ -741,7 +842,7 @@ describe("a keyboard step goes past a row that cannot move (G6)", () => {
     const onMove = vi.fn();
     render(bareList([testItem("A", true), testItem("L", false)], onMove));
 
-    fireEvent.keyDown(row("A"), { key: "ArrowDown", altKey: true });
+    fireEvent.keyDown(row("A", document), { key: "ArrowDown", altKey: true });
 
     expect(onMove).not.toHaveBeenCalled();
     expect(announcement()).toBe("");
@@ -750,7 +851,10 @@ describe("a keyboard step goes past a row that cannot move (G6)", () => {
   it("swaps Agents and Artifacts through the real rail list, keeping the group", () => {
     render(section("railAgents", vi.fn()));
 
-    fireEvent.keyDown(row("railAgents"), { key: "ArrowDown", altKey: true });
+    fireEvent.keyDown(row("railAgents", document), {
+      key: "ArrowDown",
+      altKey: true,
+    });
 
     expect(
       useLayoutStore.getState().arrangement.rail.map((entry) => entry.id),

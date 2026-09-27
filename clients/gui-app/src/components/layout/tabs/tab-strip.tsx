@@ -29,7 +29,7 @@ import { HomeStripSlot } from "@/components/layout/tabs/tab-strip-home-item";
 import { useHomeTabDrawn } from "@/components/layout/tabs/use-home-tab-drawn";
 import { useTabStripController } from "@/components/layout/tabs/tab-strip-controller";
 import { TabStripIndicatorScope } from "@/components/layout/tabs/tab-strip-indicator-scope";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { useArrangementValue } from "@/lib/layout-overrides";
 import { useHorizontalWheelScroll } from "@/hooks/use-horizontal-wheel-scroll";
 import type { TabSplitCommandId } from "@/stores/tabs/tab-split-commands";
 import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
@@ -63,7 +63,7 @@ function TabStripBody() {
   const allTabs = controller.tabs;
   const navigate = useNavigate();
   const handleWheel = useHorizontalWheelScroll();
-  const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
+  const taskTabLayout = useArrangementValue("taskTabLayout");
   const { setScrollElement, hiddenTabKeys, hasOverflow, revealTab } =
     useHiddenHeaderTabs(taskTabLayout);
   const hiddenTabs = useMemo(() => {

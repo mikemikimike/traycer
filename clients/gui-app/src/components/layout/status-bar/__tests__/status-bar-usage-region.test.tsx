@@ -124,6 +124,7 @@ describe("the usage cluster as one region", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
     });
 
@@ -137,6 +138,7 @@ describe("the usage cluster as one region", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
     });
 
@@ -160,6 +162,7 @@ describe("the usage cluster as one region", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
       useLayoutEditorStore.getState().select("usageLimits");
     });

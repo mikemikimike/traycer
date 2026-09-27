@@ -29,10 +29,8 @@
 //      node here must be named in the fixture's `NO_LIVE_LEAF` table with the
 //      reason, and every region that HAS one must not be. The driver prints
 //      the uncovered list so the gap is visible in the output.
-//   3. The preset miniature is a uniformly SCALED app frame, not a reflowed
-//      one: its untransformed frame measures exactly 1000x620 with
-//      `offsetWidth`/`offsetHeight`, and its scale is the box width over that
-//      width. A reflowed card is any other size.
+//   3. The preset cards sit in one row in the 380px inspector, each with one
+//      miniature on top and its name and caption below.
 //   4. The hover chip is where the BROWSER painted it under CSS anchor
 //      positioning, not where a measurement would have put it.
 //
@@ -88,8 +86,6 @@
 // Every variant below is a fresh navigation with its own query, and the
 // page-load guard re-baselines per variant.
 //
-//   Phase 1b (parity). The preset miniature draws the strip on the stored edge
-//       and the rail on the stored side, for every placement/side pair.
 //   Phase 2b (sides), `layout-editor-canvas.html?tabs=&collapsed=&wco=&dock=`
 //       with the real `SideTabStrip` and `DesktopMenuHeader` band:
 //       A9 generalised - the editing frame on all four column edges with no
@@ -125,17 +121,20 @@
 // sheets, the real width handle between them), `sidebar=`, `view=` and
 // `account=1`:
 //
-//   sheets - the 6px ground on every side and between the sheets, each
-//       sheet's four corners alike (a clipped arc next to the strip is the bug
-//       this guards), no pseudo-element arc left on the frame or a sheet, and
-//       both width handles as the hit in their gaps; left/right x none/macOS
-//       and top, in both themes.
-//   header - `header=app` at the top (staging round 1, F4): the active tab,
-//       the split pair's focused member and both drag overlays are one 32px
-//       box on the sheets' radius, centred in the header, with ground under
-//       it and nothing of the strip below the header; a real hover draws the
-//       same box. No controls, macOS and Windows, panel on either side, in
-//       both themes.
+//   sheets - flush surface (ticket 09): the frame flush on every side (no
+//       shell gap, no padding, no margin), the panel with no border of its
+//       own, the canvas frame's border suppressed only on the edge that
+//       already carries the surface's own seam line, no radius or
+//       pseudo-element arc left anywhere, and both width handles as the hit
+//       at the flush boundaries; left/right x none/macOS and top, in both
+//       themes.
+//   header - `header=app` at the top (staging round 1, F4; flush surface,
+//       ticket 09): the active tab, the split pair's focused member and both
+//       drag overlays are one 32px box (its own rounding, self-consistent on
+//       all four corners), centred in the header, with ground under it and
+//       nothing of the strip below the header; the surface frame sits flush
+//       against the header's own bottom edge. No controls, macOS and
+//       Windows, panel on either side, in both themes.
 //   running - the glyph set's running state is AgentSpinningDots' default
 //       dots on the expanded strip and the top header (F3), in both themes:
 //       advancing under an emulated `no-preference`, one steady visible frame
@@ -150,7 +149,7 @@
 //       kind as a 14px disc at the top-right; the waiting pulse painted past
 //       the last row with the list's padding holding its 8px spread.
 //   overlays - the hover card, the user menu (one click, no double toggle)
-//       and the Inbox drawer (level with the sheets) open toward the content
+//       and the Notifications drawer (flush with the frame) open toward the content
 //       and inside the window, on both edges.
 //   coverage - with a known host the activity plane does not reach, a task
 //       with no known agent hovers as unknown (never "Idle") with no meter
@@ -161,7 +160,7 @@
 //       gone on a collapse and in the Layered view.
 //   striptop - the top block (F1, F7), left/right x none/macOS x rail/expanded
 //       in both themes: the rail as one column (the lights on macOS left, expand,
-//       Inbox, All tasks, New Task, a divider, Home, the tiles, the avatar),
+//       Notifications, All tasks, New Task, a divider, Home, the tiles, the avatar),
 //       every part centred on the rail's axis, 32px nav tiles 4px apart, the
 //       divider midway, Home and the tiles evenly spaced, no history arrows;
 //       expanded, New Task after Home in Home's box with its icon and label
@@ -254,6 +253,12 @@ const LIVE_PROBE = `(() => {
     const leaf = picture.firstElementChild ?? picture;
     const live = glyph(node) ?? scale(node);
     const drawn = live.kind === "glyph" ? glyph(leaf) : scale(leaf);
+    // The sample sidebar always has one panel open, and its rail button wears
+    // the rail's own current-panel ink. A picture is the button at rest, so
+    // an open button is compared on its size only; the resting buttons beside
+    // it carry the colour comparison.
+    const current = node.matches('[aria-current="true"]') || node.querySelector('[aria-current="true"]') !== null;
+    if (current && live !== null) delete live.color;
     if (drawn === null) {
       return { regionId, error: "the live leaf draws an icon and the picture does not", live, drawn: null };
     }
@@ -299,20 +304,18 @@ const CLIP_FADE_PROBE = `(() => {
   };
 })()`;
 
-const MINIATURE_PROBE = `(() => {
-  const box = document.querySelector('[data-testid="preset-miniature"]');
-  if (box === null) return { error: "no preset miniature rendered" };
-  const frame = box.firstElementChild;
-  if (frame === null) return { error: "the miniature has no frame" };
-  const matrix = new DOMMatrixReadOnly(getComputedStyle(frame).transform);
+/**
+ * The preset cards: one row, each with exactly one miniature above its name
+ * and caption.
+ */
+const PRESET_CARDS_PROBE = `(() => {
+  const cards = [...document.querySelectorAll('[data-testid="layout-presets-block"] [data-preset]')];
+  const tops = cards.map((card) => Math.round(card.getBoundingClientRect().top));
   return {
-    error: null,
-    boxWidth: box.clientWidth,
-    frameWidth: frame.offsetWidth,
-    frameHeight: frame.offsetHeight,
-    scale: matrix.a,
-    scaleX: matrix.a,
-    scaleY: matrix.d,
+    count: cards.length,
+    oneRow: new Set(tops).size === 1,
+    unpictured: cards.filter((card) => card.querySelectorAll('[data-testid="preset-miniature"]').length !== 1).map((card) => card.getAttribute("data-preset")),
+    untitled: cards.filter((card) => card.textContent.trim().length === 0).map((card) => card.getAttribute("data-preset")),
   };
 })()`;
 
@@ -411,6 +414,22 @@ const DOCK_ROW_METRIC_LIST_INSET = 11.25;
 /** `selection-ring.ts`'s own two numbers, restated so a drift is a failure. */
 const RING_PADDING = 3;
 const RING_BLEED = 6;
+
+/**
+ * `selection-ring.ts`'s own `insideWindow`, restated: a target within
+ * {@link RING_BLEED} of the viewport edge is clamped so the halo the ring
+ * paints outside its own box is never itself clipped. A region near an edge
+ * (the rail's top row, for one) is expected on this clamped box, not the raw
+ * padded one.
+ */
+function clampedRingBox(box, viewport) {
+  const left = Math.max(box.x, RING_BLEED);
+  const top = Math.max(box.y, RING_BLEED);
+  const right = Math.min(box.x + box.width, viewport.width - RING_BLEED);
+  const bottom = Math.min(box.y + box.height, viewport.height - RING_BLEED);
+  if (right <= left || bottom <= top) return box;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 
 /**
  * The window the editing frame's stroke is looked for in, across each edge.
@@ -549,6 +568,12 @@ const CANVAS_REGIONS = [
   "railSharing",
   "railComments",
   "minimap",
+  // The sample conversation's own regions (L-175, L-178): a reasoning-only
+  // activity row and a command row in its last two turns, and a stamp on
+  // every prompt.
+  "toolActivity",
+  "thinking",
+  "timestamps",
   "contextUsage",
   "changedFiles",
   "runningAgents",
@@ -671,19 +696,30 @@ const INSTALL_PIXEL_TOOLS = `(() => {
  * popover layers anywhere. The file chooser is the one the DOM cannot answer;
  * that one is a CDP event.
  */
+// The sample sidebar's body is left out: it shows the panel of the selected
+// Sidebar setting by design (F3), so a click that selects a rail icon swaps
+// its sections without the app having acted. So is the sample model picker,
+// which the editor opens while Model is selected so its footer has something
+// to show: it is the editor's picture, not a popover the app opened.
 const APP_ACTED_PROBE = `(() => {
   const column = document.querySelector("[data-layout-column]");
   if (column === null) return { expanded: "no column", states: "no column", layers: -1 };
+  const appOwn = (node) =>
+    node.closest("[data-sample-sidebar-body], [data-testid='sample-model-picker']") === null;
   return {
     expanded: [...column.querySelectorAll("[aria-expanded]")]
+      .filter(appOwn)
       .map((node) => node.getAttribute("aria-expanded"))
       .join(","),
     states: [...column.querySelectorAll("[data-state]")]
+      .filter(appOwn)
       .map((node) => node.getAttribute("data-state"))
       .join(","),
-    layers: document.querySelectorAll(
-      '[role="menu"],[role="dialog"],[role="listbox"],[data-radix-popper-content-wrapper]',
-    ).length,
+    layers: [
+      ...document.querySelectorAll(
+        '[role="menu"],[role="dialog"],[role="listbox"],[data-radix-popper-content-wrapper]',
+      ),
+    ].filter(appOwn).length,
   };
 })()`;
 
@@ -734,326 +770,17 @@ const TERMINALS_STACKED_ABOVE_BROWSERS = [
   "railComments",
 ];
 
-// --- phase 1b: the miniature's placements -----------------------------------
-
-/**
- * Every stored tab strip placement and sidebar side the miniature has to draw,
- * as the query the parity fixture reads. `top/left` is the shipped layout the
- * base phase already covered.
- */
-const MINIATURE_PLACEMENTS = [
-  { tabs: "left", sidebar: "left" },
-  { tabs: "right", sidebar: "right" },
-  { tabs: "left", sidebar: "right" },
-  { tabs: "right", sidebar: "left" },
-  { tabs: "top", sidebar: "right" },
-  { tabs: "top", sidebar: "left" },
-  { tabs: "left", sidebar: "left", collapsed: 1 },
-  { tabs: "right", sidebar: "left", collapsed: 1 },
-  { tabs: "left", sidebar: "left", view: "activity" },
-  { tabs: "right", sidebar: "right", view: "activity" },
-];
-
-/**
- * The shell's structure in one frame, relative to the frame's origin and in
- * the frame's own px: the strip, the two sheets, whether the active task is
- * joined, and whether the strip lists live agents. `frameSelector` is the
- * miniature's scaled 1000x620 box, or the live app column.
- */
-const SHELL_STRUCTURE_PROBE = (frameSelector, scope) => `(() => {
-  const scope = ${scope === null ? "document" : `document.querySelector(${JSON.stringify(scope)})`};
-  const frameNode = document.querySelector(${JSON.stringify(frameSelector)});
-  const origin = frameNode.getBoundingClientRect();
-  const scale = origin.width / frameNode.offsetWidth;
-  const rect = (node) => {
-    if (node === null) return null;
-    const r = node.getBoundingClientRect();
-    return { x: (r.x - origin.x) / scale, y: (r.y - origin.y) / scale, width: r.width / scale, height: r.height / scale };
-  };
-  return {
-    strip: rect(scope.querySelector('[data-testid="side-tab-strip"], [data-testid="app-frame-side-strip"]')),
-    panel: rect(scope.querySelector('[data-shell-sheet="panel"]')),
-    content: rect(scope.querySelector('[data-shell-sheet="content"]')),
-    joined: scope.querySelector("[data-side-tab-joined]") !== null,
-    liveAgents: scope.querySelector('[data-testid="strip-live-agents"], [data-testid="app-frame-live-agents"]') !== null,
-    agentRows: [...scope.querySelectorAll('[data-testid="strip-live-agents"] [data-live-kind], [data-testid="app-frame-live-agents"] [data-live-kind]')].map((row) => {
-      const chip = row.querySelector('[data-testid="strip-live-agent-waiting-chip"]');
-      return {
-        box: rect(row),
-        indent: parseFloat(getComputedStyle(row).paddingInlineStart),
-        chip: chip === null ? null : chip.textContent,
-        time: row.querySelector('[data-testid="chat-row-idle-time"]') !== null,
-      };
-    }),
-  };
-})()`;
-
-/**
- * Where the miniature drew the strip and the rail, in its own scaled frame.
- * The strip is `app-frame-side-strip`'s box (the frame chrome's one copy),
- * the rail is `preset-miniature-rail`, and the frame is the scaled 1000x620
- * box both live in.
- */
-const MINIATURE_PLACEMENT_PROBE = `(() => {
-  const box = document.querySelector('[data-testid="preset-miniature"]');
-  if (box === null) return { error: "no preset miniature rendered" };
-  const frame = box.firstElementChild;
-  const rail = box.querySelector('[data-testid="preset-miniature-rail"]');
-  const strip = box.querySelector('[data-testid="app-frame-side-strip"]');
-  if (frame === null || rail === null) return { error: "the miniature has no frame or no rail" };
-  const rect = (node) => {
-    const r = node.getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width, height: r.height };
-  };
-  return {
-    error: null,
-    frame: rect(frame),
-    rail: rect(rail),
-    strip: strip === null ? null : rect(strip),
-    frameWidth: frame.offsetWidth,
-    frameHeight: frame.offsetHeight,
-  };
-})()`;
-
-async function runParityPlacementVariants(
-  client,
-  pageUrl,
-  canvasUrl,
-  pageLoads,
-) {
-  const violations = [];
-  const notes = [];
-  for (const placement of MINIATURE_PLACEMENTS) {
-    const label = `miniature ${Object.entries(placement)
-      .map(([key, value]) => `${key}=${String(value)}`)
-      .join(" ")}`;
-    const loadsAtStart = await openVariant(
-      client,
-      variantUrl(pageUrl, placement),
-      label,
-      "window.__layoutEditorProbe?.ready === true",
-      pageLoads,
-    );
-    await flush(client);
-    const drawn = await evaluate(client, MINIATURE_PLACEMENT_PROBE);
-    if (drawn.error !== null) {
-      violations.push(`${label}: ${drawn.error}`);
-      continue;
-    }
-    if (drawn.frameWidth !== 1000 || drawn.frameHeight !== 620) {
-      violations.push(
-        `${label}: the frame measures ${String(drawn.frameWidth)}x${String(drawn.frameHeight)} untransformed, expected 1000x620`,
-      );
-    }
-    const frameCentre = drawn.frame.x + drawn.frame.width / 2;
-    const railCentre = drawn.rail.x + drawn.rail.width / 2;
-    const railSide = railCentre < frameCentre ? "left" : "right";
-    if (railSide !== placement.sidebar) {
-      violations.push(
-        `${label}: the rail is drawn on the ${railSide} (centre ${railCentre.toFixed(1)} in a frame centred at ${frameCentre.toFixed(1)}), stored side ${placement.sidebar}`,
-      );
-    }
-    if (placement.tabs === "top") {
-      if (drawn.strip !== null) {
-        violations.push(
-          `${label}: a side strip is drawn for the top placement`,
-        );
-      }
-    } else if (drawn.strip === null) {
-      violations.push(`${label}: no side strip in the miniature`);
-    } else {
-      const atEdge =
-        placement.tabs === "left"
-          ? Math.abs(drawn.strip.x - drawn.frame.x) <= 1
-          : Math.abs(
-              drawn.strip.x +
-                drawn.strip.width -
-                (drawn.frame.x + drawn.frame.width),
-            ) <= 1;
-      if (!atEdge) {
-        violations.push(
-          `${label}: the strip at ${boxText(drawn.strip)} is not on the frame's ${placement.tabs} edge (frame ${boxText(drawn.frame)})`,
-        );
-      }
-      const railBeyondStrip =
-        placement.tabs === "left"
-          ? drawn.rail.x < drawn.strip.x + drawn.strip.width - 0.5
-          : drawn.rail.x + drawn.rail.width > drawn.strip.x + 0.5;
-      if (railBeyondStrip) {
-        violations.push(
-          `${label}: the rail at ${boxText(drawn.rail)} sits between the strip at ${boxText(drawn.strip)} and the window edge`,
-        );
-      }
-    }
-    notes.push(
-      `${label}: strip ${drawn.strip === null ? "none" : boxText(drawn.strip)}, rail ${boxText(drawn.rail)}, frame ${boxText(drawn.frame)}`,
-    );
-    const pictured = await evaluate(
-      client,
-      SHELL_STRUCTURE_PROBE(
-        '[data-testid="preset-miniature"] > div',
-        '[data-testid="preset-miniature"]',
-      ),
-    );
-    assertNoReloadSince(pageLoads, loadsAtStart, label, violations);
-    await compareWithLiveFrame(
-      client,
-      canvasUrl,
-      pageLoads,
-      placement,
-      pictured,
-      label,
-      violations,
-      notes,
-    );
-  }
-  assert.deepEqual(
-    violations,
-    [],
-    `The miniature's placements failed (${String(violations.length)}):\n${violations.map((line) => `  - ${line}`).join("\n")}\n\nmeasurements:\n${notes.map((line) => `  ${line}`).join("\n")}`,
-  );
-  for (const note of notes) console.log(`  ${note}`);
-  console.log(
-    `preset miniature placements passed: ${String(MINIATURE_PLACEMENTS.length)} stored placement/side/strip variants, each drawn on its stored edge and side, and each matching the live frame at the miniature's 1000x620: the strip, both sheets, the join and the live agents`,
-  );
-}
-
-/**
- * The live canvas at the miniature's own 1000x620, holding a task (its panel
- * and content sheets), against the picture: every box across the frame and
- * its top within 1px, and the join and the Activity list alike. The bottom is
- * not compared: the picture carries the status strip the fixture's column
- * does not mount.
- */
-async function compareWithLiveFrame(
-  client,
-  canvasUrl,
-  pageLoads,
-  placement,
-  pictured,
-  label,
-  violations,
-  notes,
-) {
-  await client.send("Emulation.setDeviceMetricsOverride", {
-    width: 1000,
-    height: 620,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
-  try {
-    const liveLabel = `${label}, live`;
-    const loadsAtStart = await openVariant(
-      client,
-      variantUrl(canvasUrl, {
-        collapsed: 0,
-        view: "layered",
-        ...placement,
-        wco: "none",
-        dock: "right",
-        surface: "epic",
-        account: 1,
-      }),
-      liveLabel,
-      SHELL_READY,
-      pageLoads,
-    );
-    if (placement.view === "activity") {
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setActivity(${JSON.stringify(RAIL_ACTIVITY)})`,
-      );
-      // The picture's first agent waits on a reply, so the live one does too.
-      await evaluate(
-        client,
-        `window.__layoutCanvasProbe.setIndicators({}, ${JSON.stringify({ "fixture-agent-plan": { ...NO_INDICATOR, pendingInterview: true } })})`,
-      );
-    }
-    await settle(client, 400);
-    const live = await evaluate(
-      client,
-      SHELL_STRUCTURE_PROBE("[data-layout-column]", null),
-    );
-    for (const part of ["strip", "panel", "content"]) {
-      const a = pictured[part];
-      const b = live[part];
-      if ((a === null) !== (b === null)) {
-        violations.push(
-          `${label}: the ${part} is ${a === null ? "missing from the picture" : "drawn in the picture"} but ${b === null ? "absent" : "present"} live`,
-        );
-        continue;
-      }
-      if (a === null) continue;
-      for (const key of ["x", "y", "width"]) {
-        if (Math.abs(a[key] - b[key]) > 1)
-          violations.push(
-            `${label}: the ${part}'s ${key} is ${a[key].toFixed(1)} in the picture, ${b[key].toFixed(1)} live`,
-          );
-      }
-    }
-    if (pictured.joined !== live.joined)
-      violations.push(
-        `${label}: the picture ${pictured.joined ? "joins" : "does not join"} the active task to its panel, the live strip ${live.joined ? "does" : "does not"}`,
-      );
-    if (pictured.liveAgents !== live.liveAgents)
-      violations.push(
-        `${label}: the picture ${pictured.liveAgents ? "lists" : "does not list"} live agents in the strip, the live strip ${live.liveAgents ? "does" : "does not"}`,
-      );
-    // Row anatomy, not only presence: a waiting root (its chip, no time), a
-    // nested agent (one indent step, its time) and a second root, alike.
-    if (pictured.agentRows.length !== live.agentRows.length) {
-      violations.push(
-        `${label}: the picture lists ${String(pictured.agentRows.length)} live agents, the live strip ${String(live.agentRows.length)}`,
-      );
-    } else {
-      for (const [index, a] of pictured.agentRows.entries()) {
-        const b = live.agentRows[index];
-        const row = `live agent ${String(index + 1)}`;
-        if (Math.abs(a.indent - b.indent) > 0.5)
-          violations.push(
-            `${label}: ${row} is indented ${String(a.indent)}px in the picture, ${String(b.indent)}px live`,
-          );
-        if (a.chip !== b.chip)
-          violations.push(
-            `${label}: ${row} carries chip ${String(a.chip)} in the picture, ${String(b.chip)} live`,
-          );
-        if (a.time !== b.time)
-          violations.push(
-            `${label}: ${row} ${a.time ? "shows" : "has no"} idle time in the picture, live it ${b.time ? "does" : "does not"}`,
-          );
-        for (const key of ["x", "height"]) {
-          if (Math.abs(a.box[key] - b.box[key]) > 1)
-            violations.push(
-              `${label}: ${row}'s ${key} is ${a.box[key].toFixed(1)} in the picture, ${b.box[key].toFixed(1)} live`,
-            );
-        }
-      }
-    }
-    notes.push(
-      `${label}: matches live - strip ${live.strip === null ? "none" : boxText(live.strip)}, panel ${boxText(live.panel)}, content ${boxText(live.content)}, joined ${String(live.joined)}, live agents ${String(live.liveAgents)}${live.agentRows.map((row) => ` [x ${row.box.x.toFixed(1)} indent ${String(row.indent)} ${row.chip ?? (row.time ? "time" : "-")}]`).join("")}`,
-    );
-    assertNoReloadSince(pageLoads, loadsAtStart, liveLabel, violations);
-  } finally {
-    await client.send("Emulation.setDeviceMetricsOverride", {
-      width: 1500,
-      height: 1200,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
-  }
-}
-
 // --- phase 2b: the side placements (A9 generalised, A11, A12, A13) ----------
 
 /** The strip's own numbers (side-strip-tokens.ts, D4, S-20), restated so a drift is a failure. */
 const SIDE_STRIP_RAIL_WIDTH = 60;
 const SIDE_STRIP_DEFAULT_WIDTH = 240;
 /**
- * The collapsed panel's rail sheet: the vertical `EpicLeftPanelRail`'s `w-12`
- * (48px, not the strip's 60px rail) inside the sheet's 1px border
- * (`task-surface-frame`).
+ * The collapsed panel's rail: the vertical `EpicLeftPanelRail`'s `w-12`
+ * (48px, not the strip's 60px rail). Flush surface: the collapsed rail
+ * draws no border of its own any more, so this is the bare width.
  */
-const PANEL_RAIL_SHEET_WIDTH = 48 + 2;
+const PANEL_RAIL_SHEET_WIDTH = 48;
 /** `env(titlebar-area-x, 82px)`: the fallback the fixture's `.wco` stands on (6.4). */
 const WCO_LEADING_INSET_FALLBACK = 82;
 /** `min(env(titlebar-area-x, 82px), 0.75rem)` while the inspector docks left (S-33). */
@@ -1619,9 +1346,11 @@ async function checkTitleBand(client, variant, base) {
       }
     }
   }
-  if (band.surfaceMarginTop !== `${String(SHELL_GAP)}px`) {
+  // Flush surface (5c7ba8ea): the frame meets the band, or the window top,
+  // with no shell gap of its own.
+  if (band.surfaceMarginTop !== "0px") {
     violations.push(
-      `the surface frame's margin-top is ${String(band.surfaceMarginTop)}, expected the ${String(SHELL_GAP)}px shell gap under the band or the window top (D1; class "${String(band.surfaceClass)}")`,
+      `the surface frame's margin-top is ${String(band.surfaceMarginTop)}, expected 0px: the task surface is flush under the band or the window top (class "${String(band.surfaceClass)}")`,
     );
   }
   if (variant.query.wco === "mac" && variant.query.tabs === "left") {
@@ -2146,10 +1875,22 @@ async function runLiveSwitchPhase(client, pageUrl, pageLoads) {
   await delay(450);
   await flush(client);
 
+  // The two-level form (T3/T4): a real click on the Task tabs row opens its
+  // area before the Tab placement control exists in the document.
+  const taskTabsArea = await rectOf(
+    client,
+    '[data-layout-inspector] [data-layout-area="topBar"]',
+  );
+  if (taskTabsArea !== null) {
+    await moveTo(client, taskTabsArea.cx, taskTabsArea.cy);
+    await pressAndRelease(client, taskTabsArea.cx, taskTabsArea.cy, "left");
+    await flush(client);
+  }
+
   const radio = await evaluate(
     client,
     `(() => {
-      const group = document.querySelector('[data-layout-inspector] [role="radiogroup"][aria-label="Tabs position"]');
+      const group = document.querySelector('[data-layout-inspector] [role="radiogroup"][aria-label="Tab placement"]');
       if (group === null) return null;
       const left = [...group.querySelectorAll('[role="radio"]')].find((node) => (node.textContent ?? "").trim() === "Left") ?? null;
       if (left === null) return null;
@@ -2157,15 +1898,19 @@ async function runLiveSwitchPhase(client, pageUrl, pageLoads) {
       return true;
     })()`,
   );
-  if (radio === null) {
+  if (taskTabsArea === null) {
     violations.push(
-      "A14: the inspector index shows no Tabs position radio labelled Left",
+      "A14: the inspector's All settings list shows no Task tabs row",
+    );
+  } else if (radio === null) {
+    violations.push(
+      "A14: the Task tabs area shows no Tab placement radio labelled Left",
     );
   } else {
     await flush(client);
     const left = await rectOf(
       client,
-      '[data-layout-inspector] [role="radiogroup"][aria-label="Tabs position"] [role="radio"]:nth-child(2)',
+      '[data-layout-inspector] [role="radiogroup"][aria-label="Tab placement"] [role="radio"]:nth-child(2)',
     );
     const depthBefore = await evaluate(
       client,
@@ -2654,6 +2399,19 @@ async function pressAt(client, x, y) {
 }
 
 async function moveInSteps(client, from, to) {
+  // The page's own record of the last move it dispatched, so the wait below
+  // can ask for the event itself rather than guess how long it takes.
+  await evaluate(
+    client,
+    `window.__lastPointerMove ??= (() => {
+      const last = { x: NaN, y: NaN };
+      window.addEventListener("pointermove", (event) => {
+        last.x = event.clientX;
+        last.y = event.clientY;
+      }, true);
+      return last;
+    })(); 0`,
+  );
   const steps = 16;
   for (let step = 1; step <= steps; step += 1) {
     await client.send("Input.dispatchMouseEvent", {
@@ -2666,6 +2424,38 @@ async function moveInSteps(client, from, to) {
       pointerType: "mouse",
     });
   }
+  await awaitPointerAt(client, to);
+}
+
+/**
+ * Resolves once the page has DISPATCHED a move to `to`, not merely been sent
+ * one. CDP answers a mouseMoved once the browser has taken it, while the
+ * browser holds each move until the renderer acknowledges the previous one and
+ * the renderer dispatches moves aligned to its next frame - so a read straight
+ * after the last send could see the page one or more moves behind. Under load
+ * that read the side strip at its 192px minimum instead of the rail its
+ * crossing had already drawn. Checked once per frame: input is dispatched at
+ * the start of a frame, before its rAF callbacks, so when a callback sees the
+ * position every handler for that move has run.
+ */
+async function awaitPointerAt(client, to) {
+  const found = await evaluate(
+    client,
+    `new Promise((resolve) => {
+      const last = window.__lastPointerMove;
+      let frames = 0;
+      const check = () => {
+        if (Math.abs(last.x - ${to.x}) <= 1 && Math.abs(last.y - ${to.y}) <= 1) resolve(true);
+        else if (++frames > 600) resolve(false);
+        else requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    })`,
+  );
+  if (!found)
+    throw new Error(
+      `the page never dispatched the move to (${String(to.x)}, ${String(to.y)})`,
+    );
 }
 
 async function releaseAt(client, x, y) {
@@ -2704,10 +2494,6 @@ const SHOTS_DIR = process.env.LAYOUT_EDITOR_BROWSER_SHOTS ?? null;
 
 /** The waiting pulse's ring spread (`side-strip-waiting-pulse` in index.css). */
 const WAITING_PULSE_SPREAD = 8;
-
-/** A 16px square around each corner, compared with the top-left one mirrored. */
-const CORNER_REGION = 16;
-const CORNER_MEAN_CEILING = 2;
 
 const NO_INDICATOR = {
   unreadFailure: false,
@@ -2896,11 +2682,14 @@ const HEADER_PROBE = (scope) => `(() => {
   const scope = ${scope};
   // In the strip, the selected tab's box; in a drag overlay, which has no tab
   // roles, the one box it draws.
-  const activeBox = scope === null ? null : scope.matches('[data-testid="header-tab-drag-overlay"]')
-    ? scope.querySelector('[data-testid="tab-chrome-box"]')
-    : scope.querySelector('[role="tab"][aria-selected="true"] [data-testid="tab-chrome-box"]');
+  const activeItem = scope === null ? null : scope.matches('[data-testid="header-tab-drag-overlay"]')
+    ? scope
+    : scope.querySelector('[role="tab"][aria-selected="true"]');
+  const activeBox = activeItem === null ? null : activeItem.matches('[data-testid="tab-chrome-box"]')
+    ? activeItem
+    : activeItem.querySelector('[data-testid="tab-chrome-box"]');
   const activeRoot = activeBox === null ? null : activeBox.parentElement;
-  const sheet = document.querySelector('[data-shell-sheet="content"]');
+  const sheet = document.querySelector('[data-epic-canvas-frame]');
   // Every painted part of the strip: nothing may reach below the header.
   const below = strip === null || header === null ? [] : [...strip.querySelectorAll("*")]
     .filter((node) => {
@@ -2912,10 +2701,20 @@ const HEADER_PROBE = (scope) => `(() => {
     .map(({ node, r }) => (node.getAttribute("data-testid") ?? node.tagName.toLowerCase()) + "@" + r.bottom.toFixed(1));
   return {
     header: box(header),
+    frame: box(document.querySelector(${JSON.stringify(SURFACE_FRAME)})),
     sheet: box(sheet),
-    sheetRadius: sheet === null ? null : getComputedStyle(sheet).borderTopLeftRadius,
     active: box(activeBox),
     activeRadii: activeBox === null ? null : radii(activeBox),
+    // The active tab opens into its task's sheet (the sheet join, index.css):
+    // joined, its two bottom corners go square rather than matching the top.
+    activeJoined: activeBox !== null && activeBox.hasAttribute("data-sheet-joined"),
+    // A split pair joins as the GROUP's own box (split-tab-chrome.tsx), a
+    // sibling of the focused member's chrome rather than a descendant of it:
+    // the member's own box stays fully rounded and unjoined even while the
+    // pair behind it fills the strip below with its sheet's fill instead of
+    // ground. Search the whole strip item (data-strip-item-id, the lone
+    // tab's own wrapper or the split group's) so either shape is found.
+    itemJoined: activeBox !== null && activeBox.closest("[data-strip-item-id]")?.querySelector("[data-sheet-joined]") != null,
     activeBorder: activeBox === null ? null : getComputedStyle(activeBox).borderTopWidth,
     activePseudo: activeRoot === null ? [] : [...pseudo(activeRoot), ...pseudo(activeBox)],
     caps: document.querySelectorAll('[data-testid^="tab-cap"], [data-testid="tab-baseline-cover"]').length,
@@ -3086,7 +2885,7 @@ async function runHeaderPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    `${String(HEADER_VARIANTS.length)} top-placement windows in both themes - the active tab, the split pair's focused member and both drag overlays are one ${String(HEADER_TAB_BOX_HEIGHT)}px box on the sheets' radius, centred in the header, with nothing of the strip below the header and ground under every box; an inactive tab's real hover is the same box`,
+    `${String(HEADER_VARIANTS.length)} top-placement windows in both themes - the active tab, the split pair's focused member and both drag overlays are one ${String(HEADER_TAB_BOX_HEIGHT)}px box (self-consistent rounding on all four corners), centred in the header, with nothing of the strip below the header, ground under every box and the surface frame flush against the header's bottom edge; an inactive tab's real hover is the same box`,
   );
 }
 
@@ -3138,13 +2937,24 @@ async function checkHeaderTabBox(
     );
   if (probe.activeBorder !== "1px")
     fail(`the box's border is ${String(probe.activeBorder)}, not 1px`);
-  if (
-    new Set(probe.activeRadii).size !== 1 ||
-    probe.activeRadii[0] !== probe.sheetRadius
-  )
+  // Flush surface: the sheets carry no radius of their own any more, so the
+  // box's own rounding (design token, independent of the sheet below it) only
+  // has to stay self-consistent - all four corners alike, unless the box is
+  // joined into its sheet, which opens its two bottom corners square (the
+  // sheet join, index.css) while the top two stay rounded alike.
+  const [tl, tr, br, bl] = probe.activeRadii;
+  if (probe.activeJoined) {
+    if (tl !== tr)
+      fail(`the box's top corners are ${tl} and ${tr}, not the same`);
+    if (br !== "0px" || bl !== "0px")
+      fail(
+        `the box's joined bottom corners are ${br} and ${bl}, not square (0px)`,
+      );
+  } else if (new Set(probe.activeRadii).size !== 1) {
     fail(
-      `the box's corners are ${probe.activeRadii.join(" ")}, not the sheets' ${String(probe.sheetRadius)} on all four`,
+      `the box's corners are ${probe.activeRadii.join(" ")}, not the same on all four`,
     );
+  }
   const inOverlay = scope.includes("drag-overlay");
   if (!inOverlay) {
     if (Math.abs(active.cy - probe.header.cy) > 0.5)
@@ -3162,18 +2972,28 @@ async function checkHeaderTabBox(
       fail(
         `the box reaches ${active.bottom.toFixed(1)}, past the header (${probe.header.bottom.toFixed(1)}) or into the sheet (${probe.sheet.y.toFixed(1)})`,
       );
-    // Pixels: ground under the box, in the header and in the shell gap.
-    const ground = await resolveRgb(client, "var(--shell-ground)");
-    for (const [where, y] of [
-      ["between the box and the header's bottom", active.bottom + 1.5],
-      ["in the shell gap under the box", probe.header.bottom + SHELL_GAP / 2],
-    ]) {
+    // Pixels: ground between the box and the header's own bottom edge - only
+    // where the item is not joined (lone tab, or the pair's own group box).
+    // A joined item's bridge fills that same strip with the sheet's own fill
+    // instead (the sheet join, index.css).
+    if (!probe.itemJoined) {
+      const ground = await resolveRgb(client, "var(--shell-ground)");
+      const y = active.bottom + 1.5;
       const pixel = await samplePixelAt(client, active.cx, y);
       if (!sameRgb(pixel, ground, 2))
         fail(
-          `no ground ${where} (${active.cx.toFixed(0)}, ${y.toFixed(0)}): ${rgbText(pixel)}, ground ${rgbText(ground)}`,
+          `no ground between the box and the header's bottom (${active.cx.toFixed(0)}, ${y.toFixed(0)}): ${rgbText(pixel)}, ground ${rgbText(ground)}`,
         );
     }
+    // Flush surface: the surface frame sits right at the header's own bottom
+    // edge, with no shell gap between them any more.
+    if (
+      probe.frame !== null &&
+      Math.abs(probe.frame.y - probe.header.bottom) > 0.5
+    )
+      fail(
+        `the surface frame sits ${(probe.frame.y - probe.header.bottom).toFixed(1)}px off the header's bottom edge, not flush`,
+      );
   }
   if (
     reference !== null &&
@@ -3478,18 +3298,25 @@ const SHEETS_PROBE = `(() => {
   };
   const frame = document.querySelector(${JSON.stringify(SURFACE_FRAME)});
   const pseudo = (node) => [getComputedStyle(node, "::before").content, getComputedStyle(node, "::after").content];
-  const sheets = [...document.querySelectorAll("[data-shell-sheet]")].map((node) => ({
-    id: node.getAttribute("data-shell-sheet"),
-    rect: box(node),
-    border: getComputedStyle(node).borderTopWidth,
-    radius: getComputedStyle(node).borderTopLeftRadius,
-    pseudo: pseudo(node),
-  }));
+  const borders = (node) => {
+    const style = getComputedStyle(node);
+    return { top: style.borderTopWidth, right: style.borderRightWidth, bottom: style.borderBottomWidth, left: style.borderLeftWidth };
+  };
+  const radii = (node) => {
+    const style = getComputedStyle(node);
+    return [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius];
+  };
+  const task = document.querySelector("[data-shell-sheet]");
+  const panel = document.querySelector("[data-epic-sidebar-panel]");
+  const canvas = document.querySelector("[data-epic-canvas-frame]");
   return {
     frame: box(frame),
-    frameMargin: getComputedStyle(frame).margin,
-    framePseudo: pseudo(frame),
-    sheets,
+    frameMargin: frame === null ? null : getComputedStyle(frame).margin,
+    framePadding: frame === null ? null : getComputedStyle(frame).padding,
+    framePseudo: frame === null ? [] : pseudo(frame),
+    task: task === null ? null : task.getAttribute("data-shell-sheet"),
+    panel: panel === null ? null : { rect: box(panel), border: borders(panel) },
+    canvas: canvas === null ? null : { rect: box(canvas), border: borders(canvas), radii: radii(canvas), pseudo: pseudo(canvas) },
     strip: box(document.querySelector('[data-testid="side-tab-strip"]')),
     stripHandle: box(document.querySelector('[data-testid="side-tab-strip-resize-handle"]')),
     viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -3498,6 +3325,18 @@ const SHEETS_PROBE = `(() => {
 
 const HIT_PROBE = (x, y, selector) =>
   `document.elementFromPoint(${String(x)}, ${String(y)})?.closest(${JSON.stringify(selector)}) != null`;
+
+/**
+ * Mirrors `CanvasColumn`'s own seam suppression (epic-shell.tsx, flush
+ * surface): the canvas frame leaves its border off the edge that already
+ * carries the surface frame's own seam line (`data-tab-edge`) - only when
+ * the tab strip sits directly against the canvas, i.e. the strip's edge
+ * differs from the sidebar's side. `null` means every edge draws its border.
+ */
+function canvasSeamEdge(tabs, sidebarSide) {
+  const stripEdge = tabs === "top" ? null : tabs;
+  return stripEdge === sidebarSide ? null : stripEdge;
+}
 
 async function runSheetsPhase(client, pageUrl, pageLoads) {
   await runShellPhase(
@@ -3539,7 +3378,7 @@ async function runSheetsPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    `${String(SHEET_VARIANTS.length)} windows in both themes - the 6px ground on every side and between the sheets, every sheet's four corners drawn alike, no pseudo-element arc on the frame or a sheet, and the width handles as the hit in both gaps`,
+    `${String(SHEET_VARIANTS.length)} windows in both themes - the surface frame flush on every side (no margin, no padding), the panel with no border of its own, the canvas frame's border suppressed only on its own seam edge with no radius anywhere, and the width handles as the hit at the flush boundaries`,
   );
 }
 
@@ -3579,11 +3418,16 @@ const FLIP_PROBE = `(() => {
     return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom };
   };
   const q = (selector) => document.querySelector(selector);
-  // A collapsed panel stays mounted and hidden beside the rail sheet: the panel sheet on screen counts.
-  const panels = [...document.querySelectorAll('[data-shell-sheet="panel"]')];
+  // Whichever pane currently occupies the sidebar's screen position: the
+  // real panel when expanded, or its collapsed rail (a separate element)
+  // when not - the panel itself stays mounted at zero width while hidden.
+  const sidebarPane = [
+    q('[data-epic-sidebar-panel]'),
+    q('[data-fixture-collapsed-rail]'),
+  ].find((node) => node !== null && node.getBoundingClientRect().width > 0) ?? null;
   return {
-    panel: box(panels.find((node) => node.getBoundingClientRect().width > 0)),
-    content: box(q('[data-shell-sheet="content"]')),
+    panel: box(sidebarPane),
+    content: box(q('[data-epic-canvas-frame]')),
     slot: box(q('[data-testid="tile-surface-slot"]')),
     body: box(q("[data-fixture-hosted-body]")),
     stripHandle: box(q('[data-testid="side-tab-strip-resize-handle"]')),
@@ -3644,7 +3488,7 @@ async function runFlipPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    `${String(FLIP_VARIANTS.length)} windows - on load, after a live side flip and after flipping back, the panel sits on its side with the ${String(SHELL_GAP)}px ground beside the content sheet, and the hosted chat body fills its slot inside the content sheet without touching the panel`,
+    `${String(FLIP_VARIANTS.length)} windows - on load, after a live side flip and after flipping back, the panel sits flush on its side against the content frame (flush surface), and the hosted chat body fills its slot inside the content frame without touching the panel`,
   );
 }
 
@@ -3659,9 +3503,9 @@ async function checkFlip(client, side, label, violations, notes) {
   }
   const gap =
     side === "left" ? content.x - panel.right : panel.x - content.right;
-  if (Math.abs(gap - SHELL_GAP) > 0.5)
+  if (Math.abs(gap) > 0.5)
     fail(
-      `the panel is not on the ${side} with the ${String(SHELL_GAP)}px ground beside the content: gap ${gap.toFixed(1)}px (panel ${boxText(panel)}, content ${boxText(content)})`,
+      `the panel is not flush on the ${side} against the content frame (flush surface, no ground between them): gap ${gap.toFixed(1)}px (panel ${boxText(panel)}, content ${boxText(content)})`,
     );
   if (!sameBoxWithin(body, slot, 1))
     fail(
@@ -3922,83 +3766,91 @@ async function runMovesPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both panel sides, after a strip side switch each way, top to each side and back, a strip collapse and expand, a strip width drag, and the panel collapsing to its rail and back, the hosted chat body stays on its slot inside the content sheet with the ground beside the panel",
+    "on both panel sides, after a strip side switch each way, top to each side and back, a strip collapse and expand, a strip width drag, and the panel collapsing to its rail and back, the hosted chat body stays on its slot inside the content frame, flush against the panel",
   );
 }
 
 async function checkSheets(client, variant, label, violations, notes) {
   const probe = await evaluate(client, SHEETS_PROBE);
-  const ground = await resolveRgb(client, "var(--shell-ground)");
   const fail = (line) => violations.push(`${label}: ${line}`);
-  if (probe.frameMargin !== `${String(SHELL_GAP)}px`)
+  if (probe.frameMargin !== "0px")
     fail(
-      `the surface frame's margin is ${probe.frameMargin}, not the ${String(SHELL_GAP)}px shell gap`,
+      `the surface frame's margin is ${probe.frameMargin}, not flush (0px, flush surface)`,
     );
+  if (probe.framePadding !== "0px")
+    fail(`the surface frame's padding is ${probe.framePadding}, not 0px`);
   if (probe.framePseudo.some((content) => content !== "none"))
     fail(
-      `the surface frame still draws a pseudo-element (${probe.framePseudo.join(", ")}): the old beside-edge arc`,
+      `the surface frame still draws a pseudo-element (${probe.framePseudo.join(", ")}): there is no radius left to carve an arc out of`,
     );
-  const panel = probe.sheets.find((sheet) => sheet.id === "panel");
-  const content = probe.sheets.find((sheet) => sheet.id === "content");
-  if (panel === undefined || content === undefined) {
+  if (probe.task !== "task")
     fail(
-      `expected a panel and a content sheet, found ${probe.sheets.map((sheet) => sheet.id).join(", ")}`,
+      `expected one task sheet (data-shell-sheet="task"), found ${probe.task === null ? "none" : probe.task}`,
+    );
+  if (probe.panel === null || probe.canvas === null) {
+    fail(
+      `the panel (${String(probe.panel !== null)}) or the canvas frame (${String(probe.canvas !== null)}) is missing`,
     );
     return;
   }
-  const means = [];
-  for (const sheet of probe.sheets) {
-    if (sheet.border !== "1px")
-      fail(`the ${sheet.id} sheet's border is ${sheet.border}`);
-    if (!(Number.parseFloat(sheet.radius) > 0))
-      fail(`the ${sheet.id} sheet has no radius`);
-    if (sheet.pseudo.some((value) => value !== "none"))
-      fail(
-        `the ${sheet.id} sheet draws a pseudo-element (${sheet.pseudo.join(", ")})`,
-      );
-    for (const [corner, mean] of await cornerAsymmetry(client, sheet.rect)) {
-      means.push(`${sheet.id}/${corner} ${mean.toFixed(2)}`);
-      if (mean >= CORNER_MEAN_CEILING)
+  // No pane divider left on the panel: only the canvas frame draws a border now.
+  for (const [side, width] of Object.entries(probe.panel.border)) {
+    if (width !== "0px")
+      fail(`the panel still draws a ${side} border (${width})`);
+  }
+  // No sheet radius anywhere: the canvas frame is a plain rectangle.
+  if (probe.canvas.radii.some((radius) => radius !== "0px"))
+    fail(
+      `the canvas frame has a corner radius (${probe.canvas.radii.join(" ")}), expected none`,
+    );
+  if (probe.canvas.pseudo.some((content) => content !== "none"))
+    fail(
+      `the canvas frame draws a pseudo-element (${probe.canvas.pseudo.join(", ")})`,
+    );
+  // The canvas frame's border is suppressed only on the edge that already
+  // carries the surface frame's own seam line (where the canvas meets the
+  // strip directly); it is drawn everywhere else, including against the panel.
+  const seam = canvasSeamEdge(variant.query.tabs, variant.query.sidebar);
+  for (const side of ["left", "right"]) {
+    const width = probe.canvas.border[side];
+    if (side === seam) {
+      if (width !== "0px")
         fail(
-          `the ${sheet.id} sheet's ${corner} corner differs from its top-left one mirrored (mean ${mean.toFixed(2)} per channel): a clipped or overdrawn arc`,
+          `the canvas frame still draws its ${side} border (${width}) where the surface frame's own seam already runs`,
         );
+    } else if (width !== "1px") {
+      fail(`the canvas frame's ${side} border is ${width}, not 1px`);
     }
   }
-  // The ground: between the sheets, over the content sheet, and at the far edge.
+  // Flush: the panel and the canvas frame touch with nothing between them.
   const [left, right] =
-    panel.rect.x < content.rect.x
-      ? [panel.rect, content.rect]
-      : [content.rect, panel.rect];
+    probe.panel.rect.x < probe.canvas.rect.x
+      ? [probe.panel.rect, probe.canvas.rect]
+      : [probe.canvas.rect, probe.panel.rect];
+  const gap = right.x - (left.x + left.width);
+  if (Math.abs(gap) > 0.5)
+    fail(
+      `the panel and the canvas frame are ${gap.toFixed(1)}px apart, not flush (panel ${boxText(probe.panel.rect)}, canvas ${boxText(probe.canvas.rect)})`,
+    );
   const gapX = (left.x + left.width + right.x) / 2;
-  const midY = content.rect.y + content.rect.height * 0.75;
-  const spots = {
-    "between the sheets": [gapX, midY],
-    "above the content sheet": [
-      content.rect.cx,
-      content.rect.y - SHELL_GAP / 2,
-    ],
-    "below the content sheet": [
-      content.rect.cx,
-      content.rect.y + content.rect.height + SHELL_GAP / 2,
-    ],
-  };
+  const midY = probe.canvas.rect.y + probe.canvas.rect.height * 0.75;
+  // The frame itself is flush to the window on whichever edge has no strip:
+  // no ground left outside it any more.
   if (probe.strip === null || probe.strip.x > probe.frame.x) {
-    spots["at the window's left edge"] = [probe.frame.x - SHELL_GAP / 2, midY];
-  }
-  if (probe.strip === null || probe.strip.x < probe.frame.x) {
-    spots["at the window's right edge"] = [
-      probe.frame.x + probe.frame.width + SHELL_GAP / 2,
-      midY,
-    ];
-  }
-  for (const [where, [x, y]] of Object.entries(spots)) {
-    const pixel = await samplePixelAt(client, x, y);
-    if (!sameRgb(pixel, ground, 2))
+    if (Math.abs(probe.frame.x) > 0.5)
       fail(
-        `the ground is not showing ${where} (${x.toFixed(0)}, ${y.toFixed(0)}): ${rgbText(pixel)}, ground ${rgbText(ground)}`,
+        `the surface frame sits ${probe.frame.x.toFixed(1)}px off the window's left edge, not flush`,
       );
   }
-  // The handles are the hit in the gaps they sit in.
+  if (probe.strip === null || probe.strip.x < probe.frame.x) {
+    const edgeGap = probe.viewport.width - (probe.frame.x + probe.frame.width);
+    if (Math.abs(edgeGap) > 0.5)
+      fail(
+        `the surface frame sits ${edgeGap.toFixed(1)}px off the window's right edge, not flush`,
+      );
+  }
+  // The handles are still the hit at the boundary they sit on, now flush
+  // rather than centred in a ground gap.
   if (
     !(await evaluate(
       client,
@@ -4006,13 +3858,13 @@ async function checkSheets(client, variant, label, violations, notes) {
     ))
   )
     fail(
-      `the gap between the sheets at x=${gapX.toFixed(1)} is not the panel's width handle`,
+      `the boundary between the panel and the canvas at x=${gapX.toFixed(1)} is not the panel's width handle`,
     );
   if (probe.strip !== null) {
     const stripGapX =
       probe.strip.x < probe.frame.x
-        ? probe.strip.x + probe.strip.width + SHELL_GAP / 2
-        : probe.strip.x - SHELL_GAP / 2;
+        ? (probe.strip.x + probe.strip.width + probe.frame.x) / 2
+        : (probe.frame.x + probe.frame.width + probe.strip.x) / 2;
     if (
       !(await evaluate(
         client,
@@ -4024,50 +3876,12 @@ async function checkSheets(client, variant, label, violations, notes) {
       ))
     )
       fail(
-        `the gap between the strip and the frame at x=${stripGapX.toFixed(1)} is not the strip's width handle`,
+        `the boundary between the strip and the frame at x=${stripGapX.toFixed(1)} is not the strip's width handle`,
       );
   }
   notes.push(
-    `${label}: ground ${rgbText(ground)}, corners ${means.join(", ")}`,
+    `${label}: canvas border ${JSON.stringify(probe.canvas.border)}, seam ${String(seam)}`,
   );
-}
-
-/**
- * Each corner's 16px square against the top-left one mirrored onto it, as a
- * mean per channel: an arc clipped on one side, or overdrawn, breaks the
- * symmetry (the wave-1 check, and the bug a strip's neighbour corner had).
- */
-async function cornerAsymmetry(client, rect) {
-  const size = CORNER_REGION;
-  const x = Math.round(rect.x) - 3;
-  const y = Math.round(rect.y) - 3;
-  const right = Math.round(rect.x + rect.width) + 3 - size;
-  const bottom = Math.round(rect.y + rect.height) + 3 - size;
-  const topLeft = await regionPixels(client, x, y, size, size);
-  const at = (pixels, i, j) =>
-    pixels.slice((j * size + i) * 3, (j * size + i) * 3 + 3);
-  const out = [];
-  for (const [corner, cx, cy, flipX, flipY] of [
-    ["top-right", right, y, true, false],
-    ["bottom-left", x, bottom, false, true],
-    ["bottom-right", right, bottom, true, true],
-  ]) {
-    const pixels = await regionPixels(client, cx, cy, size, size);
-    let total = 0;
-    for (let j = 0; j < size; j += 1) {
-      for (let i = 0; i < size; i += 1) {
-        const a = at(topLeft, i, j);
-        const b = at(
-          pixels,
-          flipX ? size - 1 - i : i,
-          flipY ? size - 1 - j : j,
-        );
-        for (let k = 0; k < 3; k += 1) total += Math.abs(a[k] - b[k]);
-      }
-    }
-    out.push([corner, total / (size * size * 3)]);
-  }
-  return out;
 }
 
 // --- the joined tab (D3) and its four T05 risks ---
@@ -4077,16 +3891,23 @@ const JOIN_VARIANTS = [
     label: "left, sidebar left",
     query: { tabs: "left", sidebar: "left", surface: "epic" },
     joins: "left",
+    pane: "panel",
   },
   {
     label: "right, sidebar right",
     query: { tabs: "right", sidebar: "right", surface: "epic" },
     joins: "right",
+    pane: "panel",
   },
   {
+    // The panel sits on the strip's far side here, so the strip meets the
+    // canvas directly: `useSideTabJoin` still joins, with the canvas as the
+    // pane (side-tab-join.ts - "the panel on the far side" is explicitly one
+    // of the cases the canvas pane covers), rather than joining nothing.
     label: "left, sidebar right",
     query: { tabs: "left", sidebar: "right", surface: "epic" },
-    joins: null,
+    joins: "left",
+    pane: "canvas",
   },
   {
     label: "left, sidebar left, a route surface",
@@ -4095,22 +3916,37 @@ const JOIN_VARIANTS = [
   },
 ];
 
+/** The join's own `--join-fill` token per pane (index.css). */
+function paneFillToken(pane) {
+  if (pane === "panel") return "--sidebar";
+  if (pane === "rail") return "--background";
+  return "--canvas";
+}
+
 const JOIN_PROBE = `(() => {
   const box = (node) => {
     if (node === null) return null;
     const r = node.getBoundingClientRect();
     return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
   };
-  const joined = document.querySelector("[data-side-tab-joined]");
-  const bridge = document.querySelector("[data-side-tab-join-bridge]");
+  const joined = document.querySelector("[data-sheet-joined]");
+  const bridge = document.querySelector("[data-sheet-join-bridge]");
   const active = document.querySelector('[data-testid="side-tab-strip"] [data-side-tab][data-active="true"]');
   const list = document.querySelector('[data-testid="side-tab-strip"] [data-strip-axis="y"]');
+  // Whichever pane currently occupies the sidebar's screen position: the
+  // real panel when expanded, or its collapsed rail (a separate element,
+  // the join's "rail" pane) when not.
+  const sidebarPane = [
+    document.querySelector('[data-epic-sidebar-panel]'),
+    document.querySelector('[data-fixture-collapsed-rail]'),
+  ].find((node) => node !== null && node.getBoundingClientRect().width > 0) ?? null;
   return {
-    joined: joined === null ? null : { edge: joined.getAttribute("data-side-tab-joined"), rect: box(joined), text: joined.textContent.trim() },
+    joined: joined === null ? null : { edge: joined.getAttribute("data-sheet-joined"), pane: joined.getAttribute("data-join-pane"), rect: box(joined), text: joined.textContent.trim() },
     bridge: bridge === null || getComputedStyle(bridge).display === "none" ? null : box(bridge),
     active: box(active),
     list: box(list),
-    panel: box(document.querySelector('[data-shell-sheet="panel"]')),
+    panel: box(sidebarPane),
+    canvas: box(document.querySelector('[data-epic-canvas-frame]')),
     strip: box(document.querySelector('[data-testid="side-tab-strip"]')),
     handle: box(document.querySelector('[data-testid="side-tab-strip-resize-handle"]')),
   };
@@ -4131,7 +3967,6 @@ async function runJoinPhase(client, pageUrl, pageLoads) {
       );
       const fail = (line) => violations.push(`${label}: ${line}`);
       const say = (line) => notes.push(`${label}: ${line}`);
-      const ground = await resolveRgb(client, "var(--shell-ground)");
       if (variant.joins === null) {
         const probe = await evaluate(client, JOIN_PROBE);
         if (probe.joined !== null)
@@ -4146,12 +3981,12 @@ async function runJoinPhase(client, pageUrl, pageLoads) {
           `nothing joined, bridge ${probe.bridge === null ? "hidden" : "shown"}`,
         );
       } else {
-        await checkJoinPaint(client, variant, "expanded", ground, fail, say);
+        await checkJoinPaint(client, variant, "expanded", fail, say);
         await checkJoinOverHandle(client, variant, fail, say);
-        await checkJoinScrolledOut(client, variant, ground, fail, say);
+        await checkJoinScrolledOut(client, variant, fail, say);
         await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(true)");
         await settle(client, 400);
-        await checkJoinPaint(client, variant, "collapsed", ground, fail, say);
+        await checkJoinPaint(client, variant, "collapsed", fail, say);
         await evaluate(
           client,
           "window.__layoutCanvasProbe.setCollapsed(false)",
@@ -4171,12 +4006,12 @@ async function runJoinPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "the active row and tile take the panel's fill and run it across the gap over the sheet's border on both edges, the ground stays past its concave corners, nothing joins on the far side or over a route, and the bridge holds over the resize handle, after a reorder settles, and gives way while its row is scrolled part out",
+    "the active row and tile take the panel's fill and run it over the seam onto the frame on both edges, the fill stays inside the joined shape past its corners, nothing joins on the far side or over a route, and the bridge holds over the resize handle, after a reorder settles, and gives way while its row is scrolled part out",
   );
 }
 
-/** J1-J3: the row, the bridge over the gap and the sheet's border, and the ground past the corner. */
-async function checkJoinPaint(client, variant, state, ground, fail, say) {
+/** J1-J3: the row, the bridge over the gap and the sheet's border, and containment past the corner. */
+async function checkJoinPaint(client, variant, state, fail, say) {
   const probe = await evaluate(client, JOIN_PROBE);
   if (probe.joined === null) {
     fail(`${state}: no row or tile is joined`);
@@ -4191,36 +4026,53 @@ async function checkJoinPaint(client, variant, state, ground, fail, say) {
     return;
   }
   const row = probe.joined.rect;
-  const panel = probe.panel;
-  const fill = await samplePixelAt(
+  // The pane the row joins: the panel (or its collapsed rail) when the
+  // sidebar sits on the strip's own side, else the canvas - whichever pane
+  // actually sits flush against the strip (side-tab-join.ts).
+  const pane = probe.joined.pane === "canvas" ? probe.canvas : probe.panel;
+  if (pane === null) {
+    fail(`${state}: no ${probe.joined.pane} pane on screen to join`);
+    return;
+  }
+  // The join's own fill token (index.css), not a sampled pixel: the canvas
+  // pane is mostly covered by hosted content in this fixture, so a pixel
+  // sample would read the content's fill rather than the pane's own.
+  const fill = await resolveRgb(
     client,
-    panel.cx,
-    panel.y + panel.height * 0.75,
+    `var(${paneFillToken(probe.joined.pane)})`,
   );
   const onLeft = variant.joins === "left";
   const rowEnd = onLeft ? row.x + row.width - 2 : row.x + 2;
   const gapX = onLeft
-    ? (probe.strip.x + probe.strip.width + panel.x) / 2
-    : (panel.x + panel.width + probe.strip.x) / 2;
-  const borderX = onLeft ? panel.x + 0.5 : panel.x + panel.width - 0.5;
+    ? (probe.strip.x + probe.strip.width + pane.x) / 2
+    : (pane.x + pane.width + probe.strip.x) / 2;
+  const borderX = onLeft ? pane.x + 0.5 : pane.x + pane.width - 0.5;
   const spots = {
     "the row's sheet-side end": [rowEnd, row.cy],
     "the gap": [gapX, row.cy],
-    "the sheet's border": [borderX, row.cy],
+    // The canvas pane is filled edge to edge by the fixture's own hosted
+    // demo content (a dashed border right at its own edge), which the gap
+    // spot above already sits just outside of; sampling the seam border
+    // itself would read that demo border instead. Panel/rail stay blank
+    // there, so the check still holds for them.
+    ...(probe.joined.pane === "canvas"
+      ? {}
+      : { "the sheet's border": [borderX, row.cy] }),
   };
   for (const [where, [x, y]] of Object.entries(spots)) {
     const pixel = await samplePixelAt(client, x, y);
     if (!sameRgb(pixel, fill, 3))
       fail(
-        `${state}: ${where} at (${x.toFixed(1)}, ${y.toFixed(0)}) is ${rgbText(pixel)}, not the panel's fill ${rgbText(fill)}`,
+        `${state}: ${where} at (${x.toFixed(1)}, ${y.toFixed(0)}) is ${rgbText(pixel)}, not the ${variant.pane}'s fill ${rgbText(fill)}`,
       );
   }
-  // Past the concave corners the gap is ground again.
+  // Past the concave corners the join's fill does not bleed: the strip's own
+  // background shows again above and below the joined row.
   for (const y of [row.y - 10, row.y + row.height + 10]) {
     const pixel = await samplePixelAt(client, gapX, y);
-    if (!sameRgb(pixel, ground, 2))
+    if (sameRgb(pixel, fill, 3))
       fail(
-        `${state}: the gap ${y < row.y ? "above" : "below"} the join (y=${y.toFixed(0)}) is ${rgbText(pixel)}, not the ground ${rgbText(ground)}`,
+        `${state}: the gap ${y < row.y ? "above" : "below"} the join (y=${y.toFixed(0)}) still reads as the joined fill ${rgbText(fill)}, past the row's own bounds`,
       );
   }
   if (
@@ -4240,10 +4092,9 @@ async function checkJoinOverHandle(client, variant, fail, say) {
   const before = await evaluate(client, JOIN_PROBE);
   const row = before.joined.rect;
   const x = before.handle.cx;
-  const fill = await samplePixelAt(
+  const fill = await resolveRgb(
     client,
-    before.panel.cx,
-    before.panel.y + before.panel.height * 0.75,
+    `var(${paneFillToken(before.joined.pane)})`,
   );
   await moveTo(client, x, row.cy);
   await settle(client, 400);
@@ -4265,7 +4116,7 @@ async function checkJoinOverHandle(client, variant, fail, say) {
 }
 
 /** A row part out of the list is a plain active row, so the bridge never paints over the chrome around the list. */
-async function checkJoinScrolledOut(client, variant, ground, fail, say) {
+async function checkJoinScrolledOut(client, variant, fail, say) {
   await client.send("Emulation.setDeviceMetricsOverride", {
     width: 1500,
     height: 340,
@@ -4306,10 +4157,15 @@ async function checkJoinScrolledOut(client, variant, ground, fail, say) {
       fail(
         `the bridge paints at ${boxText(cut.bridge)} for a row cut by the list's edge`,
       );
+    const pane = variant.pane === "canvas" ? cut.canvas : cut.panel;
     const gapX =
       variant.joins === "left"
-        ? (cut.strip.x + cut.strip.width + cut.panel.x) / 2
-        : (cut.panel.x + cut.panel.width + cut.strip.x) / 2;
+        ? (cut.strip.x + cut.strip.width + pane.x) / 2
+        : (pane.x + pane.width + cut.strip.x) / 2;
+    const fill = await resolveRgb(
+      client,
+      `var(${paneFillToken(variant.pane)})`,
+    );
     const listBottom = cut.list.y + cut.list.height;
     const cutRow = await evaluate(
       client,
@@ -4319,14 +4175,16 @@ async function checkJoinScrolledOut(client, variant, ground, fail, say) {
       fail(
         `the active row [${cutRow.y.toFixed(0)}, ${cutRow.bottom.toFixed(0)}] is not cut by the list's bottom edge at ${listBottom.toFixed(0)}`,
       );
+    // A row cut by the list's edge is unjoined (checked above): its would-be
+    // fill does not bleed into the strip's own chrome around the list.
     for (const [where, y] of [
       ["beside the row's visible half", listBottom - 4],
       ["beside the foot", listBottom + 4],
     ]) {
       const pixel = await samplePixelAt(client, gapX, y);
-      if (!sameRgb(pixel, ground, 2))
+      if (sameRgb(pixel, fill, 3))
         fail(
-          `the gap ${where} (y=${y.toFixed(0)}) is ${rgbText(pixel)}, not the ground ${rgbText(ground)}`,
+          `the gap ${where} (y=${y.toFixed(0)}) reads as the pane's fill ${rgbText(fill)}, but nothing should be joined here`,
         );
     }
     await evaluate(
@@ -4612,7 +4470,7 @@ const STRIP_TOP_VARIANTS = ["left", "right"].flatMap((tabs) =>
   ),
 );
 
-/** The collapsed nav tiles (expand, Inbox, All tasks, New Task, the avatar): 32px squares. */
+/** The collapsed nav tiles (expand, Notifications, All tasks, New Task, the avatar): 32px squares. */
 const STRIP_NAV_TILE = 32;
 
 const STRIP_TOP_PROBE = `(() => {
@@ -4735,7 +4593,7 @@ async function runStripTopPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    `${String(STRIP_TOP_VARIANTS.length)} windows in both themes - the rail as one centred column (expand, Inbox, All tasks, New Task, a divider, Home, the tiles, the avatar) with an even rhythm and no history arrows, and the expanded New Task as a primary row after Home, aligned with it`,
+    `${String(STRIP_TOP_VARIANTS.length)} windows in both themes - the rail as one centred column (expand, Notifications, All tasks, New Task, a divider, Home, the tiles, the avatar) with an even rhythm and no history arrows, and the expanded New Task as a primary row after Home, aligned with it`,
   );
 }
 
@@ -4789,7 +4647,7 @@ function checkNewTaskPrimary(probe, fail) {
 }
 
 /**
- * F1: one column, top to bottom - the title row (macOS left), expand, Inbox,
+ * F1: one column, top to bottom - the title row (macOS left), expand, Notifications,
  * All tasks, New Task, the divider, Home, the tiles, the avatar - every part
  * centred on the rail's axis, the nav tiles 4px apart, the divider midway
  * between New Task and Home, and Home spaced from the first tile as the tiles
@@ -4862,7 +4720,7 @@ function checkRailColumn(probe, variant, fail) {
         `${name} is ${boxText(rect)}, not a ${String(STRIP_NAV_TILE)}px tile`,
       );
   }
-  // The Inbox tile's mark sits on its glyph's top-right corner as a task
+  // The Notifications tile's mark sits on its glyph's top-right corner as a task
   // badge sits on its chip: centred 1px out from that corner.
   if (probe.inboxIcon !== null && probe.inboxMark !== null) {
     const cx = probe.inboxMark.x + probe.inboxMark.width / 2;
@@ -4871,7 +4729,7 @@ function checkRailColumn(probe, variant, fail) {
     const expectedY = probe.inboxIcon.y - 1;
     if (Math.abs(cx - expectedX) > 0.75 || Math.abs(cy - expectedY) > 0.75)
       fail(
-        `the Inbox mark ${boxText(probe.inboxMark)} is centred at (${cx.toFixed(1)}, ${cy.toFixed(1)}), not on the glyph's corner (${expectedX.toFixed(1)}, ${expectedY.toFixed(1)})`,
+        `the Notifications mark ${boxText(probe.inboxMark)} is centred at (${cx.toFixed(1)}, ${cy.toFixed(1)}), not on the glyph's corner (${expectedX.toFixed(1)}, ${expectedY.toFixed(1)})`,
       );
   }
   const gap = (above, below) =>
@@ -4941,7 +4799,7 @@ const MONOGRAM_SIDE_CLEARANCE = 2.5;
 /** A hairline has to stand off the ground by at least this much to be seen. */
 const RAIL_DIVIDER_CONTRAST_FLOOR = 1.15;
 
-/** F7 expanded: Inbox, All tasks, Home, then New Task, level with Home's icon and title. */
+/** F7 expanded: Notifications, All tasks, Home, then New Task, level with Home's icon and title. */
 function checkExpandedTop(probe, fail) {
   const column = [
     ["inbox", probe.inbox],
@@ -4993,7 +4851,7 @@ function checkExpandedTop(probe, fail) {
     Math.abs(middle(probe.inboxUnknown) - middle(probe.inboxUnread)) > 0.5
   )
     fail(
-      `the Inbox's unavailable dot is centred at y=${middle(probe.inboxUnknown).toFixed(1)}, its count at y=${middle(probe.inboxUnread).toFixed(1)}`,
+      `the Notifications row's unavailable dot is centred at y=${middle(probe.inboxUnknown).toFixed(1)}, its count at y=${middle(probe.inboxUnread).toFixed(1)}`,
     );
   for (const row of probe.rows) {
     if (row.meter !== null && row.titleRect !== null) {
@@ -5024,7 +4882,7 @@ const STRIP_RESIZE_PROBE = `(() => {
   const handle = strip.querySelector('[data-testid="side-tab-strip-resize-handle"]');
   const r = strip.getBoundingClientRect();
   const h = handle.getBoundingClientRect();
-  const joined = strip.querySelector("[data-side-tab-joined]");
+  const joined = strip.querySelector("[data-sheet-joined]");
   let persisted = null;
   try {
     persisted = JSON.parse(localStorage.getItem(${JSON.stringify(SIDE_STRIP_PERSIST_KEY)}) ?? "null")?.state ?? null;
@@ -5055,8 +4913,10 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
   await runShellPhase(
     "stripresize",
     [
-      { label: "left", edge: "left" },
-      { label: "right", edge: "right" },
+      { label: "left", edge: "left", sidebar: "left" },
+      { label: "right", edge: "right", sidebar: "right" },
+      { label: "left, sidebar right", edge: "left", sidebar: "right" },
+      { label: "right, sidebar left", edge: "right", sidebar: "left" },
     ],
     async (variant, violations, notes) => {
       const label = `stripresize ${variant.label}`;
@@ -5070,7 +4930,7 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
           wco: "none",
           dock: "right",
           surface: "epic",
-          sidebar: variant.edge,
+          sidebar: variant.sidebar,
           view: "activity",
         },
         label,
@@ -5129,7 +4989,6 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
           );
       };
 
-      // 1. Expanded -> under the snap point, pointer held: the rail's layout.
       let state = await probe();
       const startWidth = state.width;
       const grip = state.handle;
@@ -5137,11 +4996,22 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
         x: grip.x + sign * (width - startWidth),
         y: grip.y,
       });
+      const shotName = `stripresize-${variant.edge}-sidebar-${variant.sidebar}`;
+      await checkStripCrossingEase(client, {
+        grip,
+        at,
+        startWidth,
+        shotName,
+        fail,
+        say,
+      });
+
+      // 1. Expanded -> under the snap point, pointer held: the rail's layout.
       await pressAt(client, grip.x, grip.y);
       await moveInSteps(client, grip, at(100));
       await settle(client, 150);
       state = await probe();
-      await saveShot(client, `stripresize-${variant.edge}-1-held-under-snap`);
+      await saveShot(client, `${shotName}-1-held-under-snap`);
       // Snapped live to the rail (ruling): never a rail drawn in a wider strip.
       expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "held under the snap point");
       expectLayout(state, "rail", "held under the snap point");
@@ -5154,7 +5024,7 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
       await moveInSteps(client, at(100), at(220));
       await settle(client, 150);
       state = await probe();
-      await saveShot(client, `stripresize-${variant.edge}-2-held-over-snap`);
+      await saveShot(client, `${shotName}-2-held-over-snap`);
       expectWidth(state, 220, "held back over the snap point");
       expectLayout(state, "expanded", "held back over the snap point");
       // 3. Under again and released: the rail, stored once.
@@ -5181,7 +5051,7 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
       await moveInSteps(client, railGrip, fromRail(230));
       await settle(client, 150);
       state = await probe();
-      await saveShot(client, `stripresize-${variant.edge}-3-held-out-of-rail`);
+      await saveShot(client, `${shotName}-3-held-out-of-rail`);
       expectWidth(state, 230, "held out of the rail");
       expectLayout(state, "expanded", "held out of the rail");
       expectPersisted(
@@ -5193,7 +5063,7 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
       await pressKey(client, "Escape");
       await settle(client, 200);
       state = await probe();
-      await saveShot(client, `stripresize-${variant.edge}-4-escaped`);
+      await saveShot(client, `${shotName}-4-escaped`);
       expectWidth(state, SIDE_STRIP_RAIL_WIDTH, "after Escape");
       expectLayout(state, "rail", "after Escape");
       expectPersisted(state, true, "after Escape");
@@ -5233,7 +5103,114 @@ async function runStripResizePhase(client, pageUrl, pageLoads) {
   );
 }
 
-// --- overlays: the hover card, the user menu and the Inbox drawer, toward the content ---
+/** A slowed panel motion token, so a probe and a screenshot land inside the ease. */
+const SLOW_PANEL_MOTION_MS = 1500;
+
+async function setPanelMotionMs(client, ms) {
+  await evaluate(
+    client,
+    ms === null
+      ? `document.documentElement.style.removeProperty("--panel-animation-duration")`
+      : `document.documentElement.style.setProperty("--panel-animation-duration", "${String(ms)}ms")`,
+  );
+}
+
+/**
+ * L-165: the drag frame that crosses the snap point eases the jump between
+ * the minimum and the rail with the panel motion token, the joined tile's
+ * bridge staying on the strip's content-facing edge while it runs; Escape and
+ * a release land at once, and under reduced motion the crossing does too.
+ * Leaves the strip expanded at `startWidth`.
+ */
+async function checkStripCrossingEase(client, input) {
+  const { grip, at, startWidth, shotName, fail, say } = input;
+  const width = () =>
+    evaluate(client, STRIP_RESIZE_PROBE).then((state) => state.width);
+  await setPanelMotionMs(client, SLOW_PANEL_MOTION_MS);
+  try {
+    // A third into the ease: between the minimum and the rail, joins attached.
+    await pressAt(client, grip.x, grip.y);
+    await moveInSteps(client, grip, at(100));
+    await settle(client, SLOW_PANEL_MOTION_MS / 3);
+    const mid = await evaluate(client, STRIP_RESIZE_PROBE);
+    const join = await evaluate(client, JOIN_PROBE);
+    await saveShot(client, `${shotName}-0-mid-ease`);
+    if (!(mid.width > SIDE_STRIP_RAIL_WIDTH + 4 && mid.width < 188))
+      fail(
+        `mid-crossing: the strip is ${mid.width.toFixed(1)}px wide, expected an eased width between the rail and the minimum`,
+      );
+    if (mid.collapsed !== "true")
+      fail(
+        `mid-crossing: data-collapsed=${String(mid.collapsed)}, expected the rail's layout at once`,
+      );
+    if (join.joined === null || join.bridge === null) {
+      fail("mid-crossing: no joined tile or no bridge while the width eases");
+    } else {
+      // As at rest: the bridge runs from the tile's content-facing edge to
+      // just past the strip's, so it tracks both while the width eases.
+      const strip = join.strip;
+      const tile = join.joined.rect;
+      const onLeft = join.joined.edge === "left";
+      const tileEdge = onLeft ? tile.x + tile.width : tile.x;
+      const stripEdge = onLeft ? strip.x + strip.width : strip.x;
+      const [bridgeInner, bridgeOuter] = onLeft
+        ? [join.bridge.x, join.bridge.x + join.bridge.width]
+        : [join.bridge.x + join.bridge.width, join.bridge.x];
+      if (Math.abs(join.bridge.y - tile.y) > 0.5)
+        fail(
+          `mid-crossing: the bridge ${boxText(join.bridge)} is not level with its tile ${boxText(tile)}`,
+        );
+      if (Math.abs(bridgeInner - tileEdge) > 1.5)
+        fail(
+          `mid-crossing: the bridge starts at x=${bridgeInner.toFixed(1)}, off the tile's edge at x=${tileEdge.toFixed(1)}`,
+        );
+      if (Math.abs(bridgeOuter - stripEdge) > 2)
+        fail(
+          `mid-crossing: the bridge ends at x=${bridgeOuter.toFixed(1)}, off the strip's content edge at x=${stripEdge.toFixed(1)}`,
+        );
+    }
+    // Escape mid-ease: the starting width at once.
+    await pressKey(client, "Escape");
+    const escaped = await width();
+    if (Math.abs(escaped - startWidth) > 1.5)
+      fail(
+        `Escape mid-ease: ${escaped.toFixed(1)}px, expected ${startWidth.toFixed(1)} at once`,
+      );
+    await releaseAt(client, at(100).x, at(100).y);
+    await settle(client, 100);
+    // Released mid-ease: the rail at once.
+    await pressAt(client, grip.x, grip.y);
+    await moveInSteps(client, grip, at(100));
+    await releaseAt(client, at(100).x, at(100).y);
+    const released = await width();
+    if (Math.abs(released - SIDE_STRIP_RAIL_WIDTH) > 1.5)
+      fail(
+        `release mid-ease: ${released.toFixed(1)}px, expected the rail's ${String(SIDE_STRIP_RAIL_WIDTH)} at once`,
+      );
+    say(
+      `crossing eased (${mid.width.toFixed(0)}px a third in), Escape ${escaped.toFixed(0)}px and release ${released.toFixed(0)}px at once`,
+    );
+    await evaluate(client, "window.__layoutCanvasProbe.setCollapsed(false)");
+    await settle(client, SLOW_PANEL_MOTION_MS + 200);
+    // Reduced motion: the token goes to 0ms and the crossing lands at once.
+    await emulateReducedMotion(client, "reduce");
+    await pressAt(client, grip.x, grip.y);
+    await moveInSteps(client, grip, at(100));
+    const reduced = await width();
+    await pressKey(client, "Escape");
+    await releaseAt(client, at(100).x, at(100).y);
+    if (Math.abs(reduced - SIDE_STRIP_RAIL_WIDTH) > 1.5)
+      fail(
+        `reduced motion: the crossing drew ${reduced.toFixed(1)}px, expected the rail at once`,
+      );
+  } finally {
+    await emulateReducedMotion(client, "no-preference");
+    await setPanelMotionMs(client, null);
+  }
+  await settle(client, 300);
+}
+
+// --- overlays: the hover card, the user menu and the Notifications drawer, toward the content ---
 
 async function runOverlaysPhase(client, pageUrl, pageLoads) {
   await runShellPhase(
@@ -5335,17 +5312,26 @@ async function runOverlaysPhase(client, pageUrl, pageLoads) {
         client,
         '[data-testid="side-strip-inbox-drawer"]',
       );
-      placed("the Inbox drawer", drawer, strip);
+      placed("the Notifications drawer", drawer, strip);
       if (drawer !== null) {
         if (
           Math.abs(drawer.y - frame.y) > 1 ||
           Math.abs(drawer.y + drawer.height - (frame.y + frame.height)) > 1
         )
           fail(
-            `the Inbox drawer ${boxText(drawer)} is not level with the sheets ${boxText(frame)}`,
+            `the Notifications drawer ${boxText(drawer)} is not level with the sheets ${boxText(frame)}`,
           );
       }
-      await saveShot(client, `overlay-inbox-${variant.edge}`);
+      for (const theme of ["light", "dark"]) {
+        await evaluate(
+          client,
+          `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+        );
+        await settle(client, 200);
+        await saveShot(client, `overlay-inbox-${variant.edge}-${theme}`);
+      }
+      // Persisted: the next variant boots from the shipped "system".
+      await evaluate(client, 'window.__layoutCanvasProbe.setTheme("system")');
       await client.send("Input.dispatchKeyEvent", {
         type: "keyDown",
         key: "Escape",
@@ -5367,7 +5353,7 @@ async function runOverlaysPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both edges the hover card, the user menu (still open 750ms after one click) and the Inbox drawer (level with the sheets) open toward the content and inside the window",
+    "on both edges the hover card, the user menu (still open 750ms after one click) and the Notifications drawer (flush with the frame) open toward the content and inside the window",
   );
 }
 
@@ -6536,13 +6522,112 @@ const PLACEMENT_PROBE = `(() => {
       edges: [...bar.querySelectorAll("[data-placement-edge]")].map((node) => ({ edge: node.getAttribute("data-placement-edge"), checked: node.getAttribute("aria-checked"), rect: box(node) })),
       views: bar.querySelector('[role="radiogroup"][aria-label="Tabs view"]') !== null,
     },
-    lit: [...document.querySelectorAll('[data-surface-placement-row][data-lit="1"]')].map((node) => node.getAttribute("data-surface-placement-row")),
+    // The flat index's own "lit" row is gone with T3/T4: selecting a surface
+    // now opens ITS AREA in the two-level form, so the dock's placement
+    // control (Tab placement / Sidebar side) is what shows in its place.
+    formArea: document.querySelector('[data-layout-inspector] [role="radiogroup"][aria-label="Tab placement"]') !== null
+      ? "topBar"
+      : document.querySelector('[data-layout-inspector] [role="radiogroup"][aria-label="Sidebar side"]') !== null
+        ? "sidebar"
+        : null,
     aside: box(aside),
     sidebarSide: aside === null || body === null ? null : (aside.getBoundingClientRect().x > body.getBoundingClientRect().x + body.getBoundingClientRect().width / 2 ? "right" : "left"),
     column: box(document.querySelector("[data-layout-column]")),
     viewport: { width: window.innerWidth, height: window.innerHeight },
   };
 })()`;
+
+/** What Find's results list shows: each row's text and its highlighted marks. */
+const FIND_PROBE = `(() => {
+  const rows = [...document.querySelectorAll("[data-layout-find-result]")];
+  return {
+    rows: rows.map((row) => ({ text: row.textContent, marks: [...row.querySelectorAll("mark")].map((mark) => mark.textContent) })),
+    empty: document.body.textContent.includes("No layout settings match"),
+    area: document.querySelector("[data-layout-area-form]")?.getAttribute("data-layout-area-form") ?? null,
+  };
+})()`;
+
+/**
+ * Find a setting in both themes, by real typing: "ring" lists settings with
+ * the match highlighted at a word start (never "Sharing"), Enter opens the
+ * first one's area, and a query that matches nothing says so.
+ */
+async function runFindPhase(client, pageUrl, pageLoads) {
+  await runShellPhase(
+    "find",
+    [{ label: "light" }, { label: "dark" }],
+    async (variant, violations, notes) => {
+      const label = `find ${variant.label}`;
+      const loadsAtStart = await openShellVariant(
+        client,
+        pageUrl,
+        pageLoads,
+        {
+          tabs: "top",
+          collapsed: 0,
+          wco: "none",
+          dock: "right",
+          surface: "sample",
+        },
+        label,
+      );
+      await evaluate(
+        client,
+        `window.__layoutCanvasProbe.setTheme(${JSON.stringify(variant.label)})`,
+      );
+      await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
+      await settle(client, 600);
+      const fail = (line) => violations.push(`${label}: ${line}`);
+      const typeQuery = async (text) => {
+        await evaluate(
+          client,
+          `(() => { const field = document.querySelector('input[aria-label="Find a setting"]'); field.focus(); field.select(); })()`,
+        );
+        await client.send("Input.insertText", { text });
+        await settle(client, 300);
+      };
+
+      await typeQuery("ring");
+      let probe = await evaluate(client, FIND_PROBE);
+      await saveShot(client, `find-ring-${variant.label}`);
+      notes.push(`${label}: ${probe.rows.map((row) => row.text).join(" | ")}`);
+      if (probe.rows.length === 0) fail('"ring" lists no settings');
+      for (const row of probe.rows) {
+        if (!row.marks.some((mark) => mark.toLowerCase() === "ring"))
+          fail(`"${row.text}" highlights no "ring" (${row.marks.join(", ")})`);
+      }
+
+      await typeQuery("composer");
+      probe = await evaluate(client, FIND_PROBE);
+      await saveShot(client, `find-area-${variant.label}`);
+      if (probe.rows[0]?.text !== "ComposerArea")
+        fail(
+          `"composer" does not list the Composer area first (${probe.rows.map((row) => row.text).join(" | ")})`,
+        );
+
+      await typeQuery("zzzz");
+      probe = await evaluate(client, FIND_PROBE);
+      await saveShot(client, `find-empty-${variant.label}`);
+      if (!probe.empty || probe.rows.length > 0)
+        fail('"zzzz" shows no empty state');
+
+      await typeQuery("ring");
+      await pressKey(client, "Enter");
+      await settle(client, 600);
+      probe = await evaluate(client, FIND_PROBE);
+      await saveShot(client, `find-enter-${variant.label}`);
+      if (probe.area === null) fail("Enter opened no area");
+      await closeShellVariant(
+        client,
+        pageLoads,
+        loadsAtStart,
+        label,
+        violations,
+      );
+    },
+    "results at word starts, Enter opens an area, and an empty state",
+  );
+}
 
 async function runPlacementPhase(client, pageUrl, pageLoads) {
   await runShellPhase(
@@ -6583,10 +6668,12 @@ async function runPlacementPhase(client, pageUrl, pageLoads) {
         fail(
           `the bar ${boxText(probe.bar.rect)} covers the strip ${boxText(probe.strip)} it places`,
         );
-      if (!probe.lit.includes("topBar"))
-        fail(`the dock's placement row is not lit (${probe.lit.join(", ")})`);
+      if (probe.formArea !== "topBar")
+        fail(
+          `selecting the tab strip did not open the Task tabs area in the dock (shows ${String(probe.formArea)})`,
+        );
       say(
-        `strip bar ${probe.bar === null ? "-" : boxText(probe.bar.rect)}, ring ${probe.ring === null ? "-" : boxText(probe.ring)}, lit ${probe.lit.join(", ")}`,
+        `strip bar ${probe.bar === null ? "-" : boxText(probe.bar.rect)}, ring ${probe.ring === null ? "-" : boxText(probe.ring)}, area ${String(probe.formArea)}`,
       );
 
       // A pictogram writes the edge, and the bar follows the strip.
@@ -6973,8 +7060,8 @@ async function dragSurfaceTo(client, from, edge) {
  * The panel's REAL rail, horizontal across the panel or vertical in the
  * collapsed rail sheet, read as the user meets it: its buttons with their
  * accessible names and lit state, each group with its buttons and count, and
- * the editor's two readings of the same rail (the Position list's order in
- * the inspector index, and the preset card's miniature rail).
+ * the editor's own reading of the same rail (the Sidebar panels list's order
+ * in the inspector's Sidebar area).
  */
 const RAIL_GROUP_PROBE = `(() => {
   const rail = document.querySelector('[data-testid="epic-sidebar-rail"]');
@@ -6984,7 +7071,6 @@ const RAIL_GROUP_PROBE = `(() => {
     return { x: r.x, y: r.y, width: r.width, height: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
   };
   if (rail === null) return null;
-  const miniature = document.querySelector('[data-testid="preset-miniature-rail"]');
   return {
     orientation: rail.getAttribute("data-orientation"),
     buttons: [...rail.querySelectorAll("button")].map((node) => ({
@@ -7004,11 +7090,15 @@ const RAIL_GROUP_PROBE = `(() => {
       };
     }),
     seams: rail.querySelectorAll('[data-testid="epic-rail-stack-seam"]').length,
-    index: [...document.querySelectorAll("[data-region-id^=rail], [data-rail-stack-link]")].map((node) => node.getAttribute("data-region-id") ?? "link:" + node.getAttribute("data-rail-stack-link")).slice(0, 4),
-    miniatureGroups: miniature === null ? null : [...miniature.querySelectorAll("[data-rail-stack]")].map((node) => ({
-      icons: node.querySelectorAll("svg").length,
-      count: node.querySelector('[data-testid="epic-rail-stack-count"]') !== null,
-    })),
+    // The Sidebar area's own Panels list (T2/T3), scoped by its group label
+    // rather than a region-id prefix: every row now carries the product's own
+    // \`data-sortable-id\` (\`layoutRegionRowSelector\`), a stack link's id
+    // included, so a link is told apart by its "stack:" prefix instead of a
+    // separate attribute.
+    index: [...document.querySelectorAll('[data-layout-inspector] [role="group"][aria-label="Sidebar panels"] [data-sortable-id]')].map((node) => {
+      const id = node.getAttribute("data-sortable-id") ?? "";
+      return id.startsWith("stack:") ? "link:" + id : id;
+    }).slice(0, 4),
     // The rail's labels are the hover card's label chip (G8).
     tooltip: [...document.querySelectorAll('[data-slot="hover-card-content"][data-appearance="tooltip"]')].map((node) => node.textContent),
     focused: document.activeElement?.getAttribute("data-testid") ?? null,
@@ -7255,9 +7345,15 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
             "a click on the collapsed rail's group icon did not expand the panel",
           );
 
-        // The editor: the icon counts its members, the index lists them in
-        // order, and the preset miniature draws the group at rest.
+        // The editor: the icon counts its members and the Sidebar area's
+        // Panels list orders them.
         await evaluate(client, "window.__layoutCanvasProbe.beginSession()");
+        // Opens the Sidebar area (T3/T4's two-level form) with no row
+        // selected, so the Panels list exists in the document to be read.
+        await evaluate(
+          client,
+          'window.__layoutCanvasProbe.openAreaOf("railAgents")',
+        );
         await settle(client, 600);
         rail = await read();
         checkRailGroup(
@@ -7280,48 +7376,105 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
           fail(
             `the inspector lists ${rail.index.join(", ")}, expected ${order.join(", ")}`,
           );
-        if (
-          rail !== null &&
-          JSON.stringify(rail.miniatureGroups) !==
-            JSON.stringify([{ icons: 1, count: false }])
-        )
-          fail(
-            `the preset miniature draws the group as ${JSON.stringify(rail.miniatureGroups)}, expected one icon and no count`,
-          );
         await saveShot(client, shotName("editing"));
 
-        // Selecting the group's bottom member in the inspector rings the
-        // group's icon, the node that stands for it: never an invisible
-        // selection. A real click on the index row.
+        // The group's bottom member still keeps its own row in the Panels
+        // list (stacking merges the rail's icon, not the settings row). Once
+        // it is stacked the rail draws no icon of its own for it, so the row
+        // is its click target: opening a row's disclosure selects its region
+        // (`toggleRow`), and the selection rings the group's icon, the node
+        // that stands for it, never an invisible selection.
         const artifactsRow =
-          '[data-layout-inspector] [data-region-id="railArtifacts"]';
+          '[data-layout-inspector] [data-sortable-id="railArtifacts"] [data-row-grab]';
         await evaluate(
           client,
           `document.querySelector(${JSON.stringify(artifactsRow)})?.scrollIntoView({ block: "center" })`,
         );
         await flush(client);
+        // Whether the row reads as selected: `data-sortable-selected` on the
+        // row and `aria-pressed` on its grab (a row with no disclosure).
+        const artifactsSelected = `(() => {
+          const grab = document.querySelector(${JSON.stringify(artifactsRow)});
+          const row = grab?.closest("[data-sortable-id]");
+          return { selected: row?.getAttribute("data-sortable-selected") ?? null, pressed: grab?.getAttribute("aria-pressed") ?? null };
+        })()`;
         const row = await rectOf(client, artifactsRow);
         if (row === null) fail("editing: the inspector has no Artifacts row");
         else {
-          await pressAndRelease(client, row.cx, row.cy, "left");
-          await delay(900);
-          await flush(client);
+          await pressAt(client, row.cx, row.cy);
+          await releaseAt(client, row.cx, row.cy);
+          await settle(client, 900);
+          const clicked = await evaluate(client, artifactsSelected);
+          if (clicked.selected !== "1" || clicked.pressed !== "true")
+            fail(
+              `Artifacts row clicked: selected=${String(clicked.selected)}, aria-pressed=${String(clicked.pressed)}, expected 1 / true`,
+            );
           const ring = await evaluate(client, ringProbe("railAgents"));
           if (ring.error !== null) fail(`Artifacts selected: ${ring.error}`);
           else {
-            const expected = {
-              x: ring.region.x - RING_PADDING,
-              y: ring.region.y - RING_PADDING,
-              width: ring.region.width + RING_PADDING * 2,
-              height: ring.region.height + RING_PADDING * 2,
-            };
+            // `railAgents` sits within RING_BLEED of the top edge, so the
+            // ring's own `insideWindow` clamps it there rather than at the
+            // raw padded box (`selection-ring.ts`); the switch phase's target
+            // is nowhere near an edge, which is why this clamp never showed
+            // up there.
+            const expected = clampedRingBox(
+              {
+                x: ring.region.x - RING_PADDING,
+                y: ring.region.y - RING_PADDING,
+                width: ring.region.width + RING_PADDING * 2,
+                height: ring.region.height + RING_PADDING * 2,
+              },
+              { width: ring.innerWidth, height: ring.innerHeight },
+            );
             if (!sameBoxWithin(ring.ring, expected, 1.5))
               fail(
                 `Artifacts selected: the ring is at ${boxText(ring.ring)}, expected on the group icon ${boxText(expected)}`,
               );
           }
           await saveShot(client, shotName("bottom-selected"));
-          // Back to the index, which the reorder below reads.
+          // Enter on the focused grab toggles the selection exactly once per
+          // press: from selected, one press clears and the next selects.
+          const focusGrab = `document.querySelector(${JSON.stringify(artifactsRow)})?.focus()`;
+          for (const expected of [null, "1"]) {
+            await evaluate(client, focusGrab);
+            await pressKey(client, "Enter");
+            await settle(client, 400);
+            const state = await evaluate(client, artifactsSelected);
+            if (state.selected !== expected)
+              fail(
+                `Enter on the Artifacts row: selected=${String(state.selected)}, expected ${String(expected)} (one toggle per press)`,
+              );
+          }
+          // Space in this ordered list grabs and drops the row (L-31). The
+          // list's keydown takes it, so the button's native keyup click must
+          // not also select or clear it: grab plus drop leaves the selection.
+          const space = {
+            key: " ",
+            code: "Space",
+            windowsVirtualKeyCode: 32,
+            text: " ",
+          };
+          await evaluate(client, focusGrab);
+          for (let press = 0; press < 2; press += 1) {
+            await client.send("Input.dispatchKeyEvent", {
+              type: "keyDown",
+              ...space,
+            });
+            await delay(60);
+            await client.send("Input.dispatchKeyEvent", {
+              type: "keyUp",
+              ...space,
+            });
+            await settle(client, 300);
+          }
+          const afterSpace = await evaluate(client, artifactsSelected);
+          if (afterSpace.selected !== "1")
+            fail(
+              `Space grab and drop on the Artifacts row changed its selection to ${String(afterSpace.selected)}`,
+            );
+          // Back to the index, which the reorder below reads. Selecting the
+          // bottom member opened its own row and left the Sidebar area open
+          // (`select` sets the area, `clearSelection` only clears the row).
           await evaluate(client, "window.__layoutCanvasProbe.clearSelection()");
           await settle(client, 400);
         }
@@ -7371,10 +7524,77 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
           );
         await saveShot(client, shotName("reordered"));
 
-        // Ungrouped: both panels draw their own icon and nothing groups them.
+        // Three members (L-181): Terminals joins, the one icon counts three
+        // and is named for all of them, and the Sidebar area's stack row
+        // lists every member with its own Unstack. A REAL click on the middle
+        // member's takes it out in one history step, and the others stay.
         await evaluate(
           client,
-          'window.__layoutCanvasProbe.unstackRail("stack:railArtifacts+railAgents")',
+          'window.__layoutCanvasProbe.stackPanelInto("terminals", "chats")',
+        );
+        await settle(client, 400);
+        rail = await read();
+        checkRailGroup(
+          rail,
+          {
+            id: "stack:railArtifacts+railAgents+railTerminals",
+            topTestId: "epic-rail-artifacts",
+            hiddenTestId: "epic-rail-terminals",
+            label: "Artifacts · Agents · Terminals",
+            where: "three members",
+            orientation: "horizontal",
+            count: "3",
+          },
+          fail,
+        );
+        const unstackAgents =
+          '[data-layout-inspector] [data-stack-member="railAgents"] button';
+        await evaluate(
+          client,
+          `document.querySelector(${JSON.stringify(unstackAgents)})?.scrollIntoView({ block: "center" })`,
+        );
+        await flush(client);
+        await saveShot(client, shotName("three-members"));
+        const chip = await rectOf(client, unstackAgents);
+        const depthBeforeUnstack = await evaluate(
+          client,
+          "window.__layoutCanvasProbe.historyDepth()",
+        );
+        if (chip === null)
+          fail("three members: the stack row has no Unstack for Agents");
+        else {
+          await pressAt(client, chip.cx, chip.cy);
+          await releaseAt(client, chip.cx, chip.cy);
+          await settle(client, 500);
+          rail = await read();
+          checkRailGroup(
+            rail,
+            {
+              id: "stack:railArtifacts+railTerminals",
+              topTestId: "epic-rail-artifacts",
+              hiddenTestId: "epic-rail-terminals",
+              label: "Artifacts · Terminals",
+              where: "middle member unstacked",
+              orientation: "horizontal",
+              count: "2",
+            },
+            fail,
+          );
+          const unstackDepth = await evaluate(
+            client,
+            "window.__layoutCanvasProbe.historyDepth()",
+          );
+          if (unstackDepth !== depthBeforeUnstack + 1)
+            fail(
+              `unstacking the middle member cost ${String(unstackDepth - depthBeforeUnstack)} history steps, expected 1`,
+            );
+          await saveShot(client, shotName("middle-unstacked"));
+        }
+
+        // Ungrouped: every panel draws its own icon and nothing groups them.
+        await evaluate(
+          client,
+          'window.__layoutCanvasProbe.unstackRail("stack:railArtifacts+railTerminals")',
         );
         await settle(client, 400);
         rail = await read();
@@ -7386,6 +7606,7 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
           for (const [testId, name] of [
             ["epic-rail-artifacts", "Artifacts"],
             ["epic-rail-chats", "Agents"],
+            ["epic-rail-terminals", "Terminals"],
           ]) {
             const button = rail.buttons.find(
               (candidate) => candidate.testId === testId,
@@ -7399,7 +7620,7 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
         }
         await saveShot(client, shotName("ungrouped"));
         say(
-          `rest, tooltip, lit, keyboard, vertical, editing count and index, reorder (${String(depthAfter - depth)} step) and ungroup checked`,
+          `rest, tooltip, lit, keyboard, vertical, editing count and index, reorder (${String(depthAfter - depth)} step), a three-member stack's middle Unstack and ungroup checked`,
         );
         await evaluate(client, "window.__layoutCanvasProbe.endSession()");
         await settle(client, 300);
@@ -7418,7 +7639,7 @@ async function runGroupsPhase(client, pageUrl, pageLoads) {
         violations,
       );
     },
-    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator, named and tooltipped for both members; it lights with the group, works by keyboard, draws the same in the collapsed vertical rail, counts its members only while the editor customizes the rail, which lists them in order; reordering the members swaps the icon and name in one history step, and ungrouping gives each its own icon",
+    "on both sidebar sides and in both themes a stacked pair draws one icon, the top panel's, with no card or separator, named and tooltipped for both members; it lights with the group, works by keyboard, draws the same in the collapsed vertical rail, counts its members only while the editor customizes the rail, which lists them in order; reordering the members swaps the icon and name in one history step, a third member joins and a real click on the stack row's middle Unstack takes it out in one history step, and ungrouping gives each its own icon",
   );
 }
 
@@ -7447,6 +7668,7 @@ function selectedPhases() {
     "readings",
     "hostmenu",
     "groups",
+    "find",
   ];
   const raw = process.env.LAYOUT_EDITOR_BROWSER_PHASES;
   if (raw === undefined || raw.trim() === "") return new Set(all);
@@ -7720,10 +7942,6 @@ try {
   // report every red rather than the first.
   const runs = [
     ["parity", () => runParityPhase(client, pageUrl, pageLoads)],
-    [
-      "parity",
-      () => runParityPlacementVariants(client, pageUrl, canvasUrl, pageLoads),
-    ],
     ["canvas", () => runCanvasPhase(client, canvasUrl, pageLoads)],
     ["sides", () => runSidePlacementPhase(client, canvasUrl, pageLoads)],
     ["switch", () => runLiveSwitchPhase(client, canvasUrl, pageLoads)],
@@ -7752,6 +7970,7 @@ try {
     ["readings", () => runReadingsPhase(client, canvasUrl, pageLoads)],
     ["hostmenu", () => runHostMenuPhase(client, canvasUrl, pageLoads)],
     ["groups", () => runGroupsPhase(client, canvasUrl, pageLoads)],
+    ["find", () => runFindPhase(client, canvasUrl, pageLoads)],
   ];
   const failures = [];
   for (const [phase, run] of runs) {
@@ -7801,7 +8020,7 @@ async function runParityPhase(client, pageUrl, pageLoads) {
     "window.__layoutEditorProbe?.ready === true",
     pageLoads,
   );
-  // One frame for the miniature's ResizeObserver to settle its scale.
+  // One frame for the page to settle before it is measured.
   await evaluate(
     client,
     "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
@@ -7935,27 +8154,18 @@ async function runParityPhase(client, pageUrl, pageLoads) {
     );
   }
 
-  const miniature = await evaluate(client, MINIATURE_PROBE);
-  if (miniature.error !== null) {
-    violations.push(`preset miniature: ${miniature.error}`);
-  } else {
-    if (miniature.frameWidth !== 1000 || miniature.frameHeight !== 620) {
-      violations.push(
-        `preset miniature frame: expected 1000x620 untransformed, got ${miniature.frameWidth}x${miniature.frameHeight}`,
-      );
-    }
-    const expectedScale = miniature.boxWidth / 1000;
-    if (Math.abs(miniature.scale - expectedScale) > 0.001) {
-      violations.push(
-        `preset miniature scale: expected ${expectedScale.toFixed(4)}, got ${miniature.scale.toFixed(4)}`,
-      );
-    }
-    if (Math.abs(miniature.scaleX - miniature.scaleY) > 0.001) {
-      violations.push(
-        `preset miniature is not uniformly scaled: ${miniature.scaleX} x ${miniature.scaleY}`,
-      );
-    }
-  }
+  const presetCards = await evaluate(client, PRESET_CARDS_PROBE);
+  if (presetCards.count === 0) violations.push("no preset cards rendered");
+  if (presetCards.count > 0 && !presetCards.oneRow)
+    violations.push("preset cards wrap, expected one row at 380px");
+  if (presetCards.unpictured.length > 0)
+    violations.push(
+      `preset cards without exactly one miniature: ${presetCards.unpictured.join(", ")}`,
+    );
+  if (presetCards.untitled.length > 0)
+    violations.push(
+      `preset cards with no text: ${presetCards.untitled.join(", ")}`,
+    );
 
   await evaluate(client, "window.__layoutEditorProbe.showChip()");
   await evaluate(
@@ -7996,7 +8206,7 @@ async function runParityPhase(client, pageUrl, pageLoads) {
     violations,
     [],
     `Layout editor parity regression failed:\n${JSON.stringify(
-      { violations, stylesheet, dockRows, miniature, chip },
+      { violations, stylesheet, dockRows, presetCards, chip },
       null,
       2,
     )}`,
@@ -8266,6 +8476,7 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
   await flush(client);
   await delay(400);
   await flush(client);
+  await saveShot(client, "canvas-arrival");
 
   const coverage = await evaluate(
     client,
@@ -8890,6 +9101,12 @@ async function runCanvasPhase(client, pageUrl, pageLoads) {
 // --- phase 2: page-side probes ---------------------------------------------
 
 function regionSelector(regionId) {
+  // Timestamps are the one region drawn once per message, and the first in
+  // the document is the oldest prompt, scrolled out of a conversation that
+  // opens at its end. The last turn's stamp is the one on screen, which is
+  // also the one the editor's chip and ring go to (`preferredRegionInstance`).
+  if (regionId === "timestamps")
+    return `[data-sample-turn]:last-child [data-layout-region="timestamps"]`;
   return `[data-layout-region="${regionId}"]`;
 }
 
@@ -8946,8 +9163,13 @@ function selectionProbe(regionId) {
     const panel = document.querySelector("[data-layout-inspector]");
     return {
       selected: node === null ? null : node.getAttribute("data-selected"),
-      atIndex: panel !== null && panel.querySelector("[data-region-id]") !== null,
-      inspectorText: panel === null ? "" : (panel.textContent ?? "").slice(0, 400),
+      // The two-level form: a click opens the region's area with its row
+      // selected, so "still at the index" is no area form on screen.
+      atIndex: panel !== null && panel.querySelector("[data-layout-area-form]") === null,
+      inspectorText: (() => {
+        const row = panel === null ? null : panel.querySelector('[data-sortable-id=${JSON.stringify(regionId)}][data-sortable-selected="1"]');
+        return row === null ? "" : (row.textContent ?? "").slice(0, 400);
+      })(),
     };
   })()`;
 }
@@ -9231,11 +9453,12 @@ function buildDragPlans(toolbarLeft, dock) {
       target: {
         kind: "member",
         selector: '[data-layout-member="divider:1"]',
-        dx: 0,
-        dy: -DROP_OVERSHOOT,
+        // The sample sidebar is expanded, so its rail runs horizontally (F3).
+        dx: -DROP_OVERSHOOT,
+        dy: 0,
         // A 36px icon against an 8px divider: the overshoot has to be
         // measured on the edge that claims the slot, or the icon passes the
-        // PANEL above the divider too (L-143).
+        // PANEL before the divider too (L-143).
         leadingEdge: true,
       },
       expect: { kind: "rail", ids: TERMINALS_ABOVE_THE_DIVIDER },
@@ -9252,8 +9475,8 @@ function buildDragPlans(toolbarLeft, dock) {
       target: {
         kind: "member",
         selector: regionSelector("railTerminals"),
-        dx: 0,
-        dy: DROP_OVERSHOOT,
+        dx: DROP_OVERSHOOT,
+        dy: 0,
       },
       expect: { kind: "rail", ids: TERMINALS_ABOVE_THE_DIVIDER },
     },
@@ -9273,10 +9496,7 @@ function buildDragPlans(toolbarLeft, dock) {
       kind: "state",
       expect: { kind: "rail", ids: TERMINALS_STACKED_ABOVE_BROWSERS },
       historyDelta: 1,
-      // Scoped to the app column, which is the rail the gesture acted on: the
-      // editor beside it draws a preset miniature per preset, each a real rail
-      // with real groups and no registered icons, so a document-wide query
-      // reports four rails' worth of groups for one gesture.
+      // Scoped to the app column, which is the rail the gesture acted on.
       probe: `(() => {
         const column = document.querySelector("[data-layout-column]");
         const groups = [...column.querySelectorAll("[data-rail-stack]")];
@@ -9574,7 +9794,14 @@ async function resetSession(client) {
 }
 
 async function hoverIndexRow(client, regionId) {
-  const selector = `[data-layout-inspector] [data-region-id="${regionId}"]`;
+  // The row lives on its area's level of the two-level form, opened with no
+  // row selected so the hover alone is what asks for the ghost.
+  await evaluate(
+    client,
+    `window.__layoutCanvasProbe.openAreaOf(${JSON.stringify(regionId)})`,
+  );
+  await flush(client);
+  const selector = `[data-layout-inspector] [data-sortable-id="${regionId}"]`;
   const found = await evaluate(
     client,
     `(() => {

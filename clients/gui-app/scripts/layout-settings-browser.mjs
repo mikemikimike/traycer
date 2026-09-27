@@ -14,12 +14,12 @@
 //      of areas beside the picked one. Each area shows its own group and no
 //      other; the rail and the area's header stay put while its body scrolls;
 //      a newly picked area starts at its top; the arrow keys walk the rail; a
-//      changed area carries a dot its own Reset clears; a search result and
+//      changed area carries a dot its changed row's ↺ clears; a search result and
 //      the editor door's deep link each pick their row's area and land on the
 //      row; and nothing overflows the header or the card at either width.
 //      Below `md` the area select - and Providers' provider select, the same
 //      component - is operated for real; a short desktop pane scrolls its
-//      rail; a confirmed area Reset leaves focus in the area; and a setup
+//      rail; a ↺ by keyboard leaves focus in the area; and a setup
 //      guide's focus return lands on the area control the width draws.
 //   2. Disclosures: every row that draws a chevron opens something with
 //      content, and every row that opens nothing draws no chevron.
@@ -28,8 +28,9 @@
 //      from the shipped layout, and the app column (never the panel) must
 //      render differently afterwards. A setting nothing reads is exactly a
 //      setting whose operation leaves the product unchanged.
-//   4. G7: the resource monitor and the agent rows' readings are two
-//      switches, and each changes only its own surface.
+//   4. G7 / L-174: the resource monitor and the agent rows' readings are
+//      two switches, each changing only its own surface, and the rows draw
+//      the monitor's own Metrics choice.
 //
 // `--out DIR` writes a screenshot per area and per G7 step into DIR.
 import assert from "node:assert/strict";
@@ -64,11 +65,11 @@ const VARIANTS = [
 ];
 const TABS = [
   { label: "Presets", testIds: ["layout-presets-group", "layout-reset-group"] },
-  { label: "Tabs", testIds: ["layout-surface-topBar"] },
+  { label: "Task tabs", testIds: ["layout-surface-topBar"] },
   { label: "Sidebar", testIds: ["layout-surface-sidebar"] },
   { label: "Chat", testIds: ["layout-surface-chat"] },
   { label: "Composer", testIds: ["layout-surface-composer"] },
-  { label: "Status bar", testIds: ["layout-surface-statusBar"] },
+  { label: "Usage and resources", testIds: ["layout-surface-statusBar"] },
 ];
 /**
  * Controls that only take effect once another is on, and the switch that
@@ -76,8 +77,8 @@ const TABS = [
  */
 const PREREQUISITES = [
   {
-    control: /^contextUsage (check |Compact button)/,
-    first: "contextUsage Pin the breakdown",
+    control: /^contextUsage check /,
+    first: "contextUsage Pin breakdown",
   },
 ];
 /**
@@ -87,9 +88,9 @@ const PREREQUISITES = [
  * from that state, one at a time, exactly as the base controls are.
  */
 const SETUPS = [
-  { tab: "Tabs", steps: ["- Tabs position: Left"] },
-  { tab: "Status bar", steps: ["codex Limits: Choose..."] },
-  { tab: "Status bar", steps: ["claude-code Limits: Choose..."] },
+  { tab: "Task tabs", steps: ["- Tab placement: Left"] },
+  { tab: "Usage and resources", steps: ["codex Limits: Choose..."] },
+  { tab: "Usage and resources", steps: ["claude-code Limits: Choose..."] },
 ];
 /**
  * Operations that change a setting and, by design, nothing on screen, each
@@ -108,6 +109,10 @@ const EXPECTED_SILENT = [
     control:
       /^(openrouter|kilocode|grok|huggingface|opencode|cursor) .* display: Hidden$/,
     why: "the fixture signs in Codex and Claude Code only, so this provider draws no reading to hide",
+  },
+  {
+    control: /^model Reasoning control: /,
+    why: "the footer it styles is inside the model picker, which is closed here; the row pictures both options, and the editor opens its sample picker while Model is selected (L-173)",
   },
   {
     control: /^(railPullRequests|railComments) /,
@@ -154,7 +159,7 @@ const CONTROLS = `(() => {
       (candidate) => candidate.closest('[role="group"]') === list && candidate.querySelector(':scope > [data-row-line] [data-row-grip]') !== null,
     );
     rows.slice(0, 2).forEach((row, index) => {
-      out.push({ key: 'order ' + list.getAttribute('aria-label') + ': ' + row.getAttribute('data-sortable-id') + (index === 0 ? ' down' : ' up'), node: row.querySelector(':scope > [data-row-line] [role="button"]'), order: index === 0 ? 'ArrowDown' : 'ArrowUp' });
+      out.push({ key: 'order ' + list.getAttribute('aria-label') + ': ' + row.getAttribute('data-sortable-id') + (index === 0 ? ' down' : ' up'), node: row.querySelector(':scope > [data-row-line] [data-row-grab]'), order: index === 0 ? 'ArrowDown' : 'ArrowUp' });
     });
   }
   return out.filter((entry) => entry.node !== null && !entry.node.disabled && !entry.node.hasAttribute('data-disabled') && entry.node.closest('[inert]') === null);
@@ -487,7 +492,7 @@ async function checkAreas(client) {
   }
   // Pinned: the longest area scrolled to its end moves its body and nothing
   // else - not the rail, not its header, not the settings pane.
-  await clickTab(client, "Status bar");
+  await clickTab(client, "Usage and resources");
   await openAllDisclosures(client);
   const rest = await evaluate(client, AREA_GEOMETRY);
   await evaluate(
@@ -513,7 +518,7 @@ async function checkAreas(client) {
   await screenshotPane(client, "area-body-scrolled");
   // A newly picked area starts at its top, and so does the one left scrolled
   // when it is picked again.
-  for (const label of ["Chat", "Status bar"]) {
+  for (const label of ["Chat", "Usage and resources"]) {
     await clickTab(client, label);
     const top = await evaluate(client, AREA_GEOMETRY);
     if (top.body !== 0)
@@ -533,9 +538,9 @@ async function checkKeyboard(client) {
     `document.querySelector(${JSON.stringify(AREA_TAB)} + '[aria-selected="true"]').focus()`,
   );
   const expectations = [
-    ["ArrowDown", "Tabs"],
+    ["ArrowDown", "Task tabs"],
     ["ArrowDown", "Sidebar"],
-    ["End", "Status bar"],
+    ["End", "Usage and resources"],
     ["ArrowUp", "Composer"],
     ["Home", "Presets"],
   ];
@@ -567,8 +572,8 @@ async function checkKeyboard(client) {
 }
 
 /**
- * A changed area carries the dot from the edit that changed it, and its own
- * Reset - confirmed, as "Reset everything" is - clears it and nothing else.
+ * A changed area carries the dot from the edit that changed it, and the
+ * changed row's ↺ clears it and nothing else.
  */
 async function checkChangedDot(client) {
   const dots = () =>
@@ -592,20 +597,25 @@ async function checkChangedDot(client) {
       `changed dot: Chat is not marked after an edit (${JSON.stringify(after)})`,
     );
   await screenshotPane(client, "changed-dot-chat");
-  await resetAreaByKeyboard(client, "Chat", "changed-dot-chat-confirm");
+  await revertRowByKeyboard(
+    client,
+    "Minimap",
+    "Chat",
+    "changed-dot-chat-revert",
+  );
   const cleared = await dots();
   if (cleared.includes("Chat"))
-    failures.push("changed dot: Chat is still marked after its Reset");
+    failures.push("changed dot: Chat is still marked after the ↺");
   if (JSON.stringify(cleared) !== JSON.stringify(before))
     failures.push(
-      `changed dot: Chat's Reset changed other areas: ${JSON.stringify(before)} -> ${JSON.stringify(cleared)}`,
+      `changed dot: the Minimap ↺ changed other areas: ${JSON.stringify(before)} -> ${JSON.stringify(cleared)}`,
     );
   const minimap = await evaluate(
     client,
     "window.__layoutCanvasProbe.snapshot().overrides.minimap ?? null",
   );
   if (minimap !== null)
-    failures.push(`changed dot: Chat's Reset left ${JSON.stringify(minimap)}`);
+    failures.push(`changed dot: the Minimap ↺ left ${JSON.stringify(minimap)}`);
   await evaluate(client, "window.__layoutCanvasProbe.reset()");
 }
 
@@ -635,7 +645,7 @@ async function checkLanding(client) {
       "deep link",
       "landOnRegion",
       "resourceMonitor",
-      "Status bar",
+      "Usage and resources",
       '[data-sortable-id="resourceMonitor"]',
     ],
   ];
@@ -697,7 +707,7 @@ async function checkPanelFit(client, origin) {
       `${origin}${FIXTURE_PATH}?settings=1&pane=full&panel=layout&account=1&hosts=1&readings=both`,
       "[data-settings-panel-shell]",
     );
-    for (const area of ["Presets", "Status bar"]) {
+    for (const area of ["Presets", "Usage and resources"]) {
       if (size === "normal") await clickTab(client, area);
       const m = await evaluate(
         client,
@@ -881,8 +891,8 @@ async function checkShortPane(client, origin) {
 /**
  * Below `md` the rail is a select (review H2 #4), operated as a person
  * would: opened, an item picked. On Layout the pick shows its area, and a
- * changed area says so in the trigger and in its option, before its Reset and
- * not after. On Providers the same component picks the provider it names.
+ * changed area says so in the trigger and in its option, before the changed
+ * row's ↺ and not after. On Providers the same component picks the provider it names.
  */
 async function checkNarrowSelectors(client, origin) {
   const [, narrow] = SHOT_SIZES.find(([size]) => size === "narrow");
@@ -946,13 +956,13 @@ async function checkNarrowSelectors(client, origin) {
     [...baseline, "Chat"].sort(),
     (await changedOptions()).sort(),
   );
-  await resetAreaByKeyboard(client, "Chat", "narrow-reset-chat-confirm");
+  await revertRowByKeyboard(client, "Minimap", "Chat", "narrow-revert-minimap");
   expect(
-    "after Reset Chat",
+    "after the Minimap ↺",
     { label: "Chat", dot: false, said: false, panel: "Chat" },
     await read(),
   );
-  expect("options after Reset Chat", baseline, await changedOptions());
+  expect("options after the Minimap ↺", baseline, await changedOptions());
 
   await loadFixture(
     client,
@@ -1119,7 +1129,7 @@ async function operateAndWait(client, name) {
  */
 async function checkChooseSeedsSelection(client) {
   for (const providerId of ["codex", "claude-code"]) {
-    await resetTo(client, "Status bar", []);
+    await resetTo(client, "Usage and resources", []);
     const drawn = await evaluate(
       client,
       `[...document.querySelectorAll('[data-testid="status-bar-provider-segment-${providerId}"] [data-window-key]')]
@@ -1156,7 +1166,7 @@ async function checkChooseSeedsSelection(client) {
  */
 async function checkTabSwitchScroll(client) {
   await setViewport(client, { width: 1200, height: 700 });
-  await resetTo(client, "Status bar", []);
+  await resetTo(client, "Usage and resources", []);
   await evaluate(
     client,
     `(() => { const body = ${PANEL}.querySelector('[data-layout-area-body]'); body.scrollTop = body.scrollHeight; })()`,
@@ -1196,7 +1206,7 @@ async function checkHeaderFit(client) {
   ]) {
     // The settings pane is 36rem, so this leaves the app column 900px wide.
     await setViewport(client, { width: 1476, height: 900 });
-    await resetTo(client, "Status bar", [
+    await resetTo(client, "Usage and resources", [
       ...sides,
       "codex Limits: Choose...",
       "claude-code Limits: Choose...",
@@ -1261,12 +1271,15 @@ async function setViewport(client, size) {
 }
 
 /**
- * G7: the monitor's Shown drives the tab strip's resource reading and nothing
- * else; "Readings on agent rows" drives the agent row's chip and nothing else.
+ * G7 and L-174: the monitor's Shown drives the tab strip's resource reading
+ * and nothing else; "Readings on agent rows" (a Sidebar row) decides whether
+ * the agent row prints; and WHICH readings it prints is the monitor's own
+ * Metrics choice, which stays editable while the monitor is Hidden as long as
+ * the rows print. The Sidebar row's "Choose metrics" opens that choice.
  */
 async function checkAgentRows(client) {
   await evaluate(client, "window.__layoutCanvasProbe.reset()");
-  await clickTab(client, "Status bar");
+  await clickTab(client, "Usage and resources");
   await openAllDisclosures(client);
   await settle(client);
   const read = () =>
@@ -1279,10 +1292,19 @@ async function checkAgentRows(client) {
          ),
        })`,
     );
+  // Whether the Metrics checks can be operated right now.
+  const metricsLive = () =>
+    evaluate(
+      client,
+      `(() => {
+         const box = [...${PANEL}.querySelectorAll('[role="checkbox"]')].find((node) => node.closest('label')?.textContent.trim() === 'Memory');
+         return box === undefined ? null : !box.disabled && box.closest('fieldset:disabled') === null;
+       })()`,
+    );
   const start = await read();
   if (start.row === null || !/472/.test(start.row)) {
     failures.push(
-      `G7: agent row has no reading at rest: ${JSON.stringify(start)}`,
+      `G7: agent row has no memory reading at rest: ${JSON.stringify(start)}`,
     );
   }
   if (!start.monitor)
@@ -1299,9 +1321,26 @@ async function checkAgentRows(client) {
       `G7: hiding the monitor changed the agent row: ${JSON.stringify(monitorOff)}`,
     );
   }
-  await screenshotPage(client, "g7-2-monitor-off-rows-on");
+  if ((await metricsLive()) !== true)
+    failures.push("L-174: Metrics locked while Hidden with agent rows on");
+  await screenshotRow(client, "g7-2-monitor-off-rows-on", "Metrics");
 
-  await mustOperate(client, "resourceMonitor Readings on agent rows");
+  // One source of truth: unticking Memory under the Hidden monitor takes the
+  // memory reading off the agent row.
+  await mustOperate(client, "resourceMonitor check Memory");
+  await settle(client);
+  const noMemory = await read();
+  if (noMemory.row === null || /472/.test(noMemory.row)) {
+    failures.push(
+      `L-174: unticking Memory left it on the agent row: ${JSON.stringify(noMemory)}`,
+    );
+  }
+  await mustOperate(client, "resourceMonitor check Memory");
+  await settle(client);
+  await screenshotRow(client, "g7-3-metrics-edited-while-hidden", "Metrics");
+
+  await clickTab(client, "Sidebar");
+  await mustOperate(client, "- Readings on agent rows");
   await settle(client);
   const bothOff = await read();
   if (bothOff.row === null || /472/.test(bothOff.row)) {
@@ -1309,7 +1348,31 @@ async function checkAgentRows(client) {
       `G7: the agent rows switch did not remove the row reading: ${JSON.stringify(bothOff)}`,
     );
   }
-  await screenshotPage(client, "g7-3-both-off");
+  await screenshotRow(client, "g7-4-both-off", "Readings on agent rows");
+
+  // "Choose metrics" lands on the monitor's row in its own area.
+  await evaluate(client, "window.__layoutCanvasProbe.openSettingsApi()");
+  const chose = await evaluate(
+    client,
+    `(() => {
+       const link = [...${PANEL}.querySelectorAll('button')].find((node) => node.textContent.trim() === 'Choose metrics');
+       if (link === undefined) return false;
+       link.click();
+       return true;
+     })()`,
+  );
+  await settle(client);
+  const landed = await poll(
+    client,
+    `${PANEL}?.getAttribute('aria-label') === 'Usage and resources' && ${PANEL}.querySelector('[data-sortable-id="resourceMonitor"] [aria-expanded="true"]') !== null`,
+  );
+  if (!chose || !landed)
+    failures.push(
+      "L-174: Choose metrics did not open the Resource monitor row",
+    );
+  if ((await metricsLive()) !== false)
+    failures.push("L-174: Metrics editable while Hidden with agent rows off");
+  await screenshotRow(client, "g7-5-choose-metrics-landing", "Metrics");
 
   await mustOperate(client, "resourceMonitor Resource monitor display: Shown");
   await settle(client);
@@ -1321,7 +1384,7 @@ async function checkAgentRows(client) {
       `G7: showing the monitor brought the row reading back: ${JSON.stringify(monitorOn)}`,
     );
   }
-  await screenshotPage(client, "g7-4-monitor-on-rows-off");
+  await screenshotPage(client, "g7-6-monitor-on-rows-off");
   await evaluate(client, "window.__layoutCanvasProbe.reset()");
 }
 
@@ -1360,47 +1423,29 @@ async function clickTab(client, label) {
 }
 
 /**
- * An area's Reset by keyboard (review H2 #1). Escape first, which must hand
- * focus back to Reset; then the confirm's Reset, after which the button is
- * gone with the dot and focus must sit in the area's panel, not the page.
+ * A row's ↺ by keyboard, the only per-setting reset since T1 retired the
+ * area Resets: Enter puts the row back, the ↺ goes with the change, and focus
+ * stays in the area's panel rather than falling to the page.
  */
-async function resetAreaByKeyboard(client, label, shot) {
-  const RESET = `${PANEL}?.querySelector('button[aria-label="Reset ${label}"]')`;
-  const openConfirm = async () => {
-    const focused = await evaluate(
-      client,
-      `(() => { const reset = ${RESET}; reset?.focus(); return reset != null && document.activeElement === reset; })()`,
-    );
-    if (!focused) return false;
-    await press(client, "Enter");
-    return poll(client, `document.querySelector('[role="dialog"]') !== null`);
-  };
-  if (!(await openConfirm())) {
-    failures.push(`reset ${label}: Enter on its Reset opens no confirm`);
-    return;
-  }
-  await press(client, "Escape");
-  if (!(await poll(client, `document.activeElement === ${RESET}`)))
-    failures.push(
-      `reset ${label}: cancelling does not return focus to Reset (${await describeFocus(client)})`,
-    );
-  if (!(await openConfirm())) {
-    failures.push(`reset ${label}: Reset does not open its confirm again`);
+async function revertRowByKeyboard(client, rowName, areaLabel, shot) {
+  const REVERT = `${PANEL}?.querySelector('button[aria-label="Revert ${rowName}"]')`;
+  const focused = await evaluate(
+    client,
+    `(() => { const revert = ${REVERT}; revert?.focus(); return revert != null && document.activeElement === revert; })()`,
+  );
+  if (!focused) {
+    failures.push(`revert ${rowName}: no ↺ to focus`);
     return;
   }
   await screenshotPage(client, shot);
-  await evaluate(
-    client,
-    `[...document.querySelectorAll('[role="dialog"] button')].find((node) => node.textContent.trim() === 'Reset')?.focus()`,
-  );
   await press(client, "Enter");
   const landed = await poll(
     client,
-    `document.querySelector('[role="dialog"]') === null && ${RESET} == null && document.activeElement === ${PANEL} && ${PANEL}.getAttribute('aria-label') === ${JSON.stringify(label)}`,
+    `${REVERT} == null && ${PANEL}?.contains(document.activeElement) === true && ${PANEL}.getAttribute('aria-label') === ${JSON.stringify(areaLabel)}`,
   );
   if (!landed)
     failures.push(
-      `reset ${label}: after confirming, not in the ${label} panel (${await describeFocus(client)})`,
+      `revert ${rowName}: after Enter, not in the ${areaLabel} panel (${await describeFocus(client)})`,
     );
 }
 
@@ -1662,6 +1707,28 @@ async function screenshotPage(client, name) {
     path.join(outDir, `${name}.png`),
     Buffer.from(shot.data, "base64"),
   );
+}
+
+/**
+ * A G7 step's evidence: the settings row whose label is `label` scrolled to
+ * the middle of its pane, in both themes, so the row and the agent row it
+ * drives are in one frame.
+ */
+async function screenshotRow(client, name, label) {
+  if (outDir === null) return;
+  await evaluate(
+    client,
+    `[...${PANEL}.querySelectorAll('[data-layout-form-row]')].find((row) => row.textContent.includes(${JSON.stringify(label)}))?.scrollIntoView({ block: 'center' })`,
+  );
+  for (const theme of ["dark", "light"]) {
+    await evaluate(
+      client,
+      `window.__layoutCanvasProbe.setTheme(${JSON.stringify(theme)})`,
+    );
+    await settle(client);
+    await screenshotPage(client, `${name}-${theme}`);
+  }
+  await evaluate(client, `window.__layoutCanvasProbe.setTheme("dark")`);
 }
 
 function slug(label) {

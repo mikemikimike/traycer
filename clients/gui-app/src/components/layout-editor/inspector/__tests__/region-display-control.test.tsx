@@ -76,6 +76,7 @@ beforeEach(() => {
     entry: "keyboard",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 });
 
@@ -163,9 +164,9 @@ describe("the option set a region's own value asks for", () => {
   });
 
   it("gives a rail panel with no presence rule two, not three (G6)", () => {
-    // railAgents has no hint (offersAuto is false), so Auto and Shown drew
-    // the same rail and the third option was a choice with no effect - the
-    // page's merged control collapses to Shown/Hidden like any other region.
+    // railAgents has no hint (isAutoRailRegionId is false), so its `shown` is
+    // plain Visibility (L-93 overturned) and the control collapses to
+    // Shown/Hidden like any other region.
     expect(regionFacts("railAgents").hint).toBeNull();
 
     render(<LiveControl regionId="railAgents" />);
@@ -176,9 +177,9 @@ describe("the option set a region's own value asks for", () => {
 
     expect(railAgents().shown).toBe("hidden");
     pick("Shown");
-    // Still writes the rail's own "on" value, `auto` - not the literal
-    // `shown` a plain region's switch would write.
-    expect(railAgents().shown).toBe("auto");
+    // Writes the plain literal `shown` - this panel's value can no longer
+    // even hold `auto`.
+    expect(railAgents().shown).toBe("shown");
   });
 
   it("gives a plain region two, and no switch anywhere", () => {
@@ -191,5 +192,32 @@ describe("the option set a region's own value asks for", () => {
 
     expect(minimap().shown).toBe("hidden");
     expect(historyDepth()).toBe(1);
+  });
+});
+
+describe("Chat display settings' disclosure regions (Thinking, Tool activity)", () => {
+  it("gives Thinking Open/Closed/Hidden, and Hidden keeps size", () => {
+    useLayoutStore
+      .getState()
+      .setRegionValues("thinking", { size: "full", shown: "shown" });
+    render(<LiveControl regionId="thinking" />);
+
+    expect(optionLabels()).toEqual(["Open", "Closed", "Hidden"]);
+
+    pick("Hidden");
+
+    const state = useLayoutStore.getState();
+    const thinking = effectiveLayoutValues(
+      state.basePreset,
+      state.overrides,
+    ).thinking;
+    expect(thinking.shown).toBe("hidden");
+    expect(thinking.size).toBe("full");
+  });
+
+  it("gives Tool activity only Open/Closed, never Hidden", () => {
+    render(<LiveControl regionId="toolActivity" />);
+
+    expect(optionLabels()).toEqual(["Open", "Closed"]);
   });
 });

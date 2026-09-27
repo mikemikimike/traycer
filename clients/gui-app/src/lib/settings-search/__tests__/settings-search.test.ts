@@ -127,12 +127,25 @@ describe("settings search", () => {
     }
   });
 
+  it("reaches the Notifications page by its former name, Inbox", () => {
+    // The strip's drawer was renamed from "Inbox" to "Notifications"; the old
+    // name stays in the page's keywords so it is still findable.
+    expect(landingFor("inbox", DESKTOP)).toBe("notifications#<top>");
+  });
+
   it("reaches a bespoke page through the vocabulary it is really about", () => {
     // Providers and Worktrees have no indexable rows — they are per-provider
     // and per-worktree at runtime — so their reachability IS their keywords.
     expect(labelsFor("mcp", DESKTOP)).toContain("MCP servers");
     expect(labelsFor("api key", DESKTOP)).toContain("API key");
     expect(labelsFor("rate limit", DESKTOP)).toContain("Profiles & limits");
+  });
+
+  it("reaches the Appearance diff viewer rows by their own vocabulary", () => {
+    expect(landingFor("line numbers", DESKTOP)).toBe(
+      "appearance#appearance-diff-line-numbers",
+    );
+    expect(labelsFor("gutter", DESKTOP)).toContain("Gutter marks");
   });
 
   it("prefers the specific row over the group that contains it", () => {
@@ -286,12 +299,12 @@ describe("settings search", () => {
 
     it("indexes the small-screen status bar row in the installed app only", () => {
       expect(labelsFor("status bar on small screens", MOBILE)).toContain(
-        "Show the status bar on small screens",
+        "Status bar on small screens",
       );
       // Not on desktop: every other build draws the strip whenever the usage
       // host says so, so the switch would pick between two identical outcomes.
       expect(labelsFor("status bar on small screens", DESKTOP)).not.toContain(
-        "Show the status bar on small screens",
+        "Status bar on small screens",
       );
     });
   });

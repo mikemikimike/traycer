@@ -3,11 +3,22 @@ import {
   cleanup,
   fireEvent,
   render,
+  type RenderResult,
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+// Rail tooltips are HoverCards: with motion left on, closing one keeps its
+// content mounted (opacity 0) through a real requestAnimationFrame-driven
+// exit, which the suppression test below is not about (hover-card.test.tsx's
+// own precedent for this same mock).
+vi.mock("@/lib/animation/use-motion-enabled", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/animation/use-motion-enabled")>();
+  return { ...actual, useMotionEnabled: () => false };
+});
 import {
   EpicLeftPanelHost,
   EpicLeftPanelLoadingHost,
@@ -22,7 +33,6 @@ import { useLeftPanelStore } from "@/stores/epics/left-panel-store";
 import { type PanelVisibilityOverrideById } from "@/lib/left-panel-ids";
 import {
   applyRail,
-  clearRailVisibilityOverrides,
   currentLayoutArrangement,
   setRailVisibilityOverride,
 } from "@/lib/layout/rail-view";
@@ -194,25 +204,6 @@ const testQueryClient = new QueryClient({
 });
 const HOST_ID = "epic-sidebar-host";
 
-/** The drop-target data one rail icon registered, for the bands' own rule. */
-function railDropTargetData(panelId: string): { readonly stacked: boolean } {
-  const input = testState.droppableInputs.find(
-    (candidate) =>
-      candidate.id === `left-panel-rail-target:${panelId}:pane:${TAB_ID}`,
-  );
-  if (input === undefined) throw new Error(`no rail drop target: ${panelId}`);
-  const data = input.data;
-  if (
-    data === null ||
-    typeof data !== "object" ||
-    !("stacked" in data) ||
-    typeof data.stacked !== "boolean"
-  ) {
-    throw new Error(`rail drop target ${panelId} named no stacked flag`);
-  }
-  return { stacked: data.stacked };
-}
-
 function resetLeftPanelStore(): void {
   window.localStorage.clear();
   useSurfaceHostSelectionStore.setState({ selections: {} });
@@ -347,12 +338,31 @@ describe("<EpicLeftPanelRail />", () => {
     ).not.toBeUndefined();
   });
 
-  it("tells a drop target it is stacked from the MODEL, not from what it drew", () => {
-    // Artifacts hidden: Agents draws as a lone icon and is still half of a
-    // pair, because hiding a panel is not unstacking it (L-166). Reading the
-    // drawn shape instead let that icon offer a combine the writer refused,
-    // with a highlight and no result (L-170).
-    setRailVisibilityOverride("artifacts", false);
+  it("computes a combine cue from the MODEL's full stack, not from how many members are drawn (L-170, L-181)", () => {
+    // Build a 4-member stack, then hide every member but Chats: it draws as a
+    // LONE icon (no capsule at all), though the model still holds all four.
+    // Reading the drawn shape instead of the model would offer a join this
+    // stack cannot take.
+    act(() => {
+      let arrangement = currentLayoutArrangement();
+      arrangement = stackRailPanels(
+        arrangement,
+        "terminals",
+        "artifacts",
+        "stack",
+      );
+      arrangement = stackRailPanels(
+        arrangement,
+        "browsers",
+        "artifacts",
+        "stack",
+      );
+      applyRail(arrangement.rail);
+      setRailVisibilityOverride("artifacts", false);
+      setRailVisibilityOverride("terminals", false);
+      setRailVisibilityOverride("browsers", false);
+    });
+
     render(
       <EpicLeftPanelRail
         epicId={EPIC_ID}
@@ -360,10 +370,32 @@ describe("<EpicLeftPanelRail />", () => {
         orientation="vertical"
       />,
     );
-
     expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(0);
-    expect(railDropTargetData("chats").stacked).toBe(true);
-    expect(railDropTargetData("terminals").stacked).toBe(false);
+
+    act(() => {
+      useEpicDndStore.getState().canvasDragStarted(
+        {
+          kind: "left-panel-rail-item",
+          viewTabId: TAB_ID,
+          panelId: "sharing",
+          origin: "rail",
+        },
+        null,
+      );
+      useEpicDndStore.getState().dropPreviewChanged({
+        kind: "left-panel-rail",
+        viewTabId: TAB_ID,
+        panelId: "chats",
+        position: "combine",
+      });
+    });
+
+    expect(screen.getByTestId("epic-rail-chats").className).toContain(
+      "ring-destructive",
+    );
+    expect(screen.getByTestId("epic-rail-chats").className).not.toContain(
+      "ring-primary",
+    );
   });
 
   it("draws the shipped rail as eight direct children - the chats/artifacts capsule plus seven icons - with no dividers", () => {
@@ -458,11 +490,61 @@ describe("<EpicLeftPanelRail />", () => {
     ).toEqual(["epic-rail-chats"]);
   });
 
-  // handleGroupClick's three branches (G3): the group's one button answers a
-  // click the same way a lone panel's icon would, reading `displayedPanelId`
-  // and each member's own collapsed state rather than "which half was
-  // clicked" - there is no separate button for the bottom member any more.
-  it("opens the group on its top panel when neither member is showing", () => {
+  it("labels, counts and lights a 3-member stack's one icon for every member (L-181)", () => {
+    act(() => {
+      applyRail(
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "terminals",
+          "artifacts",
+          "stack",
+        ).rail,
+      );
+    });
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+    useLayoutEditorStore.getState().beginSession({
+      entry: "pointer",
+      source: "direct_ui",
+      startedAt: 0,
+      origin: { kind: "tab" },
+    });
+
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(1);
+    const stack = screen.getByTestId("epic-rail-stack");
+    expect(stack.getAttribute("data-rail-stack")).toBe(
+      "stack:railAgents+railArtifacts+railTerminals",
+    );
+    expect(
+      Array.from(stack.querySelectorAll("button")).map((button) =>
+        button.getAttribute("data-testid"),
+      ),
+    ).toEqual(["epic-rail-chats"]);
+    expect(
+      screen.getByTestId("epic-rail-chats").getAttribute("aria-label"),
+    ).toBe("Agents · Artifacts · Terminals");
+    // Lit for Terminals - a non-top member - being the displayed panel.
+    expect(
+      screen.getByTestId("epic-rail-chats").getAttribute("aria-current"),
+    ).toBe("true");
+    // The count badge draws only while the editor is customizing this rail.
+    expect(screen.getByTestId("epic-rail-stack-count").textContent).toBe("3");
+
+    useLayoutEditorStore.getState().endSession();
+  });
+
+  // Every stack member's own button answers a click exactly as a lone
+  // panel's icon would (L-181): there is no separate group-click branch any
+  // more, just `handleClick` reading `displayedPanelId` and that ONE panel's
+  // own collapsed state.
+  it("opens its top panel's icon when neither member is showing", () => {
     useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
     render(
       <EpicLeftPanelRail
@@ -691,6 +773,105 @@ describe("<EpicLeftPanelRail />", () => {
     ]);
   });
 
+  it("rings the combine target with the primary ring, not the old accent fill", () => {
+    render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="vertical"
+      />,
+    );
+
+    act(() => {
+      useEpicDndStore.getState().canvasDragStarted(
+        {
+          kind: "left-panel-rail-item",
+          viewTabId: TAB_ID,
+          panelId: "sharing",
+          origin: "rail",
+        },
+        null,
+      );
+      useEpicDndStore.getState().dropPreviewChanged({
+        kind: "left-panel-rail",
+        viewTabId: TAB_ID,
+        panelId: "git-diff",
+        position: "combine",
+      });
+    });
+
+    expect(screen.getByTestId("epic-rail-git-diff").className).toContain(
+      "ring-primary",
+    );
+    expect(screen.getByTestId("epic-rail-terminals").className).not.toContain(
+      "ring-primary",
+    );
+    expect(screen.getByTestId("epic-rail-sharing").className).not.toContain(
+      "ring-primary",
+    );
+
+    act(() => {
+      useEpicDndStore.getState().dropPreviewChanged({
+        kind: "left-panel-rail",
+        viewTabId: TAB_ID,
+        panelId: "git-diff",
+        position: "before",
+      });
+    });
+
+    expect(screen.getByTestId("epic-rail-git-diff").className).not.toContain(
+      "ring-primary",
+    );
+  });
+
+  it("suppresses every rail tooltip while any drag is in flight, not just the source's own", () => {
+    // Real timers: closing a HoverCard unmounts its content on a real
+    // `setTimeout` once its (possibly zero-length) exit transition ends, so
+    // the suppressed tooltip below needs one flushed to leave the DOM.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <EpicLeftPanelRail
+          epicId={EPIC_ID}
+          tabId={TAB_ID}
+          orientation="vertical"
+        />,
+      );
+      const terminalsButton = screen.getByTestId("epic-rail-terminals");
+
+      fireEvent.focus(terminalsButton);
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+
+      // "sharing" is the drag source, not "terminals" - which stays focused
+      // throughout. The fix disables every rail tooltip for the duration of
+      // ANY drag, not only the source icon's, so this already-open tooltip
+      // is suppressed too.
+      act(() => {
+        useEpicDndStore.getState().canvasDragStarted(
+          {
+            kind: "left-panel-rail-item",
+            viewTabId: TAB_ID,
+            panelId: "sharing",
+            origin: "rail",
+          },
+          null,
+        );
+      });
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      act(() => {
+        useEpicDndStore.getState().dragEnded();
+      });
+      fireEvent.focus(terminalsButton);
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("puts a collapsed section back when its own rail icon is clicked (L-170)", () => {
     // The lit icon usually toggles the whole sidebar (R5R-09), and it still
     // does for every lone panel and every expanded stack member. The one
@@ -784,6 +965,7 @@ describe("<EpicLeftPanelRail />", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
 
       renderRail(true);
@@ -804,6 +986,7 @@ describe("<EpicLeftPanelRail />", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
 
       renderRail(false);
@@ -938,7 +1121,7 @@ describe("<EpicLeftPanelRail />", () => {
       expect(screen.queryByTestId("epic-rail-pull-requests")).toBeNull();
 
       act(() => {
-        clearRailVisibilityOverrides();
+        setRailVisibilityOverride("pull-requests", null);
       });
 
       expect(screen.getByTestId("epic-rail-pull-requests")).not.toBeNull();
@@ -1165,24 +1348,56 @@ describe("<EpicLeftPanelRail />", () => {
       expect(screen.queryByTestId("epic-rail-hide-pointed-panel")).toBeNull();
     });
 
-    it("resets every override at once", () => {
-      setRailVisibilityOverride("sharing", false);
-      setRailVisibilityOverride("comments", true);
+    it("offers one Unstack per member for a stack's icon, dissolving one member on click (L-181)", () => {
       renderRail();
-      openRailMenu();
 
-      fireEvent.click(screen.getByTestId("epic-rail-reset-panel-visibility"));
+      fireEvent.contextMenu(screen.getByTestId("epic-rail-chats"));
+      expect(screen.getByTestId("epic-rail-unstack-chats").textContent).toBe(
+        "Unstack 'Agents'",
+      );
+      expect(
+        screen.getByTestId("epic-rail-unstack-artifacts").textContent,
+      ).toBe("Unstack 'Artifacts'");
 
-      expect(visibilityOverrides()).toEqual({});
+      fireEvent.click(screen.getByTestId("epic-rail-unstack-artifacts"));
+
+      expect(screen.queryAllByTestId("epic-rail-stack")).toHaveLength(0);
+      expect(screen.getByTestId("epic-rail-chats")).not.toBeNull();
+      expect(screen.getByTestId("epic-rail-artifacts")).not.toBeNull();
     });
 
-    it("omits the reset item while nothing is overridden", () => {
+    it("offers Unstack for every member of a 3-stack, right-clicked from its one icon", () => {
+      act(() => {
+        applyRail(
+          stackRailPanels(
+            currentLayoutArrangement(),
+            "terminals",
+            "artifacts",
+            "stack",
+          ).rail,
+        );
+      });
       renderRail();
-      openRailMenu();
 
+      fireEvent.contextMenu(screen.getByTestId("epic-rail-chats"));
+
+      expect(screen.getByTestId("epic-rail-unstack-chats").textContent).toBe(
+        "Unstack 'Agents'",
+      );
       expect(
-        screen.queryByTestId("epic-rail-reset-panel-visibility"),
-      ).toBeNull();
+        screen.getByTestId("epic-rail-unstack-artifacts").textContent,
+      ).toBe("Unstack 'Artifacts'");
+      expect(
+        screen.getByTestId("epic-rail-unstack-terminals").textContent,
+      ).toBe("Unstack 'Terminals'");
+    });
+
+    it("omits Unstack for a rail icon that is not in a stack", () => {
+      renderRail();
+
+      fireEvent.contextMenu(screen.getByTestId("epic-rail-terminals"));
+
+      expect(screen.queryByTestId("epic-rail-unstack-terminals")).toBeNull();
     });
 
     it("refuses to hide the last visible panel", () => {
@@ -1348,8 +1563,12 @@ describe("a stacked pair vs a lone panel in the body (L-166)", () => {
     useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
     act(() => {
       applyRail(
-        stackRailPanels(currentLayoutArrangement(), "browsers", "terminals")
-          .rail,
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "browsers",
+          "terminals",
+          "stack",
+        ).rail,
       );
     });
     renderHost();
@@ -1388,8 +1607,12 @@ describe("a stacked pair vs a lone panel in the body (L-166)", () => {
     useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
     act(() => {
       applyRail(
-        stackRailPanels(currentLayoutArrangement(), "browsers", "terminals")
-          .rail,
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "browsers",
+          "terminals",
+          "stack",
+        ).rail,
       );
     });
     renderHost();
@@ -1413,8 +1636,12 @@ describe("a stacked pair vs a lone panel in the body (L-166)", () => {
     useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
     act(() => {
       applyRail(
-        stackRailPanels(currentLayoutArrangement(), "browsers", "terminals")
-          .rail,
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "browsers",
+          "terminals",
+          "stack",
+        ).rail,
       );
     });
     renderHost();
@@ -1435,6 +1662,227 @@ describe("a stacked pair vs a lone panel in the body (L-166)", () => {
     expect(
       screen.getByRole("button", { name: "Expand Browsers" }),
     ).not.toBeNull();
+  });
+
+  describe("a stack of three", () => {
+    // Terminals, Browsers and Git diff rather than the shipped pair's
+    // members: like the pair above, their bodies render without an epic
+    // session.
+    function stackThree(): void {
+      useLeftPanelStore.getState().setActivePanelId(TAB_ID, "terminals");
+      act(() => {
+        applyRail(
+          stackRailPanels(
+            currentLayoutArrangement(),
+            "browsers",
+            "terminals",
+            "stack",
+          ).rail,
+        );
+      });
+      act(() => {
+        applyRail(
+          stackRailPanels(
+            currentLayoutArrangement(),
+            "git-diff",
+            "terminals",
+            "stack",
+          ).rail,
+        );
+      });
+    }
+
+    function collapse(...panelIds: ReadonlyArray<string>): void {
+      useLeftPanelStore.setState({
+        panelSectionCollapsedByPanelId: Object.fromEntries(
+          panelIds.map((panelId) => [panelId, true]),
+        ),
+      });
+    }
+
+    function flexGrowOf(panelId: string): number {
+      const child = screen
+        .getByTestId(`epic-left-panel-section-${panelId}`)
+        .closest<HTMLElement>("[data-split-child]");
+      if (child === null) throw new Error(`no split child for ${panelId}`);
+      return Number(child.style.flexGrow);
+    }
+
+    it("keeps the handle and the stored split between the open members when one collapses", () => {
+      stackThree();
+      useLeftPanelStore.setState({
+        panelSectionWeightsByPanelId: {
+          terminals: 30,
+          browsers: 70,
+          "git-diff": 50,
+        },
+      });
+      collapse("git-diff");
+      renderHost();
+
+      expect(sectionIds()).toEqual(["terminals", "browsers", "git-diff"]);
+      expect(screen.getAllByTestId("split-resize-handle")).toHaveLength(1);
+      expect(flexGrowOf("terminals")).toBeCloseTo(0.3);
+      expect(flexGrowOf("browsers")).toBeCloseTo(0.7);
+      expect(
+        screen.getByRole("button", { name: "Expand Git Diff" }),
+      ).not.toBeNull();
+    });
+
+    it("splits the open members around a collapsed one in the middle, which keeps its header", () => {
+      stackThree();
+      collapse("browsers");
+      renderHost();
+
+      expect(sectionIds()).toEqual(["terminals", "browsers", "git-diff"]);
+      expect(screen.getAllByTestId("split-resize-handle")).toHaveLength(1);
+      expect(
+        screen.getByRole("button", { name: "Expand Browsers" }),
+      ).not.toBeNull();
+      expect(screen.getByTestId("epic-test-terminals-body")).not.toBeNull();
+      expect(screen.getByTestId("epic-test-git-diff-body")).not.toBeNull();
+    });
+
+    it("opens a member of the pair left behind when the only expanded one leaves the stack", () => {
+      stackThree();
+      collapse("terminals", "browsers");
+      act(() => {
+        setRailVisibilityOverride("git-diff", false);
+      });
+      renderHost();
+
+      expect(sectionIds()).toEqual(["terminals", "browsers"]);
+      // Two bare headers over an empty column is the state this must not draw.
+      const flexNone = ["terminals", "browsers"].filter((panelId) =>
+        screen
+          .getByTestId(`epic-left-panel-section-${panelId}`)
+          .className.includes("flex-none"),
+      );
+      expect(flexNone).toHaveLength(1);
+    });
+  });
+
+  it("registers the body droppable at the stack's TOP panel, not the active member, and draws the join/full/same drop cue (L-181, L-182)", () => {
+    // Browsers is active, but Terminals is the top of the stack (L-181): the
+    // body is one drop target for the whole stack, so it is Terminals the
+    // droppable names, whichever member the user is looking at.
+    useLeftPanelStore.getState().setActivePanelId(TAB_ID, "browsers");
+    act(() => {
+      applyRail(
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "browsers",
+          "terminals",
+          "stack",
+        ).rail,
+      );
+    });
+    renderHost();
+
+    expect(
+      testState.droppableInputs.find(
+        (input) =>
+          typeof input.data === "object" &&
+          input.data !== null &&
+          "kind" in input.data &&
+          input.data.kind === "left-panel-body",
+      )?.data,
+    ).toEqual({
+      kind: "left-panel-body",
+      viewTabId: TAB_ID,
+      panelId: "terminals",
+    });
+
+    const dragSource: EpicCanvasLeftPanelRailDragData = {
+      kind: "left-panel-rail-item",
+      viewTabId: TAB_ID,
+      panelId: "git-diff",
+      origin: "rail",
+    };
+    const combineOnTop: EpicCanvasDropPreview = {
+      kind: "left-panel-rail",
+      viewTabId: TAB_ID,
+      panelId: "terminals",
+      position: "combine",
+    };
+
+    // A join joining the stack draws "join".
+    act(() => {
+      setRailDragState(dragSource, combineOnTop);
+    });
+    expect(
+      screen
+        .getByTestId("epic-sidebar")
+        .querySelector("[data-body-drop-cue]")
+        ?.getAttribute("data-body-drop-cue"),
+    ).toBe("join");
+
+    // A preview aimed at some other panel draws nothing.
+    act(() => {
+      setRailDragState(dragSource, {
+        kind: "left-panel-rail",
+        viewTabId: TAB_ID,
+        panelId: "git-diff",
+        position: "before",
+      });
+    });
+    expect(
+      screen.getByTestId("epic-sidebar").querySelector("[data-body-drop-cue]"),
+    ).toBeNull();
+
+    // A member of the stack itself is already there: "same" draws nothing.
+    act(() => {
+      setRailDragState(
+        {
+          kind: "left-panel-rail-item",
+          viewTabId: TAB_ID,
+          panelId: "browsers",
+          origin: "panel-section",
+        },
+        combineOnTop,
+      );
+    });
+    expect(
+      screen.getByTestId("epic-sidebar").querySelector("[data-body-drop-cue]"),
+    ).toBeNull();
+
+    // Grown to the max (terminals+browsers+git-diff+pull-requests): a FIFTH
+    // panel's join now draws "full" instead.
+    act(() => {
+      applyRail(
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "git-diff",
+          "terminals",
+          "stack",
+        ).rail,
+      );
+      applyRail(
+        stackRailPanels(
+          currentLayoutArrangement(),
+          "pull-requests",
+          "terminals",
+          "stack",
+        ).rail,
+      );
+    });
+    act(() => {
+      setRailDragState(
+        {
+          kind: "left-panel-rail-item",
+          viewTabId: TAB_ID,
+          panelId: "file-tree",
+          origin: "rail",
+        },
+        combineOnTop,
+      );
+    });
+    expect(
+      screen
+        .getByTestId("epic-sidebar")
+        .querySelector("[data-body-drop-cue]")
+        ?.getAttribute("data-body-drop-cue"),
+    ).toBe("full");
   });
 });
 
@@ -1518,7 +1966,7 @@ describe("Browsers panel registration", () => {
           sourcePanelId: "browsers",
           targetPanelId: "terminals",
           placeAfter: false,
-          asGroups: false,
+          carry: "panel",
         }).rail,
       );
     });
@@ -1532,24 +1980,49 @@ describe("Browsers panel registration", () => {
 });
 
 describe("the horizontal rail's reported natural width (bug #1)", () => {
-  function stubRailScrollWidth(widthPx: number): () => void {
-    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-      configurable: true,
-      get(this: HTMLElement) {
-        return this.getAttribute("data-testid") === "epic-sidebar-rail"
-          ? widthPx
-          : 0;
-      },
-    });
-    return () => {
-      Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-        configurable: true,
-        get: () => 0,
+  const RAIL_PADDING_PX = 16;
+
+  /**
+   * The rail measures the span of its laid-out children plus its own padding.
+   * jsdom does no layout, so both are stubbed: every child of the rail lays
+   * out over `spanPx`, and the rail is padded 8px a side.
+   */
+  function stubRailLayout(spanPx: number): () => void {
+    const rects = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function stubbedRect(this: Element) {
+        return this.parentElement?.getAttribute("data-testid") ===
+          "epic-sidebar-rail"
+          ? new DOMRect(10, 0, spanPx, 40)
+          : new DOMRect(0, 0, 0, 0);
       });
+    // Tailwind's `px-2` is not in jsdom's stylesheet, so the same padding is
+    // written as a rule `getComputedStyle` does read.
+    const padding = document.createElement("style");
+    padding.textContent =
+      '[data-testid="epic-sidebar-rail"] { padding-left: 8px; padding-right: 8px; }';
+    document.head.append(padding);
+    return () => {
+      rects.mockRestore();
+      padding.remove();
     };
   }
 
-  let restoreScrollWidth: (() => void) | null = null;
+  function reportedWidth(): number | undefined {
+    return useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID];
+  }
+
+  function renderHorizontalRail(): RenderResult {
+    return render(
+      <EpicLeftPanelRail
+        epicId={EPIC_ID}
+        tabId={TAB_ID}
+        orientation="horizontal"
+      />,
+    );
+  }
+
+  let restoreLayout: (() => void) | null = null;
 
   beforeEach(() => {
     resetLeftPanelStore();
@@ -1566,28 +2039,48 @@ describe("the horizontal rail's reported natural width (bug #1)", () => {
     resetTestState();
     setPullRequestPresence(false);
     useSidebarRailWidthStore.setState({ naturalWidthPxByTabId: {} });
-    restoreScrollWidth?.();
-    restoreScrollWidth = null;
+    restoreLayout?.();
+    restoreLayout = null;
   });
 
-  it("publishes its scrollWidth under the tab id once mounted horizontally", () => {
-    restoreScrollWidth = stubRailScrollWidth(344);
+  it("publishes the span of its children plus its padding under the tab id once mounted horizontally", () => {
+    restoreLayout = stubRailLayout(344);
 
-    render(
-      <EpicLeftPanelRail
-        epicId={EPIC_ID}
-        tabId={TAB_ID}
-        orientation="horizontal"
-      />,
-    );
+    renderHorizontalRail();
 
-    expect(
-      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
-    ).toBe(344);
+    expect(reportedWidth()).toBe(344 + RAIL_PADDING_PX);
+  });
+
+  it("reports the children's span, not the width the rail was stretched to", () => {
+    restoreLayout = stubRailLayout(250);
+    // A `w-full` scroller's scrollWidth and clientWidth never drop below its
+    // own width, so a 500px sidebar used to lock a 500px minimum.
+    for (const property of ["scrollWidth", "clientWidth"]) {
+      Object.defineProperty(HTMLElement.prototype, property, {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.getAttribute("data-testid") === "epic-sidebar-rail"
+            ? 500
+            : 0;
+        },
+      });
+    }
+    try {
+      renderHorizontalRail();
+
+      expect(reportedWidth()).toBe(250 + RAIL_PADDING_PX);
+    } finally {
+      for (const property of ["scrollWidth", "clientWidth"]) {
+        Object.defineProperty(HTMLElement.prototype, property, {
+          configurable: true,
+          get: () => 0,
+        });
+      }
+    }
   });
 
   it("reports nothing for the collapsed vertical rail", () => {
-    restoreScrollWidth = stubRailScrollWidth(344);
+    restoreLayout = stubRailLayout(344);
 
     render(
       <EpicLeftPanelRail
@@ -1597,55 +2090,33 @@ describe("the horizontal rail's reported natural width (bug #1)", () => {
       />,
     );
 
-    expect(
-      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
-    ).toBeUndefined();
+    expect(reportedWidth()).toBeUndefined();
   });
 
   it("clears its reported width once the horizontal rail unmounts", () => {
-    restoreScrollWidth = stubRailScrollWidth(344);
+    restoreLayout = stubRailLayout(344);
 
-    const view = render(
-      <EpicLeftPanelRail
-        epicId={EPIC_ID}
-        tabId={TAB_ID}
-        orientation="horizontal"
-      />,
-    );
-    expect(
-      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
-    ).toBe(344);
+    const view = renderHorizontalRail();
+    expect(reportedWidth()).toBe(344 + RAIL_PADDING_PX);
 
     view.unmount();
 
-    expect(
-      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
-    ).toBeUndefined();
+    expect(reportedWidth()).toBeUndefined();
   });
 
   it("re-measures once the rail's own item list changes", () => {
-    restoreScrollWidth = stubRailScrollWidth(344);
-    render(
-      <EpicLeftPanelRail
-        epicId={EPIC_ID}
-        tabId={TAB_ID}
-        orientation="horizontal"
-      />,
-    );
-    expect(
-      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
-    ).toBe(344);
+    restoreLayout = stubRailLayout(344);
+    renderHorizontalRail();
+    expect(reportedWidth()).toBe(344 + RAIL_PADDING_PX);
 
-    // A narrower rail (one fewer icon) reporting a SMALLER scrollWidth: the
+    // A narrower rail (one fewer icon) laying out over a SMALLER span: the
     // effect has to re-measure rather than keep the value from first mount.
-    restoreScrollWidth();
-    restoreScrollWidth = stubRailScrollWidth(300);
+    restoreLayout();
+    restoreLayout = stubRailLayout(300);
     act(() => {
       setRailVisibilityOverride("sharing", false);
     });
 
-    expect(
-      useSidebarRailWidthStore.getState().naturalWidthPxByTabId[TAB_ID],
-    ).toBe(300);
+    expect(reportedWidth()).toBe(300 + RAIL_PADDING_PX);
   });
 });

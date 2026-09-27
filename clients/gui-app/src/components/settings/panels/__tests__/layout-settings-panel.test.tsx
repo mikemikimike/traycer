@@ -22,16 +22,22 @@ import {
   USAGE_PROVIDER_IDS,
 } from "@/lib/layout/layout-arrangement";
 import type { HideableRegionId } from "@/lib/layout/layout-values";
-import { navigateToLayoutRegion } from "@/lib/settings-navigation";
+import {
+  navigateToLayoutArea,
+  navigateToLayoutRegion,
+} from "@/lib/settings-navigation";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
-import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import {
+  effectiveLayoutValues,
+  PRESET_VALUES,
+} from "@/lib/layout/layout-presets";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
 import { searchSettings } from "@/lib/settings-search/settings-search";
 
 // The provider list is read through the watched host's scope; this page needs
@@ -83,11 +89,19 @@ vi.mock(
   }),
 );
 
+const navigateMock = vi.hoisted(() => vi.fn());
+const openLayoutEditorMock = vi.hoisted(() => vi.fn());
+
 // The width gate reads the window, and the door is not what this suite is
 // about: every case below wants the page's own rows, not a session.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-router")>()),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigateMock,
+}));
+
+vi.mock("@/lib/layout/editor-session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/layout/editor-session")>()),
+  openLayoutEditor: openLayoutEditorMock,
 }));
 
 function resetLayout(): void {
@@ -102,13 +116,15 @@ afterEach(() => {
   cleanup();
   setMobileApp(false);
   resetLayout();
-  useSettingsStore.getState().setTaskTabLayout("scroll");
   setSystemTabModalApi(null);
   useSettingsSearchStore.setState({
     query: "",
     pendingReveal: null,
     handoffPending: false,
   });
+  navigateMock.mockClear();
+  openLayoutEditorMock.mockClear();
+  useLayoutEditorStore.getState().endSession();
 });
 
 /** One region's effective value, which is what a row draws and writes. */
@@ -327,6 +343,7 @@ describe("Settings - Layout", () => {
 
       let long = 0;
       let short = 0;
+      let queued = 0;
       let pinnedCount = 0;
       let pinnedInComposer = false;
 
@@ -342,6 +359,10 @@ describe("Settings - Layout", () => {
         short += panel.queryAllByText(
           "Drag to reorder, here or on the canvas.",
         ).length;
+        // The fixed Message queue is said by the list it sits under.
+        queued += panel.queryAllByText(
+          "Drag to reorder, here or on the canvas. The message queue stays next to the message box.",
+        ).length;
         // The pinned-right note belongs to the Toolbar-right LIST, so it is
         // part of that list header's one line rather than a footnote under
         // the card (redesign 4.8).
@@ -355,7 +376,8 @@ describe("Settings - Layout", () => {
       }
 
       expect(long).toBe(1);
-      expect(short).toBe(2);
+      expect(short).toBe(1);
+      expect(queued).toBe(1);
       expect(pinnedCount).toBe(1);
       expect(pinnedInComposer).toBe(true);
     });
@@ -457,21 +479,6 @@ describe("Settings - Layout", () => {
   });
 
   describe("the pictures (L-120, redesign 3.2)", () => {
-    it("draws a band on Composer and Status bar, and nowhere else", async () => {
-      const user = userEvent.setup();
-      renderPanel();
-
-      for (const group of SURFACE_GROUPS) {
-        await goToSurfaceTab(user, group.id);
-        const bands = within(surface(group.id)).queryAllByTestId(
-          "surface-band",
-        );
-        const expected =
-          group.id === "composer" || group.id === "statusBar" ? 1 : 0;
-        expect(bands, group.id).toHaveLength(expected);
-      }
-    });
-
     it("opens the Sidebar card with its first row, not with a plinth", async () => {
       const user = userEvent.setup();
       renderPanel();
@@ -483,29 +490,28 @@ describe("Settings - Layout", () => {
       expect(within(sidebar).queryByText("Specimen")).toBeNull();
       // Below the surface's own Side row, the first button in the card is the
       // first panel's own grab, so the list that changes the rail comes next.
-      const focusable = sidebar.querySelector('[role="button"]');
+      const focusable = sidebar.querySelector("[data-row-grab]");
       const firstRow = sidebar.querySelector("[data-sortable-id]");
       expect(firstRow?.contains(focusable ?? null)).toBe(true);
     });
 
-    it("carries the real rail button on each Sidebar row, and only there", async () => {
+    it("draws each Sidebar row's registry icon in the icon column, like every other list", async () => {
       const user = userEvent.setup();
       renderPanel();
       await goToSurfaceTab(user, "sidebar");
 
+      // The rail's own 1:1 button used to stand in the icon column, which
+      // pushed these names off the column every other row's name starts in.
       for (const railId of RAIL_REGION_IDS) {
+        expect(
+          row(railId).querySelectorAll("[data-row-icon]"),
+          railId,
+        ).toHaveLength(1);
         expect(
           row(railId).querySelectorAll("[data-row-glyph]"),
           railId,
-        ).toHaveLength(1);
+        ).toHaveLength(0);
       }
-
-      // Every other list keeps the registry's icon: their depictions are
-      // either too wide to be a glyph or already inside the surface's band.
-      await goToSurfaceTab(user, "composer");
-      expect(
-        surface("composer").querySelectorAll("[data-row-glyph]"),
-      ).toHaveLength(0);
     });
   });
 
@@ -547,37 +553,22 @@ describe("Settings - Layout", () => {
     });
   });
 
-  describe("choosing a preset keeps the per-region changes (L-133)", () => {
-    it("changes the base and leaves the picks alone", () => {
+  describe("applying a preset clears the per-region delta (L-133 overturned)", () => {
+    it("replaces the pick with the preset's own value and drops the delta", () => {
       act(() => {
         useLayoutStore.getState().setRegionValues("mic", { shown: "shown" });
-        useLayoutStore.getState().setBasePreset("compact");
+        useLayoutStore.getState().applyPreset("compact");
       });
       renderPanel();
 
-      // `mic` is hidden under Compact, so the pick is a change and says so.
-      // The Presets tab is the page's default, so it needs no switch.
+      // The apply cleared the delta, so the status line reads the preset
+      // name alone. The Presets tab is the page's default, so it needs no
+      // switch.
       expect(screen.getByTestId("preset-status-line").textContent).toBe(
-        "Compact + 1 change",
+        "Compact",
       );
-
-      act(() => {
-        useLayoutStore.getState().setBasePreset("detailed");
-      });
-
-      // Detailed shows the mic anyway, so the pick is no longer a CHANGE -
-      // and it is still the user's pick, so switching back restores it. The
-      // count is truthful at every step because it is measured by difference.
-      const state = useLayoutStore.getState();
-      expect(state.overrides.mic?.shown).toBe("shown");
-      expect(screen.getByTestId("preset-status-line").textContent).toBe(
-        "Detailed",
-      );
-
-      act(() => {
-        useLayoutStore.getState().setBasePreset("compact");
-      });
-      expect(shownValue("mic")).toBe("shown");
+      expect(useLayoutStore.getState().overrides).toEqual({});
+      expect(shownValue("mic")).toBe(PRESET_VALUES.compact.mic.shown);
     });
   });
 
@@ -585,7 +576,7 @@ describe("Settings - Layout", () => {
     it("restores every value and every arrangement field", async () => {
       const user = userEvent.setup();
       act(() => {
-        useLayoutStore.getState().setBasePreset("compact");
+        useLayoutStore.getState().applyPreset("compact");
         useLayoutStore.getState().setRegionValues("minimap", {
           shown: "hidden",
         });
@@ -605,9 +596,7 @@ describe("Settings - Layout", () => {
       // tab switch is needed to reach it.
       renderPanel();
 
-      await user.click(
-        screen.getByRole("button", { name: "Reset everything" }),
-      );
+      await user.click(screen.getByRole("button", { name: "Reset layout…" }));
       await user.click(screen.getByTestId("confirm-action"));
 
       const state = useLayoutStore.getState();
@@ -639,7 +628,7 @@ describe("Settings - Layout", () => {
       // card that vanishes (5.8).
       expect(
         within(card)
-          .getByRole("button", { name: "Reset everything" })
+          .getByRole("button", { name: "Reset layout…" })
           .hasAttribute("disabled"),
       ).toBe(true);
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -656,7 +645,8 @@ describe("Settings - Layout", () => {
       renderPanel();
       await goToSurfaceTab(user, "chat");
 
-      expect(within(row("minimap")).getByTestId("changed-dot")).toBeTruthy();
+      // The revert after the name is the row's changed signal; it draws no dot.
+      expect(within(row("minimap")).queryByTestId("changed-dot")).toBeNull();
 
       await user.click(
         within(row("minimap")).getByRole("button", { name: "Revert Minimap" }),
@@ -701,9 +691,82 @@ describe("Settings - Layout", () => {
       within(row("contextUsage")).getByRole("radiogroup", { name: "Style" }),
     ).toBeTruthy();
     // The scroll is for the eye; the focus is for the hands (5.9).
-    expect(row("contextUsage").querySelector('[role="button"]')).toBe(
+    expect(row("contextUsage").querySelector("[data-row-grab]")).toBe(
       document.activeElement,
     );
+  });
+
+  it("opens a row on a click, but never touches the editor's own selection (item toggleRow)", async () => {
+    // This page keeps its own local `openRows` state (`layout-settings-panel.tsx`'s
+    // `useState`), never the editor store's - the editor's `selected` is a
+    // fact about the DOCKED inspector, which this page is not.
+    const user = userEvent.setup();
+    renderPanel();
+    await goToSurfaceTab(user, "chat");
+
+    await user.click(within(row("contextUsage")).getByRole("button"));
+
+    expect(
+      within(row("contextUsage")).getByRole("radiogroup", { name: "Style" }),
+    ).toBeTruthy();
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+  });
+
+  it("gives a non-disclosing row no aria-pressed here, and a click on it does nothing (item C)", async () => {
+    // Home tab has no disclosure at all (`rows: []`) - in the editor its label
+    // button selects it (`onSelectRow`), but this page passes `onSelectRow={null}`,
+    // so the same button here is inert and never claims to be a toggle.
+    const user = userEvent.setup();
+    renderPanel();
+    await goToSurfaceTab(user, "topBar");
+
+    const button = within(row("homeTab")).getByRole("button");
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
+
+    await user.click(button);
+
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+  });
+
+  it("picks the area an editor exit lands on, with no row touched (5.3)", async () => {
+    setSystemTabModalApi({
+      active: null,
+      openSettings: vi.fn(),
+      openHistory: vi.fn(),
+      close: vi.fn(),
+      setSection: vi.fn(),
+      promoteToTab: vi.fn(),
+      isOverlayActive: () => true,
+    });
+    renderPanel();
+    expect(
+      screen
+        .getByRole("tab", { name: "Presets" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    await act(async () => {
+      navigateToLayoutArea("composer");
+      await Promise.resolve();
+    });
+
+    expect(
+      screen
+        .getByRole("tab", { name: "Composer" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    await act(async () => {
+      navigateToLayoutArea(null);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen
+        .getByRole("tab", { name: "Presets" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   describe("the small-screen status bar row (L-51)", () => {
@@ -714,7 +777,7 @@ describe("Settings - Layout", () => {
 
       expect(
         screen.queryByRole("switch", {
-          name: "Show the status bar on small screens",
+          name: "Status bar on small screens",
         }),
       ).toBeNull();
     });
@@ -727,7 +790,7 @@ describe("Settings - Layout", () => {
 
       await user.click(
         screen.getByRole("switch", {
-          name: "Show the status bar on small screens",
+          name: "Status bar on small screens",
         }),
       );
 
@@ -736,7 +799,7 @@ describe("Settings - Layout", () => {
   });
 
   describe("the surface placement rows", () => {
-    it("labels the Tabs tab, and opens it with Position then Task tab layout", async () => {
+    it("labels the Tabs tab, and opens it with Placement then Tab overflow", async () => {
       const user = userEvent.setup();
       renderPanel();
       await goToSurfaceTab(user, "topBar");
@@ -751,32 +814,32 @@ describe("Settings - Layout", () => {
       if (position === null || taskTabLayout === null) {
         throw new Error("missing a Tabs surface row");
       }
-      expect(position.textContent).toContain("Position");
+      expect(position.textContent).toContain("Placement");
       expect(
         position.compareDocumentPosition(taskTabLayout) &
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
       expect(
-        within(tabs).getByRole("radiogroup", { name: "Tabs position" }),
+        within(tabs).getByRole("radiogroup", { name: "Tab placement" }),
       ).toBeTruthy();
     });
 
-    it("disables Task tab layout with its reason while the tabs are vertical, keeping its value", async () => {
+    it("disables Tab overflow with its reason while the tabs are vertical, keeping its value", async () => {
       const user = userEvent.setup();
       renderPanel();
       await goToSurfaceTab(user, "topBar");
-      const taskTabLayout = within(surface("topBar")).getByRole("group", {
-        name: "Task tab layout",
+      const taskTabLayout = within(surface("topBar")).getByRole("radiogroup", {
+        name: "Tab overflow",
       });
       const disabledStates = (): ReadonlyArray<boolean> =>
         within(taskTabLayout)
-          .getAllByRole<HTMLButtonElement>("button")
-          .map((button) => button.disabled);
+          .getAllByRole<HTMLButtonElement>("radio")
+          .map((radio) => radio.disabled);
       expect(disabledStates()).toEqual([false, false]);
 
       await user.click(
         within(
-          screen.getByRole("radiogroup", { name: "Tabs position" }),
+          screen.getByRole("radiogroup", { name: "Tab placement" }),
         ).getByRole("radio", { name: "Left" }),
       );
 
@@ -785,16 +848,16 @@ describe("Settings - Layout", () => {
       );
       expect(disabledStates()).toEqual([true, true]);
       expect(surface("topBar").textContent).toContain(
-        "Applies when tabs are at the top.",
+        "Available when tabs are at the top.",
       );
       expect(
         within(taskTabLayout)
-          .getByRole("button", { name: "Scroll" })
-          .getAttribute("aria-pressed"),
+          .getByRole("radio", { name: "Scroll" })
+          .getAttribute("aria-checked"),
       ).toBe("true");
     });
 
-    it("opens the Tabs tab with View, disabled at the top and writable once vertical (D8)", async () => {
+    it("opens the Tabs tab with Side tab view, disabled at the top and writable once vertical (D8)", async () => {
       const user = userEvent.setup();
       renderPanel();
       await goToSurfaceTab(user, "topBar");
@@ -803,9 +866,9 @@ describe("Settings - Layout", () => {
       const view = tabs.querySelector(
         "[data-settings-anchor='layout-side-strip-view']",
       );
-      expect(view?.textContent).toContain("View");
+      expect(view?.textContent).toContain("Side tab view");
       const viewGroup = within(tabs).getByRole("radiogroup", {
-        name: "Tabs view",
+        name: "Side tab view",
       });
       expect(
         within(viewGroup)
@@ -813,12 +876,12 @@ describe("Settings - Layout", () => {
           .every((option) => option.disabled),
       ).toBe(true);
       expect(tabs.textContent).toContain(
-        "Applies when tabs are at the left or right.",
+        "Available when tabs are on the left or right.",
       );
 
       await user.click(
         within(
-          screen.getByRole("radiogroup", { name: "Tabs position" }),
+          screen.getByRole("radiogroup", { name: "Tab placement" }),
         ).getByRole("radio", { name: "Left" }),
       );
 
@@ -855,7 +918,7 @@ describe("Settings - Layout", () => {
       expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
     });
 
-    it("withholds Position, View and Side in the installed mobile app, and never disables Task tab layout there", async () => {
+    it("withholds Placement, Side tab view and Side in the installed mobile app, and never disables Tab overflow there", async () => {
       setMobileApp(true);
       useLayoutStore.setState({
         ...DEFAULT_LAYOUT_SNAPSHOT,
@@ -869,21 +932,21 @@ describe("Settings - Layout", () => {
       await goToSurfaceTab(user, "topBar");
 
       expect(
-        screen.queryByRole("radiogroup", { name: "Tabs position" }),
+        screen.queryByRole("radiogroup", { name: "Tab placement" }),
       ).toBeNull();
       expect(
-        screen.queryByRole("radiogroup", { name: "Tabs view" }),
+        screen.queryByRole("radiogroup", { name: "Side tab view" }),
       ).toBeNull();
-      const taskTabLayout = within(surface("topBar")).getByRole("group", {
-        name: "Task tab layout",
+      const taskTabLayout = within(surface("topBar")).getByRole("radiogroup", {
+        name: "Tab overflow",
       });
       expect(
         within(taskTabLayout)
-          .getAllByRole<HTMLButtonElement>("button")
-          .map((button) => button.disabled),
+          .getAllByRole<HTMLButtonElement>("radio")
+          .map((radio) => radio.disabled),
       ).toEqual([false, false]);
       expect(surface("topBar").textContent).not.toContain(
-        "Applies when tabs are at the top.",
+        "Available when tabs are at the top.",
       );
 
       // "Sidebar side" lives on a different tab, so it has to be checked on
@@ -999,11 +1062,11 @@ describe("Settings - Layout", () => {
       const tabs = screen.getAllByRole("tab");
       expect(tabs.map((tab) => tab.textContent)).toEqual([
         "Presets",
-        "Tabs",
+        "Task tabs",
         "Sidebar",
         "Chat",
         "Composer",
-        "Status bar",
+        "Usage and resources",
       ]);
 
       // Radix moves the roving tab stop on a `setTimeout(0)` rather than
@@ -1053,26 +1116,7 @@ describe("Settings - Layout", () => {
       expect(screen.queryByText("Customize layout")).toBeNull();
     });
 
-    it("shows no Reset on Presets even once its preset changed, and none on an untouched surface", async () => {
-      const user = userEvent.setup();
-      act(() => {
-        useLayoutStore.getState().setBasePreset("compact");
-      });
-      renderPanel();
-
-      // Presets is the page's default tab.
-      expect(
-        screen.queryByRole("button", { name: "Reset Presets" }),
-      ).toBeNull();
-
-      await goToSurfaceTab(user, "composer");
-      expect(
-        screen.queryByRole("button", { name: "Reset Composer" }),
-      ).toBeNull();
-    });
-
-    it("lights an area's dot after an edit, and Reset plus confirm clears only that area's dot", async () => {
-      const user = userEvent.setup();
+    it("lights an area's dot after an edit, independently of every other area's", () => {
       act(() => {
         useLayoutStore.getState().setArrangement({
           ...DEFAULT_ARRANGEMENT,
@@ -1084,20 +1128,12 @@ describe("Settings - Layout", () => {
 
       const chatTab = () => screen.getByRole("tab", { name: /^Chat/ });
       const sidebarTab = () => screen.getByRole("tab", { name: /^Sidebar/ });
+      const composerTab = () => screen.getByRole("tab", { name: /^Composer/ });
       expect(within(chatTab()).getByTestId("area-changed-dot")).toBeTruthy();
       expect(within(sidebarTab()).getByTestId("area-changed-dot")).toBeTruthy();
-
-      await goToSurfaceTab(user, "chat");
-      await user.click(screen.getByRole("button", { name: "Reset Chat" }));
-      await user.click(screen.getByTestId("confirm-action"));
-
-      expect(within(chatTab()).queryByTestId("area-changed-dot")).toBeNull();
-      // Sidebar's dot, and its own change, are untouched by Chat's reset.
-      expect(within(sidebarTab()).getByTestId("area-changed-dot")).toBeTruthy();
-      expect(useLayoutStore.getState().arrangement.minimapSide).toBe(
-        DEFAULT_ARRANGEMENT.minimapSide,
-      );
-      expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("right");
+      expect(
+        within(composerTab()).queryByTestId("area-changed-dot"),
+      ).toBeNull();
     });
 
     it("scrolls a newly picked area back to its top", async () => {
@@ -1116,101 +1152,55 @@ describe("Settings - Layout", () => {
 
       expect(chatBody.scrollTop).toBe(0);
     });
-
-    it("resetting Tabs also restores Task tab layout", async () => {
-      const user = userEvent.setup();
-      act(() => {
-        useLayoutStore.getState().setArrangement({
-          ...DEFAULT_ARRANGEMENT,
-          tabStripPlacement: "left",
-        });
-        useSettingsStore.getState().setTaskTabLayout("shrink");
-      });
-      renderPanel();
-      await goToSurfaceTab(user, "topBar");
-
-      await user.click(screen.getByRole("button", { name: "Reset Tabs" }));
-      await user.click(screen.getByTestId("confirm-action"));
-
-      expect(useSettingsStore.getState().taskTabLayout).toBe("scroll");
-      expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
-        DEFAULT_ARRANGEMENT.tabStripPlacement,
-      );
-    });
   });
 
-  describe("Reset button focus return (review H2)", () => {
-    it("returns focus to the area's panel after a keyboard-confirmed reset", async () => {
-      const user = userEvent.setup();
-      act(() => {
-        useLayoutStore.getState().setArrangement({
-          ...DEFAULT_ARRANGEMENT,
-          minimapSide: "left",
-        });
-      });
-      renderPanel();
-      await goToSurfaceTab(user, "chat");
+  describe("the header's door into the editor", () => {
+    const originalInnerWidth = window.innerWidth;
 
-      const resetButton = screen.getByRole("button", { name: "Reset Chat" });
-      act(() => {
-        resetButton.focus();
+    // The door is withheld under the editor's own 1100px threshold
+    // (`LAYOUT_EDITOR_MIN_WIDTH`), which jsdom's default width is below.
+    beforeEach(() => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        writable: true,
+        value: 1400,
       });
-      await user.keyboard("{Enter}");
-
-      const confirmButton = screen.getByTestId("confirm-action");
-      act(() => {
-        confirmButton.focus();
+    });
+    afterEach(() => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        writable: true,
+        value: originalInnerWidth,
       });
-      await user.keyboard("{Enter}");
-
-      // The reset unmounts the button that opened the dialog, and
-      // `onCloseAutoFocus` redirects the browser's own focus-restore rather
-      // than running it synchronously with the close.
-      await act(async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 0);
-        });
-      });
-
-      expect(document.activeElement).toBe(
-        screen.getByRole("tabpanel", { name: "Chat" }),
-      );
-      expect(screen.queryByRole("button", { name: "Reset Chat" })).toBeNull();
     });
 
-    it("returns focus to the Reset button on Cancel", async () => {
-      const user = userEvent.setup();
-      act(() => {
-        useLayoutStore.getState().setArrangement({
-          ...DEFAULT_ARRANGEMENT,
-          minimapSide: "left",
-        });
-      });
+    it("opens with origin settings/presets (area null) at rest", () => {
       renderPanel();
-      await goToSurfaceTab(user, "chat");
 
-      const resetButton = screen.getByRole("button", { name: "Reset Chat" });
-      act(() => {
-        resetButton.focus();
-      });
-      await user.keyboard("{Enter}");
+      fireEvent.click(screen.getByRole("button", { name: "Customize layout" }));
 
-      const cancelButton = screen.getByRole("button", { name: "Cancel" });
-      act(() => {
-        cancelButton.focus();
-      });
-      await user.keyboard("{Enter}");
+      expect(openLayoutEditorMock).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          source: "direct_ui",
+          entry: "pointer",
+          target: null,
+          origin: { kind: "settings", area: null },
+        }),
+      );
+    });
 
-      await act(async () => {
-        await new Promise((resolve) => {
-          setTimeout(resolve, 0);
-        });
-      });
+    it("names the current surface tab as the origin's area", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await goToSurfaceTab(user, "sidebar");
 
-      // Cancel leaves the area changed, so the opener is still there for
-      // Radix's own default focus-restore to land on.
-      expect(document.activeElement).toBe(resetButton);
-      expect(screen.getByRole("button", { name: "Reset Chat" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Customize layout" }));
+
+      expect(openLayoutEditorMock).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          origin: { kind: "settings", area: "sidebar" },
+        }),
+      );
     });
   });
 });

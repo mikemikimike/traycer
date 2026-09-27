@@ -93,6 +93,7 @@ describe("<TabStripKeybindingBridge />", () => {
       entry: "keyboard",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
     render(<TabStripKeybindingBridge />);
 

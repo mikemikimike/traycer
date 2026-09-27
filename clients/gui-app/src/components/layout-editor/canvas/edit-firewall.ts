@@ -76,6 +76,20 @@ function contextMenuIsTheAppsOwn(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * A press on the Customizing tab itself (audit F1). It is the session's own
+ * tab, not the app acting: activating it is a no-op, and its close is a way
+ * out of the editor.
+ */
+function isSessionTabPress(event: Event): boolean {
+  return (
+    event.type !== "keydown" &&
+    event.type !== "keypress" &&
+    event.target instanceof Element &&
+    event.target.closest('[data-tab-kind="sample-workspace"]') !== null
+  );
+}
+
 export interface EditFirewallInput {
   /** The element 4.5 names the app column; never an ancestor of the inspector. */
   readonly column: HTMLElement;
@@ -91,6 +105,7 @@ export function installEditFirewall(input: EditFirewallInput): () => void {
   const { column, focusTarget } = input;
 
   const swallow = (event: Event): void => {
+    if (isSessionTabPress(event)) return;
     event.preventDefault();
     // Not `stopPropagation`: a handler bound on the column itself is exactly
     // as able to act on the app as one further down.

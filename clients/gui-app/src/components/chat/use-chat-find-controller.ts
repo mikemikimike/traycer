@@ -24,6 +24,8 @@ import {
   type ChatTimelineNavigationLocation,
 } from "@/components/chat/chat-messages-scroll-helpers";
 import { TileFindContext } from "@/components/epic-canvas/tile-find/tile-find-adapter-context";
+import { useRegionShown } from "@/lib/layout-overrides";
+import { isThinkingShown } from "@/stores/layout/layout-store";
 import {
   useChatFindActiveTargetClearEpoch,
   useReconcileChatFindActiveTarget,
@@ -458,9 +460,11 @@ export function useChatFindController(
     [applyFindOpenedTarget],
   );
 
+  // Thinking's Shown regroups runs as surely as promotion does.
+  const thinkingShown = useRegionShown("thinking");
   useLayoutEffect(() => {
     chatFindAdapterRef.current?.notifyRowsChanged();
-  }, [backgroundToolBlockIds, messages]);
+  }, [backgroundToolBlockIds, messages, thinkingShown]);
 
   useLayoutEffect(() => {
     if (tileFindContext === null) return undefined;
@@ -472,6 +476,7 @@ export function useChatFindController(
           messagesRef.current,
           instanceId,
           backgroundToolBlockIdsRef.current,
+          !isThinkingShown(),
         ),
       getCoverageMessage: getFindCoverageMessage,
       getPlacement: () => getFindPlacementRef.current(),

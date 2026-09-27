@@ -22,11 +22,11 @@ import type { RailRegionId } from "@/lib/layout/region-id";
 
 const RAIL_ROWS = [{ kind: "position-order", group: "rail" }] as const;
 
-function railRegionBase(
-  regionId: RailRegionId,
+function railRegionBase<K extends RailRegionId>(
+  regionId: K,
   keywords: ReadonlyArray<string>,
   hint: string | null,
-): Omit<LayoutRegion<RailRegionId>, "id"> {
+): Omit<LayoutRegion<K>, "id"> {
   const definition = getLeftPanelDefinition(leftPanelIdForRailRegion(regionId));
   return {
     name: definition.title,
@@ -72,7 +72,7 @@ export const RAIL_PULL_REQUESTS_REGION: LayoutRegion<"railPullRequests"> = {
   ...railRegionBase(
     "railPullRequests",
     ["pull", "requests", "pr", "review"],
-    "Auto - appears when this repo has pull requests",
+    "Auto: appears when this task has pull requests.",
   ),
 };
 

@@ -1754,7 +1754,7 @@ function ToolChip(props: {
             <p className="mt-1 text-ui-xs text-muted-foreground">
               Disabled by {denySummary}
               {readOnly && denySummary !== "local project settings"
-                ? " (locked — clear the deny in that source to re-enable)"
+                ? " (locked - clear the deny in that source to re-enable)"
                 : null}
             </p>
           ) : null}

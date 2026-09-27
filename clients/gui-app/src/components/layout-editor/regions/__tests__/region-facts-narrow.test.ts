@@ -24,6 +24,16 @@ function rowOf(regionId: RegionId, kind: string): AnyGrammarRow {
   return row;
 }
 
+/** Model has two `style`-kind rows (Style, Reasoning control) - by `key`. */
+function styleRowOf(regionId: RegionId, key: string): AnyGrammarRow {
+  const row = LAYOUT_REGIONS[regionId].rows.find(
+    (entry) => entry.kind === "style" && entry.key === key,
+  );
+  if (row === undefined)
+    throw new Error(`no such row: ${regionId}/style/${key}`);
+  return row;
+}
+
 describe("regionRowAvailable", () => {
   it("keeps every row when the viewport is not narrow", () => {
     expect(
@@ -33,9 +43,6 @@ describe("regionRowAvailable", () => {
         false,
       ),
     ).toBe(true);
-    expect(regionRowAvailable("access", rowOf("access", "size"), false)).toBe(
-      true,
-    );
     expect(regionRowAvailable("model", rowOf("model", "style"), false)).toBe(
       true,
     );
@@ -80,24 +87,26 @@ describe("regionRowAvailable", () => {
     ).toBe(true);
   });
 
-  it("drops Access's own size row narrow - the narrow toolbar draws it fixed, icon only", () => {
-    expect(regionRowAvailable("access", rowOf("access", "size"), true)).toBe(
-      false,
-    );
-  });
-
-  it("leaves an unrelated region's size row alone narrow - the rule names Access, not every size row", () => {
-    expect(
-      regionRowAvailable("runningAgents", rowOf("runningAgents", "size"), true),
-    ).toBe(true);
-  });
-
   it("drops Model's own style row narrow, but leaves another region's style alone", () => {
     expect(regionRowAvailable("model", rowOf("model", "style"), true)).toBe(
       false,
     );
     expect(
-      regionRowAvailable("usageLimits", rowOf("usageLimits", "style"), true),
+      regionRowAvailable("contextUsage", rowOf("contextUsage", "style"), true),
     ).toBe(true);
+  });
+
+  it("keeps Model's Reasoning control row narrow - the compact toolbar's chip has no style choice, but its footer draws the same picker", () => {
+    expect(
+      regionRowAvailable(
+        "model",
+        styleRowOf("model", "reasoningControl"),
+        true,
+      ),
+    ).toBe(true);
+    // Contrast with the row the gate DOES drop, keyed by "style".
+    expect(
+      regionRowAvailable("model", styleRowOf("model", "style"), true),
+    ).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { RailVisibility } from "@/lib/layout/layout-values";
-import { RAIL_REGION_IDS } from "@/lib/layout/rail";
+import { isAutoRailRegionId, RAIL_REGION_IDS } from "@/lib/layout/rail";
 import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import type { RailRegionId, RegionId } from "@/lib/layout/region-id";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
@@ -26,17 +26,17 @@ export function isRailRegionId(id: RegionId): id is RailRegionId {
 /**
  * What a region's `shown` becomes when it is turned ON.
  *
- * A rail panel goes to `auto` rather than `shown`: its own presence rule is the
- * default, and pinning it open is a separate answer the three-state control
- * gives (L-47). One function because two surfaces turn a region on - the
- * inspector's switch and a right-click quick verb - and a second copy of this
- * rule would be a rail panel that comes back pinned from one of them.
+ * Pull requests and Comments go to `auto` rather than `shown`: their presence
+ * rule is the default, and pinning one open is a separate answer the Auto /
+ * Shown / Hidden control gives (L-47). One function because two surfaces turn a
+ * region on - the form and a right-click quick verb - and a second copy of this
+ * rule would be a panel that comes back pinned from one of them.
  */
 export function regionShownOnValue(regionId: RegionId): RailVisibility {
-  return isRailRegionId(regionId) ? "auto" : "shown";
+  return isAutoRailRegionId(regionId) ? "auto" : "shown";
 }
 
-/** The one rule for a region's Shown switch, tri-state rail included (L-47). */
+/** The one rule for turning a region on or off, Auto panels included (L-47). */
 export function setRegionShown(regionId: RegionId, next: boolean): void {
   const shown = next ? regionShownOnValue(regionId) : "hidden";
   useLayoutEditorStore.getState().recordGesture(() => {

@@ -166,7 +166,7 @@ and anchor come from there. `settings-search-entries.ts` only lists the
 collections. A collection module may import the model and the availability
 predicates; it never imports the assembled index or the search consumer.
 
-- `page` is a required member of every input — the section's own entry. Its
+- `page` is a required member of every input - the section's own entry. Its
   `availableWhen` is required too and is the gate for the WHOLE page: it is the
   page entry's own gate and is composed (AND) into every member's, so a row can
   never be offered by search in a shell where its page is withheld. Every page is
@@ -1438,83 +1438,43 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     Providers uses (`settings-master-detail.tsx`): a rail of areas beside the
     picked one from `md` up, a select above it below `md`. The rail is a
     vertical Radix tab list, so the arrow keys walk it. Each area has a pinned
-    header (title, one line, and its own confirmed Reset while it differs from
-    what shipped, `regions/surface-diff.ts`) over a body that owns the scroll,
-    and a changed area carries the same blue dot a changed row does. Every
+    header (title and one line) over a body that owns the scroll, and a changed
+    area (`regions/surface-diff.ts`) carries the same blue dot a changed row
+    does. Every
     area stays mounted, hidden while another is picked, so a search result or
     a region landing that picks an area finds its row in the same commit.
-  - **One form, two hosts (L-03), and the page GROUPS (L-92, L-95).** The
-    layout form is a set of components under
-    `components/layout-editor/inspector/`, and the two hosts differ by
-    COMPOSITION rather than by components. The docked inspector filters by
-    SELECTION: one `RegionSection` for the selected region, with its order
-    group's list drawn `selectedId={regionId}`. This page cannot filter,
-    because nothing is selected, so it groups: one `SettingsGroup` per SURFACE
-    area (Tabs · Sidebar · Chat · Composer · Status bar) whose body is a
-    `SurfaceSection` - at most one picture BAND, the surface's own rows, and
-    one `OrderGroupList` per order group it owns, drawn `selectedId={null}`.
-    **A surface gets a picture only where the picture carries something the
-    rows cannot** (L-120, `SURFACE_BANDS`): Composer and Status bar do, and
-    nothing else does. The Sidebar's assembled shape IS its list order and each
-    of its rows carries the real rail button as its glyph, so the card that
-    opened with a 660px plinth now opens with its first control.
-    Same registry, same lists, same write seams (`layout-gestures.ts`,
-    `inspector/region-control-io.ts`); no page-only row component.
-    The index belongs to the dock, not here: an index exists to pick ONE
-    section to open, and on the page every row is already there. What the page
-    took from it is the FILTER (L-07), which hides a surface card with no match
-    and leaves an order list whole - filtering the members of a list a drag
-    reorders would make a drop land between rows the user could not see.
-  - **A region is a ROW** (L-95). The L-08 grammar survives inside it, in ONE
-    state control (L-121, `RegionDisplayControl`): `Auto · Shown · Hidden` on a
-    rail panel (L-47, L-93, because a panel's own presence rule is what `auto`
-    defers to), `Full row · Chip · Hidden` where the region has a size, and
-    `Shown · Hidden` everywhere else. `Full row / Chip / Hidden` is not a new
-    value - it is `size` and `shown` read together and written apart, so a
-    hidden chip still materialises as a chip ghost (L-113) and comes back as a
-    chip. Position IS the row's place in its list; `Side`, `Style` and
-    `Fine-tune` open behind the row's own disclosure - one level deep, never
-    off the page, which is L-89 satisfied by never leaving it. The revert sits
-    in a slot the row RESERVES whether or not there is anything in it (L-122),
-    so the right-hand column never shifts when a value changes. **The docked
-    inspector keeps the artifact's grammar** (L-128): `Shown` and `Size` stay
-    two rows there, writing the same two stored values.
-    `regions/surface-groups.ts` is the tier above the registry: which order
-    groups a surface owns, and the facts that belong to a LIST rather than to a
-    member (its heading, its reorder instruction, "Add divider", the
-    pinned-right note). Those were the repeats L-92 was about - nine identical
-    rail Position lists, five dock copies, three toolbar-left copies.
-  - **Exactly one control per thing.** A region's visibility has one control on
-    either host, and the eye button the sortable rows used to carry is gone: it
-    wrote through `regionShownOnValue`, so two presses anywhere turned a pinned
-    `shown` back into `auto` without saying so. Where the two strip
-    readings live is a pair of picks EACH (L-156): Usage limits and Resource
-    monitor carry their own `Position` (Status bar / Tab strip) and `Side` (Left /
-    Right) on both hosts, and moving one never moves the other. The shared
-    "Show these in" row that moved both at once is gone with the behaviour it
-    described, and the Status bar card's one surface-tier row is
-    `mobileFooter`.
-  - **Usage providers are a headed list in the Status bar card** (L-123), a
-    sibling of the two region rows, rendered only while Usage limits is shown.
-    Each provider is an ordinary row with a `Shown | Hidden` control writing
-    `hiddenProviders`, and its disclosure holds `ProviderLimitsControl` alone -
-    the shared half of `ProviderLevel`, minus the stage and the icon-tile
-    header the row above already stands in for. That took a provider's limits
-    from five levels to two. The dock still opens a provider as its own screen
-    with a back row, through `rows/children-row.tsx`.
-  - **The safety net.** There is no session here, so no Undo, no Discard and no
-    Cmd+Z, and "Reset to <preset>" is values-only by construction (L-57).
-    **Reset everything** (L-20) is therefore built, and on this host it is the
-    LAST card on the page, `tone="danger"`, with its confirm (L-108) - the
-    house orders groups by frequency and risk with destructive last. It renders
-    even on an untouched layout, with the button disabled: showing the floor
-    and saying you are standing on it beats a card that vanishes. The dock
-    keeps the same button on its presets card, where Undo is one keystroke
-    away. `lib/layout/layout-diff.ts` owns the
-    pure builders behind it plus the predicates for the three arrangement
-    fields nothing measured before - `hiddenProviders`, `providerLimits` and
-    `mobileFooter`. Every region row has a changed dot and its own revert, and
-    each order list has one for the whole group.
+  - **One form, two hosts, two levels (L-03; L-06/08/09 partly overturned).**
+    Both hosts draw All settings - the Presets block and the areas - and one
+    area's form, `SurfaceSection`, whose rows disclose their details in place.
+    There is no third level. This page draws the areas as its rail and the
+    picked one beside it; the editor inspector draws them as a list
+    (`inspector/layout-form.tsx`, `LayoutAllSettings`) and opens one with an
+    "All settings" back row (`LayoutAreaLevel`). The editor store's `area`,
+    `openRows` and `openArea(area, row)` are that level; a canvas selection
+    (`select`) opens its region's area with the row expanded and highlighted.
+    Same registry, same lists, same row component (`SortableList`, and
+    `rows/layout-form-row.tsx` for an area's own rows), same write seams.
+  - **A region is a ROW** (L-95) with ONE state control (L-121,
+    `RegionDisplayControl`): `Auto · Shown · Hidden` on Pull requests and
+    Comments only, `Full row · Chip · Hidden` where the region has a size, and
+    `Shown · Hidden` everywhere else. Location, Side, Style and the detail rows
+    open behind the row's own disclosure, disabled but readable while the
+    region is Hidden. Every row reserves its grip, revert, extra and chevron
+    slots (L-122), so controls share one right edge and never shift. At the
+    inspector's 320px the control wraps under the label.
+  - **Usage providers are a headed list in the Usage and resources area**
+    (L-123): configured providers first, with their logos, then the rest behind
+    a Show all providers disclosure. A provider's disclosure holds
+    `ProviderLimitsControl`.
+  - **Presets and resets.** The Presets block (`inspector/presets-block.tsx`)
+    applies a preset in one click, replacing visibility and style values and
+    keeping placement, order and providers, with an Undo toast. Its status
+    reads `<Preset> · Modified` with a View changes list grouped Styles and
+    Arrangement, each line with its own revert (`lib/layout/layout-diff.ts`
+    builds it, `inspector/layout-change-lines.ts` words it). `Reset layout…`
+    confirms in both hosts (L-108 overturned); on this page it is the Presets
+    area's last card, `tone="danger"`. Every row and order list has its own
+    revert.
   - **Landing on a region.** Below the editor's width threshold the door
     redirects here, and `navigateToLayoutRegion` (`lib/settings-navigation.ts`)
     carries the target through: the page takes the pending region, opens that
@@ -1794,66 +1754,78 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     rather than testing the build, so the pair follows from the field.
   - **The rail is one flat list** (L-155, L-166): `arrangement.rail` is panels,
     dividers and stack links in order.
-    The three are independent of each other and there is still no grouping
-    concept - nothing owns a run of panels, and every panel has its own icon.
+    The three are independent of each other.
     - A DIVIDER is a SPACER and nothing else.
       The user reads it as a "Divider", adds it, drags it and removes it, and
       the sidebar draws it as a gap at rest (L-140).
       The shipped rail carries none.
-    - A STACK LINK is a join between the two ADJACENT panels it sits between:
-      those two share the sidebar body, top and bottom, with a resize handle
-      and a per-section collapse, and the rail draws the pair as ONE view group
-      the way VS Code draws a view container (G3, `left-panel-rail-stack.tsx`):
-      the top panel's icon, named and tooltipped for both ("Agents ·
-      Artifacts"), lit while either is showing, with no card or separator.
-      While the editor customizes the rail the icon carries a member count.
-      Clicking it opens the group on its top panel (or puts back a collapsed
-      member section), and clicking it while the group shows collapses the
-      column.
+    - A STACK joins two to four ADJACENT panels (L-166, L-181): they share
+      the sidebar body, top to bottom, with a resize handle between each two
+      and a per-section collapse. The entry sits right after its first member
+      and its id names every member in order (`stack:A+B+C`), so a stored pair
+      is just the two-member case.
+      The rail draws a stack as ONE view group the way VS Code draws a view
+      container (G3, `left-panel-rail-stack.tsx`): the top member's icon,
+      named and tooltipped for every member ("Agents · Artifacts"), lit while
+      any member is showing, with no card or separator, and a member count
+      only while the editor customizes the rail. Clicking it opens the stack
+      on its top panel (or puts back a collapsed member section), and clicking
+      it while the stack shows collapses the column.
       The shipped rail carries exactly one, Agents with Artifacts.
-      A stack joins exactly two panels: `normalizeRail` re-derives every link
-      from the pair it ends up between, in either order, so the two trading
-      places keeps the group and changes which icon the rail shows, a panel
-      dragged away from its partner drops the join, a divider moved between
-      them drops it, and a run of three cannot exist because a panel already
-      claimed by one link cannot be claimed by a second.
-      A HIDDEN panel drops out of its stack for display only - the visible
-      partner stands alone on the rail and in the body, and showing the panel
-      again restores the pair.
-      A new stack always opens with both sections showing: the collapse flag
-      outlives the pair, and while two panels are apart neither draws a chevron
-      that could clear it (L-170).
-      Both members can never be collapsed at once, because a collapse hands its
-      space to the partner; the control is not offered to the last expanded
-      one.
+      `normalizeRail` keeps each stack as the runs of its members that still
+      stand side by side, in any order and re-minted for that order: members
+      trading places keeps the stack, a member taken away leaves it (a pair
+      dissolves), a divider or another panel moved between members splits it
+      there, a run over four keeps its first four, and a panel belongs to one
+      stack. Membership is explicit in the writers, so a member carried out of
+      its stack leaves it even when it lands right beside it.
+      A rail drag says what it CARRIES (`RailDragCarry`): the rail's icon
+      carries its whole stack, a SECTION header carries one panel.
+      Four is the cap because of the BODY, not the rail: at the window's 600px
+      minimum height, four sections still show a header and three rows each.
+      A HIDDEN panel drops out of its stack for display only - the rest stand
+      as a smaller stack, or alone, on the rail and in the body, and showing the
+      panel again puts it back.
+      A member joining a stack opens with its section showing: the collapse
+      flag outlives the stack, and a panel standing alone draws no chevron that
+      could clear it (L-170).
+      The last expanded member can never be collapsed, because a collapse hands
+      its space to the members still open.
       `railDisplayEntries` (`lib/layout/rail.ts`) is what every rail SURFACE
       walks - the icon column, the sample scene's copy and the preset card's
-      miniature - so the group rule and the hidden-partner rule are written
+      miniature - so the capsule rule and the hidden-member rule are written
       once; `visibleRailPanelIds` beside it is the one visibility filter for the
       body's choice of panel and the PR retention.
       Writes go through `applyRail` (`lib/layout/rail-view.ts`) for the app's own
       drag and through `moveRailEntry` / `insertRailDivider` /
-      `removeRailDivider` / `stackRailPanels` / `unstackRail`
-      (`lib/layout/layout-arrangement.ts`) for the editor's list, with
-      `moveRailPanelBeside` / `moveRailPanelToEnd` the one mover both drags place
-      a panel by.
-      A rail icon is a whole group, so dragging it carries the pair, and any
-      drop beside a pair lands before or after the whole pair (G3); a SECTION
-      header is one panel, so dragging it moves that panel alone - beside its
-      partner it swaps the two, anywhere else it leaves the group.
+      `removeRailDivider` / `stackRailPanelWithBelow` / `unstackRail` /
+      `unstackRailPanel` (`lib/layout/layout-arrangement.ts`) for the editor's
+      list, with `moveRailPanelBeside` / `moveRailPanelToEnd` /
+      `stackRailPanels` the movers both drags place a panel by.
+      A carried stack lands before or after the target's whole stack. A carried
+      panel beside another member of its own stack changes place in it;
+      anywhere else it leaves the stack and lands before or after the target's
+      whole stack, never between another stack's members.
       On the rail a drop has three bands (L-168): the outer 30% at each end
-      reorders, and the middle 40% stacks.
-      A group carried onto another icon's middle band makes nothing (a stack is
-      two panels). A single panel dragged by its section header that is
-      already half of a pair LEAVES that pair and joins the new one (L-170).
-      A TARGET that is already half of a pair is refused, with no preview at all,
-      because a stack joins exactly two panels.
-      "Already half of a pair" is read off the model rather than off what the
-      rail drew, so a panel whose partner is hidden refuses a drop on its middle
-      band the way its group would.
-      A drop on the sidebar BODY is resolved against the section under the
-      pointer, not the panel the body is focused on: a stacked pair draws two,
-      and the active one is not always the one being aimed at.
+      reorders, and the middle 40% appends what is carried to the target's
+      stack (after its last member), or stacks them with a lone target.
+      `railStackJoin` answers what the middle band would do - `join`, `full`
+      (the result would pass four) or `same` (already stacked together) - and
+      the rail draws the join ring or a red refusal ring on the target icon
+      from that answer; a refused drop commits nothing.
+      A member leaves its stack by dragging its section header out of the
+      body onto the rail, from the stack icon's menu ("Unstack 'Name'" per
+      member), or from the Sidebar area's stack row, which lists every member
+      with its own Unstack beside "Remove stack"; each is one write and one
+      undo step, and the first or last member stays where it stands while a
+      middle one steps out to just after the stack.
+      A drop on the open sidebar BODY means INTO the stack it draws (L-182):
+      the body is one droppable naming the stack's top panel, it resolves to
+      the same middle-band join as that panel's rail icon, and it draws the
+      same answer on its frame - the join ring, the red refusal for a stack
+      that would pass four, and nothing for a member dropped on its own
+      stack. The editor canvas has no join gesture (L-169), so the body there
+      takes no drop.
       The split and the per-section collapse live in the PANEL store
       (`panelSectionWeightsByPanelId`, `panelSectionCollapsedByPanelId`), not in
       the arrangement: they are how a stack is drawn rather than whether it

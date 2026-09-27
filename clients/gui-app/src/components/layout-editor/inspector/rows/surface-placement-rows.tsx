@@ -1,52 +1,77 @@
 import type { ReactNode } from "react";
 import {
-  InspectorRow,
-  RevertButton,
-} from "@/components/layout-editor/inspector/inspector-row";
+  Cpu,
+  Layers,
+  MoveHorizontal,
+  PanelLeft,
+  PanelTop,
+  Smartphone,
+  UnfoldHorizontal,
+  type LucideIcon,
+} from "lucide-react";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
+import { LayoutFormRow } from "@/components/layout-editor/inspector/rows/layout-form-row";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
+import { Button } from "@/components/ui/button";
+import { navigateToLayoutRegion } from "@/lib/settings-navigation";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
 import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import {
   EDGE_SIDE_OPTIONS,
+  READING_WIDTH_OPTIONS,
   SIDE_STRIP_VIEW_OPTIONS,
+  TAB_OVERFLOW_OPTIONS,
   TAB_STRIP_PLACEMENT_OPTIONS,
   type SurfaceGroupId,
 } from "@/components/layout-editor/regions/region-grammar";
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
-import { SettingsRow } from "@/components/settings/settings-row";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import {
+  mobileFooterChanged,
   sidebarSideChanged,
   sideStripViewChanged,
   tabStripPlacementChanged,
 } from "@/lib/layout/layout-diff";
 import type { SettingsRowDefinition } from "@/lib/settings-search/settings-definitions";
-import { useLayoutStore } from "@/stores/layout/layout-store";
+import {
+  useLayoutSnapshot,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
+import { Switch } from "@/components/ui/switch";
+import {
+  isControlValueChanged,
+  revertControlValue,
+  writeControlValue,
+} from "@/components/layout-editor/inspector/region-control-io";
 
 /**
- * The placements that belong to a SURFACE rather than to a region: where the
- * task tabs sit, what their vertical strip shows, and which side of the task
- * canvas the sidebar takes.
+ * The rows that belong to an AREA rather than to a region: where the task tabs
+ * sit, what their side strip shows and how they overflow; which side of the
+ * task canvas the sidebar takes and whether agent rows carry resource
+ * readings; the Composer's fixed Message queue note; and the small-screen
+ * status bar.
  *
  * Neither the tab strip nor the sidebar column is a region, so these rows sit
- * under their surface's heading on both hosts - the docked inspector's index
- * and the Settings page's surface card - rather than in a region's section.
- * Each host frames the row its own way (an `InspectorRow` in the dock, a
- * `SettingsRow` with its search anchor on the page); the control, the write
- * and the revert are the same. Both read the STORED arrangement, write it as
- * one recorded gesture (L-18) and offer a revert only while the value differs
- * from the shipped one. Label, description, keywords and availability are the
- * Settings search definitions', so a search result, the filters and the row
- * all say the same thing.
+ * in their area's form in both hosts, drawn as a `LayoutFormRow`. Each reads
+ * the STORED arrangement, writes it as one recorded gesture (L-18) and offers
+ * a revert only while the value differs from the shipped one. Label,
+ * description and availability are the Settings search definitions', so a
+ * search result and the row say the same thing.
  */
 
 const TAB_STRIP_PLACEMENT_ROW = LAYOUT.definitions.tabStripPlacement;
 const SIDE_STRIP_VIEW_ROW = LAYOUT.definitions.sideStripView;
+const TAB_OVERFLOW_ROW = LAYOUT.definitions.taskTabLayout;
 const SIDEBAR_SIDE_ROW = LAYOUT.definitions.sidebarSide;
+const READING_WIDTH_ROW = LAYOUT.definitions.readingWidth;
+const RESOURCE_READINGS_ROW = LAYOUT.definitions.resourceReadings;
+const MOBILE_FOOTER_ROW = LAYOUT.definitions.mobileFooter;
 
-/** The surface's own placement row, drawn under its heading in the dock. */
-export function SurfacePlacementRow(props: {
+/** An area's own rows that come before its lists. */
+export function SurfaceLeadingRows(props: {
   readonly surface: SurfaceGroupId;
 }): ReactNode {
   if (props.surface === "topBar") {
@@ -54,54 +79,50 @@ export function SurfacePlacementRow(props: {
       <>
         <TabStripPositionRow />
         <SideStripViewRow />
+        <TabOverflowRow />
       </>
     );
   }
   if (props.surface === "sidebar") return <SidebarSideRow />;
+  if (props.surface === "chat") return <ReadingWidthRow />;
+  return null;
+}
+
+/** An area's own rows that come after its lists. */
+export function SurfaceTrailingRows(props: {
+  readonly surface: SurfaceGroupId;
+}): ReactNode {
+  if (props.surface === "sidebar") return <ResourceReadingsRow />;
+  if (props.surface === "statusBar") return <MobileFooterRow />;
   return null;
 }
 
 /**
- * One placement row in the frame of the host drawing it, or nothing where its
- * definition says the build has no use for it (the installed mobile app).
- * `status` says why the control is disabled; the dock shows it in place of
- * the description.
+ * One area row, or nothing where its definition says the build has no use for
+ * it (the installed mobile app). `status` stands in place of the description:
+ * why the control is disabled, or the description with a control of its own.
  */
 function PlacementRow(props: {
   readonly row: SettingsRowDefinition;
+  readonly icon: LucideIcon;
   readonly control: ReactNode;
   readonly onRevert: (() => void) | null;
   readonly revertLabel: string;
-  readonly status: string | null;
+  readonly status: ReactNode;
 }): ReactNode {
-  const { row, control, onRevert, revertLabel, status } = props;
-  const page = useLayoutFormHost() === "page";
+  const { row, icon, control, onRevert, revertLabel, status } = props;
   const availability = useSettingsAvailabilityContext();
   if (!row.availableWhen(availability)) return null;
-  if (page) {
-    return (
-      <SettingsRow
-        row={row}
-        status={status ?? undefined}
-        control={
-          <div className="flex items-center gap-1.5">
-            {control}
-            {onRevert === null ? null : (
-              <RevertButton onRevert={onRevert} label={revertLabel} />
-            )}
-          </div>
-        }
-      />
-    );
-  }
   return (
-    <InspectorRow
-      top
+    <LayoutFormRow
+      anchor={row.anchor ?? null}
+      icon={icon}
       label={row.label}
-      description={status ?? row.description ?? undefined}
+      description={status ?? row.description ?? null}
       control={control}
-      onRevert={onRevert ?? undefined}
+      onRevert={onRevert}
       revertLabel={revertLabel}
+      stacked={false}
     />
   );
 }
@@ -112,6 +133,7 @@ export function TabStripPositionRow(): ReactNode {
   return (
     <PlacementRow
       row={TAB_STRIP_PLACEMENT_ROW}
+      icon={PanelTop}
       onRevert={
         tabStripPlacementChanged(arrangement, DEFAULT_ARRANGEMENT)
           ? () => {
@@ -122,11 +144,11 @@ export function TabStripPositionRow(): ReactNode {
             }
           : null
       }
-      revertLabel="Revert tabs position"
+      revertLabel="Reset tab placement to default: Top"
       status={null}
       control={
         <SegmentedControl
-          ariaLabel="Tabs position"
+          ariaLabel="Tab placement"
           options={TAB_STRIP_PLACEMENT_OPTIONS}
           value={arrangement.tabStripPlacement}
           onChange={(next) => {
@@ -153,6 +175,7 @@ export function SideStripViewRow(): ReactNode {
   return (
     <PlacementRow
       row={SIDE_STRIP_VIEW_ROW}
+      icon={Layers}
       onRevert={
         sideStripViewChanged(arrangement, DEFAULT_ARRANGEMENT)
           ? () => {
@@ -163,11 +186,11 @@ export function SideStripViewRow(): ReactNode {
             }
           : null
       }
-      revertLabel="Revert tabs view"
-      status={atTop ? "Applies when tabs are at the left or right." : null}
+      revertLabel="Reset side tab view to default"
+      status={atTop ? "Available when tabs are on the left or right." : null}
       control={
         <SegmentedControl
-          ariaLabel="Tabs view"
+          ariaLabel="Side tab view"
           options={SIDE_STRIP_VIEW_OPTIONS}
           value={arrangement.sideStripView}
           disabled={atTop}
@@ -190,6 +213,7 @@ export function SidebarSideRow(): ReactNode {
   return (
     <PlacementRow
       row={SIDEBAR_SIDE_ROW}
+      icon={PanelLeft}
       onRevert={
         sidebarSideChanged(arrangement, DEFAULT_ARRANGEMENT)
           ? () => {
@@ -200,7 +224,7 @@ export function SidebarSideRow(): ReactNode {
             }
           : null
       }
-      revertLabel="Revert sidebar side"
+      revertLabel="Reset sidebar side to default"
       status={null}
       control={
         <SegmentedControl
@@ -211,6 +235,187 @@ export function SidebarSideRow(): ReactNode {
             if (next !== "left" && next !== "right") return;
             writeArrangementField("sidebarSide", next);
           }}
+        />
+      }
+    />
+  );
+}
+
+/** How wide the transcript, the composer and an artifact's body run. */
+export function ReadingWidthRow(): ReactNode {
+  const readingWidth = useLayoutStore(
+    (state) => state.arrangement.readingWidth,
+  );
+  return (
+    <PlacementRow
+      row={READING_WIDTH_ROW}
+      icon={UnfoldHorizontal}
+      onRevert={
+        readingWidth === DEFAULT_ARRANGEMENT.readingWidth
+          ? null
+          : () => {
+              writeArrangementField(
+                "readingWidth",
+                DEFAULT_ARRANGEMENT.readingWidth,
+              );
+            }
+      }
+      revertLabel="Reset reading width to default: Comfortable"
+      status={null}
+      control={
+        <SegmentedControl
+          ariaLabel="Reading width"
+          options={READING_WIDTH_OPTIONS}
+          value={readingWidth}
+          onChange={(next) => {
+            if (next !== "comfortable" && next !== "wide") return;
+            writeArrangementField("readingWidth", next);
+          }}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * How tabs fit a horizontal strip. A side strip stacks its tabs and never
+ * scrolls or shrinks them sideways, so while the tabs sit at a side the
+ * control is disabled and says why; the stored value is kept for the way back.
+ * The installed mobile app always draws its tabs at the top.
+ */
+export function TabOverflowRow(): ReactNode {
+  const taskTabLayout = useLayoutStore(
+    (state) => state.arrangement.taskTabLayout,
+  );
+  const placement = useLayoutStore(
+    (state) => state.arrangement.tabStripPlacement,
+  );
+  const availability = useSettingsAvailabilityContext();
+  const atSide =
+    TAB_STRIP_PLACEMENT_ROW.availableWhen(availability) && placement !== "top";
+  return (
+    <PlacementRow
+      row={TAB_OVERFLOW_ROW}
+      icon={MoveHorizontal}
+      onRevert={
+        taskTabLayout === DEFAULT_ARRANGEMENT.taskTabLayout
+          ? null
+          : () => {
+              writeArrangementField(
+                "taskTabLayout",
+                DEFAULT_ARRANGEMENT.taskTabLayout,
+              );
+            }
+      }
+      revertLabel="Reset tab overflow to default: Scroll"
+      status={atSide ? "Available when tabs are at the top." : null}
+      control={
+        <SegmentedControl
+          ariaLabel="Tab overflow"
+          options={TAB_OVERFLOW_OPTIONS}
+          value={taskTabLayout}
+          disabled={atSide}
+          onChange={(next) => {
+            if (next !== "scroll" && next !== "shrink") return;
+            writeArrangementField("taskTabLayout", next);
+          }}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * The resource readings on each agent and terminal row in the sidebar (G7).
+ * Stored beside the Resource monitor's values, but a Sidebar setting: it works
+ * whether or not the monitor is shown, so it never greys with it. WHICH
+ * readings is the monitor's own Metrics choice (L-174), so the description
+ * links there.
+ */
+export function ResourceReadingsRow(): ReactNode {
+  const snapshot = useLayoutSnapshot();
+  const on = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides)
+    .resourceMonitor.agentRows;
+  const page = useLayoutFormHost() === "page";
+  // Each host opens the monitor's row its own way: the page lands on it as a
+  // settings result does, the editor opens its area with the row expanded.
+  const openResourceMonitor = (): void => {
+    if (page) {
+      navigateToLayoutRegion("resourceMonitor");
+      return;
+    }
+    useLayoutEditorStore
+      .getState()
+      .openArea(LAYOUT_REGIONS.resourceMonitor.surface, "resourceMonitor");
+  };
+  return (
+    <PlacementRow
+      row={RESOURCE_READINGS_ROW}
+      icon={Cpu}
+      onRevert={
+        isControlValueChanged("resourceMonitor", "agentRows")
+          ? () => {
+              revertControlValue("resourceMonitor", "agentRows");
+            }
+          : null
+      }
+      revertLabel="Reset readings on agent rows"
+      status={
+        <>
+          {RESOURCE_READINGS_ROW.description}{" "}
+          <Button
+            type="button"
+            variant="link"
+            size={page ? "inline" : "inline-xs"}
+            onClick={openResourceMonitor}
+          >
+            Choose metrics
+          </Button>
+        </>
+      }
+      control={
+        <Switch
+          aria-label={RESOURCE_READINGS_ROW.label}
+          checked={on}
+          onCheckedChange={(next) => {
+            writeControlValue("resourceMonitor", "agentRows", next);
+          }}
+        />
+      }
+    />
+  );
+}
+
+/**
+ * Whether the strip is drawn at all on a narrow viewport (L-51). Only the
+ * installed mobile app has the switch: every other build draws the footer
+ * whenever a reading names it.
+ */
+function MobileFooterRow(): ReactNode {
+  const arrangement = useLayoutStore((state) => state.arrangement);
+  return (
+    <PlacementRow
+      row={MOBILE_FOOTER_ROW}
+      icon={Smartphone}
+      onRevert={
+        mobileFooterChanged(arrangement)
+          ? () => {
+              writeArrangementField(
+                "mobileFooter",
+                DEFAULT_ARRANGEMENT.mobileFooter,
+              );
+            }
+          : null
+      }
+      revertLabel="Reset the small-screen status bar"
+      status={null}
+      control={
+        <Switch
+          checked={arrangement.mobileFooter}
+          onCheckedChange={(checked) => {
+            writeArrangementField("mobileFooter", checked);
+          }}
+          aria-label={MOBILE_FOOTER_ROW.label}
         />
       }
     />

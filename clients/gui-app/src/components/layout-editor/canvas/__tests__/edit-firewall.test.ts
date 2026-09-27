@@ -151,6 +151,44 @@ describe("the edit firewall (4.4)", () => {
     expect(heard).toEqual([]);
   });
 
+  /**
+   * Audit F1. The Customizing tab is the session's own tab, not the app
+   * acting: activating it is a no-op and its close is a way out of the
+   * editor, so pointer gestures on it must reach the tab strip rather than
+   * being swallowed like every other press on the column.
+   */
+  it("lets a pointer press on the Customizing tab through, but still swallows a keydown on it", () => {
+    const { control, heard } = mountColumn();
+    control.setAttribute("data-tab-kind", "sample-workspace");
+
+    control.dispatchEvent(
+      new Event("click", { bubbles: true, cancelable: true }),
+    );
+    expect(heard).toEqual(["click", "column:click"]);
+
+    heard.length = 0;
+    control.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, cancelable: true }),
+    );
+    expect(heard).toEqual(["pointerdown", "column:pointerdown"]);
+
+    heard.length = 0;
+    control.dispatchEvent(
+      new Event("keydown", { bubbles: true, cancelable: true }),
+    );
+    expect(heard).toEqual([]);
+  });
+
+  it("still swallows a click elsewhere in the column", () => {
+    const { control, heard } = mountColumn();
+
+    control.dispatchEvent(
+      new Event("click", { bubbles: true, cancelable: true }),
+    );
+
+    expect(heard).toEqual([]);
+  });
+
   it("lets the wheel through, so the app keeps scrolling (L-17)", () => {
     const { control, heard } = mountColumn();
 

@@ -64,7 +64,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
     // move that changes the hovered region, each filter keystroke, each
     // selection change while the pointer rests on a region - and building the
     // label means building the whole 22-region value set to read one region's
-    // state word (G1-04's rule, which `inspector-index.tsx` follows in this
+    // state word (G1-04's rule, which `layout-form.tsx` follows in this
     // same commit). The label changes only when the pointer moves to another
     // region or the layout is written, so those are the two things this
     // remembers.
@@ -86,6 +86,17 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       return label;
     };
 
+    // Fixed chrome the canvas names without it being a setting (C4): the
+    // Message queue says it is always there, and a press on it selects nothing.
+    let cue: HTMLElement | null = null;
+    const setCue = (next: HTMLElement | null): void => {
+      if (next === cue) return;
+      cue?.removeAttribute("data-layout-anchor");
+      cue = next;
+      cue?.setAttribute("data-layout-anchor", "hover");
+      paint();
+    };
+
     const paint = (): void => {
       const state = useLayoutEditorStore.getState();
       const hoveredRegion = decoratedHoverRegion(state);
@@ -93,7 +104,13 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
         hoveredRegion === null
           ? null
           : preferredRegionInstance(state, hoveredRegion);
-      if (hoveredRegion === null || hovered === null) chip.hide();
+      if (hoveredRegion === null && cue !== null)
+        chip.show({
+          label: cue.getAttribute("data-layout-cue") ?? "",
+          node: cue,
+          placement: "above",
+        });
+      else if (hoveredRegion === null || hovered === null) chip.hide();
       else
         chip.show({
           label: labelFor(hoveredRegion),
@@ -120,7 +137,12 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       if (!hoverCapablePointer(event.pointerType)) return;
       const target = event.target;
       if (!(target instanceof Node) || !column.contains(target)) return;
-      useLayoutEditorStore.getState().setHovered(regionUnder(target, column));
+      const regionNode = regionNodeUnder(target, column);
+      const regionId = regionIdOf(regionNode);
+      const state = useLayoutEditorStore.getState();
+      if (regionNode !== null) state.setPointed(regionNode);
+      state.setHovered(regionId);
+      setCue(regionId === null ? cueNodeUnder(target, column) : null);
     };
 
     // The one owner of "this press starts a drag". The firewall swallows
@@ -134,7 +156,9 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       const state = useLayoutEditorStore.getState();
       state.setKeyboardNav(false);
       const member = memberNodeUnder(target, column);
-      const regionId = regionUnder(target, column);
+      const regionNode = regionNodeUnder(target, column);
+      const regionId = regionIdOf(regionNode);
+      if (regionNode !== null) state.setPointed(regionNode);
       // A surface is selected only through its OWN space: a region inside it
       // (the Home tab, a rail icon) and a rail divider stay what they were.
       const surface =
@@ -155,6 +179,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
     // set it too, and the pointer is already over one by the time this fires.
     const onPointerLeave = (): void => {
       useLayoutEditorStore.getState().setHovered(null);
+      setCue(null);
     };
 
     paint();
@@ -179,6 +204,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       // the transform it put on an element the app owns all go with the
       // session, and it writes nothing on the way out.
       cancelLayoutDrag();
+      setCue(null);
       chip.destroy();
       ring.destroy();
       column.removeAttribute("data-layout-editing");
@@ -186,17 +212,29 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
   }, [column, live]);
 }
 
+/** The fixed-chrome cue under the pointer, if any (`data-layout-cue`). */
+function cueNodeUnder(target: Node, column: HTMLElement): HTMLElement | null {
+  const element = target instanceof Element ? target : target.parentElement;
+  const node = element?.closest("[data-layout-cue]") ?? null;
+  return node instanceof HTMLElement && column.contains(node) ? node : null;
+}
+
 /**
- * The nearest registered region's ELEMENT at a point, which is what makes the
- * whole element hoverable rather than only the pixel the pointer is over, and
- * is also the thing a drag picks up.
+ * The nearest element at a point that answers for a region: its registered
+ * node (`data-layout-region`), which is what makes the whole element hoverable
+ * rather than only the pixel the pointer is over, or a PART drawn for it
+ * elsewhere (`data-layout-region-part`, the sample picker's footer), which
+ * hovers and selects the region without being its node. Only the node carries
+ * `data-layout-region`, so every lookup by region name finds it and nothing
+ * else.
  */
 function regionNodeUnder(
   target: Node,
   column: HTMLElement,
 ): HTMLElement | null {
   const element = target instanceof Element ? target : target.parentElement;
-  const node = element?.closest("[data-layout-region]") ?? null;
+  const node =
+    element?.closest("[data-layout-region], [data-layout-region-part]") ?? null;
   if (!(node instanceof HTMLElement) || !column.contains(node)) return null;
   return node;
 }
@@ -263,14 +301,14 @@ function armPlacementDrag(
 function selectedNode(
   state: Pick<
     LayoutEditorState,
-    "instances" | "selected" | "selectedSurface" | "surfaceNodes"
+    "instances" | "pointed" | "selected" | "selectedSurface" | "surfaceNodes"
   >,
 ): HTMLElement | null {
   if (state.selected !== null) {
     const own = preferredRegionInstance(state, state.selected);
     if (own !== null) return own.node;
-    // A group's bottom member has no node of its own: the group's one icon
-    // stands for it on the rail (G3), so that icon is what gets the ring.
+    // A stack's lower members have no node of their own: the stack's one icon
+    // stands for them on the rail (G3, L-181), so that icon gets the ring.
     const selected = state.selected;
     const railRegion = RAIL_REGION_IDS.find((id) => id === selected);
     if (railRegion === undefined) return null;
@@ -290,12 +328,10 @@ function selectedNode(
 
 function regionIdOf(node: HTMLElement | null): RegionId | null {
   if (node === null) return null;
-  const value = node.getAttribute("data-layout-region");
+  const value =
+    node.getAttribute("data-layout-region") ??
+    node.getAttribute("data-layout-region-part");
   return LAYOUT_REGION_IDS.find((id) => id === value) ?? null;
-}
-
-function regionUnder(target: Node, column: HTMLElement): RegionId | null {
-  return regionIdOf(regionNodeUnder(target, column));
 }
 
 /** A top-bar region has nothing above it, so its chip goes underneath (4.3). */

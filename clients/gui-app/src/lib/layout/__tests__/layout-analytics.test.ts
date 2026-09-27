@@ -226,14 +226,16 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
       ...DEFAULT_LAYOUT_SNAPSHOT,
       basePreset: "compact",
       overrides: {
-        // Visibility, RegionSize, RailVisibility (both of its non-default
-        // members), ModelStyle, ContextStyle, AmountMode, a boolean leaf and
-        // the one list leaf.
+        // Visibility (twice: mic, and railAgents now that the seven plain
+        // rail panels default to shown rather than carrying the tri-state
+        // rule), RegionSize, RailVisibility's one non-default member left on
+        // a panel that still has one (railComments), ModelStyle, ContextStyle,
+        // AmountMode, a boolean leaf and the one list leaf.
         mic: { shown: "hidden" },
         runningAgents: { shown: "hidden", size: "chip" },
-        railAgents: { shown: "shown" },
+        railAgents: { shown: "hidden" },
         railComments: { shown: "hidden" },
-        model: { style: "bars-text" },
+        model: { style: "bars-text", reasoningControl: "list" },
         contextUsage: {
           style: "ring-only",
           pinBreakdown: true,
@@ -256,7 +258,8 @@ describe("the three layout payloads survive the analytics sanitizer", () => {
     const properties = layoutSnapshotProperties(snapshot);
 
     expect(properties.layout_model_style).toBe("bars-text");
-    expect(properties.layout_rail_agents_shown).toBe("shown");
+    expect(properties.layout_model_reasoning_control).toBe("list");
+    expect(properties.layout_rail_agents_shown).toBe("hidden");
     expect(properties.layout_rail_comments_shown).toBe("hidden");
     expect(properties.layout_context_usage_style).toBe("ring-only");
     expect(properties.layout_context_usage_pinned_fields).toBe("changed");

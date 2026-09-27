@@ -570,6 +570,7 @@ describe("the Tabs placement radio group", () => {
       entry: "keyboard",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
     render(
       <div data-testid="app-column">

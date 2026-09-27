@@ -18,7 +18,7 @@ import {
  * `ControlSpec<K>.key` is `keyof LayoutValues[K] & string` for the region's
  * OWN `K`, which - as `RegionRowFacts`'s comment on `layout-regions.ts`
  * already states - cannot survive a walk over every region: `keyof` of a
- * union of the twenty-three regions' value shapes collapses to the one field
+ * union of the twenty-six regions' value shapes collapses to the one field
  * they all share (`shown`). Reading a section's rows generically off a plain
  * `RegionId` is exactly what keeps the grammar renderer un-written-per-region
  * (L-08), so this module reads and writes the dynamic key with `Reflect`
@@ -59,6 +59,17 @@ export function readControlValue(
     throw new Error(`layout region has no control value for key: ${key}`);
   }
   return false;
+}
+
+/** Whether a Hidden region still leaves this fine-tune row editable (L-174). */
+export function fineTuneRowLiveWhileHidden(
+  row: { readonly liveWhileHidden: RegionValueKey | null },
+  values: LayoutValues[RegionId],
+): boolean {
+  return (
+    row.liveWhileHidden !== null &&
+    readControlValue(values, row.liveWhileHidden) === true
+  );
 }
 
 /** One control's new value, written through the editor's gesture recording. */

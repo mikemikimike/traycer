@@ -1,24 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
 import { useNavigatorResourceMetrics } from "@/hooks/resources/use-navigator-resource-metrics";
-import { NAVIGATOR_RESOURCE_METRICS } from "@/stores/settings/settings-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 
 /**
- * `agentRows` and `shown` used to be one switch (G7); this hook now reads
- * `agentRows` alone, independent of whether the monitor itself is shown.
+ * WHETHER rows print at all is `agentRows`; WHICH readings print is the
+ * monitor's own Metrics selection (cpu/memory/processes), in chip order.
+ * `ramShare` has no per-row meaning and is always ignored here.
  */
-function setResourceMonitor(values: {
-  readonly shown: boolean;
-  readonly agentRows: boolean;
+function setResourceMonitor(patch: {
+  readonly cpu?: boolean;
+  readonly memory?: boolean;
+  readonly processes?: boolean;
+  readonly ramShare?: boolean;
+  readonly agentRows?: boolean;
 }): void {
-  useLayoutStore.getState().setRegionValues("resourceMonitor", {
-    shown: values.shown ? "shown" : "hidden",
-    agentRows: values.agentRows,
-  });
+  useLayoutStore.getState().setRegionValues("resourceMonitor", patch);
 }
 
 function resetStore(): void {
@@ -32,35 +32,75 @@ afterEach(() => {
 });
 
 describe("useNavigatorResourceMetrics", () => {
-  it("returns the full metric list when agentRows is on, even with the monitor hidden", () => {
-    setResourceMonitor({ shown: false, agentRows: true });
+  it("draws the shipped preset's selection: cpu and processes", () => {
+    const { result } = renderHook(() => useNavigatorResourceMetrics());
+
+    expect(result.current).toEqual(["cpu", "processes"]);
+  });
+
+  it.each<
+    [
+      Partial<{
+        cpu: boolean;
+        memory: boolean;
+        processes: boolean;
+      }>,
+      ReadonlyArray<string>,
+    ]
+  >([
+    [{ cpu: true, memory: false, processes: false }, ["cpu"]],
+    [{ cpu: false, memory: true, processes: false }, ["memory"]],
+    [{ cpu: false, memory: false, processes: true }, ["processes"]],
+    [{ cpu: true, memory: true, processes: false }, ["cpu", "memory"]],
+    [{ cpu: true, memory: false, processes: true }, ["cpu", "processes"]],
+    [{ cpu: false, memory: true, processes: true }, ["memory", "processes"]],
+    [
+      { cpu: true, memory: true, processes: true },
+      ["cpu", "memory", "processes"],
+    ],
+    [{ cpu: false, memory: false, processes: false }, []],
+  ])("selection %o draws %o, in canonical chip order", (patch, expected) => {
+    setResourceMonitor(patch);
 
     const { result } = renderHook(() => useNavigatorResourceMetrics());
 
-    expect(result.current).toEqual(NAVIGATOR_RESOURCE_METRICS);
+    expect(result.current).toEqual(expected);
   });
 
-  it("returns no metrics when agentRows is off, even with the monitor shown", () => {
-    setResourceMonitor({ shown: true, agentRows: false });
+  it("draws no chips when only RAM share is selected - rows have no per-row RAM share", () => {
+    setResourceMonitor({
+      cpu: false,
+      memory: false,
+      processes: false,
+      ramShare: true,
+    });
 
     const { result } = renderHook(() => useNavigatorResourceMetrics());
 
     expect(result.current).toEqual([]);
   });
 
-  it("returns the full metric list when both agentRows and shown are on", () => {
-    setResourceMonitor({ shown: true, agentRows: true });
-
-    const { result } = renderHook(() => useNavigatorResourceMetrics());
-
-    expect(result.current).toEqual(NAVIGATOR_RESOURCE_METRICS);
-  });
-
-  it("returns no metrics when both agentRows and shown are off", () => {
-    setResourceMonitor({ shown: false, agentRows: false });
+  it("draws no chips while agentRows is off, whatever the Metrics selection", () => {
+    setResourceMonitor({
+      cpu: true,
+      memory: true,
+      processes: true,
+      agentRows: false,
+    });
 
     const { result } = renderHook(() => useNavigatorResourceMetrics());
 
     expect(result.current).toEqual([]);
+  });
+
+  it("returns a referentially stable array across rerenders with unchanged values", () => {
+    const { result, rerender } = renderHook(() =>
+      useNavigatorResourceMetrics(),
+    );
+    const first = result.current;
+
+    rerender();
+
+    expect(result.current).toBe(first);
   });
 });

@@ -112,6 +112,7 @@ import {
   type StatusBarRateLimitCluster,
 } from "@/hooks/rate-limits/use-status-bar-rate-limit-segments";
 import type { RateLimitProfileSelection } from "@/hooks/rate-limits/use-rate-limit-profile-selection";
+import { SAMPLE_ACCOUNT_LABEL } from "@/components/sample-workspace/sample-workspace-scene";
 
 const PROFILE_SELECTION: RateLimitProfileSelection = {
   shownProfiles: {},
@@ -119,12 +120,13 @@ const PROFILE_SELECTION: RateLimitProfileSelection = {
 };
 
 function renderSegments(providers: ReadonlyArray<ConfiguredRateLimitProvider>) {
-  return renderSegmentsFor(providers, PROFILE_SELECTION);
+  return renderSegmentsFor(providers, PROFILE_SELECTION, false);
 }
 
 function renderSegmentsFor(
   providers: ReadonlyArray<ConfiguredRateLimitProvider>,
   profileSelection: RateLimitProfileSelection,
+  sample: boolean,
 ) {
   return renderHook(() => {
     // The batches describe ONE render. The hook samples the clock through
@@ -137,8 +139,16 @@ function renderSegmentsFor(
       profileSelection,
       mode: "live",
       editing: false,
+      sample,
     });
   });
+}
+
+function renderSampleSegments(
+  providers: ReadonlyArray<ConfiguredRateLimitProvider>,
+  profileSelection: RateLimitProfileSelection,
+) {
+  return renderSegmentsFor(providers, profileSelection, true);
 }
 
 function profileFixture(
@@ -797,10 +807,14 @@ describe("useStatusBarRateLimitSegments", () => {
       mocks.results.set("codex:", codexReading(10));
       mocks.results.set("codex:personal", codexReading(40));
 
-      const { result } = renderSegmentsFor([codexWithAccounts()], {
-        shownProfiles: { codex: [null, "work"] },
-        lastProfileByHarness: {},
-      });
+      const { result } = renderSegmentsFor(
+        [codexWithAccounts()],
+        {
+          shownProfiles: { codex: [null, "work"] },
+          lastProfileByHarness: {},
+        },
+        false,
+      );
 
       expect(segmentIdentities(result.current.cluster)).toEqual([
         ["codex", "work"],
@@ -836,19 +850,27 @@ describe("useStatusBarRateLimitSegments", () => {
     it("draws one last-used segment when nothing is checked, and skips a checked id that no longer exists", () => {
       mocks.results.set("codex:personal", codexReading(40));
 
-      const nothingChecked = renderSegmentsFor([codexWithAccounts()], {
-        shownProfiles: {},
-        lastProfileByHarness: { codex: "personal" },
-      });
+      const nothingChecked = renderSegmentsFor(
+        [codexWithAccounts()],
+        {
+          shownProfiles: {},
+          lastProfileByHarness: { codex: "personal" },
+        },
+        false,
+      );
       expect(segmentIdentities(nothingChecked.result.current.cluster)).toEqual([
         ["codex", "personal"],
       ]);
       nothingChecked.unmount();
 
-      const stale = renderSegmentsFor([codexWithAccounts()], {
-        shownProfiles: { codex: ["removed", "personal"] },
-        lastProfileByHarness: {},
-      });
+      const stale = renderSegmentsFor(
+        [codexWithAccounts()],
+        {
+          shownProfiles: { codex: ["removed", "personal"] },
+          lastProfileByHarness: {},
+        },
+        false,
+      );
       expect(segmentIdentities(stale.result.current.cluster)).toEqual([
         ["codex", "personal"],
       ]);
@@ -865,6 +887,7 @@ describe("useStatusBarRateLimitSegments", () => {
           }),
         ],
         { shownProfiles: { codex: ["work"] }, lastProfileByHarness: {} },
+        false,
       );
       const segments =
         result.current.cluster.kind === "segments"
@@ -905,10 +928,14 @@ describe("useStatusBarRateLimitSegments", () => {
       mocks.results.set("opencode:first", reading);
       mocks.results.set("opencode:second", reading);
 
-      const { result } = renderSegmentsFor([provider], {
-        shownProfiles: { opencode: ["first", "second"] },
-        lastProfileByHarness: {},
-      });
+      const { result } = renderSegmentsFor(
+        [provider],
+        {
+          shownProfiles: { opencode: ["first", "second"] },
+          lastProfileByHarness: {},
+        },
+        false,
+      );
 
       // The split happened: one target per http batch.
       expect(
@@ -941,6 +968,7 @@ describe("useStatusBarRateLimitSegments", () => {
             profileSelection: props.selection,
             mode: "live",
             editing: false,
+            sample: false,
           }),
         { initialProps: { selection: hostA } },
       );
@@ -1390,5 +1418,178 @@ describe("useStatusBarWindowedProviders", () => {
       "codex",
       "claude-code",
     ]);
+  });
+});
+
+describe("useStatusBarRateLimitSegments - sample scene", () => {
+  function claudeSegment(result: {
+    readonly current: { readonly cluster: StatusBarRateLimitCluster };
+  }) {
+    const cluster = result.current.cluster;
+    if (cluster.kind !== "segments") throw new Error(cluster.kind);
+    return cluster.segments[0];
+  }
+
+  function windowKeys(
+    windows: ReadonlyArray<{ readonly windowKey: string }>,
+  ): ReadonlyArray<string> {
+    return windows.map((window) => window.windowKey);
+  }
+
+  function claudeSelection(limitKeys: ReadonlyArray<string>): void {
+    useLayoutStore.getState().setArrangement({
+      ...useLayoutStore.getState().arrangement,
+      providerLimits: { "claude-code": { limitKeys } },
+    });
+  }
+
+  it("shows exactly the picked window when the selection names a weekly key", () => {
+    claudeSelection(["claude-code:sevenDay"]);
+
+    const { result } = renderSampleSegments(
+      [
+        configuredProvider({
+          providerId: "claude-code",
+          lane: "ephemeralProcess",
+        }),
+      ],
+      PROFILE_SELECTION,
+    );
+
+    expect(windowKeys(claudeSegment(result).shown)).toEqual([
+      "claude-code:sevenDay",
+    ]);
+  });
+
+  it("shows a two-window selection under the same window keys it picked", () => {
+    claudeSelection(["claude-code:fiveHour", "claude-code:sevenDayOpus"]);
+
+    const { result } = renderSampleSegments(
+      [
+        configuredProvider({
+          providerId: "claude-code",
+          lane: "ephemeralProcess",
+        }),
+      ],
+      PROFILE_SELECTION,
+    );
+
+    expect(windowKeys(claudeSegment(result).shown)).toEqual([
+      "claude-code:fiveHour",
+      "claude-code:sevenDayOpus",
+    ]);
+  });
+
+  it("falls back to the tightest sample window when the selection is Automatic", () => {
+    const { result } = renderSampleSegments(
+      [
+        configuredProvider({
+          providerId: "claude-code",
+          lane: "ephemeralProcess",
+        }),
+      ],
+      PROFILE_SELECTION,
+    );
+
+    const segment = claudeSegment(result);
+    expect(windowKeys(segment.shown)).toEqual([segment.tightest?.windowKey]);
+  });
+
+  it("relabels a real account to the sample label", () => {
+    const selection: RateLimitProfileSelection = {
+      shownProfiles: { codex: ["personal"] },
+      lastProfileByHarness: {},
+    };
+
+    const { result } = renderSampleSegments([codexWithAccounts()], selection);
+
+    const cluster = result.current.cluster;
+    if (cluster.kind !== "segments") throw new Error(cluster.kind);
+    expect(cluster.segments[0]?.profileId).toBe("personal");
+    expect(cluster.segments[0]?.account).toMatchObject({
+      profileId: "personal",
+      label: SAMPLE_ACCOUNT_LABEL,
+    });
+  });
+
+  it("draws no segment for a provider with no sample windows, never its real reading or account", () => {
+    setResult("antigravity", {
+      data: freshEnvelope({
+        provider: "antigravity",
+        available: true,
+        planName: "Google AI Pro",
+        groups: [
+          {
+            displayName: "Gemini Models",
+            description: null,
+            windows: [
+              {
+                usedPercent: 91,
+                resetsAt: Date.now() + 3_600_000,
+                durationMinutes: 300,
+                bucketId: "gemini-5h",
+                windowKind: "5h",
+              },
+            ],
+          },
+        ],
+      }),
+      isError: false,
+    });
+    const selection: RateLimitProfileSelection = {
+      shownProfiles: { antigravity: ["real-account"] },
+      lastProfileByHarness: {},
+    };
+
+    const { result } = renderSampleSegments(
+      [
+        configuredProvider({
+          providerId: "claude-code",
+          lane: "ephemeralProcess",
+        }),
+        configuredProvider({
+          providerId: "antigravity",
+          lane: "httpFetch",
+          profiles: [
+            profileFixture("ambient", "ambient"),
+            profileFixture("real-account", "managed"),
+          ],
+        }),
+      ],
+      selection,
+    );
+
+    expect(segmentIdentities(result.current.cluster)).toEqual([
+      ["claude-code", null],
+    ]);
+  });
+
+  it("reports live even when the query behind it is cold", () => {
+    const { result } = renderSampleSegments(
+      [
+        configuredProvider({
+          providerId: "claude-code",
+          lane: "ephemeralProcess",
+        }),
+      ],
+      PROFILE_SELECTION,
+    );
+
+    const segment = claudeSegment(result);
+    expect(segment.state).toBe("live");
+    expect(segment.reason).toBeNull();
+  });
+
+  it("leaves a cold provider cold when the sample scene is off", () => {
+    const { result } = renderSegments([
+      configuredProvider({
+        providerId: "claude-code",
+        lane: "ephemeralProcess",
+      }),
+    ]);
+
+    const segment = claudeSegment(result);
+    expect(segment.state).toBe("cold");
+    expect(segment.windows).toEqual([]);
   });
 });

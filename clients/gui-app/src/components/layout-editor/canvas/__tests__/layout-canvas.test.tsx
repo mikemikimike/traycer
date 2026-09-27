@@ -85,12 +85,52 @@ function RailCanvas(): ReactElement {
   );
 }
 
+/**
+ * A column with a region PART drawn BEFORE its registered node - the sample
+ * picker's footer (`data-layout-region-part`), which hovers and selects the
+ * region without being the node every lookup by name has to find.
+ */
+function PartCanvas(props: {
+  readonly regionId: RegionId;
+  readonly instanceId: string | null;
+  readonly testId: string;
+}): ReactElement {
+  const [column, setColumn] = useState<HTMLElement | null>(null);
+  useLayoutCanvas(column);
+  return (
+    <div ref={setColumn} data-layout-column data-testid="column">
+      <div data-layout-region-part={props.regionId} data-testid="part">
+        <span data-testid="part-inner">part</span>
+      </div>
+      <Region {...props} />
+    </div>
+  );
+}
+
+/**
+ * A column with a fixed-chrome cue - the Message queue's own boundary
+ * (`chat-lower-dock.tsx`) - and no region under it, the way the real dock
+ * frame draws it.
+ */
+function CueCanvas(): ReactElement {
+  const [column, setColumn] = useState<HTMLElement | null>(null);
+  useLayoutCanvas(column);
+  return (
+    <div ref={setColumn} data-layout-column data-testid="column">
+      <div data-layout-cue="Message queue · Always here" data-testid="queue">
+        <span data-testid="queue-inner">queue</span>
+      </div>
+    </div>
+  );
+}
+
 function openSession(): void {
   act(() => {
     useLayoutEditorStore.getState().beginSession({
       entry: "pointer",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
   });
 }
@@ -461,5 +501,85 @@ describe("the session's canvas", () => {
     });
 
     expect(ring()?.hidden).toBe(true);
+  });
+});
+
+/**
+ * A region PART (L-... the sample picker's footer): it hovers and selects the
+ * region it names, but every lookup by `data-layout-region` - and the ring and
+ * chip's own anchoring - still finds the REGISTERED node, not the part.
+ */
+describe("a region part (data-layout-region-part)", () => {
+  it("hovers and selects the region through the part", () => {
+    openSession();
+    const view = render(
+      <PartCanvas regionId="model" instanceId="tile-a" testId="model" />,
+    );
+
+    fireEvent.pointerMove(view.getByTestId("part-inner"), MOUSE);
+    expect(useLayoutEditorStore.getState().hovered).toBe("model");
+
+    fireEvent.pointerDown(view.getByTestId("part-inner"));
+    expect(useLayoutEditorStore.getState().selected).toBe("model");
+  });
+
+  it("leaves data-layout-region on the registered node alone - the part never carries it", () => {
+    openSession();
+    const view = render(
+      <PartCanvas regionId="model" instanceId="tile-a" testId="model" />,
+    );
+
+    expect(document.querySelector('[data-layout-region="model"]')).toBe(
+      view.getByTestId("model"),
+    );
+    expect(view.getByTestId("part").hasAttribute("data-layout-region")).toBe(
+      false,
+    );
+  });
+
+  it("anchors the hover chip and the selection ring to the registered node, not the part", async () => {
+    openSession();
+    const view = render(
+      <PartCanvas regionId="model" instanceId="tile-a" testId="model" />,
+    );
+    // The part sits at jsdom's default zero rect; only the registered node's
+    // box moves, so a chip or ring placed off the part would stay at zero.
+    movable(view.getByTestId("model"), new DOMRect(700, 120, 200, 30));
+
+    fireEvent.pointerMove(view.getByTestId("part-inner"), MOUSE);
+    expect(chip()?.style.left).not.toBe("0px");
+    expect(chip()?.style.left).not.toBe("");
+
+    fireEvent.pointerDown(view.getByTestId("part-inner"));
+    await flushFrame();
+    expect(ring()?.style.transform).toBe("translate(697.00px, 117.00px)");
+  });
+});
+
+/**
+ * Fixed chrome the canvas names without it being a setting (C4): the Message
+ * queue always sits above the composer and is never hidden, so it carries a
+ * `data-layout-cue` label rather than being a region a session could select.
+ */
+describe("the fixed-chrome cue", () => {
+  it("shows the hover chip with the cue's own label when no region is under the pointer", () => {
+    openSession();
+    const view = render(<CueCanvas />);
+
+    fireEvent.pointerMove(view.getByTestId("queue-inner"), MOUSE);
+
+    expect(useLayoutEditorStore.getState().hovered).toBeNull();
+    expect(chip()?.textContent).toBe("Message queue · Always here");
+    expect(chip()?.hidden).toBe(false);
+  });
+
+  it("selects nothing on a press over the cue", () => {
+    openSession();
+    const view = render(<CueCanvas />);
+
+    fireEvent.pointerMove(view.getByTestId("queue-inner"), MOUSE);
+    fireEvent.pointerDown(view.getByTestId("queue-inner"));
+
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
   });
 });

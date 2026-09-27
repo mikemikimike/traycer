@@ -95,12 +95,14 @@ import {
   KeyboardSensor,
   useSensor,
   useSensors,
+  type DragCancelEvent,
   type DragEndEvent,
   type DragMoveEvent,
   type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { snapCenterToCursor } from "@dnd-kit/modifiers";
+import { isKeyboardEvent } from "@dnd-kit/utilities";
 import type { Modifier } from "@dnd-kit/core";
 import { useNavigate, type UseNavigateResult } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
@@ -307,6 +309,30 @@ function grabPoint(activatorEvent: Event): PointLike {
 }
 
 /**
+ * Drop the focus a pointer drag's PRESS gave the dragged control.
+ *
+ * Chromium focuses a button on mousedown, so after a pointer drop the dragged
+ * rail icon or tab still holds focus. Nothing shows until the next keydown -
+ * any key, a lone Cmd or Shift included - which makes the focused element
+ * match `:focus-visible` and draws a keyboard ring on something the user only
+ * dragged. A keyboard drag is left alone: dnd-kit's `RestoreFocus` returns
+ * focus to the moved item, and it tests the activator with this same
+ * `isKeyboardEvent`, so the two cover exactly complementary gestures.
+ */
+function releasePointerDragFocus(activatorEvent: Event): void {
+  if (isKeyboardEvent(activatorEvent)) return;
+  const focused = document.activeElement;
+  const pressed = activatorEvent.target;
+  if (
+    focused instanceof HTMLElement &&
+    pressed instanceof Node &&
+    focused.contains(pressed)
+  ) {
+    focused.blur();
+  }
+}
+
+/**
  * Tile overlay: pointer-derived, and deliberately NOT clamped to any strip.
  *
  * The header clamps because it has exactly one strip and a tab cannot leave it.
@@ -417,12 +443,6 @@ function readOverRect(
   return event.over?.rect ?? null;
 }
 
-function findDroppableElement(id: string | number): Element | null {
-  return document.querySelector(
-    `[data-dnd-droppable-id="${CSS.escape(String(id))}"]`,
-  );
-}
-
 type DragUpdateEvent = DragMoveEvent | DragOverEvent | DragEndEvent;
 
 function compatibleCanvasTarget(
@@ -485,10 +505,6 @@ function updateCanvasSourcePreview(
     target,
     point: resolvedPoint,
     targetRect: readOverRect(event),
-    targetElement:
-      target.kind === "left-panel-body" && over !== null
-        ? findDroppableElement(over.id)
-        : null,
     activeRect: event.active.rect.current.translated ?? null,
   });
   if (isLeftPanelDropNoop(source, preview)) {
@@ -1491,6 +1507,7 @@ export function RootDndProvider(props: RootDndProviderProps) {
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      releasePointerDragFocus(event.activatorEvent);
       const source = readActiveDragSource(event.active);
       // Pointer-up can race the final collision update. Refresh first so an
       // explicit in-app target wins over the viewport-edge tear-off affordance
@@ -1605,12 +1622,16 @@ export function RootDndProvider(props: RootDndProviderProps) {
     ],
   );
 
-  const handleDragCancel = useCallback(() => {
-    // Cancel means cancel: undo the drag-start promotion so no state survives
-    // a gesture the user abandoned.
-    restorePromotedPreview();
-    endGesture();
-  }, [endGesture]);
+  const handleDragCancel = useCallback(
+    (event: DragCancelEvent) => {
+      // Cancel means cancel: undo the drag-start promotion so no state survives
+      // a gesture the user abandoned.
+      releasePointerDragFocus(event.activatorEvent);
+      restorePromotedPreview();
+      endGesture();
+    },
+    [endGesture],
+  );
 
   return (
     <DndContext

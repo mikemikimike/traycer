@@ -759,6 +759,7 @@ describe("<AppStatusBar /> right-click visibility menu", () => {
       entry: "pointer",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
     render(<AppStatusBar />);
 

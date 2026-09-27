@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   useArrangementValue,
+  useReadingWidthClass,
   useRegionShown,
   useRegionValue,
   useRegionValues,
@@ -10,7 +11,6 @@ import {
 } from "@/lib/layout-overrides";
 import { LayoutOverrideProvider } from "@/providers/layout-override-provider";
 import { PRESET_VALUES } from "@/lib/layout/layout-presets";
-import { persistKey, STORE_KEYS } from "@/lib/persist";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -245,64 +245,31 @@ describe("layout override seam", () => {
     });
   });
 
-  describe("the session-only preview tier (L-43, L-65)", () => {
-    it("shows the previewed preset's own density, delta and all", () => {
-      act(() => {
-        // A change the user made on top of their base preset. A preset card is
-        // a picture of that DENSITY, so the preview has to replace the delta
-        // as well as the base - otherwise the three cards differ by the user's
-        // own changes too (2.2).
-        useLayoutStore.getState().setRegionValues("model", { style: "bars" });
-      });
-
-      expect(readUnder(() => useRegionValue("model", "style"), bare)).toBe(
-        "bars",
-      );
+  describe("useReadingWidthClass", () => {
+    it("returns max-w-3xl by default and max-w-5xl when wide", () => {
+      expect(readUnder(() => useReadingWidthClass(), bare)).toBe("max-w-3xl");
 
       act(() => {
-        useLayoutEditorStore.getState().setPreviewPreset("compact");
+        useLayoutStore.getState().setArrangement({
+          ...useLayoutStore.getState().arrangement,
+          readingWidth: "wide",
+        });
       });
 
-      expect(readUnder(() => useRegionValue("model", "style"), bare)).toBe(
-        PRESET_VALUES.compact.model.style,
-      );
+      expect(readUnder(() => useReadingWidthClass(), bare)).toBe("max-w-5xl");
     });
 
-    it("writes nothing while it is set, and puts the real values back on leave", () => {
-      const before = useLayoutStore.getState();
-
-      act(() => {
-        useLayoutEditorStore.getState().setPreviewPreset("detailed");
-      });
-
-      // Not the store, not the history, not localStorage: the whole point of
-      // a tier above the seam rather than a write the leave has to undo.
-      expect(useLayoutStore.getState()).toBe(before);
-      expect(useLayoutEditorStore.getState().history.past).toHaveLength(0);
-      expect(
-        window.localStorage.getItem(persistKey(STORE_KEYS.layout)),
-      ).toBeNull();
-
-      act(() => {
-        useLayoutEditorStore.getState().setPreviewPreset(null);
-      });
-
-      expect(readUnder(() => useRegionValue("model", "style"), bare)).toBe(
-        PRESET_VALUES.default.model.style,
-      );
-    });
-
-    it("still lets a specimen override win, so the stage is not previewed away", () => {
-      act(() => {
-        useLayoutEditorStore.getState().setPreviewPreset("compact");
-      });
-
+    it("respects a LayoutOverrideProvider arrangement override", () => {
       expect(
         readUnder(
-          () => useRegionValue("model", "style"),
-          under({ values: { model: { style: "text" } } }),
+          () => useReadingWidthClass(),
+          under({ arrangement: { readingWidth: "wide" } }),
         ),
-      ).toBe("text");
+      ).toBe("max-w-5xl");
+      // The store is untouched: an override is a drawing, never a write.
+      expect(useLayoutStore.getState().arrangement.readingWidth).toBe(
+        "comfortable",
+      );
     });
   });
 });

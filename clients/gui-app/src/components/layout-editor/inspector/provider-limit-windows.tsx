@@ -59,6 +59,8 @@ function ReadLayoutUsage(props: {
     profileSelection,
     mode: "passive",
     editing: true,
+    // The Choose picker lists what the provider really reports.
+    sample: false,
   });
   return (
     <LayoutUsageContext

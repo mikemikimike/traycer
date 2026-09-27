@@ -1,31 +1,18 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Wrench } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
-import { cn } from "@/lib/utils";
 import {
-  anythingChanged,
-  changeCount,
-  resetEverything,
-  resetToBase,
-} from "@/lib/layout/layout-diff";
-import {
-  sideTabStripEdge,
-  statusBarHostsAnyRegion,
-  type EdgeSide,
-  type LayoutArrangement,
-} from "@/lib/layout/layout-arrangement";
-import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
-import {
-  LAYOUT_PRESET_IDS,
-  PRESET_VALUES,
-  type LayoutPresetId,
-} from "@/lib/layout/layout-presets";
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { toast } from "sonner";
+import { create } from "zustand";
+import { Check, ChevronRight, Wrench } from "lucide-react";
 import {
   type AppFrame,
-  AppFramePanelTaskHeader,
-  AppFrameLiveAgentItems,
   AppFrameComposerStack,
+  AppFrameLiveAgentItems,
+  AppFramePanelTaskHeader,
   AppFrameRailEntries,
   AppFrameRegion,
   AppFrameSideStrip,
@@ -36,310 +23,216 @@ import {
   SIDE_STRIP_DEFAULT_WIDTH_PX,
   SIDE_STRIP_RAIL_WIDTH_PX,
 } from "@/components/layout/tabs/side-strip/side-strip-tokens";
+import {
+  sideTabStripEdge,
+  statusBarHostsAnyRegion,
+  type EdgeSide,
+  type LayoutArrangement,
+} from "@/lib/layout/layout-arrangement";
 import { DEFAULT_SIDEBAR_WIDTH_PX } from "@/stores/epics/left-panel-store";
 import { useSideStripCollapsed } from "@/stores/layout/side-tab-strip-store";
-import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
-import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
-import { useSettingsStore } from "@/stores/settings/settings-store";
+import { Button } from "@/components/ui/button";
+import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
+import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import {
+  arrangementChangeLine,
+  styleChangeLines,
+  type LayoutChangeLine,
+} from "@/components/layout-editor/inspector/layout-change-lines";
+import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
+import { isMac } from "@/lib/keybindings/platform";
+import { cn } from "@/lib/utils";
+import {
+  layoutChanges,
+  layoutModified,
+  resetLayout,
+  resetWouldChange,
+  revertLayoutChange,
+  type LayoutChange,
+} from "@/lib/layout/layout-diff";
+import {
+  effectiveLayoutValues,
+  LAYOUT_PRESET_IDS,
+  PRESET_LABELS,
+  PRESET_VALUES,
+  type LayoutPresetId,
+} from "@/lib/layout/layout-presets";
+import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import {
+  getLayoutSnapshot,
   useLayoutSnapshot,
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 
-const PRESET_LABELS: Readonly<Record<LayoutPresetId, string>> = {
-  default: "Default",
-  compact: "Compact",
-  detailed: "Detailed",
+const PRESET_CAPTIONS: Readonly<Record<LayoutPresetId, string>> = {
+  default: "Full rows, standard readings.",
+  compact: "Chips, fewer readings.",
+  detailed: "Every reading shown.",
 };
 
-interface PresetsBlockProps {
-  /**
-   * Hover/arrow-focus preview without writing (L-43, L-44, L-65): `null`
-   * clears the preview. The docked inspector routes this into the editor
-   * store's session-only preview tier, which the override seam prefers while
-   * it is set; the full-width Settings host has no canvas to preview onto and
-   * passes a no-op.
-   */
-  readonly onPreviewPreset: (presetId: LayoutPresetId | null) => void;
+const PRESET_HELPER =
+  "Applying a preset replaces visibility and style choices. Placement, order and provider choices stay as they are. You can undo it.";
+
+/** One toast for every apply, so a second apply replaces the first's Undo. */
+const PRESET_TOAST_ID = "layout-preset-applied";
+
+/**
+ * Whether View changes is open. Shared by both hosts' blocks and the apply
+ * toast, whose View changes button opens it wherever the block is drawn.
+ */
+const useViewChangesOpen = create<{ readonly open: boolean }>(() => ({
+  open: false,
+}));
+
+function setViewChangesOpen(open: boolean): void {
+  useViewChangesOpen.setState({ open });
 }
 
 /**
- * The presets row (L-06, L-20): three faithful miniature cards, then the
- * status line ("Compact + N changes" and "Reset to Compact"). `.presets` /
- * `.statusline` in the prototype.
+ * The Presets block: one card per preset, the `<Preset> · Modified` status
+ * with its View changes list, and the helper saying what Apply keeps.
+ *
+ * `reveal` brings the block on screen, for the apply toast's View changes: the
+ * page picks its Presets area, the editor goes back to All settings.
  */
-export function PresetsBlock(props: PresetsBlockProps): ReactNode {
+export function PresetsBlock(props: {
+  readonly reveal: () => void;
+}): ReactNode {
+  const { reveal } = props;
   const snapshot = useLayoutSnapshot();
-  const basePreset = snapshot.basePreset;
-  const count = changeCount(snapshot);
-  const gutter = useSortableRowPadding();
-  const dock = useLayoutFormHost() === "inspector";
-
-  /**
-   * A preset click changes the DENSITY and nothing else (L-133).
-   *
-   * It used to clear the per-region delta as well, which made the card a
-   * second "Reset to <preset>" wearing a density's clothes - and on this
-   * page, where there is no Undo (L-108), an unrecoverable one. Keeping the
-   * overrides is what leaves "Reset to <preset>" beside it a distinct action
-   * with something of its own to do, and the count next to it stays truthful
-   * because it is measured by DIFFERENCE against whichever base is current.
-   */
-  function commitPreset(presetId: LayoutPresetId): void {
-    props.onPreviewPreset(null);
-    useLayoutEditorStore.getState().recordGesture(() => {
-      useLayoutStore.getState().setBasePreset(presetId);
-    });
-  }
+  const modified = layoutModified(snapshot);
+  const page = useLayoutFormHost() === "page";
+  const open = useViewChangesOpen((state) => state.open) && modified;
+  const listId = useId();
 
   return (
-    <div className="flex flex-col">
-      <div className={gutter.row}>
-        {/* Capped rather than fluid, which is the one place on this page a
-          width cap is the right answer: a card is a PICTURE of a window, and
-          at full page width the three were ~470px each of mostly empty dark
-          frame immediately under the page title - the largest object on a page
-          whose subject is the list below it (P-2). `max-w-md` rather than
-          `max-w-xl` (L-124): at 215px the thumbnails were already unreadable
-          and the three differ only by density, so the LABEL is what identifies
-          them and a smaller card reads as a chooser instead of a gallery. The
-          cap never binds in the 320px dock, so the two hosts still draw the
-          same card. */}
-        <div className="mx-auto grid w-full max-w-md grid-cols-3 gap-1.5">
-          {LAYOUT_PRESET_IDS.map((presetId, index) => (
-            <PresetCard
-              key={presetId}
-              presetId={presetId}
-              arrangement={snapshot.arrangement}
-              on={basePreset === presetId}
-              onCommit={() => {
-                commitPreset(presetId);
-              }}
-              onPreview={() => {
-                props.onPreviewPreset(presetId);
-              }}
-              onClearPreview={() => {
-                props.onPreviewPreset(null);
-              }}
-              onArrowMove={(direction) => {
-                const next =
-                  LAYOUT_PRESET_IDS[
-                    Math.min(
-                      Math.max(index + direction, 0),
-                      LAYOUT_PRESET_IDS.length - 1,
-                    )
-                  ];
-                document.getElementById(`layout-preset-${next}`)?.focus();
-              }}
-            />
-          ))}
-        </div>
-      </div>
-      {/* The card's own row, in the row shape every other line on this page
-        uses (L-127): the state on the left with the same `bg-info` dot the
-        rows carry, the caption as its description, the benign counterpart
-        action on the right. It is hand-built rather than an `InspectorRow`
-        because the label is COMPOSITE - a preset name, a dot and a count -
-        and that row takes a string. The gutter is the shared one, so the line
-        sits in the same column as the rows of every other card. */}
+    <div data-testid="layout-presets-block" className="flex flex-col">
+      {/* One row of three equal columns across the full width, in both hosts. */}
       <div
         className={cn(
-          "flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-border/40",
-          gutter.row,
+          "grid w-full grid-cols-3",
+          page ? "gap-2 p-4" : "gap-1.5 px-3.5 py-3",
         )}
       >
-        <div className="min-w-32 flex-1">
-          <div className="flex items-center gap-1.5">
-            {count > 0 ? (
-              <span
-                aria-hidden
-                data-testid="preset-changed-dot"
-                className="size-1.5 shrink-0 rounded-full bg-info"
-              />
-            ) : null}
-            {/* `truncate`: the button beside it takes ~120px of a 292px row,
-              so any count at all wrapped the label onto a second line
-              (I-13). */}
-            <span
-              data-testid="preset-status-line"
-              className="min-w-0 truncate font-medium text-foreground"
-            >
-              {PRESET_LABELS[basePreset]}
-              {count > 0
-                ? ` + ${count} ${count === 1 ? "change" : "changes"}`
-                : ""}
-            </span>
-          </div>
-          <p className="mt-0.5 max-w-[72ch] text-pretty text-ui-sm text-muted-foreground">
-            Presets change how much is shown, not where things are.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {count > 0 ? (
-            <Button
-              type="button"
-              variant="muted"
-              size="sm"
-              onClick={() => {
-                useLayoutEditorStore.getState().recordGesture(() => {
-                  useLayoutStore.getState().replaceAll(resetToBase(snapshot));
-                });
-              }}
-            >
-              Reset to {PRESET_LABELS[basePreset]}
-            </Button>
-          ) : null}
-          {/* The floor is beside the preset it resets past only where it is
-            REVERSIBLE (L-20's placement, redesign 4.4). On the page it is the
-            one irreversible action there is, so it leaves this card for a
-            `tone="danger"` card at the foot; the page renders its own. */}
-          {dock ? <ResetEverythingButton snapshot={snapshot} /> : null}
-        </div>
+        {LAYOUT_PRESET_IDS.map((presetId) => (
+          <PresetCard
+            key={presetId}
+            presetId={presetId}
+            arrangement={snapshot.arrangement}
+            last={snapshot.basePreset === presetId}
+            onApply={() => {
+              applyPreset(presetId, reveal);
+            }}
+          />
+        ))}
       </div>
-    </div>
-  );
-}
-
-/**
- * The floor under everything else (L-20): the preset, every value AND the whole
- * arrangement back to what shipped.
- *
- * It exists here rather than only on the page because both hosts need the same
- * floor, but the page is why it had to be built: with no session there is no
- * Undo, no Discard and no Cmd+Z (P-6), "Reset to Default" is values-only by
- * construction (L-57), and three arrangement fields had no revert anywhere at
- * all.
- *
- * **The confirm belongs to the page and to nothing else (R1-07).** A modal
- * that says "this cannot be undone here" is true on Settings and false in the
- * docked inspector, where the write goes through `recordGesture` and Cmd+Z,
- * the Undo button and Discard all put it back. A user inside a live session
- * was being told their whole layout was about to be destroyed irreversibly,
- * and backing out of a reversible action; the inspector's own safety net is
- * the one the rest of its gestures already rely on, so the gesture applies
- * there and the sentence stays true where it is shown.
- *
- * Exported because the two hosts now PLACE it differently (redesign 4.4): the
- * dock keeps it on the presets card, beside the preset it resets past, where
- * Undo is one keystroke away; the page draws it in a `tone="danger"` card at
- * the foot of the page, which is where the house puts its one irreversible
- * action. Placement is composition, which is the only kind of difference the
- * two hosts are allowed (L-03, L-16).
- */
-export function ResetEverythingButton(props: {
-  readonly snapshot: LayoutSnapshot;
-}): ReactNode {
-  const { snapshot } = props;
-  const irreversible = useLayoutFormHost() === "page";
-  const [confirming, setConfirming] = useState(false);
-  const taskTabLayout = useSettingsStore((state) => state.taskTabLayout);
-  const changed =
-    anythingChanged(snapshot) || (irreversible && taskTabLayout !== "scroll");
-  // In the dock this is one control on a crowded instrument line, so an
-  // inoperable one is noise and it stands down. On the page it is a card of
-  // its own, and a card that vanishes takes the floor's existence with it:
-  // showing the floor and saying you are standing on it is clearer (5.8).
-  if (!changed && !irreversible) return null;
-  function reset(): void {
-    if (irreversible) useSettingsStore.getState().setTaskTabLayout("scroll");
-    useLayoutEditorStore.getState().recordGesture(() => {
-      useLayoutStore.getState().replaceAll(resetEverything(snapshot));
-    });
-  }
-  return (
-    <>
-      <Button
-        type="button"
-        variant={irreversible ? "destructive" : "muted"}
-        size="sm"
-        disabled={!changed}
-        onClick={() => {
-          if (irreversible) {
-            setConfirming(true);
-            return;
-          }
-          reset();
-        }}
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 border-t border-border/40",
+          page ? "px-4 py-2.5" : "px-3.5 py-2",
+        )}
       >
-        Reset everything
-      </Button>
-      {irreversible ? (
-        <ConfirmDestructiveDialog
-          open={confirming}
-          onOpenChange={setConfirming}
-          title="Reset the whole layout?"
-          description="Every setting, and where everything sits, go back to how the app shipped. This cannot be undone here."
-          cascadeSummary={null}
-          actionLabel="Reset everything"
-          isPending={false}
-          blockedReason={null}
-          onConfirm={() => {
-            setConfirming(false);
-            reset();
-          }}
-        />
-      ) : null}
-    </>
+        <span className="flex min-w-0 items-center gap-2 text-ui-sm font-medium">
+          {modified ? (
+            <span
+              aria-hidden
+              data-testid="changed-dot"
+              className="size-1.5 shrink-0 rounded-full bg-info"
+            />
+          ) : null}
+          <span data-testid="preset-status-line" className="truncate">
+            {PRESET_LABELS[snapshot.basePreset]}
+            {modified ? " · Modified" : ""}
+          </span>
+        </span>
+        {modified ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            aria-expanded={open}
+            aria-controls={listId}
+            onClick={() => {
+              setViewChangesOpen(!open);
+            }}
+          >
+            {open ? "Hide changes" : "View changes"}
+            <ChevronRight
+              aria-hidden
+              data-icon="inline-end"
+              className={cn("transition-transform", open && "rotate-90")}
+            />
+          </Button>
+        ) : null}
+      </div>
+      {open ? <ChangeList id={listId} snapshot={snapshot} /> : null}
+      <p
+        className={cn(
+          "border-t border-border/40 text-pretty text-ui-xs text-muted-foreground",
+          page ? "px-4 py-2.5" : "px-3.5 py-2",
+        )}
+      >
+        {PRESET_HELPER}
+      </p>
+    </div>
   );
 }
 
 function PresetCard(props: {
   readonly presetId: LayoutPresetId;
   readonly arrangement: LayoutArrangement;
-  readonly on: boolean;
-  readonly onCommit: () => void;
-  readonly onPreview: () => void;
-  readonly onClearPreview: () => void;
-  readonly onArrowMove: (direction: 1 | -1) => void;
+  readonly last: boolean;
+  readonly onApply: () => void;
 }): ReactNode {
-  const { presetId, arrangement, on } = props;
+  const { presetId, arrangement, last, onApply } = props;
+  const captionId = useId();
+  const name = PRESET_LABELS[presetId];
   return (
     // A `<div role="button">`, not a native `<button>`: the miniature draws
-    // the region's own real depiction (`PresetMiniature`, below), and a few
-    // regions (`runningAgents` among them) depict as a genuinely interactive
-    // component with its own `<button>` - nesting that inside a native
-    // button is invalid HTML and reads as two overlapping controls. The
-    // miniature is `inert`, so nothing inside it is focusable, hit-testable
-    // or in the a11y tree; this card is the one control.
+    // real depictions, a few of which render their own `<button>`, and a
+    // button inside a button is invalid HTML. The miniature is `inert`, so
+    // this card is the one control.
     <div
-      id={`layout-preset-${presetId}`}
       role="button"
       tabIndex={0}
-      aria-pressed={on}
-      aria-label={`${PRESET_LABELS[presetId]} preset`}
-      className={cn(
-        "flex flex-col items-stretch gap-1.5 rounded-lg border border-border bg-card p-1 pb-1.5 transition-colors active:press-scrim",
-        on && "border-foreground",
-      )}
-      onClick={props.onCommit}
-      onMouseEnter={props.onPreview}
-      onMouseLeave={props.onClearPreview}
-      onFocus={() => {
-        if (useLayoutEditorStore.getState().keyboardNav) props.onPreview();
-      }}
-      onBlur={props.onClearPreview}
+      data-preset={presetId}
+      aria-label={`Apply ${name}`}
+      aria-describedby={captionId}
+      aria-current={last ? "true" : undefined}
+      onClick={onApply}
       onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          props.onCommit();
-          return;
-        }
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
-        useLayoutEditorStore.getState().setKeyboardNav(true);
-        props.onArrowMove(event.key === "ArrowRight" ? 1 : -1);
+        onApply();
       }}
+      className={cn(
+        "relative flex min-w-0 cursor-default flex-col gap-1.5 rounded-lg border border-border p-1 pb-2 text-left transition-colors duration-100 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        last && "border-foreground/60 bg-foreground/5",
+      )}
     >
-      <span className="text-micro text-muted-foreground uppercase">Sample</span>
       <PresetMiniature presetId={presetId} arrangement={arrangement} />
-      <span
-        className={cn(
-          "text-center text-ui-xs text-muted-foreground",
-          on && "text-foreground",
-        )}
-      >
-        {PRESET_LABELS[presetId]}
+      {/* On the picture's corner, so the name keeps the card's whole width
+        in the 380px dock. */}
+      {last ? (
+        <span
+          aria-hidden
+          data-testid="preset-applied-check"
+          className="absolute top-2 right-2 flex size-4 items-center justify-center rounded-full bg-foreground text-background"
+        >
+          <Check className="size-3" strokeWidth={3} />
+        </span>
+      ) : null}
+      <span className="flex min-w-0 flex-col gap-0.5 px-1">
+        <span className="truncate text-ui-sm font-medium text-foreground">
+          {name}
+        </span>
+        <span
+          id={captionId}
+          className="text-pretty text-ui-xs text-muted-foreground"
+        >
+          {PRESET_CAPTIONS[presetId]}
+        </span>
       </span>
     </div>
   );
@@ -348,25 +241,17 @@ function PresetCard(props: {
 const MINIATURE_FRAME_WIDTH = 1000;
 const MINIATURE_FRAME_HEIGHT = 620;
 /**
- * The ratio a card in the 320px dock lands on, which is the frame's scale
- * until the box has been measured - the prototype's `transform: scale(.08)`,
- * "corrected to the exact ratio on the next frame".
- *
- * Seeded rather than left at 0 because a box that measures zero at layout time
- * - inside a collapsed group, a hidden tab, a container that has not laid out
- * - never measures again, and a frame at `scale(0)` is an empty card (I-18).
+ * The ratio a card in the 380px dock lands on, used until the box has been
+ * measured. Seeded rather than 0 because a box that measures zero at layout
+ * time (a collapsed group, a hidden tab) never measures again, and a frame at
+ * `scale(0)` is an empty card.
  */
-const MINIATURE_SEED_SCALE = 0.081;
+const MINIATURE_SEED_SCALE = 0.103;
 
 /**
- * A few turns of a conversation, as the transcript draws them.
- *
- * Inert static markup with no depictions of its own: the card is what makes a
- * preset legible, and at this scale what carries that is the SHAPE of a page
- * of chat - user bubbles against the right, assistant paragraphs running the
- * column's width, a tool line between them. The three cards mount ~30
- * `HostContextFrame`s between them already, and each one costs a
- * `ResizeObserver` and a layout read (G1-21), so nothing here is a region.
+ * A few turns of a conversation, as inert static markup: at this scale what
+ * makes a preset legible is the SHAPE of a page of chat, and nothing here is
+ * a region, so it costs no host frame or observer.
  */
 const MINIATURE_TRANSCRIPT: ReadonlyArray<{
   readonly id: string;
@@ -374,11 +259,7 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
   readonly text: string;
 }> = [
   { id: "u1", kind: "user", text: "Make the task list easier to scan." },
-  {
-    id: "t1",
-    kind: "tool",
-    text: "Read src/task-list.tsx",
-  },
+  { id: "t1", kind: "tool", text: "Read src/task-list.tsx" },
   {
     id: "a1",
     kind: "assistant",
@@ -397,41 +278,13 @@ const MINIATURE_TRANSCRIPT: ReadonlyArray<{
 ];
 
 /**
- * A faithful, uniformly-scaled miniature of the real app frame (L-43, L-62):
- * the preset's own values, drawn with the SAME `depictRegion` the specimen
- * stage and the canvas use, under the CURRENT arrangement (2.2) - never a
- * reflowed or hand-drawn lookalike.
- *
- * The frame it is drawn into is the app's own shell: the ground, a top bar or
- * a side strip on it where the stored placement puts the tabs (S-03), and the
- * task surface edge to edge - a task's panel (its rail across the top, its
- * header, its agents) on the stored sidebar side and the bordered epic canvas
- * (a transcript with a few turns in it, the dock the preset produces, a
- * composer box) - then the status strip. The strip is the user's own: the
- * 60px rail while it is collapsed, its active task joined to the surface as
- * the live one is, and its live agents listed in the Activity view. That part
- * is inert static markup, and it is there because a card that was 60% empty
- * `bg-card` read as a near-black rectangle in every dark preset, where
- * `--card` and `--background` are the same colour (I-03). Everything in it
- * that is not this card's own placement comes from `app-frame-chrome.tsx`,
- * which the page's specimens draw from too, so the two pictures cannot
- * disagree about the app (R1-04).
- *
- * Platform-neutral: the real frame draws a slim title band above a vertical
- * strip on Windows, on Linux, and on macOS with the strip at the right
- * (S-04); the miniature draws none, on any platform, which is not drift for
- * ticket 12's live-vs-picture pass to report.
- *
- * Everything the arrangement decides is honoured, because the card's whole
- * claim is that it is a picture of the user's own frame under that density:
- * a chip-sized dock row draws as a chip in the compact strip rather than as a
- * full row, each bar reading sits in whichever bar it names (L-156), the
- * resource readout and the minimap take the sides they are on, and the rail is
- * the real rail with its real dividers. The three cards then differ by density
- * and by nothing else, which is what makes them comparable.
+ * A uniformly scaled miniature of the real app frame: the preset's own
+ * values, drawn with the same `depictRegion` the canvas uses, under the
+ * CURRENT arrangement, so the three cards differ by density and nothing else.
+ * The frame around the regions comes from `app-frame-chrome.tsx`.
  *
  * `inert`: several depictions render a real `<button>`, and `aria-hidden`
- * would have left every one of them in the tab order at 1/12 scale (G1-06).
+ * would leave them in the tab order at 1/12 scale.
  */
 function PresetMiniature(props: {
   readonly presetId: LayoutPresetId;
@@ -446,8 +299,7 @@ function PresetMiniature(props: {
     const box = boxRef.current;
     if (box === null) return;
     const update = () => {
-      // A width of 0 is "not laid out", not "this card is zero wide": taking
-      // it would replace the seed with a scale that draws nothing (I-18).
+      // A width of 0 is "not laid out", not a zero-wide card.
       const width = box.clientWidth;
       if (width === 0) return;
       setScale(width / MINIATURE_FRAME_WIDTH);
@@ -464,10 +316,8 @@ function PresetMiniature(props: {
   const edge = sideTabStripEdge(arrangement.tabStripPlacement);
 
   const panel = <MiniaturePanel {...frame} />;
-  // The live canvas border, less any side that lies on the surface's seam
-  // line (the picture has no status row between the header and the canvas)
-  // and less the bottom, which the status strip below always draws its own
-  // top border against (mirrors `CanvasColumn`'s live suppression).
+  // The live canvas border, less any side on the surface's seam line and less
+  // the bottom, which the status strip draws its own border against.
   const sideSeam = edge === arrangement.sidebarSide ? null : edge;
   const content = (
     <div
@@ -514,10 +364,7 @@ function PresetMiniature(props: {
         {edge === null ? <MiniatureTopBar {...frame} /> : null}
         <div className="flex min-h-0 flex-1">
           {edge === "left" ? strip : null}
-          {/* The shell's own surface frame, edge to edge: only the epic
-              canvas inside it draws a border. */}
           <div
-            data-testid="preset-miniature-surface"
             data-tab-edge={edge ?? "top"}
             className="task-surface-frame flex min-h-0 min-w-0 flex-1"
           >
@@ -550,10 +397,7 @@ function MiniatureTopBar({ values, arrangement }: AppFrame): ReactNode {
   );
 }
 
-/**
- * The vertical strip on the ground, at its real width (the rail's while it is
- * collapsed), scaled with everything else here.
- */
+/** The vertical strip at its real width (the rail's while collapsed). */
 function MiniatureSideStrip({
   values,
   arrangement,
@@ -595,8 +439,6 @@ function MiniatureChatArea({ values, arrangement }: AppFrame): ReactNode {
   return (
     <div className="flex min-h-0 flex-1 border-b border-border">
       {side === "left" ? minimap : null}
-      {/* Clipped rather than scrolled, exactly as the real transcript's top is
-        off-screen: the card is a window onto a conversation in progress. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden px-6 pt-5">
         {MINIATURE_TRANSCRIPT.map((message) => (
           <MiniatureMessage key={message.id} kind={message.kind}>
@@ -648,13 +490,7 @@ function MiniatureComposerFoot({ values, arrangement }: AppFrame): ReactNode {
   );
 }
 
-/**
- * The status strip, or nothing at all: the strip is drawn for as long as
- * either reading is still in it (L-51, L-156).
- *
- * The bar's BOX is this card's; what is in it and in what order is the frame
- * chrome's one copy (R2-02).
- */
+/** The status strip, drawn only while a reading is still in it. */
 function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
   if (!statusBarHostsAnyRegion(arrangement)) return null;
   return (
@@ -665,9 +501,8 @@ function MiniatureStatusBar({ values, arrangement }: AppFrame): ReactNode {
 }
 
 /**
- * The task's panel pane at its default width: the rail across its top as the
- * expanded panel draws it, holding the frame chrome's entries (L-155), the
- * task header (D12), and the Agents tree.
+ * The task's panel at its default width: the rail across its top, the task
+ * header and the Agents tree.
  */
 function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
   return (
@@ -675,13 +510,7 @@ function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
       className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-(--sidebar)"
       style={{ width: DEFAULT_SIDEBAR_WIDTH_PX }}
     >
-      {/* Each rail picture comes in the vertical rail's 48px column frame
-          (`HOST_CONTEXT_CLASS.rail`); across the panel's top it hugs its
-          icon instead, as the horizontal rail's tiles do. */}
-      <div
-        data-testid="preset-miniature-rail"
-        className="flex h-10 w-full min-w-0 shrink-0 flex-row items-center justify-center-safe gap-1 overflow-hidden px-2 [&_[data-layout-depiction=rail]]:w-auto [&_[data-layout-depiction=rail]]:py-0"
-      >
+      <div className="flex h-10 w-full min-w-0 shrink-0 flex-row items-center justify-center-safe gap-1 overflow-hidden px-2 [&_[data-layout-depiction=rail]]:w-auto [&_[data-layout-depiction=rail]]:py-0">
         <AppFrameRailEntries values={values} arrangement={arrangement} />
       </div>
       <AppFramePanelTaskHeader />
@@ -691,3 +520,247 @@ function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
     </div>
   );
 }
+
+/**
+ * Everything that differs, grouped the way the status reads it: Styles
+ * against the last-applied preset, Arrangement against what shipped. Each
+ * line has its own revert.
+ */
+function ChangeList(props: {
+  readonly id: string;
+  readonly snapshot: LayoutSnapshot;
+}): ReactNode {
+  const { id, snapshot } = props;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const changes = layoutChanges(snapshot);
+  const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
+  const styles = styleChangeLines(changes.styles, snapshot, values);
+  const arrangement = changes.arrangement.map(arrangementChangeLine);
+  const keys = [...styles, ...arrangement].map((line) => line.key);
+  // A line's ↺ takes its line with it, and a focused button that unmounts
+  // drops focus to the page. Focus moves first, to the next line's ↺, the
+  // previous one's for the last line, or - the list emptying means every value
+  // is the applied preset's again, and Modified and View changes go with it -
+  // that preset's card, the one control of the block that is sure to stay.
+  const revertLine = (line: LayoutChangeLine): void => {
+    const index = keys.indexOf(line.key);
+    // `at` rather than an index, which types the ends as absent; `index > 0`
+    // because `at(-1)` would wrap round to the last line.
+    const neighbour =
+      keys.at(index + 1) ?? (index > 0 ? keys.at(index - 1) : undefined);
+    const list = listRef.current;
+    const target =
+      neighbour === undefined
+        ? list
+            ?.closest("[data-testid='layout-presets-block']")
+            ?.querySelector<HTMLElement>("[data-preset][aria-current='true']")
+        : // Matched on the dataset rather than a selector: a line key is
+          // free text, and a selector would need escaping for it.
+          [...(list?.querySelectorAll<HTMLElement>("[data-change-line]") ?? [])]
+            .find((node) => node.dataset.changeLine === neighbour)
+            ?.querySelector<HTMLElement>("button");
+    target?.focus();
+    // An emptied list closes, so the next change starts it closed again
+    // rather than reopening a list nobody asked to see.
+    if (neighbour === undefined) setViewChangesOpen(false);
+    revertChanges(line.changes);
+  };
+  return (
+    <div
+      ref={listRef}
+      id={id}
+      data-testid="layout-change-list"
+      className="border-t border-border/40"
+    >
+      <ChangeGroup title="Styles" lines={styles} onRevert={revertLine} />
+      <ChangeGroup
+        title="Arrangement"
+        lines={arrangement}
+        onRevert={revertLine}
+      />
+    </div>
+  );
+}
+
+function ChangeGroup(props: {
+  readonly title: string;
+  readonly lines: ReadonlyArray<LayoutChangeLine>;
+  readonly onRevert: (line: LayoutChangeLine) => void;
+}): ReactNode {
+  const { title, lines, onRevert } = props;
+  const page = useLayoutFormHost() === "page";
+  const gutter = page ? "px-4" : "px-3.5";
+  if (lines.length === 0) return null;
+  return (
+    <section aria-label={title}>
+      <h4
+        className={cn(
+          "pt-2.5 pb-1 text-ui-xs font-medium text-muted-foreground",
+          gutter,
+        )}
+      >
+        {title}
+      </h4>
+      <ul>
+        {lines.map((line) => (
+          <li
+            key={line.key}
+            data-change-line={line.key}
+            className={cn(
+              "flex items-center gap-2 border-t border-border/40 py-1.5",
+              gutter,
+            )}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-ui-sm">{line.label}</span>
+              <span className="block truncate text-ui-xs text-muted-foreground">
+                {line.baseline}
+              </span>
+            </span>
+            <span className="shrink-0 text-ui-sm">{line.current}</span>
+            <span className="flex size-6 shrink-0 items-center justify-center">
+              <RevertButton
+                label={`Revert ${line.label}`}
+                onRevert={() => {
+                  onRevert(line);
+                }}
+              />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** One line's changes put back as one step. */
+function revertChanges(changes: ReadonlyArray<LayoutChange>): void {
+  useLayoutEditorStore.getState().recordGesture(() => {
+    useLayoutStore
+      .getState()
+      .replaceAll(
+        changes.reduce(
+          (snapshot, change) => revertLayoutChange(snapshot, change),
+          getLayoutSnapshot(),
+        ),
+      );
+  });
+}
+
+/**
+ * Applies a preset as one step, then offers Undo and View changes.
+ *
+ * Undo puts back the values alone: an apply never touches the arrangement, so
+ * an arrangement change made after it survives the Undo. The toast is only
+ * good while the values are still the ones the apply wrote: any later change
+ * to them - an edit, an editor Undo or Discard, a reset - dismisses it, so its
+ * Undo can never bring back values that were meant to be gone.
+ */
+function applyPreset(presetId: LayoutPresetId, reveal: () => void): void {
+  const before = getLayoutSnapshot();
+  useLayoutEditorStore.getState().recordGesture(() => {
+    useLayoutStore.getState().applyPreset(presetId);
+  });
+  const applied = getLayoutSnapshot();
+  if (sameValues(before, applied)) return;
+  stopWatchingPresetToast();
+  const stopWatching = useLayoutStore.subscribe(() => {
+    if (!sameValues(getLayoutSnapshot(), applied)) {
+      stopWatchingPresetToast();
+      toast.dismiss(PRESET_TOAST_ID);
+    }
+  });
+  presetToastWatch = stopWatching;
+  toast(`${PRESET_LABELS[presetId]} applied. Placement and order kept.`, {
+    id: PRESET_TOAST_ID,
+    onAutoClose: stopWatchingPresetToast,
+    onDismiss: stopWatchingPresetToast,
+    action: {
+      label: "Undo",
+      onClick: () => {
+        stopWatchingPresetToast();
+        if (!sameValues(getLayoutSnapshot(), applied)) return;
+        useLayoutEditorStore.getState().recordGesture(() => {
+          useLayoutStore.getState().replaceAll({
+            ...getLayoutSnapshot(),
+            basePreset: before.basePreset,
+            overrides: before.overrides,
+          });
+        });
+      },
+    },
+    cancel: {
+      label: "View changes",
+      onClick: () => {
+        reveal();
+        setViewChangesOpen(true);
+      },
+    },
+  });
+}
+
+/** The watch that keeps the one preset toast honest, while it is up. */
+let presetToastWatch: (() => void) | null = null;
+
+function stopWatchingPresetToast(): void {
+  presetToastWatch?.();
+  presetToastWatch = null;
+}
+
+/** Whether two snapshots hold the same preset and values. */
+function sameValues(left: LayoutSnapshot, right: LayoutSnapshot): boolean {
+  return (
+    left.basePreset === right.basePreset &&
+    JSON.stringify(left.overrides) === JSON.stringify(right.overrides)
+  );
+}
+
+/**
+ * `Reset layout…`: every value and the whole arrangement back to what shipped,
+ * behind the same confirm in both hosts. In the editor it is one undo step.
+ */
+export function ResetLayoutButton(): ReactNode {
+  const snapshot = useLayoutSnapshot();
+  const editor = useLayoutFormHost() === "inspector";
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        disabled={!resetWouldChange(snapshot)}
+        onClick={() => {
+          setConfirming(true);
+        }}
+      >
+        Reset layout…
+      </Button>
+      <ConfirmDestructiveDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Reset layout?"
+        description={
+          editor
+            ? `${RESET_LAYOUT_DESCRIPTION} In the editor you can undo this with ${isMac() ? "⌘Z" : "Ctrl+Z"}.`
+            : RESET_LAYOUT_DESCRIPTION
+        }
+        cascadeSummary={null}
+        actionLabel="Reset layout"
+        isPending={false}
+        blockedReason={null}
+        onConfirm={() => {
+          setConfirming(false);
+          useLayoutEditorStore.getState().recordGesture(() => {
+            useLayoutStore
+              .getState()
+              .replaceAll(resetLayout(getLayoutSnapshot()));
+          });
+        }}
+      />
+    </>
+  );
+}
+
+const RESET_LAYOUT_DESCRIPTION =
+  "Every setting, and where everything sits, goes back to how the app shipped. This includes panel order, stacks, dividers, provider choices and the pinned breakdown.";

@@ -54,7 +54,7 @@ export const SIDE_TAB_ROW_CLASS = "h-8 rounded-lg px-2 gap-2";
 export const SIDE_TAB_LEADING_CLASS = "size-4 me-2";
 /**
  * The leading slot when it holds a tile, by tile kind. An icon keeps the 16px
- * slot, so Home's glyph stands where Inbox's and All tasks' do. A monogram
+ * slot, so Home's glyph stands where Notifications' and All tasks' do. A monogram
  * takes 20px of the same 24px, the rail chip's shape (26x22) at row size, so
  * two letters stand clear of its edges; its badge then sits flush beside it,
  * its ring ending where the title starts.
@@ -189,7 +189,7 @@ export const SIDE_STRIP_FOOT_CLASS = "gap-2 p-2";
 /** A group header's member count. */
 export const SIDE_TAB_GROUP_COUNT_CLASS = "text-ui-xs tabular-nums";
 /**
- * A nav control's collapsed form - the expand toggle, Inbox, All tasks, New
+ * A nav control's collapsed form - the expand toggle, Notifications, All tasks, New
  * Task and the avatar: a 32px icon tile (D6), on the rail's axis. The rail's
  * nav tiles stand 4px apart.
  */
@@ -203,7 +203,7 @@ export const SIDE_STRIP_RAIL_NAV_CLASS = "flex flex-col items-center gap-1";
  */
 export const SIDE_STRIP_RAIL_DIVIDER_CLASS = "my-2 h-px w-6 bg-foreground/15";
 /**
- * The collapsed Inbox tile's marks, both cut out of the strip's ground and
+ * The collapsed Notifications tile's marks, both cut out of the strip's ground and
  * seated on the 16px glyph's top-right corner as a task tile's badge sits on
  * its chip's: centred 1px out from that corner, at (25, 7) in the 32px tile.
  * The needs-you count is a 16px pill, the status-unavailable dot 8px.

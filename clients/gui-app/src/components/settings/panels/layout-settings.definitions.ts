@@ -33,7 +33,8 @@ export const LAYOUT = defineSettingsSection("layout", {
   page: {
     availableWhen: alwaysAvailable,
     label: "Layout",
-    description: "Where the app's chrome sits and how much of it shows.",
+    description:
+      "Where the app's chrome sits and how much of it shows. Changes apply right away.",
     keywords: [
       "chrome",
       "customize",
@@ -71,8 +72,8 @@ export const LAYOUT = defineSettingsSection("layout", {
       "visual",
     ],
   },
-  // First on the page: the coarsest control here, and the one every section
-  // below is measured against ("Compact + 3 changes").
+  // First on the page: the coarsest control here, and the one every section's
+  // values are measured against ("Compact · Modified").
   presets: {
     kind: "group",
     search: { anchor: "layout-presets" },
@@ -93,7 +94,7 @@ export const LAYOUT = defineSettingsSection("layout", {
   topBar: {
     kind: "group",
     search: { anchor: "layout-surface-top-bar" },
-    label: "Tabs",
+    label: "Task tabs",
     description: null,
     breadcrumb: null,
     availableWhen: alwaysAvailable,
@@ -107,7 +108,7 @@ export const LAYOUT = defineSettingsSection("layout", {
     kind: "row",
     group: "topBar",
     search: { anchor: "layout-tab-strip-placement" },
-    label: "Position",
+    label: "Placement",
     description: "Across the top, or as a vertical strip at either edge.",
     availableWhen: isSurfacePlacementRowAvailable,
     keywords: [
@@ -120,31 +121,35 @@ export const LAYOUT = defineSettingsSection("layout", {
     ],
   },
   /**
-   * What the vertical strip shows (D8): a surface-level row beside Position,
+   * What the side strip shows (D8): a surface-level row beside Placement,
    * drawn by `SideStripViewRow` on both hosts.
    */
   sideStripView: {
     kind: "row",
     group: "topBar",
     search: { anchor: "layout-side-strip-view" },
-    label: "View",
+    label: "Side tab view",
     description:
-      "Layered lists tabs only. Activity also lists the active task's live agents and what needs you.",
+      "Tabs only lists your tabs. Activity also lists the active task's live agents and what needs you.",
     availableWhen: isSurfacePlacementRowAvailable,
     keywords: [
       "view",
       "activity",
-      "layered",
+      "tabs only",
       "live agents",
       "needs you",
       "vertical tabs",
     ],
   },
+  /**
+   * How tabs fit a top strip. Settings-store state rather than arrangement,
+   * drawn by `TabOverflowRow` on both hosts.
+   */
   taskTabLayout: {
     kind: "row",
     group: "topBar",
     search: { anchor: "layout-task-tab-layout" },
-    label: "Task tab layout",
+    label: "Tab overflow",
     description:
       "Scroll keeps titles readable. Shrink to fit makes tabs narrower as you open more.",
     availableWhen: alwaysAvailable,
@@ -180,6 +185,29 @@ export const LAYOUT = defineSettingsSection("layout", {
     availableWhen: isSurfacePlacementRowAvailable,
     keywords: ["sidebar", "left", "right", "side"],
   },
+  /**
+   * The resource readings beside each agent and terminal row, drawn by
+   * `ResourceReadingsRow` on both hosts. Whether rows print is this switch;
+   * which readings is the Resource monitor's Metrics choice (L-174).
+   */
+  resourceReadings: {
+    kind: "row",
+    group: "sidebar",
+    search: { anchor: "layout-resource-readings" },
+    label: "Readings on agent rows",
+    description:
+      "Shows the metrics chosen under Usage and resources > Resource monitor.",
+    availableWhen: alwaysAvailable,
+    keywords: [
+      "resource",
+      "readings",
+      "cpu",
+      "memory",
+      "processes",
+      "agent rows",
+      "terminals",
+    ],
+  },
   chat: {
     kind: "group",
     search: { anchor: "layout-surface-chat" },
@@ -188,6 +216,29 @@ export const LAYOUT = defineSettingsSection("layout", {
     breadcrumb: null,
     availableWhen: alwaysAvailable,
     keywords: ["transcript", "minimap", "context"],
+  },
+  /**
+   * How wide chat and artifacts read: a surface-level row, because the
+   * content column is not a thing to point at. Drawn by `ReadingWidthRow` on
+   * both hosts; presets leave it alone (it is arrangement, not density).
+   */
+  readingWidth: {
+    kind: "row",
+    group: "chat",
+    search: { anchor: "layout-reading-width" },
+    label: "Reading width",
+    description: "Chat and artifacts. Wide suits a large monitor.",
+    availableWhen: alwaysAvailable,
+    keywords: [
+      "width",
+      "wide",
+      "column",
+      "measure",
+      "full width",
+      "max width",
+      "comfortable",
+      "artifact",
+    ],
   },
   composer: {
     kind: "group",
@@ -201,11 +252,11 @@ export const LAYOUT = defineSettingsSection("layout", {
   statusBar: {
     kind: "group",
     search: { anchor: "layout-surface-status-bar" },
-    label: "Status bar",
+    label: "Usage and resources",
     description: null,
     breadcrumb: null,
     availableWhen: alwaysAvailable,
-    keywords: ["footer", "strip", "usage", "resources"],
+    keywords: ["footer", "status bar", "strip", "usage", "resources"],
   },
   /*
    * There is no surface-tier row for where the strip's readings live any more
@@ -228,40 +279,34 @@ export const LAYOUT = defineSettingsSection("layout", {
     kind: "row",
     group: "statusBar",
     search: { anchor: "layout-mobile-footer" },
-    label: "Show the status bar on small screens",
+    label: "Status bar on small screens",
     description: null,
     availableWhen: isMobileFooterRowAvailable,
     keywords: ["footer", "phone", "mobile", "small screen", "status bar"],
   },
   /**
-   * Last on the page, and the only card with a tone (redesign 4.4).
-   *
-   * "Reset everything" used to be `variant="muted" size="sm"` on the same line
-   * as "Reset to Compact", inside the Presets card: the one irreversible
-   * action on the page, styled and placed as the least consequential of the
-   * three. The house orders groups by frequency and risk with destructive
-   * last, and has a `tone="danger"` group for exactly this. The confirm stays
-   * (L-108) - this host has no Undo.
+   * Last in the Presets area, and the only card with a tone: `Reset layout…`
+   * puts every setting and the whole arrangement back, behind a confirm in
+   * both hosts (L-108 overturned).
    */
-  resetEverything: {
+  resetLayout: {
     kind: "group",
-    search: { anchor: "layout-reset-everything" },
-    label: "Reset everything",
+    search: { anchor: "layout-reset" },
+    label: "Reset layout",
     description: null,
     breadcrumb: null,
     availableWhen: alwaysAvailable,
     keywords: ["reset", "default", "start over", "restore", "undo all"],
   },
-  resetEverythingAction: {
+  resetLayoutAction: {
     kind: "row",
-    group: "resetEverything",
+    group: "resetLayout",
     // The card's own name and this row's are the same words, and two results
-    // under one name on one page is a choice with no answer - the same reason
-    // the Customize card folds into its row.
-    search: { contributesTo: "resetEverything" },
-    label: "Put the whole layout back",
+    // under one name on one page is a choice with no answer.
+    search: { contributesTo: "resetLayout" },
+    label: "Reset layout",
     description:
-      "Every setting, and where everything sits, go back to how the app shipped. This cannot be undone here.",
+      "Every setting, and where everything sits, goes back to how the app shipped.",
     availableWhen: alwaysAvailable,
     keywords: [],
   },

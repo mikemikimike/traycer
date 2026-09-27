@@ -45,7 +45,7 @@ export function SegmentedControl(props: SegmentedControlProps): ReactNode {
           aria-describedby={option.describedBy}
           asChild
         >
-          <Button type="button" variant="muted" size="xs">
+          <Button type="button" variant="muted" size="segment">
             {option.label}
           </Button>
         </RadioGroupPrimitive.Item>

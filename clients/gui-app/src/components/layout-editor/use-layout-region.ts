@@ -140,6 +140,7 @@ export function useLayoutRegion(input: {
       }
       if (
         state.hovered !== previous.hovered ||
+        state.pointed !== previous.pointed ||
         state.selected !== previous.selected ||
         state.instances !== previous.instances
       ) {
@@ -253,8 +254,29 @@ function isAnchorInstance(
   state: LayoutEditorState,
   instance: RegionInstance,
 ): boolean {
-  return preferredRegionInstance(state, instance.regionId) === instance;
+  let byRegion = anchorsByState.get(state);
+  if (byRegion === undefined) {
+    byRegion = new Map();
+    anchorsByState.set(state, byRegion);
+  }
+  let anchor = byRegion.get(instance.regionId);
+  if (anchor === undefined) {
+    anchor = preferredRegionInstance(state, instance.regionId);
+    byRegion.set(instance.regionId, anchor);
+  }
+  return anchor === instance;
 }
+
+/**
+ * Each region's anchor, resolved once per store state. One store change runs
+ * `decorate` for every instance of a region, and each resolution hit-tests
+ * the region's instances, so resolving per instance was N^2 layout reads for
+ * the transcript's N timestamps on a single hover (B7).
+ */
+const anchorsByState = new WeakMap<
+  LayoutEditorState,
+  Map<RegionId, RegionInstance | null>
+>();
 
 function flag(node: HTMLElement, attribute: string, on: boolean): void {
   if (on) node.setAttribute(attribute, "1");

@@ -138,6 +138,17 @@ describe("actionsSource", () => {
     expect(item?.shortcut).toBeNull();
   });
 
+  // The strip's drawer was renamed from "Inbox" to "Notifications"; "inbox"
+  // stays a findable synonym so a person who still thinks of it that way
+  // isn't stranded by the rename.
+  it("keeps 'inbox' as a findable synonym for the notifications action", () => {
+    const item = captureItems().find(
+      (row) => row.id === "action:app.notifications.open",
+    );
+    expect(item).toBeDefined();
+    expect(item?.keywords).toContain("inbox");
+  });
+
   // `isPaletteEligible` (actions.source.ts) special-cases app.home.open: its
   // dispatch handler no-ops while the Home tab is off, so a palette row that
   // does nothing would be worse than no row. Locks down both sides of that
@@ -159,5 +170,32 @@ describe("actionsSource", () => {
       expect(item?.label).toBe("Go to Home");
       expect(item?.shortcut).toBe("mod+shift+h");
     });
+  });
+
+  // Only the vertical strip registers `app.tabs.vertical.collapse`'s handler
+  // (`side-tab-strip.tsx`), so the row must not offer a command that cannot
+  // run while this window's tabs are at the top.
+  describe("app.tabs.vertical.collapse row (gated on the tab strip placement)", () => {
+    it("omits the row while the tabs are at the top", () => {
+      const ids = captureItems().map((item) => item.id);
+      expect(ids).not.toContain("action:app.tabs.vertical.collapse");
+    });
+
+    it.each([{ placement: "left" as const }, { placement: "right" as const }])(
+      "includes the row once the tabs are at the side ($placement)",
+      ({ placement }) => {
+        useLayoutStore.setState({
+          arrangement: {
+            ...useLayoutStore.getState().arrangement,
+            tabStripPlacement: placement,
+          },
+        });
+        const item = captureItems().find(
+          (row) => row.id === "action:app.tabs.vertical.collapse",
+        );
+        expect(item).toBeDefined();
+        expect(item?.label).toBe("Collapse vertical tabs");
+      },
+    );
   });
 });

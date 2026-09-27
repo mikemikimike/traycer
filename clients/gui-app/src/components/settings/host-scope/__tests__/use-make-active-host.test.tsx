@@ -8,7 +8,7 @@ import { hostScopeOptionFixture } from "../host-scope-fixture";
  * to and the account menu's Host section calls straight. `activate-single-flight.test.tsx`
  * already pins the single-flight guard through `useHostScopeFor`; this suite
  * proves the extracted hook carries the same behaviour on its own, with no
- * `useHostScopeFor` in between — including the R1-A2 module-level latch,
+ * `useHostScopeFor` in between - including the R1-A2 module-level latch,
  * which must survive a surface unmounting and must be shared by two mounted
  * at once.
  */
@@ -53,7 +53,7 @@ const hosts = [
 
 afterEach(async () => {
   // The latch lives on a module-level `WeakMap` keyed by `authority`, which
-  // this whole file shares — an unresolved `activate` from one test is still
+  // this whole file shares - an unresolved `activate` from one test is still
   // the authority's pending entry when the next test's hook mounts. Settle it
   // first, or "nothing in flight" (every test's own precondition) is false
   // before that test even runs.
@@ -109,7 +109,7 @@ describe("useMakeActiveHost", () => {
   it("keeps the latch across a close-and-reopen of the surface (R1-A2)", async () => {
     // The account menu's Host section unmounts the instant a pick closes the
     // menu. The pending write it started must still gate the NEXT mount of
-    // the hook — Settings, or the menu reopened — not reset just because no
+    // the hook - Settings, or the menu reopened - not reset just because no
     // component happened to be watching it.
     const first = renderHook(() => useMakeActiveHost(hosts));
 
@@ -157,7 +157,7 @@ describe("useMakeActiveHost", () => {
     });
 
     expect(activateCalls).toEqual(["host-a"]);
-    // The write came from `settings`, and `menu` sees it too — one window,
+    // The write came from `settings`, and `menu` sees it too - one window,
     // one in-flight activation, whichever surface asked.
     expect(menu.result.current.isActivating).toBe(true);
     expect(menu.result.current.activatingHostId).toBe("host-a");

@@ -14,6 +14,7 @@ import { formatModifierChordForDisplay } from "@/lib/keybindings/chord";
 import { findConflict } from "@/lib/keybindings/conflicts";
 import { useKeybindingStore } from "@/stores/settings/keybinding-store";
 import { useRegionShown } from "@/lib/layout-overrides";
+import { useTabStripPlacement } from "@/components/layout/tabs/use-tab-strip-placement";
 import { Kbd } from "@/components/ui/kbd";
 import { useSummonHotkey } from "@/hooks/runner/use-summon-hotkey";
 import { GLOBAL_SHORTCUT_DEFAULT_CHORDS } from "@traycer-clients/shared/keybindings/global-shortcuts";
@@ -45,14 +46,17 @@ export function KeybindingsSettingsPanel() {
   const resetAll = useKeybindingStore((s) => s.resetAll);
 
   const homeTabEnabled = useRegionShown("homeTab");
+  const verticalTabs = useTabStripPlacement() !== "top";
   // A row here is a promise that the chord does something. `app.home.open`
   // dispatches to nothing while the Home tab is off, so it would be a bindable
   // row for a surface this build has not got - the same reason the command
-  // palette omits it.
+  // palette omits it. `app.tabs.vertical.collapse` likewise, while this
+  // window's tabs are at the top and there is no strip to collapse.
   const primaryActionIds = ACTION_IDS.filter(
     (id) =>
       !SUB_LEADER_ACTION_SET.has(id) &&
-      (homeTabEnabled || id !== "app.home.open"),
+      (homeTabEnabled || id !== "app.home.open") &&
+      (verticalTabs || id !== "app.tabs.vertical.collapse"),
   );
 
   // Lifted (rather than owned by `SummonHotkeyRow`) so the "Reset all to

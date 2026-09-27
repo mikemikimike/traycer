@@ -149,9 +149,9 @@ export function inactiveCursorStyleFor(
  */
 export type NavigatorResourceMetric = "cpu" | "memory" | "processes";
 /**
- * The fixed set the chips draw, with nothing selecting a subset any more
- * (L-28). WHETHER they draw is the Resource monitor's own "Agent rows"
- * switch (G7) - see `useNavigatorResourceMetrics`.
+ * Every reading a row chip can draw, in chip order. Which of them draw is the
+ * Resource monitor's Metrics selection, and whether any draw is its "Readings
+ * on agent rows" switch (L-174) - see `useNavigatorResourceMetrics`.
  */
 export const NAVIGATOR_RESOURCE_METRICS: ReadonlyArray<NavigatorResourceMetric> =
   ["cpu", "memory", "processes"];
@@ -207,7 +207,6 @@ export interface StartPageWallpaper {
    */
   readonly curatedId: string | null;
 }
-export type TaskTabLayout = "scroll" | "shrink";
 export interface SettingsState {
   startPageWallpaper: StartPageWallpaper | null;
   showGreeting: boolean;
@@ -345,7 +344,6 @@ export interface SettingsState {
   chatDockPanelHeight: number;
   /** App-wide audible cues selected for each notification event type. */
   notificationChimeSounds: NotificationChimeSoundsByEvent;
-  taskTabLayout: TaskTabLayout;
   setTheme: (theme: ThemeMode) => void;
   setThemePreset: (preset: ThemePreset) => void;
   /**
@@ -400,7 +398,6 @@ export interface SettingsState {
     eventType: NotificationChimeEventType,
     value: NotificationChimeSound,
   ) => void;
-  setTaskTabLayout: (value: TaskTabLayout) => void;
 }
 
 type PersistedSettingsState = Pick<
@@ -444,7 +441,6 @@ type PersistedSettingsState = Pick<
   | "workspaceFileWordWrap"
   | "chatDockPanelHeight"
   | "notificationChimeSounds"
-  | "taskTabLayout"
 >;
 
 type SetFn = (
@@ -522,7 +518,6 @@ function partializeSettingsState(state: SettingsState): PersistedSettingsState {
     workspaceFileWordWrap: state.workspaceFileWordWrap,
     chatDockPanelHeight: state.chatDockPanelHeight,
     notificationChimeSounds: state.notificationChimeSounds,
-    taskTabLayout: state.taskTabLayout,
   };
 }
 
@@ -571,7 +566,6 @@ export const useSettingsStore = create<SettingsState>()(
       workspaceFileWordWrap: null,
       chatDockPanelHeight: CHAT_DOCK_PANEL_DEFAULT_HEIGHT_RATIO,
       notificationChimeSounds: DEFAULT_NOTIFICATION_CHIME_SOUNDS,
-      taskTabLayout: "scroll",
       setTheme: makeSetter(set, "theme"),
       setThemePreset: (themePreset) => {
         if (useThemeLibraryStore.getState().clearSelection())
@@ -706,7 +700,6 @@ export const useSettingsStore = create<SettingsState>()(
               },
         );
       },
-      setTaskTabLayout: makeSetter(set, "taskTabLayout"),
     }),
     {
       ...basePersistOptions(persistKey(STORE_KEYS.settings)),
@@ -781,8 +774,6 @@ export const useSettingsStore = create<SettingsState>()(
             persisted.notificationChimeSounds,
             persisted.notificationChimeSound,
           ),
-          taskTabLayout:
-            persisted.taskTabLayout === "shrink" ? "shrink" : "scroll",
         };
       },
     },

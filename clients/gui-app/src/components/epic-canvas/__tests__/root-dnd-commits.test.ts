@@ -14,7 +14,11 @@ import {
   useLayoutStore,
 } from "@/stores/layout/layout-store";
 import { currentLayoutArrangement } from "@/lib/layout/rail-view";
-import { DEFAULT_RAIL, visibleRailPanelIds } from "@/lib/layout/rail";
+import {
+  DEFAULT_RAIL,
+  visibleRailPanelIds,
+  type RailEntry,
+} from "@/lib/layout/rail";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { useEpicSidebarExpansionStore } from "@/stores/epics/epic-sidebar-expansion-store";
 import { makeGitFileDiffTile } from "@/lib/git/git-diff-tile";
@@ -269,21 +273,6 @@ function railSource(
   };
 }
 
-function makeRectElement(
-  id: string,
-  rect: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  },
-): Element {
-  const element = document.createElement("section");
-  element.setAttribute("data-left-panel-section-id", id);
-  element.getBoundingClientRect = () => DOMRect.fromRect(rect);
-  return element;
-}
-
 function resetStores(): void {
   window.localStorage.clear();
   testState.canvasStore.canvasByTabId = {};
@@ -320,7 +309,6 @@ describe("root dnd commits - left panel", () => {
       target,
       point: { x: 20, y: 220 },
       targetRect: null,
-      targetElement: null,
       activeRect: null,
     });
 
@@ -355,7 +343,6 @@ describe("root dnd commits - left panel", () => {
       kind: "left-panel-rail-item",
       panelId: "terminals",
       orientation: "horizontal",
-      stacked: false,
     } as const;
     for (const y of [2, 18, 34]) {
       expect(
@@ -364,7 +351,6 @@ describe("root dnd commits - left panel", () => {
           target,
           point: { x: LEADING_X_MIDDLE_Y.x, y },
           targetRect: RAIL_SLOT_RECT,
-          targetElement: null,
           activeRect: null,
         }),
       ).toEqual({
@@ -378,7 +364,6 @@ describe("root dnd commits - left panel", () => {
       target,
       point: LEADING_X_MIDDLE_Y,
       targetRect: RAIL_SLOT_RECT,
-      targetElement: null,
       activeRect: null,
     });
 
@@ -406,7 +391,6 @@ describe("root dnd commits - left panel", () => {
       kind: "left-panel-rail-item",
       panelId: "terminals",
       orientation: "vertical",
-      stacked: false,
     } as const;
     for (const x of [2, 18, 34]) {
       expect(
@@ -415,7 +399,6 @@ describe("root dnd commits - left panel", () => {
           target,
           point: { x, y: 4 },
           targetRect: RAIL_SLOT_RECT,
-          targetElement: null,
           activeRect: null,
         }),
       ).toEqual({
@@ -429,7 +412,6 @@ describe("root dnd commits - left panel", () => {
       target,
       point: { x: 4, y: 34 },
       targetRect: RAIL_SLOT_RECT,
-      targetElement: null,
       activeRect: null,
     });
 
@@ -455,93 +437,189 @@ describe("root dnd commits - left panel", () => {
     ]);
   });
 
-  it("resolves a stacked body drop against the section under the pointer", () => {
-    // Agents active and stacked above Artifacts: the target still names the
-    // ACTIVE panel, and the pointer is in the LOWER section. Resolving both
-    // halves against the active panel put the boundary line on the wrong
-    // section and committed a placement that broke the pair (L-170).
-    const bodyElement = document.createElement("div");
-    bodyElement.append(
-      makeRectElement("chats", { x: 0, y: 0, width: 320, height: 400 }),
-      makeRectElement("artifacts", { x: 0, y: 400, width: 320, height: 400 }),
-    );
-    const source = railSource("file-tree", "rail");
-    const target = {
-      kind: "left-panel-body",
-      panelId: "chats",
-    } as const;
+  it("resolves a rail-icon drop on the open body to a combine on the stack's top panel, joining it (L-182)", () => {
+    // The body is ONE drop target for the whole stack it draws: a drop
+    // anywhere on it means the same middle-band join a drop on the stack's
+    // own rail icon (Chats, the top of the shipped pair) would mean.
+    const source = railSource("terminals", "rail");
+    const target = { kind: "left-panel-body", panelId: "chats" } as const;
 
     const preview = resolveCanvasDropPreview({
       source,
       target,
       point: { x: 120, y: 700 },
       targetRect: null,
-      targetElement: bodyElement,
       activeRect: null,
     });
 
     expect(preview).toEqual({
-      kind: "left-panel-section",
+      kind: "left-panel-rail",
       viewTabId: undefined,
-      panelId: "artifacts",
-      position: "after",
+      panelId: "chats",
+      position: "combine",
     });
 
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    // Placed after Artifacts, so the pair survives the drop.
     expect(currentLayoutArrangement().rail.map((entry) => entry.id)).toEqual([
       "railAgents",
-      "stack:railAgents+railArtifacts",
+      "stack:railAgents+railArtifacts+railTerminals",
       "railArtifacts",
-      "railFileTree",
       "railTerminals",
       "railBrowsers",
       "railGitDiff",
       "railPullRequests",
+      "railFileTree",
       "railSharing",
       "railComments",
     ]);
   });
 
-  it("inserts a panel at a section boundary via the body's section bounds", () => {
-    const groupElement = document.createElement("div");
-    groupElement.append(
-      makeRectElement("chats", { x: 0, y: 0, width: 320, height: 900 }),
-    );
-    const source = railSource("file-tree", "rail");
-    // A lone panel: the body draws one section and the target names it.
-    const target = {
-      kind: "left-panel-body",
-      panelId: "chats",
-    } as const;
+  it("refuses a body drop onto a stack already at the max, drawing the refusal rather than a quiet no-op (L-181, L-182)", () => {
+    const fourMember = [
+      { kind: "panel" as const, id: "railAgents" as const },
+      {
+        kind: "stack" as const,
+        id: "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
+      },
+      { kind: "panel" as const, id: "railArtifacts" as const },
+      { kind: "panel" as const, id: "railTerminals" as const },
+      { kind: "panel" as const, id: "railBrowsers" as const },
+      { kind: "panel" as const, id: "railGitDiff" as const },
+      { kind: "panel" as const, id: "railPullRequests" as const },
+      { kind: "panel" as const, id: "railFileTree" as const },
+      { kind: "panel" as const, id: "railSharing" as const },
+      { kind: "panel" as const, id: "railComments" as const },
+    ];
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, rail: fourMember },
+    });
+    const source = railSource("git-diff", "rail");
+    const target = { kind: "left-panel-body", panelId: "chats" } as const;
     const preview = resolveCanvasDropPreview({
       source,
       target,
-      point: { x: 120, y: 760 },
+      point: { x: 120, y: 700 },
       targetRect: null,
-      targetElement: groupElement,
+      activeRect: null,
+    });
+
+    expect(isLeftPanelDropNoop(source, preview)).toBe(false);
+    const committed = commitResolvedCanvasDrop(
+      { source, target, preview },
+      rawNestedFocus,
+    );
+
+    expect(committed).toBe(false);
+    expect(useLayoutStore.getState().arrangement.rail).toEqual(fourMember);
+  });
+
+  it("is a no-op for a section-origin drop onto the body of the stack the panel already belongs to", () => {
+    const source = railSource("artifacts", "panel-section");
+    const target = { kind: "left-panel-body", panelId: "chats" } as const;
+    const preview = resolveCanvasDropPreview({
+      source,
+      target,
+      point: { x: 120, y: 700 },
+      targetRect: null,
+      activeRect: null,
+    });
+
+    expect(isLeftPanelDropNoop(source, preview)).toBe(true);
+    const before = useLayoutStore.getState().arrangement.rail;
+    commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
+    expect(useLayoutStore.getState().arrangement.rail).toBe(before);
+  });
+
+  it("carries a WHOLE stack onto another stack's body, appending all its members (L-181, L-182)", () => {
+    // Terminals+Browsers, dragged by ITS icon, lands on the shipped
+    // Agents+Artifacts body: both members join, growing the 2-member stack to
+    // 4 rather than replacing or refusing it.
+    const rail: ReadonlyArray<RailEntry> = [
+      { kind: "panel", id: "railAgents" },
+      { kind: "stack", id: "stack:railAgents+railArtifacts" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "stack", id: "stack:railTerminals+railBrowsers" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+    ];
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, rail },
+    });
+    const source = railSource("terminals", "rail");
+    const target = { kind: "left-panel-body", panelId: "chats" } as const;
+    const preview = resolveCanvasDropPreview({
+      source,
+      target,
+      point: { x: 120, y: 700 },
+      targetRect: null,
       activeRect: null,
     });
 
     commitResolvedCanvasDrop({ source, target, preview }, rawNestedFocus);
 
-    // The drag came off the rail (asGroups), so the drop anchors to the whole
-    // target group - Chats is the top of the shipped pair, so File Tree lands
-    // after the WHOLE pair rather than wedging between Chats and Artifacts.
-    expect(
-      visibleRailPanelIds(currentLayoutArrangement().rail, () => true),
-    ).toEqual([
-      "chats",
-      "artifacts",
-      "file-tree",
-      "terminals",
-      "browsers",
-      "git-diff",
-      "pull-requests",
-      "sharing",
-      "comments",
+    expect(currentLayoutArrangement().rail.map((entry) => entry.id)).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
+      "railArtifacts",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
     ]);
+  });
+
+  it("refuses a whole-stack body join that would pass the max (L-181, L-182)", () => {
+    // Agents+Artifacts+GitDiff (3) plus Terminals+Browsers (2) would be 5:
+    // refused, and the stored rail is untouched.
+    const rail: ReadonlyArray<RailEntry> = [
+      { kind: "panel", id: "railAgents" },
+      {
+        kind: "stack",
+        id: "stack:railAgents+railArtifacts+railGitDiff",
+      },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "stack", id: "stack:railTerminals+railBrowsers" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+    ];
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, rail },
+    });
+    const source = railSource("terminals", "rail");
+    const target = { kind: "left-panel-body", panelId: "chats" } as const;
+    const preview = resolveCanvasDropPreview({
+      source,
+      target,
+      point: { x: 120, y: 700 },
+      targetRect: null,
+      activeRect: null,
+    });
+
+    expect(isLeftPanelDropNoop(source, preview)).toBe(false);
+    const committed = commitResolvedCanvasDrop(
+      { source, target, preview },
+      rawNestedFocus,
+    );
+
+    expect(committed).toBe(false);
+    expect(useLayoutStore.getState().arrangement.rail).toEqual(rail);
   });
 });
 
@@ -555,7 +633,6 @@ describe("root dnd commits - full-pane tile split affordances", () => {
         target: paneBodyTarget("group-1"),
         point: panePoint,
         targetRect: PANE_RECT,
-        targetElement: null,
         activeRect: null,
       }),
     ).toEqual({
@@ -572,7 +649,6 @@ describe("root dnd commits - full-pane tile split affordances", () => {
         target: paneBodyTarget("group-2"),
         point: panePoint,
         targetRect: PANE_RECT,
-        targetElement: null,
         activeRect: null,
       }),
     ).toEqual({
@@ -587,10 +663,34 @@ describe("root dnd commits - left panel drop resolver", () => {
   beforeEach(resetStores);
   afterEach(resetStores);
 
-  it("moves a panel before another panel", () => {
-    // Artifacts is a rail-origin drag (asGroups), so it carries its whole
-    // group - and Chats, the target, is that very group's own top: a group
-    // dropped beside its own member is a no-op (G3).
+  it("reorders WITHIN its own stack rather than treating a stacked source as a no-op (L-181)", () => {
+    // A section header carries one panel (L-181): dropped beside its own
+    // stack partner, Artifacts moves to the top of the pair and stays a
+    // member.
+    expect(
+      resolveRailForDrop(
+        railSource("artifacts", "panel-section"),
+        { kind: "left-panel-rail", panelId: "chats", position: "before" },
+        DEFAULT_ARRANGEMENT,
+      ),
+    ).toEqual([
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "stack", id: "stack:railArtifacts+railAgents" },
+      { kind: "panel", id: "railAgents" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+    ]);
+  });
+
+  it("is a no-op for a rail icon dropped WITHIN its own stack, which carries the whole block (L-181)", () => {
+    // A rail icon carries the whole stack (L-181): dropped beside its own
+    // partner, the target is already inside the carried block, so nothing
+    // moves.
     expect(
       resolveRailForDrop(
         railSource("artifacts", "rail"),
@@ -630,9 +730,8 @@ describe("root dnd commits - left panel drop resolver", () => {
     ).toEqual(DEFAULT_RAIL);
   });
 
-  it("moves a panel and a section to the rail end", () => {
-    // Rail-origin (asGroups): Artifacts carries its whole group to the end,
-    // Agents included.
+  it("moves the WHOLE stack to the rail's end via its icon, or ONE panel via its section header (L-181)", () => {
+    // Rail-icon origin: the whole stack carries to the end, together.
     expect(
       resolveRailForDrop(
         railSource("artifacts", "rail"),
@@ -668,34 +767,6 @@ describe("root dnd commits - left panel drop resolver", () => {
       { kind: "panel", id: "railSharing" },
       { kind: "panel", id: "railComments" },
       { kind: "panel", id: "railArtifacts" },
-    ]);
-  });
-
-  it("inserts at a section boundary", () => {
-    // Git Diff is a lone panel dragged off the rail (asGroups), and Artifacts
-    // is the bottom of the shipped pair - so the drop anchors before the
-    // WHOLE pair, never between Agents and Artifacts.
-    expect(
-      resolveRailForDrop(
-        railSource("git-diff", "rail"),
-        {
-          kind: "left-panel-section",
-          panelId: "artifacts",
-          position: "before",
-        },
-        DEFAULT_ARRANGEMENT,
-      ),
-    ).toEqual([
-      { kind: "panel", id: "railGitDiff" },
-      { kind: "panel", id: "railAgents" },
-      { kind: "stack", id: "stack:railAgents+railArtifacts" },
-      { kind: "panel", id: "railArtifacts" },
-      { kind: "panel", id: "railTerminals" },
-      { kind: "panel", id: "railBrowsers" },
-      { kind: "panel", id: "railPullRequests" },
-      { kind: "panel", id: "railFileTree" },
-      { kind: "panel", id: "railSharing" },
-      { kind: "panel", id: "railComments" },
     ]);
   });
 
@@ -742,11 +813,11 @@ describe("root dnd commits - left panel drop resolver", () => {
     ]);
   });
 
-  it("refuses a rail-origin combine off an already-stacked source (G3)", () => {
-    // Agents ships joined to Artifacts. Dragged off the rail's own icon, the
-    // icon IS the group - and a group carried onto another icon joins
-    // nothing (a stack is exactly two panels), so the drop commits nothing
-    // rather than replacing a member.
+  it("lets a stacked SOURCE dragged by its rail icon carry its WHOLE stack onto a new target (L-170, L-181)", () => {
+    // A rail icon carries the whole stack (L-181): dragged off it, BOTH
+    // Agents and Artifacts leave the shipped pair together and join
+    // Terminals, unlike the section-origin case right below, which carries
+    // Agents alone.
     const next = resolveRailForDrop(
       railSource("chats", "rail"),
       { kind: "left-panel-rail", panelId: "terminals", position: "combine" },
@@ -754,10 +825,10 @@ describe("root dnd commits - left panel drop resolver", () => {
     );
 
     expect(next?.map((entry) => entry.id)).toEqual([
-      "railAgents",
-      "stack:railAgents+railArtifacts",
-      "railArtifacts",
       "railTerminals",
+      "stack:railTerminals+railAgents+railArtifacts",
+      "railAgents",
+      "railArtifacts",
       "railBrowsers",
       "railGitDiff",
       "railPullRequests",
@@ -791,9 +862,10 @@ describe("root dnd commits - left panel drop resolver", () => {
     ]);
   });
 
-  it("refuses to stack onto a panel that is already half of a pair", () => {
-    // Artifacts is the shipped rail's one stacked panel: a stack joins exactly
-    // two (L-166), so the drop commits nothing rather than replacing a member.
+  it("joins a target that is already stacked, growing the stack (L-181)", () => {
+    // Artifacts is the shipped rail's stacked panel: dropping a third member
+    // onto it grows the stack rather than refusing, since two is no longer
+    // the max.
     expect(
       resolveRailForDrop(
         railSource("terminals", "rail"),
@@ -804,7 +876,60 @@ describe("root dnd commits - left panel drop resolver", () => {
         },
         DEFAULT_ARRANGEMENT,
       ),
-    ).toEqual(DEFAULT_ARRANGEMENT.rail);
+    ).toEqual([
+      { kind: "panel", id: "railAgents" },
+      { kind: "stack", id: "stack:railAgents+railArtifacts+railTerminals" },
+      { kind: "panel", id: "railArtifacts" },
+      { kind: "panel", id: "railTerminals" },
+      { kind: "panel", id: "railBrowsers" },
+      { kind: "panel", id: "railGitDiff" },
+      { kind: "panel", id: "railPullRequests" },
+      { kind: "panel", id: "railFileTree" },
+      { kind: "panel", id: "railSharing" },
+      { kind: "panel", id: "railComments" },
+    ]);
+  });
+
+  it("refuses a target whose stack already holds the max, with no undo step spent (L-181)", () => {
+    const fourMember = [
+      { kind: "panel" as const, id: "railAgents" as const },
+      {
+        kind: "stack" as const,
+        id: "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
+      },
+      { kind: "panel" as const, id: "railArtifacts" as const },
+      { kind: "panel" as const, id: "railTerminals" as const },
+      { kind: "panel" as const, id: "railBrowsers" as const },
+      { kind: "panel" as const, id: "railGitDiff" as const },
+      { kind: "panel" as const, id: "railPullRequests" as const },
+      { kind: "panel" as const, id: "railFileTree" as const },
+      { kind: "panel" as const, id: "railSharing" as const },
+      { kind: "panel" as const, id: "railComments" as const },
+    ];
+    const arrangement = { ...DEFAULT_ARRANGEMENT, rail: fourMember };
+
+    expect(
+      resolveRailForDrop(
+        railSource("git-diff", "rail"),
+        { kind: "left-panel-rail", panelId: "chats", position: "combine" },
+        arrangement,
+      ),
+    ).toEqual(fourMember);
+
+    // isLeftPanelDropNoop reads the live store, so the full stack has to be
+    // seeded there too: a refused join is not a quiet no-op (its preview
+    // stays, so the rail can draw the refusal cue).
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement,
+    });
+    expect(
+      isLeftPanelDropNoop(railSource("git-diff", "rail"), {
+        kind: "left-panel-rail",
+        panelId: "chats",
+        position: "combine",
+      }),
+    ).toBe(false);
   });
 
   it("returns null for non-left-panel previews", () => {
@@ -845,7 +970,6 @@ describe("root dnd commits - left panel drop resolver", () => {
           orientation: "vertical",
           // Agents ships joined to Artifacts (L-166); an outer-band reorder is
           // offered on a stacked icon all the same.
-          stacked: true,
         },
         preview,
       },
@@ -853,6 +977,53 @@ describe("root dnd commits - left panel drop resolver", () => {
     );
 
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
+  });
+
+  it("returns false and writes nothing for a refused full-stack join, even though it is not a quiet no-op (L-181)", () => {
+    const fourMember = [
+      { kind: "panel" as const, id: "railAgents" as const },
+      {
+        kind: "stack" as const,
+        id: "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
+      },
+      { kind: "panel" as const, id: "railArtifacts" as const },
+      { kind: "panel" as const, id: "railTerminals" as const },
+      { kind: "panel" as const, id: "railBrowsers" as const },
+      { kind: "panel" as const, id: "railGitDiff" as const },
+      { kind: "panel" as const, id: "railPullRequests" as const },
+      { kind: "panel" as const, id: "railFileTree" as const },
+      { kind: "panel" as const, id: "railSharing" as const },
+      { kind: "panel" as const, id: "railComments" as const },
+    ];
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      arrangement: { ...DEFAULT_ARRANGEMENT, rail: fourMember },
+    });
+    const source = railSource("git-diff", "rail");
+    const preview = {
+      kind: "left-panel-rail",
+      panelId: "chats",
+      position: "combine",
+    } as const;
+
+    // The refusal cue stays drawn, so this is deliberately NOT a quiet no-op.
+    expect(isLeftPanelDropNoop(source, preview)).toBe(false);
+
+    const committed = commitResolvedCanvasDrop(
+      {
+        source,
+        target: {
+          kind: "left-panel-rail-item",
+          panelId: "chats",
+          orientation: "vertical",
+        },
+        preview,
+      },
+      rawNestedFocus,
+    );
+
+    expect(committed).toBe(false);
+    expect(useLayoutStore.getState().arrangement.rail).toEqual(fourMember);
   });
 });
 

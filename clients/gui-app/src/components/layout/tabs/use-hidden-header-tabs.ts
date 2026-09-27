@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import type { TaskTabLayout } from "@/stores/settings/settings-store";
+import type { TaskTabLayout } from "@/lib/layout/layout-arrangement";
 import { HORIZONTAL_STRIP_AXIS } from "@/components/epic-canvas/dnd/strip-axis";
 import { readHeaderStripLayoutRect } from "./header-strip-geometry";
 

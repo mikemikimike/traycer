@@ -18,7 +18,7 @@ import {
 } from "@/lib/left-panel-ids";
 
 export const COMMENTS_AUTO_HINT =
-  "Auto - appears after opening a comment thread or starting a comment on the active artifact";
+  "Auto: appears after you open or start a comment on the active artifact.";
 
 export interface LeftPanelAvailabilityContext {
   readonly commentsPanelRevealed: boolean;

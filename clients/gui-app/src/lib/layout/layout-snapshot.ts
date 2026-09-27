@@ -15,10 +15,10 @@ import type { RegionId } from "@/lib/layout/region-id";
 /**
  * Three fields rather than a slice per surface, because the editor's own
  * gestures are all three at once - a preset applies values and leaves the
- * arrangement alone, Discard restores a whole snapshot, and the header's
- * "Compact + 3 changes" is a count over the delta. Effective values are
- * computed (`effectiveLayoutValues`) rather than stored, so a preset switch
- * keeps every change a user made on top of it.
+ * arrangement alone, Discard restores a whole snapshot, and the change list
+ * reads values against the last-applied preset and the arrangement against
+ * the shipped one. Effective values are computed (`effectiveLayoutValues`)
+ * rather than stored.
  */
 export interface LayoutSnapshot {
   readonly basePreset: LayoutPresetId;
@@ -29,17 +29,4 @@ export interface LayoutSnapshot {
 /** Several regions' patches applied as ONE write, one render and one undo step. */
 export type LayoutValuePatches = {
   readonly [K in RegionId]?: Partial<LayoutValues[K]>;
-};
-
-/**
- * The same shape for a REVERT: which of each region's keys to take back out of
- * the delta (L-133), as one write.
- *
- * Stringly-typed keys for the same reason `clearRegionValues` takes them: a
- * caller's keys come from a patch or a registry row rather than from one
- * region's declared value shape, and the resolver on the write path is what
- * keeps the result sound.
- */
-export type LayoutValueKeysByRegion = {
-  readonly [K in RegionId]?: ReadonlyArray<string>;
 };

@@ -3,11 +3,7 @@ import { CONTEXT_USAGE_ROW_KEYS } from "@/lib/context-usage-rows";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { visibleRailPanelIds, type RailEntry } from "@/lib/layout/rail";
 import type { RailRegionId } from "@/lib/layout/region-id";
-import {
-  changeCount,
-  regionChanged,
-  resetToBase,
-} from "@/lib/layout/layout-diff";
+import { layoutChanges, regionChanged } from "@/lib/layout/layout-diff";
 import { type LayoutValues } from "@/lib/layout/layout-values";
 import {
   effectiveLayoutValues,
@@ -24,6 +20,11 @@ import {
 
 const LAYOUT_KEY = persistKey(STORE_KEYS.layout);
 const LAYOUT_VERSION = 4;
+
+/** The number of Styles lines on the change list - what `changeCount` used to return. */
+function changeCount(snapshot: LayoutSnapshot): number {
+  return layoutChanges(snapshot).styles.length;
+}
 
 /** Every panel the rail holds, hiding nothing. */
 function everyRailPanelId(
@@ -210,7 +211,7 @@ describe("useLayoutStore", () => {
       });
       expect(
         effectiveLayoutValues("default", getLayoutSnapshot().overrides).model,
-      ).toEqual({ style: "bars" });
+      ).toEqual({ style: "bars", reasoningControl: "slider" });
     });
 
     it("keeps a key set back to the base's own value, and stops counting it", () => {
@@ -248,51 +249,69 @@ describe("useLayoutStore", () => {
     });
   });
 
-  describe("the base preset (L-133)", () => {
-    it("changes the density and keeps every pick, in both directions", () => {
+  describe("applying a preset (L-133 overturned)", () => {
+    it("replaces every value with the preset's, clears the delta, and leaves the arrangement alone", () => {
       const store = useLayoutStore.getState();
       store.setArrangement({ ...DEFAULT_ARRANGEMENT, minimapSide: "left" });
-      // Compact hides the microphone too, so this stops being a CHANGE there.
       store.setRegionValues("mic", { shown: "hidden" });
-      // Compact has no opinion about the Home tab, so this stays one.
       store.setRegionValues("homeTab", { shown: "shown" });
 
-      useLayoutStore.getState().setBasePreset("compact");
+      useLayoutStore.getState().applyPreset("compact");
 
-      expect(getLayoutSnapshot().overrides).toEqual({
-        mic: { shown: "hidden" },
-        homeTab: { shown: "shown" },
-      });
-      // Truthful without being lossy: one of the two picks differs from
-      // Compact, so the header reads "Compact + 1 change".
-      expect(changeCount(getLayoutSnapshot())).toBe(1);
+      expect(getLayoutSnapshot().basePreset).toBe("compact");
+      // Applying is total, not a merge: the delta a person had built up under
+      // the old base is gone, not re-minimized against the new one.
+      expect(getLayoutSnapshot().overrides).toEqual({});
       expect(getLayoutSnapshot().arrangement.minimapSide).toBe("left");
       expect(
-        effectiveLayoutValues("compact", getLayoutSnapshot().overrides).mic,
-      ).toEqual({ shown: "hidden" });
-
-      // And the round trip, which is the whole of what L-133 bought: under
-      // Detailed the mic is shown by the preset, so the pick becomes a change
-      // again - the count is re-measured against the base that is current, not
-      // carried over - and going back to Compact returns the user's own answer
-      // instead of the preset's.
-      useLayoutStore.getState().setBasePreset("detailed");
-      expect(changeCount(getLayoutSnapshot())).toBe(2);
-      useLayoutStore.getState().setBasePreset("compact");
-      expect(
-        effectiveLayoutValues("compact", getLayoutSnapshot().overrides).mic,
-      ).toEqual({ shown: "hidden" });
+        effectiveLayoutValues("compact", getLayoutSnapshot().overrides),
+      ).toEqual(PRESET_VALUES.compact);
     });
 
-    it("is what `Reset to <preset>` is for, and that still clears them", () => {
+    it("clears the delta even when applying the preset already current", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("homeTab", { shown: "shown" });
-      store.setBasePreset("compact");
 
-      useLayoutStore.getState().replaceAll(resetToBase(getLayoutSnapshot()));
+      useLayoutStore.getState().applyPreset("default");
 
       expect(getLayoutSnapshot().overrides).toEqual({});
-      expect(getLayoutSnapshot().basePreset).toBe("compact");
+      expect(getLayoutSnapshot().basePreset).toBe("default");
+    });
+  });
+
+  describe("applying a preset that changes nothing", () => {
+    it("neither notifies subscribers nor writes storage when the current preset is applied over no overrides", () => {
+      const listener = vi.fn();
+      const unsubscribe = useLayoutStore.subscribe(listener);
+      window.localStorage.clear();
+
+      useLayoutStore.getState().applyPreset(getLayoutSnapshot().basePreset);
+      unsubscribe();
+
+      expect(listener).not.toHaveBeenCalled();
+      expect(window.localStorage.getItem(LAYOUT_KEY)).toBeNull();
+    });
+
+    it("still notifies for a different preset", () => {
+      const listener = vi.fn();
+      const unsubscribe = useLayoutStore.subscribe(listener);
+
+      useLayoutStore.getState().applyPreset("compact");
+      unsubscribe();
+
+      expect(listener).toHaveBeenCalled();
+    });
+
+    it("still notifies for the current preset when overrides are present", () => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+      const listener = vi.fn();
+      const unsubscribe = useLayoutStore.subscribe(listener);
+
+      useLayoutStore.getState().applyPreset(getLayoutSnapshot().basePreset);
+      unsubscribe();
+
+      expect(listener).toHaveBeenCalled();
+      expect(getLayoutSnapshot().overrides).toEqual({});
     });
   });
 
@@ -338,13 +357,13 @@ describe("useLayoutStore", () => {
     });
   });
 
-  describe("reset to base", () => {
+  describe("reapplying the current preset", () => {
     it("puts the values back and leaves the arrangement where it is", () => {
       const store = useLayoutStore.getState();
       store.setRegionValues("model", { style: "bars" });
       store.setArrangement({ ...DEFAULT_ARRANGEMENT, usageHost: "header" });
 
-      useLayoutStore.getState().replaceAll(resetToBase(getLayoutSnapshot()));
+      useLayoutStore.getState().applyPreset(getLayoutSnapshot().basePreset);
 
       expect(getLayoutSnapshot().overrides).toEqual({});
       expect(getLayoutSnapshot().arrangement.usageHost).toBe("header");
@@ -361,24 +380,6 @@ describe("useLayoutStore", () => {
       useLayoutStore.getState().setRegionValues("mic", patch);
 
       expect(getLayoutSnapshot().overrides).toEqual({});
-    });
-
-    it("applies several regions as ONE notification, so one undo step", () => {
-      let notifications = 0;
-      const unsubscribe = useLayoutStore.subscribe(() => {
-        notifications += 1;
-      });
-      useLayoutStore.getState().setRegionValuesMany({
-        model: { style: "bars" },
-        homeTab: { shown: "shown" },
-      });
-      unsubscribe();
-
-      expect(notifications).toBe(1);
-      expect(getLayoutSnapshot().overrides).toEqual({
-        model: { style: "bars" },
-        homeTab: { shown: "shown" },
-      });
     });
   });
 
@@ -633,12 +634,50 @@ describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
     );
   });
 
+  it("carries a legacy group of three panels as one stack naming all three (L-181)", async () => {
+    window.localStorage.setItem(
+      persistKey(STORE_KEYS.leftPanel),
+      JSON.stringify({
+        state: {
+          panelGroups: [
+            { panelIds: ["chats", "artifacts", "terminals"] },
+            { panelIds: ["browsers"] },
+            { panelIds: ["git-diff"] },
+            { panelIds: ["pull-requests"] },
+            { panelIds: ["file-tree"] },
+            { panelIds: ["sharing"] },
+            { panelIds: ["comments"] },
+          ],
+        },
+        version: 2,
+      }),
+    );
+
+    const { state } = await relaunchStore();
+
+    expect(everyRailPanelId(state().arrangement.rail)).toEqual([
+      "chats",
+      "artifacts",
+      "terminals",
+      "browsers",
+      "git-diff",
+      "pull-requests",
+      "file-tree",
+      "sharing",
+      "comments",
+    ]);
+    expect(
+      state().arrangement.rail.filter((entry) => entry.kind === "stack"),
+    ).toEqual([
+      { kind: "stack", id: "stack:railAgents+railArtifacts+railTerminals" },
+    ]);
+  });
+
   it("carries nothing from a legacy record sitting on the shipped defaults", async () => {
     // The carry runs for EVERY user on the first launch after it lands, not
-    // only for users who changed something. Under L-133 the delta is the
-    // user's own answers and nothing re-minimizes it, so a value equal to the
-    // shipped Default must not be recorded: it would win over a preset click
-    // forever and read as "Detailed + 1 change" on a layout nobody touched.
+    // only for users who changed something. A value equal to the shipped
+    // Default must not be recorded: it would win over an apply's cleared
+    // delta and read as "Detailed · Modified" on a layout nobody touched.
     window.localStorage.setItem(
       persistKey(STORE_KEYS.settings),
       JSON.stringify({

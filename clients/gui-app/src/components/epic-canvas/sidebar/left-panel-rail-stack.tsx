@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
 /**
- * A stacked pair on the rail, drawn as ONE view group (G3), the way VS Code
- * draws a view container: the icon of the group's top panel stands for the
- * pair, its name lists both ("Agents · Artifacts"), and clicking it opens the
- * body the two share. Which icon shows is the user's choice of order: the
- * panel on top of the group is the one the rail draws.
+ * A stack on the rail, drawn as ONE view group (G3, L-181), the way VS Code
+ * draws a view container: the icon of the stack's top panel stands for every
+ * member, its name lists them ("Agents · Artifacts · Terminals"), and clicking
+ * it opens the body they share. Which icon shows is the user's choice of
+ * order: the panel on top of the stack is the one the rail draws.
  *
  * At rest that is all there is. While the layout editor is customizing this
  * rail the grouping has to stay visible, since the inspector's Position list

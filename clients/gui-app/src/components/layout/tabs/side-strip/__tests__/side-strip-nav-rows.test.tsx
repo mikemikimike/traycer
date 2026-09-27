@@ -1,5 +1,5 @@
 /**
- * `SideStripNavRows` (D6): the Inbox row (one unread count, tinted by needs-you,
+ * `SideStripNavRows` (D6): the Notifications row (one unread count, tinted by needs-you,
  * collapsed badge, admission gate) and the All tasks row (shortcut, active
  * state), plus the Tasks label above the rows. Mounted through the real
  * `SideTabStrip` so `ColumnEdgeContext`, the popover store and the real
@@ -314,7 +314,7 @@ describe("SideStripNavRows", () => {
       ).toBeTruthy();
       expect(
         screen.getByTestId("side-strip-inbox").getAttribute("aria-label"),
-      ).toBe("Inbox, status unavailable");
+      ).toBe("Notifications, status unavailable");
     },
   );
 
@@ -328,7 +328,7 @@ describe("SideStripNavRows", () => {
     ).toBeNull();
     expect(
       screen.getByTestId("side-strip-inbox").getAttribute("aria-label"),
-    ).toBe("Inbox");
+    ).toBe("Notifications");
   });
 
   it("shows the All tasks shortcut only when a binding exists", async () => {

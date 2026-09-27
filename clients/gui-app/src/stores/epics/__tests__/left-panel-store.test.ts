@@ -19,7 +19,6 @@ import type {
 } from "@/lib/left-panel-ids";
 import {
   applyRail,
-  clearRailVisibilityOverrides,
   currentLayoutArrangement,
   setRailVisibilityOverride,
   useLayoutRail,
@@ -97,14 +96,13 @@ function movePanelBeside(
   sourcePanelId: LeftPanelId,
   targetPanelId: LeftPanelId,
   placeAfter: boolean,
-  asGroups: boolean,
 ): void {
   applyRail(
     moveRailPanelBeside(currentLayoutArrangement(), {
       sourcePanelId,
       targetPanelId,
       placeAfter,
-      asGroups,
+      carry: "panel",
     }).rail,
   );
 }
@@ -536,7 +534,7 @@ describe("useLeftPanelStore", () => {
   });
 
   it("reorders panels before or after another panel", () => {
-    movePanelBeside("artifacts", "chats", false, false);
+    movePanelBeside("artifacts", "chats", false);
     expect(railPanelIds(currentRail())).toEqual([
       "artifacts",
       "chats",
@@ -549,7 +547,7 @@ describe("useLeftPanelStore", () => {
       "comments",
     ]);
 
-    movePanelBeside("comments", "chats", true, false);
+    movePanelBeside("comments", "chats", true);
     expect(railPanelIds(currentRail())).toEqual([
       "artifacts",
       "chats",
@@ -564,7 +562,7 @@ describe("useLeftPanelStore", () => {
   });
 
   it("keeps rail order global instead of scoping layout by tab", () => {
-    movePanelBeside("artifacts", "chats", false, false);
+    movePanelBeside("artifacts", "chats", false);
     useLeftPanelStore.getState().setActivePanelId("tab-a", "artifacts");
     useLeftPanelStore.getState().setActivePanelId("tab-b", "file-tree");
 
@@ -625,7 +623,7 @@ describe("useLeftPanelStore", () => {
 
   it("moves a panel to the rail end", () => {
     applyRail(
-      moveRailPanelToEnd(currentLayoutArrangement(), "chats", false).rail,
+      moveRailPanelToEnd(currentLayoutArrangement(), "chats", "panel").rail,
     );
 
     expect(railPanelIds(currentRail())).toEqual([
@@ -642,14 +640,14 @@ describe("useLeftPanelStore", () => {
   });
 
   it("writes nothing on a no-op rail move", () => {
-    movePanelBeside("artifacts", "chats", false, false);
+    movePanelBeside("artifacts", "chats", false);
     const before = useLayoutStore.getState().arrangement.rail;
-    movePanelBeside("artifacts", "chats", false, false);
+    movePanelBeside("artifacts", "chats", false);
     expect(useLayoutStore.getState().arrangement.rail).toBe(before);
   });
 
   it("keeps the rail hook snapshot stable across unrelated writes", () => {
-    movePanelBeside("artifacts", "chats", false, false);
+    movePanelBeside("artifacts", "chats", false);
     const hook = renderHook(() => useLayoutRail());
     const before = hook.result.current;
 
@@ -796,14 +794,14 @@ describe("useLeftPanelStore", () => {
     );
   });
 
-  it("clears every override at once, leaving no record of any of them", () => {
-    // "Reset panel visibility" is a revert across all nine regions, so it
-    // REMOVES the picks (L-133) instead of writing nine `auto` records into
-    // the delta of a user who had overridden one.
+  it("clears each override, leaving no record of any of them", () => {
+    // Reverting a panel REMOVES its pick (L-133) instead of writing an `auto`
+    // record into the delta, one panel at a time.
     setRailVisibilityOverride("chats", false);
     setRailVisibilityOverride("comments", true);
 
-    clearRailVisibilityOverrides();
+    setRailVisibilityOverride("chats", null);
+    setRailVisibilityOverride("comments", null);
 
     expect(visibilityOverrides()).toEqual({});
     expect(readPersistedLayoutOverrides()).toEqual({});
@@ -819,9 +817,9 @@ describe("useLeftPanelStore", () => {
     setRailVisibilityOverride("chats", false);
     expect(useLeftPanelStore.getState()).toBe(afterHide);
 
-    clearRailVisibilityOverrides();
+    setRailVisibilityOverride("chats", null);
     const cleared = useLeftPanelStore.getState();
-    clearRailVisibilityOverrides();
+    setRailVisibilityOverride("chats", null);
     expect(useLeftPanelStore.getState()).toBe(cleared);
   });
 });

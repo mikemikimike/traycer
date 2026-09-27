@@ -19,9 +19,12 @@ import type { RegionId } from "@/lib/layout/region-id";
 export type Visibility = "shown" | "hidden";
 
 /**
- * Rail panels with a presence rule (L-47). `auto` follows the panel's own rule
- * - a Pull requests icon that appears once the repo has pull requests - and is
- * the default, so a panel nobody has touched behaves exactly as it shipped.
+ * The two rail panels with a real presence rule (L-47): Pull requests and
+ * Comments. `auto` follows that rule - a Pull requests icon that appears once
+ * the task has pull requests - and is their default. The other seven panels'
+ * rule was "always", so Auto was Shown under another name and they are plain
+ * `Visibility` (L-93 overturned); a stored `auto` on one of them reads as
+ * `shown`.
  */
 export type RailVisibility = "auto" | "shown" | "hidden";
 
@@ -30,6 +33,9 @@ export type RegionSize = "full" | "chip";
 
 /** How the model chip draws the thinking effort. */
 export type ModelStyle = "text" | "bars" | "bars-text";
+
+/** How the model picker's footer sets the thinking effort. */
+export type ReasoningControl = "slider" | "list";
 
 /** How the context chip draws what is left of the window. */
 export type ContextStyle = "text" | "ring" | "ring-only";
@@ -68,6 +74,7 @@ export const LAYOUT_VALUE_ENUM_MEMBERS: ReadonlyArray<string> = Object.keys({
     ModelStyle,
     true
   >),
+  ...({ slider: true, list: true } satisfies Record<ReasoningControl, true>),
   ...({ text: true, ring: true, "ring-only": true } satisfies Record<
     ContextStyle,
     true
@@ -91,7 +98,17 @@ export interface AccessValues {
   readonly size: RegionSize;
 }
 
-export interface RailValues {
+/**
+ * Tool activity: a size and no Shown. `full` is Expanded and `chip` is
+ * Collapsed. It never hides, because approvals, failures and file edits ride
+ * the same rows and hiding them would hide what the user must act on.
+ */
+export interface ToolActivityValues {
+  readonly size: RegionSize;
+}
+
+/** Pull requests and Comments: shown only while their rule holds, by default. */
+export interface AutoRailValues {
   readonly shown: RailVisibility;
 }
 
@@ -152,6 +169,7 @@ export interface ContextUsageValues extends ShownValues {
  */
 export interface ModelValues {
   readonly style: ModelStyle;
+  readonly reasoningControl: ReasoningControl;
 }
 
 export interface LayoutValues {
@@ -160,6 +178,11 @@ export interface LayoutValues {
   readonly resourceMonitor: ResourceMonitorValues;
   readonly minimap: ShownValues;
   readonly contextUsage: ContextUsageValues;
+  /** Whether a settled activity row opens by default. */
+  readonly toolActivity: ToolActivityValues;
+  /** Reasoning blocks: open by default, folded, or not drawn at all. */
+  readonly thinking: SizedValues;
+  readonly timestamps: ShownValues;
   readonly runningAgents: SizedValues;
   readonly changedFiles: SizedValues;
   readonly background: SizedValues;
@@ -168,20 +191,21 @@ export interface LayoutValues {
   readonly access: AccessValues;
   readonly model: ModelValues;
   readonly mic: ShownValues;
-  readonly railAgents: RailValues;
-  readonly railTerminals: RailValues;
-  readonly railBrowsers: RailValues;
-  readonly railArtifacts: RailValues;
-  readonly railGitDiff: RailValues;
-  readonly railPullRequests: RailValues;
-  readonly railFileTree: RailValues;
-  readonly railSharing: RailValues;
-  readonly railComments: RailValues;
+  readonly railAgents: ShownValues;
+  readonly railTerminals: ShownValues;
+  readonly railBrowsers: ShownValues;
+  readonly railArtifacts: ShownValues;
+  readonly railGitDiff: ShownValues;
+  readonly railPullRequests: AutoRailValues;
+  readonly railFileTree: ShownValues;
+  readonly railSharing: ShownValues;
+  readonly railComments: AutoRailValues;
 }
 
 /**
- * The regions that can be hidden: every one with a `shown` leaf. Access and
- * Model are the two without - each is a floor the composer always draws (G6).
+ * The regions that can be hidden: every one with a `shown` leaf. Access, Model
+ * and Tool activity are the three without - each is a floor that always draws
+ * (G6).
  */
 export type HideableRegionId = {
   [K in RegionId]: LayoutValues[K] extends { readonly shown: unknown }
@@ -208,7 +232,7 @@ export type LayoutOverrides = {
  * Every key some region's value bag has, as one union.
  *
  * The UNION and not the intersection, which is what `keyof LayoutValues[RegionId]`
- * gives (`shown`, the only key all twenty-three share). It is the type a caller
+ * gives (`shown`, the only key all twenty-six share). It is the type a caller
  * walking every region can still name a control's key with - the registry's
  * own `ControlSpec<K>.key` stays tied to its region - so `region-control-io.ts`
  * takes this rather than a bare `string` and a typo cannot be passed at all

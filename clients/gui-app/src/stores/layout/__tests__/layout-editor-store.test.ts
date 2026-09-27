@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import {
+  DEFAULT_ARRANGEMENT,
+  USAGE_PROVIDER_IDS,
+} from "@/lib/layout/layout-arrangement";
 import { LAYOUT_HISTORY_CAP } from "@/lib/layout/layout-history";
 import { persistKey, STORE_KEYS } from "@/lib/persist";
 import {
@@ -34,6 +37,7 @@ function session(): void {
     entry: "pointer",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 }
 
@@ -274,36 +278,158 @@ describe("Discard and external writes (L-18)", () => {
   });
 });
 
-describe("the inspector ladder (L-31)", () => {
-  it("walks provider level, then section, then index", () => {
+describe("undo and redo across an external write", () => {
+  it("undo restores the gestured region and keeps a write the editor did not make; redo re-applies it and keeps the write", () => {
     session();
-    editorState().select("usageLimits");
-    editorState().openLevel({
-      kind: "usage-provider",
-      providerId: "claude-code",
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
     });
 
-    expect(editorState().popInspectorLevel()).toBe(true);
-    expect(editorState().level).toBeNull();
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
+
+    editorState().undo();
+
+    expect(getLayoutSnapshot().overrides.mic).toBeUndefined();
+    expect(getLayoutSnapshot().overrides.attachImage).toEqual({
+      shown: "hidden",
+    });
+
+    editorState().redo();
+
+    expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
+    expect(getLayoutSnapshot().overrides.attachImage).toEqual({
+      shown: "hidden",
+    });
+  });
+
+  it("redo keeps a write made after the undo", () => {
+    session();
+    editorState().recordGesture(() => {
+      useLayoutStore.getState().setRegionValues("mic", { shown: "hidden" });
+    });
+    editorState().undo();
+
+    useLayoutStore
+      .getState()
+      .setRegionValues("attachImage", { shown: "hidden" });
+
+    editorState().redo();
+
+    expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
+    expect(getLayoutSnapshot().overrides.attachImage).toEqual({
+      shown: "hidden",
+    });
+  });
+});
+
+describe("the inspector ladder (L-31)", () => {
+  it("walks the selected row, then its area, then All settings", () => {
+    session();
+    editorState().select("usageLimits");
+
+    expect(editorState().area).toBe("statusBar");
     expect(editorState().selected).toBe("usageLimits");
 
     expect(editorState().popInspectorLevel()).toBe(true);
     expect(editorState().selected).toBeNull();
+    expect(editorState().area).toBe("statusBar");
+
+    expect(editorState().popInspectorLevel()).toBe(true);
+    expect(editorState().area).toBeNull();
 
     expect(editorState().popInspectorLevel()).toBe(false);
   });
 
-  it("closes an open level when the selection moves", () => {
+  it("closes the row's own disclosure when the ladder pops it", () => {
     session();
     editorState().select("usageLimits");
-    editorState().openLevel({
-      kind: "usage-provider",
-      providerId: "claude-code",
-    });
+    expect(editorState().openRows).toContain("usageLimits");
 
+    editorState().popInspectorLevel();
+
+    expect(editorState().openRows).not.toContain("usageLimits");
+  });
+
+  it("walks a selected SURFACE the same way, since it is the other kind of canvas selection", () => {
+    session();
+    editorState().selectSurface("topBar");
+
+    expect(editorState().area).toBe("topBar");
+    expect(editorState().selectedSurface).toBe("topBar");
+
+    expect(editorState().popInspectorLevel()).toBe(true);
+    expect(editorState().selectedSurface).toBeNull();
+    expect(editorState().area).toBe("topBar");
+
+    expect(editorState().popInspectorLevel()).toBe(true);
+    expect(editorState().area).toBeNull();
+
+    expect(editorState().popInspectorLevel()).toBe(false);
+  });
+
+  it("moves the selection outright when a different region is selected", () => {
+    session();
+    editorState().select("usageLimits");
     editorState().select("minimap");
 
-    expect(editorState().level).toBeNull();
+    expect(editorState().selected).toBe("minimap");
+    expect(editorState().area).toBe("chat");
+  });
+});
+
+describe("toggleRow also selects, for a region row's own disclosure (item toggleRow)", () => {
+  it("opening a region row selects it and clears a selected surface", () => {
+    session();
+    editorState().selectSurface("topBar");
+    expect(editorState().selectedSurface).toBe("topBar");
+
+    editorState().toggleRow("usageLimits");
+
+    expect(editorState().openRows).toContain("usageLimits");
+    expect(editorState().selected).toBe("usageLimits");
+    expect(editorState().selectedSurface).toBeNull();
+  });
+
+  it("closing the row that is currently selected clears the selection", () => {
+    session();
+    editorState().toggleRow("usageLimits");
+    expect(editorState().selected).toBe("usageLimits");
+
+    editorState().toggleRow("usageLimits");
+
+    expect(editorState().openRows).not.toContain("usageLimits");
+    expect(editorState().selected).toBeNull();
+  });
+
+  it("closing a row that is not the selected one leaves the selection alone", () => {
+    session();
+    editorState().toggleRow("usageLimits");
+    editorState().toggleRow("minimap");
+    expect(editorState().selected).toBe("minimap");
+    expect(editorState().openRows).toContain("usageLimits");
+
+    editorState().toggleRow("usageLimits");
+
+    expect(editorState().openRows).not.toContain("usageLimits");
+    expect(editorState().selected).toBe("minimap");
+  });
+
+  it("only opens or closes a provider row, never touching the selection", () => {
+    session();
+    editorState().select("usageLimits");
+    const provider = USAGE_PROVIDER_IDS[0];
+
+    editorState().toggleRow(provider);
+
+    expect(editorState().openRows).toContain(provider);
+    expect(editorState().selected).toBe("usageLimits");
+
+    editorState().toggleRow(provider);
+
+    expect(editorState().openRows).not.toContain(provider);
+    expect(editorState().selected).toBe("usageLimits");
   });
 });
 

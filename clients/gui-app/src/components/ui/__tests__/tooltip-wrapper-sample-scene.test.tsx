@@ -147,6 +147,7 @@ describe("tooltips inside the layout editor's sample scene", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
     });
 

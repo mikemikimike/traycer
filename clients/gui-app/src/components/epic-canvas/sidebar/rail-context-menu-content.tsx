@@ -7,16 +7,22 @@ import {
 } from "@/components/ui/context-menu";
 import { CustomizeLayoutMenuItem } from "@/components/layout-editor/customize-layout-menu-item";
 import {
+  getLeftPanelDefinition,
   isLeftPanelVisible,
   LEFT_PANEL_DEFINITIONS,
   type LeftPanelAvailabilityContext,
 } from "@/components/epic-canvas/sidebar/left-panel-registry";
 import {
-  clearRailVisibilityOverrides,
   setRailVisibilityOverride,
   setSidebarSide,
+  unstackRailMember,
+  useLayoutRail,
 } from "@/lib/layout/rail-view";
-import { railRegionForLeftPanelId } from "@/lib/layout/rail";
+import {
+  leftPanelIdForRailRegion,
+  railRegionForLeftPanelId,
+  railStackOf,
+} from "@/lib/layout/rail";
 import { type LeftPanelId } from "@/lib/left-panel-ids";
 import { useArrangementValue } from "@/lib/layout-overrides";
 
@@ -51,6 +57,7 @@ export function RailContextMenuContent(props: {
 }): ReactNode {
   const { context, contextPanelId } = props;
   const sidebarSide = useArrangementValue("sidebarSide");
+  const rail = useLayoutRail();
   const visibility = LEFT_PANEL_DEFINITIONS.map((definition) => ({
     definition,
     visible: isLeftPanelVisible(definition, context),
@@ -62,9 +69,12 @@ export function RailContextMenuContent(props: {
     // The last one standing stays put; see the note above.
     locked: entry.visible && visibleCount === 1,
   }));
-  const hasOverrides = Object.keys(context.visibilityOverrideById).length > 0;
   const pointedEntry =
     entries.find((entry) => entry.definition.id === contextPanelId) ?? null;
+  const pointedStack =
+    pointedEntry === null
+      ? null
+      : railStackOf(rail, railRegionForLeftPanelId(pointedEntry.definition.id));
 
   return (
     <ContextMenuContent
@@ -81,6 +91,21 @@ export function RailContextMenuContent(props: {
           >
             {`Hide '${pointedEntry.definition.title}'`}
           </ContextMenuItem>
+          {/* Each member out of its stack (L-181), since the stack's one
+              icon stands for all of them; out of a pair, the pair dissolves. */}
+          {(pointedStack?.members ?? []).map((member) => {
+            const panelId = leftPanelIdForRailRegion(member);
+            const title = getLeftPanelDefinition(panelId).title;
+            return (
+              <ContextMenuItem
+                key={member}
+                onSelect={() => unstackRailMember(panelId)}
+                data-testid={`epic-rail-unstack-${panelId}`}
+              >
+                {`Unstack '${title}'`}
+              </ContextMenuItem>
+            );
+          })}
           <ContextMenuSeparator />
         </>
       ) : null}
@@ -109,17 +134,6 @@ export function RailContextMenuContent(props: {
           ) : null}
         </ContextMenuCheckboxItem>
       ))}
-      {hasOverrides ? (
-        <>
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            onSelect={clearRailVisibilityOverrides}
-            data-testid="epic-rail-reset-panel-visibility"
-          >
-            Reset panel visibility
-          </ContextMenuItem>
-        </>
-      ) : null}
       <ContextMenuSeparator />
       {/* S-32: the sidebar's own side, beside its visibility verbs. Writes
           through the same recordGesture-wrapped path as every item above it,

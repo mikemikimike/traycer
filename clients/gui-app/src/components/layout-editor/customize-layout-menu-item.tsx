@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlidersHorizontal } from "lucide-react";
 import { ContextMenuItem } from "@/components/ui/context-menu";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
+import { activateTabIntent } from "@/lib/tab-navigation";
 import type { RegionId } from "@/lib/layout/region-id";
 
 /**
@@ -30,7 +31,9 @@ export function CustomizeLayoutMenuItem(props: {
           source: "direct_ui",
           entry: "pointer",
           target: props.target,
-          navigate,
+          origin: { kind: "tab" },
+          navigateToTabIntent: (intent) =>
+            activateTabIntent(navigate, intent, undefined),
         });
       }}
     >

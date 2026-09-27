@@ -1,6 +1,7 @@
 import {
   DEFAULT_ARRANGEMENT,
   isAutomaticLimitSelection,
+  USAGE_PROVIDER_IDS,
   ORDER_GROUP_IDS,
   type BarHost,
   type EdgeSide,
@@ -13,9 +14,12 @@ import {
 import {
   overrideKeys,
   sameFieldList,
+  isStringList,
   sameRegionValue,
   type LayoutValues,
+  type RegionValueKey,
 } from "@/lib/layout/layout-values";
+import { resolvePersistedOverrides } from "@/lib/layout/layout-values-persist";
 import {
   effectiveLayoutValues,
   PRESET_VALUES,
@@ -26,16 +30,17 @@ import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 
 /**
- * What is different from the base preset, and the way back.
+ * What is different from the last-applied preset, and the way back.
  *
- * The scope is settled (C-11) and deliberately narrower than "everything a
- * user could have touched": a change is a VALUE that differs from the base
- * preset, an order group that is no longer in its default order, or a provider
- * switched off the strip. Presets are density-only (L-20), so putting the
- * arrangement back is a separate gesture and `resetToBase` leaves it alone.
+ * `basePreset` is the preset last APPLIED, and an apply replaces every value
+ * with that preset's (`applyPreset`), so a value is a change exactly when it
+ * differs from it. Where things live has no preset, so the arrangement is
+ * measured against the shipped one. The two together are the change list
+ * (`layoutChanges`), grouped Styles and Arrangement, and `<Preset> · Modified`
+ * reads whether that list has anything in it.
  */
 
-/** Which keys of one region differ from the base preset, in the patch's order. */
+/** Which keys of one region differ from the last-applied preset, in the patch's order. */
 function changedKeys<K extends RegionId>(
   snapshot: LayoutSnapshot,
   region: K,
@@ -54,32 +59,6 @@ export function regionChanged(
   region: RegionId,
 ): boolean {
   return changedKeys(snapshot, region).length > 0;
-}
-
-/**
- * The number the header reads out beside the preset name ("Compact + 3
- * changes"): one per changed VALUE, and nothing else (L-57).
- *
- * Values only, because the count has to agree with the button beside it:
- * "Reset to Compact" reverts exactly the delta this counts, and a count that
- * also carried the arrangement would leave changes behind after a reset that
- * claimed to clear them. An arrangement change is still a change a person
- * made - it earns a dot in the index and a revert on its own Position row
- * (`positionRowChanged`).
- */
-export function changeCount(snapshot: LayoutSnapshot): number {
-  // By DIFFERENCE, through the same `changedKeys` the row's own dot reads
-  // (L-133). It used to count the delta's keys and rely on the store keeping
-  // that delta minimal against the base - an invariant bought by having a
-  // preset click delete every pick the incoming preset agreed with, which is
-  // the destruction L-133 closed. Counting is the cheap half of that trade:
-  // `changedKeys` returns early for a region with no patch, so the walk
-  // allocates only for the regions a person has actually touched, which is
-  // what G1-21 was about.
-  return layoutRegionIds().reduce(
-    (total, region) => total + changedKeys(snapshot, region).length,
-    0,
-  );
 }
 
 /**
@@ -105,22 +84,6 @@ export function reorderedGroups(
       !sameFieldList(orderIds(arrangement, group), defaultOrderIds(group)),
   );
 }
-
-/** Every value back to the base preset. Values only: the arrangement stays. */
-export function resetToBase(snapshot: LayoutSnapshot): LayoutSnapshot {
-  return { ...snapshot, overrides: {} };
-}
-
-// ── The floor (L-20's "Reset everything", P-6) ──────────────────────────────
-//
-// `changeCount` and `resetToBase` are deliberately values-only, and
-// `positionRowChanged` covers the two bar placements, the minimap side and
-// the five order groups. That leaves three fields nothing measured and nothing
-// put back - `hiddenProviders`, `providerLimits` and `mobileFooter` - so a
-// page reading "Default" with no changes could have three providers hidden and
-// the mobile footer off. The predicates below are what a changed dot and a
-// per-row revert read; `resetEverything` is the floor under both, and it
-// matters most on this host, which has no session and therefore no Undo.
 
 /**
  * Whether one provider's stored selection differs from the shipped default.
@@ -187,9 +150,9 @@ export function mobileFooterChanged(arrangement: LayoutArrangement): boolean {
  * handed to it - a two-arrangement comparator rather than one fixed against
  * `DEFAULT_ARRANGEMENT`, so a caller comparing against a session's entry
  * snapshot and one comparing against the shipped default can both use it.
- * `arrangementChanged` below is the one caller so far and passes
- * `DEFAULT_ARRANGEMENT` as `b`, the same "changed from shipped" reading every
- * Position row dot and revert uses (`region-position-rows.ts`).
+ * `surface-diff.ts` passes `DEFAULT_ARRANGEMENT` as `b`, the same "changed
+ * from shipped" reading every Position row dot and revert uses
+ * (`region-position-rows.ts`).
  */
 export function tabStripPlacementChanged(
   a: LayoutArrangement,
@@ -214,32 +177,210 @@ export function sideStripViewChanged(
   return a.sideStripView !== b.sideStripView;
 }
 
-/** Whether ANY of where things live differs from the shipped arrangement. */
-export function arrangementChanged(arrangement: LayoutArrangement): boolean {
-  return (
-    reorderedGroups(arrangement).length > 0 ||
-    arrangement.usageHost !== DEFAULT_ARRANGEMENT.usageHost ||
-    arrangement.usageSide !== DEFAULT_ARRANGEMENT.usageSide ||
-    arrangement.minimapSide !== DEFAULT_ARRANGEMENT.minimapSide ||
-    arrangement.resourceHost !== DEFAULT_ARRANGEMENT.resourceHost ||
-    arrangement.resourceSide !== DEFAULT_ARRANGEMENT.resourceSide ||
-    usageProvidersChanged(arrangement) ||
-    mobileFooterChanged(arrangement) ||
-    tabStripPlacementChanged(arrangement, DEFAULT_ARRANGEMENT) ||
-    sidebarSideChanged(arrangement, DEFAULT_ARRANGEMENT) ||
-    sideStripViewChanged(arrangement, DEFAULT_ARRANGEMENT)
+// ── The change list ─────────────────────────────────────────────────────────
+
+/** Any one leaf some region's value bag holds. */
+export type LayoutValueLeaf = boolean | string | ReadonlyArray<string>;
+
+/** One value that differs from the last-applied preset. */
+export interface StyleChange {
+  readonly kind: "value";
+  readonly region: RegionId;
+  readonly key: RegionValueKey;
+  readonly current: LayoutValueLeaf;
+  /** The last-applied preset's value, which the line's revert restores. */
+  readonly baseline: LayoutValueLeaf;
+}
+
+/** The arrangement's single-valued fields a change line can name. */
+export type ArrangementField =
+  | "tabStripPlacement"
+  | "sideStripView"
+  | "taskTabLayout"
+  | "readingWidth"
+  | "sidebarSide"
+  | "minimapSide"
+  | "usageHost"
+  | "usageSide"
+  | "resourceHost"
+  | "resourceSide"
+  | "mobileFooter";
+
+const ARRANGEMENT_FIELDS: ReadonlyArray<ArrangementField> = [
+  "tabStripPlacement",
+  "sideStripView",
+  "taskTabLayout",
+  "readingWidth",
+  "sidebarSide",
+  "minimapSide",
+  "usageHost",
+  "usageSide",
+  "resourceHost",
+  "resourceSide",
+  "mobileFooter",
+];
+
+/**
+ * One piece of where things live that differs from what shipped.
+ *
+ * A reordered group and a changed provider carry no value pair: an order and
+ * a provider's hidden state plus limits are not one value, and the line reads
+ * the same whatever they are.
+ */
+export type ArrangementChange =
+  | {
+      readonly kind: "field";
+      readonly field: ArrangementField;
+      readonly current: LayoutArrangement[ArrangementField];
+      /** The shipped value, which the line's revert restores. */
+      readonly baseline: LayoutArrangement[ArrangementField];
+    }
+  | { readonly kind: "order"; readonly group: OrderGroupId }
+  | { readonly kind: "provider"; readonly providerId: RateLimitProviderId };
+
+export type LayoutChange = StyleChange | ArrangementChange;
+
+export interface LayoutChanges {
+  readonly styles: ReadonlyArray<StyleChange>;
+  readonly arrangement: ReadonlyArray<ArrangementChange>;
+}
+
+/**
+ * Everything that differs: values against the last-applied preset, the
+ * arrangement against the shipped one.
+ *
+ * Which profiles the usage popover shows, the pinned breakdown's field order
+ * and the status bar's parked set are left out: each is picked where it is
+ * drawn rather than in the layout form, so no row could show it. `resetLayout`
+ * still puts them back.
+ */
+export function layoutChanges(snapshot: LayoutSnapshot): LayoutChanges {
+  const values = effectiveLayoutValues(snapshot.basePreset, snapshot.overrides);
+  const arrangement = snapshot.arrangement;
+  return {
+    styles: layoutRegionIds().flatMap((region) =>
+      regionStyleChanges(snapshot, values, region),
+    ),
+    arrangement: [
+      ...ARRANGEMENT_FIELDS.filter(
+        (field) => arrangement[field] !== DEFAULT_ARRANGEMENT[field],
+      ).map((field): ArrangementChange => ({
+        kind: "field",
+        field,
+        current: arrangement[field],
+        baseline: DEFAULT_ARRANGEMENT[field],
+      })),
+      ...reorderedGroups(arrangement).map((group): ArrangementChange => ({
+        kind: "order",
+        group,
+      })),
+      ...USAGE_PROVIDER_IDS.filter((providerId) =>
+        providerChanged(arrangement, providerId),
+      ).map((providerId): ArrangementChange => ({
+        kind: "provider",
+        providerId,
+      })),
+    ],
+  };
+}
+
+/** Whether the status reads `<Preset> · Modified` rather than the name alone. */
+export function layoutModified(snapshot: LayoutSnapshot): boolean {
+  const changes = layoutChanges(snapshot);
+  return changes.styles.length > 0 || changes.arrangement.length > 0;
+}
+
+/** That one change put back, and nothing else. */
+export function revertLayoutChange(
+  snapshot: LayoutSnapshot,
+  change: LayoutChange,
+): LayoutSnapshot {
+  const arrangement = snapshot.arrangement;
+  switch (change.kind) {
+    case "value": {
+      // Taken OUT of the delta, so the value is the last-applied preset's.
+      const overrides: Record<string, unknown> = { ...snapshot.overrides };
+      const kept: Record<string, unknown> = {
+        ...snapshot.overrides[change.region],
+      };
+      delete kept[change.key];
+      overrides[change.region] = kept;
+      return {
+        ...snapshot,
+        overrides: resolvePersistedOverrides(overrides),
+      };
+    }
+    case "field":
+      return {
+        ...snapshot,
+        arrangement: {
+          ...arrangement,
+          [change.field]: DEFAULT_ARRANGEMENT[change.field],
+        },
+      };
+    case "order":
+      // Every order group is the arrangement field of the same name.
+      // `dividerSeq` stays: it only ever increases.
+      return {
+        ...snapshot,
+        arrangement: {
+          ...arrangement,
+          [change.group]: DEFAULT_ARRANGEMENT[change.group],
+        },
+      };
+    case "provider":
+      return {
+        ...snapshot,
+        arrangement: revertProvider(arrangement, change.providerId),
+      };
+  }
+}
+
+/** One region's value lines. */
+function regionStyleChanges(
+  snapshot: LayoutSnapshot,
+  values: LayoutValues,
+  region: RegionId,
+): ReadonlyArray<StyleChange> {
+  const baseline = PRESET_VALUES[snapshot.basePreset][region];
+  const keys: ReadonlyArray<string> = changedKeys(snapshot, region);
+  return keys.filter(isRegionValueKey).map((key): StyleChange => ({
+    kind: "value",
+    region,
+    key,
+    current: regionLeaf(values[region], key),
+    baseline: regionLeaf(baseline, key),
+  }));
+}
+
+function isRegionValueKey(key: string): key is RegionValueKey {
+  return layoutRegionIds().some(
+    (region) => key in PRESET_VALUES.default[region],
   );
 }
 
 /**
+ * One leaf off a region's bag, read by a key known to be in it; `Reflect.get`
+ * for the reason `regionSettingValue` gives, and narrowed rather than cast.
+ */
+function regionLeaf(
+  regionValues: LayoutValues[RegionId],
+  key: RegionValueKey,
+): LayoutValueLeaf {
+  const leaf: unknown = Reflect.get(regionValues, key);
+  if (typeof leaf === "boolean" || typeof leaf === "string") return leaf;
+  return isStringList(leaf) ? leaf : [];
+}
+
+/**
  * Everything back to what shipped: the Default preset, no value overrides and
- * the shipped arrangement (L-20).
+ * the shipped arrangement - `Reset layout…`.
  *
  * `dividerSeq` is the one field that does NOT go back. It is the rail's
  * "only ever increases" counter, and handing out an id a removed divider once
  * held is the one way two entries in a list keyed by id can collide.
  */
-export function resetEverything(snapshot: LayoutSnapshot): LayoutSnapshot {
+export function resetLayout(snapshot: LayoutSnapshot): LayoutSnapshot {
   return {
     ...snapshot,
     basePreset: "default",
@@ -254,12 +395,45 @@ export function resetEverything(snapshot: LayoutSnapshot): LayoutSnapshot {
   };
 }
 
-/** Whether a snapshot has anything at all for "Reset everything" to undo. */
-export function anythingChanged(snapshot: LayoutSnapshot): boolean {
+/**
+ * Whether `resetLayout` would change anything at all - including the stored
+ * choices the change list leaves out (selected accounts, pinned field order).
+ * `dividerSeq` is bookkeeping and never counts.
+ */
+export function resetWouldChange(snapshot: LayoutSnapshot): boolean {
+  const reset = resetLayout(snapshot);
+  return !sameData(
+    { ...snapshot, arrangement: { ...snapshot.arrangement, dividerSeq: 0 } },
+    { ...reset, arrangement: { ...reset.arrangement, dividerSeq: 0 } },
+  );
+}
+
+/** Plain-data equality that ignores key order. */
+function sameData(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => sameData(entry, right[index]))
+    );
+  }
+  if (
+    left === null ||
+    right === null ||
+    typeof left !== "object" ||
+    typeof right !== "object"
+  )
+    return false;
+  const keys = Object.keys(left);
   return (
-    snapshot.basePreset !== "default" ||
-    changeCount(snapshot) > 0 ||
-    arrangementChanged(snapshot.arrangement)
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(right, key) &&
+        sameData(Reflect.get(left, key), Reflect.get(right, key)),
+    )
   );
 }
 
@@ -499,8 +673,8 @@ export interface LayoutEditorSessionChangeSummary {
 
 /**
  * `layout_editor_session`'s value-change facts (L-46, L-54, L-57):
- * `changedCount` is {@link changeCount} at exit - the same delta "Reset to
- * <preset>" reverts - and `regionsTouchedCount` is the distinct regions that
+ * `changedCount` is the number of Styles lines on the change list at exit,
+ * and `regionsTouchedCount` is the distinct regions that
  * moved between the session's entry snapshot and its exit snapshot.
  */
 export function layoutEditorSessionChangeSummary(
@@ -508,7 +682,7 @@ export function layoutEditorSessionChangeSummary(
   exitSnapshot: LayoutSnapshot,
 ): LayoutEditorSessionChangeSummary {
   return {
-    changedCount: changeCount(exitSnapshot),
+    changedCount: layoutChanges(exitSnapshot).styles.length,
     regionsTouchedCount: touchedRegionIds(entrySnapshot, exitSnapshot).length,
   };
 }

@@ -29,7 +29,7 @@ function row(id: string): HTMLElement {
 }
 
 function grabOf(rowNode: HTMLElement): HTMLElement {
-  const node = rowNode.querySelector('[role="button"]');
+  const node = rowNode.querySelector("[data-row-grab]");
   if (!(node instanceof HTMLElement)) throw new Error("row has no grab");
   return node;
 }
@@ -54,8 +54,8 @@ function Card(props: {
           overrides: state.overrides,
           arrangement: state.arrangement,
         }}
-        filter=""
         openRows={openRows}
+        onSelectRow={null}
         onToggleRow={(id) => {
           props.onToggle?.(id);
           setOpenRows((prev) =>
@@ -64,7 +64,7 @@ function Card(props: {
               : [...prev, id],
           );
         }}
-        surfaceRows={null}
+        selectedRow={null}
       />
     </LayoutFormHostContext>
   );

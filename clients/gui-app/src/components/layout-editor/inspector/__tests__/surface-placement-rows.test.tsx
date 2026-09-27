@@ -1,19 +1,18 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
+import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
 import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
-import {
+  ReadingWidthRow,
+  ResourceReadingsRow,
   SidebarSideRow,
   SideStripViewRow,
+  TabOverflowRow,
   TabStripPositionRow,
 } from "@/components/layout-editor/inspector/rows/surface-placement-rows";
-import { SURFACE_GROUPS } from "@/components/layout-editor/regions/region-grammar";
 import { setMobileApp } from "@/lib/mobile-app";
+import { readPendingLayoutLanding } from "@/lib/settings-navigation";
+import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -21,10 +20,13 @@ import {
 } from "@/stores/layout/layout-store";
 
 /**
- * The Tabs surface's Position row and the Sidebar surface's Side row: each
- * writes the stored arrangement, a write inside a session is one undo step
- * that Discard puts back, and the revert shows only while the value differs
- * from the shipped one.
+ * The Task tabs surface's Placement, Side tab view and Tab overflow rows, and
+ * the Sidebar surface's Side and Resource readings rows. Each
+ * arrangement-backed row writes the stored arrangement, a write inside a
+ * session is one undo step that Discard puts back, and the revert shows only
+ * while the value differs from the shipped one. Resource readings writes a
+ * region value instead of the arrangement, through the same
+ * `region-control-io` seam every other region control uses.
  */
 
 function historyDepth(): number {
@@ -45,6 +47,7 @@ function beginSession(): void {
     entry: "keyboard",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 }
 
@@ -60,6 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   setMobileApp(false);
+  setSystemTabModalApi(null);
   useLayoutEditorStore.getState().setFilter("");
   useLayoutEditorStore.getState().endSession();
 });
@@ -70,7 +74,7 @@ describe("<TabStripPositionRow />", () => {
 
     const options = Array.from(
       screen
-        .getByRole("radiogroup", { name: "Tabs position" })
+        .getByRole("radiogroup", { name: "Tab placement" })
         .querySelectorAll("[role='radio']"),
     );
     expect(options.map((node) => node.textContent)).toEqual([
@@ -83,13 +87,13 @@ describe("<TabStripPositionRow />", () => {
       "false",
       "false",
     ]);
-    expect(screen.getByText("Position")).toBeTruthy();
+    expect(screen.getByText("Placement")).toBeTruthy();
   });
 
   it("writes the store at rest, with no history", () => {
     render(<TabStripPositionRow />);
 
-    pick("Tabs position", "Left");
+    pick("Tab placement", "Left");
 
     expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
       "left",
@@ -101,7 +105,7 @@ describe("<TabStripPositionRow />", () => {
     beginSession();
     render(<TabStripPositionRow />);
 
-    pick("Tabs position", "Right");
+    pick("Tab placement", "Right");
     expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe(
       "right",
     );
@@ -122,17 +126,23 @@ describe("<TabStripPositionRow />", () => {
   it("offers a revert only while the placement differs from the shipped one", () => {
     render(<TabStripPositionRow />);
     expect(
-      screen.queryByRole("button", { name: "Revert tabs position" }),
+      screen.queryByRole("button", {
+        name: "Reset tab placement to default: Top",
+      }),
     ).toBeNull();
 
-    pick("Tabs position", "Left");
+    pick("Tab placement", "Left");
     fireEvent.click(
-      screen.getByRole("button", { name: "Revert tabs position" }),
+      screen.getByRole("button", {
+        name: "Reset tab placement to default: Top",
+      }),
     );
 
     expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe("top");
     expect(
-      screen.queryByRole("button", { name: "Revert tabs position" }),
+      screen.queryByRole("button", {
+        name: "Reset tab placement to default: Top",
+      }),
     ).toBeNull();
   });
 });
@@ -149,34 +159,34 @@ describe("<SideStripViewRow /> (D8)", () => {
     });
   }
 
-  it("draws Layered / Activity over the stored view", () => {
+  it("draws Tabs only / Activity over the stored view", () => {
     render(<SideStripViewRow />);
 
     const options = Array.from(
       screen
-        .getByRole("radiogroup", { name: "Tabs view" })
+        .getByRole("radiogroup", { name: "Side tab view" })
         .querySelectorAll("[role='radio']"),
     );
     expect(options.map((node) => node.textContent)).toEqual([
-      "Layered",
+      "Tabs only",
       "Activity",
     ]);
     expect(options.map((node) => node.getAttribute("aria-checked"))).toEqual([
       "true",
       "false",
     ]);
-    expect(screen.getByText("View")).toBeTruthy();
+    expect(screen.getByText("Side tab view")).toBeTruthy();
   });
 
   it("is disabled with a reason while the tabs are at the top, which is the shipped default", () => {
     render(<SideStripViewRow />);
 
     const options = screen
-      .getByRole("radiogroup", { name: "Tabs view" })
+      .getByRole("radiogroup", { name: "Side tab view" })
       .querySelectorAll<HTMLButtonElement>("[role='radio']");
     expect([...options].every((option) => option.disabled)).toBe(true);
     expect(
-      screen.getByText("Applies when tabs are at the left or right."),
+      screen.getByText("Available when tabs are on the left or right."),
     ).toBeTruthy();
   });
 
@@ -185,11 +195,11 @@ describe("<SideStripViewRow /> (D8)", () => {
     render(<SideStripViewRow />);
 
     const options = screen
-      .getByRole("radiogroup", { name: "Tabs view" })
+      .getByRole("radiogroup", { name: "Side tab view" })
       .querySelectorAll<HTMLButtonElement>("[role='radio']");
     expect([...options].every((option) => option.disabled)).toBe(false);
     expect(
-      screen.queryByText("Applies when tabs are at the left or right."),
+      screen.queryByText("Available when tabs are on the left or right."),
     ).toBeNull();
   });
 
@@ -197,7 +207,7 @@ describe("<SideStripViewRow /> (D8)", () => {
     withVerticalStrip();
     render(<SideStripViewRow />);
 
-    pick("Tabs view", "Activity");
+    pick("Side tab view", "Activity");
 
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
       "activity",
@@ -210,7 +220,7 @@ describe("<SideStripViewRow /> (D8)", () => {
     beginSession();
     render(<SideStripViewRow />);
 
-    pick("Tabs view", "Activity");
+    pick("Side tab view", "Activity");
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
       "activity",
     );
@@ -232,15 +242,21 @@ describe("<SideStripViewRow /> (D8)", () => {
     withVerticalStrip();
     render(<SideStripViewRow />);
     expect(
-      screen.queryByRole("button", { name: "Revert tabs view" }),
+      screen.queryByRole("button", {
+        name: "Reset side tab view to default",
+      }),
     ).toBeNull();
 
-    pick("Tabs view", "Activity");
-    fireEvent.click(screen.getByRole("button", { name: "Revert tabs view" }));
+    pick("Side tab view", "Activity");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reset side tab view to default" }),
+    );
 
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe("layered");
     expect(
-      screen.queryByRole("button", { name: "Revert tabs view" }),
+      screen.queryByRole("button", {
+        name: "Reset side tab view to default",
+      }),
     ).toBeNull();
   });
 });
@@ -291,138 +307,311 @@ describe("<SidebarSideRow />", () => {
   it("offers a revert only while the side differs from the shipped one", () => {
     render(<SidebarSideRow />);
     expect(
-      screen.queryByRole("button", { name: "Revert sidebar side" }),
+      screen.queryByRole("button", {
+        name: "Reset sidebar side to default",
+      }),
     ).toBeNull();
 
     pick("Sidebar side", "Right");
     fireEvent.click(
-      screen.getByRole("button", { name: "Revert sidebar side" }),
+      screen.getByRole("button", { name: "Reset sidebar side to default" }),
     );
 
     expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("left");
     expect(
-      screen.queryByRole("button", { name: "Revert sidebar side" }),
+      screen.queryByRole("button", {
+        name: "Reset sidebar side to default",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps focus in the row when its ↺ unmounts, moving it to a sibling control", () => {
+    render(<SidebarSideRow />);
+    pick("Sidebar side", "Right");
+
+    const revertButton = screen.getByRole("button", {
+      name: "Reset sidebar side to default",
+    });
+    const row = revertButton.closest("[data-layout-form-row]");
+    if (row === null)
+      throw new Error("expected a data-layout-form-row ancestor");
+    revertButton.focus();
+    fireEvent.click(revertButton);
+
+    expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("left");
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset sidebar side to default",
+      }),
+    ).toBeNull();
+    expect(row.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe("<ReadingWidthRow />", () => {
+  it("draws Comfortable / Wide over the stored width", () => {
+    render(<ReadingWidthRow />);
+
+    const options = Array.from(
+      screen
+        .getByRole("radiogroup", { name: "Reading width" })
+        .querySelectorAll("[role='radio']"),
+    );
+    expect(options.map((node) => node.textContent)).toEqual([
+      "Comfortable",
+      "Wide",
+    ]);
+    expect(options.map((node) => node.getAttribute("aria-checked"))).toEqual([
+      "true",
+      "false",
+    ]);
+  });
+
+  it("writes arrangement.readingWidth", () => {
+    render(<ReadingWidthRow />);
+
+    pick("Reading width", "Wide");
+
+    expect(useLayoutStore.getState().arrangement.readingWidth).toBe("wide");
+    expect(historyDepth()).toBe(0);
+  });
+
+  it("offers a revert only while wide, and it restores comfortable", () => {
+    render(<ReadingWidthRow />);
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset reading width to default: Comfortable",
+      }),
+    ).toBeNull();
+
+    pick("Reading width", "Wide");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reset reading width to default: Comfortable",
+      }),
+    );
+
+    expect(useLayoutStore.getState().arrangement.readingWidth).toBe(
+      "comfortable",
+    );
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset reading width to default: Comfortable",
+      }),
     ).toBeNull();
   });
 });
 
-/** The index group under one surface heading, by the heading's text. */
-function indexGroup(label: string): HTMLElement | null {
-  const heading = Array.from(
-    document.querySelectorAll<HTMLElement>("div.uppercase"),
-  ).find((node) => node.textContent === label);
-  return heading?.parentElement ?? null;
-}
+describe("<TabOverflowRow />", () => {
+  function withVerticalStrip(): void {
+    useLayoutStore.setState({
+      ...DEFAULT_LAYOUT_SNAPSHOT,
+      layoutCarryDone: true,
+      arrangement: {
+        ...DEFAULT_LAYOUT_SNAPSHOT.arrangement,
+        tabStripPlacement: "left",
+      },
+    });
+  }
 
-describe("the dock's index", () => {
-  it("draws Position and View under Tabs and Side under Sidebar, and neither elsewhere", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
+  it("draws Scroll / Shrink to fit over the stored layout", () => {
+    render(<TabOverflowRow />);
 
-    const tabs = indexGroup("Tabs");
-    const sidebar = indexGroup("Sidebar");
-    expect(
-      tabs?.querySelector("[role='radiogroup'][aria-label='Tabs position']"),
-    ).not.toBeNull();
-    expect(
-      tabs?.querySelector("[role='radiogroup'][aria-label='Tabs view']"),
-    ).not.toBeNull();
-    expect(
-      sidebar?.querySelector("[role='radiogroup'][aria-label='Sidebar side']"),
-    ).not.toBeNull();
-    for (const group of SURFACE_GROUPS) {
-      if (group.id === "topBar" || group.id === "sidebar") continue;
-      expect(
-        indexGroup(group.label)?.querySelector("[role='radiogroup']") ?? null,
-        group.id,
-      ).toBeNull();
-    }
+    const options = Array.from(
+      screen
+        .getByRole("radiogroup", { name: "Tab overflow" })
+        .querySelectorAll("[role='radio']"),
+    );
+    expect(options.map((node) => node.textContent)).toEqual([
+      "Scroll",
+      "Shrink to fit",
+    ]);
+    expect(options.map((node) => node.getAttribute("aria-checked"))).toEqual([
+      "true",
+      "false",
+    ]);
+    expect(screen.getByText("Tab overflow")).toBeTruthy();
   });
 
-  it("keeps the Tabs heading and Position for a filter only the row matches", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
+  it("is enabled with no status while the tabs sit at the top, the shipped default", () => {
+    render(<TabOverflowRow />);
 
-    act(() => {
-      useLayoutEditorStore.getState().setFilter("vertical tabs");
-    });
-
-    const tabs = indexGroup("Tabs");
+    const options = screen
+      .getByRole("radiogroup", { name: "Tab overflow" })
+      .querySelectorAll<HTMLButtonElement>("[role='radio']");
+    expect([...options].every((option) => option.disabled)).toBe(false);
     expect(
-      tabs?.querySelector("[role='radiogroup'][aria-label='Tabs position']"),
-    ).not.toBeNull();
-    expect(tabs?.querySelector("[data-region-id]") ?? null).toBeNull();
-    expect(indexGroup("Sidebar")).toBeNull();
-    expect(screen.queryByText(/No region matches/)).toBeNull();
+      screen.queryByText("Available when tabs are at the top."),
+    ).toBeNull();
+  });
+
+  it("is disabled with a reason once the tabs move to a side, which never scrolls or shrinks its own", () => {
+    withVerticalStrip();
+    render(<TabOverflowRow />);
+
+    const options = screen
+      .getByRole("radiogroup", { name: "Tab overflow" })
+      .querySelectorAll<HTMLButtonElement>("[role='radio']");
+    expect([...options].every((option) => option.disabled)).toBe(true);
+    expect(
+      screen.getByText("Available when tabs are at the top."),
+    ).toBeTruthy();
+  });
+
+  it("writes the store at rest, with no history", () => {
+    render(<TabOverflowRow />);
+
+    pick("Tab overflow", "Shrink to fit");
+
+    expect(useLayoutStore.getState().arrangement.taskTabLayout).toBe("shrink");
+    expect(historyDepth()).toBe(0);
+  });
+
+  it("is one undo step in a session, and Discard puts it back", () => {
+    beginSession();
+    render(<TabOverflowRow />);
+
+    pick("Tab overflow", "Shrink to fit");
+    expect(useLayoutStore.getState().arrangement.taskTabLayout).toBe("shrink");
+    expect(historyDepth()).toBe(1);
+
+    useLayoutEditorStore.getState().undo();
+    expect(useLayoutStore.getState().arrangement.taskTabLayout).toBe("scroll");
+
+    useLayoutEditorStore.getState().redo();
+    expect(useLayoutStore.getState().arrangement.taskTabLayout).toBe("shrink");
+
+    useLayoutEditorStore.getState().discard();
+    expect(useLayoutStore.getState().arrangement.taskTabLayout).toBe("scroll");
+  });
+
+  it("offers a revert only while the value differs from the shipped default", () => {
+    render(<TabOverflowRow />);
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset tab overflow to default: Scroll",
+      }),
+    ).toBeNull();
+
+    pick("Tab overflow", "Shrink to fit");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reset tab overflow to default: Scroll",
+      }),
+    );
+
+    expect(useLayoutStore.getState().arrangement.taskTabLayout).toBe("scroll");
+    expect(
+      screen.queryByRole("button", {
+        name: "Reset tab overflow to default: Scroll",
+      }),
+    ).toBeNull();
   });
 });
 
-/**
- * `LitSurfacePlacementRow` (D14, ticket 09): the dock half of the canvas's
- * placement bar, lit while its surface is the canvas selection.
- */
-describe("the dock's placement row lights up with its surface", () => {
-  function litRow(surface: "topBar" | "sidebar"): HTMLElement | null {
-    return document.querySelector(`[data-surface-placement-row="${surface}"]`);
-  }
+describe("<ResourceReadingsRow /> (G7)", () => {
+  it("draws the shipped default: on", () => {
+    render(<ResourceReadingsRow />);
 
-  it("lights the Tabs row while topBar is selected, and no other row", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
-    expect(litRow("topBar")?.hasAttribute("data-lit")).toBe(false);
-
-    act(() => {
-      useLayoutEditorStore.getState().selectSurface("topBar");
-    });
-
-    expect(litRow("topBar")?.getAttribute("data-lit")).toBe("1");
-    expect(litRow("sidebar")?.hasAttribute("data-lit")).toBe(false);
-  });
-
-  it("lights the Sidebar row while sidebar is selected", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
-
-    act(() => {
-      useLayoutEditorStore.getState().selectSurface("sidebar");
-    });
-
-    expect(litRow("sidebar")?.getAttribute("data-lit")).toBe("1");
-    expect(litRow("topBar")?.hasAttribute("data-lit")).toBe(false);
-  });
-
-  it("un-lights once the surface is deselected", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
-    act(() => {
-      useLayoutEditorStore.getState().selectSurface("topBar");
-    });
-    expect(litRow("topBar")?.getAttribute("data-lit")).toBe("1");
-
-    act(() => {
-      useLayoutEditorStore.getState().popInspectorLevel();
-    });
-
-    expect(litRow("topBar")?.hasAttribute("data-lit")).toBe(false);
-  });
-
-  // Finding 4: unlike the "vertical tabs" filter above, which the Tabs
-  // group's OWN keywords still match, this filter matches nothing about the
-  // Tabs surface at all. The group must still survive - and its placement
-  // row still light and be mountable for `scrollIntoView` - purely because
-  // it is the canvas SELECTION, not because the filter let it through.
-  it("keeps and lights the selected surface's row even under a filter the surface has nothing to do with", () => {
-    render(<InspectorIndex onPreviewPreset={() => {}} />);
-
-    act(() => {
-      useLayoutEditorStore.getState().selectSurface("topBar");
-      useLayoutEditorStore.getState().setFilter("minimap");
-    });
-
-    expect(indexGroup("Tabs")).not.toBeNull();
-    expect(litRow("topBar")?.getAttribute("data-lit")).toBe("1");
     expect(
-      litRow("topBar")?.querySelector(
-        "[role='radiogroup'][aria-label='Tabs position']",
-      ),
-    ).not.toBeNull();
-    // The unrelated filter still does its job for everything else.
-    expect(indexGroup("Sidebar")).toBeNull();
+      screen
+        .getByRole("switch", { name: "Readings on agent rows" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("stays operable while the Resource monitor itself is Hidden - it tunes the sidebar, not the monitor", () => {
+    useLayoutStore.getState().setRegionValues("resourceMonitor", {
+      shown: "hidden",
+    });
+    render(<ResourceReadingsRow />);
+
+    const toggle = screen.getByRole("switch", {
+      name: "Readings on agent rows",
+    });
+    expect(toggle.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(toggle);
+
+    expect(useLayoutStore.getState().overrides.resourceMonitor?.agentRows).toBe(
+      false,
+    );
+    // The monitor's own Hidden is untouched by this write.
+    expect(useLayoutStore.getState().overrides.resourceMonitor?.shown).toBe(
+      "hidden",
+    );
+  });
+
+  it("offers a revert only while it differs from the shipped default", () => {
+    render(<ResourceReadingsRow />);
+    expect(
+      screen.queryByRole("button", { name: "Reset readings on agent rows" }),
+    ).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("switch", { name: "Readings on agent rows" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reset readings on agent rows" }),
+    );
+
+    expect(
+      useLayoutStore.getState().overrides.resourceMonitor?.agentRows,
+    ).toBeUndefined();
+    expect(
+      screen.queryByRole("button", { name: "Reset readings on agent rows" }),
+    ).toBeNull();
+  });
+});
+
+describe("<ResourceReadingsRow /> Choose metrics link (L-174)", () => {
+  it("in the inspector host, opens the Resource monitor's row expanded", () => {
+    render(<ResourceReadingsRow />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose metrics" }));
+
+    const state = useLayoutEditorStore.getState();
+    expect(state.area).toBe("statusBar");
+    expect(state.selected).toBe("resourceMonitor");
+    expect(state.openRows).toContain("resourceMonitor");
+  });
+
+  it("in the page host, navigates Settings to the Resource monitor's row instead", () => {
+    setSystemTabModalApi({
+      active: null,
+      openSettings: vi.fn(),
+      openHistory: vi.fn(),
+      close: vi.fn(),
+      setSection: vi.fn(),
+      promoteToTab: vi.fn(),
+      isOverlayActive: () => true,
+    });
+    render(
+      <LayoutFormHostContext value="page">
+        <ResourceReadingsRow />
+      </LayoutFormHostContext>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose metrics" }));
+
+    expect(readPendingLayoutLanding()?.target).toEqual({
+      kind: "region",
+      regionId: "resourceMonitor",
+    });
+    // The docked editor's own selection is untouched by the page host.
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+  });
+});
+
+describe("<RevertButton /> (inspector-row.tsx)", () => {
+  it("still calls onRevert with no [data-sortable-id]/[data-layout-form-row] row ancestor", () => {
+    const onRevert = vi.fn();
+    render(<RevertButton onRevert={onRevert} label="Revert something" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert something" }));
+
+    expect(onRevert).toHaveBeenCalledOnce();
   });
 });
 

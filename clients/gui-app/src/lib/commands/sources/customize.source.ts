@@ -1,16 +1,12 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
 import type { CommandItem, ReactCommandSource } from "@/lib/commands/types";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
 /**
- * "Customize layout" in the palette (L-15, L-33).
- *
- * One item, not two: the sample workspace is no longer something to open, it
- * is the scene the door falls back to when there is no real chat to decorate,
- * so a second row would be asking the user to make a choice the session
- * already makes for them.
+ * The palette's two layout doors (L-15, L-33, C15): "Customize layout" opens
+ * the editor on the sample workspace, "Layout settings" opens the same form in
+ * Settings. Both outrank tasks for "layout" (`paletteFilter`).
  *
  * `entry: "keyboard"` unconditionally - the palette is reached by typing, and
  * the entry method gates the View Transition as well as being reported (L-30,
@@ -19,7 +15,6 @@ import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 export const customizeSource: ReactCommandSource = {
   id: "customize",
   useItems: () => {
-    const navigate = useNavigate();
     const editing = useLayoutEditorStore((state) => state.session !== null);
     const locked = useLayoutEditorStore(
       (state) => state.lockedBy === "other-window",
@@ -54,17 +49,32 @@ export const customizeSource: ReactCommandSource = {
       return [
         {
           ...item,
-          description: "Rearrange the app's chrome in a sample workspace",
-          run: () => {
+          description: "Arrange your layout using sample content.",
+          // `ctx.router`, never `useNavigate()`: the palette mounts above
+          // `RouterProvider`, where the hook has no router to navigate with.
+          run: (ctx) => {
             openLayoutEditor({
               source: "command_palette",
               entry: "keyboard",
               target: null,
-              navigate,
+              origin: { kind: "tab" },
+              navigateToTabIntent: ctx.router.navigateToTabIntent,
             });
           },
         },
+        {
+          id: "customize:layout-settings",
+          label: "Layout settings",
+          description: "Open Settings, Layout.",
+          keywords: ["layout", "settings", "appearance", "chrome"],
+          group: "actions",
+          scope: "actions",
+          shortcut: null,
+          actionId: null,
+          subpage: null,
+          run: (ctx) => ctx.router.navigateSettingsSection("layout"),
+        },
       ];
-    }, [editing, locked, navigate]);
+    }, [editing, locked]);
   },
 };

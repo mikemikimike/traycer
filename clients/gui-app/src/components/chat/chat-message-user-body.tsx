@@ -300,7 +300,11 @@ function AgentMessageDisplayView({
         />
         {expectReply ? <ReplyExpectedIcon /> : null}
       </span>
-      <ChatMessageTimestamp timestamp={sentAt} />
+      <ChatMessageTimestamp
+        timestamp={sentAt}
+        separated={false}
+        instanceId={messageId}
+      />
     </>
   );
 

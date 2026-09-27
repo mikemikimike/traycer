@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-  anythingChanged,
-  arrangementChanged,
+  layoutModified,
   layoutSnapshotProperties,
   mobileFooterChanged,
   providerChanged,
-  resetEverything,
+  resetLayout,
+  resetWouldChange,
   revertProvider,
   sidebarSideChanged,
   sideStripViewChanged,
@@ -19,12 +19,16 @@ import {
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
+import {
+  DEFAULT_LAYOUT_SNAPSHOT,
+  useLayoutStore,
+} from "@/stores/layout/layout-store";
 
 /**
  * The page's safety net (L-20, P-6).
  *
  * The full-width host has no session, so it has no Undo, no Discard and no
- * Cmd+Z, and "Reset to <preset>" is values-only by construction (L-57). These
+ * Cmd+Z, and applying a preset clears the delta by construction. These
  * are the predicates a changed dot and a per-row revert read for the three
  * arrangement fields nothing measured - `hiddenProviders`, `providerLimits`
  * and `mobileFooter` - and the floor underneath all of them.
@@ -37,6 +41,14 @@ const OTHER_PROVIDER: RateLimitProviderId =
 function snapshotWith(arrangement: LayoutArrangement): LayoutSnapshot {
   return { basePreset: "default", overrides: {}, arrangement };
 }
+
+beforeEach(() => {
+  window.localStorage.clear();
+  useLayoutStore.setState({
+    ...DEFAULT_LAYOUT_SNAPSHOT,
+    layoutCarryDone: true,
+  });
+});
 
 describe("one provider's own state", () => {
   it("is unchanged until it is hidden or its limits are picked", () => {
@@ -56,18 +68,23 @@ describe("one provider's own state", () => {
     expect(providerChanged(picked, PROVIDER)).toBe(true);
   });
 
-  it("is measured by difference, so an entry equal to Automatic is none", () => {
+  it("never reaches the store at all, so it is not a stored difference either", () => {
     // The writer deletes the key on the way back to Automatic; a map
-    // rehydrated from an older write can still carry one, and an entry that
-    // says exactly what the default says is not a change (R1-03).
-    const automatic: LayoutArrangement = {
+    // rehydrated from an older write can still carry one, but every write
+    // path normalizes it away (`withoutAutomaticLimits`), so a snapshot that
+    // actually went through the store never holds an Automatic entry to
+    // measure - not visibly (R1-03), and not as a stored-record difference
+    // either.
+    useLayoutStore.getState().setArrangement({
       ...DEFAULT_ARRANGEMENT,
       providerLimits: { [PROVIDER]: AUTOMATIC_LIMIT_SELECTION },
-    };
+    });
+    const stored = useLayoutStore.getState().arrangement;
 
-    expect(providerChanged(automatic, PROVIDER)).toBe(false);
-    expect(usageProvidersChanged(automatic)).toBe(false);
-    expect(anythingChanged(snapshotWith(automatic))).toBe(false);
+    expect(stored.providerLimits).toEqual({});
+    expect(providerChanged(stored, PROVIDER)).toBe(false);
+    expect(usageProvidersChanged(stored)).toBe(false);
+    expect(resetWouldChange(snapshotWith(stored))).toBe(false);
   });
 
   it("reverts to shown and Automatic, leaving every other provider alone", () => {
@@ -119,7 +136,7 @@ describe("what the page can see as changed", () => {
   });
 
   it("answers for the whole arrangement, field by field", () => {
-    expect(arrangementChanged(DEFAULT_ARRANGEMENT)).toBe(false);
+    expect(layoutModified(snapshotWith(DEFAULT_ARRANGEMENT))).toBe(false);
     const eachOne: ReadonlyArray<Partial<LayoutArrangement>> = [
       { usageHost: "header" },
       { minimapSide: "left" },
@@ -133,7 +150,7 @@ describe("what the page can see as changed", () => {
     ];
     for (const patch of eachOne) {
       expect(
-        arrangementChanged({ ...DEFAULT_ARRANGEMENT, ...patch }),
+        layoutModified(snapshotWith({ ...DEFAULT_ARRANGEMENT, ...patch })),
         JSON.stringify(patch),
       ).toBe(true);
     }
@@ -203,7 +220,7 @@ describe("the vertical strip's view", () => {
   });
 });
 
-describe("Reset everything (L-20)", () => {
+describe("Reset layout (L-20)", () => {
   it("puts back the preset, every value and every arrangement field", () => {
     const before: LayoutSnapshot = {
       basePreset: "compact",
@@ -218,7 +235,7 @@ describe("Reset everything (L-20)", () => {
         providerLimits: { [PROVIDER]: { limitKeys: ["5h"] } },
         dock: [...DEFAULT_ARRANGEMENT.dock].reverse(),
         usageProviders: [...DEFAULT_ARRANGEMENT.usageProviders].reverse(),
-        // S-29: "Reset everything" restores the tab strip placement and the
+        // S-29: "Reset layout" restores the tab strip placement and the
         // sidebar side too.
         tabStripPlacement: "right",
         sidebarSide: "right",
@@ -227,12 +244,12 @@ describe("Reset everything (L-20)", () => {
       },
     };
 
-    const after = resetEverything(before);
+    const after = resetLayout(before);
 
     expect(after.basePreset).toBe("default");
     expect(after.overrides).toEqual({});
-    expect(arrangementChanged(after.arrangement)).toBe(false);
-    expect(anythingChanged(after)).toBe(false);
+    expect(layoutModified(after)).toBe(false);
+    expect(resetWouldChange(after)).toBe(false);
     expect(after.arrangement.tabStripPlacement).toBe("top");
     expect(after.arrangement.sidebarSide).toBe("left");
     expect(after.arrangement.sideStripView).toBe("layered");
@@ -244,18 +261,43 @@ describe("Reset everything (L-20)", () => {
       dividerSeq: DEFAULT_ARRANGEMENT.dividerSeq + 7,
     });
 
-    expect(resetEverything(before).arrangement.dividerSeq).toBe(
+    expect(resetLayout(before).arrangement.dividerSeq).toBe(
       DEFAULT_ARRANGEMENT.dividerSeq + 7,
     );
   });
 
   it("has nothing to do on a snapshot that is already the shipped one", () => {
-    expect(anythingChanged(snapshotWith(DEFAULT_ARRANGEMENT))).toBe(false);
+    expect(resetWouldChange(snapshotWith(DEFAULT_ARRANGEMENT))).toBe(false);
     expect(
-      anythingChanged({
+      resetWouldChange({
         ...snapshotWith(DEFAULT_ARRANGEMENT),
         basePreset: "compact",
       }),
     ).toBe(true);
+  });
+
+  it("is true for a stored choice the change list leaves out, even at Default", () => {
+    // Which profiles the usage popover shows is picked where it is drawn, not
+    // in the layout form - `layoutModified` never sees it - but it is still
+    // part of the stored record, so a reset would still clear it.
+    const withProfile = snapshotWith({
+      ...DEFAULT_ARRANGEMENT,
+      shownProfiles: { "host-1": { [PROVIDER]: ["profile-1"] } },
+    });
+
+    expect(layoutModified(withProfile)).toBe(false);
+    expect(resetWouldChange(withProfile)).toBe(true);
+  });
+
+  it("is false for a pristine layout differing only in dividerSeq", () => {
+    // dividerSeq only ever increases (it is never handed back by a reset,
+    // above); a layout that differs from the shipped one ONLY there is not
+    // something a reset would visibly do anything to.
+    const bumped = snapshotWith({
+      ...DEFAULT_ARRANGEMENT,
+      dividerSeq: DEFAULT_ARRANGEMENT.dividerSeq + 3,
+    });
+
+    expect(resetWouldChange(bumped)).toBe(false);
   });
 });

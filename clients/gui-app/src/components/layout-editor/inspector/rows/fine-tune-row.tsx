@@ -1,36 +1,24 @@
-import { useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
-import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
-import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
+import type { ReactNode } from "react";
+import { LayoutFormRow } from "@/components/layout-editor/inspector/rows/layout-form-row";
 import {
   SegmentedControl,
   type SegmentedControlOption,
 } from "@/components/layout-editor/inspector/segmented-control";
 import {
+  fineTuneRowLiveWhileHidden,
   isControlValueChanged,
   readControlValue,
   revertControlValue,
+  revertControlValues,
   writeControlValue,
 } from "@/components/layout-editor/inspector/region-control-io";
-import { fineTuneMatchesFilter } from "@/components/layout-editor/regions/region-filter-match";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
 import type { LayoutValues, RegionValueKey } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 import { cn } from "@/lib/utils";
 
-/**
- * The collapsed disclosure at the foot of a section, and the four control
- * shapes its rows are operated with.
- *
- * Every combination the curated Style examples do not list is reachable here,
- * which is what lets the examples be five rather than thirty-two (L-10).
- */
+/** A region's detail rows, and the four control shapes they are operated with. */
 
 /**
  * A fine-tune row as a caller walking EVERY region sees it.
@@ -44,7 +32,8 @@ export interface FineTuneRowFacts {
   readonly id: string;
   readonly label: string;
   readonly description: string | null;
-  readonly whileHidden: boolean;
+  readonly requires: RegionValueKey | null;
+  readonly liveWhileHidden: RegionValueKey | null;
   readonly control:
     | { readonly kind: "switch"; readonly key: RegionValueKey }
     | {
@@ -54,8 +43,11 @@ export interface FineTuneRowFacts {
       }
     | {
         readonly kind: "checks";
-        readonly keys: ReadonlyArray<RegionValueKey>;
-        readonly options: ReadonlyArray<SegmentedControlOption>;
+        readonly options: ReadonlyArray<{
+          readonly key: RegionValueKey;
+          readonly label: string;
+          readonly requires: RegionValueKey | null;
+        }>;
       }
     | {
         readonly kind: "field-checks";
@@ -64,72 +56,63 @@ export interface FineTuneRowFacts {
       };
 }
 
-export function FineTuneDisclosure(props: {
+/**
+ * A region's detail rows, drawn in place inside its row's disclosure. A row
+ * whose prerequisite is off stays readable and disabled, rather than leaving
+ * the form (the breakdown rows while Pin breakdown is off). While the region
+ * is Hidden every row greys with it, except one another reader still follows
+ * (`liveWhileHidden`).
+ */
+export function FineTuneRows(props: {
   readonly rows: ReadonlyArray<FineTuneRowFacts>;
   readonly regionId: RegionId;
   readonly regionValues: LayoutValues[RegionId];
-  readonly filter: string;
-  /**
-   * Whether the region is Hidden, which greys every row that tunes it and
-   * leaves operable the rows that say they outlive it (`whileHidden`).
-   */
   readonly regionHidden: boolean;
 }): ReactNode {
-  const { rows, regionId, regionValues, filter, regionHidden } = props;
-  const page = useLayoutFormHost() === "page";
-  const [manuallyOpen, setManuallyOpen] = useState<boolean | null>(null);
-  // The manual answer is scoped to the filter that was in force when it was
-  // given: without this, opening Fine-tune once and closing it again silenced
-  // L-07's auto-expand for the rest of the session, so typing a word that only
-  // matches a fine-tune label looked like no match at all (G1-20).
-  const [openedUnder, setOpenedUnder] = useState(filter);
-  const manual = openedUnder === filter ? manuallyOpen : null;
-  const open = manual ?? fineTuneMatchesFilter(regionId, filter);
-
-  const body = rows.map((row) => {
-    const greyed = regionHidden && !row.whileHidden;
-    return (
-      // `inert`, not `aria-hidden`, for the reason `RegionSection` gives
-      // (G1-06): it removes focus, hit testing and the a11y tree in one.
-      <div key={row.id} inert={greyed} className={cn(greyed && "opacity-40")}>
-        <FineTuneRowView
-          row={row}
-          regionId={regionId}
-          regionValues={regionValues}
-        />
-      </div>
-    );
-  });
-
-  // On the page these rows are already behind the region row's own
-  // disclosure, so a second one inside it hid a single row behind two clicks
-  // (G6). The dock has no row disclosure, and keeps its collapsed Fine-tune.
-  if (page) return <div className="border-t border-border">{body}</div>;
-
+  const { rows, regionId, regionValues, regionHidden } = props;
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={(next) => {
-        setManuallyOpen(next);
-        setOpenedUnder(filter);
-      }}
-      className="border-t border-border"
-    >
-      <CollapsibleTrigger
-        variant="panel"
-        className="group flex w-full items-center text-left text-ui-sm"
-      >
-        <ChevronRight className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-        <span>Fine-tune ({rows.length})</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>{body}</CollapsibleContent>
-    </Collapsible>
+    <div className="border-t border-border/40">
+      {rows.map((row) => {
+        const disabled =
+          (regionHidden && !fineTuneRowLiveWhileHidden(row, regionValues)) ||
+          (row.requires !== null &&
+            readControlValue(regionValues, row.requires) !== true);
+        const prerequisite =
+          row.requires === null ? null : requiredRowLabel(rows, row.requires);
+        return (
+          // A disabled `fieldset` turns the controls off and keeps the row,
+          // its label and why it is off in the accessibility tree.
+          <fieldset
+            key={row.id}
+            disabled={disabled}
+            className="m-0 min-w-0 border-0 p-0"
+          >
+            <FineTuneRowView
+              row={row}
+              regionId={regionId}
+              regionValues={regionValues}
+            />
+            {disabled && prerequisite !== null ? (
+              <p className="px-2.5 pb-2 text-ui-xs text-muted-foreground">
+                Turn on {prerequisite} to change this.
+              </p>
+            ) : null}
+          </fieldset>
+        );
+      })}
+    </div>
   );
 }
 
-/** The one non-boolean switch field (`compactButton`) reads `Visibility`. */
-function visibilityWord(on: boolean): "shown" | "hidden" {
-  return on ? "shown" : "hidden";
+/** The label of the switch a row depends on, for its "Turn on …" line. */
+function requiredRowLabel(
+  rows: ReadonlyArray<FineTuneRowFacts>,
+  key: RegionValueKey,
+): string | null {
+  return (
+    rows.find((row) => row.control.kind === "switch" && row.control.key === key)
+      ?.label ?? null
+  );
 }
 
 function FineTuneRowView(props: {
@@ -141,28 +124,28 @@ function FineTuneRowView(props: {
   const { control } = row;
 
   if (control.kind === "switch") {
-    const value = readControlValue(regionValues, control.key);
-    const checked = typeof value === "boolean" ? value : value === "shown";
+    const checked = readControlValue(regionValues, control.key) === true;
     return (
-      <InspectorRow
+      <LayoutFormRow
+        anchor={null}
+        icon={null}
+        stacked={false}
         label={row.label}
-        description={row.description ?? undefined}
+        revertLabel={`Revert ${row.label}`}
+        description={row.description ?? null}
         onRevert={
           isControlValueChanged(regionId, control.key)
             ? () => {
                 revertControlValue(regionId, control.key);
               }
-            : undefined
+            : null
         }
         control={
           <Switch
             aria-label={row.label}
             checked={checked}
             onCheckedChange={(next) => {
-              const current = readControlValue(regionValues, control.key);
-              const value =
-                typeof current === "boolean" ? next : visibilityWord(next);
-              writeControlValue(regionId, control.key, value);
+              writeControlValue(regionId, control.key, next);
             }}
           />
         }
@@ -173,15 +156,19 @@ function FineTuneRowView(props: {
   if (control.kind === "segment") {
     const value = String(readControlValue(regionValues, control.key));
     return (
-      <InspectorRow
+      <LayoutFormRow
+        anchor={null}
+        icon={null}
+        stacked={false}
         label={row.label}
-        description={row.description ?? undefined}
+        revertLabel={`Revert ${row.label}`}
+        description={row.description ?? null}
         onRevert={
           isControlValueChanged(regionId, control.key)
             ? () => {
                 revertControlValue(regionId, control.key);
               }
-            : undefined
+            : null
         }
         control={
           <SegmentedControl
@@ -198,34 +185,43 @@ function FineTuneRowView(props: {
   }
 
   if (control.kind === "checks") {
+    const keys = control.options.map((option) => option.key);
     return (
-      <InspectorRow
+      <LayoutFormRow
+        anchor={null}
+        icon={null}
         stacked
         label={row.label}
-        description={row.description ?? undefined}
+        revertLabel={`Revert ${row.label}`}
+        description={row.description ?? null}
         onRevert={
-          control.keys.some((key) => isControlValueChanged(regionId, key))
+          keys.some((key) => isControlValueChanged(regionId, key))
             ? () => {
-                control.keys.forEach((key) => {
-                  revertControlValue(regionId, key);
-                });
+                revertControlValues(regionId, keys);
               }
-            : undefined
+            : null
         }
         control={
           <div className="flex flex-col gap-1.5">
-            {control.options.map((option, index) => {
-              const key = control.keys[index];
-              const checked = readControlValue(regionValues, key) === true;
+            {control.options.map((option) => {
+              const checked =
+                readControlValue(regionValues, option.key) === true;
+              const unavailable =
+                option.requires !== null &&
+                readControlValue(regionValues, option.requires) !== true;
               return (
                 <label
-                  key={option.value}
-                  className="flex items-center gap-2 text-ui-sm"
+                  key={option.key}
+                  className={cn(
+                    "flex items-center gap-2 text-ui-sm",
+                    unavailable && "opacity-40",
+                  )}
                 >
                   <Checkbox
                     checked={checked}
+                    disabled={unavailable}
                     onCheckedChange={(next) => {
-                      writeControlValue(regionId, key, next === true);
+                      writeControlValue(regionId, option.key, next === true);
                     }}
                   />
                   {option.label}
@@ -246,16 +242,19 @@ function FineTuneRowView(props: {
   // the session and found every row back on the next launch (G1-07).
   const last = selected.length <= 1;
   return (
-    <InspectorRow
+    <LayoutFormRow
+      anchor={null}
+      icon={null}
       stacked
       label={row.label}
+      revertLabel={`Revert ${row.label}`}
       description={row.description ?? "At least one row stays in the card."}
       onRevert={
         isControlValueChanged(regionId, control.key)
           ? () => {
               revertControlValue(regionId, control.key);
             }
-          : undefined
+          : null
       }
       control={
         <div className="flex flex-col gap-1.5">

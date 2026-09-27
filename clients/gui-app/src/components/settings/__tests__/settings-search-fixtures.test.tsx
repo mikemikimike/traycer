@@ -85,6 +85,28 @@ vi.mock(
   },
 );
 
+// The Layout panel wraps itself directly in the shared watched-usage read
+// (`LayoutUsageProvider`), which resolves a host scope through a real
+// `HostRuntimeProvider` this suite never mounts. A pass-through here, mocked
+// at the same boundary `layout-settings-panel.test.tsx` uses, keeps the anchor
+// rows drawing for real without standing up that scope.
+vi.mock(
+  "@/components/layout-editor/inspector/provider-limit-windows",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/components/layout-editor/inspector/provider-limit-windows")
+    >()),
+    ProviderLimitWindowsReader: (props: {
+      readonly children: (limits: {
+        windows: ReadonlyArray<never>;
+        drawnKeys: ReadonlyArray<never>;
+      }) => ReactNode;
+    }) => props.children({ windows: [], drawnKeys: [] }),
+    LayoutUsageProvider: (props: { readonly children: ReactNode }) =>
+      props.children,
+  }),
+);
+
 // General's replay button and Sounds' host link navigate; nothing here clicks
 // them, but both hooks need a router to be CALLED.
 vi.mock("@tanstack/react-router", async (importOriginal) => ({

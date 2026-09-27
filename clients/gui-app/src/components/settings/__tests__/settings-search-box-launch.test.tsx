@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
 import { SettingsSearch } from "@/components/settings/settings-search-box";
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
@@ -87,6 +88,21 @@ describe("<SettingsSearch /> launch results", () => {
     );
     expect(navigateToSettingsSectionMock).not.toHaveBeenCalled();
     expect(useSettingsSearchStore.getState().pendingReveal).toBeNull();
+  });
+
+  it("names the region's own area as the origin, so leaving returns there", () => {
+    render(<Harness />);
+    type("microphone");
+
+    fireEvent.click(
+      screen.getByTestId("settings-search-result-layout:launch:mic"),
+    );
+
+    expect(openLayoutEditorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: { kind: "settings", area: LAYOUT_REGIONS.mic.surface },
+      }),
+    );
   });
 
   // The entry method gates the editor's entry motion as well as being reported

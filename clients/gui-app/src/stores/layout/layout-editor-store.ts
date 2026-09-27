@@ -9,14 +9,12 @@ import {
   undoLayout,
   type LayoutHistory,
 } from "@/lib/layout/layout-history";
-import {
-  effectiveLayoutValues,
-  type LayoutPresetId,
-} from "@/lib/layout/layout-presets";
+import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
 import { basePersistOptions, persistKey, STORE_KEYS } from "@/lib/persist";
-import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
+import { LAYOUT_REGIONS } from "@/components/layout-editor/regions/layout-regions";
+import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import {
   getLayoutSnapshot,
   useLayoutStore,
@@ -70,7 +68,18 @@ export interface LayoutEditorSession {
    */
   readonly source: AnalyticsSource;
   readonly startedAt: number;
+  /** Where Done and Discard return the user to. */
+  readonly origin: LayoutEditorOrigin;
 }
+
+/**
+ * The door that opened the session. `tab`: closing the sample tab already
+ * returns to the tab the user came from. `settings`: Settings > Layout at the
+ * area they were reading (`null` is Presets).
+ */
+export type LayoutEditorOrigin =
+  | { readonly kind: "tab" }
+  | { readonly kind: "settings"; readonly area: SurfaceGroupId | null };
 
 export type RegionInstanceKey = string;
 
@@ -94,12 +103,6 @@ export interface RegionInstance {
  * icons - so they are selected as surfaces and placed by the placement bar.
  */
 export type PlacementSurfaceId = "topBar" | "sidebar";
-
-/** The one level below a region section: a provider's own limits (L-26). */
-export interface InspectorLevel {
-  readonly kind: "usage-provider";
-  readonly providerId: RateLimitProviderId;
-}
 
 /** Whether another window holds the single-window lease (L-32). */
 export type LayoutEditorLock = "none" | "other-window";
@@ -131,8 +134,20 @@ export interface LayoutEditorState {
    * re-resolve the node off this map rather than holding the old one (L-90).
    */
   readonly surfaceNodes: ReadonlyMap<PlacementSurfaceId, HTMLElement>;
-  readonly level: InspectorLevel | null;
+  /**
+   * The inspector's level: `null` is All settings, otherwise the one area whose
+   * form is open. Selecting a region on the canvas opens its area.
+   */
+  readonly area: SurfaceGroupId | null;
+  /** Rows whose disclosure is open in the area form, by row id. */
+  readonly openRows: ReadonlyArray<string>;
   readonly hovered: RegionId | null;
+  /**
+   * The region element the canvas pointer was last on or pressed. Only a
+   * region drawn more than once needs it (a timestamp on every message): the
+   * chip and the ring go to the copy the pointer is actually on.
+   */
+  readonly pointed: HTMLElement | null;
   /**
    * Raised by the first key press and dropped by the first pointer gesture: a
    * row taking focus only drives the canvas highlight when the focus came from
@@ -140,14 +155,6 @@ export interface LayoutEditorState {
    */
   readonly keyboardNav: boolean;
   readonly filter: string;
-  /**
-   * The preset the pointer or arrow focus is on right now, previewed on the
-   * canvas without writing anything (L-43, L-65). The override seam prefers it
-   * while it is set; leaving the card clears it and a click commits through
-   * the ordinary gesture path, so the preview never reaches the layout store,
-   * the history or `localStorage`.
-   */
-  readonly previewPreset: LayoutPresetId | null;
   readonly dockMode: LayoutDockMode;
   readonly floatPosition: LayoutDockPosition | null;
   readonly history: LayoutHistory;
@@ -197,17 +204,33 @@ export interface LayoutEditorState {
     surface: PlacementSurfaceId,
     node: HTMLElement,
   ) => void;
-  readonly openLevel: (level: InspectorLevel) => void;
   /**
-   * One rung of the Escape ladder (L-31, C-26): the provider level, then the
-   * open section, then the index. `false` means the ladder is already at the
-   * index and the caller exits the editor.
+   * Opens an area's form, or All settings for `null`. A `row` is a region the
+   * form opens expanded and highlighted, and the canvas rings; `select` is this
+   * with the region's own area.
+   */
+  readonly openArea: (
+    area: SurfaceGroupId | null,
+    row: RegionId | null,
+  ) => void;
+  /**
+   * Opens or closes one row's disclosure in the area form. A REGION row's
+   * disclosure is also its selection, so the canvas rings it and shows it while
+   * hidden: opening one selects it, and closing the selected one clears it. A
+   * stacked sidebar pair draws one canvas icon, so its lower member has no
+   * other way to be selected.
+   */
+  readonly toggleRow: (rowId: string) => void;
+  /**
+   * One rung of the Escape ladder: close the open rows (and the selection),
+   * then the selected surface, then the area back to All settings. `false`
+   * means the ladder is already at All settings, where it stops.
    */
   readonly popInspectorLevel: () => boolean;
   readonly setHovered: (regionId: RegionId | null) => void;
+  readonly setPointed: (node: HTMLElement | null) => void;
   readonly setKeyboardNav: (keyboardNav: boolean) => void;
   readonly setFilter: (filter: string) => void;
-  readonly setPreviewPreset: (previewPreset: LayoutPresetId | null) => void;
   readonly setDockMode: (dockMode: LayoutDockMode) => void;
   /**
    * Where a floating inspector was left, or `null` for "nowhere in
@@ -233,11 +256,12 @@ const SESSION_DEFAULTS = {
   instances: new Map<RegionInstanceKey, RegionInstance>(),
   selected: null,
   selectedSurface: null,
-  level: null,
+  area: null,
+  openRows: [],
   hovered: null,
+  pointed: null,
   keyboardNav: false,
   filter: "",
-  previewPreset: null,
   history: EMPTY_LAYOUT_HISTORY,
   undoCount: 0,
   firstChangeAt: null,
@@ -296,18 +320,27 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       // (G1-04).
       select: (selected) => {
         const state = get();
-        if (state.selected === selected && state.selectedSurface === null)
+        if (selected === null) {
+          if (state.selected === null && state.selectedSurface === null) return;
+          set({ selected: null, selectedSurface: null });
           return;
-        set({ selected, selectedSurface: null, level: null });
+        }
+        get().openArea(LAYOUT_REGIONS[selected].surface, selected);
       },
       selectSurface: (selectedSurface) => {
         const state = get();
         if (
           state.selectedSurface === selectedSurface &&
-          state.selected === null
+          state.selected === null &&
+          state.area === selectedSurface
         )
           return;
-        set({ selectedSurface, selected: null, level: null });
+        set({
+          selectedSurface,
+          selected: null,
+          area: selectedSurface,
+          filter: "",
+        });
       },
       registerSurfaceNode: (surface, node) =>
         set((state) => {
@@ -325,15 +358,62 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           surfaceNodes.delete(surface);
           return { surfaceNodes };
         }),
-      openLevel: (level) => set({ level }),
+      openArea: (area, row) => {
+        const state = get();
+        const openRows =
+          row === null || state.openRows.includes(row)
+            ? state.openRows
+            : [...state.openRows, row];
+        if (
+          state.area === area &&
+          state.selected === row &&
+          state.selectedSurface === null &&
+          state.openRows === openRows &&
+          (area === null || state.filter === "")
+        )
+          return;
+        set({
+          area,
+          selected: row,
+          selectedSurface: null,
+          // All settings has no rows, so nothing stays open behind it.
+          openRows: area === null ? [] : openRows,
+          // Find lives at All settings: opening an area consumes the query, so
+          // a leftover one never narrows what the next visit shows.
+          filter: area === null ? state.filter : "",
+        });
+      },
+      toggleRow: (rowId) => {
+        const state = get();
+        const closing = state.openRows.includes(rowId);
+        const openRows = closing
+          ? state.openRows.filter((entry) => entry !== rowId)
+          : [...state.openRows, rowId];
+        const region =
+          Object.values(LAYOUT_REGIONS).find((entry) => entry.id === rowId)
+            ?.id ?? null;
+        if (region === null) {
+          set({ openRows });
+        } else if (!closing) {
+          set({ openRows, selected: region, selectedSurface: null });
+        } else if (state.selected === region) {
+          set({ openRows, selected: null });
+        } else {
+          set({ openRows });
+        }
+      },
       popInspectorLevel: () => {
         const state = get();
-        if (state.level !== null) {
-          set({ level: null });
+        if (state.selected !== null || state.openRows.length > 0) {
+          set({ selected: null, openRows: [] });
           return true;
         }
-        if (state.selected !== null || state.selectedSurface !== null) {
-          set({ selected: null, selectedSurface: null });
+        if (state.selectedSurface !== null) {
+          set({ selectedSurface: null });
+          return true;
+        }
+        if (state.area !== null) {
+          set({ area: null, openRows: [] });
           return true;
         }
         return false;
@@ -342,6 +422,10 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         if (get().hovered === hovered) return;
         set({ hovered });
       },
+      setPointed: (pointed) => {
+        if (get().pointed === pointed) return;
+        set({ pointed });
+      },
       setKeyboardNav: (keyboardNav) => {
         if (get().keyboardNav === keyboardNav) return;
         set({ keyboardNav });
@@ -349,10 +433,6 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       setFilter: (filter) => {
         if (get().filter === filter) return;
         set({ filter });
-      },
-      setPreviewPreset: (previewPreset) => {
-        if (get().previewPreset === previewPreset) return;
-        set({ previewPreset });
       },
       setDockMode: (dockMode) => {
         if (get().dockMode === dockMode) return;
@@ -428,28 +508,53 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
 
 /**
  * The instance the overlays point at: the first one registered for the region
- * (4.6, C-25).
+ * that is on screen, else the first one registered (4.6, C-25).
  *
- * "First" is enough because a live session has exactly one instance of a
- * region to choose from. `useLayoutRegion` registers nothing from a surface
- * whose `PaneVisibilityContext` is false; the editor's canvas is always the
- * sample workspace, which is a plain top-level tab and
- * `splitEligibility: "ineligible"`, so while a session is live that tab is the
- * only visible surface. What is left registering is the sample scene and the
- * shell around it (the header, the tab strip, the status bar), each of which
- * draws any one region once. This used to be a PIN on the sample tile, carried
- * on the session, back when the editor decorated the user's own screen in
- * place (L-15) and two tiles could both be looking at it; L-87 removed the
- * second tile, and the pin with it.
+ * Most regions have exactly one instance in a live session. `useLayoutRegion`
+ * registers nothing from a surface whose `PaneVisibilityContext` is false; the
+ * editor's canvas is always the sample workspace, which is a plain top-level
+ * tab and `splitEligibility: "ineligible"`, so while a session is live that
+ * tab is the only visible surface. This used to be a PIN on the sample tile,
+ * carried on the session, back when the editor decorated the user's own
+ * screen in place (L-15) and two tiles could both be looking at it; L-87
+ * removed the second tile, and the pin with it.
+ *
+ * The transcript's regions are the exception (L-178): a timestamp is drawn on
+ * every message, and the first one registered is the oldest - scrolled out of
+ * the sample conversation, which opens at its end. The chip and the ring go to
+ * the copy the canvas pointer is on (`pointed`), else to one the reader can
+ * see, and "can see" is the browser's own hit test at its centre, which knows
+ * about the scroller's clip and anything drawn over it.
  */
 export function preferredRegionInstance(
-  state: Pick<LayoutEditorState, "instances">,
+  state: Pick<LayoutEditorState, "instances" | "pointed">,
   regionId: RegionId,
 ): RegionInstance | null {
+  let first: RegionInstance | null = null;
+  let onScreen: RegionInstance | null = null;
   for (const instance of state.instances.values()) {
-    if (instance.regionId === regionId) return instance;
+    if (instance.regionId !== regionId) continue;
+    if (instance.node === state.pointed) return instance;
+    first ??= instance;
+    if (onScreen === null && instanceOnScreen(instance.node))
+      onScreen = instance;
   }
-  return null;
+  return onScreen ?? first;
+}
+
+function instanceOnScreen(node: HTMLElement): boolean {
+  // Widened on purpose: jsdom implements no hit testing, and there every
+  // instance is as good as the first.
+  const doc: {
+    readonly elementFromPoint: Document["elementFromPoint"] | undefined;
+  } = node.ownerDocument;
+  if (doc.elementFromPoint === undefined) return false;
+  const rect = node.getBoundingClientRect();
+  const hit = node.ownerDocument.elementFromPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2,
+  );
+  return hit !== null && node.contains(hit);
 }
 
 /**
@@ -509,11 +614,21 @@ function watchExternalLayoutWrites(): void {
       setDirty(!sameSnapshot(entrySnapshot, next));
       return;
     }
-    // History is deliberately left alone: the old editor wiped the stacks on
-    // any external write, which lost the user's own work to someone else's.
-    const rebased = rebaseLayoutSnapshot(entrySnapshot, before, next);
+    // Every snapshot the session can restore moves onto the external write:
+    // Discard's baseline and each Undo/Redo step, so none of them puts back
+    // what another window changed. The stacks themselves are kept - the old
+    // editor wiped them on any external write, which lost the user's own work
+    // to someone else's.
+    const rebase = (snapshot: LayoutSnapshot): LayoutSnapshot =>
+      rebaseLayoutSnapshot(snapshot, before, next);
+    const { history } = useLayoutEditorStore.getState();
+    const rebased = rebase(entrySnapshot);
     useLayoutEditorStore.setState({
       entrySnapshot: rebased,
+      history: {
+        past: history.past.map(rebase),
+        future: history.future.map(rebase),
+      },
       dirty: !sameSnapshot(rebased, next),
     });
   });
@@ -547,15 +662,12 @@ function sameSnapshot(
 
 /**
  * Whether two snapshots DRAW the same app, which is a different question from
- * whether they are the same record (L-133).
+ * whether they are the same record.
  *
- * The delta holds what a person picked, not what differs from the current
- * preset, so a pick that the preset already makes changes the record and
- * changes nothing on screen. The rule the record comparison used to state is
- * about the screen and still binds: an Undo that visibly does nothing is worse
- * than no Undo, and a `first_change_bucket` stamped by an invisible pick would
- * report a change nobody could see. The pick itself is kept either way - it is
- * the user's answer again the moment they switch preset.
+ * A pick equal to the last-applied preset's value changes the record and
+ * nothing on screen. An Undo that visibly does nothing is worse than no Undo,
+ * and a `first_change_bucket` stamped by an invisible pick would report a
+ * change nobody could see.
  *
  * Only `recordGesture` asks this, once per gesture. The dirty flag keeps the
  * cheap record comparison above: it runs inside the store subscription, on

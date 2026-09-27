@@ -39,21 +39,25 @@ export type AnyGrammarRow = (typeof LAYOUT_REGIONS)[RegionId]["rows"][number];
  * A region's row, with only what a caller walking EVERY region can ask about.
  *
  * Which keys a control writes is the part that cannot survive the walk, since
- * `keyof LayoutValues[K]` collapses to what all twenty-three regions share.
+ * `keyof LayoutValues[K]` collapses to what all twenty-six regions share.
  */
 export type RegionRowFacts =
   | {
-      readonly kind:
-        | "size"
-        | "position-host"
-        | "position-side"
-        | "style"
-        | "children";
+      readonly kind: "position-host" | "position-side" | "children";
     }
+  | { readonly kind: "style"; readonly key: string; readonly label: string }
   | { readonly kind: "position-order"; readonly group: OrderGroupId }
   | {
       readonly kind: "fine-tune";
-      readonly rows: ReadonlyArray<{ readonly label: string }>;
+      readonly rows: ReadonlyArray<{
+        readonly label: string;
+        readonly control:
+          | {
+              readonly kind: "checks";
+              readonly options: ReadonlyArray<{ readonly label: string }>;
+            }
+          | { readonly kind: "switch" | "segment" | "field-checks" };
+      }>;
     };
 
 /** The part of a region that does not depend on its value bag. */
@@ -86,7 +90,7 @@ export function regionFacts(region: RegionId): RegionFacts {
  *
  * While the tabs are a vertical strip there is no header: Home sits above the
  * tabs, and a header-hosted reading sits in the strip's foot, where the stored
- * `left` / `right` read as first and last in the stack.
+ * `left` / `right` read as start and end in the stack.
  */
 export function regionWhere(
   region: RegionId,
@@ -101,7 +105,7 @@ export function regionWhere(
   }
   const placement = barPlacement(arrangement, barRegion);
   if (vertical && placement.host === "header") {
-    return `Tab strip foot - ${placement.side === "left" ? "first" : "last"}`;
+    return `Tab strip foot - ${placement.side === "left" ? "start" : "end"}`;
   }
   return `${facts.whereByHost[placement.host]} - ${placement.side} side`;
 }
@@ -154,6 +158,7 @@ export function regionRowAvailable(
     (row.group === "toolbarLeft" || row.group === "toolbarRight")
   )
     return false;
-  if (regionId === "access" && row.kind === "size") return false;
-  return regionId !== "model" || row.kind !== "style";
+  // The compact toolbar draws the model chip one way; its picker footer is
+  // the same picker's, so Reasoning control still applies there.
+  return regionId !== "model" || row.kind !== "style" || row.key !== "style";
 }

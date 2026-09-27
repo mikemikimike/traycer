@@ -1,5 +1,11 @@
 import { LayoutUsageProvider } from "@/components/layout-editor/inspector/provider-limit-windows";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import "@/components/layout-editor/layout-editor.css";
 import { installEditFirewall } from "@/components/layout-editor/canvas/edit-firewall";
 import {
@@ -8,13 +14,12 @@ import {
 } from "@/components/layout-editor/canvas/drag-engine";
 import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas";
 import { useFloatingDock } from "@/components/layout-editor/inspector/dock-modes";
-import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
-import { InspectorIndex } from "@/components/layout-editor/inspector/inspector-index";
 import { InspectorShell } from "@/components/layout-editor/inspector/inspector-shell";
+import {
+  LayoutAllSettings,
+  LayoutAreaLevel,
+} from "@/components/layout-editor/inspector/layout-form";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
-import { ProviderLevel } from "@/components/layout-editor/inspector/provider-level";
-import { RegionSection } from "@/components/layout-editor/inspector/region-section";
-import { regionFacts } from "@/components/layout-editor/regions/region-facts";
 import { SurfacePlacementBar } from "@/components/layout-editor/surface-placement-bar";
 import { TooltipsSuppressedProvider } from "@/components/ui/tooltip-wrapper";
 import {
@@ -25,7 +30,6 @@ import { setLayoutInspectorNode } from "@/lib/layout/editor-motion";
 import {
   abandonLayoutEditorSession,
   closeLayoutEditor,
-  type LayoutEditorExitReason,
 } from "@/lib/layout/editor-session";
 import { useDesktopWindowId } from "@/lib/windows/desktop-window-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -121,29 +125,25 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
     };
   }, [live]);
 
-  // Escape's one owner while a session is live (L-31, C-26), for the same
-  // reason as the chord above: the ladder is a fact about the SESSION, not
-  // about what has focus. It used to be a listener on the inspector panel,
-  // which selecting a region killed - the focused index row unmounted, focus
-  // fell back to `<body>`, and the key never passed through the panel again
-  // (I-02). Nothing has to be fought for here: the filter's clear and the
-  // sortable list's grab-cancel both stop the native event below this node,
-  // and a layer that took focus answers for itself (see `ownsItsOwnEscape`).
+  // Escape's one owner while a session is live, for the same reason as the
+  // chord above: the ladder is a fact about the SESSION, not about what has
+  // focus. Cancel a drag, close the open rows, step back to All settings, then
+  // stop: Escape never closes the editor (audit F5, narrowing L-31). Done and
+  // Cmd+W do. The filter's clear and the sortable list's grab-cancel stop the
+  // native event below this node, and a layer that took focus answers for
+  // itself (see `ownsItsOwnEscape`).
   useEffect(() => {
     if (!live) return;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       if (ownsItsOwnEscape(event.target)) return;
-      event.preventDefault();
-      // A gesture in hand is the ladder's first rung: Escape puts it back and
-      // the release that follows writes nothing, the way the dock's keyboard
-      // grab cancels.
       if (layoutDragActive()) {
+        event.preventDefault();
         cancelLayoutDrag();
         return;
       }
-      if (useLayoutEditorStore.getState().popInspectorLevel()) return;
-      closeLayoutEditor("escape");
+      if (useLayoutEditorStore.getState().popInspectorLevel())
+        event.preventDefault();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -194,76 +194,41 @@ export function LayoutEditor(props: LayoutEditorProps): ReactNode {
 }
 
 /**
- * Which of the three screens the inspector shows, read off the editor store's
- * own ladder (index -> section -> provider level).
+ * Which of the form's two levels the inspector shows: All settings, or the
+ * area the editor store has open (`openArea`, or a canvas selection).
  *
  * Separate from the root so that none of it - least of all the notification
  * feed the relay row reads - is subscribed to while the editor is closed.
  */
 function InspectorBody(): ReactNode {
-  const selected = useLayoutEditorStore((state) => state.selected);
-  const level = useLayoutEditorStore((state) => state.level);
+  const area = useLayoutEditorStore((state) => state.area);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [leftArea, setLeftArea] = useState(area);
 
-  let body: ReactNode;
-  if (level !== null) {
-    body = (
-      <>
-        {/* Keyed per level, so arriving at a deeper one re-homes focus onto
-          its own way back rather than leaving it on the row that opened it. */}
-        <InspectorBackRow
-          key={`provider-${level.providerId}`}
-          label={regionFacts("usageLimits").name}
-          onBack={popLevel}
-        />
-        <ProviderLevel providerId={level.providerId} />
-      </>
-    );
-  } else if (selected !== null) {
-    body = (
-      <>
-        <InspectorBackRow
-          key={`section-${selected}`}
-          label="All regions"
-          onBack={popLevel}
-        />
-        {/* Keyed on the region: the section holds per-region local state (the
-          Fine-tune disclosure), and an unkeyed element would carry one
-          region's open state into the next (G1-20). */}
-        <RegionSection
-          key={selected}
-          regionId={selected}
-          onOpenProvider={(providerId) => {
-            useLayoutEditorStore
-              .getState()
-              .openLevel({ kind: "usage-provider", providerId });
-          }}
-        />
-      </>
-    );
-  } else {
-    body = (
-      // Preview-without-writing (L-43, L-65): the editor store's session-only
-      // preview tier, which the override seam prefers while it is set. Nothing
-      // reaches the layout store or the history, so leaving the card restores
-      // the real values in one render and a click still commits as one undo
-      // step through `recordGesture`.
-      <InspectorIndex
-        onPreviewPreset={(presetId) => {
-          useLayoutEditorStore.getState().setPreviewPreset(presetId);
-        }}
-      />
-    );
-  }
+  // Back at All settings, focus lands on the area row the user left, so the
+  // keyboard is where the eye is. Tracked during render (the previous area is
+  // gone by the time an effect could read it).
+  if (leftArea !== area && area !== null) setLeftArea(area);
+  useEffect(() => {
+    if (area !== null || leftArea === null) return;
+    rootRef.current
+      ?.querySelector<HTMLElement>(`[data-layout-area="${leftArea}"]`)
+      ?.focus();
+  }, [area, leftArea]);
 
-  return <InspectorShell onExit={exit}>{body}</InspectorShell>;
-}
-
-function popLevel(): void {
-  useLayoutEditorStore.getState().popInspectorLevel();
-}
-
-function exit(reason: LayoutEditorExitReason): void {
-  closeLayoutEditor(reason);
+  return (
+    <InspectorShell onExit={closeLayoutEditor}>
+      <div ref={rootRef}>
+        {area === null ? (
+          <LayoutAllSettings />
+        ) : (
+          // Keyed on the area, so arriving at one re-homes focus onto its back
+          // row rather than leaving it on the row that opened it.
+          <LayoutAreaLevel key={area} area={area} />
+        )}
+      </div>
+    </InspectorShell>
+  );
 }
 
 /**

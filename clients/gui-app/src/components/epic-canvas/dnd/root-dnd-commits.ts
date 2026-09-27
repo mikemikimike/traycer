@@ -18,6 +18,7 @@ import {
   EPIC_CANVAS_DND_SOURCE_TYPES,
   GIT_DIFF_TILE_DND_TYPE,
   LEFT_PANEL_RAIL_ITEM_DND_TYPE,
+  railDragCarry,
   MANAGED_COMMAND_OUTPUT_DND_TYPE,
   PANEL_NODE_FAMILY,
   SIDEBAR_NODE_DND_TYPE,
@@ -25,9 +26,7 @@ import {
   WORKSPACE_FILE_DND_TYPE,
   getArtifactTabDropIndexFromPoint,
   getEpicCanvasDropPreview,
-  getLeftPanelBodyDropPreview,
   type EpicCanvasDragSourceData,
-  type LeftPanelSectionRect,
   type EpicCanvasDropPreview,
   type EpicCanvasDropTargetData,
   type PointLike,
@@ -54,17 +53,15 @@ import {
   expandJoinedPanelSections,
   type RootCreatePanelId,
 } from "@/stores/epics/left-panel-store";
-import { isLeftPanelId } from "@/lib/left-panel-ids";
 import {
   areRailsEqual,
   normalizeRail,
-  railRegionForLeftPanelId,
   type RailEntry,
 } from "@/lib/layout/rail";
 import {
-  isStackedRailPanel,
   moveRailPanelBeside,
   moveRailPanelToEnd,
+  railStackJoin,
   stackRailPanels,
   type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
@@ -222,69 +219,11 @@ export function resolveOverlayTileForSource(
 
 // ── Preview resolution ──────────────────────────────────────────────────────
 
-function getElementRect(element: Element): RectLike {
-  const rect = element.getBoundingClientRect();
-  return {
-    left: rect.left,
-    top: rect.top,
-    width: rect.width,
-    height: rect.height,
-  };
-}
-
-/**
- * The section of the sidebar body the pointer is in, measured (L-170).
- *
- * A stacked pair draws two, so the body cannot be resolved by the panel the
- * target names. Read off the DOM rather than off the model because it is the
- * drawn geometry the pointer is being compared against, and the element
- * already names its own panel. A pointer outside every section - the gap the
- * resize handle sits in - falls back to the NEAREST, so a drop on the seam
- * still means something rather than nothing.
- */
-function getPointedLeftPanelSection(
-  bodyElement: Element,
-  point: PointLike,
-): LeftPanelSectionRect | null {
-  const sections = [
-    ...bodyElement.querySelectorAll("[data-left-panel-section-id]"),
-  ].flatMap((element): LeftPanelSectionRect[] => {
-    const panelId = element.getAttribute("data-left-panel-section-id");
-    if (!isLeftPanelId(panelId)) return [];
-    return [{ panelId, rect: getElementRect(element) }];
-  });
-  if (sections.length === 0) return null;
-  const inside = sections.find(
-    (section) =>
-      point.y >= section.rect.top &&
-      point.y < section.rect.top + section.rect.height,
-  );
-  if (inside !== undefined) return inside;
-  return sections.reduce((nearest, section) =>
-    distanceToRect(point.y, section.rect) <
-    distanceToRect(point.y, nearest.rect)
-      ? section
-      : nearest,
-  );
-}
-
-function distanceToRect(y: number, rect: RectLike): number {
-  if (y < rect.top) return rect.top - y;
-  const bottom = rect.top + rect.height;
-  return y > bottom ? y - bottom : 0;
-}
-
 export interface ResolveCanvasDropPreviewInput {
   readonly source: EpicCanvasDragSourceData;
   readonly target: EpicCanvasDropTargetData;
   readonly point: PointLike;
   readonly targetRect: RectLike | null;
-  /**
-   * The droppable's DOM element - only required for `left-panel-body`
-   * targets, whose preview splits the drawn section rather than the
-   * droppable; every other target resolves from `targetRect` alone.
-   */
-  readonly targetElement: Element | null;
   /** Translated rect of the dragged chip (tab-over-tab center math). */
   readonly activeRect: RectLike | null;
 }
@@ -292,23 +231,7 @@ export interface ResolveCanvasDropPreviewInput {
 export function resolveCanvasDropPreview(
   input: ResolveCanvasDropPreviewInput,
 ): EpicCanvasDropPreview {
-  const { source, target, point, targetRect, targetElement, activeRect } =
-    input;
-  if (target.kind === "left-panel-body") {
-    if (source.kind !== LEFT_PANEL_RAIL_ITEM_DND_TYPE) return null;
-    if (targetElement === null) return null;
-    const section = getPointedLeftPanelSection(targetElement, point);
-    // A section dragged onto its OWN section is the one drop with nothing to
-    // say, since the only panel there to place it beside is itself. Compared
-    // against the section under the pointer, so on a stacked body the other
-    // half still takes the drop (L-170).
-    if (
-      source.origin === "panel-section" &&
-      source.panelId === section?.panelId
-    )
-      return null;
-    return getLeftPanelBodyDropPreview(target, section, point);
-  }
+  const { source, target, point, targetRect, activeRect } = input;
   if (
     target.kind === "artifact-tab" &&
     source.kind === ARTIFACT_TAB_DND_TYPE &&
@@ -375,45 +298,30 @@ export function resolveRailForDrop(
   preview: NonNullable<EpicCanvasDropPreview>,
   arrangement: LayoutArrangement,
 ): ReadonlyArray<RailEntry> | null {
-  // A rail icon is a whole view group (G3), so it moves whole; a section
-  // header is one panel, and moving it alone is how a panel leaves a group.
-  const asGroups = source.origin === "rail";
+  const carry = railDragCarry(source);
   if (preview.kind === "left-panel-rail" && preview.position === "combine") {
-    // A group carried onto another icon joins nothing: a stack is exactly two
-    // panels (L-166), so answering the rail as it is refuses the drop, and the
-    // no-op guard keeps the band from lighting.
-    if (
-      asGroups &&
-      isStackedRailPanel(
-        arrangement.rail,
-        railRegionForLeftPanelId(source.panelId),
-      )
-    )
-      return normalizedRail(arrangement);
-    // The middle band joins the two into a stack (L-168). `stackRailPanels`
-    // returns the arrangement it was given when the join is refused - either
-    // panel already half of a pair - so a refused drop reaches the "did
-    // anything change" guard below and spends no undo step.
+    // The middle band adds the carried panels to the target's stack (L-168,
+    // L-181). `stackRailPanels` returns the arrangement it was given for
+    // anything `railStackJoin` refuses - a full stack, or the two already
+    // stacked together - so a refused drop reaches the "did anything change"
+    // guard below and spends no undo step.
     return normalizedRail(
-      stackRailPanels(arrangement, source.panelId, preview.panelId),
+      stackRailPanels(arrangement, source.panelId, preview.panelId, carry),
     );
   }
-  if (
-    preview.kind === "left-panel-rail" ||
-    preview.kind === "left-panel-section"
-  ) {
+  if (preview.kind === "left-panel-rail") {
     return normalizedRail(
       moveRailPanelBeside(arrangement, {
         sourcePanelId: source.panelId,
         targetPanelId: preview.panelId,
         placeAfter: preview.position === "after",
-        asGroups,
+        carry,
       }),
     );
   }
   if (preview.kind === "left-panel-rail-list") {
     return normalizedRail(
-      moveRailPanelToEnd(arrangement, source.panelId, asGroups),
+      moveRailPanelToEnd(arrangement, source.panelId, carry),
     );
   }
   return null;
@@ -441,6 +349,19 @@ export function isLeftPanelDropNoop(
   if (source.kind !== LEFT_PANEL_RAIL_ITEM_DND_TYPE) return false;
   if (preview === null) return false;
   const arrangement = currentLayoutArrangement();
+  // A join the rail refuses is not a quiet no-op: its preview stays, so the
+  // rail draws the refusal cue over the full stack (L-181).
+  if (
+    preview.kind === "left-panel-rail" &&
+    preview.position === "combine" &&
+    railStackJoin(
+      arrangement.rail,
+      source.panelId,
+      preview.panelId,
+      railDragCarry(source),
+    ) === "full"
+  )
+    return false;
   const nextRail = resolveRailForDrop(source, preview, arrangement);
   return nextRail !== null && areRailsEqual(arrangement.rail, nextRail);
 }
@@ -526,8 +447,7 @@ function placeResolvedCanvasTile(
   const { epicId, tile, target, preview } = resolved;
   if (
     preview.kind === "left-panel-rail" ||
-    preview.kind === "left-panel-rail-list" ||
-    preview.kind === "left-panel-section"
+    preview.kind === "left-panel-rail-list"
   ) {
     return false;
   }
@@ -632,14 +552,13 @@ export function commitResolvedCanvasDrop(
     );
   }
   if (drop.source.kind === LEFT_PANEL_RAIL_ITEM_DND_TYPE) {
-    const nextRail = resolveRailForDrop(
-      drop.source,
-      drop.preview,
-      currentLayoutArrangement(),
-    );
-    if (nextRail !== null) {
+    const arrangement = currentLayoutArrangement();
+    const nextRail = resolveRailForDrop(drop.source, drop.preview, arrangement);
+    // A refused join (a full stack) keeps its preview so the rail can draw
+    // the refusal, and lands here changing nothing (L-181).
+    if (nextRail !== null && !areRailsEqual(arrangement.rail, nextRail)) {
       applyRail(nextRail);
-      // A new stack opens with both sections showing (L-170). Said at the
+      // A joining member opens with its section showing (L-170). Said at the
       // COMMIT rather than inside the resolver, which is pure: the resolver
       // answers what the rail becomes, and this is a fact about the two
       // panels' own drawing state.

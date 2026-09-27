@@ -3,6 +3,7 @@ import type {
   BarPlacement,
   BarRegionId,
   LayoutArrangement,
+  ReadingWidth,
 } from "@/lib/layout/layout-arrangement";
 import {
   type HideableRegionId,
@@ -132,30 +133,15 @@ export function useRegionValues<K extends RegionId>(
   );
 }
 
-/**
- * What a region's values rest on right now: the base preset and the stored
- * delta, or the PREVIEWED preset alone (L-43, L-65).
- *
- * The preview tier is session-only and lives in the editor store, so hovering
- * or arrow-focusing a preset card shows the whole canvas under that density
- * without writing anything - nothing reaches the layout store, the history or
- * `localStorage`, and leaving the card puts the real values back in one
- * render. It is the base AND the delta that a preview replaces, because a
- * preset card is a picture of that density itself and the three cards would
- * otherwise differ by the user's own changes as well as by density (2.2).
- */
+/** What a region's values rest on: the last-applied preset and the stored delta. */
 function useRegionBase<K extends RegionId>(
   regionId: K,
 ): {
   readonly base: LayoutValues[K];
   readonly stored: Partial<LayoutValues[K]> | undefined;
 } {
-  const previewPreset = useLayoutEditorStore((state) => state.previewPreset);
   const basePreset = useLayoutStore((state) => state.basePreset);
   const stored = useLayoutStore((state) => state.overrides[regionId]);
-  if (previewPreset !== null) {
-    return { base: PRESET_VALUES[previewPreset][regionId], stored: undefined };
-  }
   return { base: PRESET_VALUES[basePreset][regionId], stored };
 }
 
@@ -201,6 +187,21 @@ export function useArrangementValue<Key extends keyof LayoutArrangement>(
   const stored = useLayoutStore((state) => state.arrangement[key]);
   const override = use(LayoutOverrideContext).arrangement?.[key];
   return override === undefined ? stored : override;
+}
+
+/**
+ * The content column the transcript, every lower surface of the composer and
+ * an artifact's body share, as a class. One answer for all of them, because a
+ * chat and the document read beside it must agree on their measure (audit R2).
+ * Literal class names, so Tailwind sees both.
+ */
+const READING_WIDTH_CLASS: Readonly<Record<ReadingWidth, string>> = {
+  comfortable: "max-w-3xl",
+  wide: "max-w-5xl",
+};
+
+export function useReadingWidthClass(): string {
+  return READING_WIDTH_CLASS[useArrangementValue("readingWidth")];
 }
 
 /**

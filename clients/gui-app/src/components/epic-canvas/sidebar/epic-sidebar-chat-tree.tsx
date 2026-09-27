@@ -228,13 +228,15 @@ import {
   BASE_PAD_LEFT,
   EMPTY_PENDING_LIST,
   EMPTY_PRE_ACK_LIST,
+  ARCHIVED_ROW_CLASS,
   INDENT_PX,
   SIDEBAR_REVEAL_HIGHLIGHT_CLASS,
   anyMutationPending,
-  nodePadRightClass,
+  chatRowClassName,
   revealSidebarNode,
   useNodeIconDisplay,
 } from "./epic-sidebar-tree-shared";
+import { ChatRowLeadingIconSlot, ChatRowView } from "./chat-row-view";
 import { TreeGroupGuide } from "./epic-sidebar-tree-guide";
 import {
   applyVisibleFilter,
@@ -2510,32 +2512,6 @@ function SidebarRowCheckbox(props: {
 }
 
 /**
- * Fixed-size slot the leading icon renders into, so every row's text column
- * starts at the same x regardless of which variant (chat glyph, harness brand
- * + terminal subscript, spinner, bot) fills it. Sized to the widest variant -
- * `SidebarAgentHarnessIcon`, whose subscript overhangs the 14px brand mark.
- *
- * The slot is only a WIDTH reservation: it carries no vertical alignment of
- * its own. Centering across the two-line card is the outer row's job
- * (`items-center`), which is why the slot must not grow to the card's height.
- */
-function ChatRowLeadingIconSlot(props: { readonly children: ReactNode }) {
-  return (
-    // NOT `aria-hidden`. This slot was hidden while a trailing status chip
-    // existed, because the two announced the same state and a read-only row
-    // said "Read-only agent" twice. The row now carries no trailing chip, so
-    // this icon is the row's ONLY status surface (`ChatProgressIcon` for chats,
-    // the spinner / rollup for agents) - hiding it would drop running,
-    // approval, failure, and read-only from the a11y tree entirely rather than
-    // de-duplicating them. The status elements inside own their own
-    // `role="status"` and accessible names; nothing here is focusable.
-    <span className="inline-flex h-3.5 w-[1.125rem] shrink-0 items-center">
-      {props.children}
-    </span>
-  );
-}
-
-/**
  * Leading icon for a sidebar row - the row's single status surface now that no
  * trailing chip exists. A COLLAPSED PARENT resolves its hidden descendants'
  * rollup here too: that rollup used to live in the trailing slot, and dropping
@@ -2900,12 +2876,6 @@ interface ChatRowButtonProps {
 }
 
 /**
- * Dimming for an archived row included by the selected visibility mode or by
- * the narrow open/activity/unread exception in the default view.
- */
-const ARCHIVED_ROW_CLASS = "opacity-55";
-
-/**
  * The row button's accessible name. Its explicit `aria-label` replaces the
  * subtree as the name, so every state a glyph inside the row shows visually
  * (archived prefix, offline lock) has to be restated here or a keyboard /
@@ -3138,44 +3108,6 @@ function AgentSessionStateBadge(props: {
   );
 }
 
-/**
- * The row's own class list, lifted out of {@link ChatRowButton} so its five
- * state modifiers stop counting against that component's complexity ceiling.
- * Pure and unchanged - same operands, same order.
- *
- * `min-h-7` is a FLOOR, not a height: the row is a horizontal flex - chevron,
- * leading icon, then the text column - and `items-center` centers the short
- * children against whatever height the column takes. Kept as a floor rather
- * than a fixed height so a row whose title wraps, or which regains a second
- * line, grows instead of clipping.
- */
-function chatRowClassName(state: {
-  readonly isDragging: boolean;
-  readonly showRowControls: boolean;
-  readonly reserveArchiveSlot: boolean;
-  readonly selectionMode: boolean;
-  readonly isArchived: boolean;
-  readonly isActive: boolean;
-  readonly revealRowControls: boolean;
-}): string {
-  return cn(
-    "flex min-h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 text-left text-ui-sm font-normal transition-colors",
-    "focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-2",
-    state.isDragging && "cursor-grabbing opacity-60",
-    nodePadRightClass(
-      state.showRowControls,
-      state.reserveArchiveSlot,
-      state.revealRowControls,
-    ),
-    state.selectionMode && "cursor-pointer",
-    state.isArchived && ARCHIVED_ROW_CLASS,
-    state.isActive
-      ? "bg-accent text-accent-foreground"
-      : "text-foreground/75 hover:bg-accent/70 hover:text-accent-foreground",
-    SIDEBAR_REVEAL_HIGHLIGHT_CLASS,
-  );
-}
-
 function ChatRowButton(props: ChatRowButtonProps) {
   const {
     epicId,
@@ -3323,47 +3255,53 @@ function ChatRowButton(props: ChatRowButtonProps) {
           paddingLeft: `${depth * INDENT_PX + BASE_PAD_LEFT}px`,
         }}
       >
-        <NodeChevron
-          hasChildren={hasChildren}
-          expanded={expanded}
-          onToggle={selectionChevronToggle}
-        />
-        <SidebarRowCheckbox
-          inputId={selectionInputId}
-          nodeId={nodeId}
-          nodeName={nodeName}
-          isSelected={isSelected}
-          onToggleSelection={onToggleSelection}
-        />
-        <ChatRowLeadingIconSlot>
-          <ChatRowLeadingIcon
-            epicId={epicId}
-            nodeId={nodeId}
-            ownerHostId={ownerHostId}
-            artifactType={artifactType}
-            hasChildren={hasChildren}
-            expanded={expanded}
-          />
-        </ChatRowLeadingIconSlot>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex min-w-0 items-center gap-1.5">
-            {isArchived ? <ArchivedTitlePrefix /> : null}
-            <span className="min-w-0 flex-1 truncate">{nodeName}</span>
-            <AgentRoleBadgesForOwner
-              ownerKind={resourceOwnerKind}
-              claims={roleClaims}
+        <ChatRowView
+          chevron={
+            <NodeChevron
+              hasChildren={hasChildren}
+              expanded={expanded}
+              onToggle={selectionChevronToggle}
             />
-            {/*
-             * The session state survives selection mode, unlike the owner
-             * metadata below. Bulk-selecting is exactly where a reader decides
-             * what to act on, and "this one is asleep, not stopped" is the
-             * distinction that changes the decision - dropping it here would
-             * hide the fact this change exists to surface, at the one moment
-             * it is being used.
-             */}
-            <AgentSessionStateBadge nodeId={nodeId} isArchived={isArchived} />
-          </span>
-        </span>
+          }
+          selection={
+            <SidebarRowCheckbox
+              inputId={selectionInputId}
+              nodeId={nodeId}
+              nodeName={nodeName}
+              isSelected={isSelected}
+              onToggleSelection={onToggleSelection}
+            />
+          }
+          leadingIcon={
+            <ChatRowLeadingIcon
+              epicId={epicId}
+              nodeId={nodeId}
+              ownerHostId={ownerHostId}
+              artifactType={artifactType}
+              hasChildren={hasChildren}
+              expanded={expanded}
+            />
+          }
+          nodeName={nodeName}
+          isArchived={isArchived}
+          badges={
+            <>
+              <AgentRoleBadgesForOwner
+                ownerKind={resourceOwnerKind}
+                claims={roleClaims}
+              />
+              {/*
+               * The session state survives selection mode, unlike the owner
+               * metadata below. Bulk-selecting is exactly where a reader decides
+               * what to act on, and "this one is asleep, not stopped" is the
+               * distinction that changes the decision - dropping it here would
+               * hide the fact this change exists to surface, at the one moment
+               * it is being used.
+               */}
+              <AgentSessionStateBadge nodeId={nodeId} isArchived={isArchived} />
+            </>
+          }
+        />
       </label>
     );
     // No owner metadata while bulk-selecting, so this reduces to the role
@@ -3411,92 +3349,97 @@ function ChatRowButton(props: ChatRowButtonProps) {
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
-      <NodeChevron
-        hasChildren={hasChildren}
-        expanded={expanded}
-        onToggle={onToggle}
-      />
-      <ChatRowLeadingIconSlot>
-        <ChatRowLeadingIcon
-          epicId={epicId}
-          nodeId={nodeId}
-          ownerHostId={ownerHostId}
-          artifactType={artifactType}
-          hasChildren={hasChildren}
-          expanded={expanded}
-        />
-      </ChatRowLeadingIconSlot>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1.5">
-          {isArchived ? <ArchivedTitlePrefix /> : null}
-          <span className="min-w-0 flex-1 truncate">{nodeName}</span>
-          <AgentSessionStateBadge nodeId={nodeId} isArchived={isArchived} />
-          {showSharedIndicator ? (
-            <TooltipWrapper
-              label={SHARED_WITH_TASK_TOOLTIP}
-              side="top"
-              sideOffset={undefined}
-              align={undefined}
-            >
-              <Users
-                className="size-3 shrink-0 text-muted-foreground"
-                data-testid={`epic-sidebar-shared-${nodeId}`}
-                aria-hidden
-              />
-            </TooltipWrapper>
-          ) : null}
-          {offlineLock !== null ? (
-            <TooltipWrapper
-              label={offlineRowLockTooltip(offlineLock)}
-              side={popoverSide}
-              sideOffset={undefined}
-              align={placement?.align}
-            >
-              <Lock
-                className="size-3 shrink-0 text-muted-foreground"
-                data-testid={`epic-sidebar-tree-lock-${nodeId}`}
-                // Decoration: the row button's explicit `aria-label` REPLACES
-                // its subtree as the accessible name, so a label here could
-                // never reach assistive technology - the offline state rides
-                // the row's own name instead (see `chatRowAriaLabel`).
-                aria-hidden
-              />
-            </TooltipWrapper>
-          ) : null}
-          <AgentRoleBadgesForOwner
-            ownerKind={resourceOwnerKind}
-            claims={roleClaims}
+      <ChatRowView
+        chevron={
+          <NodeChevron
+            hasChildren={hasChildren}
+            expanded={expanded}
+            onToggle={onToggle}
           />
-          <NavigatorResourceHotspotChip
-            owner={
-              resourceOwnerKind === null
-                ? null
-                : {
-                    epicId,
-                    kind: resourceOwnerKind,
-                    ownerId: nodeId,
-                    hostId: null,
-                  }
-            }
-            metrics={navigatorResourceMetrics}
-            className={undefined}
+        }
+        selection={null}
+        leadingIcon={
+          <ChatRowLeadingIcon
+            epicId={epicId}
+            nodeId={nodeId}
+            ownerHostId={ownerHostId}
+            artifactType={artifactType}
+            hasChildren={hasChildren}
+            expanded={expanded}
           />
-          {/* Completes the control SWAP: while the archive button is mounted,
+        }
+        nodeName={nodeName}
+        isArchived={isArchived}
+        badges={
+          <>
+            <AgentSessionStateBadge nodeId={nodeId} isArchived={isArchived} />
+            {showSharedIndicator ? (
+              <TooltipWrapper
+                label={SHARED_WITH_TASK_TOOLTIP}
+                side="top"
+                sideOffset={undefined}
+                align={undefined}
+              >
+                <Users
+                  className="size-3 shrink-0 text-muted-foreground"
+                  data-testid={`epic-sidebar-shared-${nodeId}`}
+                  aria-hidden
+                />
+              </TooltipWrapper>
+            ) : null}
+            {offlineLock !== null ? (
+              <TooltipWrapper
+                label={offlineRowLockTooltip(offlineLock)}
+                side={popoverSide}
+                sideOffset={undefined}
+                align={placement?.align}
+              >
+                <Lock
+                  className="size-3 shrink-0 text-muted-foreground"
+                  data-testid={`epic-sidebar-tree-lock-${nodeId}`}
+                  // Decoration: the row button's explicit `aria-label` REPLACES
+                  // its subtree as the accessible name, so a label here could
+                  // never reach assistive technology - the offline state rides
+                  // the row's own name instead (see `chatRowAriaLabel`).
+                  aria-hidden
+                />
+              </TooltipWrapper>
+            ) : null}
+            <AgentRoleBadgesForOwner
+              ownerKind={resourceOwnerKind}
+              claims={roleClaims}
+            />
+            <NavigatorResourceHotspotChip
+              owner={
+                resourceOwnerKind === null
+                  ? null
+                  : {
+                      epicId,
+                      kind: resourceOwnerKind,
+                      ownerId: nodeId,
+                      hostId: null,
+                    }
+              }
+              metrics={navigatorResourceMetrics}
+              className={undefined}
+            />
+            {/* Completes the control SWAP: while the archive button is mounted,
               revealing the controls removes the idle-time slot from layout so
               the title can use every pixel before the reserved action strip.
               Scoped to this trailing span only - the leading icon sits outside
               it, so the swap never blanks the row's status glyph. */}
-          <span
-            className={cn(
-              "flex-none",
-              reserveArchiveSlot &&
-                "group-hover/tree-item:hidden group-focus-within/tree-item:hidden group-has-[[data-state=open]]/tree-item:hidden",
-            )}
-          >
-            <ChatRowIdleTime updatedAt={updatedAt} />
-          </span>
-        </span>
-      </span>
+            <span
+              className={cn(
+                "flex-none",
+                reserveArchiveSlot &&
+                  "group-hover/tree-item:hidden group-focus-within/tree-item:hidden group-has-[[data-state=open]]/tree-item:hidden",
+              )}
+            >
+              <ChatRowIdleTime updatedAt={updatedAt} />
+            </span>
+          </>
+        }
+      />
     </button>
   );
   // Same composition the graph nodes use - extracted so the navigator and the
@@ -3518,22 +3461,6 @@ function ChatRowButton(props: ChatRowButtonProps) {
       extraContent={null}
       side={popoverSide}
     />
-  );
-}
-
-/**
- * Keeps the archival state attached to the title rather than competing with
- * timestamps and controls in the trailing metadata cluster.
- */
-function ArchivedTitlePrefix(): ReactNode {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1 text-muted-foreground"
-      data-testid="chat-row-archived-label"
-    >
-      <span className="font-semibold">Archived</span>
-      <span aria-hidden="true">·</span>
-    </span>
   );
 }
 

@@ -6,6 +6,7 @@ import {
   depictRegion,
   type HostContextId,
 } from "@/components/layout-editor/region-depiction";
+import { isWindowedRateLimitProvider } from "@/lib/rate-limits/rate-limit-window-catalog";
 import type { LayoutArrangement } from "@/lib/layout/layout-arrangement";
 import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
@@ -229,6 +230,9 @@ describe("what a depiction draws", () => {
 
   it("draws every provider the arrangement still shows", () => {
     const visible = DEFAULT_ARRANGEMENT.usageProviders;
+    // Only windowed providers get a picture (non-windowed ones report a
+    // credit balance, not a window, so `depictUsageLimits` omits them).
+    const windowed = visible.filter(isWindowedRateLimitProvider);
     const hiddenAll = render(
       depictRegion("usageLimits", SHIPPED_DEFAULT_VALUES.usageLimits, {
         ...DEFAULT_ARRANGEMENT,
@@ -258,22 +262,22 @@ describe("what a depiction draws", () => {
         DEFAULT_ARRANGEMENT,
       ),
     );
-    expect(visible.length).toBeGreaterThan(3);
+    expect(windowed.length).toBeGreaterThan(3);
     expect(
       allShown.container.querySelectorAll("[data-provider-id]"),
-    ).toHaveLength(visible.length);
+    ).toHaveLength(windowed.length);
 
     const fifthHidden = render(
       depictRegion("usageLimits", SHIPPED_DEFAULT_VALUES.usageLimits, {
         ...DEFAULT_ARRANGEMENT,
-        hiddenProviders: [visible[4]],
+        hiddenProviders: [windowed[4]],
       }),
     );
     const drawn = [
       ...fifthHidden.container.querySelectorAll("[data-provider-id]"),
     ].map((segment) => segment.getAttribute("data-provider-id"));
-    expect(drawn).toHaveLength(visible.length - 1);
-    expect(drawn).not.toContain(visible[4]);
+    expect(drawn).toHaveLength(windowed.length - 1);
+    expect(drawn).not.toContain(windowed[4]);
   });
 
   it("gives neighbouring providers readings of their own", () => {
@@ -295,7 +299,10 @@ describe("what a depiction draws", () => {
       (segment) => segment.textContent.replace(/^\D+/, ""),
     );
 
-    expect(readings).toHaveLength(DEFAULT_ARRANGEMENT.usageProviders.length);
+    const windowed = DEFAULT_ARRANGEMENT.usageProviders.filter(
+      isWindowedRateLimitProvider,
+    );
+    expect(readings).toHaveLength(windowed.length);
     expect(readings.every((reading) => reading.length > 0)).toBe(true);
     // Three readings rotate across the catalog, so a strip longer than three
     // repeats - but never beside its own twin, which is where the "eight

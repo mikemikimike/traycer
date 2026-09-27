@@ -134,6 +134,27 @@ const REGION_PARITY: Readonly<Record<RegionId, ReadonlyArray<ParityCase>>> = {
         "ContextUsageChipView reads its style and its pin through the preference seam rather than from props, so a picture of it would be a second reader of the seam",
     },
   ],
+  toolActivity: [
+    {
+      kind: "own-markup",
+      reason:
+        "depictTranscriptDisclosure draws from ActivityGroupSegment's own classes rather than through it, because the real row reads its open state from a per-chat store a picture must not mount",
+    },
+  ],
+  thinking: [
+    {
+      kind: "own-markup",
+      reason:
+        "depictTranscriptDisclosure draws from ReasoningSegment's own classes rather than through it, because the real row reads its open state from a per-chat store a picture must not mount",
+    },
+  ],
+  timestamps: [
+    {
+      kind: "own-markup",
+      reason:
+        "depictTimestamp draws from ChatMessageTimestamp's own classes rather than through it, since the real component subscribes to the live clock tick a picture must not mount",
+    },
+  ],
   runningAgents: [
     realLeaf(ChatDockCompactChip, CHIP_MODULE, AS_CHIP),
     realLeaf(
@@ -331,7 +352,7 @@ describe("the depictions drawn from their own markup", () => {
    * identity check above, and the only way to make that pass is to declare it
    * here - which moves this list and fails again, in front of a reviewer.
    */
-  it("are the three the module declares, and no more", () => {
+  it("are the six the module declares, and no more", () => {
     const ownMarkup = LAYOUT_REGION_IDS.filter((regionId) =>
       REGION_PARITY[regionId].some(
         (parityCase) => parityCase.kind === "own-markup",
@@ -341,6 +362,9 @@ describe("the depictions drawn from their own markup", () => {
       "contextUsage",
       "mic",
       "resourceMonitor",
+      "thinking",
+      "timestamps",
+      "toolActivity",
     ]);
   });
 });

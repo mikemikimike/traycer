@@ -32,6 +32,7 @@ import {
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import { useRegionValues } from "@/lib/layout-overrides";
 import { openLayoutEditor } from "@/lib/layout/editor-session";
+import { activateTabIntent } from "@/lib/tab-navigation";
 import { useTitleBarDragSuppression } from "@/stores/layout/title-bar-drag-store";
 import {
   regionValuesHidden,
@@ -130,7 +131,7 @@ function runQuickVerb(input: {
   const previous = readControlValue(values, key);
   writeControlValue(regionId, key, quickVerbValue(verb, regionId));
   pendingQuickVerb = { regionId, verb };
-  toast(quickVerbToast(verb, regionName), {
+  toast(quickVerbToast(verb, regionId, regionName), {
     id: QUICK_VERB_TOAST_ID,
     duration: QUICK_VERB_TOAST_DURATION_MS,
     // Neither fires for an action/cancel click (sonner calls only that
@@ -161,7 +162,9 @@ function runQuickVerb(input: {
           source: "direct_ui",
           entry: "pointer",
           target: regionId,
-          navigate,
+          origin: { kind: "tab" },
+          navigateToTabIntent: (intent) =>
+            activateTabIntent(navigate, intent, undefined),
         });
       },
     },
@@ -238,7 +241,7 @@ export function LayoutRegionVerbItems(props: {
             }}
           >
             <Icon aria-hidden />
-            {quickVerbLabel(verb, facts.name)}
+            {quickVerbLabel(verb, regionId, facts.name)}
           </ContextMenuItem>
         );
       })}

@@ -177,7 +177,7 @@ export function ContextUsageChipView({
         data-testid="context-usage-chip-ghost"
         className="inline-flex h-5 w-12 shrink-0 items-center justify-center rounded-sm border border-dashed border-border/60 text-ui-xs text-muted-foreground/50"
       >
-        —
+        -
       </span>
     );
   }

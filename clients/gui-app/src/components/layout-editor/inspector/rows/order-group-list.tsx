@@ -3,8 +3,8 @@ import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { isVoiceInputRowAvailable } from "@/lib/settings/settings-availability";
 import { NoLayoutUsageProviders } from "@/components/layout-editor/inspector/provider-limit-windows";
-import type { ReactNode } from "react";
-import { Plus } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ChevronRight, Plus } from "lucide-react";
 import { SortableList } from "@/components/layout-editor/inspector/sortable-list";
 import { useLayoutFormHost } from "@/components/layout-editor/inspector/layout-form-host";
 import { useSortableRowPadding } from "@/components/layout-editor/inspector/sortable-row-padding";
@@ -49,18 +49,14 @@ import type { RateLimitProviderId } from "@/lib/rate-limit-providers";
  * to `string` meant re-narrowing each id back on the way out, where a
  * mis-routed id was silently DROPPED instead of failing (G1-23).
  *
- * THE list for its group, in both hosts (L-03, L-95). The page draws it once
- * per surface card with `selectedId: null`, and the inspector draws the same
- * one for the selected region with `selectedId` on its row - which is the whole
- * of what the two hosts need to differ by, and why nine rail sections could
- * collapse into one list without a page-only component.
+ * THE list for its group in both hosts (L-03, L-95): the area form draws it
+ * once per group, with the canvas's selected region highlighted.
  */
 export function OrderGroupList(props: {
   readonly group: OrderGroupId;
   readonly selectedId: RegionId | null;
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
-  readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
   readonly decorate: SortableRowDecorator | null;
 }): ReactNode {
   const { group, arrangement } = props;
@@ -71,7 +67,9 @@ export function OrderGroupList(props: {
       {ORDER_GROUPS[group].dividers ? (
         // In the rows' own gutter: it is the last line of the same list, not a
         // button parked under a card (L-25, L-155).
-        <div className={gutter.row}>
+        <div className={cn(gutter.row, "flex")}>
+          {/* In the label column, under the names of the rows it adds to. */}
+          <span aria-hidden className="w-11 shrink-0" />
           <Button
             type="button"
             variant="muted-outline"
@@ -99,57 +97,39 @@ export function OrderGroupList(props: {
 
 /**
  * The header that introduces one of these lists: its name, how it is operated,
- * and whatever verb belongs to the GROUP rather than to a member (R3-11).
- *
- * Beside {@link OrderGroupList} because it is the other half of the same thing
- * and both hosts compose the pair: the page's surface card draws it above each
- * of its lists with a `Revert order` button, and the dock's Providers level
- * draws it above the one list it has with nothing beside it. It used to be
- * hand-built in both of those files - the same gutter, the same `h3`, the same
- * `max-w-[72ch]` paragraph - which is the drift R1-04 and R2-02 were each about
- * one layer down, with the WORDS already unified into `surface-groups.ts` and
- * only the markup left in two places.
- *
- * What the callers still own is how the header is ruled into the card around
- * it: that is a fact about the card, and the two cards genuinely differ.
+ * and whatever verb belongs to the GROUP rather than to a member (R3-11) - the
+ * area form's order revert.
  */
 export function OrderGroupHeader(props: {
   readonly group: OrderGroupId;
-  /** The group's own verb beside the heading, or `null` for none. */
-  readonly action: ReactNode;
+  /** The list's revert, drawn after its heading, or `null`. */
+  readonly revert: ReactNode;
 }): ReactNode {
-  const { group, action } = props;
+  const { group, revert } = props;
   const facts = ORDER_GROUPS[group];
   const gutter = useSortableRowPadding();
   const page = useLayoutFormHost() === "page";
   const narrow = useIsMobileViewport();
   if (narrow && (group === "toolbarLeft" || group === "toolbarRight"))
     return null;
+  // At the row edge, the same x the area's own heading starts at; the rows'
+  // grip column hangs under it.
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-start justify-between gap-x-6 gap-y-2",
-        gutter.row,
-      )}
-    >
-      <div className="min-w-32 flex-1">
-        {facts.label === null ? null : (
-          <h3 className="font-medium text-foreground">{facts.label}</h3>
+    <div className={gutter.row}>
+      <div className="flex items-center gap-1">
+        <h3 className="font-medium text-foreground">{facts.label}</h3>
+        {revert === null ? null : (
+          <span className="-my-1 flex shrink-0">{revert}</span>
         )}
-        <p
-          className={cn(
-            "max-w-[72ch] text-pretty text-muted-foreground",
-            // A notch under the row scale the gutter carries, on whichever
-            // host: the page reads at the Settings form's size and the dock at
-            // the instrument panel's (P-4).
-            page ? "text-ui-sm" : "text-ui-xs",
-            facts.label === null ? null : "mt-0.5",
-          )}
-        >
-          {orderGroupInstruction(group)}
-        </p>
       </div>
-      {action}
+      <p
+        className={cn(
+          "mt-0.5 max-w-[72ch] text-pretty text-muted-foreground",
+          page ? "text-ui-sm" : "text-ui-xs",
+        )}
+      >
+        {orderGroupInstruction(group)}
+      </p>
     </div>
   );
 }
@@ -159,11 +139,9 @@ function OrderGroupRows(props: {
   readonly selectedId: RegionId | null;
   readonly values: LayoutValues;
   readonly arrangement: LayoutArrangement;
-  readonly onOpenProvider: ((providerId: RateLimitProviderId) => void) | null;
   readonly decorate: SortableRowDecorator | null;
 }): ReactNode {
-  const { group, selectedId, values, arrangement, onOpenProvider, decorate } =
-    props;
+  const { group, selectedId, values, arrangement, decorate } = props;
   const { providerIds } = useLayoutUsage();
   const narrow = useIsMobileViewport();
   const availability = useSettingsAvailabilityContext();
@@ -240,28 +218,11 @@ function OrderGroupRows(props: {
         />
       );
     case "usageProviders":
-      if (visibleProviders.length === 0) return <NoLayoutUsageProviders />;
       return (
-        <SortableList<RateLimitProviderId>
-          label={orderGroupListLabel(group)}
-          selectedId={selectedId}
-          items={providerOrderItems(
-            arrangement,
-            providerIds,
-            onOpenProvider,
-            decorate,
-          )}
-          onMove={(id, toIndex) => {
-            writeArrangement({
-              ...arrangement,
-              usageProviders: reorderVisibleProviders(
-                arrangement.usageProviders,
-                visibleProviders,
-                id,
-                toIndex,
-              ),
-            });
-          }}
+        <ProviderLists
+          configured={visibleProviders}
+          arrangement={arrangement}
+          decorate={decorate}
         />
       );
     case "rail":
@@ -288,6 +249,81 @@ function OrderGroupRows(props: {
     default:
       return assertNever(group);
   }
+}
+
+/**
+ * The providers configured on the watched host, in their saved order, then
+ * the rest behind a Show all providers disclosure (C13). The disclosure is not
+ * a layout setting, and an unconfigured provider keeps its saved choices.
+ */
+function ProviderLists(props: {
+  readonly configured: ReadonlyArray<RateLimitProviderId>;
+  readonly arrangement: LayoutArrangement;
+  readonly decorate: SortableRowDecorator | null;
+}): ReactNode {
+  const { configured, arrangement, decorate } = props;
+  const [showAll, setShowAll] = useState(false);
+  const gutter = useSortableRowPadding();
+  const others = arrangement.usageProviders.filter(
+    (id) => !configured.includes(id),
+  );
+  return (
+    <>
+      {configured.length === 0 ? (
+        <div className={cn(gutter.row, "flex")}>
+          <span aria-hidden className="w-11 shrink-0" />
+          <NoLayoutUsageProviders />
+        </div>
+      ) : (
+        <SortableList<RateLimitProviderId>
+          label={orderGroupListLabel("usageProviders")}
+          selectedId={null}
+          items={providerOrderItems(configured, arrangement, decorate)}
+          onMove={(id, toIndex) => {
+            writeArrangement({
+              ...arrangement,
+              usageProviders: reorderVisibleProviders(
+                arrangement.usageProviders,
+                configured,
+                id,
+                toIndex,
+              ),
+            });
+          }}
+        />
+      )}
+      {others.length === 0 ? null : (
+        <div className={cn(gutter.row, "flex")}>
+          <span aria-hidden className="w-11 shrink-0" />
+          <Button
+            type="button"
+            variant="muted"
+            size="xs"
+            aria-expanded={showAll}
+            onClick={() => {
+              setShowAll(!showAll);
+            }}
+          >
+            <ChevronRight
+              aria-hidden
+              className={cn("transition-transform", showAll && "rotate-90")}
+            />
+            {showAll
+              ? "Hide other providers"
+              : `Show all providers (${String(others.length)} not configured on this host)`}
+          </Button>
+        </div>
+      )}
+      {showAll && others.length > 0 ? (
+        <SortableList<RateLimitProviderId>
+          label="Providers not configured on this host"
+          selectedId={null}
+          items={providerOrderItems(others, arrangement, decorate)}
+          onMove={null}
+        />
+      ) : null}
+    </>
+  );
 }
 
 /** One id's new index, with an id this list no longer holds left alone. */

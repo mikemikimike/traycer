@@ -77,12 +77,17 @@ export function SideStripTabRow(props: {
           autoTint={epicId === null ? null : tabAutoTint(epicId)}
           groupLine={props.groupLine}
           leading={leading}
-          tile={sideTabTileOf({
-            appearance: item.appearance,
-            title: item.displayTab.name,
-            titleGenerating,
-            fallback: leading,
-          })}
+          tile={
+            // The session tab is a mode with its own icon, never a monogram.
+            tab.kind === "sample-workspace"
+              ? { kind: "icon", icon: leading }
+              : sideTabTileOf({
+                  appearance: item.appearance,
+                  title: item.displayTab.name,
+                  titleGenerating,
+                  fallback: leading,
+                })
+          }
           badge={badge}
           agents={agents}
           title={
@@ -97,12 +102,25 @@ export function SideStripTabRow(props: {
             )
           }
           hoverCardBody={
-            <SideTabHoverCardBody
-              title={item.displayName}
-              epicId={epicId}
-              badge={badge}
-              agents={agents}
-            />
+            tab.kind === "sample-workspace" ? (
+              // A mode, not a task: no agents, so no "Idle" (audit F2).
+              <div
+                data-testid="side-tab-hover-card-body"
+                className="flex flex-col gap-2"
+              >
+                <div className="text-ui-sm font-medium text-foreground">
+                  {item.displayName}
+                </div>
+                <div className="text-muted-foreground">Sample workspace</div>
+              </div>
+            ) : (
+              <SideTabHoverCardBody
+                title={item.displayName}
+                epicId={epicId}
+                badge={badge}
+                agents={agents}
+              />
+            )
           }
           leaderBadge={
             item.leaderBadge === null ? null : (

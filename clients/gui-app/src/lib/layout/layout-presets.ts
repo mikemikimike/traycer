@@ -5,13 +5,12 @@ import type { LayoutOverrides, LayoutValues } from "@/lib/layout/layout-values";
  * The three densities, and the arithmetic that turns one of them plus a delta
  * into what the app draws.
  *
- * The values are held as a BASE PRESET plus the user's own override delta
- * (`LayoutOverrides`), and a preset switch changes the preset ALONE (L-133):
- * the delta is what a person picked, so it outlives a change of density and
- * is theirs again the moment they switch back. What is "changed" is measured
- * by difference against whichever base is current (`layout-diff.ts`), which is
- * how "Compact + 3 changes" stays truthful without the store having to hold a
- * delta that is minimal against the base.
+ * The values are held as the LAST-APPLIED preset plus the user's own override
+ * delta (`LayoutOverrides`). Applying a preset replaces every value with the
+ * preset's - the delta is cleared - and leaves the arrangement alone, so
+ * placement, order and provider choices survive a change of density. What is
+ * changed is measured by difference against the last-applied preset
+ * (`layout-diff.ts`).
  */
 
 export type LayoutPresetId = "default" | "compact" | "detailed";
@@ -21,6 +20,13 @@ export const LAYOUT_PRESET_IDS: ReadonlyArray<LayoutPresetId> = [
   "compact",
   "detailed",
 ];
+
+/** Each preset's name, as the form, its status line and its toast say it. */
+export const PRESET_LABELS: Readonly<Record<LayoutPresetId, string>> = {
+  default: "Default",
+  compact: "Compact",
+  detailed: "Detailed",
+};
 
 /**
  * Every region exactly as the app ships it, which is also the Default preset.
@@ -58,22 +64,25 @@ export const SHIPPED_DEFAULT_VALUES: LayoutValues = {
     pinnedFields: CONTEXT_USAGE_ROW_KEYS,
     compactButton: "shown",
   },
+  toolActivity: { size: "chip" },
+  thinking: { shown: "shown", size: "chip" },
+  timestamps: { shown: "shown" },
   runningAgents: { shown: "shown", size: "full" },
   changedFiles: { shown: "shown", size: "full" },
   background: { shown: "shown", size: "full" },
   todo: { shown: "shown", size: "full" },
   attachImage: { shown: "shown" },
   access: { size: "full" },
-  model: { style: "text" },
+  model: { style: "text", reasoningControl: "slider" },
   mic: { shown: "shown" },
-  railAgents: { shown: "auto" },
-  railTerminals: { shown: "auto" },
-  railBrowsers: { shown: "auto" },
-  railArtifacts: { shown: "auto" },
-  railGitDiff: { shown: "auto" },
+  railAgents: { shown: "shown" },
+  railTerminals: { shown: "shown" },
+  railBrowsers: { shown: "shown" },
+  railArtifacts: { shown: "shown" },
+  railGitDiff: { shown: "shown" },
   railPullRequests: { shown: "auto" },
-  railFileTree: { shown: "auto" },
-  railSharing: { shown: "auto" },
+  railFileTree: { shown: "shown" },
+  railSharing: { shown: "shown" },
   railComments: { shown: "auto" },
 };
 
@@ -122,12 +131,17 @@ const COMPACT_VALUES: LayoutValues = {
     pinnedFields: CONTEXT_USAGE_ROW_KEYS,
     compactButton: "hidden",
   },
+  // Reasoning is commentary on work the transcript already shows, and the
+  // time on each message is the last reading in it with no job to do while
+  // reading; activity rows stay, since approvals and failures ride them.
+  thinking: { shown: "hidden", size: "chip" },
+  timestamps: { shown: "hidden" },
   runningAgents: { shown: "shown", size: "chip" },
   changedFiles: { shown: "shown", size: "chip" },
   background: { shown: "shown", size: "chip" },
   todo: { shown: "shown", size: "chip" },
   access: { size: "chip" },
-  model: { style: "bars" },
+  model: { style: "bars", reasoningControl: "slider" },
   mic: { shown: "hidden" },
 };
 
@@ -160,7 +174,10 @@ const DETAILED_VALUES: LayoutValues = {
     pinnedFields: CONTEXT_USAGE_ROW_KEYS,
     compactButton: "shown",
   },
-  model: { style: "bars-text" },
+  // Every thinking level spelled out by name, which is what the list does.
+  model: { style: "bars-text", reasoningControl: "list" },
+  toolActivity: { size: "full" },
+  thinking: { shown: "shown", size: "full" },
 };
 
 export const PRESET_VALUES: Readonly<Record<LayoutPresetId, LayoutValues>> = {
@@ -181,6 +198,9 @@ export function effectiveLayoutValues(
     resourceMonitor: { ...base.resourceMonitor, ...overrides.resourceMonitor },
     minimap: { ...base.minimap, ...overrides.minimap },
     contextUsage: { ...base.contextUsage, ...overrides.contextUsage },
+    toolActivity: { ...base.toolActivity, ...overrides.toolActivity },
+    thinking: { ...base.thinking, ...overrides.thinking },
+    timestamps: { ...base.timestamps, ...overrides.timestamps },
     runningAgents: { ...base.runningAgents, ...overrides.runningAgents },
     changedFiles: { ...base.changedFiles, ...overrides.changedFiles },
     background: { ...base.background, ...overrides.background },

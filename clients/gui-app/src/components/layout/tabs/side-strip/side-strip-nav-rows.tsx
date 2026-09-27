@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef, ReactNode } from "react";
-import { History, Inbox, Plus } from "lucide-react";
+import { Bell, History, Plus } from "lucide-react";
 import { useRouterState } from "@tanstack/react-router";
 import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
 import { NotificationsPopover } from "@/components/notifications/notifications-popover";
@@ -41,7 +41,7 @@ import {
 } from "./side-strip-tokens";
 
 /**
- * The strip's nav rows under the top block's controls (D6): Inbox, which
+ * The strip's nav rows under the top block's controls (D6): Notifications, which
  * opens the notification center as a drawer on the strip's edge, and All
  * tasks, which opens History. Collapsed, both are 32px icon tiles.
  */
@@ -218,7 +218,7 @@ function InboxNavRow(props: {
             onPointerDown={onTriggerPointerDown}
             onKeyDown={onTriggerKeyDown}
           >
-            <Inbox
+            <Bell
               className={cn(
                 SIDE_TAB_LEADING_CLASS,
                 collapsed && "me-0",
@@ -238,7 +238,7 @@ function InboxNavRow(props: {
                     "min-w-0 flex-1 truncate text-left",
                   )}
                 >
-                  Inbox
+                  Notifications
                 </span>
                 {/* One count, the unread total; a pending ask tints it
                     rather than adding a second number. An ask already read
@@ -287,12 +287,13 @@ function InboxNavRow(props: {
         layout="bare"
         side={placement?.side}
         align="start"
-        // The strip's own gutter: the drawer sits one shell gap off the
-        // strip and one in from its top and bottom, level with the sheets.
-        sideOffset={SHELL_GAP_PX}
-        alignOffset={SHELL_GAP_PX}
+        // Flush surface: the strip and the frame sit with no ground between
+        // them any more, so the drawer opens flush off the strip too, level
+        // with the frame's own top and bottom.
+        sideOffset={0}
+        alignOffset={0}
         data-testid="side-strip-inbox-drawer"
-        className="h-[calc(var(--radix-popover-trigger-height)_-_2*var(--shell-gap))] w-auto overflow-hidden"
+        className="h-[var(--radix-popover-trigger-height)] w-auto overflow-hidden"
         {...contentHandlers}
       >
         <NotificationsPopover
@@ -307,12 +308,10 @@ function InboxNavRow(props: {
   );
 }
 
-/** `--shell-gap` in px, for Radix's numeric offsets. */
-const SHELL_GAP_PX = 6;
 const NO_SHELL_STYLE = {};
 
 /**
- * The collapsed Inbox tile's corner: the needs-you count, else the
+ * The collapsed Notifications tile's corner: the needs-you count, else the
  * status-unavailable dot, else nothing.
  */
 function InboxTileMark(props: {
@@ -355,9 +354,11 @@ const INBOX_UNKNOWN_DOT_CLASS =
 
 function inboxTooltip(unavailable: boolean, chord: ChordString | null): string {
   if (unavailable) {
-    return "Inbox status unavailable, so this may be out of date";
+    return "Notifications status unavailable, so this may be out of date";
   }
-  return chord === null ? "Inbox" : `Inbox (${formatChordForDisplay(chord)})`;
+  return chord === null
+    ? "Notifications"
+    : `Notifications (${formatChordForDisplay(chord)})`;
 }
 
 function inboxAccessibleLabel(
@@ -370,7 +371,9 @@ function inboxAccessibleLabel(
     unread > 0 ? `${unread} unread` : null,
     unavailable ? "status unavailable" : null,
   ].filter((part): part is string => part !== null);
-  return parts.length === 0 ? "Inbox" : `Inbox, ${parts.join(", ")}`;
+  return parts.length === 0
+    ? "Notifications"
+    : `Notifications, ${parts.join(", ")}`;
 }
 
 /** Opens History, the same action as the header's `HistoryButton`. */

@@ -1,3 +1,4 @@
+import { useReadingWidthClass } from "@/lib/layout-overrides";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence } from "motion/react";
 import type {
@@ -183,6 +184,7 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
   // rather than inside its workspace row: a fully compact chat has no row at
   // all and must still draw them (A.4.4).
   const strip = useChatDockCompactStrip();
+  const readingWidth = useReadingWidthClass();
   // The node an open pill's actions are portalled into. State rather than a
   // ref because the panels that fill it render in the same commit and must
   // re-render once it exists.
@@ -281,7 +283,8 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
               // gap is between two flex children, so a chat with no frame
               // (`empty:hidden`) pays nothing for it and keeps the composer's
               // own `pt-4` as its separation.
-              "pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-3 bg-canvas",
+              "pointer-events-auto mx-auto flex w-full flex-col gap-3 bg-canvas",
+              readingWidth,
               topPadding,
             )}
           >
@@ -339,9 +342,13 @@ export function ChatLowerDock(props: ChatLowerDockProps) {
                   dock: props,
                 })}
                 {/* Passive: it is chrome the editor cannot customize, so a
-                    layout session dims it like the transcript. */}
+                    layout session dims it like the transcript, and the canvas
+                    names it with a cue rather than a setting (C4). */}
                 {queueVisible ? (
-                  <div data-layout-passive>
+                  <div
+                    data-layout-passive
+                    data-layout-cue="Message queue · Always here"
+                  >
                     {queuePanel(props, anyRowVisible)}
                   </div>
                 ) : null}

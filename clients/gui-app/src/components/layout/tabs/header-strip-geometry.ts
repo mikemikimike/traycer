@@ -7,6 +7,7 @@
  * dnd-kit's autoScroll can move it without pointer input. Render transforms are
  * subtracted from slot measurements to recover stable layout-space geometry.
  */
+import { cssEscape } from "@/lib/dom/css-escape";
 import {
   stripAxisOf,
   contentDirectionOf,
@@ -166,11 +167,8 @@ export function readHeaderStripSlots(
  * item is not in the strip.
  */
 export function readHeaderStripItemRect(stripItemId: string): RectLike | null {
-  // A quoted attribute value only needs `"` and `\` escaped; `CSS.escape`
-  // is not available in every environment this module runs in (jsdom).
-  const quoted = stripItemId.replace(/["\\]/g, "\\$&");
   const item = stripElement()?.querySelector<HTMLElement>(
-    `[data-strip-item-id="${quoted}"]`,
+    `[data-strip-item-id="${cssEscape(stripItemId)}"]`,
   );
   if (item === null || item === undefined) return null;
   const rect = item.getBoundingClientRect();

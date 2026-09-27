@@ -1,4 +1,5 @@
 import { useColumnOverlayPlacement } from "@/components/layout/column-edge-context";
+import { useSampleScene } from "@/components/sample-workspace/sample-scene-context";
 import { useEffect, useState, type ReactNode } from "react";
 import { Gauge } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -237,11 +238,13 @@ function LiveRateLimitGlyph({
   readonly form: BarReadingForm;
 }): ReactNode {
   const providers = useStatusBarWindowedProviders();
+  const sample = useSampleScene();
   const { cluster, mountTargets } = useStatusBarRateLimitSegments({
     providers,
     profileSelection,
     mode: "live",
     editing: false,
+    sample,
   });
   return (
     <>

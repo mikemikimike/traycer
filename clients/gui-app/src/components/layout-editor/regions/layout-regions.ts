@@ -1,6 +1,9 @@
 import {
   CONTEXT_USAGE_REGION,
   MINIMAP_REGION,
+  THINKING_REGION,
+  TIMESTAMPS_REGION,
+  TOOL_ACTIVITY_REGION,
 } from "@/components/layout-editor/regions/chat-regions";
 import {
   ACCESS_REGION,
@@ -40,7 +43,7 @@ import type { RegionId } from "@/lib/layout/region-id";
  * launch entries.
  *
  * An index rather than a table: each surface states its own regions in its own
- * file, and this map is where the twenty-three are joined so a caller holding
+ * file, and this map is where the twenty-six are joined so a caller holding
  * an id can look one up. A region missing from here is a compile error, which is
  * what keeps the five per-surface files from drifting into a partial registry.
  *
@@ -53,6 +56,11 @@ export const LAYOUT_REGIONS: {
   homeTab: HOME_TAB_REGION,
   usageLimits: USAGE_LIMITS_REGION,
   resourceMonitor: RESOURCE_MONITOR_REGION,
+  // The transcript's own three in the order a turn draws them, then the
+  // two readings at its edges; the Chat area lists them in this order.
+  toolActivity: TOOL_ACTIVITY_REGION,
+  thinking: THINKING_REGION,
+  timestamps: TIMESTAMPS_REGION,
   minimap: MINIMAP_REGION,
   contextUsage: CONTEXT_USAGE_REGION,
   runningAgents: RUNNING_AGENTS_REGION,

@@ -477,12 +477,6 @@ describe("dnd-store preview tick suppression", () => {
     ).toBe(false);
     expect(
       epicCanvasDropPreviewEqual(
-        { kind: "left-panel-section", panelId: "chats", position: "before" },
-        { kind: "left-panel-section", panelId: "chats", position: "before" },
-      ),
-    ).toBe(true);
-    expect(
-      epicCanvasDropPreviewEqual(
         { kind: "left-panel-rail-list" },
         { kind: "left-panel-rail-list" },
       ),

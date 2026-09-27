@@ -1,4 +1,3 @@
-import type { UseNavigateResult } from "@tanstack/react-router";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -20,22 +19,29 @@ import {
   layoutDurationBucket,
   layoutEditorSessionChangeSummary,
 } from "@/lib/layout/layout-diff";
+import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import type { RegionId } from "@/lib/layout/region-id";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import {
   closeSystemOverlay,
+  navigateToLayoutArea,
   navigateToLayoutRegion,
   navigateToSettingsSection,
 } from "@/lib/settings-navigation";
-import { activateTabIntent } from "@/lib/tab-navigation";
+import type { TabActivationIntent } from "@/lib/tab-navigation/intents";
 import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
 import {
   useLayoutEditorStore,
   type LayoutEditorEntryMethod,
+  type LayoutEditorOrigin,
   type LayoutEditorSession,
 } from "@/stores/layout/layout-editor-store";
 import { getLayoutSnapshot } from "@/stores/layout/layout-store";
-import { createLayoutItem, flattenLayoutRefs } from "@/stores/tabs/layout";
+import {
+  createLayoutItem,
+  flattenLayoutRefs,
+  type StripItem,
+} from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 
@@ -65,8 +71,6 @@ import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
  * region, nothing to choose between.
  */
 
-type NavigateFn = UseNavigateResult<string>;
-
 const SAMPLE_WORKSPACE_REF = {
   kind: "sample-workspace",
   id: "sample-workspace",
@@ -75,8 +79,9 @@ const SAMPLE_WORKSPACE_REF = {
 /** Why a session ended, which is what decides the teardown (5.3). */
 export type LayoutEditorExitReason =
   | "done"
-  | "escape"
   | "discard"
+  | "open-settings"
+  | "abandoned"
   | "tab-switch"
   | "sample-closed"
   | "below-threshold"
@@ -98,12 +103,16 @@ export interface OpenLayoutEditorInput {
   readonly entry: LayoutEditorEntryMethod;
   /** The region to preselect, for a deep link out of Settings search (5.3). */
   readonly target: RegionId | null;
+  /** Where Done returns to (`LayoutEditorOrigin`). */
+  readonly origin: LayoutEditorOrigin;
   /**
-   * The router's navigate: the sample workspace is a real top-level tab, so it
-   * is opened through the ordinary tab navigation controller rather than by
-   * writing the tab store.
+   * Activates a tab through the ordinary tab navigation controller: the sample
+   * workspace is a real top-level tab, not a tab-store write. A callback rather
+   * than the router's `navigate`, because the palette mounts above
+   * `RouterProvider`, where `useNavigate()` has no router and the sample tab
+   * was never activated (the editor then framed the user's real tab).
    */
-  readonly navigate: NavigateFn;
+  readonly navigateToTabIntent: (intent: TabActivationIntent) => void;
 }
 
 /**
@@ -154,6 +163,8 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
     return false;
   }
   if (!acquireLayoutEditorLease()) return false;
+  const entry = Symbol("layout-editor-entry");
+  pendingEntry = entry;
   // The app's own system overlay is chrome the editor is about to decorate,
   // and it is portalled above everything the editor draws (L-91). Dismissing
   // it belongs to the door for the same reason the lease and the width gate
@@ -162,20 +173,36 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
   dismissCommandPalette();
   // Before the session begins, so the activation this performs is not the tab
   // switch the session watcher exits on.
-  openSampleWorkspace(input.navigate);
+  openSampleWorkspace(input.navigateToTabIntent);
 
   runLayoutEditorMotion({
     phase: "enter",
     entry: input.entry,
     dockMode: editor.dockMode,
     apply: () => {
+      // The entry may have been overtaken while its motion was deferred: a
+      // newer open owns the lease now, the shell was abandoned (which released
+      // it), or the sample tab closed under a session that had not begun.
+      if (pendingEntry !== entry) return;
+      pendingEntry = null;
+      if (!sampleWorkspaceOpen(useTabsStore.getState().items)) {
+        releaseLayoutEditorLease();
+        return;
+      }
       useLayoutEditorStore.getState().beginSession({
         entry: input.entry,
         source: input.source,
         startedAt: Date.now(),
+        origin: input.origin,
       });
       if (input.target !== null) {
         useLayoutEditorStore.getState().select(input.target);
+      } else if (
+        input.origin.kind === "settings" &&
+        input.origin.area !== null
+      ) {
+        // The Settings door lands on the area the page was showing.
+        useLayoutEditorStore.getState().openArea(input.origin.area, null);
       }
       watchSession();
       startLayoutEditorHeartbeat(() => {
@@ -189,6 +216,9 @@ export function openLayoutEditor(input: OpenLayoutEditorInput): boolean {
 /**
  * Leave the editor. `discard` puts the entry snapshot back first (L-18); every
  * other reason keeps what the session wrote, because changes applied live.
+ * `done`, `discard` and closing the sample tab return to the door that opened
+ * the session;
+ * `open-settings` goes to Settings > Layout at the area the inspector shows.
  *
  * The teardown is the last thing to happen, not the first: on the fallback
  * path the inspector slides out while it is still rendering the session, so
@@ -216,6 +246,19 @@ export function closeLayoutEditor(reason: LayoutEditorExitReason): void {
 }
 
 /**
+ * Cmd+W while a session is open is Done, whatever tab or tile has focus: the
+ * Done menu advertises the chord, and closing a real tab under the editor is
+ * the one thing the user did not ask for. Every close-tab path (the native
+ * File menu item and the renderer's close chords) asks here first; `true`
+ * means the chord is spent, including during an exit already under way.
+ */
+export function closeLayoutEditorForCloseTabChord(): boolean {
+  if (useLayoutEditorStore.getState().session === null) return false;
+  closeLayoutEditor("done");
+  return true;
+}
+
+/**
  * The teardown of a session that is leaving and whose exit motion has not
  * landed yet.
  *
@@ -225,6 +268,14 @@ export function closeLayoutEditor(reason: LayoutEditorExitReason): void {
  * shell's unmount runs it with no motion at all.
  */
 let pendingTeardown: (() => void) | null = null;
+
+/**
+ * The entry whose session has not begun yet: on the view-transition path the
+ * door holds the lease and has opened the sample tab a frame before the
+ * transition's update callback begins the session. Its callback begins the
+ * session only while it is still this slot's entry.
+ */
+let pendingEntry: symbol | null = null;
 
 function flushPendingTeardown(): void {
   const teardown = pendingTeardown;
@@ -239,12 +290,19 @@ function flushPendingTeardown(): void {
  */
 export function abandonLayoutEditorSession(): void {
   const editor = useLayoutEditorStore.getState();
-  if (editor.session === null) return;
+  if (editor.session === null) {
+    // An entry still waiting for its motion holds the lease and nothing else.
+    if (pendingEntry !== null) {
+      pendingEntry = null;
+      releaseLayoutEditorLease();
+    }
+    return;
+  }
   if (editor.leaving) {
     flushPendingTeardown();
     return;
   }
-  endSession(editor.session, "done");
+  endSession(editor.session, "abandoned");
 }
 
 /** The teardown itself, once whatever carries the exit has played. */
@@ -271,38 +329,59 @@ function endSession(
     now: Date.now(),
   });
   if (reason === "discard") editor.discard();
+  // Read before `endSession()` resets the level.
+  const returnArea = exitArea(reason, session, editor.area);
   editor.endSession();
-  // A sample tab that is already gone, or that the user navigated away from,
-  // is not this editor's to close: the first case has nothing to close and the
-  // second would take away a tab the user just chose.
-  if (
-    reason !== "tab-switch" &&
-    reason !== "sample-closed" &&
-    reason !== "lease-lost"
-  ) {
+  // The sample tab never outlives its session, whatever ended it: a sample
+  // left behind after a tab switch or a lost lease was a Customizing tab that
+  // showed the sample with no inspector, no frame and the user's real
+  // readings. After a tab switch it is no longer the active tab, so closing it
+  // takes nothing the user chose; `sample-closed` has nothing left to close.
+  if (reason !== "sample-closed") {
     tabCommandCoordinator.closeRefAfterConfirmed({ ...SAMPLE_WORKSPACE_REF });
   }
+  // After the close, which has already put a `tab` origin back on the tab it
+  // came from; Settings is an overlay (or its own tab) over that.
+  if (returnArea !== undefined) navigateToLayoutArea(returnArea);
+}
+
+/**
+ * The Settings > Layout area an exit lands on, or `undefined` for an exit
+ * that stays in the app.
+ */
+function exitArea(
+  reason: LayoutEditorExitReason,
+  session: LayoutEditorSession,
+  area: SurfaceGroupId | null,
+): SurfaceGroupId | null | undefined {
+  if (reason === "open-settings") return area;
+  // Closing the Customizing tab (its ×, or Cmd+W on it) is Done too.
+  if (
+    (reason === "done" || reason === "discard" || reason === "sample-closed") &&
+    session.origin.kind === "settings"
+  )
+    return session.origin.area;
+  return undefined;
 }
 
 /**
  * Put the command palette away BEFORE anything navigates (L-134).
  *
  * The palette dismisses itself after the item it ran - `runCommandItem` closes
- * it in a `finally`, and because `run` is awaited that lands a microtask later
- * still, interleaved with the router's own promise chain. What this item does
- * is activate a tab, and the activation did not survive that: opening the
- * editor from the palette docked the inspector over the tab the user came
- * from, with the sample workspace sitting beside it as a retained background
- * tab and nothing registering from it (LV2-06).
+ * it in a `finally`, a microtask after `run` - but the editor must not open
+ * under a modal still on screen, for the same reason the door dismisses the
+ * system overlays above: which layers have to be down before the app
+ * navigates is a fact about the door, not about whichever gesture reached it.
  *
- * So the door dismisses it, for the same reason it dismisses the system
- * overlays above: which layers have to be down before the app navigates is a
- * fact about the door, not about whichever gesture reached it - and a call
- * site that forgets is a call site that reopens the bug.
+ * LV2-06 (the inspector docked over the user's own tab, the sample workspace
+ * left behind as a background tab) was once blamed on that ordering. Its real
+ * cause was the palette's navigator: the palette mounts above
+ * `RouterProvider`, so the `useNavigate()` it used could not navigate and the
+ * sample tab was never activated. That is why the door takes
+ * `navigateToTabIntent` rather than a router `navigate`.
  *
- * The flush is the load-bearing half. A store write alone leaves the dialog
- * mounted, and its unmount - with Radix's focus restore inside it - would land
- * on React's next commit, which is after the navigation this returns to. The
+ * The flush keeps the dialog's unmount, with Radix's focus restore inside it,
+ * ahead of the navigation rather than on React's next commit after it. The
  * guard keeps it to the one entry point that has a palette open: every other
  * door does no React work here at all.
  */
@@ -318,7 +397,9 @@ function dismissCommandPalette(): void {
  * looking at so closing it puts them back (`sampleReturnItemId`, read by
  * `withoutSampleWorkspace`).
  */
-function openSampleWorkspace(navigate: NavigateFn): void {
+function openSampleWorkspace(
+  navigateToTabIntent: (intent: TabActivationIntent) => void,
+): void {
   useTabsStore.setState((state) => {
     const layout = createLayoutItem(state, { ...SAMPLE_WORKSPACE_REF });
     const items = layout.items.map((item) => {
@@ -339,7 +420,7 @@ function openSampleWorkspace(navigate: NavigateFn): void {
     });
     return { items, stripOrder: flattenLayoutRefs(layout) };
   });
-  activateTabIntent(navigate, { kind: "sample-workspace" }, undefined);
+  navigateToTabIntent({ kind: "sample-workspace" });
 }
 
 let stopSessionWatch: (() => void) | null = null;
@@ -355,11 +436,7 @@ function watchSession(): void {
   stopWatchingSession();
   const activeItemId = useTabsStore.getState().activeItemId;
   const unwatchTabs = useTabsStore.subscribe((state) => {
-    if (
-      !state.items.some(
-        (item) => item.kind === "tab" && item.ref.kind === "sample-workspace",
-      )
-    ) {
+    if (!sampleWorkspaceOpen(state.items)) {
       closeLayoutEditor("sample-closed");
       return;
     }
@@ -372,6 +449,12 @@ function watchSession(): void {
     unwatchTabs();
     unwatchWidth();
   };
+}
+
+function sampleWorkspaceOpen(items: ReadonlyArray<StripItem>): boolean {
+  return items.some(
+    (item) => item.kind === "tab" && item.ref.kind === "sample-workspace",
+  );
 }
 
 function stopWatchingSession(): void {

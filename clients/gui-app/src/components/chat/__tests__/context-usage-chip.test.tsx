@@ -158,6 +158,7 @@ function requestContextUsageGhost(): void {
     entry: "pointer",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
   useLayoutEditorStore.getState().setHovered("contextUsage");
 }

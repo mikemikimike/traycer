@@ -66,19 +66,19 @@ describe.each<TabStripPlacement>(["left", "right"])(
       ).toBe("Tab strip - above the tabs");
     });
 
-    it("puts a header-hosted reading in the strip's foot, first or last", () => {
+    it("puts a header-hosted reading in the strip's foot, start or end", () => {
       expect(
         regionWhere(
           "usageLimits",
           arrangementWith(placement, "header", "left"),
         ),
-      ).toBe("Tab strip foot - first");
+      ).toBe("Tab strip foot - start");
       expect(
         regionWhere(
           "resourceMonitor",
           arrangementWith(placement, "header", "right"),
         ),
-      ).toBe("Tab strip foot - last");
+      ).toBe("Tab strip foot - end");
     });
 
     it("keeps a status-bar reading's wording", () => {
@@ -110,14 +110,11 @@ describe("BAR_HOST_OPTIONS", () => {
 });
 
 describe("edgeSideOptions", () => {
-  it("says First / Last for the header host while vertical", () => {
-    expect(labels(edgeSideOptions("header", "left"))).toEqual([
-      "First",
-      "Last",
-    ]);
+  it("says Start / End for the header host while vertical", () => {
+    expect(labels(edgeSideOptions("header", "left"))).toEqual(["Start", "End"]);
     expect(labels(edgeSideOptions("header", "right"))).toEqual([
-      "First",
-      "Last",
+      "Start",
+      "End",
     ]);
   });
 
@@ -159,7 +156,7 @@ describe("the index state word of a bar reading", () => {
   });
 
   it.each<TabStripPlacement>(["left", "right"])(
-    "names the tab strip, first or last, with the tabs at the %s",
+    "names the tab strip, start or end, with the tabs at the %s",
     (placement) => {
       expect(
         regionStateWord(
@@ -167,14 +164,14 @@ describe("the index state word of a bar reading", () => {
           values,
           arrangementWith(placement, "header", "left"),
         ),
-      ).toBe("Tab strip, first");
+      ).toBe("Tab strip, start");
       expect(
         regionStateWord(
           "resourceMonitor",
           values,
           arrangementWith(placement, "header", "right"),
         ),
-      ).toBe("Tab strip, last");
+      ).toBe("Tab strip, end");
     },
   );
 

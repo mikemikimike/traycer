@@ -18,7 +18,8 @@ import {
   Lock,
   Trash2,
 } from "lucide-react";
-import { LEFT_PANEL_DEFINITIONS } from "@/components/epic-canvas/sidebar/left-panel-registry";
+import { LeftPanelRailIcon } from "@/components/epic-canvas/sidebar/left-panel-rail-icon";
+import { LEFT_PANEL_RAIL_TILE_CLASS } from "@/components/epic-canvas/sidebar/left-panel-rail-tile";
 import { EpicNodeTabIcon } from "@/components/epic-canvas/epic-node-tab-icon";
 import { CommGraphTileIcon } from "@/components/epic-canvas/comm-graph/comm-graph-tile-icon";
 import { ManagedCommandMonitorIcon } from "@/components/managed-commands/managed-command-monitor-icon";
@@ -472,24 +473,24 @@ function GitDiffTileDragOverlay(props: { readonly node: GitDiffTileRef }) {
   );
 }
 
+/**
+ * A rail icon drags as its own tile, not a labelled chip: the rail is a row of
+ * 36px icons, and a chip three tiles wide covered the neighbours and the drop
+ * line the user was aiming at.
+ */
 function LeftPanelRailDragOverlay(props: {
   readonly source: EpicCanvasLeftPanelRailDragData;
 }) {
-  const panel =
-    LEFT_PANEL_DEFINITIONS.find(
-      (definition) => definition.id === props.source.panelId,
-    ) ?? null;
-  if (panel === null) return null;
-  const Icon = panel.icon;
   return (
     <m.div
       {...CHIP_MOTION}
+      data-testid="left-panel-rail-drag-overlay"
       className={cn(
-        "pointer-events-none flex h-9 cursor-grabbing select-none items-center gap-2 rounded-md border border-canvas-border/80 bg-canvas px-3 text-ui-sm font-medium text-canvas-foreground shadow-lg",
+        LEFT_PANEL_RAIL_TILE_CLASS,
+        "pointer-events-none flex cursor-grabbing select-none items-center justify-center border border-canvas-border/80 bg-canvas text-canvas-foreground shadow-lg",
       )}
     >
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <span>{panel.title}</span>
+      <LeftPanelRailIcon panelId={props.source.panelId} hidden={false} />
     </m.div>
   );
 }

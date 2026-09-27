@@ -28,7 +28,6 @@ function row(id: RowId, label: string): SortableListItem<RowId> {
     divider: false,
     movable: true,
     dimmed: false,
-    changed: false,
     hint: null,
     control: (
       <button type="button" aria-label={`${label} display`}>
@@ -42,7 +41,7 @@ function row(id: RowId, label: string): SortableListItem<RowId> {
     onRemove: null,
     removeLabel: null,
     onStack: null,
-    onActivate: null,
+    stackMembers: null,
   };
 }
 
@@ -84,7 +83,7 @@ describe("focusing a list row from outside the list", () => {
     const active = document.activeElement;
     if (active === null) throw new Error("nothing took focus");
     expect(card("contextUsage").contains(active)).toBe(true);
-    expect(active.getAttribute("role")).toBe("button");
+    expect(active.hasAttribute("data-row-grab")).toBe(true);
   });
 
   it("does nothing when there is no row", () => {

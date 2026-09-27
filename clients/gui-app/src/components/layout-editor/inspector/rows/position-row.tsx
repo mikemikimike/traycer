@@ -1,42 +1,35 @@
 import type { ReactNode } from "react";
-import { InspectorRow } from "@/components/layout-editor/inspector/inspector-row";
+import { LayoutFormRow } from "@/components/layout-editor/inspector/rows/layout-form-row";
 import {
   BarHostControl,
   RegionSideControl,
 } from "@/components/layout-editor/inspector/region-controls";
-import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
-import { orderGroupInstruction } from "@/components/layout-editor/regions/surface-groups";
-import { regionFacts } from "@/components/layout-editor/regions/region-facts";
+import {
+  SIDE_TAB_ALIGNMENT_HELPER,
+  sideTabFootAlignment,
+} from "@/components/layout-editor/regions/region-grammar";
+import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { writeArrangement } from "@/lib/layout/arrangement-gestures";
 import {
   positionAxisChanged,
   revertPositionAxis,
-  positionRowChanged,
-  revertPositionRow,
 } from "@/components/layout-editor/regions/region-position-rows";
 import {
   asBarRegionId,
+  barPlacement,
   type LayoutArrangement,
-  type OrderGroupId,
 } from "@/lib/layout/layout-arrangement";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
-import type { LayoutValues } from "@/lib/layout/layout-values";
 import type { RegionId } from "@/lib/layout/region-id";
 
 /**
- * Where a region sits, in the three shapes that question has: which surface
- * hosts it, which end of a surface it is anchored to, and where it falls in a
- * list a drag can reorder.
- *
- * These are the DOCK's framing of those three controls (`region-controls.tsx`).
- * The page has no Position row at all: a region's place IS its place in its
- * surface card's list, its side sits inline on the row, and the usage cluster's
- * host belongs to the Status bar surface rather than to a region (L-95, D7).
+ * Where a region sits, in the two shapes a row's disclosure draws: which bar
+ * hosts it, and which end of its surface it is anchored to. Its place in a
+ * list IS its row's place in that list.
  *
  * A revert belongs to the ROW it sits on, and since L-156 the two bar readings
  * have two of them - a bar and an end of it - so each puts its own axis back
- * and leaves the other alone. The order row still reverts its whole group,
- * which is what putting a list back means.
+ * and leaves the other alone.
  */
 
 /**
@@ -56,8 +49,12 @@ export function PositionHostRow(props: {
   const barRegion = asBarRegionId(regionId);
   if (barRegion === null) return null;
   return (
-    <InspectorRow
-      label="Position"
+    <LayoutFormRow
+      anchor={null}
+      icon={null}
+      label="Location"
+      revertLabel="Revert Location"
+      stacked={false}
       description={description}
       onRevert={
         positionAxisChanged(snapshot, regionId, "position-host")
@@ -66,7 +63,7 @@ export function PositionHostRow(props: {
                 revertPositionAxis(arrangement, regionId, "position-host"),
               );
             }
-          : undefined
+          : null
       }
       control={
         <BarHostControl regionId={barRegion} arrangement={arrangement} />
@@ -76,11 +73,10 @@ export function PositionHostRow(props: {
 }
 
 /**
- * Which end of its surface an edge-anchored region sits at.
- *
- * "Side" wherever the region also picks a bar, because two rows both labelled
- * Position say nothing about which is which; "Position" on its own where the
- * side IS the whole question, which is the minimap's row.
+ * Which end of its surface an edge-anchored region sits at: "Alignment" for a
+ * bar reading (the start or end of its reading area), "Side" for the minimap's
+ * edge of the transcript (C9). In the side tabs' foot the options read Start
+ * and End, and the row says what that means.
  */
 export function PositionSideRow(props: {
   readonly regionId: RegionId;
@@ -89,10 +85,23 @@ export function PositionSideRow(props: {
   readonly description: string;
 }): ReactNode {
   const { regionId, arrangement, snapshot, description } = props;
+  const bar = asBarRegionId(regionId);
+  const narrow = useIsMobileViewport();
+  const footAlignment =
+    bar !== null &&
+    !narrow &&
+    sideTabFootAlignment(
+      barPlacement(arrangement, bar).host,
+      arrangement.tabStripPlacement,
+    );
   return (
-    <InspectorRow
-      label={sideRowLabel(regionId)}
-      description={description}
+    <LayoutFormRow
+      anchor={null}
+      icon={null}
+      label={bar === null ? "Side" : "Alignment"}
+      revertLabel={bar === null ? "Revert Side" : "Revert Alignment"}
+      stacked={false}
+      description={footAlignment ? SIDE_TAB_ALIGNMENT_HELPER : description}
       onRevert={
         positionAxisChanged(snapshot, regionId, "position-side")
           ? () => {
@@ -100,56 +109,10 @@ export function PositionSideRow(props: {
                 revertPositionAxis(arrangement, regionId, "position-side"),
               );
             }
-          : undefined
+          : null
       }
       control={
         <RegionSideControl regionId={regionId} arrangement={arrangement} />
-      }
-    />
-  );
-}
-
-/** What the side row is called beside the rows the same region draws. */
-function sideRowLabel(regionId: RegionId): string {
-  return regionFacts(regionId).rows.some((row) => row.kind === "position-host")
-    ? "Side"
-    : "Position";
-}
-
-/**
- * A region's place in one of the five lists a drag can reorder - the same list
- * the page draws on its surface card, filtered to nothing and highlighted on
- * this region's row instead (L-03).
- */
-export function PositionOrderRow(props: {
-  readonly regionId: RegionId;
-  readonly group: OrderGroupId;
-  readonly values: LayoutValues;
-  readonly arrangement: LayoutArrangement;
-  readonly snapshot: LayoutSnapshot;
-}): ReactNode {
-  const { regionId, group, values, arrangement, snapshot } = props;
-  return (
-    <InspectorRow
-      stacked
-      label="Position"
-      description={orderGroupInstruction(group)}
-      onRevert={
-        positionRowChanged(snapshot, regionId)
-          ? () => {
-              writeArrangement(revertPositionRow(arrangement, regionId));
-            }
-          : undefined
-      }
-      control={
-        <OrderGroupList
-          group={group}
-          selectedId={regionId}
-          values={values}
-          arrangement={arrangement}
-          onOpenProvider={null}
-          decorate={null}
-        />
       }
     />
   );

@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { ColumnEdgeContext } from "@/components/layout/column-edge-context";
+import { SampleSceneContext } from "@/components/sample-workspace/sample-scene-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type {
   StatusBarProviderSegmentModel,
@@ -76,7 +77,7 @@ const AMBIENT_BINDING_STUB = { stub: "ambient-binding" };
 /**
  * Whether `useStatusBarRateLimitSegments` was mounted this render. A plain
  * counter rather than `vi.fn()` because the return value already flows
- * through the mutable `cluster` above — this only needs to answer "did the
+ * through the mutable `cluster` above - this only needs to answer "did the
  * icon mount the selector at all", which is the fetch-against-the-wrong-host
  * guarantee the placeholder-glyph tests below exist to prove.
  */
@@ -87,12 +88,18 @@ let useStatusBarRateLimitSegmentsCalled = false;
  * the status bar's cluster does (G6 review A). See `LiveRateLimitGlyph`.
  */
 let lastMode: StatusBarRateLimitMode | null = null;
+/** The `sample` flag `LiveRateLimitGlyph` last asked the selector for. */
+let lastSample: boolean | null = null;
 
 vi.mock("@/hooks/rate-limits/use-status-bar-rate-limit-segments", () => ({
   useStatusBarWindowedProviders: () => [],
-  useStatusBarRateLimitSegments: (input: { mode: StatusBarRateLimitMode }) => {
+  useStatusBarRateLimitSegments: (input: {
+    readonly mode: StatusBarRateLimitMode;
+    readonly sample: boolean;
+  }) => {
     useStatusBarRateLimitSegmentsCalled = true;
     lastMode = input.mode;
+    lastSample = input.sample;
     return { cluster, mountTargets: [] };
   },
 }));
@@ -227,6 +234,7 @@ afterEach(() => {
   hasExplicitPick = false;
   useStatusBarRateLimitSegmentsCalled = false;
   lastMode = null;
+  lastSample = null;
   useTitleBarDragStore.setState({ suppressors: new Set() });
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
 });
@@ -783,6 +791,25 @@ describe("<RateLimitIconButton />", () => {
     it("asks the selector for live mode in the inline form", () => {
       renderInline();
       expect(lastMode).toBe("live");
+    });
+  });
+
+  // The header glyph reads `useSampleScene()` itself (C12) - the same wiring
+  // `StatusBarRateLimitCluster` gets from its caller - rather than the
+  // sample scene routing through it another way.
+  describe("sample scene (C12)", () => {
+    it("asks the selector for sample readings inside SampleSceneContext", () => {
+      render(
+        <SampleSceneContext.Provider value>
+          {iconTree()}
+        </SampleSceneContext.Provider>,
+      );
+      expect(lastSample).toBe(true);
+    });
+
+    it("asks the selector for real readings outside SampleSceneContext", () => {
+      renderIcon();
+      expect(lastSample).toBe(false);
     });
   });
 });

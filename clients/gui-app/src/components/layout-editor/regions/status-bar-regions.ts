@@ -2,72 +2,8 @@ import { Cpu, Gauge } from "lucide-react";
 import {
   SHOW_HIDE_VERBS,
   type LayoutRegion,
-  type StyleExample,
 } from "@/components/layout-editor/regions/region-grammar";
 import { barPlacementStateWord } from "@/components/layout-editor/regions/region-state-words";
-
-/**
- * The five readings worth picking between, each a complete answer rather than
- * a toggle: every combination is still reachable under Fine-tune, so nothing
- * is lost by not listing thirty-two of them (L-10, resolves O-3).
- */
-const USAGE_LIMITS_EXAMPLES: ReadonlyArray<StyleExample<"usageLimits">> = [
-  {
-    id: "full",
-    label: "bar, percent, word and reset",
-    patch: {
-      bar: true,
-      percent: true,
-      word: true,
-      reset: true,
-      amount: "used",
-    },
-  },
-  {
-    id: "barPercent",
-    label: "bar and percent",
-    patch: {
-      bar: true,
-      percent: true,
-      word: false,
-      reset: false,
-      amount: "used",
-    },
-  },
-  {
-    id: "leftWithReset",
-    label: "percent left with reset, no bar",
-    patch: {
-      bar: false,
-      percent: true,
-      word: true,
-      reset: true,
-      amount: "remaining",
-    },
-  },
-  {
-    id: "barOnly",
-    label: "bar only",
-    patch: {
-      bar: true,
-      percent: false,
-      word: false,
-      reset: false,
-      amount: "used",
-    },
-  },
-  {
-    id: "percentOnly",
-    label: "percent only",
-    patch: {
-      bar: false,
-      percent: true,
-      word: false,
-      reset: false,
-      amount: "used",
-    },
-  },
-];
 
 /**
  * One of the two regions whose home is itself a setting - a bar and an end of
@@ -108,61 +44,45 @@ export const USAGE_LIMITS_REGION: LayoutRegion<"usageLimits"> = {
     },
     {
       kind: "position-side",
-      description: "Which end of that bar.",
-    },
-    {
-      kind: "style",
-      description: "Each example is the real segment, drawn at full size.",
-      specimen: "usage-provider",
-      examples: USAGE_LIMITS_EXAMPLES,
+      description: "The start or end of its reading area.",
     },
     {
       kind: "fine-tune",
       rows: [
         {
-          id: "word",
-          label: "Show the word used/left",
-          description: null,
-          pinsTransient: false,
-          whileHidden: false,
-          control: { kind: "switch", key: "word" },
-        },
-        {
-          id: "reset",
-          label: "Time until reset",
-          description: null,
-          pinsTransient: false,
-          whileHidden: false,
-          control: { kind: "switch", key: "reset" },
-        },
-        {
-          id: "bar",
-          label: "Progress bar",
-          description: null,
-          pinsTransient: false,
-          whileHidden: false,
-          control: { kind: "switch", key: "bar" },
-        },
-        {
-          id: "percent",
-          label: "Percentage",
-          description: null,
-          pinsTransient: false,
-          whileHidden: false,
-          control: { kind: "switch", key: "percent" },
-        },
-        {
           id: "amount",
-          label: "Used or remaining",
+          label: "Amount",
           description: null,
           pinsTransient: false,
-          whileHidden: false,
+          liveWhileHidden: null,
+          requires: null,
           control: {
             kind: "segment",
             key: "amount",
             options: [
               { value: "used", label: "Used" },
               { value: "remaining", label: "Remaining" },
+            ],
+          },
+        },
+        {
+          // The five fields had a second writer in the Style examples, which
+          // set the same keys as named combinations (L-10 overturned in part).
+          // Each field is now said once, here.
+          id: "show",
+          label: "Show",
+          description:
+            "Amount label shows “used” or “remaining” beside the percentage.",
+          pinsTransient: false,
+          liveWhileHidden: null,
+          requires: null,
+          control: {
+            kind: "checks",
+            options: [
+              { key: "bar", label: "Progress bar", requires: null },
+              { key: "percent", label: "Percentage", requires: null },
+              { key: "word", label: "Amount label", requires: "percent" },
+              { key: "reset", label: "Time until reset", requires: null },
             ],
           },
         },
@@ -191,8 +111,6 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
     "ram",
     "resource",
     "monitor",
-    "agent rows",
-    "sidebar",
     // The same four as the usage cluster's: since L-156 this reading picks
     // its own bar, so "header" and "move" have to find it too.
     "header",
@@ -205,35 +123,30 @@ export const RESOURCE_MONITOR_REGION: LayoutRegion<"resourceMonitor"> = {
       kind: "position-host",
       description: "Which bar the monitor lives in.",
     },
-    { kind: "position-side", description: "Which end of that bar." },
+    {
+      kind: "position-side",
+      description: "The start or end of its reading area.",
+    },
     {
       kind: "fine-tune",
       rows: [
-        // First, beside the monitor's own Shown: the two are the two places
-        // resource readings appear, and each is on or off by itself (G7).
-        {
-          id: "agentRows",
-          label: "Readings on agent rows",
-          description:
-            "CPU, memory and processes beside each agent and terminal in the sidebar. Independent of the monitor.",
-          pinsTransient: false,
-          whileHidden: true,
-          control: { kind: "switch", key: "agentRows" },
-        },
         {
           id: "metrics",
           label: "Metrics",
-          description: "What the monitor reports.",
+          description:
+            "What the monitor reports. Readings on agent rows use the same choice.",
           pinsTransient: false,
-          whileHidden: false,
+          // The rows' only metric control, so it stays editable while they
+          // print, even with the monitor itself Hidden (L-174).
+          liveWhileHidden: "agentRows",
+          requires: null,
           control: {
             kind: "checks",
-            keys: ["cpu", "memory", "processes", "ramShare"],
             options: [
-              { value: "cpu", label: "CPU" },
-              { value: "memory", label: "Memory" },
-              { value: "processes", label: "Processes" },
-              { value: "ramShare", label: "RAM share" },
+              { key: "cpu", label: "CPU", requires: null },
+              { key: "memory", label: "Memory", requires: null },
+              { key: "processes", label: "Processes", requires: null },
+              { key: "ramShare", label: "RAM share", requires: null },
             ],
           },
         },

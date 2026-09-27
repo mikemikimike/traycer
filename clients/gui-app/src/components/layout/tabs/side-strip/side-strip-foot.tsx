@@ -28,7 +28,7 @@ import {
 /**
  * What trails in the header, in the strip (S-03, D6): the update row while an
  * update is pending, the header-hosted readings (left cluster, then right),
- * and the account row that opens the user menu. Inbox and All tasks moved to
+ * and the account row that opens the user menu. Notifications and All tasks moved to
  * the top block. Only one of the header and the strip is ever mounted, so each
  * region's canvas node and each action registration stays single. Collapsed,
  * one centred column with the avatar tile last; all of it no-drag.

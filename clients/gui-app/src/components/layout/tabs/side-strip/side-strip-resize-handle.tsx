@@ -47,15 +47,22 @@ interface StripDragState {
  * The layout follows the drag (F9): the frame that carries the width across
  * the snap point switches the strip between the rail and the expanded layout
  * through the store's transient `dragCollapsed`, rendered synchronously so the
- * new layout and the new width paint together. That is the only render a drag
- * makes; the release (or a cancel) clears it in the same batch as its store
- * write.
+ * new layout and the new width paint together. That crossing is a jump between
+ * the rail and the minimum, not pointer tracking, so the same render turns on
+ * the strip's width easing and the jump eases like the collapse button's
+ * (L-165); every other frame, the release and a cancel are instant, and the
+ * drag's start stops an ease still running. The release (or a cancel) clears
+ * `dragCollapsed` in the same batch as its store write.
  */
 export function SideStripResizeHandle(props: {
   readonly edge: EdgeSide;
   readonly stripRef: RefObject<HTMLElement | null>;
+  /** Eases the width change of the render it is called in. */
+  readonly easeWidth: () => void;
+  /** Ends any width easing synchronously, so the next width lands instantly. */
+  readonly stopWidthEasing: () => void;
 }): ReactNode {
-  const { edge, stripRef } = props;
+  const { edge, stripRef, easeWidth, stopWidthEasing } = props;
   const widthPx = useSideTabStripStore((state) => state.widthPx);
   const collapsed = useSideStripCollapsed();
   const dragRef = useRef<StripDragState | null>(null);
@@ -66,6 +73,7 @@ export function SideStripResizeHandle(props: {
     onDragStart: () => {
       const strip = stripRef.current;
       if (strip === null) return false;
+      stopWidthEasing();
       const startWidth = strip.getBoundingClientRect().width;
       dragRef.current = {
         strip,
@@ -90,6 +98,7 @@ export function SideStripResizeHandle(props: {
           state.setDragCollapsed(
             nextCollapsed === state.collapsed ? null : nextCollapsed,
           );
+          easeWidth();
         });
       }
       drag.strip.style.width = `${nextWidth}px`;
@@ -98,6 +107,7 @@ export function SideStripResizeHandle(props: {
       const drag = dragRef.current;
       dragRef.current = null;
       if (drag === null) return;
+      stopWidthEasing();
       // The width as rendered after the last frame, so a floor or cap the
       // strip's own classes apply (S-43, the 40vw cap) is what gets stored.
       const renderedWidth = drag.strip.getBoundingClientRect().width;
@@ -108,6 +118,7 @@ export function SideStripResizeHandle(props: {
       const drag = dragRef.current;
       dragRef.current = null;
       if (drag === null) return;
+      stopWidthEasing();
       useSideTabStripStore.getState().setDragCollapsed(null);
       settleStripWidth(drag.strip);
     },

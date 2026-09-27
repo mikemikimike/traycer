@@ -31,7 +31,7 @@ vi.mock("@/components/settings/host-scope/add-host-dialog", () => ({
 // The sidebar now opts into the liveness poll directly (see
 // `useRegisteredHostsPollLiveness` in `settings-sidebar.tsx`). This suite
 // mocks `useHostScope` wholesale and renders no `QueryClientProvider`, so the
-// real hook — which calls `useQuery` unconditionally — would throw for want
+// real hook - which calls `useQuery` unconditionally - would throw for want
 // of a query client. It is also irrelevant to navigation, which is what this
 // suite is about.
 vi.mock("@/hooks/auth/use-registered-hosts-query", () => ({
@@ -41,7 +41,7 @@ vi.mock("@/hooks/auth/use-registered-hosts-query", () => ({
 // Same reasoning, one hook later: the picker now resolves each row's update
 // badge through `useFleetUpdateViews`, which owns a `useQuery` for the fleet
 // sweep and therefore needs a query client this navigation suite deliberately
-// does not mount. Stubbed to the "nothing observed" answer — which is also the
+// does not mount. Stubbed to the "nothing observed" answer - which is also the
 // honest production answer for a fleet with no borrowable sessions, so the
 // rows this suite asserts on render exactly as they would there.
 //
@@ -50,7 +50,7 @@ vi.mock("@/hooks/auth/use-registered-hosts-query", () => ({
 // silently becoming a fleet-polling test.
 // Returns the SHARED constant rather than a literal spelled out here. A mock
 // factory is not type-checked against the module it replaces, so a hand-written
-// view silently loses any field added later — and `undefined` is not `null`, so
+// view silently loses any field added later - and `undefined` is not `null`, so
 // the row's badge would have read "last seen undefined" on every host while
 // this navigation suite went on passing. The whole point of exporting
 // `UNKNOWN_FLEET_UPDATE_VIEW` is that no caller, test or otherwise, writes one

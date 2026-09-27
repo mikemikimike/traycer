@@ -1,3 +1,4 @@
+import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import type { RegionId } from "@/lib/layout/region-id";
 import type { SettingsSectionId } from "@/lib/settings-sections";
 import { getSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
@@ -67,31 +68,44 @@ export function closeSystemOverlay(): void {
 }
 
 /**
- * Move the Settings surface to `Layout` AND say which region to land on.
+ * Move the Settings surface to `Layout` AND say where on it to land: a region's
+ * row, or an area.
  *
  * The companion to {@link navigateToSettingsSection} rather than a second
- * argument on it, because the target is not a section: it is a row inside one,
- * and only one page has any. The editor's width-gate redirect is its one
- * caller today - below 1100px the door sends the user here instead of opening
- * a canvas, and until now it dropped the region they had asked for, so a
- * search result for "Minimap" in a 900px window landed on a page with nothing
- * preselected and nothing scrolled to (A.5).
+ * argument on it, because the target is not a section: it is a place inside
+ * one, and only one page has any. Two callers: the editor's width-gate
+ * redirect, which below 1100px sends the user to the region they asked for
+ * instead of opening a canvas (A.5), and the editor's exit, which returns a
+ * session opened from this page to the area it was opened from.
  *
  * The request OUTLIVES the call, like the settings-search reveal it sits
  * beside: the panel mounts after the navigation commits, so it is published
  * here and taken by whichever Layout page renders next.
  */
 export function navigateToLayoutRegion(regionId: RegionId): boolean {
+  return navigateToLayoutLanding({ kind: "region", regionId });
+}
+
+/** `null` is the Presets area. */
+export function navigateToLayoutArea(area: SurfaceGroupId | null): boolean {
+  return navigateToLayoutLanding({ kind: "area", area });
+}
+
+function navigateToLayoutLanding(target: LayoutLandingTarget): boolean {
   if (!navigateToSettingsSection("layout")) return false;
-  pendingLayoutRegion = { regionId, requestedAt: Date.now() };
-  for (const listener of pendingLayoutRegionListeners) listener();
+  pendingLayoutLanding = { target, requestedAt: Date.now() };
+  for (const listener of pendingLayoutLandingListeners) listener();
   return true;
 }
 
-export interface PendingLayoutRegion {
-  readonly regionId: RegionId;
+export type LayoutLandingTarget =
+  | { readonly kind: "region"; readonly regionId: RegionId }
+  | { readonly kind: "area"; readonly area: SurfaceGroupId | null };
+
+export interface PendingLayoutLanding {
+  readonly target: LayoutLandingTarget;
   /**
-   * Tells two consecutive requests for the SAME region apart, which is what
+   * Tells two consecutive requests for the SAME place apart, which is what
    * asking twice produces - without it the second is a no-op and the user, who
    * asked precisely because they wanted to be shown again, sees nothing.
    */
@@ -102,11 +116,11 @@ export interface PendingLayoutRegion {
  * Held as one stable object, replaced only on a write, so a `useSyncExternal
  * Store` read of it is referentially stable between requests.
  */
-let pendingLayoutRegion: PendingLayoutRegion | null = null;
-const pendingLayoutRegionListeners = new Set<() => void>();
+let pendingLayoutLanding: PendingLayoutLanding | null = null;
+const pendingLayoutLandingListeners = new Set<() => void>();
 
-export function readPendingLayoutRegion(): PendingLayoutRegion | null {
-  return pendingLayoutRegion;
+export function readPendingLayoutLanding(): PendingLayoutLanding | null {
+  return pendingLayoutLanding;
 }
 
 /**
@@ -116,18 +130,20 @@ export function readPendingLayoutRegion(): PendingLayoutRegion | null {
  * subscribers still believed it was there would keep re-rendering against a
  * value the store no longer holds.
  */
-export function takePendingLayoutRegion(): PendingLayoutRegion | null {
-  const pending = pendingLayoutRegion;
+export function takePendingLayoutLanding(): PendingLayoutLanding | null {
+  const pending = pendingLayoutLanding;
   if (pending === null) return null;
-  pendingLayoutRegion = null;
-  for (const listener of pendingLayoutRegionListeners) listener();
+  pendingLayoutLanding = null;
+  for (const listener of pendingLayoutLandingListeners) listener();
   return pending;
 }
 
-export function subscribePendingLayoutRegion(listener: () => void): () => void {
-  pendingLayoutRegionListeners.add(listener);
+export function subscribePendingLayoutLanding(
+  listener: () => void,
+): () => void {
+  pendingLayoutLandingListeners.add(listener);
   return () => {
-    pendingLayoutRegionListeners.delete(listener);
+    pendingLayoutLandingListeners.delete(listener);
   };
 }
 

@@ -322,7 +322,6 @@ export type AnalyticsSetting =
   | "defaultSelection"
   | "defaultServiceTier"
   | "diffViewerPreferences"
-  | "taskTabLayout"
   | "linkOpen"
   | "browserSearchEngine"
   | "pinnedContextBreakdownFields"
@@ -1013,7 +1012,7 @@ export interface AnalyticsEventProperties {
    * edits the sample workspace (L-87), and a property with one possible value
    * is noise. The rest is the
    * session's change summary: `changed_count` is the value delta against the
-   * base preset at exit (what "Reset to <preset>" would revert, L-57),
+   * last-applied preset at exit (the Styles lines on the change list),
    * `regions_touched_count` is the distinct regions that moved between entry
    * and exit, and `discarded` is whether the session ended in Discard rather
    * than a separate exit-reason property.
@@ -1241,6 +1240,9 @@ const ANALYTICS_LAYOUT_REGIONS = new Set<string>(
     resourceMonitor: true,
     minimap: true,
     contextUsage: true,
+    toolActivity: true,
+    thinking: true,
+    timestamps: true,
     runningAgents: true,
     changedFiles: true,
     background: true,
@@ -1349,7 +1351,6 @@ const ANALYTICS_SETTINGS = new Set<string>(
     defaultSelection: true,
     defaultServiceTier: true,
     diffViewerPreferences: true,
-    taskTabLayout: true,
     linkOpen: true,
     browserSearchEngine: true,
     pinnedContextBreakdownFields: true,

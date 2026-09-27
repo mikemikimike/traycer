@@ -5,6 +5,7 @@ import {
 } from "@/components/layout-editor/use-layout-region";
 import { useRegionValues } from "@/lib/layout-overrides";
 import { depictRegion } from "@/components/layout-editor/region-depiction";
+import { useLiveUsageArrangement } from "@/components/layout-editor/inspector/use-layout-usage";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
@@ -52,7 +53,9 @@ export function GhostRegionPicture(props: {
   const values = useRegionValues(regionId);
   // A depiction needs the whole arrangement; this component is part of the
   // editor, which the override seam's own exemption list covers.
-  const arrangement = useLayoutStore((state) => state.arrangement);
+  const arrangement = useLiveUsageArrangement(
+    useLayoutStore((state) => state.arrangement),
+  );
   if (!ghost) return null;
   return depictRegion(regionId, values, arrangement);
 }

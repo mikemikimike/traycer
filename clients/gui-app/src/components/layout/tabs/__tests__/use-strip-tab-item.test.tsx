@@ -77,6 +77,19 @@ vi.mock("@/hooks/epic/use-epic-pin-local-home-support", () => ({
   useEpicPinLocalHomeSupported: () => false,
 }));
 
+// The context menu's appearance submenu composes the organization
+// task-context query, which also reads a host client and throws outside a
+// `<HostRuntimeProvider>`. No case here supplies an organization host or
+// asserts that submenu's data, so keep it inert at its host-query boundary.
+vi.mock("@/hooks/epic/use-epic-get-task-contexts-query", () => ({
+  useEpicGetTaskContexts: () => ({
+    tasksById: new Map(),
+    localHomedTaskIds: new Set(),
+    isFetching: false,
+    error: null,
+  }),
+}));
+
 const EPIC_ID = "epic-row";
 const CHAT_ID = "chat-row";
 

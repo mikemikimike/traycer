@@ -135,11 +135,10 @@ const KEYBOARD_KEY_READS: Readonly<Record<string, number>> = {
   // Enter/Space on a row's overlay link, plus the search box's Escape (clears a
   // non-empty query; not a registered chord).
   "gui-app/src/components/epics/epics-list-panel.tsx": 3,
-  // The layout editor's index and its sortable list: arrows walk the rows,
-  // Enter and Space open a section or grab a row, Alt+arrows reorder a list
-  // item (L-31), and Escape cancels a grab. All named keys, none of them a
-  // registered chord.
-  "gui-app/src/components/layout-editor/inspector/inspector-index.tsx": 4,
+  // The layout editor's sortable list: Space grabs a row (or activates it in
+  // an unordered list), Enter activates, arrows move a grabbed row or, with
+  // Alt, reorder it (L-31), and Escape cancels a grab. All named keys, none of
+  // them a registered chord.
   "gui-app/src/components/layout-editor/inspector/sortable-list.tsx": 5,
   // The editor's own Mod+Z / Mod+Shift+Z, matched by the letter the user
   // reads - see PRINTABLE_CHARACTER_MATCHES - plus the session's Escape, which

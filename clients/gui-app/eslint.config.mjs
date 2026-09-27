@@ -3097,6 +3097,7 @@ export default tseslint.config(
       "src/components/epic-canvas/image-preview/image-diff-view.tsx",
       "src/components/epic-canvas/pip/agent-browser-pip.tsx",
       "src/components/epic-canvas/renderers/agent-cursor-overlay.tsx",
+      "src/components/epic-canvas/sidebar/artifact-row-view.tsx",
       "src/components/epic-canvas/sidebar/epic-sidebar-artifact-tree.tsx",
       "src/components/epic-canvas/sidebar/epic-sidebar-chat-tree.tsx",
       "src/components/epic-canvas/sidebar/epic-sidebar-cloud-chat-row.tsx",

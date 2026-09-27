@@ -1,7 +1,5 @@
 import { SAMPLE_USAGE_USED_PERCENT } from "@/components/sample-workspace/sample-workspace-scene";
 import { useSampleScene } from "@/components/sample-workspace/sample-scene-context";
-import { statusBarPreviewSample } from "@/components/sample-workspace/sample-rate-limit-readings";
-import { useSampledNow } from "@/lib/relative-time";
 import type { ReactNode } from "react";
 import { PopoverTrigger } from "@/components/ui/popover";
 import { RefreshIconButton } from "@/components/refresh-icon-button";
@@ -61,7 +59,6 @@ export function StatusBarRateLimitCluster(props: {
 }): ReactNode {
   const display = useStatusBarUsageDisplay();
   const sampleCold = useSampleScene();
-  const now = useSampledNow();
   const requestRevealProfile = useRateLimitPopoverStore(
     (state) => state.requestRevealProfile,
   );
@@ -73,10 +70,8 @@ export function StatusBarRateLimitCluster(props: {
     // below fans out from here. Every other reader observes what this one wrote.
     mode: "live",
     editing: props.editing,
+    sample: sampleCold,
   });
-
-  const sample = sampleCold ? statusBarPreviewSample(cluster, now) : null;
-  const displayed = sample?.cluster ?? cluster;
   return (
     <>
       {/*
@@ -91,14 +86,12 @@ export function StatusBarRateLimitCluster(props: {
       */}
       <StatusBarUsageScroller
         hostId={props.hostId}
-        cluster={displayed}
+        cluster={cluster}
         testId="status-bar-rate-limit-scroller"
       >
         <StatusBarUsageTrigger
-          cluster={displayed}
-          sampleLabel={
-            sample !== null || (sampleCold && cluster.kind === "no-providers")
-          }
+          cluster={cluster}
+          sampleLabel={sampleCold ? cluster.kind !== "hidden" : false}
           display={display}
           onRevealProfile={requestRevealProfile}
         />

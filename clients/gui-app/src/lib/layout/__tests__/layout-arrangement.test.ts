@@ -21,10 +21,14 @@ import {
   moveRailPanelToEnd,
   removeRailDivider,
   isStackedRailPanel,
+  railPanelToStackBelow,
+  railStackJoin,
   sideTabStripEdge,
   stackRailPanels,
+  stackRailPanelWithBelow,
   toggleVerticalTabs,
   unstackRail,
+  unstackRailPanel,
   TOOLBAR_REGION_IDS,
   type LayoutArrangement,
   type SideStripView,
@@ -37,9 +41,12 @@ import {
 import {
   areRailsEqual,
   DEFAULT_RAIL,
+  MAX_RAIL_STACK_MEMBERS,
   railDisplayEntries,
   railStackId,
+  railStackMembers,
   railStackMembersFor,
+  railStackOf,
   DEFAULT_RAIL_DIVIDER_SEQ,
   normalizeRail,
   railDividerId,
@@ -180,7 +187,7 @@ describe("a panel moved within the rail", () => {
           sourcePanelId: "comments",
           targetPanelId: "chats",
           placeAfter: false,
-          asGroups: false,
+          carry: "panel",
         }).rail,
       ),
     ).toEqual([
@@ -200,7 +207,7 @@ describe("a panel moved within the rail", () => {
           sourcePanelId: "chats",
           targetPanelId: "terminals",
           placeAfter: true,
-          asGroups: false,
+          carry: "panel",
         }).rail,
       ),
     ).toEqual([
@@ -231,7 +238,7 @@ describe("a panel moved within the rail", () => {
           sourcePanelId: "terminals",
           targetPanelId: "chats",
           placeAfter: false,
-          asGroups: false,
+          carry: "panel",
         }).rail,
       ).slice(0, 4),
     ).toEqual(["railTerminals", "railAgents", "railArtifacts", "divider:1"]);
@@ -239,9 +246,9 @@ describe("a panel moved within the rail", () => {
 
   it("puts a panel at the rail's end", () => {
     expect(
-      idsOf(moveRailPanelToEnd(withRail(DEFAULT_RAIL), "chats", false).rail).at(
-        -1,
-      ),
+      idsOf(
+        moveRailPanelToEnd(withRail(DEFAULT_RAIL), "chats", "panel").rail,
+      ).at(-1),
     ).toBe("railAgents");
   });
 
@@ -253,7 +260,7 @@ describe("a panel moved within the rail", () => {
         sourcePanelId: "comments",
         targetPanelId: "chats",
         placeAfter: false,
-        asGroups: false,
+        carry: "panel",
       }).rail,
     ).toBe(arrangement.rail);
     expect(
@@ -261,7 +268,7 @@ describe("a panel moved within the rail", () => {
         sourcePanelId: "chats",
         targetPanelId: "comments",
         placeAfter: false,
-        asGroups: false,
+        carry: "panel",
       }).rail,
     ).toBe(arrangement.rail);
     expect(
@@ -269,10 +276,10 @@ describe("a panel moved within the rail", () => {
         sourcePanelId: "chats",
         targetPanelId: "chats",
         placeAfter: true,
-        asGroups: false,
+        carry: "panel",
       }).rail,
     ).toBe(arrangement.rail);
-    expect(moveRailPanelToEnd(arrangement, "comments", false)).toBe(
+    expect(moveRailPanelToEnd(arrangement, "comments", "panel")).toBe(
       arrangement,
     );
   });
@@ -327,7 +334,7 @@ describe("areRailsEqual", () => {
           sourcePanelId: "comments",
           targetPanelId: "chats",
           placeAfter: false,
-          asGroups: false,
+          carry: "panel",
         }).rail,
       ),
     ).toBe(false);
@@ -714,26 +721,52 @@ describe("normalizeArrangement", () => {
       DEFAULT_RAIL.filter((entry) => entry.kind === "panel"),
     );
   });
+
+  it("drops an Automatic providerLimits entry and keeps a drawn one", () => {
+    const arrangement = normalizeArrangement({
+      ...DEFAULT_ARRANGEMENT,
+      providerLimits: {
+        codex: { limitKeys: [] },
+        grok: { limitKeys: ["weekly"] },
+      },
+    });
+
+    expect(arrangement.providerLimits).toEqual({
+      grok: { limitKeys: ["weekly"] },
+    });
+  });
+
+  it("keeps providerLimits by identity when there is nothing Automatic to drop", () => {
+    const providerLimits = { grok: { limitKeys: ["weekly"] } };
+    const arrangement = normalizeArrangement({
+      ...DEFAULT_ARRANGEMENT,
+      providerLimits,
+    });
+
+    expect(arrangement.providerLimits).toBe(providerLimits);
+  });
 });
 
 describe("the rail's three-state visibility (L-47, L-61)", () => {
-  it("round-trips Hide, Show and back onto the panel's own rule", () => {
+  it("writes Hide and Show onto whichever region it is given", () => {
     expect(railVisibilityFor(true)).toBe("shown");
     expect(railVisibilityFor(false)).toBe("hidden");
-    // `null` is the menu saying "follow the panel's own presence rule again",
-    // which has to be the ABSENCE of an entry rather than a stored `false`.
-    expect(railVisibilityFor(null)).toBe("auto");
   });
 
-  it("reads the nine regions as the sparse map the sidebar renders from", () => {
+  it("reads the sparse map: hidden always, shown only where Auto exists", () => {
     const values = effectiveLayoutValues("default", {
-      railSharing: { shown: "shown" },
+      // A plain panel's own rule IS shown, so setting it to `shown` is a
+      // no-op and stays absent from the map; only `hidden` is a real pick.
+      railSharing: { shown: "hidden" },
+      // Pull requests and Comments can leave the rail on their own rule, so
+      // pinning either one `shown` is a real pick and belongs in the map.
+      railPullRequests: { shown: "shown" },
       railComments: { shown: "hidden" },
-      railAgents: { shown: "auto" },
     });
 
     expect(panelVisibilityOverridesFromValues(values)).toEqual({
-      sharing: true,
+      sharing: false,
+      "pull-requests": true,
       comments: false,
     });
   });
@@ -928,10 +961,12 @@ describe("resolvePersistedArrangement", () => {
     expect(arrangement.hiddenProviders).toEqual(["codex"]);
   });
 
-  it("keeps a drawable limit selection and reads an empty pick list as Automatic", () => {
+  it("keeps a drawable limit selection and drops an Automatic one entirely", () => {
     // The `automatic` booleans are what a record written before R1-15 carries.
     // They are ignored rather than rejected: the only thing that field ever
-    // said was whether the list was empty, and the list says it.
+    // said was whether the list was empty, and the list says it. An entry
+    // that resolves to Automatic is then normalized away, since Automatic IS
+    // the absent key.
     const arrangement = resolvePersistedArrangement({
       providerLimits: {
         codex: { automatic: false, limitKeys: ["weekly"] },
@@ -942,8 +977,15 @@ describe("resolvePersistedArrangement", () => {
 
     expect(arrangement.providerLimits).toEqual({
       codex: { limitKeys: ["weekly"] },
-      grok: { limitKeys: [] },
     });
+  });
+
+  it("reads a stored Automatic entry as no entry at all", () => {
+    const arrangement = resolvePersistedArrangement({
+      providerLimits: { grok: { limitKeys: [] } },
+    });
+
+    expect(arrangement.providerLimits).toEqual({});
   });
 
   it("drops a host whose every provider resolved to nothing checked", () => {
@@ -1195,7 +1237,7 @@ describe("a stack link, normalised (L-166)", () => {
       sourcePanelId: "artifacts",
       targetPanelId: "comments",
       placeAfter: true,
-      asGroups: false,
+      carry: "panel",
     }).rail;
 
     expect(idsOf(normalizeRail(moved))).toEqual([
@@ -1313,6 +1355,7 @@ describe("stacking and unstacking (L-168)", () => {
       withRail(DEFAULT_RAIL),
       "terminals",
       "browsers",
+      "panel",
     );
 
     expect(idsOf(normalizeRail(stacked.rail))).toEqual([
@@ -1330,26 +1373,108 @@ describe("stacking and unstacking (L-168)", () => {
     ]);
   });
 
-  it("refuses a TARGET that is already half of a pair", () => {
+  it("joins a target that is already stacked, growing the stack, instead of refusing it (L-181)", () => {
     const arrangement = withRail(DEFAULT_RAIL);
+    const expected = [
+      "railAgents",
+      "stack:railAgents+railArtifacts+railTerminals",
+      "railArtifacts",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ];
 
-    expect(stackRailPanels(arrangement, "terminals", "artifacts")).toBe(
+    expect(
+      idsOf(
+        normalizeRail(
+          stackRailPanels(arrangement, "terminals", "artifacts", "panel").rail,
+        ),
+      ),
+    ).toEqual(expected);
+    // Either existing member is an equally good target: the new one lands in
+    // the same place either way.
+    expect(
+      idsOf(
+        normalizeRail(
+          stackRailPanels(arrangement, "terminals", "chats", "panel").rail,
+        ),
+      ),
+    ).toEqual(expected);
+    // A panel onto itself is refused (`railStackJoin` answers `same`).
+    expect(stackRailPanels(arrangement, "chats", "chats", "panel")).toBe(
       arrangement,
     );
-    expect(stackRailPanels(arrangement, "terminals", "chats")).toBe(
+  });
+
+  it("refuses a target whose stack already holds the max, with the `full` cue (L-181)", () => {
+    const fourMember: ReadonlyArray<RailEntry> = [
+      panel("railAgents"),
+      stack("stack:railAgents+railArtifacts+railTerminals+railBrowsers"),
+      panel("railArtifacts"),
+      panel("railTerminals"),
+      panel("railBrowsers"),
+      ...FLAT_RAIL.slice(4),
+    ];
+    const arrangement = withRail(fourMember);
+
+    expect(railStackJoin(arrangement.rail, "git-diff", "chats", "panel")).toBe(
+      "full",
+    );
+    expect(
+      railStackJoin(arrangement.rail, "git-diff", "artifacts", "panel"),
+    ).toBe("full");
+    expect(stackRailPanels(arrangement, "git-diff", "chats", "panel")).toBe(
       arrangement,
     );
-    expect(stackRailPanels(arrangement, "chats", "chats")).toBe(arrangement);
+  });
+
+  it("builds up to a 4-member stack one join at a time, then refuses the 5th", () => {
+    let arrangement = withRail(DEFAULT_RAIL);
+    arrangement = stackRailPanels(
+      arrangement,
+      "terminals",
+      "artifacts",
+      "panel",
+    );
+    arrangement = stackRailPanels(
+      arrangement,
+      "browsers",
+      "artifacts",
+      "panel",
+    );
+
+    expect(idsOf(normalizeRail(arrangement.rail))).toEqual([
+      "railAgents",
+      "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
+      "railArtifacts",
+      "railTerminals",
+      "railBrowsers",
+      "railGitDiff",
+      "railPullRequests",
+      "railFileTree",
+      "railSharing",
+      "railComments",
+    ]);
+
+    expect(stackRailPanels(arrangement, "git-diff", "chats", "panel")).toBe(
+      arrangement,
+    );
   });
 
   it("lets a stacked SOURCE leave its pair and join a new one (L-170)", () => {
     // Agents ships joined to Artifacts. Dropping it onto Terminals is the
     // first stacking gesture most users will try, and it has to mean what it
     // says: the old join goes, the new one arrives, Artifacts stands alone.
+    // This is the section-header ("panel") carry: only Agents itself moves.
     const joined = stackRailPanels(
       withRail(DEFAULT_RAIL),
       "chats",
       "terminals",
+      "panel",
     );
 
     expect(idsOf(normalizeRail(joined.rail))).toEqual([
@@ -1389,7 +1514,7 @@ describe("stacking and unstacking (L-168)", () => {
       sourcePanelId: "terminals",
       targetPanelId: "browsers",
       placeAfter: false,
-      asGroups: false,
+      carry: "panel",
     }).rail;
 
     expect(idsOf(normalizeRail(before))).toEqual(idsOf(DEFAULT_RAIL));
@@ -1399,21 +1524,356 @@ describe("stacking and unstacking (L-168)", () => {
       ),
     ).toBe(false);
   });
+
+  const THREE_MEMBER_RAIL: ReadonlyArray<RailEntry> = [
+    panel("railAgents"),
+    stack("stack:railAgents+railArtifacts+railTerminals"),
+    panel("railArtifacts"),
+    panel("railTerminals"),
+    ...FLAT_RAIL.slice(3),
+  ];
+
+  describe("unstackRailPanel: one member out (L-181)", () => {
+    it("moves a removed MIDDLE member to just after its former stack, keeping the rest stacked", () => {
+      const result = unstackRailPanel(
+        withRail(THREE_MEMBER_RAIL),
+        "railArtifacts",
+      ).rail;
+
+      expect(idsOf(normalizeRail(result))).toEqual([
+        "railAgents",
+        "stack:railAgents+railTerminals",
+        "railTerminals",
+        "railArtifacts",
+        ...idsOf(FLAT_RAIL).slice(3),
+      ]);
+    });
+
+    it("leaves the FIRST or LAST member exactly where it stands, dissolving a two-member stack", () => {
+      const paired = withRail(DEFAULT_RAIL);
+
+      expect(
+        idsOf(normalizeRail(unstackRailPanel(paired, "railAgents").rail)),
+      ).toEqual(idsOf(FLAT_RAIL));
+      expect(
+        idsOf(normalizeRail(unstackRailPanel(paired, "railArtifacts").rail)),
+      ).toEqual(idsOf(FLAT_RAIL));
+    });
+
+    it("does nothing for a panel that is not in a stack", () => {
+      const flat = withRail(FLAT_RAIL);
+
+      expect(unstackRailPanel(flat, "railTerminals")).toBe(flat);
+    });
+  });
+
+  describe("unstackRail: the whole stack at once", () => {
+    it("removes a 3-member stack in one write, leaving every member in place", () => {
+      const result = unstackRail(
+        withRail(THREE_MEMBER_RAIL),
+        "stack:railAgents+railArtifacts+railTerminals",
+      ).rail;
+
+      expect(idsOf(result)).toEqual(
+        idsOf(THREE_MEMBER_RAIL).filter((id) => !id.startsWith("stack:")),
+      );
+    });
+  });
+
+  describe("moveRailPanelBeside and a stack (L-181)", () => {
+    it("carries the WHOLE stack when dragged by its rail icon, landing beside another panel as one block", () => {
+      const moved = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
+        sourcePanelId: "chats",
+        targetPanelId: "terminals",
+        placeAfter: true,
+        carry: "stack",
+      }).rail;
+
+      expect(idsOf(normalizeRail(moved))).toEqual([
+        "railTerminals",
+        "railAgents",
+        "stack:railAgents+railArtifacts",
+        "railArtifacts",
+        ...idsOf(FLAT_RAIL).slice(3),
+      ]);
+    });
+
+    it("carries the WHOLE stack to the rail's end", () => {
+      const moved = moveRailPanelToEnd(
+        withRail(DEFAULT_RAIL),
+        "chats",
+        "stack",
+      ).rail;
+
+      expect(idsOf(moved)).toEqual([
+        ...idsOf(FLAT_RAIL).slice(2),
+        "railAgents",
+        "stack:railAgents+railArtifacts",
+        "railArtifacts",
+      ]);
+    });
+
+    it("joins two whole stacks together up to the max, and refuses past it", () => {
+      const rail: ReadonlyArray<RailEntry> = [
+        panel("railAgents"),
+        stack("stack:railAgents+railArtifacts+railTerminals"),
+        panel("railArtifacts"),
+        panel("railTerminals"),
+        panel("railBrowsers"),
+        stack("stack:railBrowsers+railGitDiff"),
+        panel("railGitDiff"),
+        panel("railPullRequests"),
+        panel("railFileTree"),
+        panel("railSharing"),
+        panel("railComments"),
+      ];
+      const arrangement = withRail(rail);
+
+      // 3 carried + 1 lone = 4, exactly the max: a whole-stack carry joins.
+      expect(
+        railStackJoin(arrangement.rail, "chats", "pull-requests", "stack"),
+      ).toBe("join");
+      const joined = stackRailPanels(
+        arrangement,
+        "chats",
+        "pull-requests",
+        "stack",
+      );
+      expect(idsOf(normalizeRail(joined.rail))).toEqual([
+        "railBrowsers",
+        "stack:railBrowsers+railGitDiff",
+        "railGitDiff",
+        "railPullRequests",
+        "stack:railPullRequests+railAgents+railArtifacts+railTerminals",
+        "railAgents",
+        "railArtifacts",
+        "railTerminals",
+        "railFileTree",
+        "railSharing",
+        "railComments",
+      ]);
+
+      // 3 carried + 2 already stacked = 5, past the max: refused.
+      expect(
+        railStackJoin(arrangement.rail, "chats", "git-diff", "stack"),
+      ).toBe("full");
+      expect(stackRailPanels(arrangement, "chats", "git-diff", "stack")).toBe(
+        arrangement,
+      );
+    });
+
+    it("lets a section-header drag of a MIDDLE member out, leaving the rest stacked", () => {
+      const moved = moveRailPanelBeside(withRail(THREE_MEMBER_RAIL), {
+        sourcePanelId: "artifacts",
+        targetPanelId: "browsers",
+        placeAfter: true,
+        carry: "panel",
+      }).rail;
+
+      expect(idsOf(normalizeRail(moved))).toEqual([
+        "railAgents",
+        "stack:railAgents+railTerminals",
+        "railTerminals",
+        "railBrowsers",
+        "railArtifacts",
+        ...idsOf(FLAT_RAIL).slice(4),
+      ]);
+    });
+
+    it("reorders WITHIN its own stack and stays a member", () => {
+      const moved = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
+        sourcePanelId: "artifacts",
+        targetPanelId: "chats",
+        placeAfter: false,
+        carry: "panel",
+      }).rail;
+
+      expect(idsOf(normalizeRail(moved))).toEqual([
+        "railArtifacts",
+        "stack:railArtifacts+railAgents",
+        "railAgents",
+        ...idsOf(FLAT_RAIL).slice(2),
+      ]);
+    });
+
+    it("dropped beside a stacked target lands beside its WHOLE stack, never between its members", () => {
+      const moved = moveRailPanelBeside(withRail(DEFAULT_RAIL), {
+        sourcePanelId: "browsers",
+        targetPanelId: "artifacts",
+        placeAfter: true,
+        carry: "panel",
+      }).rail;
+
+      expect(idsOf(normalizeRail(moved))).toEqual([
+        "railAgents",
+        "stack:railAgents+railArtifacts",
+        "railArtifacts",
+        "railBrowsers",
+        "railTerminals",
+        ...idsOf(FLAT_RAIL).slice(4),
+      ]);
+    });
+
+    it("returns the IDENTICAL rail for a 3-stack's middle member dropped where it already stands (L-170, L-181)", () => {
+      const arrangement = withRail(THREE_MEMBER_RAIL);
+
+      // Artifacts (the middle member) already stands directly after Agents.
+      expect(
+        moveRailPanelBeside(arrangement, {
+          sourcePanelId: "artifacts",
+          targetPanelId: "chats",
+          placeAfter: true,
+          carry: "panel",
+        }).rail,
+      ).toBe(arrangement.rail);
+      // And directly before Terminals.
+      expect(
+        moveRailPanelBeside(arrangement, {
+          sourcePanelId: "artifacts",
+          targetPanelId: "terminals",
+          placeAfter: false,
+          carry: "panel",
+        }).rail,
+      ).toBe(arrangement.rail);
+    });
+
+    it("moves a NON-adjacent reorder within a 3-stack, which the old pair-only early return wrongly refused", () => {
+      // Terminals is the LAST member, dropped before the FIRST: a real move
+      // across the whole stack, not a swap of adjacent members.
+      const moved = moveRailPanelBeside(withRail(THREE_MEMBER_RAIL), {
+        sourcePanelId: "terminals",
+        targetPanelId: "chats",
+        placeAfter: false,
+        carry: "panel",
+      }).rail;
+
+      expect(idsOf(normalizeRail(moved))).toEqual([
+        "railTerminals",
+        "stack:railTerminals+railAgents+railArtifacts",
+        "railAgents",
+        "railArtifacts",
+        ...idsOf(FLAT_RAIL).slice(3),
+      ]);
+    });
+
+    it("keeps the same no-op identity through moveCanvasOrderMember's rail group", () => {
+      const arrangement = withRail(THREE_MEMBER_RAIL);
+
+      const next = moveCanvasOrderMember({
+        arrangement,
+        group: "rail",
+        fromId: "railArtifacts",
+        toId: "railAgents",
+        placeAfter: true,
+      });
+
+      expect(next.rail).toBe(arrangement.rail);
+    });
+  });
+
+  it("leaves its stack when moved to the rail's end", () => {
+    const moved = moveRailPanelToEnd(
+      withRail(DEFAULT_RAIL),
+      "chats",
+      "panel",
+    ).rail;
+    const normalized = normalizeRail(moved);
+
+    expect(idsOf(normalized).at(-1)).toBe("railAgents");
+    expect(isStackedRailPanel(normalized, "railAgents")).toBe(false);
+    expect(isStackedRailPanel(normalized, "railArtifacts")).toBe(false);
+  });
+
+  describe("the list's own join: stack with the panel below (L-168, L-181)", () => {
+    it("offers the panel directly below, only from the LAST member of a block", () => {
+      const rail = withRail(DEFAULT_RAIL).rail;
+
+      // Agents is the FIRST member of the shipped pair, not the last.
+      expect(railPanelToStackBelow(rail, "railAgents")).toBeNull();
+      expect(railPanelToStackBelow(rail, "railArtifacts")).toBe(
+        "railTerminals",
+      );
+      expect(railPanelToStackBelow(rail, "railTerminals")).toBe("railBrowsers");
+    });
+
+    it("offers nothing when the next entry is a divider, or there is none", () => {
+      const withDivider = [
+        ...FLAT_RAIL.slice(0, 3),
+        divider("divider:1"),
+        ...FLAT_RAIL.slice(3),
+      ];
+
+      expect(railPanelToStackBelow(withDivider, "railTerminals")).toBeNull();
+      expect(railPanelToStackBelow(FLAT_RAIL, "railComments")).toBeNull();
+    });
+
+    it("refuses once the combined total would exceed the max", () => {
+      const fourAboveOne: ReadonlyArray<RailEntry> = [
+        panel("railAgents"),
+        stack("stack:railAgents+railArtifacts+railTerminals+railBrowsers"),
+        panel("railArtifacts"),
+        panel("railTerminals"),
+        panel("railBrowsers"),
+        ...FLAT_RAIL.slice(4),
+      ];
+
+      expect(railPanelToStackBelow(fourAboveOne, "railBrowsers")).toBeNull();
+    });
+
+    it("joins the two blocks with no member moving", () => {
+      const joined = stackRailPanelWithBelow(
+        withRail(DEFAULT_RAIL),
+        "railArtifacts",
+      ).rail;
+
+      expect(idsOf(normalizeRail(joined))).toEqual([
+        "railAgents",
+        "stack:railAgents+railArtifacts+railTerminals",
+        "railArtifacts",
+        "railTerminals",
+        ...idsOf(FLAT_RAIL).slice(3),
+      ]);
+    });
+
+    it("does nothing when there is no panel below to join", () => {
+      const arrangement = withRail(FLAT_RAIL);
+
+      expect(stackRailPanelWithBelow(arrangement, "railComments")).toBe(
+        arrangement,
+      );
+    });
+  });
 });
 
 describe("what a rail SURFACE draws (L-166, L-167)", () => {
-  it("draws a stacked pair as one capsule and everything else as itself", () => {
+  it("draws a stack as one capsule holding every member, and everything else as itself (L-181)", () => {
     expect(railDisplayEntries(DEFAULT_RAIL, () => true)).toEqual([
       {
         kind: "stack",
         id: "stack:railAgents+railArtifacts",
-        top: "railAgents",
-        bottom: "railArtifacts",
+        members: ["railAgents", "railArtifacts"],
       },
       ...idsOf(FLAT_RAIL)
         .slice(2)
         .map((id) => ({ kind: "panel", id })),
     ]);
+  });
+
+  it("draws a 3- or 4-member stack as one capsule listing every member, in order", () => {
+    const fourMember: ReadonlyArray<RailEntry> = [
+      panel("railAgents"),
+      stack("stack:railAgents+railArtifacts+railTerminals+railBrowsers"),
+      panel("railArtifacts"),
+      panel("railTerminals"),
+      panel("railBrowsers"),
+      ...FLAT_RAIL.slice(4),
+    ];
+
+    expect(railDisplayEntries(fourMember, () => true)[0]).toEqual({
+      kind: "stack",
+      id: "stack:railAgents+railArtifacts+railTerminals+railBrowsers",
+      members: ["railAgents", "railArtifacts", "railTerminals", "railBrowsers"],
+    });
   });
 
   it("leaves the visible partner standing alone when one is hidden", () => {
@@ -1442,10 +1902,37 @@ describe("what a rail SURFACE draws (L-166, L-167)", () => {
     ).toEqual(["railAgents"]);
   });
 
-  it("names a link after the panel above it", () => {
-    expect(railStackId("railAgents", "railArtifacts")).toBe(
+  it("names a stack after every member it holds, in order (L-181)", () => {
+    expect(railStackId(["railAgents", "railArtifacts"])).toBe(
       "stack:railAgents+railArtifacts",
     );
+    expect(railStackId(["railAgents", "railArtifacts", "railTerminals"])).toBe(
+      "stack:railAgents+railArtifacts+railTerminals",
+    );
+  });
+});
+
+describe("railStackMembers / railStackOf (L-181)", () => {
+  it("reads a stack id back as its ordered members, or null for one this build cannot read", () => {
+    expect(
+      railStackMembers("stack:railAgents+railArtifacts+railTerminals"),
+    ).toEqual(["railAgents", "railArtifacts", "railTerminals"]);
+    expect(railStackMembers("stack:railAgents")).toBeNull(); // fewer than two
+    expect(railStackMembers("stack:railAgents+railAgents")).toBeNull(); // a repeat
+    expect(railStackMembers("stack:railAgents+notARegion")).toBeNull(); // unknown
+    expect(railStackMembers("not-a-stack-id")).toBeNull();
+  });
+
+  it("finds the stack a panel belongs to in a normalized rail, or null standing alone", () => {
+    expect(railStackOf(DEFAULT_RAIL, "railArtifacts")).toEqual({
+      id: "stack:railAgents+railArtifacts",
+      members: ["railAgents", "railArtifacts"],
+    });
+    expect(railStackOf(DEFAULT_RAIL, "railTerminals")).toBeNull();
+  });
+
+  it("holds at most four members", () => {
+    expect(MAX_RAIL_STACK_MEMBERS).toBe(4);
   });
 });
 
@@ -1545,6 +2032,34 @@ describe("the tab strip's placement and the sidebar's side (S-01, S-02, S-05, S-
 
       expect(arrangement.tabStripPlacement).toBe("right");
       expect(arrangement.sidebarSide).toBe("right");
+    });
+  });
+});
+
+// Chat display settings (audit R1): how wide the transcript, the composer
+// and an artifact's body run.
+describe("readingWidth", () => {
+  it("ships comfortable", () => {
+    expect(DEFAULT_ARRANGEMENT.readingWidth).toBe("comfortable");
+  });
+
+  describe("resolvePersistedArrangement", () => {
+    it("keeps a stored wide", () => {
+      expect(
+        resolvePersistedArrangement({ readingWidth: "wide" }).readingWidth,
+      ).toBe("wide");
+    });
+
+    it("falls back to comfortable on an absent or unreadable value", () => {
+      expect(resolvePersistedArrangement({}).readingWidth).toBe("comfortable");
+
+      const junk: ReadonlyArray<unknown> = [1, "WIDE", null, {}, "narrow"];
+      for (const readingWidth of junk) {
+        expect(
+          resolvePersistedArrangement({ readingWidth }).readingWidth,
+          JSON.stringify(readingWidth),
+        ).toBe("comfortable");
+      }
     });
   });
 });

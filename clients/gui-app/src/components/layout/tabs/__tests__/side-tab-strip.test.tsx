@@ -16,6 +16,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -36,7 +37,12 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { EpicWaitingReason } from "@/hooks/epic/use-epic-activity-status";
 import type { TaskPinnedState } from "@/hooks/epic/use-epic-task-pinned-states-query";
-import type { ActionId } from "@/lib/keybindings/actions";
+import { formatChordForDisplay } from "@/lib/keybindings/chord";
+import { getDefaultBindings, type ActionId } from "@/lib/keybindings/actions";
+import {
+  dispatchAction,
+  type KeybindingRouter,
+} from "@/lib/keybindings/dispatch";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { createPersistentMemoryHistory } from "@/lib/persistent-history";
 import type { SurfaceNotificationIndicators } from "@/stores/notifications/notification-indicator-state";
@@ -54,6 +60,7 @@ import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
 import { tabItemId, tabRefKey } from "@/stores/tabs/layout";
 import { useTabsStore } from "@/stores/tabs/store";
 import { useTitleBarDragStore } from "@/stores/layout/title-bar-drag-store";
+import { useKeybindingStore } from "@/stores/settings/keybinding-store";
 import type { TabRef } from "@/stores/tabs/types";
 import { useAuthStore } from "@/stores/auth/auth-store";
 
@@ -135,9 +142,19 @@ vi.mock("@/lib/animation/use-motion-enabled", async (importOriginal) => {
   return { ...actual, useMotionEnabled: () => motion.enabled };
 });
 
-vi.mock("@/hooks/epic/use-epic-task-pinned-states-query", () => ({
-  useEpicTaskPinnedStates: () => new Map<string, TaskPinnedState>(),
-}));
+vi.mock(
+  "@/hooks/epic/use-epic-task-pinned-states-query",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/hooks/epic/use-epic-task-pinned-states-query")
+      >();
+    return {
+      ...actual,
+      useEpicTaskPinnedStates: () => new Map<string, TaskPinnedState>(),
+    };
+  },
+);
 
 vi.mock("@/hooks/epic/use-epic-set-pinned-mutation", async (importOriginal) => {
   const actual =
@@ -206,7 +223,7 @@ vi.mock("@/components/layout/header/app-update-button", () => ({
   AppUpdateHeaderButton: () => <span data-testid="foot-update" />,
 }));
 
-// The Inbox nav row (top block) and the foot's account row both reach a host
+// The Notifications nav row (top block) and the foot's account row both reach a host
 // directory entry through `<HostRuntimeProvider>`, which this harness does not
 // mount - this suite is about the strip's own structure, not host content.
 vi.mock("@/hooks/host/use-host-directory-entry", async (importOriginal) => {
@@ -234,6 +251,32 @@ vi.mock("@/components/auth/user-menu", async (importOriginal) => {
 });
 
 installTabSyncCoordinator({ readyPromise: Promise.resolve() });
+
+// Dynamic-handler dispatch never touches the router, so every field is a no-op.
+const NOOP_ROUTER: KeybindingRouter = {
+  getPathname: () => "/",
+  navigateHome: () => undefined,
+  navigateSettings: () => undefined,
+  navigateToEpic: () => undefined,
+  navigateToEpicTab: () => undefined,
+  navigateToEpicList: () => undefined,
+  navigateSettingsSection: () => undefined,
+  navigateToTabIntent: () => undefined,
+  goBack: () => undefined,
+  goForward: () => undefined,
+  isHistoryNavAvailable: () => false,
+  canGoBack: () => false,
+  canGoForward: () => false,
+};
+
+/** Dispatches the strip's collapse action as the keyboard would. */
+function collapseViaKeyboard(): boolean {
+  let fired = false;
+  act(() => {
+    fired = dispatchAction("app.tabs.vertical.collapse", NOOP_ROUTER);
+  });
+  return fired;
+}
 
 const STRIP_KEYBINDING_IDS: ReadonlyArray<ActionId> = [
   "tab.split.add",
@@ -639,6 +682,64 @@ describe("<SideTabStrip />", () => {
     expect(registrations.peak.get("app.tabs.vertical.toggle")).toBeUndefined();
   });
 
+  describe("app.tabs.vertical.collapse (L-165)", () => {
+    it("collapses and expands via the keyboard action, never carrying the easing class", async () => {
+      openEpicTabs(["Alpha"]);
+      const strip = await renderStrip("/elsewhere", LEFT_STRIP);
+      expect(strip.getAttribute("data-collapsed")).toBe("false");
+
+      expect(collapseViaKeyboard()).toBe(true);
+      expect(strip.getAttribute("data-collapsed")).toBe("true");
+      expect(strip.className).not.toContain("transition-[width]");
+
+      expect(collapseViaKeyboard()).toBe(true);
+      expect(strip.getAttribute("data-collapsed")).toBe("false");
+      expect(strip.className).not.toContain("transition-[width]");
+    });
+
+    it("registers exactly once while mounted, and unregisters on unmount", async () => {
+      const router = buildRouter("/elsewhere", LEFT_STRIP, undefined);
+      const { unmount } = render(<RouterProvider router={router} />);
+      await screen.findByTestId("side-tab-strip");
+
+      expect(registrations.live.get("app.tabs.vertical.collapse")).toBe(1);
+      expect(registrations.peak.get("app.tabs.vertical.collapse")).toBe(1);
+
+      unmount();
+
+      expect(registrations.live.get("app.tabs.vertical.collapse")).toBe(0);
+      expect(collapseViaKeyboard()).toBe(false);
+      expect(useSideTabStripStore.getState().collapsed).toBe(false);
+    });
+  });
+
+  it("shows the collapse button's chord in its tooltip, and drops it once the binding is cleared", async () => {
+    await renderStrip("/", LEFT_STRIP);
+    const toggle = screen.getByTestId("side-tab-strip-collapse");
+    const chord =
+      useKeybindingStore.getState().bindings["app.tabs.vertical.collapse"];
+    if (chord === null) throw new Error("expected a default binding");
+
+    try {
+      fireEvent.pointerMove(toggle);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip.textContent).toBe(
+        `Collapse tabs (${formatChordForDisplay(chord)})`,
+      );
+
+      act(() => {
+        useKeybindingStore
+          .getState()
+          .clearBinding("app.tabs.vertical.collapse");
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("tooltip").textContent).toBe("Collapse tabs");
+      });
+    } finally {
+      useKeybindingStore.setState({ bindings: getDefaultBindings() });
+    }
+  });
+
   it("stamps the vertical drag contract on the scroller", async () => {
     openEpicTabs(["Alpha"]);
     await renderStrip("/elsewhere", { ...LEFT_STRIP, edge: "right" });
@@ -939,6 +1040,22 @@ describe("<SideTabStrip />", () => {
     expect(strip.className).not.toContain(easingClass);
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(useSideTabStripStore.getState().widthPx).toBe(264);
+    expect(strip.className).not.toContain(easingClass);
+  });
+
+  it("clears the easing class synchronously when the keyboard action fires right after a click", async () => {
+    motion.enabled = true;
+    openEpicTabs(["Alpha"]);
+    const strip = await renderStrip("/elsewhere", LEFT_STRIP);
+    const easingClass = "transition-[width]";
+
+    fireEvent.click(screen.getByTestId("side-tab-strip-collapse"));
+    expect(strip.getAttribute("data-collapsed")).toBe("true");
+    expect(strip.className).toContain(easingClass);
+
+    expect(collapseViaKeyboard()).toBe(true);
+
+    expect(strip.getAttribute("data-collapsed")).toBe("false");
     expect(strip.className).not.toContain(easingClass);
   });
 
@@ -1283,6 +1400,65 @@ describe("<SideTabStrip />", () => {
         }),
       );
     }
+
+    /** `moveTo`, mirrored for a right-edge strip (its drag delta is negated). */
+    function crossTo(
+      handle: HTMLElement,
+      edge: EdgeSide,
+      fromWidth: number,
+      targetWidth: number,
+    ): void {
+      if (edge === "right") moveTo(handle, targetWidth, fromWidth);
+      else moveTo(handle, fromWidth, targetWidth);
+    }
+
+    describe("width easing on a crossing (L-165)", () => {
+      it.each([{ edge: "left" as const }, { edge: "right" as const }])(
+        "eases only the frames that cross the snap point, either direction ($edge)",
+        async ({ edge }) => {
+          motion.enabled = true;
+          const easingClass = "transition-[width]";
+          const strip = await renderStrip("/", { ...LEFT_STRIP, edge });
+          stubStripRect(strip);
+          const handle = screen.getByTestId("side-tab-strip-resize-handle");
+
+          downHandle(handle, DRAG_ANCHOR_X);
+          expect(strip.className).not.toContain(easingClass);
+
+          // Stays on the expanded side: no crossing, no ease.
+          crossTo(handle, edge, START_WIDTH, START_WIDTH - 20);
+          expect(strip.className).not.toContain(easingClass);
+
+          // Crosses under the snap point: this frame eases.
+          crossTo(handle, edge, START_WIDTH, UNDER_SNAP_WIDTH);
+          expect(strip.getAttribute("data-collapsed")).toBe("true");
+          expect(strip.className).toContain(easingClass);
+
+          // Crossing back over the snap point, in the same drag, eases too.
+          crossTo(handle, edge, START_WIDTH, OVER_SNAP_WIDTH);
+          expect(strip.getAttribute("data-collapsed")).toBe("false");
+          expect(strip.className).toContain(easingClass);
+
+          releaseHandle(handle);
+          expect(strip.className).not.toContain(easingClass);
+        },
+      );
+
+      it("leaves no easing class after a cancelled crossing", async () => {
+        motion.enabled = true;
+        const easingClass = "transition-[width]";
+        const strip = await renderStrip("/", LEFT_STRIP);
+        stubStripRect(strip);
+        const handle = screen.getByTestId("side-tab-strip-resize-handle");
+
+        downHandle(handle, DRAG_ANCHOR_X);
+        moveTo(handle, START_WIDTH, UNDER_SNAP_WIDTH);
+        expect(strip.className).toContain(easingClass);
+
+        cancelHandle(handle);
+        expect(strip.className).not.toContain(easingClass);
+      });
+    });
 
     it("draws the live collapsed rail once a drag crosses under the snap point, before anything is stored", async () => {
       const strip = await renderStrip("/", LEFT_STRIP);

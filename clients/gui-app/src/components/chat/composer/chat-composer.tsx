@@ -1,3 +1,4 @@
+import { useReadingWidthClass } from "@/lib/layout-overrides";
 import {
   memo,
   useCallback,
@@ -228,7 +229,7 @@ interface ChatComposerProps {
   readonly topSpacing: ChatLowerSurfaceTopSpacing;
   /**
    * Optional element rendered directly above the composer input box (within
-   * the same `max-w-3xl` column). Used by the chat tile for the
+   * the same reading column). Used by the chat tile for the
    * accumulated-changes tab, which connects to the composer's top edge.
    * `null` renders nothing.
    */
@@ -303,6 +304,7 @@ function ChatComposerImpl(props: ChatComposerProps) {
     topSlot,
     getDraftBlobBridgeSupported,
   } = props;
+  const readingWidth = useReadingWidthClass();
   const runnerHost = useRunnerHost();
   const hostClient = useTabHostClient();
   const tabHostId = useTabHostId();
@@ -726,7 +728,12 @@ function ChatComposerImpl(props: ChatComposerProps) {
       {topBannerKind === "rate-limit" ? (
         <ChatComposerBannerPortal>
           <div className="pointer-events-none px-4">
-            <div className="pointer-events-auto mx-auto w-full max-w-3xl bg-canvas pt-4">
+            <div
+              className={cn(
+                "pointer-events-auto mx-auto w-full bg-canvas pt-4",
+                readingWidth,
+              )}
+            >
               {rateLimitPrompt.kind === "visible" ? (
                 <ProfileRateLimitSwitchBanner
                   key={rateLimitPrompt.warningKey}
@@ -765,7 +772,8 @@ function ChatComposerImpl(props: ChatComposerProps) {
         />
         <div
           className={cn(
-            "pointer-events-auto relative mx-auto w-full max-w-3xl bg-canvas pb-4 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-canvas after:content-['']",
+            "pointer-events-auto relative mx-auto w-full bg-canvas pb-4 after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-canvas after:content-['']",
+            readingWidth,
             topSpacing === "normal" ? "pt-4" : "pt-0",
           )}
         >

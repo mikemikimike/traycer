@@ -1,3 +1,4 @@
+import { Info } from "lucide-react";
 import { tabCommandCoordinator } from "@/stores/tabs/tab-command-coordinator";
 import { SampleWorkspaceBody } from "./sample-workspace-body";
 import { useEffect } from "react";
@@ -51,16 +52,23 @@ export function SampleWorkspaceSurface({ tabId }: { readonly tabId: string }) {
   }, [tabId]);
   return (
     <div className="flex h-full min-h-0 flex-col" data-sample-workspace>
-      {/* The banner is the canvas's own caption, not chrome the user can
-          customize, so it takes the passive dim with everything else that is
-          not a region (C-03). A sibling of the body below it, so the marker
-          never sits above one. */}
-      <p
-        data-layout-passive
-        className="shrink-0 border-b px-4 py-2 text-ui-sm text-muted-foreground"
+      {/* The sample notice: the third half of the amber signal with the
+          Customizing tab and the frame (design craft 2.3). Not dimmed, for the
+          same reason the tab is not. */}
+      <div
+        data-sample-notice
+        className="flex h-7 shrink-0 items-center justify-between gap-3 border-b border-warning-foreground/40 bg-warning-foreground/14 px-3 text-ui-xs font-medium text-warning-foreground"
       >
-        Sample content. Changes apply to your layout.
-      </p>
+        <span className="flex min-w-0 items-center gap-2">
+          <Info aria-hidden className="size-3.5 shrink-0" />
+          <span className="truncate">
+            Sample workspace. Changes apply to your layout.
+          </span>
+        </span>
+        <span className="truncate font-normal opacity-80">
+          Point at any part of the app to change it.
+        </span>
+      </div>
       <SampleWorkspaceBody />
     </div>
   );

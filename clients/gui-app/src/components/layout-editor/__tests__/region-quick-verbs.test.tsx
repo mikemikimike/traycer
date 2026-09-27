@@ -22,6 +22,7 @@ import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { offeredQuickVerbs } from "@/components/layout-editor/regions/quick-verbs";
 import {
   SHOW_HIDE_VERBS,
+  SIZE_ONLY_VERBS,
   SIZED_VERBS,
 } from "@/components/layout-editor/regions/region-grammar";
 import { Analytics, AnalyticsEvent } from "@/lib/analytics";
@@ -131,16 +132,28 @@ describe("offeredQuickVerbs", () => {
     ).toEqual(["show"]);
   });
 
-  it("offers the size a region is NOT in, and only while it is there to size", () => {
+  it("offers only one verb, ever: hide/show first, the size verb only when the region has no hide", () => {
+    // A region with both a hide and a size verb (Todo): hide always wins,
+    // so the size verb never surfaces beside it.
     expect(
       offeredQuickVerbs(SIZED_VERBS, { hidden: false, chip: false }),
-    ).toEqual(["chip", "hide"]);
+    ).toEqual(["hide"]);
     expect(
       offeredQuickVerbs(SIZED_VERBS, { hidden: false, chip: true }),
-    ).toEqual(["full", "hide"]);
+    ).toEqual(["hide"]);
     expect(
       offeredQuickVerbs(SIZED_VERBS, { hidden: true, chip: true }),
     ).toEqual(["show"]);
+  });
+
+  it("offers the size a region is NOT in, for a size-only region with no hide/show pair", () => {
+    // Access (G6): size-only, so the size verb is the one thing left.
+    expect(
+      offeredQuickVerbs(SIZE_ONLY_VERBS, { hidden: false, chip: false }),
+    ).toEqual(["chip"]);
+    expect(
+      offeredQuickVerbs(SIZE_ONLY_VERBS, { hidden: false, chip: true }),
+    ).toEqual(["full"]);
   });
 });
 
@@ -157,21 +170,22 @@ describe("<LayoutRegionContextMenu />", () => {
   });
 
   // A second verb replaces the first's toast rather than stacking beside it, so
-  // the only Undo on screen is always the last verb's. Needs a region with
-  // BOTH a size and a hide verb - Access is size-only since G6, so this uses
-  // Todo (SIZED_VERBS) instead.
+  // the only Undo on screen is always the last verb's. Only one verb is ever
+  // offered at once now, so the two opens have to be two DIFFERENT states of
+  // the same region - hide, then (now hidden) show - rather than two verbs
+  // offered side by side in one menu.
   it("shows one toast at a time, whichever verb fired", () => {
     render(<Harness regionId="todo" />);
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-chip"));
-    const sizeToast = toasts.at(-1);
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
+    const hideToast = toasts.at(-1);
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-show"));
 
-    expect(sizeToast?.id).toBeTypeOf("string");
-    expect(toasts.at(-1)?.id).toBe(sizeToast?.id);
+    expect(hideToast?.id).toBeTypeOf("string");
+    expect(toasts.at(-1)?.id).toBe(hideToast?.id);
   });
 
   // The case a snapshot-based Undo gets wrong: something ELSE changes the same
@@ -207,7 +221,7 @@ describe("<LayoutRegionContextMenu />", () => {
     expect(regionValue("railComments", "shown")).toBe("auto");
   });
 
-  it("opens the editor on the region the menu was over", () => {
+  it("opens the editor on the region the menu was over, with a tab origin", () => {
     render(<Harness regionId="mic" />);
     openMenu();
 
@@ -218,6 +232,7 @@ describe("<LayoutRegionContextMenu />", () => {
         source: "direct_ui",
         entry: "pointer",
         target: "mic",
+        origin: { kind: "tab" },
       }),
     );
   });
@@ -233,6 +248,46 @@ describe("<LayoutRegionContextMenu />", () => {
     expect(openLayoutEditorMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: "minimap" }),
     );
+  });
+
+  // Chat display settings (audit R1, R3): Tool activity is Closed by
+  // default, so its one offered verb is the size verb, worded as an
+  // open/close pair like Thinking's.
+  //
+  // Each of these three resolves its own toast before finishing (there is one
+  // pending-verb slot, module-wide) so it leaves nothing for a later test's
+  // own `Analytics.track` spy to catch (L-19, L-46).
+  it("offers to open a closed Tool activity, and opening it sets size full", () => {
+    render(<Harness regionId="toolActivity" />);
+    openMenu();
+
+    fireEvent.click(screen.getByTestId("layout-quick-verb-toolActivity-full"));
+
+    expect(regionValue("toolActivity", "size")).toBe("full");
+    expect(toasts.at(-1)?.message).toBe("Tool activity open");
+    toasts.at(-1)?.onAutoClose?.();
+  });
+
+  it("offers to hide a shown Thinking", () => {
+    render(<Harness regionId="thinking" />);
+    openMenu();
+
+    fireEvent.click(screen.getByTestId("layout-quick-verb-thinking-hide"));
+
+    expect(regionValue("thinking", "shown")).toBe("hidden");
+    expect(toasts.at(-1)?.message).toBe("Thinking hidden");
+    toasts.at(-1)?.onAutoClose?.();
+  });
+
+  it("offers to hide shown Timestamps", () => {
+    render(<Harness regionId="timestamps" />);
+    openMenu();
+
+    fireEvent.click(screen.getByTestId("layout-quick-verb-timestamps-hide"));
+
+    expect(regionValue("timestamps", "shown")).toBe("hidden");
+    expect(toasts.at(-1)?.message).toBe("Timestamps hidden");
+    toasts.at(-1)?.onAutoClose?.();
   });
 });
 
@@ -280,24 +335,24 @@ describe("layout_quick_verb analytics (L-19, L-46)", () => {
     );
   });
 
-  // Needs a region with both a size and a hide verb - Todo (SIZED_VERBS)
-  // stands in for Access, which G6 made size-only.
+  // Only one verb is ever offered at once now, so the two opens are two
+  // different states of the same region - hide, then (now hidden) show.
   it("sends undone: false for a verb whose toast a second verb replaces", () => {
     const trackSpy = vi.spyOn(Analytics.getInstance(), "track");
     render(<Harness regionId="todo" />);
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-chip"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
     expect(trackSpy).not.toHaveBeenCalled();
 
     openMenu();
-    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-hide"));
+    fireEvent.click(screen.getByTestId("layout-quick-verb-todo-show"));
 
     // The first verb's toast was replaced before it ever resolved, so it is
     // reported here - as "stood", never undone - rather than lost.
     expect(trackSpy).toHaveBeenCalledExactlyOnceWith(
       AnalyticsEvent.LayoutQuickVerb,
-      { region: "todo", verb: "chip", undone: false },
+      { region: "todo", verb: "hide", undone: false },
     );
 
     toasts.at(-1)?.onAutoClose?.();
@@ -305,7 +360,7 @@ describe("layout_quick_verb analytics (L-19, L-46)", () => {
     expect(trackSpy).toHaveBeenCalledTimes(2);
     expect(trackSpy).toHaveBeenLastCalledWith(AnalyticsEvent.LayoutQuickVerb, {
       region: "todo",
-      verb: "hide",
+      verb: "show",
       undone: false,
     });
   });
@@ -605,6 +660,7 @@ describe("<LayoutClusterContextMenu /> over regions the app named itself", () =>
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       });
     });
 

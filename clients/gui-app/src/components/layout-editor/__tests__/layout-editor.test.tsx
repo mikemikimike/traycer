@@ -1,4 +1,10 @@
-import { act, cleanup, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -73,6 +79,7 @@ function openSession(): void {
     entry: "pointer",
     source: "direct_ui",
     startedAt: 0,
+    origin: { kind: "tab" },
   });
 }
 
@@ -213,9 +220,6 @@ describe("the mounted editor root", () => {
     act(() => {
       openSession();
       useLayoutEditorStore.getState().select("usageLimits");
-      useLayoutEditorStore
-        .getState()
-        .openLevel({ kind: "usage-provider", providerId: "claude-code" });
     });
 
     // Focus is on `<body>`, which is exactly where selecting a region used to
@@ -226,21 +230,30 @@ describe("the mounted editor root", () => {
     act(() => {
       escape(document.body);
     });
-    expect(useLayoutEditorStore.getState().level).toBeNull();
-    expect(useLayoutEditorStore.getState().selected).toBe("usageLimits");
-
-    act(() => {
-      escape(document.body);
-    });
+    // First rung: the selected row closes, its area stays open.
     expect(useLayoutEditorStore.getState().selected).toBeNull();
-    expect(useLayoutEditorStore.getState().session).not.toBeNull();
+    expect(useLayoutEditorStore.getState().area).toBe("statusBar");
 
-    // Off the bottom rung: the third press leaves the editor.
     act(() => {
       escape(document.body);
     });
-    expect(useLayoutEditorStore.getState().session).toBeNull();
-    expect(view.container.querySelector("[data-layout-inspector]")).toBeNull();
+    // Second rung: back to All settings, with focus left on the row for the
+    // area the ladder just left (I-02).
+    expect(useLayoutEditorStore.getState().area).toBeNull();
+    expect(useLayoutEditorStore.getState().session).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-layout-area")).toBe(
+      "statusBar",
+    );
+
+    // Off the bottom rung: Escape never closes the editor (audit F5).
+    act(() => {
+      escape(document.body);
+    });
+    expect(useLayoutEditorStore.getState().session).not.toBeNull();
+    expect(useLayoutEditorStore.getState().area).toBeNull();
+    expect(
+      view.container.querySelector("[data-layout-inspector]"),
+    ).not.toBeNull();
   });
 
   it("leaves Escape alone when no session is open", () => {
@@ -370,7 +383,7 @@ describe("the mounted editor root", () => {
     expect(useLayoutEditorStore.getState().history.past.length).toBe(before);
   });
 
-  it("draws the shared back row over every level below the index (L-89)", () => {
+  it("draws the shared back row over the area level (L-89)", () => {
     const column = mountColumn();
     const view = render(<LayoutEditor column={column} />);
 
@@ -386,16 +399,7 @@ describe("the mounted editor root", () => {
     });
     expect(
       view.container.querySelector("[data-layout-inspector-back]")?.textContent,
-    ).toBe("All regions");
-
-    act(() => {
-      useLayoutEditorStore
-        .getState()
-        .openLevel({ kind: "usage-provider", providerId: "claude-code" });
-    });
-    expect(
-      view.container.querySelector("[data-layout-inspector-back]")?.textContent,
-    ).toBe("Usage limits");
+    ).toBe("All settings");
   });
 
   it("raises the relay row only while something is blocking on the user (4.8)", () => {
@@ -415,5 +419,138 @@ describe("the mounted editor root", () => {
     });
 
     expect(view.container.textContent).toContain("An agent is waiting for you");
+  });
+});
+
+describe("the inspector chrome", () => {
+  function openInspectorMenu(): void {
+    // Radix's DropdownMenuTrigger opens on pointerdown, not the click event.
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Inspector options" }),
+      { button: 0 },
+    );
+  }
+
+  function openMoreWaysOut(): void {
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "More ways out" }),
+      { button: 0 },
+    );
+  }
+
+  it("writes the dock mode from the ⋯ menu, and the checked radio reflects the store", () => {
+    const column = mountColumn();
+    render(<LayoutEditor column={column} />);
+    act(() => {
+      openSession();
+    });
+
+    openInspectorMenu();
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Dock right" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Dock left" }));
+    expect(useLayoutEditorStore.getState().dockMode).toBe("left");
+
+    openInspectorMenu();
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Dock left" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: "Dock right" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Float" }));
+    expect(useLayoutEditorStore.getState().dockMode).toBe("float");
+  });
+
+  it("disables the Discard item until something has changed", () => {
+    const column = mountColumn();
+    render(<LayoutEditor column={column} />);
+    act(() => {
+      openSession();
+    });
+
+    openMoreWaysOut();
+    const untouched = screen.getByRole("menuitem", {
+      name: /Discard session changes/,
+    });
+    expect(
+      untouched.getAttribute("data-disabled") === "" ||
+        untouched.getAttribute("aria-disabled") === "true",
+    ).toBe(true);
+  });
+
+  it("leaves the layout and the session untouched when Discard's confirm is cancelled", () => {
+    const column = mountColumn();
+    render(<LayoutEditor column={column} />);
+    act(() => {
+      openSession();
+      hideTheMic();
+    });
+
+    openMoreWaysOut();
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Discard session changes/ }),
+    );
+    fireEvent.click(screen.getByTestId("confirm-cancel"));
+
+    expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
+    expect(useLayoutEditorStore.getState().session).not.toBeNull();
+  });
+
+  it("restores the entry snapshot and ends the session on Discard confirm", () => {
+    const column = mountColumn();
+    const view = render(<LayoutEditor column={column} />);
+    act(() => {
+      openSession();
+    });
+    const entry = getLayoutSnapshot();
+
+    act(() => {
+      hideTheMic();
+    });
+    expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
+
+    openMoreWaysOut();
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Discard session changes/ }),
+    );
+    fireEvent.click(screen.getByTestId("confirm-action"));
+
+    expect(getLayoutSnapshot()).toEqual(entry);
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+    expect(view.container.querySelector("[data-layout-inspector]")).toBeNull();
+  });
+
+  // Item 4: a check reads as a selected state, which Done in a "way out" menu
+  // is not - so its icon slot is an empty `aria-hidden` spacer that only keeps
+  // the label lined up with Discard's, never a check glyph.
+  it("gives Done an empty icon slot rather than a check, while Discard keeps its icon", () => {
+    const column = mountColumn();
+    render(<LayoutEditor column={column} />);
+    act(() => {
+      openSession();
+    });
+
+    openMoreWaysOut();
+
+    const doneItem = screen.getByRole("menuitem", { name: /^Done/ });
+    expect(doneItem.querySelector("svg")).toBeNull();
+    const spacer = doneItem.querySelector('[aria-hidden="true"]');
+    expect(spacer).not.toBeNull();
+    expect(spacer?.className).toContain("size-4");
+
+    const discardItem = screen.getByRole("menuitem", {
+      name: /Discard session changes/,
+    });
+    expect(discardItem.querySelector("svg")).not.toBeNull();
   });
 });

@@ -46,12 +46,24 @@ export type RailRegionId =
   | "railSharing"
   | "railComments";
 
+/**
+ * What the transcript itself draws: the activity rows that fold a run of tool
+ * calls, the reasoning blocks, and the time on each user message. Each is a
+ * thing on screen with its own right-click, so each is a region rather than a
+ * Chat area row.
+ */
+export type ChatDisplayRegionId = "toolActivity" | "thinking" | "timestamps";
+
+/** The rail panels whose presence rule can leave them out, and so offer Auto. */
+export type AutoRailRegionId = "railPullRequests" | "railComments";
+
 export type RegionId =
   | "homeTab"
   | "usageLimits"
   | "resourceMonitor"
   | "minimap"
   | "contextUsage"
+  | ChatDisplayRegionId
   | DockRegionId
   | ToolbarRegionId
   | RailRegionId;

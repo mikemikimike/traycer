@@ -43,8 +43,8 @@ vi.mock("@/components/layout-editor/inspector/provider-limit-windows", () => ({
 import { OrderGroupList } from "@/components/layout-editor/inspector/rows/order-group-list";
 
 // The real catalog, in its own canonical order (codex, claude-code,
-// openrouter, kilocode, grok, huggingface, opencode, cursor) - not a hand
-// picked subset. `writeArrangement` runs every write through
+// openrouter, kilocode, grok, huggingface, opencode, cursor, antigravity) -
+// not a hand picked subset. `writeArrangement` runs every write through
 // `normalizeArrangement`, which merges in any canonical id the stored order
 // is missing (`mergeOrder`, arrangement-persist.ts); starting from the full
 // catalog makes that merge a no-op instead of a second, unrelated seam this
@@ -73,7 +73,6 @@ function renderList(arrangementValue: LayoutArrangement): ReactNode {
       selectedId={null}
       values={values()}
       arrangement={arrangementValue}
-      onOpenProvider={null}
       decorate={null}
     />
   );
@@ -89,7 +88,6 @@ function renderToolbar(
       selectedId={null}
       values={values()}
       arrangement={arrangementValue}
-      onOpenProvider={null}
       decorate={null}
     />
   );
@@ -184,6 +182,7 @@ describe("reordering the visible providers preserves the omitted ones' own slots
       "huggingface",
       "opencode",
       "cursor",
+      "antigravity",
     ]);
     // openrouter's INDEX, specifically - not merely "still present" - is
     // what "preserve omitted slots" actually claims: it sat between the two
@@ -194,6 +193,7 @@ describe("reordering the visible providers preserves the omitted ones' own slots
       "huggingface",
       "opencode",
       "cursor",
+      "antigravity",
     ]);
   });
 
@@ -204,6 +204,7 @@ describe("reordering the visible providers preserves the omitted ones' own slots
       entry: "pointer",
       source: "direct_ui",
       startedAt: 0,
+      origin: { kind: "tab" },
     });
 
     fireEvent.keyDown(row("claude-code"), { key: "ArrowDown", altKey: true });
@@ -216,6 +217,7 @@ describe("reordering the visible providers preserves the omitted ones' own slots
       "huggingface",
       "opencode",
       "cursor",
+      "antigravity",
     ]);
 
     useLayoutEditorStore.getState().undo();

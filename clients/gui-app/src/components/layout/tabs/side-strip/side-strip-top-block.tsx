@@ -10,8 +10,11 @@ import { HistoryNavButtons } from "@/components/layout/header/history-nav-button
 import { WINDOW_LEADING_INSET_CLASS } from "@/components/layout/header/title-bar-drag";
 import { Button } from "@/components/ui/button";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { formatChordForDisplay } from "@/lib/keybindings/chord";
+import { shortcutHintsVisible } from "@/lib/keybindings/shortcut-hints";
 import type { EdgeSide } from "@/lib/layout/layout-arrangement";
 import { cn } from "@/lib/utils";
+import { useBindingForAction } from "@/stores/settings/keybinding-store";
 import { SideHomeRow } from "./side-home-row";
 import {
   SideStripNavRows,
@@ -45,14 +48,14 @@ export interface SideStripTopBlockProps {
 
 /**
  * What leads in the header, in the strip (S-03). Expanded: history back and
- * forward beside the collapse toggle, the Inbox and All tasks nav rows (D6),
+ * forward beside the collapse toggle, the Notifications and All tasks nav rows (D6),
  * the Activity view's Needs you block (D10), Home, New Task as the primary
  * last row (F7), then the "Tasks" label over the rows. On macOS with the
  * strip at the left the first row is the title bar: a drag row that reserves
  * the traffic lights and puts the arrows right of them (S-04).
  *
  * Collapsed, one centred column (F1): the title bar's lights, the expand
- * toggle, Inbox, All tasks and New Task as 32px tiles 4px apart, a divider,
+ * toggle, Notifications, All tasks and New Task as 32px tiles 4px apart, a divider,
  * then Home as the first tile of the rail's 8px rhythm the task tiles
  * continue. The arrows are not drawn; their shortcuts still work.
  */
@@ -174,11 +177,16 @@ function SideStripCollapseToggle(props: {
 }): ReactNode {
   const placement = useColumnOverlayPlacement("top");
   const label = props.collapsed ? "Expand tabs" : "Collapse tabs";
+  const chord = useBindingForAction("app.tabs.vertical.collapse");
+  const tooltip =
+    chord === null || !shortcutHintsVisible()
+      ? label
+      : `${label} (${formatChordForDisplay(chord)})`;
   const icons = COLLAPSE_ICON[props.edge];
   const Icon = props.collapsed ? icons.expand : icons.collapse;
   return (
     <TooltipWrapper
-      label={label}
+      label={tooltip}
       side={placement?.side ?? "bottom"}
       sideOffset={undefined}
       align={placement?.align}

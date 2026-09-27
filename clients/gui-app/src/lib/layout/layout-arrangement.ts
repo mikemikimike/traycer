@@ -6,8 +6,13 @@ import {
   DEFAULT_RAIL_DIVIDER_SEQ,
   RAIL_REGION_IDS,
   railDividerId,
+  MAX_RAIL_STACK_MEMBERS,
+  areRailsEqual,
+  normalizeRail,
   railRegionForLeftPanelId,
   railStackId,
+  railStackMembers,
+  railStackOf,
   type RailEntry,
 } from "@/lib/layout/rail";
 import type { LeftPanelId } from "@/lib/left-panel-ids";
@@ -48,6 +53,15 @@ export type TabStripPlacement = "top" | EdgeSide;
  * also lists the active task's live agents under its row.
  */
 export type SideStripView = "layered" | "activity";
+
+/** How the task tabs fit when there are more than the strip holds. */
+export type TaskTabLayout = "scroll" | "shrink";
+
+/**
+ * The measure the transcript, the composer and an artifact's body share:
+ * `comfortable` is the shipped column, `wide` the one for a large monitor.
+ */
+export type ReadingWidth = "comfortable" | "wide";
 
 /**
  * The two regions that name a bar AND an end of it, each for itself (L-156).
@@ -214,6 +228,15 @@ export interface LayoutArrangement {
   readonly sidebarSide: EdgeSide;
   /** What the vertical strip shows (D8); ignored while the tabs are at the top. */
   readonly sideStripView: SideStripView;
+  /** Tab overflow: scroll the tabs, or shrink them to fit. */
+  readonly taskTabLayout: TaskTabLayout;
+  /**
+   * How wide chat and artifacts read. Arrangement rather than a value: a
+   * preset is density, how much a region says, and this is how much of the
+   * window the content column takes - it depends on the monitor, not on how
+   * much chrome someone wants, so a density switch must leave it alone.
+   */
+  readonly readingWidth: ReadingWidth;
 }
 
 /** Every provider that reports account rate limits, in the strip's own order. */
@@ -324,6 +347,8 @@ export const DEFAULT_ARRANGEMENT: LayoutArrangement = {
   tabStripPlacement: "top",
   sidebarSide: "left",
   sideStripView: "layered",
+  taskTabLayout: "scroll",
+  readingWidth: "comfortable",
 };
 
 /** What a provider draws until told otherwise: its tightest limit, and only that. */
@@ -656,7 +681,9 @@ export function moveCanvasOrderMember(input: {
       // between its two panels.
       return {
         ...arrangement,
-        rail: railPlacedBeside(arrangement.rail, input, true),
+        // The canvas's rail draws a stack as its one icon, so a drag of it
+        // carries the whole stack.
+        rail: railPlacedBeside(arrangement.rail, input, "stack"),
       };
   }
 }
@@ -692,71 +719,123 @@ function placedBeside<Id extends string>(
 }
 
 /**
- * The rail entries that move and stand together: a stacked panel's whole pair
- * with its link, or the one entry. Indexes into `rail`, first and last.
+ * The rail entries that stand together: a stacked panel's whole stack, or the
+ * one entry. Indexes into `rail`, first and last.
  */
 function railBlockAt(
   rail: ReadonlyArray<RailEntry>,
   index: number,
 ): readonly [number, number] {
-  if (rail[index].kind !== "panel") return [index, index];
-  if (rail.at(index + 1)?.kind === "stack") return [index, index + 2];
-  if (index >= 2 && rail[index - 1].kind === "stack") return [index - 2, index];
-  return [index, index];
+  const entry = rail[index];
+  if (entry.kind !== "panel") return [index, index];
+  const stack = railStackOf(rail, entry.id);
+  if (stack === null) return [index, index];
+  const positions = rail.flatMap((candidate, position) =>
+    candidate.kind === "panel" && stack.members.includes(candidate.id)
+      ? [position]
+      : [],
+  );
+  return [Math.min(...positions), Math.max(...positions)];
 }
 
 /**
- * One rail entry put beside another, where a stacked pair is one unit (G3):
- * a drop beside either panel of a pair lands before or after the whole pair,
- * never between its two panels.
+ * The rail with one panel taken out of whatever stack names it. The panel
+ * stays where it stands; `normalizeRail` dissolves a stack left with one
+ * member.
+ */
+function withoutStackMember(
+  rail: ReadonlyArray<RailEntry>,
+  regionId: RailRegionId,
+): ReadonlyArray<RailEntry> {
+  return rail.map((entry): RailEntry => {
+    if (entry.kind !== "stack") return entry;
+    const members = railStackMembers(entry.id);
+    if (members === null || !members.includes(regionId)) return entry;
+    return {
+      kind: "stack",
+      id: railStackId(members.filter((member) => member !== regionId)),
+    };
+  });
+}
+
+/**
+ * What a rail drag carries (L-181): the rail's icon stands for its whole
+ * stack, so dragging it carries the stack; a panel's SECTION HEADER is one
+ * panel, which is how a member is reordered within its stack or taken out.
+ */
+export type RailDragCarry = "stack" | "panel";
+
+/**
+ * One rail entry put beside another.
  *
- * `carrySource` says what was grabbed. The rail's own icon is a whole group,
- * so the pair travels together. A panel's section header is one panel: moved
- * beside its own partner it swaps places with it, which `normalizeRail` keeps
- * as the same group with the other icon on top, and moved anywhere else it
- * leaves its group, link and all.
+ * A carried STACK lands before or after the target's whole stack, and onto
+ * itself moves nothing. A carried PANEL beside another member of its own
+ * stack stays in it and only changes place; anywhere else it leaves its stack
+ * and lands before or after the target's whole stack, never between another
+ * stack's members, because before and after only reorder (L-168).
  */
 function railPlacedBeside(
   rail: ReadonlyArray<RailEntry>,
   drop: CanvasOrderDrop,
-  carrySource: boolean,
+  carry: RailDragCarry,
+): ReadonlyArray<RailEntry> {
+  const placed = railPlacedBesideRaw(rail, drop, carry);
+  // A drop that lands the carried entries where they already stand answers
+  // the rail it was given, so a caller's identity guard spends no write or
+  // undo step on it. Compared normalized: the mover leaves a stack entry where
+  // `normalizeRail` would re-place it.
+  return areRailsEqual(normalizeRail(placed), normalizeRail(rail))
+    ? rail
+    : placed;
+}
+
+function railPlacedBesideRaw(
+  rail: ReadonlyArray<RailEntry>,
+  drop: CanvasOrderDrop,
+  carry: RailDragCarry,
 ): ReadonlyArray<RailEntry> {
   const fromIndex = rail.findIndex((entry) => entry.id === drop.fromId);
   const toIndex = rail.findIndex((entry) => entry.id === drop.toId);
   if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return rail;
-  const [groupStart, groupEnd] = railBlockAt(rail, fromIndex);
-  if (toIndex >= groupStart && toIndex <= groupEnd) {
-    // A group onto itself, or a panel dropped on the side of its partner it
-    // already stands on, moves nothing.
-    if (carrySource || drop.placeAfter === fromIndex > toIndex) return rail;
+  const moved = rail[fromIndex];
+  const [blockStart, blockEnd] = railBlockAt(rail, fromIndex);
+  const inOwnBlock = toIndex >= blockStart && toIndex <= blockEnd;
+  if (carry === "stack") {
+    if (inOwnBlock) return rail;
+    const carried = rail.slice(blockStart, blockEnd + 1);
+    const remaining = rail.filter(
+      (_, index) => index < blockStart || index > blockEnd,
+    );
+    const [anchorStart, anchorEnd] = railBlockAt(
+      remaining,
+      remaining.indexOf(rail[toIndex]),
+    );
+    const insertAt = drop.placeAfter ? anchorEnd + 1 : anchorStart;
+    return [
+      ...remaining.slice(0, insertAt),
+      ...carried,
+      ...remaining.slice(insertAt),
+    ];
+  }
+  if (inOwnBlock) {
     const remaining = rail.filter((_, index) => index !== fromIndex);
     const anchor = remaining.indexOf(rail[toIndex]);
     const insertAt = drop.placeAfter ? anchor + 1 : anchor;
     return [
       ...remaining.slice(0, insertAt),
-      rail[fromIndex],
+      moved,
       ...remaining.slice(insertAt),
     ];
   }
-  const taken = (index: number): boolean =>
-    carrySource
-      ? index >= groupStart && index <= groupEnd
-      : index === fromIndex ||
-        (groupStart !== groupEnd && index === groupStart + 1);
-  const carried = carrySource
-    ? rail.slice(groupStart, groupEnd + 1)
-    : [rail[fromIndex]];
-  const remaining = rail.filter((_, index) => !taken(index));
+  const source =
+    moved.kind === "panel" ? withoutStackMember(rail, moved.id) : rail;
+  const remaining = source.filter((_, index) => index !== fromIndex);
   const [anchorStart, anchorEnd] = railBlockAt(
     remaining,
-    remaining.indexOf(rail[toIndex]),
+    remaining.indexOf(source[toIndex]),
   );
   const insertAt = drop.placeAfter ? anchorEnd + 1 : anchorStart;
-  return [
-    ...remaining.slice(0, insertAt),
-    ...carried,
-    ...remaining.slice(insertAt),
-  ];
+  return [...remaining.slice(0, insertAt), moved, ...remaining.slice(insertAt)];
 }
 
 // ── The rail's writers ──────────────────────────────────────────────────────
@@ -809,7 +888,8 @@ export function removeRailDivider(
 }
 
 /**
- * One rail PANEL placed beside another, for the app's own sidebar drag.
+ * One rail icon's stack, or one panel, placed beside another panel, for the
+ * app's own sidebar drag.
  *
  * The same mover the editor's canvas drop uses, reached the same way
  * (R5R-06): the drag at rest and the drag in a session differ in what the
@@ -817,7 +897,8 @@ export function removeRailDivider(
  * put it back beside that one" would drift the first time either is fixed.
  * The sidebar speaks panel ids, so what is added here is the bijection onto
  * the rail's region ids, and the one fact only the sidebar knows: whether the
- * user grabbed the rail's group icon or one panel's section header (G3).
+ * user grabbed the rail's icon, which carries its whole stack, or one panel's
+ * section header (L-181).
  */
 export function moveRailPanelBeside(
   arrangement: LayoutArrangement,
@@ -825,8 +906,7 @@ export function moveRailPanelBeside(
     readonly sourcePanelId: LeftPanelId;
     readonly targetPanelId: LeftPanelId;
     readonly placeAfter: boolean;
-    /** Off the rail's icon, which is a whole group; off a section header, one panel. */
-    readonly asGroups: boolean;
+    readonly carry: RailDragCarry;
   },
 ): LayoutArrangement {
   const rail = railPlacedBeside(
@@ -836,66 +916,183 @@ export function moveRailPanelBeside(
       toId: railRegionForLeftPanelId(drop.targetPanelId),
       placeAfter: drop.placeAfter,
     },
-    drop.asGroups,
+    drop.carry,
   );
   return rail === arrangement.rail ? arrangement : { ...arrangement, rail };
 }
 
+/** The panels a drag carries: the source's whole stack, or just the source. */
+function carriedMembers(
+  rail: ReadonlyArray<RailEntry>,
+  sourceId: RailRegionId,
+  carry: RailDragCarry,
+): ReadonlyArray<RailRegionId> {
+  if (carry === "panel") return [sourceId];
+  return railStackOf(rail, sourceId)?.members ?? [sourceId];
+}
+
 /**
- * Two panels joined into a stack, which is what a drop onto the middle of a
- * rail icon means (L-168).
+ * What a drop onto the middle of a rail icon would do (L-181): `join` adds the
+ * carried panels to the target's stack (or makes a stack with it), `full` is
+ * refused because the result would pass {@link MAX_RAIL_STACK_MEMBERS}, and
+ * `same` does nothing because the carried panels are already stacked with the
+ * target. The rail draws the join cue, a refusal cue, or nothing, from this
+ * answer, and the writer obeys the same one.
+ */
+export type RailStackJoin = "join" | "full" | "same";
+
+export function railStackJoin(
+  rail: ReadonlyArray<RailEntry>,
+  sourcePanelId: LeftPanelId,
+  targetPanelId: LeftPanelId,
+  carry: RailDragCarry,
+): RailStackJoin {
+  const targetId = railRegionForLeftPanelId(targetPanelId);
+  const carried = carriedMembers(
+    rail,
+    railRegionForLeftPanelId(sourcePanelId),
+    carry,
+  );
+  const target = railStackOf(rail, targetId)?.members ?? [targetId];
+  if (carried.some((member) => target.includes(member))) return "same";
+  return target.length + carried.length > MAX_RAIL_STACK_MEMBERS
+    ? "full"
+    : "join";
+}
+
+/**
+ * The carried panels added to another's stack, which is what a drop onto the
+ * middle of a rail icon means (L-168, L-181). A target standing alone makes a
+ * stack with them.
  *
- * The SOURCE lands directly below the TARGET and a link is placed between
- * them, so the panel the user aimed at keeps its place and the one they
- * carried is the one that moves - the same promise every other rail drop
- * makes. The inspector's row action calls it the other way round for that
- * reason: there the panel the user pressed is the one that must stay put, so
- * the panel BELOW is the source and the join costs no reorder at all.
- *
- * A source that is already half of a pair LEAVES that pair and joins the new
- * one (L-170). Nothing extra is needed for it: a link is the pair its id
- * names, the source moving away makes that pair non-adjacent, and
- * `normalizeRail` drops the old join on the write. Refusing it instead would
- * be the rail's own rule disagreeing with the drop bands, which light the
- * middle of any target a source can reach.
- *
- * The TARGET is still refused when it is already half of a pair: a stack joins
- * exactly two panels (L-166), and neither replacing a member nor growing a run
- * of three is what the gesture asked for. The refusal is the arrangement
- * itself, so the caller's own "did this change anything" guard makes it a
- * no-op with no undo step spent on it, and the middle band draws no preview
- * over such a target at all.
+ * The carried panels land directly after the target stack's last member, in
+ * their own order, so the panels the user aimed at keep their places and the
+ * ones they carried are the ones that move - the same promise every other rail
+ * drop makes. A single panel carried out of another stack leaves it (L-170).
+ * Anything {@link railStackJoin} does not answer `join` for returns the
+ * arrangement it was given, so the caller's own "did this change anything"
+ * guard spends no undo step on it.
  */
 export function stackRailPanels(
   arrangement: LayoutArrangement,
   sourcePanelId: LeftPanelId,
   targetPanelId: LeftPanelId,
+  carry: RailDragCarry,
 ): LayoutArrangement {
-  if (sourcePanelId === targetPanelId) return arrangement;
-  const sourceId = railRegionForLeftPanelId(sourcePanelId);
+  if (
+    railStackJoin(arrangement.rail, sourcePanelId, targetPanelId, carry) !==
+    "join"
+  )
+    return arrangement;
   const targetId = railRegionForLeftPanelId(targetPanelId);
-  if (isStackedRailPanel(arrangement.rail, targetId)) return arrangement;
-  const moved = arrangement.rail.find(
-    (entry) => entry.kind === "panel" && entry.id === sourceId,
+  const carried = carriedMembers(
+    arrangement.rail,
+    railRegionForLeftPanelId(sourcePanelId),
+    carry,
   );
-  if (moved === undefined) return arrangement;
-  const remaining = arrangement.rail.filter((entry) => entry !== moved);
-  const anchor = remaining.findIndex(
-    (entry) => entry.kind === "panel" && entry.id === targetId,
+  // The carried panels' own stack goes with them: a whole stack is re-minted
+  // into the target's, and a single member simply leaves its old one.
+  const released = carried.reduce(
+    (rail, member) => withoutStackMember(rail, member),
+    arrangement.rail,
   );
-  if (anchor < 0) return arrangement;
+  const moved = carried.flatMap((member) =>
+    released.filter((entry) => entry.kind === "panel" && entry.id === member),
+  );
+  const remaining = released.filter((entry) => !moved.includes(entry));
+  const stack = railStackOf(remaining, targetId);
+  const members = stack?.members ?? [targetId];
+  const lastIndex = Math.max(
+    ...members.map((member) =>
+      remaining.findIndex(
+        (entry) => entry.kind === "panel" && entry.id === member,
+      ),
+    ),
+  );
+  if (lastIndex < 0) return arrangement;
+  const id = railStackId([...members, ...carried]);
+  const placed = [
+    ...remaining.slice(0, lastIndex + 1),
+    ...moved,
+    ...remaining.slice(lastIndex + 1),
+  ];
+  return {
+    ...arrangement,
+    rail:
+      stack === null
+        ? placed.flatMap((entry): RailEntry[] =>
+            entry.kind === "panel" && entry.id === targetId
+              ? [entry, { kind: "stack", id }]
+              : [entry],
+          )
+        : placed.map((entry): RailEntry =>
+            entry.kind === "stack" && entry.id === stack.id
+              ? { kind: "stack", id }
+              : entry,
+          ),
+  };
+}
+
+/**
+ * The panel directly below this one's stack (or below this panel, standing
+ * alone), when the list's "Stack with the panel below" can join the two
+ * (L-168, L-181): this panel is the last of its stack, the next entry is a
+ * panel rather than a divider, and the two stacks together stay within
+ * {@link MAX_RAIL_STACK_MEMBERS}. `null` otherwise.
+ */
+export function railPanelToStackBelow(
+  rail: ReadonlyArray<RailEntry>,
+  regionId: RailRegionId,
+): RailRegionId | null {
+  const index = rail.findIndex(
+    (entry) => entry.kind === "panel" && entry.id === regionId,
+  );
+  if (index < 0) return null;
+  const [, blockEnd] = railBlockAt(rail, index);
+  if (blockEnd !== index) return null;
+  const below = rail.at(index + 1);
+  if (below === undefined || below.kind !== "panel") return null;
+  const count = (id: RailRegionId): number =>
+    railStackOf(rail, id)?.members.length ?? 1;
+  return count(regionId) + count(below.id) <= MAX_RAIL_STACK_MEMBERS
+    ? below.id
+    : null;
+}
+
+/**
+ * This panel's stack (or this panel) joined with the one directly below it,
+ * with no panel moving: the list gesture never reorders (L-170).
+ */
+export function stackRailPanelWithBelow(
+  arrangement: LayoutArrangement,
+  regionId: RailRegionId,
+): LayoutArrangement {
+  const below = railPanelToStackBelow(arrangement.rail, regionId);
+  if (below === null) return arrangement;
+  const membersOf = (id: RailRegionId): ReadonlyArray<RailRegionId> =>
+    railStackOf(arrangement.rail, id)?.members ?? [id];
+  const members = [...membersOf(regionId), ...membersOf(below)];
+  const rail = arrangement.rail.filter(
+    (entry) =>
+      !(
+        entry.kind === "stack" &&
+        railStackMembers(entry.id)?.some((member) => members.includes(member))
+      ),
+  );
+  const first = rail.findIndex(
+    (entry) => entry.kind === "panel" && entry.id === members[0],
+  );
   return {
     ...arrangement,
     rail: [
-      ...remaining.slice(0, anchor + 1),
-      { kind: "stack", id: railStackId(targetId, sourceId) },
-      moved,
-      ...remaining.slice(anchor + 1),
+      ...rail.slice(0, first + 1),
+      { kind: "stack", id: railStackId(members) },
+      ...rail.slice(first + 1),
     ],
   };
 }
 
-/** One stack link taken out; both panels stay where they are (L-168). */
+/** A whole stack taken apart; every panel stays where it is (L-168). */
 export function unstackRail(
   arrangement: LayoutArrangement,
   entryId: string,
@@ -907,39 +1104,76 @@ export function unstackRail(
   return { ...arrangement, rail };
 }
 
-/** Whether this panel is one of a stacked pair right now. */
+/**
+ * One member taken out of its stack (L-181), with as little movement as that
+ * allows: the first or last member stays where it stands, just outside, and a
+ * middle member steps out to just after the stack, since standing where it
+ * was would split the others. Taking one out of a two-member stack dissolves
+ * it.
+ */
+export function unstackRailPanel(
+  arrangement: LayoutArrangement,
+  regionId: RailRegionId,
+): LayoutArrangement {
+  const stack = railStackOf(arrangement.rail, regionId);
+  if (stack === null) return arrangement;
+  const released = withoutStackMember(arrangement.rail, regionId);
+  const middle =
+    stack.members[0] !== regionId && stack.members.at(-1) !== regionId;
+  if (!middle) return { ...arrangement, rail: released };
+  const index = released.findIndex(
+    (entry) => entry.kind === "panel" && entry.id === regionId,
+  );
+  const [, blockEnd] = railBlockAt(arrangement.rail, index);
+  const moved = released[index];
+  const remaining = released.filter((_, position) => position !== index);
+  return {
+    ...arrangement,
+    rail: [
+      ...remaining.slice(0, blockEnd),
+      moved,
+      ...remaining.slice(blockEnd),
+    ],
+  };
+}
+
+/** Whether this panel is in a stack right now. */
 export function isStackedRailPanel(
   rail: ReadonlyArray<RailEntry>,
   regionId: RailRegionId,
 ): boolean {
-  const index = rail.findIndex(
-    (entry) => entry.kind === "panel" && entry.id === regionId,
-  );
-  if (index < 0) return false;
-  return rail[index - 1]?.kind === "stack" || rail[index + 1]?.kind === "stack";
+  return railStackOf(rail, regionId) !== null;
 }
 
-/** The same panel onto the rail's end, which is the rail's own empty space. */
+/**
+ * The same carry onto the rail's end, which is the rail's own empty space: a
+ * rail icon's whole stack, or one panel, which leaves its stack (L-181).
+ */
 export function moveRailPanelToEnd(
   arrangement: LayoutArrangement,
   sourcePanelId: LeftPanelId,
-  /** As in {@link moveRailPanelBeside}: a rail icon carries its whole group. */
-  asGroups: boolean,
+  carry: RailDragCarry,
 ): LayoutArrangement {
   const regionId = railRegionForLeftPanelId(sourcePanelId);
   const fromIndex = arrangement.rail.findIndex(
     (entry) => entry.kind === "panel" && entry.id === regionId,
   );
   if (fromIndex < 0) return arrangement;
-  const [start, end] = asGroups
-    ? railBlockAt(arrangement.rail, fromIndex)
-    : [fromIndex, fromIndex];
+  if (carry === "stack") {
+    const [start, end] = railBlockAt(arrangement.rail, fromIndex);
+    return {
+      ...arrangement,
+      rail: [
+        ...arrangement.rail.slice(0, start),
+        ...arrangement.rail.slice(end + 1),
+        ...arrangement.rail.slice(start, end + 1),
+      ],
+    };
+  }
+  const released = withoutStackMember(arrangement.rail, regionId);
+  const moved = released[fromIndex];
   return {
     ...arrangement,
-    rail: [
-      ...arrangement.rail.slice(0, start),
-      ...arrangement.rail.slice(end + 1),
-      ...arrangement.rail.slice(start, end + 1),
-    ],
+    rail: [...released.filter((entry) => entry !== moved), moved],
   };
 }

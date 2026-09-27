@@ -87,9 +87,9 @@ export function redoLayout(
  * "Discard changes" restores the state the session started from, so a write
  * from ANOTHER window - or from a settings surface outside the editor - must
  * not be undone by it: whatever the external write changed becomes part of
- * what Discard restores, and everything else stays as it was on entry. History
- * is left alone, which is the difference from the old editor: it wiped the
- * stacks on any external write.
+ * what Discard restores, and everything else stays as it was on entry. The
+ * editor rebases every Undo/Redo snapshot the same way rather than wiping the
+ * stacks, which is what the old editor did on any external write.
  *
  * The grain is the field, and the region for values: two writers touching the
  * same region in the same window is the case this cannot be exact about, and
@@ -231,6 +231,16 @@ function rebaseArrangement(
       entry.sideStripView,
       previous.sideStripView,
       next.sideStripView,
+    ),
+    taskTabLayout: pick(
+      entry.taskTabLayout,
+      previous.taskTabLayout,
+      next.taskTabLayout,
+    ),
+    readingWidth: pick(
+      entry.readingWidth,
+      previous.readingWidth,
+      next.readingWidth,
     ),
   };
   return resolvePersistedArrangement(rebased);

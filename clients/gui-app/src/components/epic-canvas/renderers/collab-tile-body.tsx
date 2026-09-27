@@ -63,7 +63,12 @@ import {
 } from "@/stores/comments/comment-threads-store";
 import type { EpicNodeRef } from "@/stores/epics/canvas/types";
 import { WORKSPACE_FILE_TAB_KIND } from "@/stores/epics/canvas/types";
-import { useArrangementValue, useRegionShown } from "@/lib/layout-overrides";
+import { cn } from "@/lib/utils";
+import {
+  useArrangementValue,
+  useReadingWidthClass,
+  useRegionShown,
+} from "@/lib/layout-overrides";
 import type { EpicArtifactRoomAvailability } from "@/stores/epics/open-epic/types";
 import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
@@ -264,6 +269,7 @@ function CollabTileSkeleton(props: {
   readonly subscribeAnswered: boolean;
   readonly budgetElapsed: boolean;
 }) {
+  const readingWidth = useReadingWidthClass();
   const testIdSuffix =
     props.subscribeAnswered && props.bodyAvailability === "unavailable"
       ? "unavailable"
@@ -280,7 +286,10 @@ function CollabTileSkeleton(props: {
       data-artifact-room-availability={props.bodyAvailability}
       data-body-subscribe-answered={props.subscribeAnswered ? "true" : "false"}
       data-budget-elapsed={props.budgetElapsed ? "true" : "false"}
-      className="mx-auto flex w-full max-w-3xl flex-col gap-3 px-6 py-8"
+      className={cn(
+        "mx-auto flex w-full flex-col gap-3 px-6 py-8",
+        readingWidth,
+      )}
     >
       {notice === null ? (
         <>
@@ -340,6 +349,7 @@ function draftRangeOwnedByTile(
 }
 
 function CollabTileBodyEditor(props: CollabTileBodyEditorProps) {
+  const readingWidth = useReadingWidthClass();
   const {
     node,
     viewTabId,
@@ -709,7 +719,7 @@ function CollabTileBodyEditor(props: CollabTileBodyEditorProps) {
         className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-8"
         onScroll={onScroll}
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+        <div className={cn("mx-auto flex w-full flex-col gap-4", readingWidth)}>
           <div className="tc-editor-surface">
             <div
               className="tc-editor-body"

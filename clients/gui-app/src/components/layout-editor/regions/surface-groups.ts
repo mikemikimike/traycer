@@ -21,11 +21,8 @@ import type { RegionId } from "@/lib/layout/region-id";
  */
 
 export interface OrderGroupFacts {
-  /**
-   * The heading above the list, or `null` where the surface card's own name
-   * already says it - the sidebar has one list and it is the sidebar.
-   */
-  readonly label: string | null;
+  /** The heading above the list. */
+  readonly label: string;
   /** How this list is operated, said once by the list (D8). */
   readonly description: string;
   /** A rule about the whole group, said by the group rather than by a member. */
@@ -38,7 +35,9 @@ export const ORDER_GROUPS: Readonly<Record<OrderGroupId, OrderGroupFacts>> = {
   dock: {
     label: "Above the message box",
     description: "Drag to reorder, here or on the canvas.",
-    note: null,
+    // The Message queue is fixed and has no setting (G1-G2), so the list it
+    // sits under says where it is.
+    note: "The message queue stays next to the message box.",
     dividers: false,
   },
   toolbarLeft: {
@@ -57,7 +56,7 @@ export const ORDER_GROUPS: Readonly<Record<OrderGroupId, OrderGroupFacts>> = {
     dividers: false,
   },
   rail: {
-    label: null,
+    label: "Panels",
     // The rail's icons are canvas-draggable too now (L-115), so its line says
     // what the other three canvas groups' lines say, plus the two things only
     // this list can do (L-155, L-168).
@@ -95,14 +94,12 @@ export const SURFACE_ORDER_GROUPS: Readonly<
 };
 
 /**
- * The label a screen reader hears for one of these lists.
- *
- * The rail's group has none of its own, because on the page the card it sits
- * in is already headed "Sidebar" - which a row's own context does not carry,
- * so the group says it here.
+ * The label a screen reader hears for one of these lists, and the change
+ * list's name for its order. The rail's heading "Panels" leans on the Sidebar
+ * area around it, which a row's own context does not carry, so it says it here.
  */
 export function orderGroupListLabel(group: OrderGroupId): string {
-  return ORDER_GROUPS[group].label ?? "Sidebar panels";
+  return group === "rail" ? "Sidebar panels" : ORDER_GROUPS[group].label;
 }
 
 /**
@@ -137,37 +134,4 @@ export function looseSurfaceRegions(
       region.surface === surface &&
       !region.rows.some((row) => row.kind === "position-order"),
   ).map((region) => region.id);
-}
-
-/**
- * The two surfaces the page draws a picture of, and the only two (L-120,
- * redesign 3.2).
- *
- * The rule: a surface gets a picture only where the picture carries something
- * its rows cannot, and the picture is placed on the axis the surface runs on.
- *
- * - **Composer.** `Full row / Chip / Hidden` across three lists, the
- *   pills-vs-joined-frame split and the two toolbar clusters are not derivable
- *   from three lists of names. It runs horizontally, so a band above it is the
- *   right axis.
- * - **Status bar.** Which bar each reading is in and which end of it (L-156)
- *   are facts about the strip, and the strip is the only thing that can show
- *   them.
- *
- * The other three draw none. The **Sidebar**'s assembled shape IS its list
- * order, and each row already carries the real rail button as its glyph
- * (L-120) - the one fact a plinth added is the fact the list is made of. The
- * **Top bar** is one region, so a picture of it is a mystery empty box. **Chat**
- * has two regions on two different surfaces, so there is no single row that
- * holds both and P-2 says to omit rather than approximate.
- */
-const SURFACE_BANDS: ReadonlyArray<SurfaceGroupId> = ["composer", "statusBar"];
-
-/**
- * Whether this surface opens with a picture band, which is also what tells the
- * card whether its first block of rows has anything above it to be ruled off
- * from.
- */
-export function surfaceHasBand(surface: SurfaceGroupId): boolean {
-  return SURFACE_BANDS.includes(surface);
 }

@@ -18,7 +18,6 @@ import type { ChatDockSection } from "@/lib/chat/chat-dock-sections";
 import { createHoverChip } from "@/components/layout-editor/canvas/hover-chip";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
 import { PresetsBlock } from "@/components/layout-editor/inspector/presets-block";
-import { SpecimenStage } from "@/components/layout-editor/inspector/specimen-stage";
 import {
   depictRegion,
   regionDepiction,
@@ -28,7 +27,7 @@ import { HostContextFrame } from "@/components/layout-editor/region-depiction-fr
 import { LAYOUT_REGION_IDS } from "@/components/layout-editor/regions/region-facts";
 import { ComposerTileIdProvider } from "@/components/home/composer/composer-tile-context";
 import { ComposerToolbar } from "@/components/home/toolbar/composer-toolbar";
-import { SampleWorkspaceRail } from "@/components/sample-workspace/sample-workspace-rail";
+import { SampleWorkspaceSidebar } from "@/components/sample-workspace/sample-workspace-sidebar";
 import {
   SAMPLE_AGENT_DESCENDANTS,
   SAMPLE_BACKGROUND_ITEMS,
@@ -55,6 +54,7 @@ import {
 import { USAGE_PROVIDER_IDS } from "@/lib/layout/layout-arrangement";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
 import type { RegionId } from "@/lib/layout/region-id";
+import { cn } from "@/lib/utils";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
 import { RunnerHostProvider } from "@/providers/runner-host-provider";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -89,9 +89,8 @@ import "@/components/layout-editor/layout-editor.css";
  *    size at which they mount with no host runtime behind them. Neither count
  *    is written down here: both clusters have gained and lost members (L-136,
  *    L-139, L-142), and a number in a comment is the thing that goes stale.
- * 3. **Uniform scaling only.** The preset miniature's frame is measured
- *    untransformed, with `offsetWidth`/`offsetHeight`, against the 1000x620
- *    it claims - a reflowed card would be any other size.
+ * 3. **The preset cards.** One row at the inspector's 380px, each a
+ *    miniature above its name and caption.
  * 4. **The hover chip's PAINTED position.** Real Chrome resolves anchor
  *    positioning, so the chip is asserted where the browser put it rather
  *    than where a measurement says it should be.
@@ -116,6 +115,12 @@ const NO_LIVE_LEAF: Readonly<Partial<Record<RegionId, string>>> = {
     "ChatTurnMinimapView is driven by the transcript's measured viewport and its scroll position",
   contextUsage:
     "ContextUsageChip draws through `motion/react-m`, which needs the app's LazyMotion feature provider",
+  toolActivity:
+    "an activity row reads its open state from the transcript's per-chat stores, which this fixture does not mount; the canvas phase drives the sample scene's real rows",
+  thinking:
+    "a reasoning row reads its open state from the transcript's per-chat stores, which this fixture does not mount; the canvas phase drives the sample scene's real rows",
+  timestamps:
+    "the stamp lives in a transcript row's sender overline, which only the canvas phase's sample scene mounts",
   railArtifacts:
     "the shipped rail stacks Artifacts under Agents, and a stack draws only its top panel's icon (G3), so Artifacts has no live leaf of its own; the driver's groups phase covers the pair on the real rail",
 };
@@ -138,6 +143,35 @@ declare global {
   }
 }
 
+/**
+ * A local stand-in for the deleted `SpecimenStage` (region-section.tsx's own
+ * card): the region forms no longer draw a region on a labelled plinth
+ * (`layout-form.tsx`'s rows draw the picture inline, at 1:1), but this
+ * fixture still needs one card per region to compare its picture against the
+ * live leaf beside it.
+ */
+function Stage(props: {
+  readonly children: ReactNode;
+  readonly label: string;
+}): ReactNode {
+  return (
+    <div
+      className="relative m-3 flex min-h-22 items-center overflow-hidden rounded-xl border border-border bg-card px-4 py-4.5"
+      style={{
+        backgroundImage:
+          "radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--foreground) 7%, transparent) 0%, transparent 62%)",
+      }}
+    >
+      <span className="absolute top-1.5 right-2.5 left-2.5 truncate text-micro tracking-[0.09em] text-muted-foreground uppercase opacity-80">
+        {props.label}
+      </span>
+      <div inert className={cn("flex w-full min-w-0 justify-center")}>
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
 export function PictureRow(props: { readonly regionId: RegionId }): ReactNode {
   const { regionId } = props;
   const basePreset = useLayoutStore((state) => state.basePreset);
@@ -146,9 +180,9 @@ export function PictureRow(props: { readonly regionId: RegionId }): ReactNode {
   const values = effectiveLayoutValues(basePreset, overrides);
   return (
     <div data-region-row={regionId} style={{ width: 360 }}>
-      <SpecimenStage off={false} label="Sample">
+      <Stage label="Sample">
         {regionDepiction(regionId, values, arrangement)}
-      </SpecimenStage>
+      </Stage>
     </div>
   );
 }
@@ -311,13 +345,13 @@ function ClipFadeCase(): ReactNode {
   const values = effectiveLayoutValues(basePreset, overrides);
   return (
     <div data-clip-case="usage-limits" style={{ width: 292 }}>
-      <SpecimenStage off={false} label="Sample">
+      <Stage label="Sample">
         {depictRegion("usageLimits", values.usageLimits, {
           ...arrangement,
           usageProviders: USAGE_PROVIDER_IDS,
           hiddenProviders: [],
         })}
-      </SpecimenStage>
+      </Stage>
     </div>
   );
 }
@@ -523,7 +557,7 @@ export function Fixture(): ReactNode {
     <TooltipProvider>
       <div data-layout-editing="1" style={{ width: 1400 }}>
         <section data-live-surface id="live-rail" style={{ display: "flex" }}>
-          <SampleWorkspaceRail />
+          <SampleWorkspaceSidebar />
         </section>
 
         <section data-live-surface id="live-toolbar" style={{ width: 720 }}>
@@ -548,8 +582,8 @@ export function Fixture(): ReactNode {
           <ClipFadeCase />
         </section>
 
-        <section id="presets" style={{ width: 320 }}>
-          <PresetsBlock onPreviewPreset={() => undefined} />
+        <section id="presets" style={{ width: 380 }}>
+          <PresetsBlock reveal={() => {}} />
         </section>
 
         {/* The two states the canvas decoration is read off: a dimmed leaf and
@@ -584,6 +618,7 @@ useLayoutEditorStore.getState().beginSession({
   entry: "pointer",
   source: "direct_ui",
   startedAt: 0,
+  origin: { kind: "tab" },
 });
 
 // Every dock member at Chip size, so the picture and the live leaf are

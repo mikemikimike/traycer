@@ -13,7 +13,7 @@ import { SIDE_STRIP_SECTION_LABEL_CLASS } from "./side-strip-tokens";
 
 /**
  * The Activity view's Needs you block (D10, D13), pinned under the nav rows:
- * the same items as the Inbox's Needs you group, from the same selector, and
+ * the same items as the Notifications drawer's Needs you group, from the same selector, and
  * only while there is one. A row opens its chat on the pending card through
  * the notification's own activation; nothing is approved or answered here.
  */

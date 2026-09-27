@@ -4,7 +4,9 @@ import { Analytics, AnalyticsEvent } from "@/lib/analytics";
 import {
   abandonLayoutEditorSession,
   closeLayoutEditor,
+  closeLayoutEditorForCloseTabChord,
   openLayoutEditor,
+  type LayoutEditorExitReason,
 } from "@/lib/layout/editor-session";
 import { setLayoutInspectorNode } from "@/lib/layout/editor-motion";
 import {
@@ -18,7 +20,10 @@ import { useEpicCanvasStore } from "@/stores/epics/canvas/store";
 import { setSystemTabModalApi } from "@/stores/tabs/system-tab-modal-bridge";
 import type { SystemModalActive } from "@/stores/tabs/system-overlay-types";
 import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import {
+  useLayoutEditorStore,
+  type LayoutEditorOrigin,
+} from "@/stores/layout/layout-editor-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
   getLayoutSnapshot,
@@ -29,20 +34,23 @@ import type { RegionId } from "@/lib/layout/region-id";
 import type { TabRef } from "@/stores/tabs/types";
 
 const navigation = vi.hoisted(() => ({
-  activateTabIntent: vi.fn(),
   navigateToSettingsSection: vi.fn(),
+  navigateToLayoutArea: vi.fn(),
 }));
 const toasts = vi.hoisted(() => ({ info: vi.fn() }));
 // The door's only two toasts are `info`; a namespace-only mock would make an
 // unexpected call throw rather than fail an assertion.
 vi.mock("sonner", () => ({ toast: { info: toasts.info } }));
-vi.mock("@/lib/tab-navigation", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/tab-navigation")>()),
-  activateTabIntent: navigation.activateTabIntent,
-}));
 vi.mock("@/lib/settings-navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/settings-navigation")>()),
   navigateToSettingsSection: navigation.navigateToSettingsSection,
+  // Mocked alongside its sibling rather than spied on separately: the door
+  // calls it by its own name, but `navigateToLayoutArea`'s own body calls
+  // `navigateToSettingsSection` through the SAME module's closure, not
+  // through this mocked export object - so overriding only the section
+  // navigator would leave the area navigator on its real implementation,
+  // which needs a published modal API this suite never stands up.
+  navigateToLayoutArea: navigation.navigateToLayoutArea,
 }));
 
 /**
@@ -58,7 +66,7 @@ vi.mock("@/lib/settings-navigation", async (importOriginal) => ({
  * The three cases that are ABOUT the guarded fallback turn a real guard on
  * (`data-reduce-panel-motion`) rather than uninstalling the API.
  */
-const navigate = vi.fn();
+const navigateToTabIntent = vi.fn();
 let transitions: Array<FakeViewTransition> = [];
 let uninstallViewTransitions: () => void = () => undefined;
 const HISTORY_REF: TabRef = { kind: "history", id: "history" };
@@ -83,20 +91,30 @@ function drainTransitions(): void {
 }
 
 function open(target: RegionId | null): boolean {
-  // The one door takes a `navigate` because the sample-workspace fallback is a
-  // real tab; every other path ignores it.
+  return openWithOrigin({ kind: "tab" }, target);
+}
+
+/** Opened from a named origin, for the exit-return tests (5.3). */
+function openWithOrigin(
+  origin: LayoutEditorOrigin,
+  target: RegionId | null,
+): boolean {
+  // The door takes a `navigateToTabIntent` callback because the
+  // sample-workspace fallback is a real tab, activated through the ordinary
+  // tab navigation controller; every other path ignores it.
   const opened = openLayoutEditor({
     source: "direct_ui",
     entry: "pointer",
     target,
-    navigate,
+    origin,
+    navigateToTabIntent,
   });
   drainTransitions();
   return opened;
 }
 
 /** Leaving, then the frame the view transition defers the teardown to. */
-function close(reason: "done" | "discard" | "tab-switch"): void {
+function close(reason: LayoutEditorExitReason): void {
   closeLayoutEditor(reason);
   drainTransitions();
 }
@@ -194,13 +212,13 @@ beforeEach(() => {
   transitions = installed.transitions;
   uninstallViewTransitions = installed.uninstall;
   window.localStorage.clear();
-  navigation.activateTabIntent.mockReset();
   navigation.navigateToSettingsSection.mockReset();
+  navigation.navigateToLayoutArea.mockReset();
   // The redirect reaches a Settings surface unless a test says otherwise; the
   // door only speaks up when it does not.
   navigation.navigateToSettingsSection.mockReturnValue(true);
   toasts.info.mockReset();
-  navigate.mockReset();
+  navigateToTabIntent.mockReset();
   publishModalApi(null);
   useCommandPaletteStore.setState({ open: false });
   setViewportWidth(1440);
@@ -303,11 +321,9 @@ describe("the canvas (L-87, 5.1)", () => {
 
     expect(open(null)).toBe(true);
 
-    expect(navigation.activateTabIntent).toHaveBeenCalledWith(
-      navigate,
-      { kind: "sample-workspace" },
-      undefined,
-    );
+    expect(navigateToTabIntent).toHaveBeenCalledWith({
+      kind: "sample-workspace",
+    });
     expect(sampleTabPresent()).toBe(true);
   });
 
@@ -415,7 +431,7 @@ describe("the command palette the door was reached from (L-134)", () => {
   it("is already dismissed when the activation runs", () => {
     useCommandPaletteStore.setState({ open: true });
     let paletteWasOpen: boolean | null = null;
-    navigation.activateTabIntent.mockImplementation(() => {
+    navigateToTabIntent.mockImplementation(() => {
       paletteWasOpen = useCommandPaletteStore.getState().open;
     });
 
@@ -424,11 +440,12 @@ describe("the command palette the door was reached from (L-134)", () => {
         source: "command_palette",
         entry: "keyboard",
         target: null,
-        navigate,
+        origin: { kind: "tab" },
+        navigateToTabIntent,
       }),
     ).toBe(true);
 
-    expect(navigation.activateTabIntent).toHaveBeenCalledOnce();
+    expect(navigateToTabIntent).toHaveBeenCalledOnce();
     expect(paletteWasOpen).toBe(false);
     expect(useCommandPaletteStore.getState().open).toBe(false);
   });
@@ -460,7 +477,8 @@ describe("asked again from inside a live session (L-19, L-129)", () => {
         source: "direct_ui",
         entry: "pointer",
         target: "minimap",
-        navigate,
+        origin: { kind: "tab" },
+        navigateToTabIntent,
       }),
     ).toBe(true);
 
@@ -518,7 +536,11 @@ describe("leaving (5.3)", () => {
     expect(getLayoutSnapshot().overrides.mic).toEqual({ shown: "hidden" });
   });
 
-  it("closes the sample tab it opened, but not one the user navigated away from", () => {
+  // The sample tab never outlives its session, whatever ended it: a sample
+  // left behind after a tab switch or a lost lease was a Customizing tab
+  // showing the sample with no inspector and no frame. Only `sample-closed`
+  // is exempt - there is nothing left to close.
+  it("closes the sample tab it opened, on every exit but sample-closed", () => {
     open(null);
     expect(sampleTabPresent()).toBe(true);
 
@@ -531,12 +553,117 @@ describe("leaving (5.3)", () => {
 
     close("tab-switch");
 
+    expect(sampleTabPresent()).toBe(false);
+
+    open(null);
     expect(sampleTabPresent()).toBe(true);
+
+    close("lease-lost");
+
+    expect(sampleTabPresent()).toBe(false);
   });
 
   it("is a no-op with no session open", () => {
     closeLayoutEditor("done");
     expect(useLayoutEditorStore.getState().session).toBeNull();
+  });
+});
+
+describe("the Cmd+W close-tab chord (item 3)", () => {
+  it("returns false and does nothing with no session open", () => {
+    expect(closeLayoutEditorForCloseTabChord()).toBe(false);
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+  });
+
+  it("runs Done and returns true with a session open", () => {
+    open(null);
+    expect(sampleTabPresent()).toBe(true);
+
+    expect(closeLayoutEditorForCloseTabChord()).toBe(true);
+    drainTransitions();
+
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+    expect(sampleTabPresent()).toBe(false);
+  });
+
+  it("still returns true while an exit is already under way", () => {
+    open(null);
+    closeLayoutEditor("done");
+    expect(useLayoutEditorStore.getState().leaving).toBe(true);
+
+    expect(closeLayoutEditorForCloseTabChord()).toBe(true);
+
+    drainTransitions();
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+  });
+});
+
+describe("returning to the door's origin on exit (5.3)", () => {
+  it("returns a settings-origin session to its area on Done", () => {
+    openWithOrigin({ kind: "settings", area: "chat" }, null);
+
+    close("done");
+
+    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
+      "chat",
+    );
+  });
+
+  it("returns a settings-origin session to its area on Discard too", () => {
+    openWithOrigin({ kind: "settings", area: "sidebar" }, null);
+
+    close("discard");
+
+    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
+      "sidebar",
+    );
+  });
+
+  it("returns to Presets for a settings-origin session opened with a null area", () => {
+    openWithOrigin({ kind: "settings", area: null }, null);
+
+    close("done");
+
+    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
+      null,
+    );
+  });
+
+  it("never navigates to Settings for a tab-origin session", () => {
+    // `open()` opens with a tab origin (L-87): closing the sample tab already
+    // returns the user to the tab they came from, so there is no Settings
+    // area to land on.
+    open(null);
+
+    close("done");
+
+    expect(navigation.navigateToLayoutArea).not.toHaveBeenCalled();
+  });
+
+  it("returns to Settings when the sample tab is closed by hand, for a settings-origin session", () => {
+    openWithOrigin({ kind: "settings", area: "topBar" }, null);
+
+    useTabsStore.setState((state) => ({
+      items: state.items.filter(
+        (item) => item.kind !== "tab" || item.ref.kind !== "sample-workspace",
+      ),
+    }));
+    drainTransitions();
+
+    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
+      "topBar",
+    );
+  });
+
+  it("sends open-settings to the editor's own current area, not the origin's", () => {
+    openWithOrigin({ kind: "settings", area: "chat" }, null);
+    useLayoutEditorStore.getState().openArea("sidebar", null);
+
+    close("open-settings");
+
+    expect(navigation.navigateToLayoutArea).toHaveBeenCalledExactlyOnceWith(
+      "sidebar",
+    );
   });
 });
 
@@ -552,7 +679,8 @@ describe("the entry method (L-30, L-54)", () => {
       source: "command_palette",
       entry: "keyboard",
       target: null,
-      navigate,
+      origin: { kind: "tab" },
+      navigateToTabIntent,
     });
 
     expect(useLayoutEditorStore.getState().session?.entry).toBe("keyboard");
@@ -639,7 +767,8 @@ describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
         source: "direct_ui",
         entry: "pointer",
         target: null,
-        navigate,
+        origin: { kind: "tab" },
+        navigateToTabIntent,
       }),
     ).toBe(true);
 
@@ -655,6 +784,56 @@ describe("re-opening during a view-transition exit (5.2, G2-02)", () => {
     expect(sampleTabPresent()).toBe(true);
     // And the new session holds the key the old one gave back.
     expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).not.toBeNull();
+  });
+});
+
+describe("the canvas or the shell going away before the entry transition lands", () => {
+  function openWithoutDraining(): void {
+    expect(
+      openLayoutEditor({
+        source: "direct_ui",
+        entry: "pointer",
+        target: null,
+        origin: { kind: "tab" },
+        navigateToTabIntent,
+      }),
+    ).toBe(true);
+    expect(transitions.length).toBeGreaterThan(0);
+  }
+
+  it("begins no session when the sample tab was closed before the entry callback ran", () => {
+    openWithoutDraining();
+
+    useTabsStore.setState((state) => ({
+      items: state.items.filter(
+        (item) => item.kind !== "tab" || item.ref.kind !== "sample-workspace",
+      ),
+    }));
+    drainTransitions();
+
+    expect(useLayoutEditorStore.getState().session).toBeNull();
+    expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
+    // The key is free again: a fresh open is not refused by a leaked lease.
+    expect(open(null)).toBe(true);
+  });
+
+  it("begins no session and runs no heartbeat when the shell abandoned the editor before the entry callback ran", () => {
+    vi.useFakeTimers();
+    try {
+      openWithoutDraining();
+
+      abandonLayoutEditorSession();
+      drainTransitions();
+
+      expect(useLayoutEditorStore.getState().session).toBeNull();
+      expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
+
+      // A heartbeat left running would re-take the lease on its next beat.
+      vi.advanceTimersByTime(10_000);
+      expect(window.localStorage.getItem(LAYOUT_EDITOR_LEASE_KEY)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -756,7 +935,8 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
       source: "command_palette",
       entry: "keyboard",
       target: null,
-      navigate,
+      origin: { kind: "tab" },
+      navigateToTabIntent,
     });
     drainTransitions();
     close("done");
@@ -789,7 +969,7 @@ describe("layout_editor_session analytics (L-46, L-54)", () => {
 });
 
 describe("the canvas going away underneath the editor (5.3)", () => {
-  it("exits when another tab takes over", () => {
+  it("exits when another tab takes over, closing the sample tab behind it and leaving the switched-to tab active", () => {
     open(null);
 
     useTabsStore.setState((state) => ({
@@ -798,10 +978,13 @@ describe("the canvas going away underneath the editor (5.3)", () => {
         { kind: "tab", id: tabItemId(EPIC_REF), ref: EPIC_REF },
       ],
       activeItemId: tabItemId(EPIC_REF),
+      stripOrder: [...state.stripOrder, EPIC_REF],
     }));
     drainTransitions();
 
     expect(useLayoutEditorStore.getState().session).toBeNull();
+    expect(sampleTabPresent()).toBe(false);
+    expect(useTabsStore.getState().activeItemId).toBe(tabItemId(EPIC_REF));
   });
 
   it("exits when the window narrows past the width the editor needs", () => {

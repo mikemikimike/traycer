@@ -13,18 +13,20 @@ import {
   type PaletteRootListProps,
 } from "@/components/command-palette/command-palette-shell";
 import { customizeSource } from "@/lib/commands/sources/customize.source";
+import type { OpenLayoutEditorInput } from "@/lib/layout/editor-session";
 import type { CommandContext, CommandItem } from "@/lib/commands/types";
 import { useCommandPaletteStore } from "@/stores/command-palette/command-palette-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
-const openLayoutEditorMock = vi.hoisted(() => vi.fn());
-const navigateMock = vi.hoisted(() => vi.fn());
+const openLayoutEditorMock = vi.hoisted(() =>
+  vi.fn<(input: OpenLayoutEditorInput) => boolean>(),
+);
 
-vi.mock("@tanstack/react-router", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@tanstack/react-router")>()),
-  useNavigate: () => navigateMock,
-}));
-
+// No `@tanstack/react-router` mock: the source takes `ctx.router`, never
+// `useNavigate()`, precisely because the palette mounts above
+// `RouterProvider`. Rendering these tests with no router mock and no
+// `<RouterProvider>` in the tree is itself the proof - a stray `useNavigate()`
+// would throw "outside a <RouterProvider>" rather than fail an assertion.
 vi.mock("@/lib/layout/editor-session", () => ({
   openLayoutEditor: openLayoutEditorMock,
 }));
@@ -40,7 +42,7 @@ function ctx(): CommandContext {
       navigateToEpicTab: () => undefined,
       navigateToEpicList: () => undefined,
       navigateSettingsSection: () => undefined,
-      navigateToTabIntent: () => undefined,
+      navigateToTabIntent: vi.fn(),
       goBack: () => undefined,
       goForward: () => undefined,
       isHistoryNavAvailable: () => false,
@@ -102,13 +104,14 @@ afterEach(() => {
 });
 
 describe("customizeSource", () => {
-  it("opens the editor through the door, as a keyboard entry", () => {
-    const [item, ...rest] = items();
+  it("opens the editor through the door, as a keyboard entry, with the palette's own navigateToTabIntent", () => {
+    const [item, settingsItem, ...rest] = items();
     expect(rest).toEqual([]);
     expect(item.label).toBe("Customize layout");
     expect(item.disabled).toBeUndefined();
 
-    void item.run(ctx());
+    const runCtx = ctx();
+    void item.run(runCtx);
 
     expect(openLayoutEditorMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -117,8 +120,25 @@ describe("customizeSource", () => {
         // View Transition as well as being reported (L-30, L-54).
         entry: "keyboard",
         target: null,
+        origin: { kind: "tab" },
+        // `ctx.router`, never `useNavigate()`: the palette mounts above
+        // `RouterProvider`, where the hook has no router to navigate with.
+        navigateToTabIntent: runCtx.router.navigateToTabIntent,
       }),
     );
+
+    // What the door was handed reaches the palette router adapter's own
+    // `navigateToTabIntent` when called, carrying the sample-workspace intent.
+    const passed =
+      openLayoutEditorMock.mock.calls.at(-1)?.[0]?.navigateToTabIntent;
+    passed?.({ kind: "sample-workspace" });
+    expect(runCtx.router.navigateToTabIntent).toHaveBeenCalledWith({
+      kind: "sample-workspace",
+    });
+
+    // The palette's second layout door: the same form, reached via Settings.
+    expect(settingsItem.id).toBe("customize:layout-settings");
+    expect(settingsItem.label).toBe("Layout settings");
   });
 
   it("offers nothing from inside a session", () => {
@@ -127,6 +147,7 @@ describe("customizeSource", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: 0,
+        origin: { kind: "tab" },
       },
     });
 
@@ -135,10 +156,11 @@ describe("customizeSource", () => {
 
   // The door declines while another window holds the lease (L-32), so the row
   // says why instead of being a press that does nothing.
-  it("explains itself rather than acting while another window holds it", () => {
+  it("explains itself rather than acting while another window holds it, and offers only that one item", () => {
     useLayoutEditorStore.setState({ lockedBy: "other-window" });
-    const [item] = items();
+    const [item, ...rest] = items();
 
+    expect(rest).toEqual([]);
     expect(item.disabled).toBe(true);
     expect(item.description).toContain("another window");
 

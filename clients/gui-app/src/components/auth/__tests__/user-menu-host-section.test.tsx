@@ -416,7 +416,7 @@ describe("<UserMenu /> host section", () => {
       activeHostId: active.hostId,
     });
     // A write already in flight FROM ANOTHER SURFACE (Settings, or an earlier
-    // pick this same menu made before it was reopened) — the module-level
+    // pick this same menu made before it was reopened) - the module-level
     // latch means every mount of the hook sees it, this menu's included.
     activatingHostRef.value = "host-pending";
     const makeActive = vi.fn();

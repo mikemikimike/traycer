@@ -212,6 +212,7 @@ describe("SettingsSetupGuide", () => {
         entry: "pointer",
         source: "direct_ui",
         startedAt: Date.now(),
+        origin: { kind: "tab" },
       },
     });
 

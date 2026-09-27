@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  resetSurface,
-  surfaceChanged,
-} from "@/components/layout-editor/regions/surface-diff";
+import { surfaceChanged } from "@/components/layout-editor/regions/surface-diff";
 import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
 import { DEFAULT_LAYOUT_SNAPSHOT } from "@/stores/layout/layout-store";
@@ -215,71 +212,5 @@ describe("surfaceChanged", () => {
       },
     };
     expect(surfaceChanged(snapshot, "statusBar")).toBe(false);
-  });
-});
-
-describe("resetSurface", () => {
-  it("clears exactly that surface's overrides, preserving every other surface's", () => {
-    const snapshot: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      overrides: {
-        homeTab: { shown: "hidden" },
-        usageLimits: { bar: false },
-      },
-    };
-
-    const reset = resetSurface(snapshot, "topBar");
-
-    expect(reset.overrides.homeTab).toBeUndefined();
-    expect(reset.overrides.usageLimits).toEqual({ bar: false });
-  });
-
-  it("puts that surface's arrangement fields back to shipped, leaving another surface's field, dividerSeq and basePreset untouched", () => {
-    const bumpedDividerSeq = DEFAULT_ARRANGEMENT.dividerSeq + 7;
-    const snapshot: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      basePreset: "compact",
-      arrangement: {
-        ...DEFAULT_ARRANGEMENT,
-        sidebarSide: "right",
-        rail: [...DEFAULT_ARRANGEMENT.rail].reverse(),
-        dividerSeq: bumpedDividerSeq,
-        // chat's own field, left alone by a sidebar reset.
-        minimapSide: "left",
-      },
-    };
-
-    const reset = resetSurface(snapshot, "sidebar");
-
-    expect(reset.arrangement.sidebarSide).toBe(DEFAULT_ARRANGEMENT.sidebarSide);
-    expect(reset.arrangement.rail).toEqual(DEFAULT_ARRANGEMENT.rail);
-    expect(reset.arrangement.dividerSeq).toBe(bumpedDividerSeq);
-    expect(reset.arrangement.minimapSide).toBe("left");
-    expect(reset.basePreset).toBe("compact");
-  });
-
-  it("on Status bar, clears the provider list, hidden providers, limits and the footer, leaving the bar placements of other surfaces' business alone", () => {
-    const snapshot: LayoutSnapshot = {
-      ...DEFAULT_LAYOUT_SNAPSHOT,
-      arrangement: {
-        ...DEFAULT_ARRANGEMENT,
-        usageHost: "header",
-        hiddenProviders: [DEFAULT_ARRANGEMENT.usageProviders[0]],
-        providerLimits: {
-          [DEFAULT_ARRANGEMENT.usageProviders[1]]: { limitKeys: ["5h"] },
-        },
-        mobileFooter: true,
-        // sidebar's own field, left alone by a status-bar reset.
-        sidebarSide: "right",
-      },
-    };
-
-    const reset = resetSurface(snapshot, "statusBar");
-
-    expect(reset.arrangement.usageHost).toBe(DEFAULT_ARRANGEMENT.usageHost);
-    expect(reset.arrangement.hiddenProviders).toEqual([]);
-    expect(reset.arrangement.providerLimits).toEqual({});
-    expect(reset.arrangement.mobileFooter).toBe(false);
-    expect(reset.arrangement.sidebarSide).toBe("right");
   });
 });

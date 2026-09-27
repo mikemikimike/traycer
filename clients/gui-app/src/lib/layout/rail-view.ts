@@ -2,22 +2,24 @@ import { useMemo } from "react";
 import {
   areRailsEqual,
   panelVisibilityOverridesFromValues,
-  RAIL_REGION_BY_PANEL,
   railRegionForLeftPanelId,
   railVisibilityFor,
   type RailEntry,
 } from "@/lib/layout/rail";
 import { effectiveLayoutValues } from "@/lib/layout/layout-presets";
-import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
-import type {
-  EdgeSide,
-  LayoutArrangement,
+import {
+  writeArrangement,
+  writeArrangementField,
+} from "@/lib/layout/arrangement-gestures";
+import {
+  unstackRailPanel,
+  type EdgeSide,
+  type LayoutArrangement,
 } from "@/lib/layout/layout-arrangement";
 import type {
   LeftPanelId,
   PanelVisibilityOverrideById,
 } from "@/lib/left-panel-ids";
-import type { LayoutValueKeysByRegion } from "@/lib/layout/layout-snapshot";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useLayoutStore } from "@/stores/layout/layout-store";
 
@@ -104,8 +106,7 @@ export function applyRail(nextRail: ReadonlyArray<RailEntry>): void {
  * `null` is not a pick, it is the ABSENCE of one, so it is a revert and takes
  * the answer out of the delta (L-133): recording `auto` would store a pick
  * that pins the panel against the day a preset sets a rail region to anything
- * else, and would put nine such records in a user's delta every time they
- * reset panel visibility.
+ * else.
  */
 export function setRailVisibilityOverride(
   panelId: LeftPanelId,
@@ -123,17 +124,14 @@ export function setRailVisibilityOverride(
   });
 }
 
-/** Every panel back on its own rule, as ONE write and one undo step. */
-export function clearRailVisibilityOverrides(): void {
-  const keysByRegion: LayoutValueKeysByRegion = Object.fromEntries(
-    Object.values(RAIL_REGION_BY_PANEL).map((regionId) => [
-      regionId,
-      ["shown"],
-    ]),
-  );
-  useLayoutEditorStore.getState().recordGesture(() => {
-    useLayoutStore.getState().clearRegionValuesMany(keysByRegion);
-  });
+/**
+ * One panel taken out of its stack from the rail's own menu (L-181), as one
+ * recorded gesture: an Undo step in a session, a plain write at rest.
+ */
+export function unstackRailMember(panelId: LeftPanelId): void {
+  const arrangement = useLayoutStore.getState().arrangement;
+  const next = unstackRailPanel(arrangement, railRegionForLeftPanelId(panelId));
+  if (next !== arrangement) writeArrangement(next);
 }
 
 /**

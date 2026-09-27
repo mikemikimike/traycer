@@ -1,3 +1,4 @@
+import { cssEscape } from "@/lib/dom/css-escape";
 import { useCallback, useEffect, useRef } from "react";
 import { useSettingsSearchStore } from "@/stores/settings/settings-search-store";
 import type { SettingsSectionId } from "@/lib/settings-sections";
@@ -250,21 +251,6 @@ function nearestScrollingAncestor(element: Element): HTMLElement | null {
     current = current.parentElement;
   }
   return null;
-}
-
-/**
- * Anchors are authored kebab-case tokens, so this never has real work to do —
- * but the value reaches `querySelector`, and a selector built by
- * concatenation is the one place a future anchor with a dot or a colon in it
- * would stop being a lookup and start being a different selector. `CSS.escape`
- * where the runtime has it (every browser this app targets), and a
- * conservative fallback for the jsdom-shaped environments that do not.
- */
-function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
-  return value.replace(/[^\w-]/g, "\\$&");
 }
 
 function prefersReducedMotion(): boolean {

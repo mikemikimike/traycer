@@ -63,9 +63,19 @@ vi.mock("@/hooks/notifications/use-host-notification-indicators-query", () => ({
     refetch: () => Promise.resolve(),
   }),
 }));
-vi.mock("@/hooks/epic/use-epic-task-pinned-states-query", () => ({
-  useEpicTaskPinnedStates: () => new Map<string, TaskPinnedState>(),
-}));
+vi.mock(
+  "@/hooks/epic/use-epic-task-pinned-states-query",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/hooks/epic/use-epic-task-pinned-states-query")
+      >();
+    return {
+      ...actual,
+      useEpicTaskPinnedStates: () => new Map<string, TaskPinnedState>(),
+    };
+  },
+);
 vi.mock("@/hooks/epic/use-epic-set-pinned-mutation", async (importOriginal) => {
   const actual =
     await importOriginal<

@@ -1,28 +1,49 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
+  ChevronDown,
+  Ellipsis,
   PanelLeft,
   PanelRight,
   PictureInPicture2,
   Redo2,
+  Settings2,
   Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  ButtonGroup,
+  ButtonGroupSeparator,
+} from "@/components/ui/button-group";
+import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
+import { formatChordForDisplay } from "@/lib/keybindings/chord";
+import { useBindingForAction } from "@/stores/settings/keybinding-store";
 import { cn } from "@/lib/utils";
 import { RelayRow } from "@/components/layout-editor/inspector/relay-row";
 import type { LayoutDockMode } from "@/stores/layout/layout-editor-store";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 
+/**
+ * How the chrome leaves the editor: Done, Discard (the entry snapshot back
+ * first), or the full-width page. Ending a session is the door's job, so the
+ * caller owns all three. Escape is not one of them: it never closes the editor
+ * (audit F5).
+ */
+export type InspectorExit = "done" | "discard" | "open-settings";
+
 interface InspectorShellProps {
-  /**
-   * Leaving the editor, and how (5.3): the Done button, or Discard changes -
-   * which restores the entry snapshot on the way out rather than leaving the
-   * user in an editor they just emptied. The caller owns both, because ending
-   * a session is the door's job; the third way out, an Escape that walked off
-   * the bottom rung of the ladder, is the editor root's (`layout-editor.tsx`)
-   * and never belonged to this chrome.
-   */
-  readonly onExit: (reason: "done" | "discard") => void;
+  readonly onExit: (reason: InspectorExit) => void;
   readonly children: ReactNode;
 }
 
@@ -37,18 +58,13 @@ const DOCK_MODES: ReadonlyArray<{
 ];
 
 /**
- * The inspector's own chrome (L-05): header (title, dock mode, Undo/Redo,
- * Done), the relay slot, the scrollable body the caller supplies, and the
- * footer's Discard changes. `.insp-head` / `.insp-foot` in the prototype.
+ * The inspector's own chrome (L-05): the header (title, the ⋯ menu with the
+ * dock modes, Undo/Redo, the split `Done ▾`), the relay slot and the
+ * scrollable body the caller supplies.
  *
- * The dock is its one host. L-03's "one form, two hosts" is about the SECTION
- * TREE - `RegionSection` and `PresetsBlock`, which `Settings > Layout` renders
- * inside its own `SettingsPanelShell` - not about this chrome: Undo, Redo, the
- * dock-mode group and Done are the instrument panel's, and the full-width page
- * has no use for any of them.
- *
- * 320px is the plan's one frozen inspector width (section 6); every other
- * measurement here is fluid, so the panel fits whatever the dock gives it.
+ * The dock is its one host. L-03's "one form, two hosts" is about the form,
+ * which `Settings > Layout` draws inside its own shell; Undo, Redo, the dock
+ * menu and Done are the instrument panel's.
  */
 export function InspectorShell(props: InspectorShellProps): ReactNode {
   const { onExit } = props;
@@ -59,9 +75,6 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
   const canRedo = useLayoutEditorStore(
     (state) => state.history.future.length > 0,
   );
-  // A boolean the gesture paths maintain, never a selector that serialises the
-  // layout triple on every editor-store notification (G1-04).
-  const canDiscard = useLayoutEditorStore((state) => state.dirty);
 
   return (
     <div
@@ -77,7 +90,7 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
       <div
         data-layout-inspector-header
         className={cn(
-          "flex h-11 shrink-0 items-center gap-1.5 border-b border-border pr-2.5 pl-3.5",
+          "flex h-11 shrink-0 items-center gap-0.5 border-b border-border pr-2.5 pl-3.5",
           // Docked left, this header sits at the window's top-left corner, so
           // it keeps the traffic-light reserve the app column gives up.
           dockMode === "left" &&
@@ -86,59 +99,131 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
       >
         <span className="text-ui-sm font-medium tracking-[0.01em]">Layout</span>
         <span className="flex-1" />
-        <div
-          role="group"
-          aria-label="Dock mode"
-          className="flex items-center gap-0.5"
+        <InspectorMenu
+          dockMode={dockMode}
+          onOpenSettings={() => {
+            onExit("open-settings");
+          }}
+        />
+        <TooltipWrapper
+          label="Undo"
+          side="bottom"
+          sideOffset={undefined}
+          align={undefined}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Undo"
+            disabled={!canUndo}
+            onClick={() => {
+              useLayoutEditorStore.getState().undo();
+            }}
+          >
+            <Undo2 />
+          </Button>
+        </TooltipWrapper>
+        <TooltipWrapper
+          label="Redo"
+          side="bottom"
+          sideOffset={undefined}
+          align={undefined}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Redo"
+            disabled={!canRedo}
+            onClick={() => {
+              useLayoutEditorStore.getState().redo();
+            }}
+          >
+            <Redo2 />
+          </Button>
+        </TooltipWrapper>
+        <DoneButton onExit={onExit} />
+      </div>
+      <RelayRow
+        onDone={() => {
+          onExit("done");
+        }}
+      />
+      <div className="min-h-0 flex-1 overflow-auto">{props.children}</div>
+    </div>
+  );
+}
+
+/** `⋯`: where the panel sits, and the way to the full-width page. */
+function InspectorMenu(props: {
+  readonly dockMode: LayoutDockMode;
+  readonly onOpenSettings: () => void;
+}): ReactNode {
+  return (
+    <DropdownMenu>
+      <TooltipWrapper
+        label="Inspector options"
+        side="bottom"
+        sideOffset={undefined}
+        align={undefined}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Inspector options"
+          >
+            <Ellipsis />
+          </Button>
+        </DropdownMenuTrigger>
+      </TooltipWrapper>
+      <DropdownMenuContent align="end" className="w-[min(90vw,13rem)]">
+        <DropdownMenuLabel>Inspector</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={props.dockMode}
+          onValueChange={(value) => {
+            const entry = DOCK_MODES.find((mode) => mode.mode === value);
+            if (entry !== undefined)
+              useLayoutEditorStore.getState().setDockMode(entry.mode);
+          }}
         >
           {DOCK_MODES.map((entry) => (
-            <TooltipWrapper
-              key={entry.mode}
-              label={entry.label}
-              side="bottom"
-              sideOffset={undefined}
-              align={undefined}
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={entry.label}
-                aria-pressed={dockMode === entry.mode}
-                onClick={() => {
-                  useLayoutEditorStore.getState().setDockMode(entry.mode);
-                }}
-              >
-                {entry.icon}
-              </Button>
-            </TooltipWrapper>
+            <DropdownMenuRadioItem key={entry.mode} value={entry.mode}>
+              {entry.icon}
+              {entry.label}
+            </DropdownMenuRadioItem>
           ))}
-        </div>
-        <span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Undo"
-          disabled={!canUndo}
-          onClick={() => {
-            useLayoutEditorStore.getState().undo();
-          }}
-        >
-          <Undo2 />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Redo"
-          disabled={!canRedo}
-          onClick={() => {
-            useLayoutEditorStore.getState().redo();
-          }}
-        >
-          <Redo2 />
-        </Button>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={props.onOpenSettings}>
+          <Settings2 />
+          Open Layout settings
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The split `Done ▾`. Done keeps what the session wrote, because it applied
+ * live; the menu holds the one way back, behind a confirm.
+ */
+function DoneButton(props: {
+  readonly onExit: (reason: InspectorExit) => void;
+}): ReactNode {
+  const { onExit } = props;
+  // A boolean the gesture paths maintain, never a selector that serialises the
+  // layout triple on every editor-store notification (G1-04).
+  const canDiscard = useLayoutEditorStore((state) => state.dirty);
+  const [confirming, setConfirming] = useState(false);
+  // Done's chord is whatever Close tab is bound to: that binding is what the
+  // editor intercepts as Done (`closeLayoutEditorForCloseTabChord`).
+  const closeChord = useBindingForAction("tab.close");
+  return (
+    <>
+      <ButtonGroup className="ml-1.5">
         <Button
           type="button"
           size="sm"
@@ -148,26 +233,60 @@ export function InspectorShell(props: InspectorShellProps): ReactNode {
         >
           Done
         </Button>
-      </div>
-      <RelayRow
-        onDone={() => {
-          onExit("done");
+        <ButtonGroupSeparator />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="icon-sm" aria-label="More ways out">
+              <ChevronDown />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-[min(90vw,15rem)]">
+            <DropdownMenuItem
+              onSelect={() => {
+                onExit("done");
+              }}
+            >
+              {/* An empty icon slot, not a check: a check reads as a
+                  selected state. It keeps the label on Discard's column. */}
+              <span aria-hidden className="size-4 shrink-0" />
+              Done
+              {closeChord === null ? null : (
+                <DropdownMenuShortcut>
+                  {formatChordForDisplay(closeChord)}
+                </DropdownMenuShortcut>
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={!canDiscard}
+              onSelect={() => {
+                setConfirming(true);
+              }}
+            >
+              <Undo2 />
+              Discard session changes…
+            </DropdownMenuItem>
+            <p className="px-1.5 pb-1 pl-7 text-ui-xs text-muted-foreground">
+              Back to your layout from when you opened the editor.
+            </p>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </ButtonGroup>
+      <ConfirmDestructiveDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Discard session changes?"
+        description="Your layout goes back to how it was when you opened the editor, and the editor closes."
+        cascadeSummary={null}
+        actionLabel="Discard changes"
+        isPending={false}
+        blockedReason={null}
+        onConfirm={() => {
+          setConfirming(false);
+          onExit("discard");
         }}
       />
-      <div className={cn("min-h-0 flex-1 overflow-auto")}>{props.children}</div>
-      <div className="flex shrink-0 items-center border-t border-border px-2.5 py-1.5">
-        <Button
-          type="button"
-          variant="muted"
-          size="sm"
-          disabled={!canDiscard}
-          onClick={() => {
-            onExit("discard");
-          }}
-        >
-          Discard changes
-        </Button>
-      </div>
-    </div>
+    </>
   );
 }
