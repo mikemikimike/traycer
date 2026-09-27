@@ -2,6 +2,7 @@ import { useLayoutEffect, useState } from "react";
 import { usePaneVisible } from "@/components/epic-tabs/pane-visibility-context";
 import {
   useLayoutEditorStore,
+  type LayoutSettingId,
   type PlacementSurfaceId,
 } from "@/stores/layout/layout-editor-store";
 
@@ -32,5 +33,41 @@ export function useLayoutSurface(
       useLayoutEditorStore.getState().unregisterSurfaceNode(surface, node);
     };
   }, [node, editing, visible, surface]);
+  return setNode;
+}
+
+/**
+ * Marks the element that draws a setting's part on the canvas - the live
+ * agents list under the active tab for Side tab view - so the canvas can hover
+ * and select it and the ring can go around it. Gated like
+ * {@link useLayoutSurface}. `data-hover` is the same outline a hovered region
+ * wears; the selected one wears the ring instead.
+ */
+export function useLayoutSettingPart(
+  setting: LayoutSettingId,
+): (node: HTMLElement | null) => void {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const editing = useLayoutEditorStore((state) => state.session !== null);
+  const hovered = useLayoutEditorStore(
+    (state) =>
+      state.hoveredSetting === setting && state.selectedSetting !== setting,
+  );
+  const visible = usePaneVisible();
+  useLayoutEffect(() => {
+    if (node === null || !editing || !visible) return;
+    node.setAttribute("data-layout-setting", setting);
+    useLayoutEditorStore.getState().registerSettingNode(setting, node);
+    return () => {
+      node.removeAttribute("data-layout-setting");
+      useLayoutEditorStore.getState().unregisterSettingNode(setting, node);
+    };
+  }, [node, editing, visible, setting]);
+  useLayoutEffect(() => {
+    if (node === null || !hovered) return;
+    node.setAttribute("data-hover", "1");
+    return () => {
+      node.removeAttribute("data-hover");
+    };
+  }, [node, hovered]);
   return setNode;
 }

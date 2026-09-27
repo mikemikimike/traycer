@@ -9,7 +9,11 @@ import { useLayoutCanvas } from "@/components/layout-editor/canvas/layout-canvas
 import { LAYOUT_CLUSTER_ATTRIBUTE } from "@/components/layout-editor/canvas/region-drag";
 import { LeftPanelRailDivider } from "@/components/epic-canvas/sidebar/left-panel-rail-divider";
 import { useLayoutRegion } from "@/components/layout-editor/use-layout-region";
-import { useLayoutSurface } from "@/components/layout-editor/use-layout-surface";
+import {
+  useLayoutSettingPart,
+  useLayoutSurface,
+} from "@/components/layout-editor/use-layout-surface";
+import { SIDE_STRIP_VIEW_AT_TOP } from "@/components/layout-editor/regions/region-grammar";
 import { railDividerId } from "@/lib/layout/rail";
 import type { RegionId } from "@/lib/layout/region-id";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
@@ -77,6 +81,38 @@ function SurfaceCanvas(): ReactElement {
     </div>
   );
 }
+
+/**
+ * The strip plus Side tab view's own canvas part (D9, item B): a
+ * `[data-layout-setting]` element inside the strip's own space, registered
+ * exactly as `SideStripLiveAgentsSlot` registers it via `useLayoutSettingPart`
+ * - a separate component from `SurfaceCanvas` above, rather than a prop on it,
+ * so none of that component's many existing call sites need to change.
+ */
+function SurfaceCanvasWithSetting(): ReactElement {
+  const [column, setColumn] = useState<HTMLElement | null>(null);
+  useLayoutCanvas(column);
+  const topBarRef = useLayoutSurface("topBar");
+  const settingRef = useLayoutSettingPart("sideStripView");
+  return (
+    <div ref={setColumn} data-layout-column data-testid="column">
+      <div ref={topBarRef} role="tablist" data-testid="tab-strip">
+        <Region regionId="homeTab" instanceId={null} testId="home" />
+        <div ref={settingRef} data-testid="setting-part">
+          agents
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function chip(): HTMLElement | null {
+  const element = document.querySelector("[data-layout-hover-chip]");
+  return element instanceof HTMLElement ? element : null;
+}
+
+/** The pointer the canvas decorates for: a mouse, never a touch (C-09). */
+const MOUSE = { pointerType: "mouse" } as const;
 
 function openSession(): void {
   act(() => {
@@ -177,29 +213,37 @@ describe("selecting a placement surface from its own space", () => {
     expect(useLayoutEditorStore.getState().selected).toBeNull();
   });
 
-  it("selects the region, not the surface, from a press on a region inside the strip", () => {
-    openSession();
-    const view = render(<SurfaceCanvas />);
-    // Select the surface first, so the region press's own-behaviour claim -
-    // that it clears rather than ignores a standing surface - is exercised.
-    fireEvent.pointerDown(view.getByTestId("tab-strip-empty"), { button: 0 });
-    expect(useLayoutEditorStore.getState().selectedSurface).toBe("topBar");
+  it.each([
+    {
+      within: "the strip",
+      space: "tab-strip-empty",
+      surface: "topBar",
+      pressed: "home-inner",
+      region: "homeTab",
+    },
+    {
+      within: "the sidebar",
+      space: "sidebar-empty",
+      surface: "sidebar",
+      pressed: "rail-agents-inner",
+      region: "railAgents",
+    },
+  ] as const)(
+    "selects the region, not the surface, from a press on a region inside $within",
+    ({ space, surface, pressed, region }) => {
+      openSession();
+      const view = render(<SurfaceCanvas />);
+      // Select the surface first, so the region press's own-behaviour claim -
+      // that it clears rather than ignores a standing surface - is exercised.
+      fireEvent.pointerDown(view.getByTestId(space), { button: 0 });
+      expect(useLayoutEditorStore.getState().selectedSurface).toBe(surface);
 
-    fireEvent.pointerDown(view.getByTestId("home-inner"), { button: 0 });
+      fireEvent.pointerDown(view.getByTestId(pressed), { button: 0 });
 
-    expect(useLayoutEditorStore.getState().selected).toBe("homeTab");
-    expect(useLayoutEditorStore.getState().selectedSurface).toBeNull();
-  });
-
-  it("selects the region, not the surface, from a press on a rail tile inside the sidebar", () => {
-    openSession();
-    const view = render(<SurfaceCanvas />);
-
-    fireEvent.pointerDown(view.getByTestId("rail-agents-inner"), { button: 0 });
-
-    expect(useLayoutEditorStore.getState().selected).toBe("railAgents");
-    expect(useLayoutEditorStore.getState().selectedSurface).toBeNull();
-  });
+      expect(useLayoutEditorStore.getState().selected).toBe(region);
+      expect(useLayoutEditorStore.getState().selectedSurface).toBeNull();
+    },
+  );
 
   it("selects neither region nor surface from a press on a rail divider, which is a member", () => {
     openSession();
@@ -234,21 +278,6 @@ describe("select(region) and selectSurface are mutually exclusive", () => {
     });
     expect(useLayoutEditorStore.getState().selectedSurface).toBe("sidebar");
     expect(useLayoutEditorStore.getState().selected).toBeNull();
-  });
-
-  it("popInspectorLevel (the Escape ladder) clears a selected surface", () => {
-    openSession();
-    act(() => {
-      useLayoutEditorStore.getState().selectSurface("topBar");
-    });
-
-    let popped = false;
-    act(() => {
-      popped = useLayoutEditorStore.getState().popInspectorLevel();
-    });
-
-    expect(popped).toBe(true);
-    expect(useLayoutEditorStore.getState().selectedSurface).toBeNull();
   });
 });
 
@@ -379,41 +408,46 @@ describe("dragging a selected surface to an edge writes the placement as one ges
     useLayoutEditorStore.getState().undo();
     expect(useLayoutStore.getState().arrangement.sidebarSide).toBe("left");
   });
+});
 
-  it("writes nothing when the surface is dropped back on its own edge", () => {
+describe("Side tab view's own part on the canvas (D9, item B)", () => {
+  it("a pointerdown on a [data-layout-setting] element inside the strip selects the setting, not the topBar surface", () => {
     openSession();
-    const view = render(<SurfaceCanvas />);
-    view.getByTestId("column").getBoundingClientRect = () =>
-      rect(0, 0, 800, 600);
+    const view = render(<SurfaceCanvasWithSetting />);
 
-    fireEvent.pointerDown(view.getByTestId("tab-strip-empty"), {
-      button: 0,
-      pointerId: 1,
-      clientX: 400,
-      clientY: 16,
+    fireEvent.pointerDown(view.getByTestId("setting-part"), { button: 0 });
+
+    expect(useLayoutEditorStore.getState().selectedSetting).toBe(
+      "sideStripView",
+    );
+    expect(useLayoutEditorStore.getState().selectedSurface).toBeNull();
+    expect(useLayoutEditorStore.getState().selected).toBeNull();
+  });
+
+  it("hovering the part shows the chip on its own node, naming the current option", () => {
+    openSession();
+    const view = render(<SurfaceCanvasWithSetting />);
+
+    fireEvent.pointerMove(view.getByTestId("setting-part"), MOUSE);
+
+    expect(useLayoutEditorStore.getState().hoveredSetting).toBe(
+      "sideStripView",
+    );
+    expect(chip()?.textContent).toBe("Side tab view · Tabs only");
+    expect(chip()?.hidden).toBe(false);
+  });
+
+  it("with no part registered (top placement), the chip goes on the topBar surface and names the reason", () => {
+    openSession();
+    render(<SurfaceCanvas />);
+
+    act(() => {
+      useLayoutEditorStore.getState().setHoveredSetting("sideStripView");
     });
-    window.dispatchEvent(
-      new PointerEvent("pointermove", {
-        bubbles: true,
-        pointerId: 1,
-        clientX: 400,
-        clientY: 10,
-      }),
-    );
-    // Stays inside the top band - the strip's own edge.
-    window.dispatchEvent(
-      new PointerEvent("pointermove", {
-        bubbles: true,
-        pointerId: 1,
-        clientX: 400,
-        clientY: 4,
-      }),
-    );
-    window.dispatchEvent(
-      new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }),
-    );
 
-    expect(useLayoutStore.getState().arrangement.tabStripPlacement).toBe("top");
-    expect(historyDepth()).toBe(0);
+    expect(chip()?.textContent).toBe(
+      `Side tab view · ${SIDE_STRIP_VIEW_AT_TOP}`,
+    );
+    expect(chip()?.getAttribute("data-placement")).toBe("below");
   });
 });

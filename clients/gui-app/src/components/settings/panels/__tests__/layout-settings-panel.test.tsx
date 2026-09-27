@@ -891,7 +891,7 @@ describe("Settings - Layout", () => {
           .every((option) => option.disabled),
       ).toBe(false);
       await user.click(
-        within(viewGroup).getByRole("radio", { name: "Activity" }),
+        within(viewGroup).getByRole("radio", { name: "Tabs and agents" }),
       );
 
       expect(useLayoutStore.getState().arrangement.sideStripView).toBe(

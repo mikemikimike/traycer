@@ -11,7 +11,6 @@ import { Check, ChevronRight, Wrench } from "lucide-react";
 import {
   type AppFrame,
   AppFrameComposerStack,
-  AppFrameLiveAgentItems,
   AppFramePanelTaskHeader,
   AppFrameRailEntries,
   AppFrameRegion,
@@ -19,6 +18,7 @@ import {
   AppFrameStatusBarRow,
   AppFrameTopBar,
 } from "@/components/layout-editor/inspector/app-frame-chrome";
+import { SampleLiveAgentItems } from "@/components/sample-workspace/sample-strip-live-agents";
 import {
   SIDE_STRIP_DEFAULT_WIDTH_PX,
   SIDE_STRIP_RAIL_WIDTH_PX,
@@ -515,7 +515,7 @@ function MiniaturePanel({ values, arrangement }: AppFrame): ReactNode {
       </div>
       <AppFramePanelTaskHeader />
       <ul className="flex flex-col gap-0.5 px-2 pt-1">
-        <AppFrameLiveAgentItems />
+        <SampleLiveAgentItems />
       </ul>
     </div>
   );

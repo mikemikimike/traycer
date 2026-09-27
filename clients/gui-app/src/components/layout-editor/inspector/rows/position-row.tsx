@@ -55,6 +55,7 @@ export function PositionHostRow(props: {
       label="Location"
       revertLabel="Revert Location"
       stacked={false}
+      selected={false}
       description={description}
       onRevert={
         positionAxisChanged(snapshot, regionId, "position-host")
@@ -101,6 +102,7 @@ export function PositionSideRow(props: {
       label={bar === null ? "Side" : "Alignment"}
       revertLabel={bar === null ? "Revert Side" : "Revert Alignment"}
       stacked={false}
+      selected={false}
       description={footAlignment ? SIDE_TAB_ALIGNMENT_HELPER : description}
       onRevert={
         positionAxisChanged(snapshot, regionId, "position-side")

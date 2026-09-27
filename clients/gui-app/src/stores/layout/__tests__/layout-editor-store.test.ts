@@ -433,6 +433,98 @@ describe("toggleRow also selects, for a region row's own disclosure (item toggle
   });
 });
 
+describe("selectSetting (Side tab view's own kind of canvas selection, L-…)", () => {
+  it("opens topBar, clears a selected region and surface, and clears the filter", () => {
+    session();
+    editorState().select("usageLimits");
+    editorState().setFilter("usage");
+
+    editorState().selectSetting("sideStripView");
+
+    expect(editorState().area).toBe("topBar");
+    expect(editorState().selectedSetting).toBe("sideStripView");
+    expect(editorState().selected).toBeNull();
+    expect(editorState().selectedSurface).toBeNull();
+    expect(editorState().filter).toBe("");
+  });
+
+  it("is a guarded no-op once the same setting is already selected with nothing else standing", () => {
+    session();
+    editorState().selectSetting("sideStripView");
+    const before = editorState();
+
+    editorState().selectSetting("sideStripView");
+
+    // Same object reference: `set` never ran a second time.
+    expect(editorState()).toBe(before);
+  });
+
+  it.each([
+    { name: "select(region)", act: () => editorState().select("minimap") },
+    { name: "select(null)", act: () => editorState().select(null) },
+    {
+      name: "selectSurface",
+      act: () => editorState().selectSurface("topBar"),
+    },
+    { name: "openArea", act: () => editorState().openArea("chat", null) },
+    {
+      name: "toggleRow opening a region row",
+      act: () => editorState().toggleRow("usageLimits"),
+    },
+  ])("$name clears a selected setting", ({ act }) => {
+    session();
+    editorState().selectSetting("sideStripView");
+    expect(editorState().selectedSetting).toBe("sideStripView");
+
+    act();
+
+    expect(editorState().selectedSetting).toBeNull();
+  });
+
+  it("popInspectorLevel clears the selected setting before All settings, same rung as a surface", () => {
+    session();
+    editorState().selectSetting("sideStripView");
+
+    expect(editorState().popInspectorLevel()).toBe(true);
+    expect(editorState().selectedSetting).toBeNull();
+    expect(editorState().area).toBe("topBar");
+
+    expect(editorState().popInspectorLevel()).toBe(true);
+    expect(editorState().area).toBeNull();
+
+    expect(editorState().popInspectorLevel()).toBe(false);
+  });
+});
+
+describe("hoveredSetting and settingNodes", () => {
+  it("setHoveredSetting is guarded against a redundant write", () => {
+    const before = editorState();
+
+    editorState().setHoveredSetting(null);
+
+    expect(editorState()).toBe(before);
+
+    editorState().setHoveredSetting("sideStripView");
+    expect(editorState().hoveredSetting).toBe("sideStripView");
+  });
+
+  it("registerSettingNode/unregisterSettingNode are node-checked, like surfaceNodes", () => {
+    const first = document.createElement("div");
+    editorState().registerSettingNode("sideStripView", first);
+    expect(editorState().settingNodes.get("sideStripView")).toBe(first);
+
+    // A remount registers the new node before the old one's cleanup runs.
+    const second = document.createElement("div");
+    editorState().registerSettingNode("sideStripView", second);
+    editorState().unregisterSettingNode("sideStripView", first);
+
+    expect(editorState().settingNodes.get("sideStripView")).toBe(second);
+
+    editorState().unregisterSettingNode("sideStripView", second);
+    expect(editorState().settingNodes.has("sideStripView")).toBe(false);
+  });
+});
+
 describe("instances", () => {
   // A live session has one visible scene, so the overlays follow the first
   // registration and the map is the only thing that decides which that is

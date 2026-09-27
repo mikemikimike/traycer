@@ -422,6 +422,72 @@ describe("layoutAreaSummary (L-91)", () => {
   });
 });
 
+/**
+ * Side tab view is not a region, but it is a row a pointer can hover and
+ * select from `LayoutAreaLevel` exactly like one - `use-layout-surface.ts`'s
+ * `useLayoutSettingPart` reads `hoveredSetting`/`selectedSetting` to light and
+ * ring its part on the canvas (D9, item B).
+ */
+describe("Side tab view's row lights and selects its canvas part", () => {
+  function sideStripViewRow(): HTMLElement {
+    const node = document.querySelector(
+      '[data-settings-anchor="layout-side-strip-view"]',
+    );
+    if (!(node instanceof HTMLElement)) {
+      throw new Error("no Side tab view row");
+    }
+    return node;
+  }
+
+  it("hovering the row sets hoveredSetting, and leaving the area clears it", () => {
+    const view = render(<Harness />);
+    act(() => {
+      useLayoutEditorStore.getState().openArea("topBar", null);
+    });
+
+    fireEvent.pointerOver(sideStripViewRow());
+    expect(useLayoutEditorStore.getState().hoveredSetting).toBe(
+      "sideStripView",
+    );
+
+    const outer = view.container.firstElementChild;
+    if (!(outer instanceof HTMLElement)) throw new Error("no area root");
+    fireEvent.pointerLeave(outer);
+
+    expect(useLayoutEditorStore.getState().hoveredSetting).toBeNull();
+  });
+
+  it("hovering a region row instead clears any hovered setting", () => {
+    render(<Harness />);
+    act(() => {
+      useLayoutEditorStore.getState().openArea("topBar", null);
+    });
+    fireEvent.pointerOver(sideStripViewRow());
+    expect(useLayoutEditorStore.getState().hoveredSetting).toBe(
+      "sideStripView",
+    );
+
+    fireEvent.pointerOver(row("homeTab"));
+
+    expect(useLayoutEditorStore.getState().hoveredSetting).toBeNull();
+    expect(useLayoutEditorStore.getState().hovered).toBe("homeTab");
+  });
+
+  it("a pointerdown inside the row selects the setting", () => {
+    render(<Harness />);
+    act(() => {
+      useLayoutEditorStore.getState().openArea("topBar", null);
+    });
+
+    fireEvent.pointerDown(sideStripViewRow());
+
+    expect(useLayoutEditorStore.getState().selectedSetting).toBe(
+      "sideStripView",
+    );
+    expect(useLayoutEditorStore.getState().area).toBe("topBar");
+  });
+});
+
 describe("layoutAreaChanged (L-91)", () => {
   it("is false against the shipped default, true once a Composer region moves", () => {
     expect(layoutAreaChanged("composer", DEFAULT_LAYOUT_SNAPSHOT)).toBe(false);

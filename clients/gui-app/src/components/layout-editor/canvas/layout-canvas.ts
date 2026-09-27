@@ -27,8 +27,15 @@ import {
   preferredRegionInstance,
   useLayoutEditorStore,
   type LayoutEditorState,
+  type LayoutSettingId,
   type PlacementSurfaceId,
 } from "@/stores/layout/layout-editor-store";
+import {
+  SIDE_STRIP_VIEW_AT_TOP,
+  SIDE_STRIP_VIEW_COLLAPSED,
+  SIDE_STRIP_VIEW_OPTIONS,
+} from "@/components/layout-editor/regions/region-grammar";
+import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { getLayoutSnapshot } from "@/stores/layout/layout-store";
 
 /**
@@ -97,6 +104,17 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       paint();
     };
 
+    // The node a setting's chip is anchored to: its part, or the strip when
+    // there is no room for the part. Stamped like the cue, since neither is a
+    // region `use-layout-region.ts` decorates.
+    let settingAnchor: HTMLElement | null = null;
+    const anchorSettingChip = (next: HTMLElement | null): void => {
+      if (next === settingAnchor) return;
+      settingAnchor?.removeAttribute("data-layout-anchor");
+      settingAnchor = next;
+      settingAnchor?.setAttribute("data-layout-anchor", "hover");
+    };
+
     const paint = (): void => {
       const state = useLayoutEditorStore.getState();
       const hoveredRegion = decoratedHoverRegion(state);
@@ -104,7 +122,11 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
         hoveredRegion === null
           ? null
           : preferredRegionInstance(state, hoveredRegion);
-      if (hoveredRegion === null && cue !== null)
+      const setting =
+        hoveredRegion === null && cue === null ? settingChip(state) : null;
+      anchorSettingChip(setting?.node ?? null);
+      if (setting !== null) chip.show(setting);
+      else if (hoveredRegion === null && cue !== null)
         chip.show({
           label: cue.getAttribute("data-layout-cue") ?? "",
           node: cue,
@@ -142,6 +164,9 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       const state = useLayoutEditorStore.getState();
       if (regionNode !== null) state.setPointed(regionNode);
       state.setHovered(regionId);
+      state.setHoveredSetting(
+        regionId === null ? settingUnder(target, column) : null,
+      );
       setCue(regionId === null ? cueNodeUnder(target, column) : null);
     };
 
@@ -160,12 +185,18 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       const regionId = regionIdOf(regionNode);
       if (regionNode !== null) state.setPointed(regionNode);
       // A surface is selected only through its OWN space: a region inside it
-      // (the Home tab, a rail icon) and a rail divider stay what they were.
-      const surface =
+      // (the Home tab, a rail icon), a setting's part (the live agents under
+      // the active tab) and a rail divider stay what they were.
+      const setting =
         regionId === null && member === null
+          ? settingUnder(target, column)
+          : null;
+      const surface =
+        regionId === null && member === null && setting === null
           ? surfaceNodeUnder(target, column)
           : null;
-      if (surface === null) state.select(regionId);
+      if (setting !== null) state.selectSetting(setting);
+      else if (surface === null) state.select(regionId);
       else state.selectSurface(surface.id);
       // A session on its way out, or a shell still gliding, has boxes that are
       // about to move or are already a snapshot; neither is something to
@@ -205,6 +236,7 @@ export function useLayoutCanvas(column: HTMLElement | null): void {
       // session, and it writes nothing on the way out.
       cancelLayoutDrag();
       setCue(null);
+      anchorSettingChip(null);
       chip.destroy();
       ring.destroy();
       column.removeAttribute("data-layout-editing");
@@ -297,11 +329,75 @@ function armPlacementDrag(
   });
 }
 
-/** The element the ring is on: the selected region's, or the selected surface's. */
+/**
+ * The setting whose part is under the pointer (`data-layout-setting`, stamped
+ * by `useLayoutSettingPart`), or `null`.
+ */
+function settingUnder(
+  target: Node,
+  column: HTMLElement,
+): LayoutSettingId | null {
+  const element = target instanceof Element ? target : target.parentElement;
+  const node = element?.closest("[data-layout-setting]") ?? null;
+  if (!(node instanceof HTMLElement) || !column.contains(node)) return null;
+  return node.getAttribute("data-layout-setting") === "sideStripView"
+    ? "sideStripView"
+    : null;
+}
+
+/**
+ * The chip for a hovered setting: its name and value on its part, as a
+ * region's chip reads. Where the strip has no room for the part - tabs at the
+ * top, or the strip collapsed to its rail - the chip goes on the strip and says
+ * why, so pointing at the row always answers on the canvas.
+ */
+function settingChip(
+  state: Pick<
+    LayoutEditorState,
+    "hoveredSetting" | "settingNodes" | "surfaceNodes"
+  >,
+): {
+  readonly label: string;
+  readonly node: HTMLElement;
+  readonly placement: HoverChipPlacement;
+} | null {
+  if (state.hoveredSetting === null) return null;
+  const { label } = LAYOUT.definitions.sideStripView;
+  const { arrangement } = getLayoutSnapshot();
+  const part = state.settingNodes.get(state.hoveredSetting);
+  if (part !== undefined) {
+    const value = SIDE_STRIP_VIEW_OPTIONS.find(
+      (option) => option.value === arrangement.sideStripView,
+    );
+    return {
+      label: `${label} · ${value?.label ?? ""}`,
+      node: part,
+      // Under the list: above it is the tab the list belongs to, whose name
+      // the chip would cover.
+      placement: "below",
+    };
+  }
+  const strip = state.surfaceNodes.get("topBar");
+  if (strip === undefined) return null;
+  const atTop = arrangement.tabStripPlacement === "top";
+  return {
+    label: `${label} · ${atTop ? SIDE_STRIP_VIEW_AT_TOP : SIDE_STRIP_VIEW_COLLAPSED}`,
+    node: strip,
+    placement: atTop ? "below" : "above",
+  };
+}
+
+/** The element the ring is on: the selected region's, surface's or setting's part. */
 function selectedNode(
   state: Pick<
     LayoutEditorState,
-    "instances" | "pointed" | "selected" | "selectedSurface" | "surfaceNodes"
+    | "instances"
+    | "pointed"
+    | "selected"
+    | "selectedSurface"
+    | "surfaceNodes"
+    | "selectedSetting"
+    | "settingNodes"
   >,
 ): HTMLElement | null {
   if (state.selected !== null) {
@@ -323,6 +419,8 @@ function selectedNode(
   }
   if (state.selectedSurface !== null)
     return state.surfaceNodes.get(state.selectedSurface) ?? null;
+  if (state.selectedSetting !== null)
+    return state.settingNodes.get(state.selectedSetting) ?? null;
   return null;
 }
 

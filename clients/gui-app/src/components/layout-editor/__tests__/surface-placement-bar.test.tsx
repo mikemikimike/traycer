@@ -344,7 +344,7 @@ describe("the tab strip bar's View pair", () => {
       .querySelectorAll("[role='radio']");
     expect(Array.from(options).map((option) => option.textContent)).toEqual([
       "Tabs only",
-      "Activity",
+      "Tabs and agents",
     ]);
   });
 
@@ -381,7 +381,7 @@ describe("the tab strip bar's View pair", () => {
     selectSurfaceWithNode("topBar");
     render(<SurfacePlacementBar />);
 
-    fireEvent.click(screen.getByRole("radio", { name: "Activity" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Tabs and agents" }));
 
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
       "activity",

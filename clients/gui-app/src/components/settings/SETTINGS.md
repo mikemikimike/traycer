@@ -1515,8 +1515,10 @@ codeFontSize` in muted styling while `null`; any tick/type pins an
     without a hand-written entry is still findable.
   - **Surface rows.**
     Five rows belong to a SURFACE rather than to a region, because what they place is not a region.
-    The Tabs card opens with **`Position`** (`arrangement.tabStripPlacement`: Top, Left or Right; keywords "vertical tabs" and "side tabs"), then **`View`** (`arrangement.sideStripView`: Layered or Activity), then `Task tab layout`.
-    `View` is disabled while the tabs are at the top, with the reason "Applies when tabs are at the left or right." in place of its description, and its stored value is kept.
+    The Tabs card opens with **`Position`** (`arrangement.tabStripPlacement`: Top, Left or Right; keywords "vertical tabs" and "side tabs"), then **`Side tab view`** (`arrangement.sideStripView`: Tabs only or Tabs and agents), then `Task tab layout`.
+    `Side tab view` picks between two pictures of the strip drawn from the real rows and the sample agents, one with the open task's live agents under its tab and one without.
+    It is disabled while the tabs are at the top, with the reason "Available when tabs are on the left or right." in place of its description, and its stored value is kept.
+    In the editor its canvas part is the live agents list under the sample tab: hovering or pressing the row lights or rings that list (ghosted while the value is Tabs only), a press on the list selects the row, and with no room for the list the canvas chip on the strip says why.
     `Task tab layout` is disabled while the tabs sit at a side, with the reason "Applies when tabs are at the top." in place of its description, and its stored value is kept.
     The Sidebar card opens with **`Side`** (`arrangement.sidebarSide`: Left or Right).
     `Position`, `View` and `Side` are `TabStripPositionRow`, `SideStripViewRow` and `SidebarSideRow` in `components/layout-editor/inspector/rows/surface-placement-rows.tsx`.

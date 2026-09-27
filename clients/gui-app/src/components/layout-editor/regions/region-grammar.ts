@@ -238,8 +238,16 @@ export const SIDE_STRIP_VIEW_OPTIONS: ReadonlyArray<{
   readonly label: string;
 }> = [
   { value: "layered", label: "Tabs only" },
-  { value: "activity", label: "Activity" },
+  { value: "activity", label: "Tabs and agents" },
 ];
+
+/** Why Side tab view does nothing at the top: its row and the canvas both say it. */
+export const SIDE_STRIP_VIEW_AT_TOP =
+  "Available when tabs are on the left or right.";
+
+/** Why it shows nothing on the collapsed rail, which the canvas says. */
+export const SIDE_STRIP_VIEW_COLLAPSED =
+  "Shows when the tab strip is expanded.";
 
 /** How tabs fit a horizontal strip. */
 export const TAB_OVERFLOW_OPTIONS: ReadonlyArray<{

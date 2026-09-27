@@ -141,19 +141,30 @@ function PlacementBarBody(props: {
         })}
       </RadioGroupPrimitive.Root>
       {view === null ? null : (
-        <SegmentedControl
-          ariaLabel="Tabs view"
-          options={SIDE_STRIP_VIEW_OPTIONS}
-          value={view}
-          disabled={false}
-          onChange={(next) => {
-            const option = SIDE_STRIP_VIEW_OPTIONS.find(
-              (candidate) => candidate.value === next,
-            );
-            if (option !== undefined)
-              writeArrangementField("sideStripView", option.value);
+        // Pointing at the view previews what it changes, as its row does.
+        <span
+          className="contents"
+          onPointerEnter={() => {
+            useLayoutEditorStore.getState().setHoveredSetting("sideStripView");
           }}
-        />
+          onPointerLeave={() => {
+            useLayoutEditorStore.getState().setHoveredSetting(null);
+          }}
+        >
+          <SegmentedControl
+            ariaLabel="Tabs view"
+            options={SIDE_STRIP_VIEW_OPTIONS}
+            value={view}
+            disabled={false}
+            onChange={(next) => {
+              const option = SIDE_STRIP_VIEW_OPTIONS.find(
+                (candidate) => candidate.value === next,
+              );
+              if (option !== undefined)
+                writeArrangementField("sideStripView", option.value);
+            }}
+          />
+        </span>
       )}
     </div>
   );

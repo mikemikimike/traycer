@@ -29,6 +29,8 @@ export function LayoutFormRow(props: {
   readonly onRevert: (() => void) | null;
   readonly revertLabel: string;
   readonly stacked: boolean;
+  /** The row the editor's canvas has selected, highlighted as a selected list row is. */
+  readonly selected: boolean;
 }): ReactNode {
   const { anchor, label, description, control, onRevert, stacked } = props;
   const page = useLayoutFormHost() === "page";
@@ -43,6 +45,7 @@ export function LayoutFormRow(props: {
           ? "flex-wrap gap-y-2"
           : page && "max-md:flex-wrap max-md:gap-y-3",
         gutter.row,
+        props.selected && "bg-foreground/6 shadow-[inset_2px_0_0_var(--ring)]",
       )}
     >
       <div

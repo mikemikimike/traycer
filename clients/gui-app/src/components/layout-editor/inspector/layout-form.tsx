@@ -4,6 +4,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from "react";
 import { ChevronRight, LayoutTemplate } from "lucide-react";
 import { InspectorBackRow } from "@/components/layout-editor/inspector/inspector-back-row";
@@ -30,7 +31,11 @@ import { LAYOUT_REGION_LIST } from "@/components/layout-editor/regions/region-fa
 import type { SurfaceGroupId } from "@/components/layout-editor/regions/region-grammar";
 import type { LayoutSnapshot } from "@/lib/layout/layout-snapshot";
 import type { RegionId } from "@/lib/layout/region-id";
-import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
+import {
+  useLayoutEditorStore,
+  type LayoutSettingId,
+} from "@/stores/layout/layout-editor-store";
+import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { useLayoutSnapshot } from "@/stores/layout/layout-store";
 
 /**
@@ -301,7 +306,10 @@ export function LayoutAreaLevel(props: {
       onPointerOver={hoverRowUnder}
       onPointerLeave={() => {
         useLayoutEditorStore.getState().setHovered(null);
+        useLayoutEditorStore.getState().setHoveredSetting(null);
       }}
+      onPointerDownCapture={selectSettingRowUnder}
+      onFocusCapture={selectSettingRowUnder}
     >
       <InspectorBackRow label="All settings" onBack={showAllSettings} />
       <div className="px-3.5 pt-3 pb-2">
@@ -334,7 +342,29 @@ function hoverRowUnder(event: PointerEvent<HTMLDivElement>): void {
     .closest("[data-sortable-id]")
     ?.getAttribute("data-sortable-id");
   const region = LAYOUT_REGION_LIST.find((entry) => entry.id === id);
-  useLayoutEditorStore.getState().setHovered(region?.id ?? null);
+  const store = useLayoutEditorStore.getState();
+  store.setHovered(region?.id ?? null);
+  store.setHoveredSetting(settingRowOf(event.target));
+}
+
+/**
+ * A press or a focus inside a setting's row selects it, which rings its part
+ * on the canvas - the row has no disclosure to open as a region's row does.
+ */
+function selectSettingRowUnder(event: SyntheticEvent<HTMLDivElement>): void {
+  if (!(event.target instanceof Element)) return;
+  const setting = settingRowOf(event.target);
+  if (setting !== null) useLayoutEditorStore.getState().selectSetting(setting);
+}
+
+/** The setting whose row holds `target`, by the row's Settings-search anchor. */
+function settingRowOf(target: Element): LayoutSettingId | null {
+  const anchor = target
+    .closest("[data-settings-anchor]")
+    ?.getAttribute("data-settings-anchor");
+  return anchor === LAYOUT.definitions.sideStripView.anchor
+    ? "sideStripView"
+    : null;
 }
 
 function showAllSettings(): void {

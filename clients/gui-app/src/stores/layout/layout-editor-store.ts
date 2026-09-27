@@ -104,6 +104,21 @@ export interface RegionInstance {
  */
 export type PlacementSurfaceId = "topBar" | "sidebar";
 
+/**
+ * An area row the canvas draws a part of without the row being a region: Side
+ * tab view, whose part is the list of live agents under the active tab. It has
+ * no value bag and no index row, so it is not one of `LayoutRegions`; like a
+ * region, it hovers and selects from the canvas and from its row, the ring
+ * goes around its part, and the part shows ghosted while pointed at in the
+ * value that hides it (C3).
+ */
+export type LayoutSettingId = "sideStripView";
+
+/** The area whose form holds each setting's row. */
+const SETTING_AREA: Readonly<Record<LayoutSettingId, SurfaceGroupId>> = {
+  sideStripView: "topBar",
+};
+
 /** Whether another window holds the single-window lease (L-32). */
 export type LayoutEditorLock = "none" | "other-window";
 
@@ -134,6 +149,14 @@ export interface LayoutEditorState {
    * re-resolve the node off this map rather than holding the old one (L-90).
    */
   readonly surfaceNodes: ReadonlyMap<PlacementSurfaceId, HTMLElement>;
+  /**
+   * The third kind of canvas selection, a setting's row and its part. Never set
+   * together with {@link selected} or {@link selectedSurface}.
+   */
+  readonly selectedSetting: LayoutSettingId | null;
+  readonly hoveredSetting: LayoutSettingId | null;
+  /** The element drawing each setting's part right now, as {@link surfaceNodes}. */
+  readonly settingNodes: ReadonlyMap<LayoutSettingId, HTMLElement>;
   /**
    * The inspector's level: `null` is All settings, otherwise the one area whose
    * form is open. Selecting a region on the canvas opens its area.
@@ -204,6 +227,17 @@ export interface LayoutEditorState {
     surface: PlacementSurfaceId,
     node: HTMLElement,
   ) => void;
+  /** Selects a setting's row and its part, opening the row's area. */
+  readonly selectSetting: (setting: LayoutSettingId) => void;
+  readonly setHoveredSetting: (setting: LayoutSettingId | null) => void;
+  readonly registerSettingNode: (
+    setting: LayoutSettingId,
+    node: HTMLElement,
+  ) => void;
+  readonly unregisterSettingNode: (
+    setting: LayoutSettingId,
+    node: HTMLElement,
+  ) => void;
   /**
    * Opens an area's form, or All settings for `null`. A `row` is a region the
    * form opens expanded and highlighted, and the canvas rings; `select` is this
@@ -223,7 +257,7 @@ export interface LayoutEditorState {
   readonly toggleRow: (rowId: string) => void;
   /**
    * One rung of the Escape ladder: close the open rows (and the selection),
-   * then the selected surface, then the area back to All settings. `false`
+   * then the selected surface or setting, then the area back to All settings. `false`
    * means the ladder is already at All settings, where it stops.
    */
   readonly popInspectorLevel: () => boolean;
@@ -256,6 +290,8 @@ const SESSION_DEFAULTS = {
   instances: new Map<RegionInstanceKey, RegionInstance>(),
   selected: null,
   selectedSurface: null,
+  selectedSetting: null,
+  hoveredSetting: null,
   area: null,
   openRows: [],
   hovered: null,
@@ -274,6 +310,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
     (set, get) => ({
       ...SESSION_DEFAULTS,
       surfaceNodes: new Map<PlacementSurfaceId, HTMLElement>(),
+      settingNodes: new Map<LayoutSettingId, HTMLElement>(),
       dockMode: "right",
       floatPosition: null,
       lockedBy: "none",
@@ -284,6 +321,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           // region that registered before the session opened stays registered.
           instances: get().instances,
           surfaceNodes: get().surfaceNodes,
+          settingNodes: get().settingNodes,
           session,
           entrySnapshot: getLayoutSnapshot(),
         });
@@ -295,6 +333,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           ...SESSION_DEFAULTS,
           instances: get().instances,
           surfaceNodes: get().surfaceNodes,
+          settingNodes: get().settingNodes,
         });
       },
       registerInstance: (instance) =>
@@ -321,8 +360,13 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
       select: (selected) => {
         const state = get();
         if (selected === null) {
-          if (state.selected === null && state.selectedSurface === null) return;
-          set({ selected: null, selectedSurface: null });
+          if (
+            state.selected === null &&
+            state.selectedSurface === null &&
+            state.selectedSetting === null
+          )
+            return;
+          set({ selected: null, selectedSurface: null, selectedSetting: null });
           return;
         }
         get().openArea(LAYOUT_REGIONS[selected].surface, selected);
@@ -332,16 +376,54 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         if (
           state.selectedSurface === selectedSurface &&
           state.selected === null &&
+          state.selectedSetting === null &&
           state.area === selectedSurface
         )
           return;
         set({
           selectedSurface,
           selected: null,
+          selectedSetting: null,
           area: selectedSurface,
           filter: "",
         });
       },
+      selectSetting: (selectedSetting) => {
+        const state = get();
+        const area = SETTING_AREA[selectedSetting];
+        if (
+          state.selectedSetting === selectedSetting &&
+          state.selected === null &&
+          state.selectedSurface === null &&
+          state.area === area
+        )
+          return;
+        set({
+          selectedSetting,
+          selected: null,
+          selectedSurface: null,
+          area,
+          filter: "",
+        });
+      },
+      setHoveredSetting: (hoveredSetting) => {
+        if (get().hoveredSetting === hoveredSetting) return;
+        set({ hoveredSetting });
+      },
+      registerSettingNode: (setting, node) =>
+        set((state) => {
+          if (state.settingNodes.get(setting) === node) return state;
+          const settingNodes = new Map(state.settingNodes);
+          settingNodes.set(setting, node);
+          return { settingNodes };
+        }),
+      unregisterSettingNode: (setting, node) =>
+        set((state) => {
+          if (state.settingNodes.get(setting) !== node) return state;
+          const settingNodes = new Map(state.settingNodes);
+          settingNodes.delete(setting);
+          return { settingNodes };
+        }),
       registerSurfaceNode: (surface, node) =>
         set((state) => {
           if (state.surfaceNodes.get(surface) === node) return state;
@@ -368,6 +450,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           state.area === area &&
           state.selected === row &&
           state.selectedSurface === null &&
+          state.selectedSetting === null &&
           state.openRows === openRows &&
           (area === null || state.filter === "")
         )
@@ -376,6 +459,7 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           area,
           selected: row,
           selectedSurface: null,
+          selectedSetting: null,
           // All settings has no rows, so nothing stays open behind it.
           openRows: area === null ? [] : openRows,
           // Find lives at All settings: opening an area consumes the query, so
@@ -395,7 +479,12 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
         if (region === null) {
           set({ openRows });
         } else if (!closing) {
-          set({ openRows, selected: region, selectedSurface: null });
+          set({
+            openRows,
+            selected: region,
+            selectedSurface: null,
+            selectedSetting: null,
+          });
         } else if (state.selected === region) {
           set({ openRows, selected: null });
         } else {
@@ -408,8 +497,8 @@ export const useLayoutEditorStore = create<LayoutEditorState>()(
           set({ selected: null, openRows: [] });
           return true;
         }
-        if (state.selectedSurface !== null) {
-          set({ selectedSurface: null });
+        if (state.selectedSurface !== null || state.selectedSetting !== null) {
+          set({ selectedSurface: null, selectedSetting: null });
           return true;
         }
         if (state.area !== null) {

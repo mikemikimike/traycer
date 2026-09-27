@@ -10,6 +10,7 @@ afterEach(cleanup);
 function renderRow(
   stacked: boolean,
   onRevert: (() => void) | null,
+  selected: boolean,
 ): HTMLElement {
   const control: ReactNode = <button type="button">The control</button>;
   const { container } = render(
@@ -22,6 +23,7 @@ function renderRow(
       onRevert={onRevert}
       revertLabel="Revert Side"
       stacked={stacked}
+      selected={selected}
     />,
   );
   const row = container.querySelector<HTMLElement>("[data-layout-form-row]");
@@ -38,7 +40,7 @@ function columnOf(row: HTMLElement, node: HTMLElement): Element {
 
 describe("LayoutFormRow", () => {
   it("puts a stacked row's control after the label block, with no chevron slot after it", () => {
-    const row = renderRow(true, null);
+    const row = renderRow(true, null, false);
     const label = columnOf(row, screen.getByText("Side"));
     const control = columnOf(
       row,
@@ -58,7 +60,7 @@ describe("LayoutFormRow", () => {
   });
 
   it("keeps an unstacked row's control in a column beside the label, before the chevron slot", () => {
-    const row = renderRow(false, null);
+    const row = renderRow(false, null, false);
     const control = columnOf(
       row,
       screen.getByRole("button", { name: "The control" }),
@@ -71,12 +73,12 @@ describe("LayoutFormRow", () => {
   });
 
   it("draws the revert after the label only while the row is changed", async () => {
-    renderRow(false, null);
+    renderRow(false, null, false);
     expect(screen.queryByRole("button", { name: "Revert Side" })).toBeNull();
     cleanup();
 
     const onRevert = vi.fn();
-    renderRow(false, onRevert);
+    renderRow(false, onRevert, false);
     const revert = screen.getByRole("button", { name: "Revert Side" });
     expect(
       screen.getByText("Side").compareDocumentPosition(revert) &
@@ -87,5 +89,14 @@ describe("LayoutFormRow", () => {
 
     await userEvent.setup().click(revert);
     expect(onRevert).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the selected highlight only while selected is true", () => {
+    const row = renderRow(false, null, false);
+    expect(row.className).not.toContain("bg-foreground/6");
+    cleanup();
+
+    const selectedRow = renderRow(false, null, true);
+    expect(selectedRow.className).toContain("bg-foreground/6");
   });
 });

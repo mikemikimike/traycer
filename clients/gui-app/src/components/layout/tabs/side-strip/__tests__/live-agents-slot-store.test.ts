@@ -11,8 +11,10 @@ import {
   publishLiveAgentsSlot,
   useLiveAgentsInStrip,
   useLiveAgentsSlot,
+  useLiveAgentsSlotMode,
 } from "@/components/layout/tabs/side-strip/live-agents-slot-store";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { useSideTabStripStore } from "@/stores/layout/side-tab-strip-store";
 import {
   DEFAULT_LAYOUT_SNAPSHOT,
@@ -22,6 +24,10 @@ import {
 function resetStores(): void {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT_SNAPSHOT });
   useSideTabStripStore.setState({ collapsed: false });
+  useLayoutEditorStore.setState({
+    hoveredSetting: null,
+    selectedSetting: null,
+  });
 }
 
 beforeEach(resetStores);
@@ -162,5 +168,96 @@ describe("useLiveAgentsInStrip", () => {
       }));
     });
     expect(result.current).toBe(false);
+  });
+});
+
+/**
+ * `useLiveAgentsSlotMode`: `"live"` when the strip actually lists live
+ * agents; `"preview"` while it does not but Tabs and agents would show there
+ * and the layout editor is pointing at Side tab view (C3, the ghost the row
+ * offers before the pick is made); `null` otherwise, including where the
+ * strip has no room for the part at all (top placement, collapsed).
+ */
+describe("useLiveAgentsSlotMode", () => {
+  function verticalExpanded(view: "layered" | "activity"): void {
+    act(() => {
+      useLayoutStore.setState({
+        arrangement: {
+          ...DEFAULT_ARRANGEMENT,
+          tabStripPlacement: "left",
+          sideStripView: view,
+        },
+      });
+    });
+  }
+
+  it("is live once the strip is a vertical, expanded Activity view", () => {
+    verticalExpanded("activity");
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+    expect(result.current).toBe("live");
+  });
+
+  it("is null in Tabs only with nothing pointed at", () => {
+    verticalExpanded("layered");
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+    expect(result.current).toBeNull();
+  });
+
+  it("is preview in Tabs only while the editor hovers Side tab view's setting", () => {
+    verticalExpanded("layered");
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+
+    act(() => {
+      useLayoutEditorStore.getState().setHoveredSetting("sideStripView");
+    });
+
+    expect(result.current).toBe("preview");
+  });
+
+  it("is preview in Tabs only while the editor has Side tab view selected", () => {
+    verticalExpanded("layered");
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+
+    act(() => {
+      useLayoutEditorStore.getState().selectSetting("sideStripView");
+    });
+
+    expect(result.current).toBe("preview");
+  });
+
+  it("is null at the top placement even while the editor points at the setting", () => {
+    act(() => {
+      useLayoutStore.setState({
+        arrangement: { ...DEFAULT_ARRANGEMENT, sideStripView: "layered" },
+      });
+      useLayoutEditorStore.getState().setHoveredSetting("sideStripView");
+    });
+
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+
+    expect(result.current).toBeNull();
+  });
+
+  it("is null while the strip is collapsed, even while the editor points at the setting", () => {
+    verticalExpanded("layered");
+    act(() => {
+      useSideTabStripStore.getState().setCollapsed(true);
+      useLayoutEditorStore.getState().setHoveredSetting("sideStripView");
+    });
+
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+
+    expect(result.current).toBeNull();
+  });
+
+  it("stays live rather than preview once the view actually is Activity, even while pointed at", () => {
+    verticalExpanded("activity");
+    act(() => {
+      useLayoutEditorStore.getState().setHoveredSetting("sideStripView");
+    });
+
+    const { result } = renderHook(() => useLiveAgentsSlotMode());
+
+    expect(result.current).toBe("live");
   });
 });

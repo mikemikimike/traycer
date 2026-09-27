@@ -130,6 +130,7 @@ function FineTuneRowView(props: {
         anchor={null}
         icon={null}
         stacked={false}
+        selected={false}
         label={row.label}
         revertLabel={`Revert ${row.label}`}
         description={row.description ?? null}
@@ -160,6 +161,7 @@ function FineTuneRowView(props: {
         anchor={null}
         icon={null}
         stacked={false}
+        selected={false}
         label={row.label}
         revertLabel={`Revert ${row.label}`}
         description={row.description ?? null}
@@ -191,6 +193,7 @@ function FineTuneRowView(props: {
         anchor={null}
         icon={null}
         stacked
+        selected={false}
         label={row.label}
         revertLabel={`Revert ${row.label}`}
         description={row.description ?? null}
@@ -246,6 +249,7 @@ function FineTuneRowView(props: {
       anchor={null}
       icon={null}
       stacked
+      selected={false}
       label={row.label}
       revertLabel={`Revert ${row.label}`}
       description={row.description ?? "At least one row stays in the card."}

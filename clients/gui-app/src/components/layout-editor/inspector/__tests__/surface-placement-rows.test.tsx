@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RevertButton } from "@/components/layout-editor/inspector/inspector-row";
 import { LayoutFormHostContext } from "@/components/layout-editor/inspector/layout-form-host";
@@ -40,6 +47,21 @@ function pick(group: string, label: string): void {
   ).find((node) => node.textContent === label);
   if (option === undefined) throw new Error(`no option ${label} in ${group}`);
   fireEvent.click(option);
+}
+
+/**
+ * `SideStripViewRow`'s options are `PicturedOptions`: each radio's picture
+ * draws real sample content (the strip's own task rows), so its `textContent`
+ * is not the option's label the way a `SegmentedControl` option's is. The
+ * label lives on `aria-label` instead (the picture is `inert`, out of the
+ * accessible-name computation), which is what `pick` above cannot match.
+ */
+function pickPictured(group: string, label: string): void {
+  fireEvent.click(
+    within(screen.getByRole("radiogroup", { name: group })).getByRole("radio", {
+      name: label,
+    }),
+  );
 }
 
 function beginSession(): void {
@@ -159,7 +181,7 @@ describe("<SideStripViewRow /> (D8)", () => {
     });
   }
 
-  it("draws Tabs only / Activity over the stored view", () => {
+  it("draws Tabs only / Tabs and agents over the stored view", () => {
     render(<SideStripViewRow />);
 
     const options = Array.from(
@@ -167,15 +189,47 @@ describe("<SideStripViewRow /> (D8)", () => {
         .getByRole("radiogroup", { name: "Side tab view" })
         .querySelectorAll("[role='radio']"),
     );
-    expect(options.map((node) => node.textContent)).toEqual([
+    // Each option's picture draws real sample content, so its accessible
+    // name - not its full textContent - is the option's own label.
+    expect(options.map((node) => node.getAttribute("aria-label"))).toEqual([
       "Tabs only",
-      "Activity",
+      "Tabs and agents",
     ]);
     expect(options.map((node) => node.getAttribute("aria-checked"))).toEqual([
       "true",
       "false",
     ]);
     expect(screen.getByText("Side tab view")).toBeTruthy();
+  });
+
+  it("draws the sample agent rows in the Tabs and agents picture, and none in Tabs only", () => {
+    render(<SideStripViewRow />);
+
+    const tabsOnly = screen.getByRole("radio", { name: "Tabs only" });
+    const tabsAndAgents = screen.getByRole("radio", {
+      name: "Tabs and agents",
+    });
+    expect(within(tabsOnly).queryByTestId("app-frame-live-agents")).toBeNull();
+    expect(
+      within(tabsAndAgents).getByTestId("app-frame-live-agents"),
+    ).toBeTruthy();
+  });
+
+  it("is not selected-highlighted at rest, and highlighted once its setting is selected", () => {
+    render(<SideStripViewRow />);
+    const rowElement = (): HTMLElement => {
+      const node = screen
+        .getByText("Side tab view")
+        .closest("[data-layout-form-row]");
+      if (node === null) throw new Error("expected a data-layout-form-row");
+      return node as HTMLElement;
+    };
+    expect(rowElement().className).not.toContain("bg-foreground/6");
+
+    act(() => {
+      useLayoutEditorStore.setState({ selectedSetting: "sideStripView" });
+    });
+    expect(rowElement().className).toContain("bg-foreground/6");
   });
 
   it("is disabled with a reason while the tabs are at the top, which is the shipped default", () => {
@@ -207,7 +261,7 @@ describe("<SideStripViewRow /> (D8)", () => {
     withVerticalStrip();
     render(<SideStripViewRow />);
 
-    pick("Side tab view", "Activity");
+    pickPictured("Side tab view", "Tabs and agents");
 
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
       "activity",
@@ -220,7 +274,7 @@ describe("<SideStripViewRow /> (D8)", () => {
     beginSession();
     render(<SideStripViewRow />);
 
-    pick("Side tab view", "Activity");
+    pickPictured("Side tab view", "Tabs and agents");
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe(
       "activity",
     );
@@ -243,19 +297,21 @@ describe("<SideStripViewRow /> (D8)", () => {
     render(<SideStripViewRow />);
     expect(
       screen.queryByRole("button", {
-        name: "Reset side tab view to default",
+        name: "Reset side tab view to default: Tabs only",
       }),
     ).toBeNull();
 
-    pick("Side tab view", "Activity");
+    pickPictured("Side tab view", "Tabs and agents");
     fireEvent.click(
-      screen.getByRole("button", { name: "Reset side tab view to default" }),
+      screen.getByRole("button", {
+        name: "Reset side tab view to default: Tabs only",
+      }),
     );
 
     expect(useLayoutStore.getState().arrangement.sideStripView).toBe("layered");
     expect(
       screen.queryByRole("button", {
-        name: "Reset side tab view to default",
+        name: "Reset side tab view to default: Tabs only",
       }),
     ).toBeNull();
   });

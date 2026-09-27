@@ -21,11 +21,8 @@ import {
   depictRegion,
 } from "@/components/layout-editor/region-depiction";
 import { PanelTaskHeaderBody } from "@/components/epic-canvas/sidebar/panel-task-header-body";
-import {
-  LIVE_AGENTS_LIST_CLASS,
-  LiveAgentRowView,
-  type LiveAgentKind,
-} from "@/components/epic-canvas/sidebar/live-agent-row";
+import { LIVE_AGENTS_LIST_CLASS } from "@/components/epic-canvas/sidebar/live-agent-row";
+import { SampleLiveAgentItems } from "@/components/sample-workspace/sample-strip-live-agents";
 import {
   barClusterRegions,
   liveAgentsInStrip,
@@ -106,7 +103,8 @@ const APP_FRAME_ACTIVE_TASK: AppFrameTask = {
   label: "Sample chat",
   monogram: "SC",
   active: true,
-  agents: { turn: 1, background: 2, coverage: "covered" },
+  // The sample agents' two unfinished turns: one working, one waiting on a reply.
+  agents: { turn: 2, background: 0, coverage: "covered" },
 };
 
 /** The tasks in every picture of the frame: the top bar's tabs, the strip's rows and tiles. */
@@ -125,44 +123,6 @@ const APP_FRAME_TABS: ReadonlyArray<AppFrameTask> = [
     monogram: "RN",
     active: false,
     agents: { turn: 0, background: 0, coverage: "covered" },
-  },
-];
-
-/** Minutes ago, for a sample agent's idle time. */
-const minutesAgo = (minutes: number): number => Date.now() - minutes * 60_000;
-
-/**
- * The active task's agents in every picture: one waiting on a reply (its chip
- * in place of a time), one nested background agent, one more at the top. At
- * rest, so no row draws the running spinner.
- */
-const APP_FRAME_LIVE_AGENTS: ReadonlyArray<{
-  readonly nodeId: string;
-  readonly title: string;
-  readonly kind: LiveAgentKind;
-  readonly depth: number;
-  readonly updatedAt: number;
-}> = [
-  {
-    nodeId: "app-frame-agent-plan",
-    title: "Plan the migration",
-    kind: "interview",
-    depth: 0,
-    updatedAt: minutesAgo(2),
-  },
-  {
-    nodeId: "app-frame-agent-tests",
-    title: "Write the tests",
-    kind: "background",
-    depth: 1,
-    updatedAt: minutesAgo(6),
-  },
-  {
-    nodeId: "app-frame-agent-index",
-    title: "Rebuild the index",
-    kind: "background",
-    depth: 0,
-    updatedAt: minutesAgo(14),
   },
 ];
 
@@ -345,16 +305,17 @@ export function AppFrameSideStrip({
           collapsed && "items-center",
         )}
       >
-        {APP_FRAME_TABS.map((task) => (
-          <Fragment key={task.id}>
-            {collapsed ? (
-              <AppFrameTaskTile task={task} joined={join} />
-            ) : (
-              <AppFrameTaskRow task={task} joined={join} />
-            )}
-            {task.active && liveAgents ? <AppFrameLiveAgents /> : null}
-          </Fragment>
-        ))}
+        {collapsed ? (
+          APP_FRAME_TABS.map((task) => (
+            <AppFrameTaskTile key={task.id} task={task} joined={join} />
+          ))
+        ) : (
+          <AppFrameStripTaskRows
+            liveAgents={liveAgents}
+            joined={join}
+            startAtActive={false}
+          />
+        )}
       </div>
       <span className="flex-1" />
       <div
@@ -464,12 +425,34 @@ function AppFrameHomeTile(): ReactNode {
 }
 
 /**
+ * The expanded strip's task rows, with the active task's live agents under its
+ * row in the Activity view (D9): the strip draws them, and so does each Side
+ * tab view picture, without the sheet join a lone picture has no sheet for.
+ */
+export function AppFrameStripTaskRows(props: {
+  readonly liveAgents: boolean;
+  readonly joined: SheetJoin | null;
+  /** From the active task's row down, which is all a small picture needs. */
+  readonly startAtActive: boolean;
+}): ReactNode {
+  const tasks = props.startAtActive
+    ? APP_FRAME_TABS.slice(APP_FRAME_TABS.indexOf(APP_FRAME_ACTIVE_TASK))
+    : APP_FRAME_TABS;
+  return tasks.map((task) => (
+    <Fragment key={task.id}>
+      <AppFrameTaskRow task={task} joined={props.joined} />
+      {task.active && props.liveAgents ? <AppFrameLiveAgents /> : null}
+    </Fragment>
+  ));
+}
+
+/**
  * An expanded task row: the empty 16px leading slot of an uncoloured, idle
  * task, the title, and the meter while more than one agent is live.
  */
 function AppFrameTaskRow(props: {
   readonly task: AppFrameTask;
-  readonly joined: SheetJoin;
+  readonly joined: SheetJoin | null;
 }): ReactNode {
   const { task } = props;
   return (
@@ -524,20 +507,11 @@ export function AppFramePanelTaskHeader(): ReactNode {
   );
 }
 
-/** The sample agents' rows, as list items: the strip's list and the panel's tree draw them. */
-export function AppFrameLiveAgentItems(): ReactNode {
-  return APP_FRAME_LIVE_AGENTS.map((agent) => (
-    <li key={agent.nodeId}>
-      <LiveAgentRowView {...agent} onClick={undefined} />
-    </li>
-  ));
-}
-
 /** The active task's live agents under its row, as the Activity view lists them (D9). */
 function AppFrameLiveAgents(): ReactNode {
   return (
     <ul data-testid="app-frame-live-agents" className={LIVE_AGENTS_LIST_CLASS}>
-      <AppFrameLiveAgentItems />
+      <SampleLiveAgentItems />
     </ul>
   );
 }

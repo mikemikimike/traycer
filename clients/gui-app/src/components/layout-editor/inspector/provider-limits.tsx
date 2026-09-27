@@ -98,6 +98,7 @@ function ProviderLimitsPick(props: {
         // too wide for its row goes on its own line, which is the
         // prototype's own answer for the same shape (`.srow.stacked`).
         stacked
+        selected={false}
         label={USAGE_PROVIDER_LEVEL.limitsLabel}
         description={USAGE_PROVIDER_LEVEL.limitsDescription}
         control={

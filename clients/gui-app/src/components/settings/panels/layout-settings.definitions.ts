@@ -130,13 +130,14 @@ export const LAYOUT = defineSettingsSection("layout", {
     search: { anchor: "layout-side-strip-view" },
     label: "Side tab view",
     description:
-      "Tabs only lists your tabs. Activity also lists the active task's live agents and what needs you.",
+      "Tabs and agents also lists the open task's active agents under its tab, with what each is doing or needs from you.",
     availableWhen: isSurfacePlacementRowAvailable,
     keywords: [
       "view",
       "activity",
       "tabs only",
       "live agents",
+      "agents",
       "needs you",
       "vertical tabs",
     ],

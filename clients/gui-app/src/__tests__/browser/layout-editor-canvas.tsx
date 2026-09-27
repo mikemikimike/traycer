@@ -48,6 +48,7 @@ import { TabChrome } from "@/components/layout/tabs/header-tab-visual";
 import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
 import { SampleSceneProvider } from "@/components/sample-workspace/sample-scene-provider";
 import { SampleWorkspaceBody } from "@/components/sample-workspace/sample-workspace-body";
+import { SampleStripLiveAgents } from "@/components/sample-workspace/sample-strip-live-agents";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { HostNotificationsIndicatorStateResponse } from "@traycer/protocol/host/notifications/contracts";
 import type { AgentActivityByEpic } from "@traycer/protocol/host/agent/activity";
@@ -1091,6 +1092,7 @@ function SampleRouteSheet(): ReactNode {
         </span>
       </div>
       <SampleWorkspaceBody />
+      <SampleStripLiveAgents tabId="sample-workspace" />
     </div>
   );
 }

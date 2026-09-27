@@ -418,7 +418,8 @@
    transition: pointing at a thing is not an animation.
    --------------------------------------------------------------- */
 
-[data-layout-editing="1"] [data-layout-region][data-hover="1"] {
+[data-layout-editing="1"] [data-layout-region][data-hover="1"],
+[data-layout-editing="1"] [data-layout-setting][data-hover="1"] {
   outline: 1px solid var(--foreground);
   outline-offset: 3px;
 }
@@ -526,6 +527,21 @@
   animation: layout-region-materialise 180ms var(--layout-editor-ease) both;
 }
 
+/* A setting's part shown in the value that hides it: Side tab view's live
+   agents while the row is pointed at in Tabs only. It arrives as a hidden
+   region does, and on a switch between the two values it eases between the
+   preview and the real thing rather than popping, so the toggle reads as
+   "these rows are what changed". The same 180ms as the ring's travel and the
+   materialise, from the editor's own curve. */
+[data-layout-editing="1"] [data-layout-setting] {
+  transition: opacity 180ms var(--layout-editor-ease);
+}
+
+[data-layout-editing="1"] [data-layout-setting][data-ghost="1"] {
+  opacity: 0.55;
+  animation: layout-region-materialise 180ms var(--layout-editor-ease) both;
+}
+
 @keyframes layout-region-materialise {
   from {
     opacity: 0;
@@ -555,7 +571,9 @@
 }
 
 [data-layout-editing="1"] [data-layout-region][data-layout-anchor~="hover"],
-[data-layout-editing="1"] [data-layout-cue][data-layout-anchor~="hover"] {
+[data-layout-editing="1"] [data-layout-cue][data-layout-anchor~="hover"],
+[data-layout-editing="1"] [data-layout-setting][data-layout-anchor~="hover"],
+[data-layout-editing="1"] [data-layout-surface][data-layout-anchor~="hover"] {
   anchor-name: --layout-hover-region;
 }
 
@@ -760,8 +778,13 @@
 
   /* The materialised control still appears - that is the answer to "what is
      hidden here" - it just arrives rather than being blurred into place. */
-  [data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
+  [data-layout-editing="1"] [data-layout-region][data-ghost="1"],
+  [data-layout-editing="1"] [data-layout-setting][data-ghost="1"] {
     animation: none;
+  }
+
+  [data-layout-editing="1"] [data-layout-setting] {
+    transition: none;
   }
 }
 
@@ -794,8 +817,17 @@
 
 :root[data-reduce-panel-motion]
   [data-layout-editing="1"]
-  [data-layout-region][data-ghost="1"] {
+  [data-layout-region][data-ghost="1"],
+:root[data-reduce-panel-motion]
+  [data-layout-editing="1"]
+  [data-layout-setting][data-ghost="1"] {
   animation: none;
+}
+
+:root[data-reduce-panel-motion]
+  [data-layout-editing="1"]
+  [data-layout-setting] {
+  transition: none;
 }
 
 /* ---------------------------------------------------------------
@@ -904,12 +936,14 @@
   [data-layout-lit="1"]
     [data-layout-passive-members]
     > :not(:has([data-layout-session-tab])),
-  [data-layout-editing="1"] [data-layout-region][data-ghost="1"] {
+  [data-layout-editing="1"] [data-layout-region][data-ghost="1"],
+  [data-layout-editing="1"] [data-layout-setting][data-ghost="1"] {
     opacity: 1;
     filter: none;
   }
 
   [data-layout-editing="1"] [data-layout-region][data-hover="1"],
+  [data-layout-editing="1"] [data-layout-setting][data-hover="1"],
   [data-layout-editing="1"] [data-layout-region][data-selected="1"] {
     outline: 2px solid Highlight;
   }

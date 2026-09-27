@@ -16,10 +16,13 @@ import { Button } from "@/components/ui/button";
 import { navigateToLayoutRegion } from "@/lib/settings-navigation";
 import { useLayoutEditorStore } from "@/stores/layout/layout-editor-store";
 import { SegmentedControl } from "@/components/layout-editor/inspector/segmented-control";
+import { PicturedOptions } from "@/components/layout-editor/inspector/pictured-options";
+import { AppFrameStripTaskRows } from "@/components/layout-editor/inspector/app-frame-chrome";
 import { writeArrangementField } from "@/lib/layout/arrangement-gestures";
 import {
   EDGE_SIDE_OPTIONS,
   READING_WIDTH_OPTIONS,
+  SIDE_STRIP_VIEW_AT_TOP,
   SIDE_STRIP_VIEW_OPTIONS,
   TAB_OVERFLOW_OPTIONS,
   TAB_STRIP_PLACEMENT_OPTIONS,
@@ -28,6 +31,7 @@ import {
 import { LAYOUT } from "@/components/settings/panels/layout-settings.definitions";
 import { useSettingsAvailabilityContext } from "@/hooks/settings/use-settings-availability-context";
 import { DEFAULT_ARRANGEMENT } from "@/lib/layout/layout-arrangement";
+import { SIDE_STRIP_DEFAULT_WIDTH_PX } from "@/components/layout/tabs/side-strip/side-strip-tokens";
 import {
   mobileFooterChanged,
   sidebarSideChanged,
@@ -109,6 +113,9 @@ function PlacementRow(props: {
   readonly onRevert: (() => void) | null;
   readonly revertLabel: string;
   readonly status: ReactNode;
+  /** A control that is a list of its own, under the label. */
+  readonly stacked: boolean;
+  readonly selected: boolean;
 }): ReactNode {
   const { row, icon, control, onRevert, revertLabel, status } = props;
   const availability = useSettingsAvailabilityContext();
@@ -122,7 +129,8 @@ function PlacementRow(props: {
       control={control}
       onRevert={onRevert}
       revertLabel={revertLabel}
-      stacked={false}
+      stacked={props.stacked}
+      selected={props.selected}
     />
   );
 }
@@ -146,6 +154,8 @@ export function TabStripPositionRow(): ReactNode {
       }
       revertLabel="Reset tab placement to default: Top"
       status={null}
+      stacked={false}
+      selected={false}
       control={
         <SegmentedControl
           ariaLabel="Tab placement"
@@ -165,12 +175,21 @@ export function TabStripPositionRow(): ReactNode {
 }
 
 /**
- * What the vertical strip shows (D8). It only means something while the tabs
- * are at an edge, so at the top the control is disabled and says why; the
- * stored value is kept for the way back.
+ * What the vertical strip shows (D8), each value drawn as the strip itself: the
+ * sample task's row and the one below it, with its live agents between them in
+ * Tabs and agents. It only means something while the tabs are at an edge, so
+ * at the top the pictures are disabled and the row says why; the stored value
+ * is kept for the way back.
+ *
+ * Its part on the editor's canvas is the list under the active tab, so it is
+ * the one area row that selects: pressing or focusing it rings that list, and
+ * a press on the list selects it (`LayoutSettingId`).
  */
 export function SideStripViewRow(): ReactNode {
   const arrangement = useLayoutStore((state) => state.arrangement);
+  const selected = useLayoutEditorStore(
+    (state) => state.selectedSetting === "sideStripView",
+  );
   const atTop = arrangement.tabStripPlacement === "top";
   return (
     <PlacementRow
@@ -186,14 +205,16 @@ export function SideStripViewRow(): ReactNode {
             }
           : null
       }
-      revertLabel="Reset side tab view to default"
-      status={atTop ? "Available when tabs are on the left or right." : null}
+      revertLabel="Reset side tab view to default: Tabs only"
+      status={atTop ? SIDE_STRIP_VIEW_AT_TOP : null}
+      stacked
+      selected={selected}
       control={
-        <SegmentedControl
-          ariaLabel="Side tab view"
-          options={SIDE_STRIP_VIEW_OPTIONS}
+        <PicturedOptions
+          label="Side tab view"
           value={arrangement.sideStripView}
           disabled={atTop}
+          labelPlacement="above"
           onChange={(next) => {
             const option = SIDE_STRIP_VIEW_OPTIONS.find(
               (candidate) => candidate.value === next,
@@ -201,6 +222,22 @@ export function SideStripViewRow(): ReactNode {
             if (option === undefined) return;
             writeArrangementField("sideStripView", option.value);
           }}
+          options={SIDE_STRIP_VIEW_OPTIONS.map((option) => ({
+            id: option.value,
+            label: option.label,
+            picture: (
+              <div
+                className="flex w-full flex-col gap-0.5"
+                style={{ maxWidth: SIDE_STRIP_DEFAULT_WIDTH_PX }}
+              >
+                <AppFrameStripTaskRows
+                  liveAgents={option.value === "activity"}
+                  joined={null}
+                  startAtActive
+                />
+              </div>
+            ),
+          }))}
         />
       }
     />
@@ -226,6 +263,8 @@ export function SidebarSideRow(): ReactNode {
       }
       revertLabel="Reset sidebar side to default"
       status={null}
+      stacked={false}
+      selected={false}
       control={
         <SegmentedControl
           ariaLabel="Sidebar side"
@@ -262,6 +301,8 @@ export function ReadingWidthRow(): ReactNode {
       }
       revertLabel="Reset reading width to default: Comfortable"
       status={null}
+      stacked={false}
+      selected={false}
       control={
         <SegmentedControl
           ariaLabel="Reading width"
@@ -309,6 +350,8 @@ export function TabOverflowRow(): ReactNode {
       }
       revertLabel="Reset tab overflow to default: Scroll"
       status={atSide ? "Available when tabs are at the top." : null}
+      stacked={false}
+      selected={false}
       control={
         <SegmentedControl
           ariaLabel="Tab overflow"
@@ -360,6 +403,8 @@ export function ResourceReadingsRow(): ReactNode {
           : null
       }
       revertLabel="Reset readings on agent rows"
+      stacked={false}
+      selected={false}
       status={
         <>
           {RESOURCE_READINGS_ROW.description}{" "}
@@ -409,6 +454,8 @@ function MobileFooterRow(): ReactNode {
       }
       revertLabel="Reset the small-screen status bar"
       status={null}
+      stacked={false}
+      selected={false}
       control={
         <Switch
           checked={arrangement.mobileFooter}
