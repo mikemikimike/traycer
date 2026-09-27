@@ -394,6 +394,9 @@ export function HomeFocusView(): ReactNode {
   const disclosure = useTaskDisclosure(liveKeys);
   const empty =
     sections.groups.length === 0 && sections.needsYou.prompts.length === 0;
+  // "Nothing needs you" under a board listing a row that does would contradict
+  // it, so the empty state speaks only for a page with no board either.
+  const showEmptyState = empty && statusBoard.rows.length === 0;
   return (
     // One landmark for the whole page - the inner groups are plain containers
     // with `h2` headings so a screen reader gets a heading outline rather than
@@ -424,9 +427,8 @@ export function HomeFocusView(): ReactNode {
             sections,
           )}
         />
-        {empty ? (
-          <HomeFocusEmptyState />
-        ) : (
+        {showEmptyState ? <HomeFocusEmptyState /> : null}
+        {empty ? null : (
           <HomeHostGroupedContext.Provider value={hostGrouping.enabled}>
             <HomeFocusSections
               model={model}

@@ -2487,12 +2487,20 @@ describe("<HomeFocusView /> status board", () => {
     expect(headingOf("running")).toBe("Running · 1");
   });
 
-  it("still draws the board over the empty state", () => {
-    statusBoardMock.rows = [statusRow({ key: "a" })];
+  it("draws the board on an otherwise empty page, without the empty state under it", () => {
+    statusBoardMock.rows = [statusRow({ key: "a", status: "needs-you" })];
     modelMock.value = model({});
     render(<HomeFocusView />);
 
     expect(screen.getByTestId("home-status-table")).toBeDefined();
+    expect(screen.queryByTestId("home-focus-empty")).toBeNull();
+  });
+
+  it("keeps the empty state when the board is empty too", () => {
+    modelMock.value = model({});
+    render(<HomeFocusView />);
+
+    expect(screen.queryByTestId("home-status-table")).toBeNull();
     expect(screen.getByTestId("home-focus-empty")).toBeDefined();
   });
 

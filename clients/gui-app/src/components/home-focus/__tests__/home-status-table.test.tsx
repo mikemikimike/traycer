@@ -104,6 +104,32 @@ describe("HomeStatusTable", () => {
     );
   });
 
+  it("agrees the verb with a single row waiting on the user", () => {
+    renderTable([
+      row({ key: "a", status: "needs-you" }),
+      row({ key: "b", status: "in-progress" }),
+    ]);
+    expect(screen.getByTestId("home-status-summary").textContent).toBe(
+      "1 needs you·1 in progress",
+    );
+  });
+
+  // Layout is asserted by class: jsdom does no table layout, so this pins the
+  // sizing contract the render relies on rather than a measured width.
+  it("gives the note the slack and sizes the item to its own text", () => {
+    renderTable([row({ key: "a", item: "Port-forward drain" })]);
+    const note = screen.getByTestId("home-status-note");
+    expect(note.classList.contains("w-full")).toBe(true);
+    expect(
+      screen.getByRole("columnheader", { name: "Note" }).classList.contains(
+        "w-full",
+      ),
+    ).toBe(true);
+    const itemText = screen.getByText("Port-forward drain");
+    expect(itemText.classList.contains("w-max")).toBe(true);
+    expect(itemText.classList.contains("max-w-56")).toBe(true);
+  });
+
   it("renders the note as markdown with a clickable link", () => {
     renderTable([
       row({
@@ -164,6 +190,21 @@ describe("HomeStatusTable", () => {
       "agent-9",
       "host-remote",
     );
+  });
+
+  it("caps and truncates a long agent name, keeping the whole name reachable", async () => {
+    const user = userEvent.setup();
+    renderTable([row({ key: "a", agentName: "Update Home Status Board" })]);
+    const chip = screen.getByTestId("home-status-agent");
+    expect(chip.classList.contains("max-w-32")).toBe(true);
+    const name = screen.getByTestId("home-status-agent-name");
+    expect(name.classList.contains("truncate")).toBe(true);
+    expect(name.textContent).toBe("Update Home Status Board");
+
+    await user.hover(chip);
+    expect(
+      (await screen.findByRole("tooltip")).textContent,
+    ).toContain("Update Home Status Board");
   });
 
   it("falls back to a generic name when the agent has none", () => {

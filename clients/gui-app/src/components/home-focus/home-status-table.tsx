@@ -8,6 +8,12 @@
  * becomes a two-column grid: the status dot, then item, note and
  * `agent · time` stacked, with dismiss pinned to the first line.
  *
+ * Column widths: Note is the one column that takes the slack (`w-full`).
+ * Status and Last update never wrap, and the agent chip truncates, so neither
+ * can squeeze it. An Item is sized to its own text up to 14rem (`w-max
+ * max-w-56`), which is also its min-content, so a short name stays on one line
+ * and only a genuinely long one wraps.
+ *
  * Ordering is the board's (needs you, in progress, done; newest first) - this
  * file renders, it does not sort.
  */
@@ -20,6 +26,7 @@ import {
 } from "@traycer/protocol/notifications/home-status-room";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { useRegisteredEpicAgentActivityTiers } from "@/lib/epic-selectors";
 import { useCompactRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -27,8 +34,8 @@ import { TraycerMarkdown } from "@/markdown/traycer-markdown";
 
 interface StatusDisplay {
   readonly label: string;
-  /** The summary line's phrasing of a count. */
-  readonly summary: string;
+  /** The summary line's phrasing of a count, which agrees with it. */
+  readonly summary: (count: number) => string;
   readonly badge: "warning" | "info" | "success";
   readonly dotClass: string;
   readonly textClass: string;
@@ -41,21 +48,21 @@ interface StatusDisplay {
 const STATUS_DISPLAY: Record<HomeStatus, StatusDisplay> = {
   "needs-you": {
     label: "Needs you",
-    summary: "need you",
+    summary: (count) => (count === 1 ? "needs you" : "need you"),
     badge: "warning",
     dotClass: "bg-warning",
     textClass: "text-warning-foreground",
   },
   "in-progress": {
     label: "In progress",
-    summary: "in progress",
+    summary: () => "in progress",
     badge: "info",
     dotClass: "bg-info",
     textClass: "text-info-foreground",
   },
   done: {
     label: "Done",
-    summary: "done",
+    summary: () => "done",
     badge: "success",
     dotClass: "bg-success",
     textClass: "text-success-foreground",
@@ -112,10 +119,10 @@ export function HomeStatusTable(props: HomeStatusTableProps): ReactNode {
             <th scope="col" className="px-3 py-2 font-medium">
               Item
             </th>
-            <th scope="col" className="px-3 py-2 font-medium">
+            <th scope="col" className="w-full px-3 py-2 font-medium">
               Note
             </th>
-            <th scope="col" className="px-3 py-2 font-medium">
+            <th scope="col" className="px-3 py-2 font-medium whitespace-nowrap">
               Last update
             </th>
             <th scope="col" className="w-0 p-0">
@@ -169,7 +176,8 @@ function HomeStatusSummary(props: {
               STATUS_DISPLAY[segment.status].textClass,
             )}
           >
-            {segment.count} {STATUS_DISPLAY[segment.status].summary}
+            {segment.count}{" "}
+            {STATUS_DISPLAY[segment.status].summary(segment.count)}
           </span>
         </span>
       ))}
@@ -197,7 +205,7 @@ function HomeStatusTableRow(props: {
         stale && "opacity-60",
       )}
     >
-      <td className="px-3 py-2.5 @max-[36rem]:row-span-3 @max-[36rem]:p-0 @max-[36rem]:pt-1.5">
+      <td className="px-3 py-2.5 whitespace-nowrap @max-[36rem]:row-span-3 @max-[36rem]:p-0 @max-[36rem]:pt-1.5">
         <Badge
           variant={display.badge}
           className="rounded-full @max-[36rem]:hidden"
@@ -225,11 +233,13 @@ function HomeStatusTableRow(props: {
         )}
         data-testid="home-status-item"
       >
-        {row.item}
+        <span className="block w-max max-w-56 @max-[36rem]:w-auto @max-[36rem]:max-w-none">
+          {row.item}
+        </span>
       </td>
       <td
         className={cn(
-          "min-w-0 px-3 py-2.5 break-words text-muted-foreground",
+          "w-full min-w-0 px-3 py-2.5 break-words text-muted-foreground",
           FOLDED_BODY_CELL,
           "@max-[36rem]:mt-0.5",
         )}
@@ -294,23 +304,35 @@ function HomeStatusLastUpdate(props: {
   const name = row.agentName.trim().length > 0 ? row.agentName : "Agent";
   return (
     <div className="flex min-w-0 items-center gap-2 text-ui-xs text-muted-foreground @max-[36rem]:gap-1">
-      <button
-        type="button"
-        onClick={() => onOpenAgent(row.epicId, row.agentId, row.hostId)}
-        data-testid="home-status-agent"
-        data-live={live ? "true" : undefined}
-        className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/50 @max-[36rem]:border-transparent @max-[36rem]:px-0 @max-[36rem]:text-muted-foreground"
+      {/* Capped and truncated: agent titles run long ("Update Home Status
+          Board"), and an uncapped chip took the width the note needs. The
+          tooltip keeps the whole name reachable. */}
+      <TooltipWrapper
+        label={name}
+        side="top"
+        sideOffset={undefined}
+        align={undefined}
       >
-        <span className="truncate">{name}</span>
-        {live ? (
-          <span
-            role="img"
-            aria-label="Working now"
-            data-testid="home-status-agent-live"
-            className="size-1.5 shrink-0 rounded-full bg-success"
-          />
-        ) : null}
-      </button>
+        <button
+          type="button"
+          onClick={() => onOpenAgent(row.epicId, row.agentId, row.hostId)}
+          data-testid="home-status-agent"
+          data-live={live ? "true" : undefined}
+          className="inline-flex max-w-32 min-w-0 items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/50 @max-[36rem]:border-transparent @max-[36rem]:px-0 @max-[36rem]:text-muted-foreground"
+        >
+          <span className="truncate" data-testid="home-status-agent-name">
+            {name}
+          </span>
+          {live ? (
+            <span
+              role="img"
+              aria-label="Working now"
+              data-testid="home-status-agent-live"
+              className="size-1.5 shrink-0 rounded-full bg-success"
+            />
+          ) : null}
+        </button>
+      </TooltipWrapper>
       <span aria-hidden className="text-muted-foreground/60">
         ·
       </span>
