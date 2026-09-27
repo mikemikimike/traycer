@@ -1,5 +1,6 @@
 import type * as Y from "yjs";
 import { z } from "zod";
+import { lazySchema } from "@traycer/protocol/framework/lazy-schema";
 
 /**
  * Top-level `Y.Map` on the per-user notifications room that holds the Home
@@ -28,32 +29,35 @@ export const HOME_STATUS_ITEM_MAX_LENGTH = 200;
 export const HOME_STATUS_NOTE_MAX_LENGTH = 2000;
 export const HOME_STATUS_ID_MAX_LENGTH = 256;
 
-export const homeStatusSchema = z.enum(HOME_STATUS_VALUES);
+export const homeStatusSchema = lazySchema(() => z.enum(HOME_STATUS_VALUES));
 
-export const homeStatusKeySchema = z
-  .string()
-  .min(1)
-  .max(HOME_STATUS_KEY_MAX_LENGTH);
+export const homeStatusKeySchema = lazySchema(() =>
+  z.string().min(1).max(HOME_STATUS_KEY_MAX_LENGTH),
+);
 
 /** The stored value under a row key. Unknown fields are ignored on read. */
-export const homeStatusRowValueSchema = z.object({
-  status: homeStatusSchema,
-  item: z.string().min(1).max(HOME_STATUS_ITEM_MAX_LENGTH),
-  /** Markdown. Render only through a sanitizing markdown renderer. */
-  note: z.string().max(HOME_STATUS_NOTE_MAX_LENGTH),
-  agentId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
-  agentName: z.string().max(HOME_STATUS_ID_MAX_LENGTH),
-  epicId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
-  hostId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
-  /** Epoch milliseconds of the last write. */
-  updatedAt: z.number().int().nonnegative(),
-});
+export const homeStatusRowValueSchema = lazySchema(() =>
+  z.object({
+    status: homeStatusSchema,
+    item: z.string().min(1).max(HOME_STATUS_ITEM_MAX_LENGTH),
+    /** Markdown. Render only through a sanitizing markdown renderer. */
+    note: z.string().max(HOME_STATUS_NOTE_MAX_LENGTH),
+    agentId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
+    agentName: z.string().max(HOME_STATUS_ID_MAX_LENGTH),
+    epicId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
+    hostId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
+    /** Epoch milliseconds of the last write. */
+    updatedAt: z.number().int().nonnegative(),
+  }),
+);
 
 export type HomeStatusRowValue = z.infer<typeof homeStatusRowValueSchema>;
 
-export const homeStatusRowSchema = homeStatusRowValueSchema.extend({
-  key: homeStatusKeySchema,
-});
+export const homeStatusRowSchema = lazySchema(() =>
+  homeStatusRowValueSchema.extend({
+    key: homeStatusKeySchema,
+  }),
+);
 
 export type HomeStatusRow = z.infer<typeof homeStatusRowSchema>;
 
