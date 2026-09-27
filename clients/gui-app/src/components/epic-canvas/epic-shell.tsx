@@ -7,6 +7,7 @@
  */
 import { use, useMemo, type ReactNode } from "react";
 import { TileCanvas } from "@/components/epic-canvas/canvas/tile-canvas";
+import { ChatStreamPrewarm } from "@/components/epic-canvas/chat-stream-prewarm";
 import { WorkspaceFileIconSpriteSheet } from "@/components/epic-canvas/workspace-file/workspace-file-icons";
 import { EpicConnectionPill } from "@/components/epic-canvas/panels/epic-connection-pill";
 import { useEpicDurabilityPlane } from "@/components/epic-canvas/panels/epic-durability-plane";
@@ -33,6 +34,10 @@ import { sideTabStripEdge } from "@/lib/layout/layout-arrangement";
 import { useArrangementValue } from "@/lib/layout-overrides";
 import { useStatusBarShown } from "@/stores/layout/layout-store";
 import { cn } from "@/lib/utils";
+import {
+  selectHasActiveInitialChatHandoffForEpic,
+  useInitialChatHandoffStore,
+} from "@/stores/epics/initial-chat-handoff-store";
 
 interface EpicShellProps {
   readonly epicId: string;
@@ -134,6 +139,9 @@ function EpicShellSessionBody(
 ) {
   const snapshotLoaded = useEpicSnapshotLoaded();
   const snapshotFetchError = useEpicSnapshotFetchError();
+  const hasActiveHandoff = useInitialChatHandoffStore((state) =>
+    selectHasActiveInitialChatHandoffForEpic(state, props.epicId),
+  );
   const snapshotContextValue = useMemo(
     () => ({ snapshotLoaded, snapshotFetchError }),
     [snapshotLoaded, snapshotFetchError],
@@ -143,6 +151,13 @@ function EpicShellSessionBody(
     <SnapshotLoadingProvider value={snapshotContextValue}>
       {props.active ? <EpicConnectionToasts epicId={props.epicId} /> : null}
       <ResourcesStreamMount epicId={props.epicId} />
+      {snapshotFetchError === null && !hasActiveHandoff ? (
+        <ChatStreamPrewarm
+          epicId={props.epicId}
+          tabId={props.tabId}
+          snapshotLoaded={snapshotLoaded}
+        />
+      ) : null}
       <CanvasColumn
         statusRow={
           <EpicShellStatusRow

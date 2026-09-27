@@ -26,6 +26,15 @@ import {
 import { createInProcessEpicRuntimeWorker } from "@/stores/epics/open-epic/test-support/in-process-epic-runtime-worker";
 import type { RuntimeWorkerLike } from "@/stores/epics/open-epic/runtime/worker/spawn-epic-runtime-worker";
 
+vi.mock("@/components/epic-canvas/chat-stream-prewarm", () => ({
+  ChatStreamPrewarm: (props: { readonly snapshotLoaded: boolean }) => (
+    <div
+      data-testid="chat-stream-prewarm"
+      data-snapshot-loaded={String(props.snapshotLoaded)}
+    />
+  ),
+}));
+
 const hostClient = {
   getActiveHostId: () => "host-test",
   getActiveHost: () => null,
@@ -318,6 +327,7 @@ describe("<EpicShell />", () => {
     // The content sheet owns the border; a second one here doubles it.
     expect(canvas.className).not.toMatch(/\bborder\b/);
     expect(screen.queryByTestId("epic-session-loading")).toBeNull();
+    expect(screen.queryByTestId("chat-stream-prewarm")).toBeNull();
   });
 
   it("draws no divider of its own: the canvas frame below it owns the border now (flush surface)", () => {
@@ -391,6 +401,43 @@ describe("<EpicShell />", () => {
     });
     expect(screen.queryByTestId("epic-shell-title-skeleton")).toBeNull();
     expect(screen.queryByText(EPIC_ID)).toBeNull();
+
+    queryClient.clear();
+  });
+
+  it("keeps chat stream prewarm mounted through the snapshot for tile handoff", async () => {
+    const controlled = installControlledFactory();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+          staleTime: 60_000,
+        },
+      },
+    });
+
+    renderShell(queryClient);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("chat-stream-prewarm").dataset.snapshotLoaded,
+      ).toBe("false");
+    });
+
+    controlled.streams()[0].callbacks.onConnectionStatus("open", null, true);
+    controlled
+      .streams()[0]
+      .callbacks.onSnapshot(
+        buildMeta("Prewarmed Epic", "editor"),
+        buildSnapshot("Prewarmed Epic"),
+      );
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("chat-stream-prewarm").dataset.snapshotLoaded,
+      ).toBe("true");
+    });
+    expect(screen.getByTestId("tile-canvas-stub")).not.toBeNull();
 
     queryClient.clear();
   });
