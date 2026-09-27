@@ -93,7 +93,7 @@ describe("useSettingsStore", () => {
   it("persists and rehydrates the Home status board thresholds", async () => {
     useSettingsStore.getState().setHomeStatusInProgressStaleAfter("1h");
     useSettingsStore.getState().setHomeStatusNeedsYouStaleAfter("8h");
-    useSettingsStore.getState().setHomeStatusDoneHideAfter("12h");
+    useSettingsStore.getState().setHomeStatusDoneHideAfter("never");
     const persisted = window.localStorage.getItem("traycer-gui-app:settings");
     expect(persisted).not.toBeNull();
 
@@ -108,14 +108,13 @@ describe("useSettingsStore", () => {
     const state = useSettingsStore.getState();
     expect(state.homeStatusInProgressStaleAfter).toBe("1h");
     expect(state.homeStatusNeedsYouStaleAfter).toBe("8h");
-    expect(state.homeStatusDoneHideAfter).toBe("12h");
+    expect(state.homeStatusDoneHideAfter).toBe("never");
   });
 
   it("rehydrates an unknown threshold as its default, not as the stored string", async () => {
     await rehydrateFrom({
       homeStatusInProgressStaleAfter: "3h",
       homeStatusNeedsYouStaleAfter: 60,
-      // Longer than hosts keep done rows, so no build offers it.
       homeStatusDoneHideAfter: "48h",
     });
 

@@ -2046,8 +2046,9 @@ md:top-0`): positioned against the nearest scrollport - the settings
     task list it draws. While it is on, three Selects under it set the Home
     status board's display thresholds (`homeStatusInProgressStaleAfter`,
     default 2 h; `homeStatusNeedsYouStaleAfter`, default Never;
-    `homeStatusDoneHideAfter`, default 24 h, and never longer, because hosts
-    prune done rows past 24 h). They are per device, change only what the
+    `homeStatusDoneHideAfter`, default 24 h, up to Never - hosts keep done
+    rows for the same 7 days as any row, which the row's description says).
+    They are per device, change only what the
     table dims and hides (`lib/home-focus/home-status-thresholds.ts`), and are
     kept when the switch goes off. Being mode-gated they own no search entry:
     they `contributesTo` the `Home tab` row. `Home density` was the second row and is gone, with the

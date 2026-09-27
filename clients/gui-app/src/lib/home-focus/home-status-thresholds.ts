@@ -4,12 +4,12 @@
  * leaves the table.
  *
  * Presentation only. Nothing here reaches the room: hosts prune on their own
- * fixed rules (`@traycer/protocol/notifications/home-status-room`), and
+ * fixed rule, the 7-day row TTL for every status
+ * (`@traycer/protocol/notifications/home-status-room`), and
  * `traycer_home_list_rows` keeps reporting `stale` against the protocol's
- * default. The 7-day row TTL is the protocol's too and is not a choice here.
+ * default.
  */
 import {
-  HOME_STATUS_DONE_TTL_MS,
   HOME_STATUS_ROW_TTL_MS,
   HOME_STATUS_STALE_MS,
   type HomeStatusRow,
@@ -17,6 +17,7 @@ import {
 
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
 
 export interface HomeStatusThresholdOption<Value extends string> {
   readonly value: Value;
@@ -64,18 +65,20 @@ export const HOME_STATUS_NEEDS_YOU_STALE_OPTIONS: ReadonlyArray<
 export const DEFAULT_HOME_STATUS_NEEDS_YOU_STALE_AFTER: HomeStatusNeedsYouStaleAfter =
   "never";
 
-export type HomeStatusDoneHideAfter = "1h" | "4h" | "12h" | "24h";
+export type HomeStatusDoneHideAfter = "1h" | "4h" | "12h" | "24h" | "never";
 
-// Capped at 24 h on purpose: hosts prune `done` rows older than
-// HOME_STATUS_DONE_TTL_MS on every write, so a longer choice here would
-// promise rows that the next write anywhere deletes.
+// Hosts keep a `done` row as long as any other, HOME_STATUS_ROW_TTL_MS
+// (7 days), so every choice here, Never included, is honoured up to that
+// age; past it the row is gone from the room and `isHomeStatusRowHiddenFor`
+// hides it anyway.
 export const HOME_STATUS_DONE_HIDE_OPTIONS: ReadonlyArray<
   HomeStatusThresholdOption<HomeStatusDoneHideAfter>
 > = [
   { value: "1h", label: "1 h", ms: HOUR_MS },
   { value: "4h", label: "4 h", ms: 4 * HOUR_MS },
   { value: "12h", label: "12 h", ms: 12 * HOUR_MS },
-  { value: "24h", label: "24 h", ms: HOME_STATUS_DONE_TTL_MS },
+  { value: "24h", label: "24 h", ms: DAY_MS },
+  { value: "never", label: "Never", ms: null },
 ];
 
 export const DEFAULT_HOME_STATUS_DONE_HIDE_AFTER: HomeStatusDoneHideAfter =
@@ -110,7 +113,7 @@ export function isHomeStatusDoneHideAfter(
 export interface HomeStatusThresholds {
   readonly inProgressStaleAfterMs: number | null;
   readonly needsYouStaleAfterMs: number | null;
-  readonly doneHideAfterMs: number;
+  readonly doneHideAfterMs: number | null;
 }
 
 export function resolveHomeStatusThresholds(
@@ -131,9 +134,7 @@ export function resolveHomeStatusThresholds(
       needsYouStaleAfter,
       null,
     ),
-    doneHideAfterMs:
-      msOf(HOME_STATUS_DONE_HIDE_OPTIONS, doneHideAfter, null) ??
-      HOME_STATUS_DONE_TTL_MS,
+    doneHideAfterMs: msOf(HOME_STATUS_DONE_HIDE_OPTIONS, doneHideAfter, DAY_MS),
   };
 }
 
@@ -187,5 +188,9 @@ export function isHomeStatusRowHiddenFor(
 ): boolean {
   const age = now - row.updatedAt;
   if (age > HOME_STATUS_ROW_TTL_MS) return true;
-  return row.status === "done" && age > thresholds.doneHideAfterMs;
+  return (
+    row.status === "done" &&
+    thresholds.doneHideAfterMs !== null &&
+    age > thresholds.doneHideAfterMs
+  );
 }

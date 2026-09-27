@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
-  HOME_STATUS_DONE_TTL_MS,
   HOME_STATUS_MAP_KEY,
   HOME_STATUS_MAX_ROWS,
   HOME_STATUS_ROW_TTL_MS,
@@ -20,6 +19,7 @@ import {
 } from "../home-status-room";
 
 const NOW = 1_800_000_000_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function row(overrides: Partial<HomeStatusRow>): HomeStatusRow {
   return {
@@ -138,24 +138,21 @@ describe("home status room", () => {
     ).toBe(false);
   });
 
-  it("expires done rows after a day and any row after a week", () => {
-    const pastDay = NOW - HOME_STATUS_DONE_TTL_MS - 1;
+  it("expires any row after a week, done rows included, and none sooner", () => {
+    const pastDay = NOW - DAY_MS - 1;
+    const atWeek = NOW - HOME_STATUS_ROW_TTL_MS;
     const pastWeek = NOW - HOME_STATUS_ROW_TTL_MS - 1;
-    expect(
-      isHomeStatusRowExpired(row({ status: "done", updatedAt: pastDay }), NOW),
-    ).toBe(true);
-    expect(
-      isHomeStatusRowExpired(
-        row({ status: "needs-you", updatedAt: pastDay }),
-        NOW,
-      ),
-    ).toBe(false);
-    expect(
-      isHomeStatusRowExpired(
-        row({ status: "needs-you", updatedAt: pastWeek }),
-        NOW,
-      ),
-    ).toBe(true);
+    for (const status of ["done", "needs-you", "in-progress"] as const) {
+      expect(
+        isHomeStatusRowExpired(row({ status, updatedAt: pastDay }), NOW),
+      ).toBe(false);
+      expect(
+        isHomeStatusRowExpired(row({ status, updatedAt: atWeek }), NOW),
+      ).toBe(false);
+      expect(
+        isHomeStatusRowExpired(row({ status, updatedAt: pastWeek }), NOW),
+      ).toBe(true);
+    }
   });
 
   it("prunes expired rows and provably old malformed rows, keeps unknown shapes", () => {
@@ -163,9 +160,13 @@ describe("home status room", () => {
     const map = getHomeStatusMap(doc);
     map.set("fresh", valueOf(row({})));
     map.set(
+      "day-old-done",
+      valueOf(row({ status: "done", updatedAt: NOW - DAY_MS - 1 })),
+    );
+    map.set(
       "old-done",
       valueOf(
-        row({ status: "done", updatedAt: NOW - HOME_STATUS_DONE_TTL_MS - 1 }),
+        row({ status: "done", updatedAt: NOW - HOME_STATUS_ROW_TTL_MS - 1 }),
       ),
     );
     map.set("old-malformed", {
@@ -178,7 +179,11 @@ describe("home status room", () => {
       "old-malformed",
     ]);
     expect(pruneHomeStatusRows(doc, NOW)).toBe(2);
-    expect([...map.keys()].sort()).toEqual(["fresh", "future-shape"]);
+    expect([...map.keys()].sort()).toEqual([
+      "day-old-done",
+      "fresh",
+      "future-shape",
+    ]);
     expect(pruneHomeStatusRows(doc, NOW)).toBe(0);
   });
 
@@ -187,7 +192,7 @@ describe("home status room", () => {
     const expired = row({
       key: "k",
       status: "done",
-      updatedAt: NOW - HOME_STATUS_DONE_TTL_MS - 1,
+      updatedAt: NOW - HOME_STATUS_ROW_TTL_MS - 1,
     });
     getHomeStatusMap(doc).set("stale-done", valueOf(expired));
     expect(writeHomeStatusRow(doc, expired, NOW)).toBe(1);
@@ -220,14 +225,19 @@ describe("home status room", () => {
     map.set("p", valueOf(row({ status: "in-progress" })));
     map.set("n", valueOf(row({ status: "needs-you" })));
     map.set(
+      "day-old-done",
+      valueOf(row({ status: "done", updatedAt: NOW - DAY_MS - 1 })),
+    );
+    map.set(
       "gone",
       valueOf(
-        row({ status: "done", updatedAt: NOW - HOME_STATUS_DONE_TTL_MS - 1 }),
+        row({ status: "done", updatedAt: NOW - HOME_STATUS_ROW_TTL_MS - 1 }),
       ),
     );
     expect(readVisibleHomeStatusRows(doc, NOW).map((r) => r.key)).toEqual([
       "n",
       "p",
+      "day-old-done",
     ]);
   });
 
@@ -262,9 +272,9 @@ describe("home status room", () => {
       row({
         key: "k",
         status: "done",
-        updatedAt: NOW - HOME_STATUS_DONE_TTL_MS,
+        updatedAt: NOW - HOME_STATUS_ROW_TTL_MS,
       }),
-      NOW - HOME_STATUS_DONE_TTL_MS,
+      NOW - HOME_STATUS_ROW_TTL_MS,
     );
     exchange(a, b);
 

@@ -17,9 +17,13 @@ export type HomeStatus = (typeof HOME_STATUS_VALUES)[number];
 
 /** An `in-progress` row untouched for longer than this renders as stale. */
 export const HOME_STATUS_STALE_MS = 2 * 60 * 60 * 1000;
-/** A `done` row older than this is hidden and pruned. */
-export const HOME_STATUS_DONE_TTL_MS = 24 * 60 * 60 * 1000;
-/** Any row older than this is hidden and pruned, whatever its status. */
+/**
+ * Any row older than this is hidden and pruned, whatever its status - `done`
+ * rows included, so how long a finished row stays in view is each reader's
+ * own display choice. Hosts from before this rule also pruned `done` rows at
+ * 24 h, so on a board one of them still writes to, a finished row can vanish
+ * sooner than a reader asked.
+ */
 export const HOME_STATUS_ROW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Writers prune the board down to this many entries. */
 export const HOME_STATUS_MAX_ROWS = 200;
@@ -132,17 +136,14 @@ export function isHomeStatusRowStale(row: HomeStatusRow, now: number): boolean {
 }
 
 /**
- * Whether a row has outlived its TTL: `done` rows after
- * {@link HOME_STATUS_DONE_TTL_MS}, any row after {@link HOME_STATUS_ROW_TTL_MS}.
- * Expired rows are pruned by writers and hidden by readers.
+ * Whether a row has outlived {@link HOME_STATUS_ROW_TTL_MS}, whatever its
+ * status. Expired rows are pruned by writers and hidden by readers.
  */
 export function isHomeStatusRowExpired(
   row: HomeStatusRow,
   now: number,
 ): boolean {
-  const age = now - row.updatedAt;
-  if (age > HOME_STATUS_ROW_TTL_MS) return true;
-  return row.status === "done" && age > HOME_STATUS_DONE_TTL_MS;
+  return now - row.updatedAt > HOME_STATUS_ROW_TTL_MS;
 }
 
 /** Valid, unexpired rows in board order. */

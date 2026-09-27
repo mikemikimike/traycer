@@ -5,7 +5,7 @@ import type { NotificationsStreamCallbacks } from "@traycer-clients/shared/host-
 import { createHostReconnectEngine } from "@traycer-clients/shared/host-client/host-connection-reconnect-engine";
 import {
   getHomeStatusMap,
-  HOME_STATUS_DONE_TTL_MS,
+  HOME_STATUS_ROW_TTL_MS,
   type HomeStatusRow,
 } from "@traycer/protocol/notifications/home-status-room";
 import { useHomeStatusBoard } from "@/hooks/home-focus/use-home-status-board";
@@ -147,7 +147,7 @@ describe("useHomeStatusBoard", () => {
       row({
         key: "fresh-done",
         status: "done",
-        updatedAt: Date.now() - HOME_STATUS_DONE_TTL_MS / 2,
+        updatedAt: Date.now() - 12 * 60 * 60 * 1000,
       }),
     ]);
     host.writeRaw("bad", { status: "nope" });
@@ -174,6 +174,30 @@ describe("useHomeStatusBoard", () => {
     });
     expect(keysOf(result.current.rows)).toEqual(["work"]);
     expect(result.current.thresholds.doneHideAfterMs).toBe(60 * 60 * 1000);
+    host.dispose();
+  });
+
+  it("keeps a days-old done row at Never, until the 7-day row TTL", () => {
+    const host = openLane();
+    host.write([
+      row({
+        key: "done-3d",
+        status: "done",
+        updatedAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
+      }),
+      row({
+        key: "done-8d",
+        status: "done",
+        updatedAt: Date.now() - HOME_STATUS_ROW_TTL_MS - 60 * 60 * 1000,
+      }),
+    ]);
+    const { result } = renderHook(() => useHomeStatusBoard());
+    expect(keysOf(result.current.rows)).toEqual([]);
+
+    act(() => {
+      useSettingsStore.getState().setHomeStatusDoneHideAfter("never");
+    });
+    expect(keysOf(result.current.rows)).toEqual(["done-3d"]);
     host.dispose();
   });
 

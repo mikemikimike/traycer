@@ -285,9 +285,10 @@ export const LAYOUT = defineSettingsSection("layout", {
     group: "tabs",
     search: { contributesTo: "homeTab" },
     label: "Done — hide after",
-    description: "How long a finished row stays on the Home status board.",
+    description:
+      "How long a finished row stays on the Home status board. Rows older than 7 days are always cleared.",
     availableWhen: alwaysAvailable,
-    keywords: ["status board", "done", "finished", "hide", "clear"],
+    keywords: ["status board", "done", "finished", "hide", "clear", "never"],
   },
   composer: {
     kind: "group",

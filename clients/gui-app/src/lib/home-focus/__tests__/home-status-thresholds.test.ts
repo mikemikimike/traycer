@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  HOME_STATUS_DONE_TTL_MS,
   HOME_STATUS_ROW_TTL_MS,
   HOME_STATUS_STALE_MS,
   type HomeStatusRow,
@@ -15,6 +14,7 @@ import {
 
 const NOW = 1_800_000_000_000;
 const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
 
 function row(overrides: Partial<HomeStatusRow>): HomeStatusRow {
   return {
@@ -39,7 +39,7 @@ describe("home status thresholds", () => {
     expect(DEFAULT_HOME_STATUS_THRESHOLDS).toEqual({
       inProgressStaleAfterMs: HOME_STATUS_STALE_MS,
       needsYouStaleAfterMs: null,
-      doneHideAfterMs: HOME_STATUS_DONE_TTL_MS,
+      doneHideAfterMs: DAY_MS,
     });
   });
 
@@ -142,12 +142,30 @@ describe("home status thresholds", () => {
       ).toBe(false);
     });
 
-    it("offers nothing longer than hosts keep done rows", () => {
+    it("keeps a done row until the 7-day row TTL at Never", () => {
+      const thresholds = resolveHomeStatusThresholds("2h", "never", "never");
+      expect(thresholds.doneHideAfterMs).toBeNull();
+      expect(
+        isHomeStatusRowHiddenFor(
+          row({ status: "done", updatedAt: NOW - HOME_STATUS_ROW_TTL_MS }),
+          NOW,
+          thresholds,
+        ),
+      ).toBe(false);
+      expect(
+        isHomeStatusRowHiddenFor(
+          row({ status: "done", updatedAt: NOW - HOME_STATUS_ROW_TTL_MS - 1 }),
+          NOW,
+          thresholds,
+        ),
+      ).toBe(true);
+    });
+
+    it("offers Never last, and no finite choice past the row TTL", () => {
+      expect(HOME_STATUS_DONE_HIDE_OPTIONS.at(-1)?.value).toBe("never");
       for (const option of HOME_STATUS_DONE_HIDE_OPTIONS) {
-        expect(option.ms).not.toBeNull();
-        expect(option.ms ?? Infinity).toBeLessThanOrEqual(
-          HOME_STATUS_DONE_TTL_MS,
-        );
+        if (option.ms === null) continue;
+        expect(option.ms).toBeLessThan(HOME_STATUS_ROW_TTL_MS);
       }
     });
   });

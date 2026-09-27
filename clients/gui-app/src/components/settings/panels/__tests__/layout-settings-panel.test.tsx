@@ -1661,12 +1661,12 @@ describe("<LayoutSettingsPanel />", () => {
 
       choose("In progress stale after", "Never");
       choose("Needs you stale after", "4 h");
-      choose("Done hide after", "1 h");
+      choose("Done hide after", "Never");
 
       const state = useSettingsStore.getState();
       expect(state.homeStatusInProgressStaleAfter).toBe("never");
       expect(state.homeStatusNeedsYouStaleAfter).toBe("4h");
-      expect(state.homeStatusDoneHideAfter).toBe("1h");
+      expect(state.homeStatusDoneHideAfter).toBe("never");
       for (const setting of [
         "homeStatusInProgressStaleAfter",
         "homeStatusNeedsYouStaleAfter",
