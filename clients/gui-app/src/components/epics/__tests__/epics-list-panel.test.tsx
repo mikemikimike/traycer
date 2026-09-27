@@ -224,6 +224,10 @@ const testState = vi.hoisted(() => ({
   pendingDeleteEpicIds: new Set<string>(),
   refetch: vi.fn(),
   fetchNextPage: vi.fn(),
+  fetchAllItems:
+    vi.fn<(signal: AbortSignal) => Promise<readonly HistoryItem[] | null>>(),
+  hasNextPage: false,
+  isFetchingNextPage: false,
   hostId: "host-test" as string | null,
   // The message-hit section's two inputs. A `null` client is the no-host-runtime
   // reading every case in this file predates, under which the section is not
@@ -275,8 +279,9 @@ vi.mock("@/hooks/home/use-history-query", () => ({
     hostId: testState.hostId,
     refetch: testState.refetch,
     fetchNextPage: testState.fetchNextPage,
-    hasNextPage: false,
-    isFetchingNextPage: false,
+    fetchAllItems: testState.fetchAllItems,
+    hasNextPage: testState.hasNextPage,
+    isFetchingNextPage: testState.isFetchingNextPage,
   }),
 }));
 
@@ -589,6 +594,9 @@ describe("<EpicsListPanel />", () => {
     testState.pendingDeleteEpicIds = new Set();
     testState.refetch.mockReset();
     testState.fetchNextPage.mockReset();
+    testState.fetchAllItems.mockReset();
+    testState.hasNextPage = false;
+    testState.isFetchingNextPage = false;
     testState.hostId = "host-test";
     testState.chatSearchClient = null;
     testState.chatSearchHits = { kind: "absent" };
@@ -2863,6 +2871,171 @@ describe("<EpicsListPanel />", () => {
     ).toBe(true);
     expect(screen.queryByTestId("epics-list-delete-selected")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Select all" })).not.toBeNull();
+  });
+
+  it("loads every history page before selecting all matching tasks", async () => {
+    testState.hasNextPage = true;
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const view = renderPanelView("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+
+    await waitFor(() => {
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole("button", { name: "Select all" }).matches(":disabled"),
+      ).toBe(true);
+    });
+
+    testState.items = [
+      historyItem({}),
+      historyItem({
+        id: "history-epic-2",
+        epicId: "epic-two",
+        title: "Second history item",
+      }),
+    ];
+    testState.hasNextPage = false;
+    view.rerender(<RouterProvider router={view.router} />);
+    await act(async () => {
+      complete?.(testState.items);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByTestId("epics-list-row-select")
+          .every(
+            (checkbox) => checkbox.getAttribute("aria-checked") === "true",
+          ),
+      ).toBe(true);
+    });
+    fireEvent.click(screen.getByTestId("epics-list-delete-selected"));
+    fireEvent.click(screen.getByTestId("delete-tasks-confirm"));
+    expect(testState.mutate).toHaveBeenCalledWith({
+      ids: ["epic-from-history", "epic-two"],
+      worktreeCleanup: null,
+    });
+  });
+
+  it("does not restore selection when Select all finishes after Cancel", async () => {
+    testState.hasNextPage = true;
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    renderPanel("page", "/");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => {
+      complete?.(testState.items);
+      await Promise.resolve();
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select history items" }),
+    );
+    expect(
+      screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(testState.fetchAllItems.mock.calls[0]?.[0].aborted).toBe(true);
+  });
+
+  it("keeps Select all available when only the loaded page is selected", async () => {
+    testState.hasNextPage = true;
+    renderPanel("page", "/");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByTestId("epics-list-row-select"));
+    expect(
+      screen.getByRole("button", { name: "Select all" }).matches(":disabled"),
+    ).toBe(false);
+    expect(screen.queryByRole("button", { name: "Deselect all" })).toBeNull();
+  });
+
+  it.each(["search changes", "unmount"])(
+    "aborts bulk selection when %s",
+    async (transition) => {
+      testState.hasNextPage = true;
+      let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+      testState.fetchAllItems.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve;
+          }),
+      );
+      const view = renderPanelView("page", "/");
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Select history items" }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+      await waitFor(() =>
+        expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+      );
+      if (transition === "unmount") view.unmount();
+      else
+        fireEvent.change(
+          screen.getByRole("searchbox", {
+            name: "Search by title, repo, branch, or PR",
+          }),
+          {
+            target: { value: "different query" },
+          },
+        );
+      expect(testState.fetchAllItems.mock.calls[0]?.[0].aborted).toBe(true);
+      await act(async () => {
+        complete?.(testState.items);
+        await Promise.resolve();
+      });
+      if (transition !== "unmount") {
+        expect(
+          screen
+            .getByTestId("epics-list-row-select")
+            .getAttribute("aria-checked"),
+        ).toBe("false");
+      }
+    },
+  );
+
+  it("retains manual selection when loading all pages fails", async () => {
+    testState.hasNextPage = true;
+    testState.fetchAllItems.mockResolvedValue(null);
+    renderPanel("page", "/");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByTestId("epics-list-row-select"));
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Select all" }).matches(":disabled"),
+      ).toBe(false),
+    );
+    expect(
+      screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   it("skips viewer rows during history select all and disables them in selection mode", async () => {
