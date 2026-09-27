@@ -19,17 +19,23 @@ const COMMAND_TIMEOUT_MS = 30_000;
 
 /**
  * Opens a CDP session on `webSocketDebuggerUrl` and resolves to
- * `{ send(method, params), close() }`.
+ * `{ send(method, params), on(method, handler), close() }`.
  *
  * `send` rejects - never hangs - when Chrome answers with an error, when the
  * socket errors or closes (every outstanding command fails with the reason),
  * when the socket is no longer open, or when no answer arrives within
  * `COMMAND_TIMEOUT_MS`.
+ *
+ * `on` calls `handler(params)` for every CDP event named `method` (a message
+ * with no `id`, e.g. `Runtime.exceptionThrown`) and returns the function that
+ * unsubscribes it. It adds no wait of its own: a driver that waits on an event
+ * does so in its own bounded polling loop, like every other page-side wait.
  */
 export function connectCdp(webSocketDebuggerUrl) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketDebuggerUrl);
     const pending = new Map();
+    const eventHandlers = new Map();
     let nextId = 0;
     let closedReason = null;
     let connectTimer = null;
@@ -53,7 +59,12 @@ export function connectCdp(webSocketDebuggerUrl) {
     });
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
-      if (typeof message.id !== "number") return;
+      if (typeof message.id !== "number") {
+        for (const handler of eventHandlers.get(message.method) ?? []) {
+          handler(message.params);
+        }
+        return;
+      }
       const request = pending.get(message.id);
       if (request === undefined) return;
       pending.delete(message.id);
@@ -98,6 +109,14 @@ export function connectCdp(webSocketDebuggerUrl) {
               request.reject(error);
             }
           });
+        },
+        on(method, handler) {
+          const handlers = eventHandlers.get(method) ?? new Set();
+          handlers.add(handler);
+          eventHandlers.set(method, handlers);
+          return () => {
+            handlers.delete(handler);
+          };
         },
         close() {
           socket.close();

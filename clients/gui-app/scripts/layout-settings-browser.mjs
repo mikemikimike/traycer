@@ -47,6 +47,7 @@ import {
   launchChromeWithDevTools,
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
+import { connectCdp } from "./cdp-client.mjs";
 
 const VIEWPORT = { width: 1920, height: 1080 };
 const FIXTURE_PATH = "/src/__tests__/browser/layout-editor-canvas.html";
@@ -320,6 +321,14 @@ try {
   );
   const target = await targetResponse.json();
   client = await connectCdp(target.webSocketDebuggerUrl);
+  client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
+    pageExceptions.push(
+      exceptionDetails.exception?.description ?? exceptionDetails.text,
+    );
+  });
+  client.on("Log.entryAdded", ({ entry }) => {
+    if (entry.level === "error") pageExceptions.push(entry.text);
+  });
   await client.send("Runtime.enable");
   await client.send("Page.enable");
   await client.send("Log.enable");
@@ -1847,70 +1856,6 @@ async function waitForHttp(url, child, readError, label) {
     await delay(150);
   }
   throw new Error(`${label} did not become reachable: ${readError()}`);
-}
-
-function connectCdp(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 0;
-    const connectTimer = setTimeout(
-      () => reject(new Error("CDP connect timed out")),
-      15_000,
-    );
-    const failAll = (reason) => {
-      for (const [id, request] of pending) {
-        pending.delete(id);
-        request.reject(reason);
-      }
-    };
-    socket.addEventListener("error", (event) => {
-      const error = new Error(`CDP socket error: ${String(event)}`);
-      reject(error);
-      failAll(error);
-    });
-    socket.addEventListener("close", (event) => {
-      failAll(new Error(`CDP socket closed (${event.code})`));
-    });
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      if (message.method === "Runtime.exceptionThrown") {
-        const details = message.params.exceptionDetails;
-        pageExceptions.push(details.exception?.description ?? details.text);
-      } else if (
-        message.method === "Log.entryAdded" &&
-        message.params.entry.level === "error"
-      ) {
-        pageExceptions.push(message.params.entry.text);
-      }
-      if (typeof message.id !== "number") return;
-      const request = pending.get(message.id);
-      if (request === undefined) return;
-      pending.delete(message.id);
-      if (message.error === undefined) request.resolve(message.result);
-      else request.reject(new Error(message.error.message));
-    });
-    socket.addEventListener("open", () => {
-      clearTimeout(connectTimer);
-      resolve({
-        send(method, params = {}) {
-          if (socket.readyState !== WebSocket.OPEN) {
-            return Promise.reject(
-              new Error(`CDP socket not open for ${method}`),
-            );
-          }
-          return new Promise((requestResolve, requestReject) => {
-            const id = ++nextId;
-            pending.set(id, { resolve: requestResolve, reject: requestReject });
-            socket.send(JSON.stringify({ id, method, params }));
-          });
-        },
-        close() {
-          socket.close();
-        },
-      });
-    });
-  });
 }
 
 async function evaluate(client, expression) {

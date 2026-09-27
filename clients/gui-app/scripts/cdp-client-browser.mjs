@@ -10,6 +10,8 @@
 // Chrome will never answer - an evaluation of a promise that never settles -
 // and then kills Chrome's whole process tree. Before `cdp-client.mjs` existed,
 // the same sequence against a driver's local copy was still pending 8s later.
+// First, while Chrome is alive, it checks the event half: `on` delivers and
+// its unsubscribe stops delivery (ablating either one turns this red).
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { connectCdp } from "./cdp-client.mjs";
@@ -39,6 +41,22 @@ try {
   assert.ok(page !== undefined, "headless Chrome must expose a page target");
   const client = await connectCdp(page.webSocketDebuggerUrl);
   await client.send("Runtime.enable");
+
+  // `on` delivers an event's params, and stops once unsubscribed. Chrome
+  // sends `Runtime.consoleAPICalled` before it answers the evaluate that
+  // logged it, so each check can read the handler right after the send.
+  const logged = [];
+  const unsubscribe = client.on("Runtime.consoleAPICalled", (params) => {
+    logged.push(params.args[0]?.value);
+  });
+  await client.send("Runtime.evaluate", { expression: "console.log('a')" });
+  unsubscribe();
+  await client.send("Runtime.evaluate", { expression: "console.log('b')" });
+  assert.deepEqual(
+    logged,
+    ["a"],
+    "on() must deliver the event while subscribed and nothing after",
+  );
 
   const inFlight = client
     .send("Runtime.evaluate", {
@@ -76,7 +94,7 @@ try {
   );
 
   console.log(
-    `CDP client regression passed: in-flight command ${outcome.message}; command after close ${afterClose}`,
+    `CDP client regression passed: events delivered until unsubscribed; in-flight command ${outcome.message}; command after close ${afterClose}`,
   );
 } catch (error) {
   console.error("CDP CLIENT REGRESSION FAILED:", error);

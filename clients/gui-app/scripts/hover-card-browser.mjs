@@ -60,6 +60,7 @@ import {
   launchChromeWithDevTools,
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
+import { connectCdp } from "./cdp-client.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1446,54 +1447,6 @@ async function waitForHttp(url, child, readError, label) {
 /** Uncaught exceptions and `console.error`s, for a fixture that never boots. */
 const consoleErrors = [];
 
-async function connectCdp(url) {
-  return await new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 0;
-    socket.addEventListener("error", () =>
-      reject(new Error("the CDP socket failed")),
-    );
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      if (message.method === "Runtime.exceptionThrown") {
-        const details = message.params.exceptionDetails;
-        consoleErrors.push(details.exception?.description ?? details.text);
-      }
-      if (
-        message.method === "Runtime.consoleAPICalled" &&
-        message.params.type === "error"
-      ) {
-        consoleErrors.push(
-          message.params.args
-            .map((arg) => arg.value ?? arg.description ?? "")
-            .join(" "),
-        );
-      }
-      if (typeof message.id !== "number") return;
-      const waiter = pending.get(message.id);
-      if (waiter === undefined) return;
-      pending.delete(message.id);
-      if (message.error === undefined) waiter.resolve(message.result);
-      else waiter.reject(new Error(message.error.message));
-    });
-    socket.addEventListener("open", () =>
-      resolve({
-        send(method, params) {
-          return new Promise((res, rej) => {
-            const id = ++nextId;
-            pending.set(id, { resolve: res, reject: rej });
-            socket.send(JSON.stringify({ id, method, params }));
-          });
-        },
-        close() {
-          socket.close();
-        },
-      }),
-    );
-  });
-}
-
 if (EVIDENCE_DIR !== null) await mkdir(EVIDENCE_DIR, { recursive: true });
 const chromePath = await findChrome("the hover card regression");
 const vitePort = await freePort();
@@ -1584,6 +1537,17 @@ try {
     )
   ).json();
   client = await connectCdp(target.webSocketDebuggerUrl);
+  client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
+    consoleErrors.push(
+      exceptionDetails.exception?.description ?? exceptionDetails.text,
+    );
+  });
+  client.on("Runtime.consoleAPICalled", ({ type, args }) => {
+    if (type !== "error") return;
+    consoleErrors.push(
+      args.map((arg) => arg.value ?? arg.description ?? "").join(" "),
+    );
+  });
   await client.send("Runtime.enable", undefined);
   await client.send("Page.enable", undefined);
   await client.send("Emulation.setDeviceMetricsOverride", {
