@@ -137,6 +137,10 @@ import { NoiseChannel } from "./noise-channel";
 import { RelaySocket, type RelayKillReason } from "./relay-socket";
 import type { AttachGrant, AttachGrantProvider } from "./grant";
 import { LogicalStream, type LogicalStreamPort } from "./logical-stream";
+import {
+  RemoteTrafficAccounting,
+  type RemoteTrafficSnapshot,
+} from "./traffic-accounting";
 
 /**
  * Streaming methods that ride the credit-gated `BULK` mux queue instead of
@@ -917,6 +921,8 @@ export class RemoteSession<
    */
   private connectionLostAt = 0;
   private connection: ActiveConnection | null = null;
+  /** Null on the normal path: no per-frame diagnostic object or clock read. */
+  private traffic: RemoteTrafficAccounting | null = null;
 
   /**
    * This session instance's namespace for the selection authority's evidence
@@ -1178,6 +1184,17 @@ export class RemoteSession<
   }
 
   // ---- Public surface (consumed by the messenger + stream client) -------- //
+
+  /** Opt in before the first dial so handshake and control totals reconcile. */
+  enableTrafficAccounting(): boolean {
+    if (this.phase !== "idle") return false;
+    this.traffic = new RemoteTrafficAccounting();
+    return true;
+  }
+
+  readTrafficSnapshot(): RemoteTrafficSnapshot | null {
+    return this.traffic?.snapshot() ?? null;
+  }
 
   /** Kicks off the first connect if the session is idle. Idempotent. */
   start(): void {
@@ -1700,6 +1717,7 @@ export class RemoteSession<
       );
     }
     const streamId = this.allocateStreamId();
+    this.traffic?.register(streamId, method, "rpc", prepared.onWirePayload);
     const replaySafe = wireIdempotencyKey !== null;
     return new Promise<unknown>((resolve, reject) => {
       {
@@ -1753,6 +1771,7 @@ export class RemoteSession<
           });
         } catch (cause) {
           this.clearPendingUnary(streamId);
+          this.traffic?.end(streamId, true);
           // Nothing was enqueued, so nothing follows on this stream.
           this.retireOutboundSeq(streamId);
           reject(asHostRpcError(cause, requestId, method));
@@ -1822,6 +1841,7 @@ export class RemoteSession<
       port: this,
     });
     this.subscriptions.set(streamId, stream);
+    this.traffic?.register(streamId, method, "stream", null);
     if (this.phase === "ready" && this.connection !== null) {
       this.openSubscription(this.connection, stream);
     } else {
@@ -2016,6 +2036,7 @@ export class RemoteSession<
     this.clearAllTimers();
     this.teardownConnection("closed-by-caller");
     for (const stream of this.subscriptions.values()) {
+      this.traffic?.end(stream.streamId, true);
       stream.notifyStatus("closed", { kind: "caller" }, null);
     }
     this.subscriptions.clear();
@@ -2125,6 +2146,7 @@ export class RemoteSession<
 
   closeStream(streamId: number, reason: string): void {
     const connection = this.connection;
+    this.traffic?.end(streamId, false);
     this.subscriptions.delete(streamId);
     this.restoredStreamIds.delete(streamId);
     const nextSeq = this.retireOutboundSeq(streamId);
@@ -2265,6 +2287,10 @@ export class RemoteSession<
       handlers: {
         onAttachAck: () => this.onAttachAck(generation),
         onData: (bytes) => this.onData(generation, bytes),
+        onTextBytes:
+          this.traffic === null
+            ? undefined
+            : (bytes) => this.traffic?.receiveText(bytes),
         onHostDetached: () => this.onHostDetached(generation),
         onHostAttached: () => this.onHostAttached(generation),
         onReauthAck: () => undefined,
@@ -2347,6 +2373,9 @@ export class RemoteSession<
   }
 
   private onData(generation: number, bytes: Uint8Array): void {
+    // Count delivery before generation filtering: a late socket frame still
+    // consumed incoming bytes, even when it cannot enter the current mux.
+    const receivedAtMs = this.traffic?.receiveBinary(bytes.byteLength) ?? 0;
     if (!this.isCurrent(generation)) {
       return;
     }
@@ -2355,6 +2384,7 @@ export class RemoteSession<
       return;
     }
     if (this.phase === "handshaking") {
+      this.traffic?.classifyHandshake(bytes.byteLength);
       // Before ready, and harmless: this IS the host's own responder message,
       // so it counts as the host speaking even though the session cannot
       // carry traffic yet.
@@ -2394,6 +2424,12 @@ export class RemoteSession<
         return;
       }
       const frame = decodeMuxFrame(muxBytes);
+      this.traffic?.classifyMux(
+        frame,
+        bytes.byteLength,
+        muxBytes.byteLength,
+        receivedAtMs,
+      );
       // Bulk credit accounting is PER FRAME at receipt, symmetric with the
       // host's spend-per-frame-sent — counting per completed message would
       // deadlock any transfer longer than the initial credit window at
@@ -2790,6 +2826,7 @@ export class RemoteSession<
         // across re-keys, and the old id stays tombstoned so relay-delayed
         // frames from before the verdict remain dead.
         this.subscriptions.delete(message.streamId);
+        this.traffic?.end(message.streamId, false);
         const reopenAttempts = this.streamReopenAttempts.get(message.streamId);
         this.streamReopenAttempts.delete(message.streamId);
         const freshStreamId = this.allocateStreamId();
@@ -2813,6 +2850,7 @@ export class RemoteSession<
         return;
       }
       stream.goFatal(details);
+      this.traffic?.end(message.streamId, false);
       this.subscriptions.delete(message.streamId);
       this.restoredStreamIds.delete(message.streamId);
       this.outboundSeq.delete(message.streamId);
@@ -2828,6 +2866,7 @@ export class RemoteSession<
       if (stream === undefined) {
         return;
       }
+      this.traffic?.end(message.streamId, false);
       stream.notifyStatus("closed", { kind: "caller" }, null);
       this.subscriptions.delete(message.streamId);
       this.restoredStreamIds.delete(message.streamId);
@@ -3608,6 +3647,12 @@ export class RemoteSession<
         selectStreamSubscribeVersion(clientCanonical, hostCanonical),
       ),
     );
+    this.traffic?.register(
+      stream.streamId,
+      stream.method,
+      "stream",
+      prepared.onWirePayload,
+    );
     stream.updateSchemaVersion(prepared.onWireVersion);
     this.enqueueMessage(connection, {
       type: MuxFrameType.SUBSCRIBE,
@@ -3775,6 +3820,7 @@ export class RemoteSession<
     }
     const { streamId, entry } = pending;
     this.clearPendingUnary(streamId);
+    this.traffic?.end(streamId, false);
     // The response ends the exchange; the client sends nothing further here.
     this.retireOutboundSeq(streamId);
     if (parsed.data.error !== null) {
@@ -4042,6 +4088,7 @@ export class RemoteSession<
     cause: string,
     retryCause: FatalErrorDetails | null,
   ): void {
+    if (this.connection !== null) this.traffic?.connectionLost();
     // Before anything else: a connection that is being lost never earned its
     // ladder reset, however close it came.
     this.clearStableResetTimer();
@@ -4482,6 +4529,7 @@ export class RemoteSession<
     this.clearAllTimers();
     this.teardownConnection("session-fatal");
     for (const stream of this.subscriptions.values()) {
+      this.traffic?.end(stream.streamId, true);
       stream.goFatal(details);
     }
     this.subscriptions.clear();
@@ -5107,6 +5155,7 @@ export class RemoteSession<
       return;
     }
     this.clearPendingUnary(streamId);
+    this.traffic?.end(streamId, true);
     const nextSeq = this.retireOutboundSeq(streamId);
     // A rejected unary's stream is terminal. Drop any still-queued request
     // upload, clear any partial response accumulator, tombstone the id so a
@@ -5159,6 +5208,7 @@ export class RemoteSession<
 
   private rejectAllPendingUnary(error: HostRpcError): void {
     for (const [streamId, entry] of Array.from(this.pendingUnary)) {
+      this.traffic?.end(streamId, true);
       if (entry.timer !== null) {
         clearTimeout(entry.timer);
       }
@@ -5170,6 +5220,7 @@ export class RemoteSession<
 
   private rejectPendingOnConnectionDrop(): void {
     for (const [streamId, entry] of Array.from(this.pendingUnary)) {
+      this.traffic?.end(streamId, true);
       if (entry.timer !== null) {
         clearTimeout(entry.timer);
       }

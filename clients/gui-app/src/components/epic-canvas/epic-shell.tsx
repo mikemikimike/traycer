@@ -30,6 +30,7 @@ import {
 } from "@/lib/registries/epic-session-registry";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { MobileDrawerTaskPaintReporter } from "@/components/layout/shell/mobile-drawer-history-gate";
 
 interface EpicShellProps {
   readonly epicId: string;
@@ -138,6 +139,9 @@ function EpicShellSessionBody(
 
   return (
     <SnapshotLoadingProvider value={snapshotContextValue}>
+      <MobileDrawerTaskPaintReporter
+        ready={props.active ? Boolean(snapshotLoaded) : false}
+      />
       {props.active ? <EpicConnectionToasts epicId={props.epicId} /> : null}
       <ResourcesStreamMount epicId={props.epicId} />
       <CanvasColumn

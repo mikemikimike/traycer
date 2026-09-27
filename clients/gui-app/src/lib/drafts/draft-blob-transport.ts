@@ -7,7 +7,12 @@ import {
   getImageBytes,
   putImageBytesAtHash,
   releaseSession,
+  sha256Hex,
 } from "@/lib/composer/landing-image-store";
+import {
+  landingLiveImageRootHashes,
+  tryReserveLandingImageResidency,
+} from "@/lib/composer/landing-image-budget";
 import { scheduleLandingImageReconcile } from "@/lib/composer/landing-image-gc";
 import { bytesToBase64Async, base64ToBytes } from "@/lib/composer/image-base64";
 import { DRAFT_BLOB_PUT_RESPONSE_TIMEOUT_MS } from "./draft-blob-transport-budget";
@@ -793,7 +798,26 @@ export function readDraftBlobsIntoLocalStore(
   client: DraftBlobClient,
   hashes: readonly string[],
 ): Promise<ReadonlyMap<string, ImageBlob>> {
-  return readDraftBlobs(hostId, client, hashes, putImageBytesAtHash);
+  return readDraftBlobs(hostId, client, hashes, storeRecoveredHostBlob);
+}
+
+async function storeRecoveredHostBlob(
+  hash: string,
+  bytes: ImageBytes,
+): Promise<"stored" | "ephemeral" | "invalid"> {
+  // An unrooted pre-apply read and a full partition may hand verified bytes
+  // to this caller, but must not create a resident session/IDB entry.
+  const reservation = landingLiveImageRootHashes().has(hash)
+    ? tryReserveLandingImageResidency([{ hash, bytes: bytes.byteLength }])
+    : null;
+  if (reservation === null) {
+    return (await sha256Hex(bytes)) === hash ? "ephemeral" : "invalid";
+  }
+  try {
+    return (await putImageBytesAtHash(hash, bytes)) ? "stored" : "invalid";
+  } finally {
+    reservation.release();
+  }
 }
 
 /** Read without storing so recovery can admit the complete byte batch first.
@@ -804,14 +828,19 @@ export function readDraftBlobsForRecovery(
   client: DraftBlobClient,
   hashes: readonly string[],
 ): Promise<ReadonlyMap<string, ImageBlob>> {
-  return readDraftBlobs(hostId, client, hashes, () => Promise.resolve(true));
+  return readDraftBlobs(hostId, client, hashes, () =>
+    Promise.resolve("ephemeral" as const),
+  );
 }
 
 async function readDraftBlobs(
   hostId: string,
   client: DraftBlobClient,
   hashes: readonly string[],
-  store: (hash: string, bytes: ImageBytes) => Promise<boolean>,
+  store: (
+    hash: string,
+    bytes: ImageBytes,
+  ) => Promise<"stored" | "ephemeral" | "invalid">,
 ): Promise<ReadonlyMap<string, ImageBlob>> {
   const images = new Map<string, ImageBlob>();
   if (hashes.length === 0) return images;
@@ -860,10 +889,10 @@ async function readDraftBlobs(
       // fetch; winning it wrongly costs an image in the wrong account's
       // partition.
       if (!stillServingBlobIdentity(owner)) return images;
-      const stored = await store(sha256, bytes);
-      if (!stored) continue;
+      const disposition = await store(sha256, bytes);
+      if (disposition === "invalid") continue;
       if (!stillServingBlobIdentity(owner)) {
-        retireCrossedBlobWrite(sha256);
+        if (disposition === "stored") retireCrossedBlobWrite(sha256);
         return images;
       }
       const mimeType = sniffImageMimeType(bytes) ?? "image/png";

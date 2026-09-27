@@ -8,6 +8,7 @@ import { QuitInterceptBridge } from "@/components/layout/bridges/quit-intercept-
 import { MigrationBlockingModalHost } from "@/components/layout/dialogs/migration-blocking-modal-host";
 import { AppHeader } from "@/components/layout/header/app-header";
 import { MobileNavDrawer } from "@/components/layout/shell/mobile-nav-drawer";
+import { MobileDrawerHistoryGateProvider } from "@/components/layout/shell/mobile-drawer-history-gate";
 import { SWIPE_NAV_SCREEN_ATTRIBUTE } from "@/components/layout/shell/screen-snapshot";
 import { useDragToDismissKeyboard } from "@/components/layout/shell/use-drag-to-dismiss-keyboard";
 import { SessionConnectivityStrip } from "@/components/layout/session-connectivity-strip";
@@ -44,6 +45,14 @@ interface AppShellProps {
  * renders while sign-out is completing.
  */
 export function AppShell(props: AppShellProps) {
+  return (
+    <MobileDrawerHistoryGateProvider>
+      <AppShellBody>{props.children}</AppShellBody>
+    </MobileDrawerHistoryGateProvider>
+  );
+}
+
+function AppShellBody(props: AppShellProps) {
   const { children } = props;
   const activeHostId = useAddressableHostId();
   // Phones get the hamburger navigation drawer; it is only mounted below md so

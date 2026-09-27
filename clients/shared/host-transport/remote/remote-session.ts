@@ -8,6 +8,7 @@ import {
   type SessionLivenessProbe,
 } from "@traycer/protocol/host-transport/remote/session";
 import type { RemoteSessionAuth } from "@traycer/protocol/host-transport/remote/auth";
+import type { RemoteTrafficSnapshot } from "@traycer/protocol/host-transport/remote/traffic-accounting";
 import { extractBearerForOpenFrame } from "../ws-rpc-client";
 import { recordNegotiatedHostManifest } from "../negotiated-manifest-registry";
 import { recordNegotiatedStreamMethodVersions } from "../negotiated-stream-version-registry";
@@ -35,6 +36,44 @@ export const HOST_STATUS_LIVENESS_PROBE: SessionLivenessProbe = {
   method: "host.status",
   params: {},
 };
+
+/** Set to `1` in sessionStorage before reload; absent in ordinary sessions. */
+export const REMOTE_TRAFFIC_DEBUG_STORAGE_KEY = "traycer:remote-traffic-debug";
+
+const debugReaders: Array<() => RemoteTrafficSnapshot | null> = [];
+let droppedDebugSessions = 0;
+
+export function readRemoteTrafficDebugSnapshots(): ReadonlyArray<
+  RemoteTrafficSnapshot & { readonly captureSession: number }
+> {
+  return debugReaders.flatMap((read, captureSession) => {
+    const snapshot = read();
+    return snapshot === null ? [] : [{ ...snapshot, captureSession }];
+  });
+}
+
+function remoteTrafficDebugEnabled(): boolean {
+  try {
+    return sessionStorage.getItem(REMOTE_TRAFFIC_DEBUG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function installRemoteTrafficDebugSurface(): void {
+  try {
+    Object.defineProperty(globalThis, "__traycerRemoteTraffic", {
+      configurable: true,
+      value: Object.freeze({
+        snapshot: readRemoteTrafficDebugSnapshots,
+        droppedSessions: () => droppedDebugSessions,
+      }),
+    });
+  } catch {
+    // A hardened embed may refuse globals. Keep the transport usable; the
+    // exported reader remains available to a local diagnostic harness.
+  }
+}
 
 export interface RemoteSessionOptions<
   RpcRegistry extends
@@ -81,6 +120,14 @@ export class RemoteSession<
       servedStreamMajors: CLIENT_SERVED_STREAM_MAJORS,
       unaryResponseMs: UNARY_RESPONSE_TIMEOUT_MS,
     });
+    if (remoteTrafficDebugEnabled() && this.enableTrafficAccounting()) {
+      debugReaders.push(() => this.readTrafficSnapshot());
+      if (debugReaders.length > 32) {
+        debugReaders.shift();
+        droppedDebugSessions += 1;
+      }
+      installRemoteTrafficDebugSurface();
+    }
   }
 }
 
