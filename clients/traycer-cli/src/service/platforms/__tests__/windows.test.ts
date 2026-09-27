@@ -59,11 +59,13 @@ import {
   parseWindowsKillOutcomeJson,
   parseWindowsProcessDetailJson,
   parseWindowsProcessTableJson,
+  setWindowsDefinitionDepsForTests,
   setWindowsStartEvidenceDepsForTests,
   setWindowsTaskInstallDepsForTests,
   setWindowsTaskUserSidReaderForTests,
   WINDOWS_KILL_TARGETS_PER_SCRIPT,
   type ProcessRunner,
+  type ScheduledTaskXmlQuery,
   type WindowsControllerDeps,
   type WindowsKillMemory,
   type WindowsKillTarget,
@@ -2997,11 +2999,9 @@ describe("killHostProcessTree convergence loop", () => {
         { processId: X, created: 1000 },
       ]);
 
-      // RED on SHIP1 (`S/round1/r1-fix5/ship2/windows.ship1.ts`, before this
-      // addendum): `pids` at the bound is unconditionally `listed` - there is
-      // no round-bound probe to clear it - so the loop throws "still running
-      // after N kill rounds" instead of resolving. Recorded separately
-      // against that file; FINAL SHIP (installed here) resolves as above.
+      // Without the round-bound probe, `pids` at the bound is unconditionally
+      // `listed` - nothing clears it - so the loop throws "still running
+      // after N kill rounds" instead of resolving as above.
     });
 
     it("the round-bound probe reports it still running: the refusal names it exactly as an un-addended survivor would", async () => {
@@ -3345,7 +3345,7 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     // probe's own handle-bound read proves it), but another process still
     // holds a handle to it, so round 1's scan keeps
     // listing 501 under its own (pid, Created) as if it were still running.
-    // A bare table-match (PRE) would read this as "still running" and WARN;
+    // A bare table-match would read this as "still running" and WARN;
     // the probe, asked through 501's own handle, reports `gone` instead. No
     // WARN. Round 1's kill set still lists 501 too (same stale row), so it
     // is re-targeted - this time the kill script itself reports `killed` -
@@ -3404,14 +3404,11 @@ describe("failed-kill WARN gating: a `failed: <type>` outcome waits for the next
     expect(probeCalls(calls)).toHaveLength(1);
     expect(killedPids(calls)).toEqual([501, 501]);
 
-    // RED on PRE (`S/round1/r1-fix5/prefix/windows.ts`, before this fix
-    // existed at all): `reportFailedKillsStillRunning` there matches the
-    // failed kill's identity directly against the round's own SCAN table,
-    // with no probe at all - 501 is still listed under the same (pid,
-    // created), so PRE WARNs "left targets running after a failed kill"
-    // (misled by the very table artifact this fix exists to see through).
-    // Recorded separately against PRE bytes; FINAL SHIP (installed here)
-    // gives no WARN, as asserted above.
+    // Without the probe, `reportFailedKillsStillRunning` matched the failed
+    // kill's identity directly against the round's own SCAN table - 501 is
+    // still listed under the same (pid, created) - and WARNed "left targets
+    // running after a failed kill", misled by the very table artifact the
+    // probe sees through. With it there is no WARN, as asserted above.
   });
 
   it("F-CLI-FAILED-WARN (control): a failed-kill target the next scan still lists under the SAME identity gets exactly one probe-confirmed WARN, and a re-targeted kill still converges", async () => {
@@ -3882,9 +3879,8 @@ describe("F-ZOMBIE-SURVIVOR: the probe chunks like the kill (WINDOWS_KILL_TARGET
 
     expect(loggerMock.warn).not.toHaveBeenCalled();
 
-    // RED on SHIP2 (`r1-fix5/ship2/windows.ts`, f2090e0e - before this
-    // addendum): `probeProcessesGone` sent every target in ONE script, so
-    // `probed` has length 1, not 3.
+    // Unchunked, `probeProcessesGone` sent every target in ONE script, so
+    // `probed` had length 1, not 3.
   });
 
   it("one throwing chunk (non-authority) keeps exactly its own targets; the other two chunks' targets clear normally", async () => {
@@ -3960,9 +3956,9 @@ describe("F-ZOMBIE-SURVIVOR: the probe chunks like the kill (WINDOWS_KILL_TARGET
       true,
     );
 
-    // RED on SHIP2 (f2090e0e): the whole 600-target set is one probe script;
-    // that single call throws, so `cleared` stays empty and ALL 600 targets
-    // are named running, not exactly the 250 of one chunk.
+    // Unchunked, the whole 600-target set is one probe script; that single
+    // call throws, so `cleared` stays empty and ALL 600 targets are named
+    // running, not exactly the 250 of one chunk.
   });
 
   it("control: 250 targets - exactly at the chunk boundary - issue exactly 1 probe call, not 2", async () => {
@@ -5633,6 +5629,58 @@ describe("parseSchtasksLastRunResult", () => {
   });
 });
 
+// A task's XML with the given task-level `<Settings><Enabled>` text, for the
+// post-/Run pins below: windows-task-enabled-state.test.ts's `taskXml`
+// reduced to the one axis these pins vary. The trigger's own Enabled is not
+// what `readWindowsTaskEnabledState` reads, so it stays "true" throughout.
+function definitionTaskXml(settingsEnabled: string | null): string {
+  const settingsEnabledLine =
+    settingsEnabled === null
+      ? ""
+      : `<Enabled>${settingsEnabled}</Enabled>\n    `;
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    ${settingsEnabledLine}<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\\traycer\\cli.exe</Command>
+      <Arguments>host start</Arguments>
+    </Exec>
+  </Actions>
+</Task>`;
+}
+
+// A queryTaskXml stub that records every task name it was asked about, so a
+// pin can assert the read happened - the MECHANISM, not just the resulting
+// `registrationCommitted` value.
+function recordingQueryTaskXml(query: ScheduledTaskXmlQuery): {
+  readonly queryTaskXml: (taskName: string) => Promise<ScheduledTaskXmlQuery>;
+  readonly calls: string[];
+} {
+  const calls: string[] = [];
+  return {
+    queryTaskXml: async (taskName: string) => {
+      calls.push(taskName);
+      return query;
+    },
+    calls,
+  };
+}
+
 describe("Windows startService post-/Run spawn verification", () => {
   beforeEach(() => {
     mocks.readHostPidMetadata.mockReset();
@@ -5642,12 +5690,14 @@ describe("Windows startService post-/Run spawn verification", () => {
     setWindowsStartEvidenceDepsForTests(null);
     setWindowsTaskInstallDepsForTests(null);
     setWindowsTaskUserSidReaderForTests(() => TEST_TASK_USER_SID);
+    setWindowsDefinitionDepsForTests(null);
   });
 
   afterEach(() => {
     setWindowsStartEvidenceDepsForTests(null);
     setWindowsTaskInstallDepsForTests(null);
     setWindowsTaskUserSidReaderForTests(null);
+    setWindowsDefinitionDepsForTests(null);
   });
 
   it("surfaces Last Run Result when /Run is accepted but nothing spawns", async () => {
@@ -5737,6 +5787,173 @@ describe("Windows startService post-/Run spawn verification", () => {
     expect(polls).toBeGreaterThanOrEqual(2);
   });
 
+  // A task its owner disabled in Task Scheduler refuses `/Run` outright and
+  // no child can ever come, so the failure is NOT marked committed: a caller
+  // holding a host-start lease would otherwise wait out its whole spawn-ack
+  // window, and retry into the same refusal, for a task that cannot run. The
+  // catch reads the task's Enabled state to know - exactly once.
+  it("a /Run failure on a task disabled in Task Scheduler is not a committed registration", async () => {
+    const { queryTaskXml, calls } = recordingQueryTaskXml({
+      kind: "xml",
+      xml: definitionTaskXml("false"),
+    });
+    setWindowsDefinitionDepsForTests({
+      queryTaskXml,
+      predictCli: async () => {
+        throw new Error("predictCli must not be called from /Run verification");
+      },
+      resolveCli: async () => {
+        throw new Error("resolveCli must not be called from /Run verification");
+      },
+    });
+    const runner: ProcessRunner = async (command, args) => {
+      if (command === "schtasks" && args[0] === "/Run") {
+        throw new ProcessRunError(
+          "schtasks /Run exited with code 1: The attempted operation is not supported for the specified type of task.",
+          command,
+          args,
+          1,
+          "",
+          "ERROR: The attempted operation is not supported for the specified type of task.",
+        );
+      }
+      return success("");
+    };
+    setWindowsStartEvidenceDepsForTests({
+      captureBaseline: async () => emptySpawnBaseline(),
+      createEvidenceReader: () => ({ collect: async () => null }),
+      sleep: async () => undefined,
+      verifyTimeoutMs: 40,
+      verifyPollMs: 10,
+    });
+
+    let caught: unknown = null;
+    try {
+      await createWindowsController(runner, noTimingDeps).start(
+        serviceLabelFor("staging"),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+      message: expect.stringContaining("schtasks /Run failed for"),
+      details: expect.objectContaining({ registrationCommitted: false }),
+    });
+    expect(didServiceRegistrationCommit(caught)).toBe(false);
+    expect(calls).toEqual(["\\Traycer\\Host-Staging"]);
+  });
+
+  // Control for the pin above: no task-level `<Enabled>` leaf at all - the
+  // schema default is enabled, so this /Run failure IS still
+  // post-registration and must stay committed exactly as today.
+  it("control: a /Run failure on a task with no Settings Enabled leaf (enabled by schema default) stays a committed registration", async () => {
+    const { queryTaskXml } = recordingQueryTaskXml({
+      kind: "xml",
+      xml: definitionTaskXml(null),
+    });
+    setWindowsDefinitionDepsForTests({
+      queryTaskXml,
+      predictCli: async () => {
+        throw new Error("predictCli must not be called from /Run verification");
+      },
+      resolveCli: async () => {
+        throw new Error("resolveCli must not be called from /Run verification");
+      },
+    });
+    const runner: ProcessRunner = async (command, args) => {
+      if (command === "schtasks" && args[0] === "/Run") {
+        throw new ProcessRunError(
+          "schtasks /Run exited with code 1: Access is denied.",
+          command,
+          args,
+          1,
+          "",
+          "ERROR: Access is denied.",
+        );
+      }
+      return success("");
+    };
+    setWindowsStartEvidenceDepsForTests({
+      captureBaseline: async () => emptySpawnBaseline(),
+      createEvidenceReader: () => ({ collect: async () => null }),
+      sleep: async () => undefined,
+      verifyTimeoutMs: 40,
+      verifyPollMs: 10,
+    });
+
+    let caught: unknown = null;
+    try {
+      await createWindowsController(runner, noTimingDeps).start(
+        serviceLabelFor("staging"),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+      details: { registrationCommitted: true },
+    });
+    expect(didServiceRegistrationCommit(caught)).toBe(true);
+  });
+
+  // Control: the query itself fails (access denied, Task Scheduler
+  // unreachable, ...) - `readWindowsTaskEnabledState` reads that as
+  // "unknown", which the catch treats the same as enabled: a read that
+  // cannot confirm the task is disabled never suppresses the wait.
+  it("control: a /Run failure when the task-enabled query itself fails stays a committed registration", async () => {
+    const { queryTaskXml } = recordingQueryTaskXml({
+      kind: "failed",
+      reason: "schtasks /Query failed (exit 1: ERROR: Access is denied.)",
+    });
+    setWindowsDefinitionDepsForTests({
+      queryTaskXml,
+      predictCli: async () => {
+        throw new Error("predictCli must not be called from /Run verification");
+      },
+      resolveCli: async () => {
+        throw new Error("resolveCli must not be called from /Run verification");
+      },
+    });
+    const runner: ProcessRunner = async (command, args) => {
+      if (command === "schtasks" && args[0] === "/Run") {
+        throw new ProcessRunError(
+          "schtasks /Run exited with code 1: Access is denied.",
+          command,
+          args,
+          1,
+          "",
+          "ERROR: Access is denied.",
+        );
+      }
+      return success("");
+    };
+    setWindowsStartEvidenceDepsForTests({
+      captureBaseline: async () => emptySpawnBaseline(),
+      createEvidenceReader: () => ({ collect: async () => null }),
+      sleep: async () => undefined,
+      verifyTimeoutMs: 40,
+      verifyPollMs: 10,
+    });
+
+    let caught: unknown = null;
+    try {
+      await createWindowsController(runner, noTimingDeps).start(
+        serviceLabelFor("staging"),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toMatchObject({
+      code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
+      details: { registrationCommitted: true },
+    });
+    expect(didServiceRegistrationCommit(caught)).toBe(true);
+  });
+
   it("controller.install performs one task rewrite followed by one verified /Run", async () => {
     const calls: RecordedCall[] = [];
     const runner: ProcessRunner = async (command, args) => {
@@ -5798,6 +6015,21 @@ describe("Windows startService post-/Run spawn verification", () => {
       return success("");
     };
     setWindowsTaskInstallDepsForTests(stagedTaskInstallDeps());
+    // The /Run catch reads the task's Enabled state; stubbed so it never
+    // reaches a live `schtasks /Query /XML`. Enabled, so this stays the
+    // committed post-registration case.
+    setWindowsDefinitionDepsForTests({
+      queryTaskXml: async () => ({
+        kind: "xml",
+        xml: definitionTaskXml(null),
+      }),
+      predictCli: async () => {
+        throw new Error("predictCli must not be called from /Run verification");
+      },
+      resolveCli: async () => {
+        throw new Error("resolveCli must not be called from /Run verification");
+      },
+    });
     setWindowsStartEvidenceDepsForTests({
       captureBaseline: async () => emptySpawnBaseline(),
       createEvidenceReader: () => ({ collect: async () => null }),

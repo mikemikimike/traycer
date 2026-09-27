@@ -1711,13 +1711,21 @@ async function runTaskAndVerifyStart(
     if (isServiceMutationAuthorityError(cause)) {
       throw markRegistrationCommitted(cause);
     }
+    // Except a task its owner disabled in Task Scheduler: it refuses this
+    // `/Run` and its logon trigger does not fire, so no child is coming.
+    // Marked committed, the lease waited its whole acknowledgement window for
+    // that child and the start was retried into the same refusal - about
+    // 100 s on a real host before the disabled-task refusal reached anyone.
+    // Read here, on the failure path only, so a start that succeeds pays
+    // nothing for it; a read that cannot tell keeps the committed answer.
+    const enabled = await readWindowsTaskEnabledState(label);
     throw cliError({
       code: CLI_ERROR_CODES.SERVICE_CONTROL_FAILED,
       message: `schtasks /Run failed for ${taskName}: ${describeCause(cause)}`,
       details: {
         task: taskName,
         cause: describeCause(cause),
-        registrationCommitted: true,
+        registrationCommitted: enabled.kind !== "disabled",
       },
       exitCode: 1,
     });
