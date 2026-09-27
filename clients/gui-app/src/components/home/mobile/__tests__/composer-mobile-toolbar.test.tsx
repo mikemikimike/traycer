@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerMobileToolbar } from "@/components/home/mobile/composer-mobile-toolbar";
+import type { PermissionMode } from "@/components/home/data/landing-options";
 import type { ComposerDictationControl } from "@/components/home/toolbar/composer-mic-button";
 import type { DictationPreparingStatus } from "@/hooks/composer/use-dictation-availability";
 import { createComposerToolbarStore } from "@/stores/composer/composer-toolbar-store";
@@ -46,13 +47,13 @@ beforeEach(() => {
   );
 });
 
-function makeStore(modelSlug: string) {
+function makeStore(modelSlug: string, permission: PermissionMode) {
   return createComposerToolbarStore({
     purpose: "run",
     reasoningFallback: "model-default",
     seedKey: "mobile-toolbar-test",
     values: {
-      permission: "supervised",
+      permission,
       selection: { harnessId: "claude", modelSlug, profileId: null },
       reasoning: "",
       serviceTier: "",
@@ -70,12 +71,13 @@ function renderToolbar(
   voice: {
     readonly dictation: ComposerDictationControl | null;
     readonly preparing: DictationPreparingStatus | null;
+    readonly permission?: PermissionMode;
   },
   runTargetHostId: string | null,
 ) {
   return render(
     <ComposerMobileToolbar
-      store={makeStore(modelSlug)}
+      store={makeStore(modelSlug, voice.permission ?? "supervised")}
       onAttachImages={vi.fn()}
       canSubmit
       attachmentPending={false}
@@ -136,6 +138,18 @@ describe("ComposerMobileToolbar", () => {
     // Visible text would truncate to "Superv..." at this width and steal room
     // the model name needs; the glyph carries it instead.
     expect(screen.queryByText("Supervised")).toBeNull();
+  });
+
+  it("names the trigger 'Auto — Experimental' when the effective permission is Auto", () => {
+    renderToolbar(
+      "claude-opus-5",
+      vi.fn(),
+      { dictation: null, preparing: null, permission: "auto" },
+      null,
+    );
+    expect(
+      screen.getByRole("button", { name: "Permissions: Auto — Experimental" }),
+    ).not.toBeNull();
   });
 
   it("opens the options sheet from the permission pill", async () => {

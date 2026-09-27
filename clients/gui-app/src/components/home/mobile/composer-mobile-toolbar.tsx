@@ -145,6 +145,10 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
     ),
   );
   const PermissionIcon = permissionOption.icon;
+  const permissionLabel =
+    permissionOption.id === "auto"
+      ? `${permissionOption.label} — Experimental`
+      : permissionOption.label;
 
   // While dictation is active the whole row becomes the recording strip, as on
   // desktop - the controls return on stop.
@@ -186,7 +190,7 @@ function ComposerMobileToolbarImpl(props: ComposerMobileToolbarProps) {
           only thing a smaller box changes is how easy the control is to hit
           with a thumb. */}
       <ToolbarPillButton
-        aria-label={`Permissions: ${permissionOption.label}`}
+        aria-label={`Permissions: ${permissionLabel}`}
         data-testid="composer-mobile-options-trigger"
         className="size-8 shrink-0 justify-center px-0"
         onClick={() => {

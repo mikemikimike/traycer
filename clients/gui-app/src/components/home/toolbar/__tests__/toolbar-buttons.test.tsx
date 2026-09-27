@@ -142,9 +142,9 @@ describe("composer toolbar chips (L-88)", () => {
     expect(classes).toContain("size-7");
     expect(classes).toContain("px-0");
     expect(classes).toContain("justify-center");
-    expect(classesOf(within(trigger).getByText("Supervised"))).toContain(
-      "hidden",
-    );
+    const labelGroup = within(trigger).getByText("Supervised").parentElement;
+    if (labelGroup === null) throw new Error("access label has no group");
+    expect(classesOf(labelGroup)).toContain("hidden");
   });
 
   it("collapses the full access chip to the same square in a narrow composer", () => {
