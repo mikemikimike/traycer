@@ -81,6 +81,18 @@ For why tabs bind to a Host, see [Hosts](/concepts/hosts).
 
 The important distinction: an Agent on the Chat interface can clone to another Host; raw terminals and Agents on the Terminal interface cannot migrate. Cloning never moves the original Agent—it creates a second one.
 
+## File Not Found In A Preview
+
+<Note>
+  This state is available in upcoming Desktop builds.
+</Note>
+
+An image, PDF, or Word preview shows **File not found** when its file has been moved, renamed, or deleted. The path bar remains visible so you can check the original location. **Open Externally** is unavailable because there is no file at that path to open.
+
+If the file moved or was renamed, open it from its new location. If you restore it to the original path, switch to another pane and back to the preview: Traycer checks the file again when the pane regains focus.
+
+This is different from an unsupported or failed preview, which can still offer **Open Externally** when the file exists and that action is available on its Host.
+
 ## Worktree Setup
 
 Agent worktree setup can show states such as:
