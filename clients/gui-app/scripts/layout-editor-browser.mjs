@@ -210,7 +210,7 @@ import {
   launchChromeWithDevTools,
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
-import { connectCdp } from "./cdp-client.mjs";
+import { openTabSession } from "./cdp-client.mjs";
 
 // --- page-side probes -------------------------------------------------------
 
@@ -6558,36 +6558,56 @@ function variantUrl(base, params) {
  */
 async function openVariant(client, url, label, readyExpression, pageLoads) {
   try {
-    await navigateAndSettle(client, url, label, readyExpression, pageLoads);
+    await navigateInFreshTab(client, url, label, readyExpression, pageLoads);
   } catch (error) {
-    // One renewed navigation, never more. The first load of "side rail left,
-    // macOS" stops answering CDP (`cdp-client.mjs` times the command out) whenever
-    // the parity phase ran earlier in the same Chrome: reproduced with
-    // `parity,sides` and the full run, never with `sides` or `canvas,sides`
-    // alone, and the second navigation always settles and passes. So some
-    // origin state the parity fixture leaves behind is read by that variant's
-    // first boot; which state is the open question in tickets/12. The ring
-    // check's persisted theme is restored and was ruled out. A page that hangs
-    // because of what it renders hangs again here and still fails, and a
-    // retry is never silent.
-    //
-    // The same single retry covers a first boot whose module graph never ran
-    // (`#root` still empty at the deadline): the `--force` dev server answers
-    // an import it is still optimizing with a 504 and no reload, which the
-    // next navigation always settles.
+    // Every load gets a fresh tab (`openTabSession`), which is what removed
+    // the tickets/12 stall: one tab navigated from load to load keeps one
+    // renderer, which grows to 1-2 GB on these unbundled fixtures and then
+    // stops booting (`#root` still empty) or is killed ("Render process
+    // gone", after which its CDP session never answers again). Measured on
+    // the canvas fixture: 4-6 stalls in 30-40 loads in one tab, 0 in 140 with
+    // a tab per load. A stall that still happens is retried ONCE, in another
+    // fresh tab, loudly and counted: the run fails on a second one, so a
+    // repeat surfaces instead of hiding behind the retry.
     if (!(error instanceof Error) || !stalledBoot(error.message)) throw error;
+    stalledBootRetries += 1;
     console.error(
-      `\n  WARNING ${label}: the page stopped answering CDP (${error.message}); navigating ONCE more. This is the open question in tickets/12; report it with this run's output.\n`,
+      `\n  WARNING ${label}: the fixture's boot stalled in a fresh tab (${error.message.split("\n")[0]}; renderer ${client.crashed() ? "gone" : "alive"}); retrying once in another fresh tab (retry ${String(stalledBootRetries)}, a second one fails the run).\n`,
     );
-    await navigateAndSettle(client, url, label, readyExpression, pageLoads);
+    await navigateInFreshTab(client, url, label, readyExpression, pageLoads);
   }
   return pageLoads.count;
+}
+
+async function navigateInFreshTab(
+  client,
+  url,
+  label,
+  readyExpression,
+  pageLoads,
+) {
+  await client.freshTab();
+  await prepareTab(client);
+  await navigateAndSettle(client, url, label, readyExpression, pageLoads);
+}
+
+/** The tab's own state, which a fresh tab starts without. */
+async function prepareTab(client) {
+  await client.send("Runtime.enable", undefined);
+  await client.send("Page.enable", undefined);
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: 1500,
+    height: 1200,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
 }
 
 /** A CDP timeout, or a readiness timeout on a document whose module never ran. */
 function stalledBoot(message) {
   // `cdp-client.mjs`'s own timeout for a command the page never answers.
   if (/^CDP \S+ got no answer within \d+ms/.test(message)) return true;
+  if (message.startsWith("The renderer was killed")) return true;
   return (
     message.startsWith("Timed out waiting for") &&
     message.includes('<div id=\\"root\\"></div>')
@@ -6607,6 +6627,8 @@ async function navigateAndSettle(
   // navigation's commit.
   const deadline = Date.now() + 30_000;
   while (pageLoads.count === loadsBefore) {
+    if (client.crashed())
+      throw new Error(`The renderer was killed while loading ${label}`);
     if (Date.now() > deadline)
       throw new Error(`${label} never fired its load event`);
     await delay(25);
@@ -6740,6 +6762,8 @@ let chrome;
 let chromeProfilePath;
 let client;
 let viteProcess;
+/** Fixture loads retried after a stalled boot; see `openVariant`. */
+let stalledBootRetries = 0;
 
 try {
   const pageUrl = `http://127.0.0.1:${vitePort}${fixturePath}`;
@@ -6766,34 +6790,12 @@ try {
     launched.readError,
     "Chrome DevTools",
   );
-  const targetResponse = await fetch(
-    new URL(
-      `/json/new?${encodeURIComponent(pageUrl)}`,
-      launched.devtoolsHttpUrl,
-    ),
-    { method: "PUT" },
-  );
-  if (!targetResponse.ok) {
-    throw new Error(
-      `Chrome could not open the fixture: ${targetResponse.status}`,
-    );
-  }
-  const target = await targetResponse.json();
-  if (typeof target.webSocketDebuggerUrl !== "string") {
-    throw new Error("Chrome did not return a page debugger URL");
-  }
-  client = await connectCdp(target.webSocketDebuggerUrl);
-  await client.send("Runtime.enable", undefined);
-  await client.send("Page.enable", undefined);
+  client = await openTabSession(launched.devtoolsHttpUrl);
+  await prepareTab(client);
   const pageLoads = { count: 0 };
+  // Registered once on the session, so it follows every fresh tab.
   client.on("Page.loadEventFired", () => {
     pageLoads.count += 1;
-  });
-  await client.send("Emulation.setDeviceMetricsOverride", {
-    width: 1500,
-    height: 1200,
-    deviceScaleFactor: 1,
-    mobile: false,
   });
   const mouseAvailable = await evaluate(
     client,
@@ -6857,6 +6859,17 @@ try {
       console.error(`\n[${phase}] FAILED:\n${report}`);
     }
   }
+  if (stalledBootRetries > 1) {
+    failures.push({
+      phase: "fixture boot",
+      error: new Error(
+        `${String(stalledBootRetries)} fixture loads stalled and were retried in a fresh tab; one is tolerated, a repeat is a regression (see openVariant)`,
+      ),
+    });
+    console.error(
+      `\n[fixture boot] FAILED: ${String(stalledBootRetries)} stalled loads`,
+    );
+  }
   console.log(
     `\nphases run: ${[...phases].join(", ")}; failed: ${failures.length === 0 ? "none" : failures.map((failure) => failure.phase).join(", ")}`,
   );
@@ -6866,7 +6879,7 @@ try {
     );
   }
 } finally {
-  client?.close();
+  await client?.close();
   if (chrome !== undefined) await terminateProcessTree(chrome);
   viteProcess?.kill("SIGTERM");
   if (chromeProfilePath !== undefined) {
@@ -6881,6 +6894,8 @@ try {
 // --- phase 1: the parity regression -----------------------------------------
 
 async function runParityPhase(client, pageUrl, pageLoads) {
+  await client.freshTab();
+  await prepareTab(client);
   await client.send("Page.navigate", { url: pageUrl });
   await waitForStablePage(
     client,
@@ -7216,6 +7231,8 @@ async function waitForStablePage(targetClient, label, expression, pageLoads) {
 async function waitFor(targetClient, label, expression) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
+    if (targetClient.crashed())
+      throw new Error(`The renderer was killed while waiting for ${label}`);
     if (await evaluate(targetClient, expression)) return;
     await delay(50);
   }
