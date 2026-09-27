@@ -25,6 +25,7 @@ function row(overrides: Partial<HomeStatusRow>): HomeStatusRow {
     agentName: "Opus impl",
     epicId: "epic-1",
     hostId: "host-1",
+    harnessId: null,
     updatedAt: NOW,
     ...overrides,
   };
@@ -196,7 +197,7 @@ describe("HomeStatusTable", () => {
     const user = userEvent.setup();
     renderTable([row({ key: "a", agentName: "Update Home Status Board" })]);
     const chip = screen.getByTestId("home-status-agent");
-    expect(chip.classList.contains("max-w-32")).toBe(true);
+    expect(chip.classList.contains("max-w-48")).toBe(true);
     const name = screen.getByTestId("home-status-agent-name");
     expect(name.classList.contains("truncate")).toBe(true);
     expect(name.textContent).toBe("Update Home Status Board");
@@ -205,6 +206,25 @@ describe("HomeStatusTable", () => {
     expect((await screen.findByRole("tooltip")).textContent).toContain(
       "Update Home Status Board",
     );
+  });
+
+  it("draws the writing agent's harness icon before its name", () => {
+    renderTable([row({ key: "a", harnessId: "codex", agentName: "Fable" })]);
+    const chip = screen.getByTestId("home-status-agent");
+    const icon = within(chip).getByTestId("home-status-agent-harness");
+    expect(icon.dataset["harnessId"]).toBe("codex");
+    expect(icon.querySelector("svg")).not.toBeNull();
+    // Leading, and outside the accessible name.
+    expect(chip.firstElementChild).toBe(icon);
+    expect(screen.getByRole("button", { name: "Fable" })).toBe(chip);
+  });
+
+  it("draws no icon for a row with no harness or one this build doesn't know", () => {
+    renderTable([
+      row({ key: "a", harnessId: null }),
+      row({ key: "b", harnessId: "not-a-harness" }),
+    ]);
+    expect(screen.queryByTestId("home-status-agent-harness")).toBeNull();
   });
 
   it("falls back to a generic name when the agent has none", () => {

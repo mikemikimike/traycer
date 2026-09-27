@@ -31,6 +31,7 @@ function row(overrides: Partial<HomeStatusRow>): HomeStatusRow {
     agentName: "Agent",
     epicId: "epic-1",
     hostId: "host-1",
+    harnessId: "claude",
     updatedAt: NOW,
     ...overrides,
   };
@@ -86,6 +87,31 @@ describe("home status room", () => {
     const rows = readHomeStatusRows(doc);
     expect(rows.map((r) => r.key).sort()).toEqual(["extra", "good"]);
     expect(rows.find((r) => r.key === "extra")).toEqual(row({ key: "extra" }));
+  });
+
+  it("reads a row written before harnessId existed, as a null harness", () => {
+    const doc = new Y.Doc();
+    const { harnessId: _harnessId, ...older } = valueOf(row({}));
+    getHomeStatusMap(doc).set("older", older);
+
+    expect(readHomeStatusRows(doc)).toEqual([
+      row({ key: "older", harnessId: null }),
+    ]);
+  });
+
+  it("reads an out-of-bound harnessId as null rather than dropping the row", () => {
+    const doc = new Y.Doc();
+    const map = getHomeStatusMap(doc);
+    map.set("empty", { ...valueOf(row({})), harnessId: "" });
+    map.set("number", { ...valueOf(row({})), harnessId: 7 });
+    map.set("long", { ...valueOf(row({})), harnessId: "x".repeat(257) });
+
+    const rows = readHomeStatusRows(doc);
+    expect(rows.map((r) => [r.key, r.harnessId])).toEqual([
+      ["empty", null],
+      ["number", null],
+      ["long", null],
+    ]);
   });
 
   it("sorts needs-you, in-progress, done, then newest first", () => {

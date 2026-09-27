@@ -26,6 +26,8 @@ import {
 } from "@traycer/protocol/notifications/home-status-room";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { normalizeProviderId } from "@/components/home/data/landing-options";
+import { HarnessIcon } from "@/components/home/pickers/harness-icon";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { useRegisteredEpicAgentActivityTiers } from "@/lib/epic-selectors";
 import { useCompactRelativeTime } from "@/lib/relative-time";
@@ -302,6 +304,10 @@ function HomeStatusLastUpdate(props: {
   const tiers = useRegisteredEpicAgentActivityTiers(row.epicId);
   const live = tiers.get(row.agentId) === "turn";
   const name = row.agentName.trim().length > 0 ? row.agentName : "Agent";
+  // The row is user-writable and older hosts write no harness, so an id this
+  // build does not know draws no icon rather than a placeholder.
+  const harnessId =
+    row.harnessId === null ? null : normalizeProviderId(row.harnessId);
   return (
     <div className="flex min-w-0 items-center gap-2 text-ui-xs text-muted-foreground @max-[36rem]:gap-1">
       {/* Capped and truncated: agent titles run long ("Update Home Status
@@ -318,8 +324,17 @@ function HomeStatusLastUpdate(props: {
           onClick={() => onOpenAgent(row.epicId, row.agentId, row.hostId)}
           data-testid="home-status-agent"
           data-live={live ? "true" : undefined}
-          className="inline-flex max-w-32 min-w-0 items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/50 @max-[36rem]:border-transparent @max-[36rem]:px-0 @max-[36rem]:text-muted-foreground"
+          className="inline-flex max-w-48 min-w-0 items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring/50 @max-[36rem]:border-transparent @max-[36rem]:px-0 @max-[36rem]:text-muted-foreground"
         >
+          {harnessId === null ? null : (
+            <span
+              className="inline-flex shrink-0"
+              data-testid="home-status-agent-harness"
+              data-harness-id={harnessId}
+            >
+              <HarnessIcon harnessId={harnessId} className="size-3.5" />
+            </span>
+          )}
           <span className="truncate" data-testid="home-status-agent-name">
             {name}
           </span>

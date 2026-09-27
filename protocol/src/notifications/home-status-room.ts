@@ -46,6 +46,17 @@ export const homeStatusRowValueSchema = lazySchema(() =>
     agentName: z.string().max(HOME_STATUS_ID_MAX_LENGTH),
     epicId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
     hostId: z.string().min(1).max(HOME_STATUS_ID_MAX_LENGTH),
+    /**
+     * The writing agent's harness, for its icon. Absent on rows written
+     * before the field existed, and a value that fails the bound reads the
+     * same way: either is `null`, never a dropped row.
+     */
+    harnessId: z
+      .string()
+      .min(1)
+      .max(HOME_STATUS_ID_MAX_LENGTH)
+      .nullable()
+      .catch(null),
     /** Epoch milliseconds of the last write. */
     updatedAt: z.number().int().nonnegative(),
   }),

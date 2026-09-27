@@ -87,6 +87,7 @@ function row(overrides: Partial<HomeStatusRow>): HomeStatusRow {
     agentName: "Opus impl",
     epicId: "epic-1",
     hostId: "host-1",
+    harnessId: "claude",
     updatedAt: Date.now(),
     ...overrides,
   };
