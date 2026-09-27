@@ -170,12 +170,11 @@ export interface EpicLaneArm {
    * Open ONLY the status lane, as the capability probe for a connection whose
    * manifest has not resolved.
    *
-   * This exists because "unknown support is not a selection" and a subscribe is
-   * the only thing that can settle it: the client learns a method's support
-   * from a subscribe COMPLETING (`applyHostManifest` runs with the subscribed
-   * method's outcome), so a runtime that installs no arm while it waits for
-   * support to resolve waits forever - there is nothing else in the epic
-   * session that would ask.
+   * This exists because "unknown support is not a selection" and a subscribe
+   * is the fallback that can settle it: remote sessions normally publish
+   * support at `openAck`, but an incomplete manifest or a local connection
+   * without cached support can remain unknown. A runtime that installed no
+   * arm while waiting for such a connection would wait indefinitely.
    *
    * The probe is the status lane rather than a throwaway request because the
    * open is not wasted on the arm it is probing FOR: on a lane host this
@@ -571,9 +570,9 @@ export function createEpicLaneArm(sources: EpicLaneArmSources): EpicLaneArm {
           // `snapshotFetchError` ("Host update needed", with the method named)
           // and cleared the write gate. On a cold open the legacy arm's own
           // root snapshot happened to clear the error a moment later; on a
-          // RE-probe - every reconnect on a relay, whose support is unknown
-          // forever - legacy was already installed, the transition planned no
-          // steps, no snapshot was owed, and the error stayed up over a
+          // RE-probe while support was still unknown - legacy was already
+          // installed, the transition planned no steps, no snapshot was owed,
+          // and the error stayed up over a
           // healthy `@1` session with the epic read-only until Retry. The two
           // legitimate responses to this close are the arm install above
           // (first probe) and the replacement `reportRequiredLaneUnsupported`

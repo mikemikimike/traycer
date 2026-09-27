@@ -5,6 +5,7 @@ import {
   type EncodeMuxFrameInput,
 } from "@traycer/protocol/host-transport/mux";
 import {
+  ChunkInterleaveWindow,
   ChunkPacer,
   type OutboundChunkSource,
 } from "@traycer/protocol/host-transport/chunking";
@@ -61,6 +62,7 @@ export class PriorityScheduler {
   private readonly options: PrioritySchedulerOptions;
   private readonly now: () => number;
   private readonly pacer: ChunkPacer;
+  private readonly chunkWindow = new ChunkInterleaveWindow();
   private bulkCredits: number;
   private nextSerial = 0;
   private pumping = false;
@@ -207,12 +209,29 @@ export class PriorityScheduler {
    * which the peer's reassembler accepts mid-sequence as a transfer abort.
    */
   dropStreamOutbound(streamId: number): void {
+    this.dropStreamOutboundInternal(streamId, true);
+  }
+
+  /** The peer's CLOSE/FATAL proves it has already discarded this partial. */
+  dropStreamOutboundAfterPeerAbort(streamId: number): void {
+    this.dropStreamOutboundInternal(streamId, false);
+  }
+
+  private dropStreamOutboundInternal(
+    streamId: number,
+    awaitLocalAbort: boolean,
+  ): void {
     for (const queue of [this.interactive, this.bulk]) {
       for (let index = queue.length - 1; index >= 0; index -= 1) {
         if (queue[index].source.streamId === streamId) {
           queue.splice(index, 1);
         }
       }
+    }
+    if (awaitLocalAbort) {
+      this.chunkWindow.awaitLocalAbort(streamId);
+    } else {
+      this.chunkWindow.forgetStream(streamId);
     }
   }
 
@@ -225,6 +244,7 @@ export class PriorityScheduler {
     this.stopped = true;
     this.interactive.length = 0;
     this.bulk.length = 0;
+    this.chunkWindow.clear();
     if (this.paceResumeTimer !== null) {
       clearTimeout(this.paceResumeTimer);
       this.paceResumeTimer = null;
@@ -263,6 +283,10 @@ export class PriorityScheduler {
         blockedStreams.add(streamId);
         continue;
       }
+      if (!this.chunkWindow.canPull(item.source)) {
+        blockedStreams.add(streamId);
+        continue;
+      }
       const frameBytes = item.source.nextFrameByteSize;
       if (!this.pacer.tryConsume(frameBytes)) {
         this.notePaceWait(this.pacer.msUntilAvailable(frameBytes));
@@ -270,12 +294,35 @@ export class PriorityScheduler {
         continue;
       }
       const frame = item.source.nextFrame();
+      this.chunkWindow.notePulled(item.source);
       if (item.source.done) {
         queue.splice(index, 1);
+      } else {
+        // A chunked message keeps its reassembly slot on this stream, but it
+        // need not own the whole QoS queue until its last chunk. Move every
+        // queued message for this stream together so a later message on the
+        // SAME stream cannot overtake this partially sent one.
+        this.rotateStreamToBack(queue, streamId);
       }
       return frame;
     }
     return null;
+  }
+
+  private rotateStreamToBack(queue: QueuedSource[], streamId: number): void {
+    if (queue.length <= 1) return;
+    const sameStream: QueuedSource[] = [];
+    let next = 0;
+    for (const item of queue) {
+      if (item.source.streamId === streamId) {
+        sameStream.push(item);
+      } else {
+        queue[next++] = item;
+      }
+    }
+    for (const item of sameStream) {
+      queue[next++] = item;
+    }
   }
 
   private next(): EncodeMuxFrameInput | null {

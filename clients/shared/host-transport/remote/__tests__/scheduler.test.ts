@@ -473,6 +473,263 @@ describe("PriorityScheduler", () => {
       vi.useRealTimers();
     }
   });
+
+  it("interleaves a later interactive stream before a large chunked interactive stream completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const largeStreamId = 401;
+      const tinyStreamId = 402;
+      const written: Array<{ streamId: number; chunked: boolean }> = [];
+      const scheduler = new PriorityScheduler({
+        write: async (frame) => {
+          written.push({ streamId: frame.streamId, chunked: frame.chunked });
+        },
+        onWriteError: (error) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        },
+        initialBulkCredits: 0,
+        now: () => Date.now(),
+      });
+
+      // Eight chunks remain below the 1 MiB threshold that would auto-upclass
+      // this source to BULK, while still requiring multiple interactive frames.
+      const large = chunkedSource(largeStreamId, QosClass.INTERACTIVE, 8);
+      const largeFrameCount = Math.ceil(
+        large.totalBodyBytes / BULK_CHUNK_SIZE_BYTES,
+      );
+      expect(large.chunked).toBe(true);
+      expect(largeFrameCount).toBeGreaterThan(1);
+      expect(largeFrameCount).toBeLessThan(CHUNK_PACE_BURST_FRAMES);
+
+      scheduler.enqueue(large);
+      scheduler.enqueue(messageSource(tinyStreamId, QosClass.INTERACTIVE));
+      // Drain the current burst without advancing the fake clock. The tiny
+      // stream should get a turn before the large source's final frame.
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(large.done).toBe(true);
+      expect(
+        written.filter((frame) => frame.streamId === largeStreamId),
+      ).toHaveLength(largeFrameCount);
+      expect(
+        written.filter((frame) => frame.streamId === tinyStreamId),
+      ).toHaveLength(1);
+      const tinyIndex = written.findIndex(
+        (frame) => frame.streamId === tinyStreamId,
+      );
+      const largeFinalIndex = written.reduce(
+        (last, frame, index) =>
+          frame.streamId === largeStreamId ? index : last,
+        -1,
+      );
+      expect(tinyIndex).toBeGreaterThanOrEqual(0);
+      expect(tinyIndex).toBeLessThan(largeFinalIndex);
+
+      // Under a frozen clock the total interactive frame count cannot exceed
+      // the pacer's configured burst; this also catches accidental unpaced
+      // draining without relying on wall-clock durations.
+      expect(written).toHaveLength(largeFrameCount + 1);
+      expect(written.length).toBeLessThanOrEqual(CHUNK_PACE_BURST_FRAMES);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rotates same-class BULK streams between frames while honoring credits and pacing", async () => {
+    vi.useFakeTimers();
+    try {
+      const largeStreamId = 501;
+      const smallStreamId = 502;
+      const initialCredits = 1000;
+      const written: Array<{ streamId: number }> = [];
+      const scheduler = new PriorityScheduler({
+        write: async (frame) => {
+          written.push({ streamId: frame.streamId });
+        },
+        onWriteError: (error) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        },
+        initialBulkCredits: initialCredits,
+        now: () => Date.now(),
+      });
+      const large = chunkedSource(largeStreamId, QosClass.BULK, 200);
+      const largeFrameCount = Math.ceil(
+        large.totalBodyBytes / BULK_CHUNK_SIZE_BYTES,
+      );
+      const small = messageSource(smallStreamId, QosClass.BULK);
+
+      scheduler.enqueue(large);
+      scheduler.enqueue(small);
+      // With the clock frozen, the current burst is the byte budget's 16 full
+      // chunks (and at most the frame budget). Both sources share the BULK
+      // queue, so the small source must take a turn inside that burst.
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(large.done).toBe(false);
+      expect(
+        written.filter((entry) => entry.streamId === smallStreamId),
+      ).toHaveLength(1);
+      const smallIndex = written.findIndex(
+        (entry) => entry.streamId === smallStreamId,
+      );
+      const largeFinalIndex = written.reduce(
+        (last, entry, index) =>
+          entry.streamId === largeStreamId ? index : last,
+        -1,
+      );
+      expect(smallIndex).toBeGreaterThanOrEqual(0);
+      expect(smallIndex).toBeLessThan(largeFinalIndex);
+      const largeFramesInBurst = written.filter(
+        (entry) => entry.streamId === largeStreamId,
+      ).length;
+      expect(largeFramesInBurst).toBeGreaterThan(0);
+      expect(largeFramesInBurst).toBeLessThanOrEqual(
+        Math.ceil(CHUNK_PACE_BURST_BYTES / BULK_CHUNK_SIZE_BYTES),
+      );
+      expect(written.length).toBeLessThanOrEqual(CHUNK_PACE_BURST_FRAMES);
+      expect(scheduler.availableCredits()).toBe(
+        initialCredits - written.length,
+      );
+
+      for (let i = 0; i < 300 && !large.done; i += 1) {
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      expect(large.done).toBe(true);
+      expect(
+        written.filter((entry) => entry.streamId === largeStreamId),
+      ).toHaveLength(largeFrameCount);
+      expect(
+        written.filter((entry) => entry.streamId === smallStreamId),
+      ).toHaveLength(1);
+      expect(scheduler.availableCredits()).toBe(
+        initialCredits - largeFrameCount - 1,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains a locally aborted chunk reservation until its terminal frame is written", async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseTerminalWrite: (() => void) | undefined;
+      let markTerminalHeld: (() => void) | undefined;
+      let releaseAbortedChunk: (() => void) | undefined;
+      let markAbortedChunkHeld: (() => void) | undefined;
+      const terminalHeld = new Promise<void>((resolve) => {
+        markTerminalHeld = resolve;
+      });
+      const abortedChunkHeld = new Promise<void>((resolve) => {
+        markAbortedChunkHeld = resolve;
+      });
+      const abortedChunkGate = new Promise<void>((resolve) => {
+        releaseAbortedChunk = resolve;
+      });
+      const terminalWriteGate = new Promise<void>((resolve) => {
+        releaseTerminalWrite = resolve;
+      });
+      const written: Array<{ streamId: number; type: number }> = [];
+      const abortedStreamId = 1000;
+      const nextStreamId = 1016;
+      const writesByStream = new Map<number, number>();
+      const scheduler = new PriorityScheduler({
+        write: async (frame) => {
+          written.push({ streamId: frame.streamId, type: frame.type });
+          if (frame.type === MuxFrameType.STREAM_FRAME) {
+            const count = (writesByStream.get(frame.streamId) ?? 0) + 1;
+            writesByStream.set(frame.streamId, count);
+            if (frame.streamId === abortedStreamId && count === 2) {
+              markAbortedChunkHeld?.();
+              await abortedChunkGate;
+            }
+          }
+          if (
+            frame.streamId === abortedStreamId &&
+            frame.type === MuxFrameType.CLOSE
+          ) {
+            markTerminalHeld?.();
+            await terminalWriteGate;
+          }
+        },
+        onWriteError: (error) => {
+          throw error instanceof Error ? error : new Error(String(error));
+        },
+        initialBulkCredits: 1000,
+        now: () => Date.now(),
+      });
+
+      // Pause the pump so all sixteen INTERACTIVE chunk streams are queued
+      // before the first source can begin. Holding the first source's second
+      // frame then proves all sixteen reservations are active.
+      scheduler.pause();
+      for (
+        let streamId = abortedStreamId;
+        streamId < nextStreamId;
+        streamId += 1
+      ) {
+        scheduler.enqueue(chunkedSource(streamId, QosClass.INTERACTIVE, 4));
+      }
+      scheduler.resume();
+      for (
+        let i = 0;
+        i < 100 && (writesByStream.get(abortedStreamId) ?? 0) < 2;
+        i += 1
+      ) {
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      await abortedChunkHeld;
+      expect(writesByStream.size).toBe(16);
+      expect(written.length).toBeGreaterThanOrEqual(16);
+      expect(written.length).toBeLessThanOrEqual(CHUNK_PACE_BURST_FRAMES);
+
+      scheduler.dropStreamOutbound(abortedStreamId);
+      // Queue the capacity-blocked stream AHEAD of CLOSE. If local abort were
+      // treated as peer-confirmed, A would be incorrectly allowed to start.
+      scheduler.enqueue(chunkedSource(nextStreamId, QosClass.INTERACTIVE, 4));
+      let seq = 0;
+      scheduler.enqueue(
+        new OutboundChunkSource(
+          {
+            type: MuxFrameType.CLOSE,
+            streamId: abortedStreamId,
+            qos: QosClass.INTERACTIVE,
+            json: null,
+            binary: null,
+          },
+          () => seq++,
+          false,
+        ),
+      );
+      releaseAbortedChunk?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await terminalHeld;
+      expect(written.some((entry) => entry.streamId === nextStreamId)).toBe(
+        false,
+      );
+
+      releaseTerminalWrite?.();
+      for (
+        let i = 0;
+        i < 100 && !written.some((entry) => entry.streamId === nextStreamId);
+        i += 1
+      ) {
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      const terminalIndex = written.findIndex(
+        (entry) =>
+          entry.streamId === abortedStreamId &&
+          entry.type === MuxFrameType.CLOSE,
+      );
+      const nextStreamIndex = written.findIndex(
+        (entry) => entry.streamId === nextStreamId,
+      );
+      expect(terminalIndex).toBeGreaterThanOrEqual(0);
+      expect(nextStreamIndex).toBeGreaterThan(terminalIndex);
+      expect(written.length).toBeLessThanOrEqual(CHUNK_PACE_BURST_FRAMES + 100);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("PriorityScheduler.queuedBytesForStream / onFrameWritten", () => {
