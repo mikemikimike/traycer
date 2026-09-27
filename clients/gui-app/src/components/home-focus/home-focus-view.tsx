@@ -36,6 +36,8 @@ import {
 } from "@/components/home-focus/home-focus-task-groups";
 import { useFocusActions } from "@/hooks/home-focus/use-focus-actions";
 import { useFocusModel } from "@/hooks/home-focus/use-focus-model";
+import { useHomeStatusBoard } from "@/hooks/home-focus/use-home-status-board";
+import { HomeStatusTable } from "@/components/home-focus/home-status-table";
 import { openNewEpicIntent } from "@/lib/commands/actions/new-epic";
 import {
   selectTaskGroups,
@@ -379,6 +381,7 @@ function selectHomeSections(
 export function HomeFocusView(): ReactNode {
   const model = useFocusModel();
   const actions: HomeFocusRowActions = useFocusActions();
+  const statusBoard = useHomeStatusBoard();
   const hostGrouping = useHomeHostGroups(model);
   const sections = useMemo(
     () => selectHomeSections(model, hostGrouping),
@@ -404,6 +407,14 @@ export function HomeFocusView(): ReactNode {
           so the last row has to clear the home indicator on a phone and still
           keep a real gutter on a desktop where every inset is zero. */}
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pt-6 pb-safe-bottom-gutter">
+        {/* Above everything, and outside the empty branch: the board is its own
+            source, so a quiet page with nothing running still shows it. */}
+        <HomeStatusTable
+          rows={statusBoard.rows}
+          now={statusBoard.now}
+          onDismiss={statusBoard.dismiss}
+          onOpenAgent={actions.openAgent}
+        />
         <HomeSummaryLine sections={sections} grouping={hostGrouping} />
         <ActivityCoverageNotice
           activity={model.coverage.activity}
