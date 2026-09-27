@@ -408,8 +408,8 @@ function fireBleedCheckedOutsideClick(
   onUnderlyingClick: { mockClear: () => void },
 ): void {
   const lockedAtStart =
-    document.body.style.pointerEvents === "none" ||
-    getComputedStyle(underlying).pointerEvents === "none";
+    document.documentElement.hasAttribute("data-base-ui-scroll-locked") ||
+    underlying.closest("[data-base-ui-inert]") !== null;
   onUnderlyingClick.mockClear();
   const restoreShell = mockShellRect();
   fireFullClick(underlying, OUTSIDE_SHELL_COORDS);
@@ -1076,7 +1076,7 @@ describe("notification desktop-pass design corrections", () => {
     });
   });
 
-  describe("nested dismissal (real Radix filter menu inside the bell popover)", () => {
+  describe("nested dismissal (real filter menu inside the bell popover)", () => {
     // The only nested DropdownMenu left in the center is the filter menu
     // (overflow was replaced by a direct settings gear). Modal menus keep
     // the body pointer lock; PopoverContent's onFocusOutside preventDefault
@@ -1100,10 +1100,7 @@ describe("notification desktop-pass design corrections", () => {
     }
 
     async function openFilterMenu(): Promise<HTMLElement> {
-      fireEvent.pointerDown(
-        screen.getByTestId("notifications-filter-trigger"),
-        { button: 0 },
-      );
+      fireEvent.click(screen.getByTestId("notifications-filter-trigger"));
       return screen.findByTestId("notifications-filter-menu");
     }
 
@@ -1117,8 +1114,10 @@ describe("notification desktop-pass design corrections", () => {
       const onUnderlyingClick = vi.fn();
       await openCenter({ onUnderlyingClick });
       await openFilterMenu();
-      // Modal menus install a body pointer lock while open.
-      expect(document.body.style.pointerEvents).toBe("none");
+      // Modal menus install Base's scroll lock while open.
+      expect(
+        document.documentElement.hasAttribute("data-base-ui-scroll-locked"),
+      ).toBe(true);
 
       // Click empty space inside the flyout (subtitle is always present and
       // not part of the filter menu portal).
@@ -1141,7 +1140,7 @@ describe("notification desktop-pass design corrections", () => {
       renderPopoverRouter(onFilterMenuOpenChange);
 
       const trigger = await screen.findByTestId("notifications-filter-trigger");
-      fireEvent.pointerDown(trigger, { button: 0 });
+      fireEvent.click(trigger);
       await screen.findByTestId("notifications-filter-menu");
       expect(onFilterMenuOpenChange).toHaveBeenCalledWith(true);
 
@@ -1212,8 +1211,10 @@ describe("notification desktop-pass design corrections", () => {
       await openFilterMenu();
 
       const underlying = screen.getByTestId("underlying-page-button");
-      expect(document.body.style.pointerEvents).toBe("none");
-      expect(getComputedStyle(underlying).pointerEvents).toBe("none");
+      expect(
+        document.documentElement.hasAttribute("data-base-ui-scroll-locked"),
+      ).toBe(true);
+      expect(underlying.closest("[data-base-ui-inert]")).not.toBeNull();
 
       fireBleedCheckedOutsideClick(underlying, onUnderlyingClick);
 

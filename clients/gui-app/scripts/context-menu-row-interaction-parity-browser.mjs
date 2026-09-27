@@ -11,12 +11,13 @@
 // Structure follows `context-menu-rename-focus-steal-browser-regression.mjs`.
 // Not wired into `scripts/run-tests.ts` - run it directly:
 //   bun run scripts/context-menu-row-interaction-parity-browser.mjs
-import { writeFile, readFile } from "node:fs/promises";
+import { writeFile, readFile, mkdtemp } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer as createTcpServer } from "node:net";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
@@ -24,6 +25,7 @@ import {
   launchChromeWithDevTools,
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
+import { connectCdp } from "./cdp-client.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -231,15 +233,16 @@ try {
     };
   }
 
-  await writeFile(
+  const reportPath =
     process.env.REPORT_OUT ??
-      "/tmp/context-menu-row-interaction-parity-result.json",
-    JSON.stringify(report, null, 2),
-  );
+    path.join(
+      await mkdtemp(path.join(tmpdir(), "context-menu-parity-")),
+      "result.json",
+    );
+  await writeFile(reportPath, JSON.stringify(report, null, 2));
   console.log(
     "context-menu row-interaction parity measurement complete:",
-    process.env.REPORT_OUT ??
-      "/tmp/context-menu-row-interaction-parity-result.json",
+    reportPath,
   );
   if (report.comparison !== undefined && report.comparison.mismatchCount > 0) {
     throw new Error(
@@ -1044,45 +1047,6 @@ async function waitForHttp(url, child, readError, label) {
     await delay(150);
   }
   throw new Error(`${label} did not become reachable: ${readError()}`);
-}
-
-function connectCdp(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let nextId = 0;
-    const connectTimer = setTimeout(
-      () => reject(new Error("CDP connect timed out")),
-      15_000,
-    );
-    socket.addEventListener("error", (event) =>
-      reject(new Error(String(event))),
-    );
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      if (typeof message.id !== "number") return;
-      const request = pending.get(message.id);
-      if (request === undefined) return;
-      pending.delete(message.id);
-      if (message.error === undefined) request.resolve(message.result);
-      else request.reject(new Error(message.error.message));
-    });
-    socket.addEventListener("open", () => {
-      clearTimeout(connectTimer);
-      resolve({
-        send(method, params = {}) {
-          return new Promise((requestResolve, requestReject) => {
-            const id = ++nextId;
-            pending.set(id, { resolve: requestResolve, reject: requestReject });
-            socket.send(JSON.stringify({ id, method, params }));
-          });
-        },
-        close() {
-          socket.close();
-        },
-      });
-    });
-  });
 }
 
 async function evaluate(client, expression) {

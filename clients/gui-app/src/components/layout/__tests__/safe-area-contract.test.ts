@@ -144,11 +144,12 @@ const AVOID_COLLISIONS_ALLOWLIST = [
   "components/epic-canvas/git-diff/git-diff-panel-actions.tsx",
 ];
 
+// `promotable-modal-frame.tsx` is not listed: it renders `DialogPopup`'s
+// `frame` variant, whose cap (`max-w-safe-dvw`) lives in `ui/dialog.tsx`.
 const WIDTH_CAPPED_FIXED_FRAMES = [
   "components/ui/dialog.tsx",
   "components/ui/sheet.tsx",
   "components/ui/drawer.tsx",
-  "components/layout/dialogs/promotable-modal-frame.tsx",
 ];
 
 describe("safe-area token contract", () => {

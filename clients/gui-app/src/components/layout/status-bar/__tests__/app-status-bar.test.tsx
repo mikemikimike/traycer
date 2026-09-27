@@ -95,8 +95,9 @@ interface PopoverStubProps {
 let lastPopoverProps: PopoverStubProps | null = null;
 
 vi.mock("@/components/layout/header/rate-limit-popover", async () => {
-  const { PopoverContent } = await import("@/components/ui/popover");
+  const { Popover, PopoverContent } = await import("@/components/ui/popover");
   return {
+    RateLimitPopoverRoot: Popover,
     RateLimitPopover: (props: PopoverStubProps) => {
       lastPopoverProps = { side: props.side, align: props.align };
       return (

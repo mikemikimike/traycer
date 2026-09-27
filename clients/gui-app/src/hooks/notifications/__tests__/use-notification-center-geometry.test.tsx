@@ -485,9 +485,7 @@ describe("useNotificationCenterGeometry integration", () => {
     expect(shell.style.width).toBe(locked.width);
     expect(shell.style.height).toBe(locked.height);
 
-    fireEvent.pointerDown(screen.getByTestId("notifications-filter-trigger"), {
-      button: 0,
-    });
+    fireEvent.click(screen.getByTestId("notifications-filter-trigger"));
     fireEvent.click(
       await screen.findByTestId("notifications-filter-unread-only"),
     );
@@ -839,9 +837,7 @@ describe("useNotificationCenterGeometry integration", () => {
 
     // Nested filter menu open/close (only remaining nested DropdownMenu;
     // overflow was replaced by a direct settings gear).
-    fireEvent.pointerDown(screen.getByTestId("notifications-filter-trigger"), {
-      button: 0,
-    });
+    fireEvent.click(screen.getByTestId("notifications-filter-trigger"));
     expect(
       await screen.findByTestId("notifications-filter-menu"),
     ).not.toBeNull();

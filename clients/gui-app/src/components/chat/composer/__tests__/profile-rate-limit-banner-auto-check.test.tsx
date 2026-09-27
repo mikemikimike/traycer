@@ -287,7 +287,7 @@ describe("ProfileRateLimitSwitchBanner automatic unknown-destination check", () 
       primaryTarget: null,
       probeTarget: unknownDestination,
     });
-    fireEvent.pointerDown(
+    fireEvent.click(
       screen.getByRole("button", { name: "View profile limits" }),
     );
     expect(

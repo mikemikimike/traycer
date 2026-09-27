@@ -1322,12 +1322,7 @@ describe("NotificationsPopover feed controls (T05)", () => {
       await screen.findByText("Recent activity");
 
       // Hide collaboration while at top so it is part of the full baseline.
-      fireEvent.pointerDown(
-        screen.getByTestId("notifications-filter-trigger"),
-        {
-          button: 0,
-        },
-      );
+      fireEvent.click(screen.getByTestId("notifications-filter-trigger"));
       fireEvent.click(
         await screen.findByTestId(
           "notifications-filter-category-collaboration",
@@ -1581,12 +1576,7 @@ describe("NotificationsPopover feed controls (T05)", () => {
       expect(shell.style.height).toBe(locked.height);
 
       // Filter switch.
-      fireEvent.pointerDown(
-        screen.getByTestId("notifications-filter-trigger"),
-        {
-          button: 0,
-        },
-      );
+      fireEvent.click(screen.getByTestId("notifications-filter-trigger"));
       fireEvent.click(
         await screen.findByTestId("notifications-filter-unread-only"),
       );

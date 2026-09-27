@@ -44,9 +44,8 @@ function setup() {
 }
 
 function openMoreMenu(): void {
-  fireEvent.pointerDown(
+  fireEvent.click(
     screen.getByRole("button", { name: "More Git Diff actions" }),
-    { button: 0 },
   );
 }
 

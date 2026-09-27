@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import {
   act,
   cleanup,
@@ -263,7 +264,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     );
   });
 
-  it("sends providers.setAutoJudge with {harnessId, autoJudge: 'provider'} and keeps showing the choice as a local echo", () => {
+  it("sends providers.setAutoJudge with {harnessId, autoJudge: 'provider'} and keeps showing the choice as a local echo", async () => {
     guiHarnessesQueryMock.data = {
       harnesses: [harnessRow({ nativeAutoJudge: true })],
     };
@@ -274,8 +275,9 @@ describe("<ProviderAutoJudgeSection />", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
       screen.getByRole("option", { name: "Claude Code's classifier" }),
     );
 
@@ -296,7 +298,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     );
   });
 
-  it("retires the echo when the write is refused, so the control stops showing a choice that never took", () => {
+  it("retires the echo when the write is refused, so the control stops showing a choice that never took", async () => {
     guiHarnessesQueryMock.data = {
       harnesses: [harnessRow({ nativeAutoJudge: true })],
     };
@@ -307,8 +309,9 @@ describe("<ProviderAutoJudgeSection />", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
       screen.getByRole("option", { name: "Claude Code's classifier" }),
     );
     expect(screen.getByRole("combobox").textContent).toMatch(
@@ -370,7 +373,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     expect(trigger.getAttribute("data-disabled")).toBeNull();
   });
 
-  it("clears the echo without flicker once the stored value agrees with it", () => {
+  it("clears the echo without flicker once the stored value agrees with it", async () => {
     guiHarnessesQueryMock.data = {
       harnesses: [harnessRow({ nativeAutoJudge: true })],
     };
@@ -381,8 +384,9 @@ describe("<ProviderAutoJudgeSection />", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
       screen.getByRole("option", { name: "Claude Code's classifier" }),
     );
     expect(screen.getByRole("combobox").textContent).toMatch(
@@ -409,7 +413,7 @@ describe("<ProviderAutoJudgeSection />", () => {
   // value-only expiry would keep showing the stale echo forever. A completed
   // `providers.list` fetch (whether or not the value moved) is what must
   // retire it instead, and `dataUpdatedAt` advancing is that fetch's signal.
-  it("expires the echo once providers.list refetches, even when the stored value round-trips back to what the echo was made against", () => {
+  it("expires the echo once providers.list refetches, even when the stored value round-trips back to what the echo was made against", async () => {
     guiHarnessesQueryMock.data = {
       harnesses: [harnessRow({ nativeAutoJudge: true })],
     };
@@ -422,8 +426,9 @@ describe("<ProviderAutoJudgeSection />", () => {
 
     // Pick "provider" - echo.against captures the stored value at pick time,
     // "undefined" (Traycer).
-    fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
       screen.getByRole("option", { name: "Claude Code's classifier" }),
     );
     expect(screen.getByRole("combobox").textContent).toMatch(
@@ -671,7 +676,7 @@ describe("<ProviderAutoJudgeSection />", () => {
     expect(screen.queryByTestId("provider-auto-judge-warning")).toBeNull();
   });
 
-  it("control: keeps showing the echo across a rerender when providers.list has not refetched", () => {
+  it("control: keeps showing the echo across a rerender when providers.list has not refetched", async () => {
     guiHarnessesQueryMock.data = {
       harnesses: [harnessRow({ nativeAutoJudge: true })],
     };
@@ -682,8 +687,9 @@ describe("<ProviderAutoJudgeSection />", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(
       screen.getByRole("option", { name: "Claude Code's classifier" }),
     );
 

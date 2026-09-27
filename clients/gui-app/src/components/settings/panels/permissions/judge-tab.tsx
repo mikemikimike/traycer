@@ -520,7 +520,9 @@ function tileClickHitControl(
   const { target } = event;
   if (!(target instanceof Element)) return true;
   if (!event.currentTarget.contains(target)) return true;
-  const control = target.closest("button, a, input, textarea, select");
+  const control = target.closest(
+    'button, a, input, textarea, select, [role="radio"]',
+  );
   if (control === null) return false;
   return !(faceInert && control.matches(JUDGE_MODEL_FACE_SELECTOR));
 }

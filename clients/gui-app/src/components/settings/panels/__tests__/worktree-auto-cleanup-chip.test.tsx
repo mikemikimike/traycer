@@ -553,8 +553,8 @@ describe("WorktreeAutoCleanupChip", () => {
     expect(
       screen
         .getByRole("switch", { name: "Automatic cleanup" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
   });
 
   it("explains a pause in plain English and offers no repair affordance", async () => {

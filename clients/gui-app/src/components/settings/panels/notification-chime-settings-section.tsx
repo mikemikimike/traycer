@@ -83,6 +83,7 @@ function NotificationChimeSelect(props: {
       onValueChange={(next) => {
         if (next === null) return;
         if (!isNotificationChimeSound(next)) return;
+        if (next === props.sound) return;
         props.setSoundForEvent(props.eventType, next);
       }}
     >
@@ -109,7 +110,7 @@ function ChimeOption(props: { readonly sound: NotificationChimeSound }) {
       value={props.sound}
       onPointerUp={preview}
       onClick={(event) => {
-        // Pointer activations already preview on pointer-up, before Radix
+        // Pointer activations already preview on pointer-up, before Select
         // persists and closes the menu. A zero-detail click is synthesized
         // (for example by a screen reader or HTMLElement.click()) and has no
         // pointer event to provide that preview.

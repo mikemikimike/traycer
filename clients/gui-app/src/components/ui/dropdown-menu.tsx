@@ -107,7 +107,7 @@ function DropdownMenuContent({
   const safeAreaInsets = useSafeAreaCollisionPadding();
   return (
     <DropdownMenuPrimitive.Portal
-      container={container}
+      container={container ?? undefined}
       data-overlay-concealed={focus.concealed || undefined}
     >
       <DropdownMenuPrimitive.Positioner

@@ -146,11 +146,10 @@ describe("nested picker profile-dropdown keyboard ownership", () => {
     // first is the correct fix, not a relaxed expectation.
     await waitFor(() => expect(document.activeElement).toBe(input));
 
-    fireEvent.pointerDown(
+    fireEvent.click(
       screen.getByRole("button", {
         name: "Claude profile: Terminal account, Terminal",
       }),
-      { button: 0, ctrlKey: false },
     );
     const menu = await screen.findByRole("menu");
     const terminalProfile = screen.getByRole("menuitem", {
@@ -291,10 +290,10 @@ function OpenProfileDropdownSurface() {
  * Radix's own roving-tabindex/focus-skip behavior for a disabled item. This
  * drives the real, unmocked primitive (mirrors the suite above).
  */
-describe("real Radix DropdownMenu: disabled-row roving focus and dismissal", () => {
+describe("real Base DropdownMenu: disabled-row roving focus and dismissal", () => {
   afterEach(() => cleanup());
 
-  it("ArrowDown roving focus skips a disabled row, and Escape still dismisses the menu", async () => {
+  it("ArrowDown roving focus reaches a disabled row without activating it, and Escape still dismisses the menu", async () => {
     render(<OpenProfileDropdownSurface />);
     const trigger = screen.getByRole("button", {
       name: "Claude profile: Terminal account, Terminal",
@@ -305,7 +304,7 @@ describe("real Radix DropdownMenu: disabled-row roving focus and dismissal", () 
     // opening the nested Radix menu on top of it.
     await waitFor(() => expect(document.activeElement).toBe(trigger));
 
-    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
     const menu = await screen.findByRole("menu");
     const terminalProfile = screen.getByRole("menuitem", {
       name: "Terminal account, Terminal",
@@ -326,15 +325,20 @@ describe("real Radix DropdownMenu: disabled-row roving focus and dismissal", () 
     terminalProfile.focus();
     expect(document.activeElement).toBe(terminalProfile);
 
-    // Radix's own roving-tabindex skips a disabled item entirely - focus
-    // lands on Personal (the next ENABLED row), never on Work.
+    // Base keeps an aria-disabled row in the roving order so its reason can be
+    // heard, but it can never be activated: focus lands on Work, Enter on it
+    // leaves the menu open, and the next ArrowDown reaches Personal.
     fireEvent.keyDown(terminalProfile, { key: "ArrowDown" });
-    await waitFor(() => expect(document.activeElement).toBe(personalProfile));
-    expect(document.activeElement).not.toBe(workProfile);
+    await waitFor(() => expect(document.activeElement).toBe(workProfile));
+    fireEvent.keyDown(workProfile, { key: "Enter" });
+    expect(screen.getByRole("menu")).toBe(menu);
 
-    // Reverse direction: ArrowUp from Personal must skip back over Work too.
+    fireEvent.keyDown(workProfile, { key: "ArrowDown" });
+    await waitFor(() => expect(document.activeElement).toBe(personalProfile));
+
+    // Reverse direction: ArrowUp from Personal walks back through Work.
     fireEvent.keyDown(personalProfile, { key: "ArrowUp" });
-    await waitFor(() => expect(document.activeElement).toBe(terminalProfile));
+    await waitFor(() => expect(document.activeElement).toBe(workProfile));
 
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());

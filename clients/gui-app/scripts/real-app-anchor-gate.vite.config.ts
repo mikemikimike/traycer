@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { mergeConfig } from "vitest/config";
 import base from "../vitest.config";
 
 const sourceOverrides: ReadonlyArray<{ env: string; file: string }> = [
@@ -34,11 +35,9 @@ const sourceOverridePlugin = {
   },
 };
 
-export default {
-  ...base,
-  plugins: [...base.plugins, sourceOverridePlugin],
+export default mergeConfig(base, {
+  plugins: [sourceOverridePlugin],
   resolve: {
-    ...base.resolve,
     alias: [
       {
         find: "@/components/layout/tabs/tab-strip",
@@ -48,7 +47,6 @@ export default {
           "src/__tests__/browser/stubs/tab-strip-stub.tsx",
         ),
       },
-      ...(base.resolve?.alias ?? []),
     ],
   },
-};
+});

@@ -119,7 +119,6 @@ export function DesktopMenuButtons(props: {
                   const revision = snapshot.data.revision;
                   changeMenu("");
                   restoreFocus();
-                  restoreOnClose.current = false;
                   execute.mutate({ revision, itemId });
                 }}
               />
@@ -173,7 +172,9 @@ export function DesktopMenuButtons(props: {
                 aria-label={item.label}
                 finalFocus={() => {
                   if (openMenuRef.current === "" && restoreOnClose.current)
-                    restoreFocus();
+                    return previousFocus.current?.isConnected
+                      ? previousFocus.current
+                      : false;
                   return false;
                 }}
               >

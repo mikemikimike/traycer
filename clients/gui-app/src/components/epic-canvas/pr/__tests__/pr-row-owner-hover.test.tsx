@@ -15,6 +15,7 @@ import type {
 import type { TileOpenIntent } from "@/lib/canvas/tile-open/intent";
 import type { EpicTreeIndex, EpicTreeNode } from "@/lib/epic-selectors";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { tooltipTextFor } from "@/components/ui/__tests__/tooltip-probe";
 import { PrRow, type PrRowEntry } from "@/components/epic-canvas/pr/pr-row";
 import { prDetailTileId } from "@/lib/pr/pr-detail-tile";
 import type { EpicCanvasTileRef } from "@/stores/epics/canvas/types";
@@ -178,9 +179,17 @@ function rowBody(): HTMLElement {
   return screen.getByTestId("pr-row-main");
 }
 
-/** Radix's trigger opens on a TIMER, and skips touch pointers outright. */
+/** Base UI's preview-card trigger opens after a mouse pointer move delay. */
 function hoverRow(): void {
-  fireEvent.pointerEnter(rowBody(), { pointerType: "mouse" });
+  const row = rowBody();
+  fireEvent.pointerEnter(row, { pointerType: "mouse" });
+  fireEvent.mouseEnter(row);
+  fireEvent.pointerMove(row, {
+    pointerType: "mouse",
+    clientX: 20,
+    clientY: 20,
+  });
+  fireEvent.mouseMove(row, { clientX: 20, clientY: 20 });
   act(() => {
     vi.advanceTimersByTime(OPEN_DELAY_MS * 2);
   });
@@ -311,15 +320,18 @@ describe("PrRow owner hover card", () => {
   it("heads the card with the full title and stands the row's tooltip down", () => {
     renderRow({ owners: chatOwners(2) }, "host-1");
 
+    hoverRow();
+
     // Stood down for the row's whole LIFETIME, not just while the card is
     // showing: both open at 500ms from the same pointer and the title is the
     // row's largest hover target, so a tooltip that armed itself between hovers
     // would still be the second floating surface this exists to prevent. The
     // three sibling tests below assert the inverse - a row with no card keeps
     // it.
-    expect(screen.getByTestId("pr-row-title").dataset.slot).toBeUndefined();
-
-    hoverRow();
+    // Base keeps a disabled trigger (and its `data-slot`) on the title, so the
+    // observable lifetime signal is that focusing it never shows a hint.
+    expect(tooltipTextFor(screen.getByTestId("pr-row-title"))).toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
 
     // The row's own title band truncates to one line, so the card heading is
     // the only place the whole title stays legible once the tooltip is gone.
@@ -335,9 +347,7 @@ describe("PrRow owner hover card", () => {
     hoverRow();
 
     expect(hoverCard()).toBeNull();
-    expect(screen.getByTestId("pr-row-title").dataset.slot).toBe(
-      "tooltip-trigger",
-    );
+    expect(tooltipTextFor(screen.getByTestId("pr-row-title"))).toBe(PR_TITLE);
   });
 
   it("has no card while no owner resolves to a node", () => {
@@ -353,9 +363,7 @@ describe("PrRow owner hover card", () => {
     hoverRow();
 
     expect(hoverCard()).toBeNull();
-    expect(screen.getByTestId("pr-row-title").dataset.slot).toBe(
-      "tooltip-trigger",
-    );
+    expect(tooltipTextFor(screen.getByTestId("pr-row-title"))).toBe(PR_TITLE);
   });
 
   it("renders the row without a card before the epic session lands", () => {

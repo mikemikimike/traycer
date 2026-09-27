@@ -22,14 +22,23 @@ const REQUEST_TIMEOUT_MS = 60_000;
 const REJECT_DEADLINE_MS = 1_500;
 
 class FakeSocket extends EventTarget {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
   static last = null;
+  readyState = FakeSocket.CONNECTING;
   constructor() {
     super();
     FakeSocket.last = this;
-    setTimeout(() => this.dispatchEvent(new Event("open")), 0);
+    setTimeout(() => {
+      this.readyState = FakeSocket.OPEN;
+      this.dispatchEvent(new Event("open"));
+    }, 0);
   }
   send() {}
   close() {
+    this.readyState = FakeSocket.CLOSED;
     this.dispatchEvent(new Event("close"));
   }
 }

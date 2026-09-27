@@ -4,7 +4,8 @@
 // Run directly: `node scripts/portal-lifecycle-gate.mjs`.
 // GATE_CASE narrows to matching test names, same convention as PROOF_CASE.
 import assert from "node:assert/strict";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -1810,10 +1811,13 @@ try {
       .join("\n"),
   );
 } finally {
-  await writeFile(
-    process.env.GATE_OUT ?? "/tmp/portal-lifecycle-gate-result.json",
-    JSON.stringify(report, null, 2),
-  );
+  const reportPath =
+    process.env.GATE_OUT ??
+    path.join(
+      await mkdtemp(path.join(tmpdir(), "portal-lifecycle-gate-")),
+      "result.json",
+    );
+  await writeFile(reportPath, JSON.stringify(report, null, 2));
   client?.close();
   await terminateProcessTree(chrome.chrome);
   await rm(chrome.profilePath, { recursive: true, force: true });

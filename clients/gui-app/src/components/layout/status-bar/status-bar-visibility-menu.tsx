@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode, ReactElement } from "react";
+import type { ReactNode, ReactElement } from "react";
 import {
   ContextMenu,
   ContextMenuCheckboxItem,
@@ -73,16 +73,15 @@ export function StatusBarVisibilityMenu(
     <ContextMenu>
       <ContextMenuTrigger
         render={props.children}
-        onContextMenu={(event: MouseEvent<HTMLElement>) => {
-          // Radix composes this ahead of its own opener and skips that opener
-          // once the event is defaulted-prevented, so an exempt subtree keeps
-          // whatever menu (or none) it owns.
+        onContextMenu={(event) => {
+          // An exempt subtree keeps whatever menu (or none) it owns.
           if (
             event.target instanceof Element &&
             event.target.closest(`[${STATUS_BAR_MENU_EXEMPT_ATTRIBUTE}]`) !==
               null
           ) {
             event.preventDefault();
+            event.preventBaseUIHandler();
           }
         }}
       />

@@ -178,7 +178,16 @@ function HostOverviewTabSelect(props: {
         }
         data-testid="host-overview-tab-select"
       >
-        <SelectValue />
+        <SelectValue>
+          {(value: string | null) =>
+            isHostOverviewTab(value) ? (
+              <>
+                {HOST_OVERVIEW_TAB_GROUPS[value].label}
+                {props.badges[value]}
+              </>
+            ) : null
+          }
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {HOST_OVERVIEW_TABS.map((value) => (

@@ -1671,7 +1671,9 @@ describe("BrowsersPanelActions", () => {
         name: "Filter browsers by host, 1 filter active",
       }),
     );
-    await user.click(screen.getByRole("menuitem", { name: "Host, Work Mac" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Host, Work Mac" }),
+    );
     fireEvent.click(
       screen.getByRole("menuitemradio", { name: /Follow task host/ }),
     );
@@ -1690,7 +1692,9 @@ describe("BrowsersPanelActions", () => {
     await user.click(
       screen.getByRole("button", { name: "Filter browsers by host" }),
     );
-    await user.click(screen.getByRole("menuitem", { name: "Host, Home Mac" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Host, Home Mac" }),
+    );
 
     expect(screen.getByText("Loading hosts…")).toBeTruthy();
   });

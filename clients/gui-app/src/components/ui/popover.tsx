@@ -111,7 +111,7 @@ function PopoverContent({
   );
   const safeAreaInsets = useSafeAreaCollisionPadding();
   return (
-    <PopoverPrimitive.Portal container={container}>
+    <PopoverPrimitive.Portal container={container ?? undefined}>
       <PopoverPrimitive.Positioner
         data-slot="popover-positioner"
         className="group/popover-positioner z-50"

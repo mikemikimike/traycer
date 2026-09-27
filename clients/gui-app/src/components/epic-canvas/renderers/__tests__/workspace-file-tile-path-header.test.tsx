@@ -127,6 +127,9 @@ describe("<WorkspaceFileTile /> path header", () => {
     expect(copyButtonQuery()).toBeNull();
 
     fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+    fireEvent.mouseEnter(trigger);
+    fireEvent.pointerMove(trigger, { pointerType: "mouse" });
+    fireEvent.mouseMove(trigger);
     act(() => {
       vi.advanceTimersByTime(OPEN_DELAY_MS * 2);
     });

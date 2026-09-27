@@ -372,7 +372,7 @@ export function HostSwitcher(props: {
         {...{ [HOST_SWITCHER_LIST_ATTRIBUTE]: "true" }}
         ref={contentRef}
         // Only the search input is worth declining for; below the threshold
-        // there is no input and Radix's default lands on a host row, which
+        // there is no input and Base's default lands on a host row, which
         // summons nothing.
         initialFocus={
           hosts.length >= SEARCH_THRESHOLD ? coarseInitialFocus : undefined
@@ -474,6 +474,11 @@ function HostSwitcherTrigger(props: {
 
   return (
     <PopoverTrigger
+      onClick={
+        keepFocusableWhenDisabled
+          ? (event) => event.preventBaseUIHandler()
+          : undefined
+      }
       render={
         <Button
           type="button"
@@ -488,12 +493,6 @@ function HostSwitcherTrigger(props: {
           aria-label={hostSwitcherLabel(props.intent, selected, triggerStatus)}
           aria-disabled={keepFocusableWhenDisabled ? true : undefined}
           disabled={props.disabled ? !keepFocusableWhenDisabled : undefined}
-          onClick={
-            keepFocusableWhenDisabled
-              ? (event: React.MouseEvent<HTMLButtonElement>) =>
-                  event.preventDefault()
-              : undefined
-          }
           data-testid="settings-host-switcher"
           className={cn(
             "group/host-switcher h-auto w-full justify-start gap-3 px-3 py-2 text-start",

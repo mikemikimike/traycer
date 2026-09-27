@@ -723,7 +723,7 @@ describe("Landing rate-limit banner durability", () => {
       expect(
         screen.getByRole("button", { name: "Switch to First" }),
       ).toBeDefined();
-      fireEvent.pointerDown(
+      fireEvent.click(
         screen.getByRole("button", { name: "Choose another profile" }),
       );
       await macrotaskTick();

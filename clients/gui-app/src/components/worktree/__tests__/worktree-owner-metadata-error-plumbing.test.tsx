@@ -98,6 +98,9 @@ const OPEN_DELAY_MS = 500;
 
 function hoverIn(trigger: HTMLElement): void {
   fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+  fireEvent.mouseEnter(trigger);
+  fireEvent.pointerMove(trigger, { pointerType: "mouse" });
+  fireEvent.mouseMove(trigger);
 }
 
 function settleOpenDelay(): void {
