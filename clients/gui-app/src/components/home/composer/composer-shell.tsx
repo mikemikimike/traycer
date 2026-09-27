@@ -12,6 +12,7 @@ import type { ComposerPickerStore } from "@/components/chat/composer/picker/comp
 import { ComposerNarrowProvider } from "@/components/home/composer/composer-narrow-context";
 import { useComposerNarrowObserver } from "@/components/home/composer/composer-narrow-hooks";
 import { useComposerEditorOverflow } from "@/components/home/composer/use-composer-editor-overflow";
+import { useComposerSheetPin } from "@/components/home/composer/use-composer-sheet-pin";
 import { useIsMobileViewport } from "@/hooks/ui/use-mobile-viewport";
 import { useVirtualKeyboardInset } from "@/hooks/ui/use-virtual-keyboard-inset";
 import type { FileTransferDragOverlayVariant } from "@/lib/files/file-transfer-paths";
@@ -186,6 +187,7 @@ function ComposerAreaImpl({
     expanded && !isMobileApp() && browserKeyboardInset > 0
       ? { bottom: `calc(${browserKeyboardInset}px + 1rem)` }
       : undefined;
+  const { slotRef, sheetRef } = useComposerSheetPin(expanded);
   return (
     <div className="relative">
       <ComposerMenu pickerStore={pickerStore} />
@@ -199,16 +201,24 @@ function ComposerAreaImpl({
           aria-hidden
           data-composer-sheet-backdrop=""
           className="fixed inset-0 z-40 bg-canvas/60"
-        />
+        >
+          <div
+            ref={slotRef}
+            data-composer-sheet-slot=""
+            style={sheetStyle}
+            className="absolute inset-x-4 top-2 bottom-[calc(max(0px,var(--safe-area-inset-bottom)-var(--keyboard-inset))+1rem)]"
+          />
+        </div>
       ) : null}
       <div
+        ref={sheetRef}
         data-composer-shell=""
         data-composer-expanded={expanded ? "" : undefined}
-        style={sheetStyle}
         className={cn(
           "relative rounded-lg bg-foreground/3 ring-1 ring-border ring-inset focus-within:ring-ring/30",
-          // The sheet fills the SURFACE the card sits on: `fixed`, so it does
-          // not depend on the stack of positioned wrappers between it and
+          // The sheet fills the SURFACE the card sits on, by taking the box
+          // of the slot above (`useComposerSheetPin`). The slot is `fixed`, so
+          // it does not depend on the positioned wrappers between it and
           // that surface, and both surfaces that mount it are layout roots -
           // the canvas tile host transforms its tile, the landing surface is
           // `contain-layout` - so "fixed" resolves against them, under the
@@ -219,7 +229,7 @@ function ComposerAreaImpl({
           // indicator's, so the max is 0. The frame takes the scroll so the
           // toolbar stays put.
           expanded &&
-            "fixed inset-x-4 top-2 bottom-[calc(max(0px,var(--safe-area-inset-bottom)-var(--keyboard-inset))+1rem)] z-40 flex flex-col bg-card shadow-lg animate-in slide-in-from-bottom duration-300",
+            "absolute z-40 flex flex-col bg-card shadow-lg animate-in slide-in-from-bottom duration-300",
         )}
       >
         {overlay}
