@@ -400,6 +400,7 @@ try {
   client = await connectCdp(target.webSocketDebuggerUrl);
   await client.send("Runtime.enable", undefined);
   await client.send("Page.enable", undefined);
+  await client.send("Network.enable", undefined);
 
   if (CORNERS_MODE) await runCorners(client, baseUrl);
   else await runOffsets(client, baseUrl);
@@ -1031,35 +1032,42 @@ function isNavigationContextError(error) {
   );
 }
 
-/**
- * Navigates and waits for the fixture probe to be ready, with one bounded
- * retry for a known cold-boot flake (module graph never ran: `#root` still
- * empty, no Vite error overlay, at the readiness deadline) - same policy as
- * `scripts/layout-editor-browser.mjs`'s `openVariant`/`stalledBoot`. Never
- * retries anything past this readiness wait (join presence, geometry).
- */
+/** Reload only when Vite explicitly invalidates an optimized dependency. */
 async function openFixture(client, url, label) {
   const ready = `window.__layoutCanvasProbe?.ready === true`;
-  await navigate(client, url);
+  let outdatedDeps = 0;
+  const unsubscribe = client.on("Network.responseReceived", ({ response }) => {
+    if (
+      response.status === 504 &&
+      response.url.includes("/node_modules/.vite/deps/")
+    ) {
+      outdatedDeps += 1;
+    }
+  });
   try {
-    await waitFor(client, `the ${label} fixture probe`, ready);
-  } catch (error) {
-    if (!(error instanceof Error) || !isColdBootFlake(error.message))
-      throw error;
-    console.error(
-      `\n  WARNING ${label}: cold-boot flake (#root empty, no overlay); navigating once more.\n`,
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const before = outdatedDeps;
+      await navigate(client, url);
+      if (
+        await waitFor(
+          client,
+          `the ${label} fixture probe`,
+          ready,
+          () => outdatedDeps > before,
+        )
+      )
+        return;
+      console.error(
+        `Vite invalidated a dependency while loading ${label}; reloading`,
+      );
+    }
+    throw new Error(
+      `Timed out loading ${label} after Vite dependency invalidation`,
     );
-    await navigate(client, url);
-    await waitFor(client, `the ${label} fixture probe`, ready);
+  } finally {
+    unsubscribe();
   }
-}
-
-function isColdBootFlake(message) {
-  return (
-    message.startsWith("Timed out waiting for") &&
-    message.includes('<div id=\\"root\\"></div>') &&
-    message.includes('"viteError": ""')
-  );
 }
 
 async function waitForHttp(url, label) {
@@ -1097,10 +1105,11 @@ async function evaluate(targetClient, expression) {
   return response.result.value;
 }
 
-async function waitFor(targetClient, label, expression) {
+async function waitFor(targetClient, label, expression, abortWhen) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (await evaluate(targetClient, expression)) return;
+    if (abortWhen?.()) return false;
+    if (await evaluate(targetClient, expression)) return true;
     await delay(50);
   }
   const state = await evaluate(
