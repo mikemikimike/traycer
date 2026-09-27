@@ -48,7 +48,7 @@ import {
   launchChromeWithDevTools,
   terminateProcessTree,
 } from "./chrome-launcher.mjs";
-import { connectCdp } from "./cdp-client.mjs";
+import { openTabSession } from "./cdp-client.mjs";
 
 const VIEWPORT = { width: 1920, height: 1080 };
 const FIXTURE_PATH = "/src/__tests__/browser/layout-editor-canvas.html";
@@ -280,6 +280,10 @@ let chromeProfilePath;
 let client;
 let viteProcess;
 const failures = [];
+/** The viewport the current tab should have; a fresh tab re-applies it. */
+let viewport = VIEWPORT;
+/** Fixture loads retried after a stalled boot; see `loadFixture`. */
+let stalledBootRetries = 0;
 /** Uncaught exceptions and error-level log entries, for a page that never renders. */
 const pageExceptions = [];
 
@@ -313,14 +317,8 @@ try {
     launched.readError,
     "Chrome DevTools",
   );
-  const targetResponse = await fetch(
-    new URL("/json/new?about:blank", devtoolsUrl),
-    {
-      method: "PUT",
-    },
-  );
-  const target = await targetResponse.json();
-  client = await connectCdp(target.webSocketDebuggerUrl);
+  client = await openTabSession(devtoolsUrl);
+  // Registered on the session, so they follow every fresh tab.
   client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
     pageExceptions.push(
       exceptionDetails.exception?.description ?? exceptionDetails.text,
@@ -329,17 +327,10 @@ try {
   client.on("Log.entryAdded", ({ entry }) => {
     if (entry.level === "error") pageExceptions.push(entry.text);
   });
-  await client.send("Runtime.enable");
-  await client.send("Page.enable");
-  await client.send("Log.enable");
   // The HMR socket stays open: with file watching off (`spawnVite`) it carries
   // only the dependency optimizer's own reloads, which the warm-up boot below
   // waits out.
-  await client.send("Emulation.setDeviceMetricsOverride", {
-    ...VIEWPORT,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
+  await prepareTab(client);
 
   // Which operations changed the app, across both windows: a sidebar-side
   // pick changes the task window and not the sample one, and a setting passes
@@ -413,6 +404,10 @@ try {
       `only ${effects.size} settings were found to operate`,
     );
 
+  if (stalledBootRetries > 1)
+    failures.push(
+      `${stalledBootRetries} fixture loads stalled and were retried in a fresh tab; one is tolerated, a repeat is a regression (see loadFixture)`,
+    );
   if (failures.length > 0) {
     console.error(
       `\n${failures.length} failure(s):\n- ${failures.join("\n- ")}`,
@@ -422,7 +417,7 @@ try {
     console.log("layout settings browser regression: OK");
   }
 } finally {
-  client?.close();
+  await client?.close();
   viteProcess?.kill("SIGTERM");
   if (chrome !== undefined) {
     try {
@@ -442,15 +437,26 @@ try {
 }
 
 /**
- * Loads the fixture, reloading when Vite's dependency optimizer re-ran under
- * the load (a 504 "Outdated Optimize Dep"): another driver's `--force` server
- * rewrites the shared cache, and the page it half-loaded never recovers.
+ * Loads the fixture in a fresh tab (`openTabSession`), so every load gets its
+ * own renderer. One tab navigated from load to load keeps one renderer, which
+ * grows until it stops booting the fixture or refuses new loads
+ * (net::ERR_INSUFFICIENT_RESOURCES, the CI failure of this driver) or is
+ * killed outright (tickets/12).
+ *
+ * Reloads when Vite's dependency optimizer re-ran under the load (a 504
+ * "Outdated Optimize Dep"): another driver's `--force` server rewrites the
+ * shared cache, and the page it half-loaded never recovers. A stalled boot is
+ * retried ONCE, in another fresh tab, loudly and counted: the run fails on a
+ * second one, so a repeat surfaces instead of hiding behind the retry.
  */
 async function loadFixture(client, url, readySelector) {
+  let retriedStall = false;
   for (let attempt = 1; ; attempt += 1) {
     pageExceptions.length = 0;
-    await navigate(client, url);
+    await client.freshTab();
+    await prepareTab(client);
     try {
+      await navigate(client, url);
       await waitFor(
         client,
         "the fixture probe",
@@ -461,20 +467,47 @@ async function loadFixture(client, url, readySelector) {
       const outdated = pageExceptions.some((text) =>
         text.includes("Outdated Optimize Dep"),
       );
-      if (!outdated || attempt === 3) throw error;
-      console.log(
-        `reloading: Vite re-optimized its dependencies (attempt ${attempt})`,
+      if (outdated && attempt < 3) {
+        console.log(
+          `reloading: Vite re-optimized its dependencies (attempt ${attempt})`,
+        );
+        continue;
+      }
+      if (retriedStall || !(error instanceof Error) || !stalledBoot(error))
+        throw error;
+      retriedStall = true;
+      stalledBootRetries += 1;
+      console.error(
+        `\n  WARNING ${url}: the fixture's boot stalled in a fresh tab (${error.message.split("\n")[0]}; renderer ${client.crashed() ? "gone" : "alive"}); retrying once in another fresh tab (retry ${stalledBootRetries}, a second one fails the run).\n`,
       );
     }
   }
 }
 
-// --- checks -----------------------------------------------------------------
+/** A dead renderer, an unanswered command, or a page that never rendered. */
+function stalledBoot(error) {
+  const message = error.message;
+  if (message.startsWith("The renderer was killed")) return true;
+  if (/^CDP \S+ got no answer within \d+ms/.test(message)) return true;
+  if (message.startsWith("Timed out waiting for the navigation")) return true;
+  return (
+    message.startsWith("Timed out waiting for the fixture probe") &&
+    message.includes('"rootEmpty": true')
+  );
+}
 
-/**
- * The rail and the picked area's header stay put while its body scrolls, and
- * a newly picked area starts at its top.
- */
+/** The tab's own state, which a fresh tab starts without. */
+async function prepareTab(client) {
+  await client.send("Runtime.enable");
+  await client.send("Page.enable");
+  await client.send("Log.enable");
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    ...viewport,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+}
+
 async function checkAreas(client) {
   // Pinned: the longest area scrolled to its end moves its body and nothing
   // else - not the rail, not its header, not the settings pane.
@@ -1124,6 +1157,7 @@ async function checkHeaderFit(client) {
 }
 
 async function setViewport(client, size) {
+  viewport = size;
   await client.send("Emulation.setDeviceMetricsOverride", {
     ...size,
     deviceScaleFactor: 1,
@@ -1608,6 +1642,8 @@ async function navigate(client, url) {
   await client.send("Page.navigate", { url });
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
+    if (client.crashed())
+      throw new Error(`The renderer was killed while navigating to ${url}`);
     try {
       const ready = await evaluate(
         client,
@@ -1685,12 +1721,14 @@ async function evaluate(client, expression) {
 async function waitFor(client, label, expression) {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
+    if (client.crashed())
+      throw new Error(`The renderer was killed while waiting for ${label}`);
     if (await evaluate(client, expression)) return;
     await delay(100);
   }
   const pageState = await evaluate(
     client,
-    `({ errors: window.__layoutCanvasErrors ?? [], text: document.body.innerText.slice(0, 2000) })`,
+    `({ rootEmpty: (document.getElementById("root")?.childElementCount ?? 0) === 0, errors: window.__layoutCanvasErrors ?? [], text: document.body.innerText.slice(0, 2000) })`,
   );
   pageState.exceptions = pageExceptions.slice(-10);
   throw new Error(
