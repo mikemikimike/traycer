@@ -2623,7 +2623,7 @@ describe("<HomeFocusView /> status board", () => {
     });
     render(<HomeFocusView />);
 
-    const board = screen.getByTestId("home-status-table");
+    const board = screen.getByTestId("home-status-section");
     const needsYou = sectionOf("needs-you");
     expect(
       board.compareDocumentPosition(needsYou) &
@@ -2647,7 +2647,7 @@ describe("<HomeFocusView /> status board", () => {
     modelMock.value = model({});
     render(<HomeFocusView />);
 
-    expect(screen.getByTestId("home-status-table")).toBeDefined();
+    expect(screen.getByTestId("home-status-section")).toBeDefined();
     expect(screen.queryByTestId("home-focus-empty")).toBeNull();
   });
 
@@ -2659,7 +2659,7 @@ describe("<HomeFocusView /> status board", () => {
     modelMock.value = model({});
     render(<HomeFocusView />);
 
-    const board = screen.getByTestId("home-status-table");
+    const board = screen.getByTestId("home-status-section");
     const gettingStarted = screen.getByTestId("home-getting-started");
     expect(
       board.compareDocumentPosition(gettingStarted) &
@@ -2680,7 +2680,7 @@ describe("<HomeFocusView /> status board", () => {
     modelMock.value = model({});
     render(<HomeFocusView />);
 
-    expect(screen.queryByTestId("home-status-table")).toBeNull();
+    expect(screen.queryByTestId("home-status-section")).toBeNull();
     expect(screen.getByTestId("home-focus-empty")).toBeDefined();
   });
 
@@ -2688,7 +2688,7 @@ describe("<HomeFocusView /> status board", () => {
     modelMock.value = model({ tasks: [taskRow({})] });
     render(<HomeFocusView />);
 
-    expect(screen.queryByTestId("home-status-table")).toBeNull();
+    expect(screen.queryByTestId("home-status-section")).toBeNull();
     expect(screen.getByTestId("home-focus-section-running")).toBeDefined();
   });
 

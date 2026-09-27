@@ -241,6 +241,9 @@ export const DEFAULT_PIN_CONTEXT_USAGE_BREAKDOWN = false;
 
 export type TaskTabLayout = "scroll" | "shrink";
 
+/** How the Home status board draws its rows: a table, or a read-only kanban. */
+export type HomeStatusView = "table" | "board";
+
 export interface SettingsState {
   startPageWallpaper: StartPageWallpaper | null;
   showGreeting: boolean;
@@ -396,6 +399,8 @@ export interface SettingsState {
   homeStatusInProgressStaleAfter: HomeStatusInProgressStaleAfter;
   homeStatusNeedsYouStaleAfter: HomeStatusNeedsYouStaleAfter;
   homeStatusDoneHideAfter: HomeStatusDoneHideAfter;
+  /** The board's own Table | Board switch, remembered per device. */
+  homeStatusView: HomeStatusView;
   /** How task tabs share space when the header fills up. */
   taskTabLayout: TaskTabLayout;
   /**
@@ -482,6 +487,7 @@ export interface SettingsState {
     value: HomeStatusNeedsYouStaleAfter,
   ) => void;
   setHomeStatusDoneHideAfter: (value: HomeStatusDoneHideAfter) => void;
+  setHomeStatusView: (value: HomeStatusView) => void;
   setTaskTabLayout: (value: TaskTabLayout) => void;
   togglePinnedContextBreakdownField: (field: ContextBreakdownField) => void;
   /**
@@ -544,6 +550,7 @@ type PersistedSettingsState = Pick<
   | "homeStatusInProgressStaleAfter"
   | "homeStatusNeedsYouStaleAfter"
   | "homeStatusDoneHideAfter"
+  | "homeStatusView"
   | "taskTabLayout"
   | "pinnedContextBreakdownFields"
   | "contextIndicatorStyle"
@@ -631,6 +638,7 @@ function partializeSettingsState(state: SettingsState): PersistedSettingsState {
     homeStatusInProgressStaleAfter: state.homeStatusInProgressStaleAfter,
     homeStatusNeedsYouStaleAfter: state.homeStatusNeedsYouStaleAfter,
     homeStatusDoneHideAfter: state.homeStatusDoneHideAfter,
+    homeStatusView: state.homeStatusView,
     taskTabLayout: state.taskTabLayout,
     pinnedContextBreakdownFields: state.pinnedContextBreakdownFields,
     contextIndicatorStyle: state.contextIndicatorStyle,
@@ -690,6 +698,7 @@ export const useSettingsStore = create<SettingsState>()(
         DEFAULT_HOME_STATUS_IN_PROGRESS_STALE_AFTER,
       homeStatusNeedsYouStaleAfter: DEFAULT_HOME_STATUS_NEEDS_YOU_STALE_AFTER,
       homeStatusDoneHideAfter: DEFAULT_HOME_STATUS_DONE_HIDE_AFTER,
+      homeStatusView: "table",
       taskTabLayout: "scroll",
       pinnedContextBreakdownFields: DEFAULT_PINNED_CONTEXT_BREAKDOWN_FIELDS,
       contextIndicatorStyle: DEFAULT_CONTEXT_INDICATOR_STYLE,
@@ -855,6 +864,7 @@ export const useSettingsStore = create<SettingsState>()(
         "homeStatusNeedsYouStaleAfter",
       ),
       setHomeStatusDoneHideAfter: makeSetter(set, "homeStatusDoneHideAfter"),
+      setHomeStatusView: makeSetter(set, "homeStatusView"),
       setTaskTabLayout: makeSetter(set, "taskTabLayout"),
       togglePinnedContextBreakdownField: (field) => {
         set((s) => {
@@ -984,7 +994,7 @@ export const useSettingsStore = create<SettingsState>()(
             typeof merged.homeTabEnabled === "boolean"
               ? merged.homeTabEnabled
               : false,
-          ...resolvePersistedHomeStatusThresholds(persisted),
+          ...resolvePersistedHomeStatusSettings(persisted),
           pinnedContextBreakdownFields:
             resolvePersistedPinnedContextBreakdownFields(
               persisted.pinnedContextBreakdownFields,
@@ -1010,17 +1020,18 @@ export function isHomeTabEnabled(): boolean {
 }
 
 /**
- * The Home status board's thresholds are closed vocabularies: a blob from
- * before they existed, or from a build offering other choices, comes back as
- * the default rather than a value no option names.
+ * The Home status board's settings are closed vocabularies: a blob from before
+ * they existed, or from a build offering other choices, comes back as the
+ * default rather than a value no option names.
  */
-function resolvePersistedHomeStatusThresholds(
+function resolvePersistedHomeStatusSettings(
   persisted: Record<string, unknown>,
 ): Pick<
   SettingsState,
   | "homeStatusInProgressStaleAfter"
   | "homeStatusNeedsYouStaleAfter"
   | "homeStatusDoneHideAfter"
+  | "homeStatusView"
 > {
   const {
     homeStatusInProgressStaleAfter: inProgress,
@@ -1028,6 +1039,7 @@ function resolvePersistedHomeStatusThresholds(
     homeStatusDoneHideAfter: doneHide,
   } = persisted;
   return {
+    homeStatusView: persisted.homeStatusView === "board" ? "board" : "table",
     homeStatusInProgressStaleAfter: isHomeStatusInProgressStaleAfter(inProgress)
       ? inProgress
       : DEFAULT_HOME_STATUS_IN_PROGRESS_STALE_AFTER,

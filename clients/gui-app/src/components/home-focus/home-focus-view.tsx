@@ -37,7 +37,7 @@ import {
 import { useFocusActions } from "@/hooks/home-focus/use-focus-actions";
 import { useFocusModel } from "@/hooks/home-focus/use-focus-model";
 import { useHomeStatusBoard } from "@/hooks/home-focus/use-home-status-board";
-import { HomeStatusTable } from "@/components/home-focus/home-status-table";
+import { HomeStatusSection } from "@/components/home-focus/home-status-section";
 import { openNewEpicIntent } from "@/lib/commands/actions/new-epic";
 import {
   selectTaskGroups,
@@ -423,7 +423,7 @@ export function HomeFocusView(): ReactNode {
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 pt-6 pb-safe-bottom-gutter">
         {/* Above everything, and outside the empty branch: the board is its own
             source, so a quiet page with nothing running still shows it. */}
-        <HomeStatusTable
+        <HomeStatusSection
           rows={statusBoard.rows}
           now={statusBoard.now}
           thresholds={statusBoard.thresholds}

@@ -54,6 +54,7 @@ function resetSettingsStore(): void {
     homeStatusInProgressStaleAfter: "2h",
     homeStatusNeedsYouStaleAfter: "never",
     homeStatusDoneHideAfter: "24h",
+    homeStatusView: "table",
   });
 }
 
@@ -109,6 +110,25 @@ describe("useSettingsStore", () => {
     expect(state.homeStatusInProgressStaleAfter).toBe("1h");
     expect(state.homeStatusNeedsYouStaleAfter).toBe("8h");
     expect(state.homeStatusDoneHideAfter).toBe("never");
+  });
+
+  it("defaults the Home status view to Table, and an old blob without it rehydrates as Table", async () => {
+    expect(useSettingsStore.getState().homeStatusView).toBe("table");
+    useSettingsStore.setState({ homeStatusView: "board" });
+    await rehydrateFrom({ homeTabEnabled: true });
+    expect(useSettingsStore.getState().homeStatusView).toBe("table");
+  });
+
+  it("persists and rehydrates the Board view, and reads an unknown view as Table", async () => {
+    useSettingsStore.getState().setHomeStatusView("board");
+    const persisted = window.localStorage.getItem("traycer-gui-app:settings");
+    useSettingsStore.setState({ homeStatusView: "table" });
+    window.localStorage.setItem("traycer-gui-app:settings", persisted ?? "");
+    await useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().homeStatusView).toBe("board");
+
+    await rehydrateFrom({ homeStatusView: "kanban" });
+    expect(useSettingsStore.getState().homeStatusView).toBe("table");
   });
 
   it("rehydrates an unknown threshold as its default, not as the stored string", async () => {

@@ -6,7 +6,7 @@ import {
   HOME_STATUS_STALE_MS,
   type HomeStatusRow,
 } from "@traycer/protocol/notifications/home-status-room";
-import { HomeStatusTable } from "@/components/home-focus/home-status-table";
+import { HomeStatusSection } from "@/components/home-focus/home-status-section";
 import {
   DEFAULT_HOME_STATUS_THRESHOLDS,
   resolveHomeStatusThresholds,
@@ -17,6 +17,7 @@ import {
   __setAgentActivityPlaneAnsweringForTests,
   __setAgentActivityStateForTests,
 } from "@/stores/agent-activity-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 
 const NOW = Date.now();
 
@@ -49,7 +50,7 @@ function renderTableWith(
   const view = render(
     // The note's links open through `useOpenLink`, which is a mutation.
     <QueryClientProvider client={new QueryClient()}>
-      <HomeStatusTable
+      <HomeStatusSection
         rows={rows}
         now={NOW}
         thresholds={thresholds}
@@ -73,15 +74,17 @@ function rowAt(index: number): HTMLElement {
 
 beforeEach(() => {
   __resetAgentActivityStoreForTests();
+  useSettingsStore.setState({ homeStatusView: "table" });
 });
 
 afterEach(() => {
   cleanup();
 });
 
-describe("HomeStatusTable", () => {
+describe("HomeStatusSection, Table view", () => {
   it("renders nothing for an empty board", () => {
     renderTable([]);
+    expect(screen.queryByTestId("home-status-section")).toBeNull();
     expect(screen.queryByTestId("home-status-table")).toBeNull();
   });
 
