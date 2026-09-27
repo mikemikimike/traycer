@@ -83,7 +83,7 @@ async function relaunchStore(): Promise<{
   };
 }
 
-/** A v1.3.0 machine's two legacy records, holding all five shipped values. */
+/** A v1.3.0 machine's two legacy records, holding all six shipped values. */
 function seedLegacyRecords(): void {
   window.localStorage.setItem(
     persistKey(STORE_KEYS.settings),
@@ -94,6 +94,9 @@ function seedLegacyRecords(): void {
         pinnedContextBreakdownFields: ["output", "used"],
         pinnedContextBreakdownOrder: ["output", "used"],
         showGlobalResourceMonitor: false,
+        // Independent of the switch: a valid empty list is what carries
+        // `agentRows: false`, so the hidden monitor alone does not.
+        navigatorResourceMetrics: [],
         // Everything else the settings record holds is deliberately not
         // carried: it never shipped as a layout value.
         contextIndicatorStyle: "ring",
@@ -136,7 +139,7 @@ function seedLegacyRecords(): void {
   );
 }
 
-/** What {@link seedLegacyRecords} must produce, all five keys at once. */
+/** What {@link seedLegacyRecords} must produce, all six keys at once. */
 function expectCarried(snapshot: LayoutSnapshot, label: string): void {
   expect(snapshot.overrides, label).toEqual({
     contextUsage: { pinBreakdown: true, pinnedFields: ["used", "output"] },
@@ -572,7 +575,7 @@ describe("useLayoutStore", () => {
   });
 });
 
-describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
+describe("the one-shot carry of the six shipped values (L-49, L-61)", () => {
   beforeEach(reset);
   afterEach(reset);
 
@@ -585,7 +588,7 @@ describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
     expect(relaunched.carried()).toBe(true);
   });
 
-  it("carries all five whichever store module the entry path loads first (L-61)", async () => {
+  it("carries all six whichever store module the entry path loads first (L-61)", async () => {
     // The order dependence this pins is not hypothetical. A zustand store
     // rewrites its own record through the CURRENT `partialize` on its first
     // write, and both legacy record owners have since dropped the fields the
@@ -697,6 +700,56 @@ describe("the one-shot carry of the five shipped values (L-49, L-61)", () => {
     expect(relaunched.state().overrides).toEqual({});
     expect(relaunched.carried()).toBe(true);
   });
+
+  it.each([
+    {
+      name: "a valid empty list turns the agent rows off and keeps the metric defaults",
+      state: { navigatorResourceMetrics: [] },
+      monitor: { agentRows: false },
+    },
+    {
+      name: "a nonempty list turns the rows on and sets each metric from membership, under a hidden monitor",
+      state: {
+        showGlobalResourceMonitor: false,
+        navigatorResourceMetrics: ["memory"],
+      },
+      monitor: {
+        shown: "hidden",
+        agentRows: true,
+        cpu: false,
+        memory: true,
+        processes: false,
+      },
+    },
+    {
+      name: "a nonempty list is independent of the switch being on",
+      state: {
+        showGlobalResourceMonitor: true,
+        navigatorResourceMetrics: ["cpu", "processes"],
+      },
+      monitor: { agentRows: true, cpu: true, memory: false, processes: true },
+    },
+    {
+      name: "an invalid list carries no row or metric preference",
+      state: {
+        showGlobalResourceMonitor: false,
+        navigatorResourceMetrics: "cpu",
+      },
+      monitor: { shown: "hidden" },
+    },
+  ])(
+    "carries the legacy navigator metrics: $name",
+    async ({ state, monitor }) => {
+      window.localStorage.setItem(
+        persistKey(STORE_KEYS.settings),
+        JSON.stringify({ state, version: 1 }),
+      );
+
+      const { state: carried } = await relaunchStore();
+
+      expect(carried().overrides).toEqual({ resourceMonitor: monitor });
+    },
+  );
 
   it("carries only the context-usage key that differs", async () => {
     window.localStorage.setItem(

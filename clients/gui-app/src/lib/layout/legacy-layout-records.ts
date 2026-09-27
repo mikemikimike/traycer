@@ -15,8 +15,9 @@ import { persistKey, STORE_KEYS } from "@/lib/persist/keys";
  * (`persist.hydrate()` -> `setItem`), so the moment `settings-store.ts` or
  * `left-panel-store.ts` is evaluated, its record is rewritten through the
  * CURRENT `partialize` - which no longer carries the minimap side, the pinned
- * breakdown, the resource-monitor switch, the panel groups or the panel
- * visibility overrides. A carry that reads `localStorage` itself therefore
+ * breakdown, the resource-monitor switch, the sidebar resource metrics, the
+ * panel groups or the panel visibility overrides. A carry that reads
+ * `localStorage` itself therefore
  * depends on which store module the entry path happened to import first, which
  * is not a thing any module states or a store suite can observe.
  *

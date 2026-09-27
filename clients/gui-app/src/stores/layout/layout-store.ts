@@ -52,7 +52,7 @@ import {
  */
 export interface LayoutStoreState extends LayoutSnapshot {
   /**
-   * Whether the one-shot carry of the five shipped values has run (L-49,
+   * Whether the one-shot carry of the six shipped values has run (L-49,
    * L-61). Persisted in this same blob, which is what makes it one-shot.
    */
   readonly layoutCarryDone: boolean;
@@ -302,14 +302,14 @@ export function isThinkingShown(): boolean {
 }
 
 /**
- * The five values that actually shipped, carried into this store once (L-49,
+ * The six values that actually shipped, carried into this store once (L-49,
  * L-61), or `null` when there is nothing to carry.
  *
  * Verified against `desktop-v1.3.0`: the layout store itself is unreleased, so
  * nothing else is migrated (P5) - but the minimap side, the pinned context
- * breakdown, the resource-monitor switch, the sidebar's panel groups and the
- * rail's per-panel Hide/Show are on users' machines, and losing any of them
- * would be a visible regression on update.
+ * breakdown, the resource-monitor switch, the sidebar's resource metrics,
+ * the sidebar's panel groups and the rail's per-panel Hide/Show are on users'
+ * machines, and losing any of them would be a visible regression on update.
  *
  * Written straight into this store's own record BEFORE it hydrates, rather
  * than folded into `merge`: zustand does not write a store back after an
@@ -332,22 +332,17 @@ function carryShippedLayoutValues(): LayoutSnapshot | null {
   const settings = legacySettingsRecord();
   const leftPanel = legacyLeftPanelRecord();
   // Handed to the resolvers as UNPARSED values, which is the point: the carry
-  // decides which five things move, and the resolvers decide what each of
+  // decides which six things move, and the resolvers decide what each of
   // them is allowed to be.
-  // Only what the old record actually DIFFERS on. It used to write `shown`
-  // for the minimap and the resource monitor unconditionally and lean on the
-  // delta being re-minimized afterwards; the delta is the user's own picks now
-  // (L-133), so a carry that writes the shipped value would put a preference
-  // on record for something nobody ever expressed one about.
+  // Carry the old answers only when they differ from the new defaults. The
+  // sidebar's old default was no chips, so its empty metric list is an answer
+  // that must become agentRows: false under the new preset's visible rows.
   const overrides = {
     ...(settings.chatTurnMinimapSide === "hide"
       ? { minimap: { shown: "hidden" } }
       : {}),
     ...carriedContextUsage(settings),
-    // Both halves: that one switch hid the agent rows' readings too (G7).
-    ...(settings.showGlobalResourceMonitor === false
-      ? { resourceMonitor: { shown: "hidden", agentRows: false } }
-      : {}),
+    ...carriedResourceMonitor(settings),
     ...carriedRailVisibility(leftPanel.panelVisibilityOverrideById),
   };
   const arrangement = {
@@ -413,6 +408,34 @@ function carriedContextUsage(
       : {}),
   };
   return Object.keys(picks).length === 0 ? {} : { contextUsage: picks };
+}
+
+/** The old sidebar chips were independent of the global monitor switch. */
+function carriedResourceMonitor(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const legacyMetrics = settings.navigatorResourceMetrics;
+  const selected = Array.isArray(legacyMetrics)
+    ? new Set(
+        ["cpu", "memory", "processes"].filter((metric) =>
+          legacyMetrics.includes(metric),
+        ),
+      )
+    : null;
+  const picks = {
+    ...(settings.showGlobalResourceMonitor === false
+      ? { shown: "hidden" }
+      : {}),
+    ...(selected === null ? {} : { agentRows: selected.size > 0 }),
+    ...(selected !== null && selected.size > 0
+      ? {
+          cpu: selected.has("cpu"),
+          memory: selected.has("memory"),
+          processes: selected.has("processes"),
+        }
+      : {}),
+  };
+  return Object.keys(picks).length === 0 ? {} : { resourceMonitor: picks };
 }
 
 /**
