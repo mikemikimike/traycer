@@ -159,8 +159,7 @@ export function useClosingOverlay<D extends ChangeDetails>(props: {
       unmounted.current = cycle.token;
       props.actions.current?.unmount();
     }
-    if (concealed && !open && !logical)
-      host?.closed(registration, host.generation);
+    if (concealed && !open) host?.closed(registration, host.generation);
   }, [
     concealed,
     open,
@@ -270,24 +269,39 @@ export function useClosingOverlayFocus(finalFocus: FinalFocus) {
   const linkedTrigger = useRef<HTMLElement | null>(null);
   const returnTo = useRef<HTMLElement | null>(null);
   const mountedPopup = useRef<HTMLDivElement | null>(null);
+  const lookup = useRef<{
+    element: HTMLDivElement;
+    opener: HTMLElement | null;
+    preferOpener: boolean;
+  } | null>(null);
   useLayoutEffect(() => {
     const element = popup.current;
     if (element) mountedPopup.current = element;
-    const trigger =
+    const opener = presentation.opener();
+    if (
       element &&
-      Array.from(
+      (lookup.current?.element !== element ||
+        lookup.current.opener !== opener ||
+        lookup.current.preferOpener !== presentation.preferOpener)
+    ) {
+      lookup.current = {
+        element,
+        opener,
+        preferOpener: presentation.preferOpener,
+      };
+      const trigger = Array.from(
         element.ownerDocument.querySelectorAll<HTMLElement>("[aria-controls]"),
       ).find((candidate) => {
         const id = candidate.getAttribute("aria-controls");
         const controlled = id ? element.ownerDocument.getElementById(id) : null;
         return controlled !== null && element.contains(controlled);
       });
-    // Select links its inner List; the link disappears once open becomes false.
-    if (trigger) linkedTrigger.current = trigger;
+      // Select links its inner List; the link disappears once open becomes false.
+      if (trigger) linkedTrigger.current = trigger;
+    }
     const reference = linkedTrigger.current?.isConnected
       ? linkedTrigger.current
       : null;
-    const opener = presentation.opener();
     returnTo.current =
       presentation.preferOpener && opener?.isConnected
         ? opener

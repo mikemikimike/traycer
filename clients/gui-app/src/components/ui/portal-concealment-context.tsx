@@ -69,9 +69,10 @@ export function PortalConcealmentBoundary(props: {
       registry.set(token, -1);
       return () => {
         registry.delete(token);
+        acknowledge();
       };
     },
-    [registry],
+    [registry, acknowledge],
   );
   const closed = useCallback(
     (token: object, generation: number): void => {

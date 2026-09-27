@@ -196,10 +196,13 @@ export function NotificationsBell() {
     <Popover
       open={open}
       onOpenChange={(next, details) => {
+        // A nested modal menu owns focus in another portal without dismissing us.
         if (!next && details.reason === "focus-out") details.cancel();
         if (!next && details.reason === "escape-key")
           lifecycle.markKeyboardDismiss();
         if (!next && details.reason === "outside-press") {
+          // A nested menu barrier can retarget an inside press to <html>; use
+          // coordinates, and send Escape only while that menu is still open.
           const shell = geometry.shellRef.current;
           const event = details.event;
           if (shell !== null && "clientX" in event && "clientY" in event) {
@@ -297,43 +300,7 @@ export function NotificationsBell() {
         align="end"
         className="w-auto overflow-hidden"
         initialFocus={lifecycle.initialFocus}
-
         finalFocus={lifecycle.finalFocus}
-        // A nested modal menu (the filter menu) traps focus into its own
-        // portal, outside this Content's DOM subtree - without this guard,
-        // Radix's DismissableLayer reads that as focus leaving the popover
-        // and dismisses it. Escape still closes the popover normally; this
-        // only turns off the focus-outside path, which nothing else in the
-        // T04 focus contract depends on.
-
-        // Real-browser-only bug (jsdom's fireEvent bypasses hit-testing and
-        // never reproduced it): while the modal filter menu is open, its
-        // pointer/scroll barrier sets `body.style.pointerEvents = "none"`.
-        // A click landing inside the popover but outside the menu is then
-        // NOT hit-tested onto the clicked element at all - the browser skips
-        // every inert (pointer-events:none) node under it and resolves
-        // `event.target` to <html>. `event.target` can't be trusted to tell
-        // "inside the popover" from "truly outside" while that lock is
-        // active, so this checks the click's real screen position against
-        // the shell's own rect instead. Genuinely outside still closes
-        // everything normally.
-        //
-        // Inside the shell, this must decide whether the filter menu still
-        // needs a synthetic Escape to close it, or already closed itself -
-        // Radix's own DismissableLayer defers cross-layer
-        // onPointerDownOutside delivery (`deferPointerDownOutside`), so the
-        // menu's own outside-pointerdown handling and this popover-level
-        // handler are NOT guaranteed to run in a fixed order relative to
-        // each other. When the menu's handler runs first, it has already
-        // closed the menu by the time this fires; dispatching Escape then
-        // would hit the popover itself as the new topmost layer and close
-        // it too - reproduced live in headless Chrome. Reading
-        // `nestedMenuOpenRef` (updated synchronously by the menu's own
-        // onOpenChange, which always completes before this deferred handler
-        // runs, since it fires on an earlier event in the same gesture)
-        // makes the decision correct in both orderings: dispatch Escape only
-        // if the menu is still open; otherwise it already closed itself, so
-        // do nothing and leave the popover open.
       >
         <NotificationsPopover
           onNavigate={handleNavigate}

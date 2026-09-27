@@ -195,6 +195,57 @@ describe("tooltip guard on composed popup triggers (R1)", () => {
   });
 });
 
+describe("tooltip guard ignores other open tooltips", () => {
+  // Base also marks an open Tooltip.Trigger with data-popup-open. That is a
+  // tooltip, not a popup, so it must never suppress its container's (or its
+  // child's) tooltip.
+  //
+  // The child Tooltip lives inside the outer trigger's `render` element:
+  // Base's render element wins over `children` on the trigger itself.
+  function nested(
+    outerOpen: boolean | undefined,
+    innerOpen: boolean | undefined,
+  ) {
+    return (
+      <TooltipProvider delay={0}>
+        <Tooltip open={outerOpen}>
+          <TooltipTrigger
+            render={
+              <div data-testid="outer">
+                Row
+                <Tooltip open={innerOpen}>
+                  <TooltipTrigger
+                    render={<button type="button">Inner</button>}
+                  />
+                  <TooltipContent>Inner help</TooltipContent>
+                </Tooltip>
+              </div>
+            }
+          />
+          <TooltipContent>Row help</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+
+  it("opens a container's tooltip while a child's own tooltip is showing", () => {
+    render(nested(undefined, true));
+    const inner = screen.getByRole("button", { name: "Inner" });
+    expect(inner.hasAttribute("data-popup-open")).toBe(true);
+    expect(tooltipTextFor(screen.getByTestId("outer"))).toBe("Row help");
+  });
+
+  it("opens a child's tooltip while its container's own tooltip is showing", () => {
+    render(nested(true, undefined));
+    expect(screen.getByTestId("outer").hasAttribute("data-popup-open")).toBe(
+      true,
+    );
+    expect(tooltipTextFor(screen.getByRole("button", { name: "Inner" }))).toBe(
+      "Inner help",
+    );
+  });
+});
+
 describe("tooltip guard boundaries (R1)", () => {
   it("still opens when aria-haspopup is explicitly false, even with aria-expanded true", () => {
     render(
@@ -216,7 +267,27 @@ describe("tooltip guard boundaries (R1)", () => {
     ).toBe("Tip");
   });
 
-  it("suppresses on Base's own data-popup-open marker alone, with no matching aria-haspopup/aria-expanded pair", () => {
+  it("suppresses on Base's data-popup-open marker when the trigger also declares aria-haspopup, without aria-expanded", () => {
+    render(
+      <TooltipProvider delay={0}>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button type="button" aria-haspopup="menu" data-popup-open="">
+                Trigger
+              </button>
+            }
+          />
+          <TooltipContent>Tip</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>,
+    );
+    expect(
+      tooltipTextFor(screen.getByRole("button", { name: "Trigger" })),
+    ).toBeNull();
+  });
+
+  it("does not suppress on the data-popup-open marker alone, which an open Tooltip trigger also carries", () => {
     render(
       <TooltipProvider delay={0}>
         <Tooltip>
@@ -233,7 +304,7 @@ describe("tooltip guard boundaries (R1)", () => {
     );
     expect(
       tooltipTextFor(screen.getByRole("button", { name: "Trigger" })),
-    ).toBeNull();
+    ).toBe("Tip");
   });
 
   it("does not suppress a tooltip whose only relation to an open popup is sharing the document", () => {

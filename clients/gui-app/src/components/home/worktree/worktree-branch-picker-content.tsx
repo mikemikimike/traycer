@@ -128,7 +128,6 @@ export function WorktreeBranchPickerContent(
       // halves have to move together or the gate is a no-op.
       initialFocus={coarseInitialFocus}
       onKeyDown={handleContentKeyDown}
-
       finalFocus={handleFinalFocus}
     >
       <div className="shrink-0 border-b p-2">

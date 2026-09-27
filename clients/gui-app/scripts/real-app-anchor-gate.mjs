@@ -19,10 +19,11 @@ import { spawn } from "node:child_process";
 import { createServer as createTcpServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  connect,
   findChrome,
   launchChromeWithDevTools,
   terminateProcessTree,
-} from "./chrome-launcher.mjs";
+} from "./gate-browser-support.mjs";
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_PATH = "/src/__tests__/browser/real-app-anchor-gate.html";
@@ -101,62 +102,6 @@ async function startViteServer() {
     await delay(100);
   }
   return { origin, server };
-}
-
-// Same shape as `primitive-gate-browser.mjs`'s own `connect()` - one request
-// id per in-flight `client.send`, resolved off the matching CDP response, plus
-// out-of-band `Runtime.exceptionThrown` collection.
-function connect(url, exceptions) {
-  return new Promise((resolvePromise, reject) => {
-    const socket = new WebSocket(url);
-    const pending = new Map();
-    let next = 0;
-    const timer = setTimeout(
-      () => reject(new Error("CDP connection timed out")),
-      15000,
-    );
-    socket.addEventListener("error", () =>
-      reject(new Error("CDP socket error")),
-    );
-    socket.addEventListener("message", (event) => {
-      const m = JSON.parse(String(event.data));
-      if (m.method === "Runtime.exceptionThrown") {
-        exceptions.push(
-          m.params.exceptionDetails.exception?.description ??
-            m.params.exceptionDetails.text,
-        );
-      }
-      const item = pending.get(m.id);
-      if (!item) return;
-      pending.delete(m.id);
-      clearTimeout(item.timer);
-      if (m.error) item.reject(new Error(m.error.message));
-      else item.resolve(m.result);
-    });
-    socket.addEventListener("open", () => {
-      clearTimeout(timer);
-      resolvePromise({
-        send(method, params) {
-          return new Promise((resolveSend, rejectSend) => {
-            const id = ++next;
-            const sendTimer = setTimeout(() => {
-              pending.delete(id);
-              rejectSend(new Error(`CDP timeout: ${method}`));
-            }, 30000);
-            pending.set(id, {
-              resolve: resolveSend,
-              reject: rejectSend,
-              timer: sendTimer,
-            });
-            socket.send(JSON.stringify({ id, method, params }));
-          });
-        },
-        close() {
-          socket.close();
-        },
-      });
-    });
-  });
 }
 
 async function evaluate(client, expression) {
@@ -568,7 +513,7 @@ async function main() {
     assert(response.ok);
     const target = await response.json();
     const exceptions = [];
-    client = await connect(target.webSocketDebuggerUrl, exceptions);
+    client = await connect(target.webSocketDebuggerUrl, exceptions, 30000);
     await client.send("Page.enable", {});
     await client.send("Runtime.enable", {});
     await client.send("Emulation.setDeviceMetricsOverride", {

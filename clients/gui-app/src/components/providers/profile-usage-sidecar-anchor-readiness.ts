@@ -1,5 +1,4 @@
-const POPPER_WRAPPER_SELECTOR =
-  '[data-slot="dropdown-menu-positioner"], [data-slot="popover-positioner"]';
+const POPPER_WRAPPER_SELECTOR = '[data-slot$="-positioner"]';
 
 function popperWrappersForAnchor(
   anchor: HTMLElement,

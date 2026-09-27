@@ -203,7 +203,7 @@ function ComposerDraftsControlImpl(props: ComposerDraftsControlProps) {
   const rowHighlighted = selectedRow !== undefined;
   // `active` is the SURFACE's own focus, and it gates the keys as well as the
   // chord. `PopoverContent` un-presents its portal when the pane loses focus
-  // or is concealed while leaving the root open (`usePaneAwareContentGuard`),
+  // or is concealed while leaving the root open (`useOverlayPresentation`),
   // so a pane switch with the list open otherwise leaves an INVISIBLE control
   // still eating arrows and Enter and still holding `c`/`d` - and `d`
   // deletes a draft while the user is typing in the pane they moved to.

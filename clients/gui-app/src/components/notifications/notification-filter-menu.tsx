@@ -114,7 +114,6 @@ export function NotificationFilterMenu(
         <DropdownMenuCheckboxItem
           checked={props.unreadOnly}
           onCheckedChange={props.onUnreadOnlyChange}
-
           data-testid="notifications-filter-unread-only"
           closeOnClick={false}
         >
@@ -127,7 +126,6 @@ export function NotificationFilterMenu(
             key={category}
             checked={props.categories.has(category)}
             onCheckedChange={() => props.onToggleCategory(category)}
-
             data-testid={`notifications-filter-category-${category}`}
             closeOnClick={false}
           >

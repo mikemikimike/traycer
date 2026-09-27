@@ -24,13 +24,14 @@ vi.mock("@/components/epics/history-modal-content", () => ({
  */
 function OpenModal(props: {
   readonly kind: "settings" | "history";
+  readonly editingTheme: boolean;
 }): ReactNode {
   const [open, setOpen] = useState(true);
   if (!open) return null;
   return (
     <SystemTabModalSurface
       active={{ kind: props.kind, section: null }}
-      editingTheme={false}
+      editingTheme={props.editingTheme}
       onClose={() => setOpen(false)}
       onPromote={() => undefined}
     />
@@ -49,7 +50,7 @@ afterEach(() => {
 describe("<SystemTabModalSurface /> Escape", () => {
   it("clears a running settings search first, and closes only on the next Escape", () => {
     useSettingsSearchStore.setState({ query: "theme" });
-    render(<OpenModal kind="settings" />);
+    render(<OpenModal kind="settings" editingTheme={false} />);
 
     pressEscapeOnDocument();
 
@@ -62,7 +63,7 @@ describe("<SystemTabModalSurface /> Escape", () => {
   });
 
   it("closes Settings on the first Escape when no search is running", () => {
-    render(<OpenModal kind="settings" />);
+    render(<OpenModal kind="settings" editingTheme={false} />);
 
     pressEscapeOnDocument();
 
@@ -71,12 +72,29 @@ describe("<SystemTabModalSurface /> Escape", () => {
 
   it("leaves History's Escape alone even with a settings query lying around", () => {
     useSettingsSearchStore.setState({ query: "theme" });
-    render(<OpenModal kind="history" />);
+    render(<OpenModal kind="history" editingTheme={false} />);
 
     pressEscapeOnDocument();
 
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(useSettingsSearchStore.getState().query).toBe("theme");
+  });
+});
+
+describe("<SystemTabModalSurface /> while a theme draft is open", () => {
+  // Radix ignored every close while a draft was open; only the explicit close
+  // button could dismiss Settings. Base's Escape listener is document-level, so
+  // the reason has to be cancelled, not just outside presses.
+  it("keeps Settings open on Escape, and closes only from the close button", () => {
+    render(<OpenModal kind="settings" editingTheme />);
+
+    pressEscapeOnDocument();
+
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("system-tab-modal-close-settings"));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

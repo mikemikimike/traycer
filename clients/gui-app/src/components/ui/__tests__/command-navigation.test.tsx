@@ -418,6 +418,71 @@ describe("ranking reorders rows in the DOM", () => {
   });
 });
 
+describe("rows without an itemKey or searchText", () => {
+  function labelled(label: string) {
+    return (
+      <Command>
+        <CommandInput />
+        <CommandList>
+          <CommandItem>{label}</CommandItem>
+          <CommandItem itemKey="other">Other</CommandItem>
+        </CommandList>
+      </Command>
+    );
+  }
+
+  it("filters on the row's current text after its label changes", () => {
+    const { rerender } = render(labelled("Old label"));
+    rerender(labelled("Renamed entry"));
+    fireEvent.change(getInput(), { target: { value: "renamed" } });
+    expect(
+      screen.queryByRole("option", { name: "Renamed entry" }),
+    ).not.toBeNull();
+    expect(screen.queryByRole("option", { name: "Other" })).toBeNull();
+
+    fireEvent.change(getInput(), { target: { value: "old label" } });
+    expect(screen.queryByRole("option", { name: "Renamed entry" })).toBeNull();
+  });
+});
+
+describe("list reconciliation cost", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps one observer across renders that change no rows, groups or query", () => {
+    let created = 0;
+    const NativeObserver = globalThis.MutationObserver;
+    vi.stubGlobal(
+      "MutationObserver",
+      class extends NativeObserver {
+        constructor(callback: MutationCallback) {
+          super(callback);
+          created += 1;
+        }
+      },
+    );
+    const tree = (className: string) => (
+      <Command className={className}>
+        <CommandInput />
+        <CommandList>
+          {labelledItems([{ label: "One" }, { label: "Two" }])}
+        </CommandList>
+      </Command>
+    );
+    const { rerender } = render(tree("a"));
+    const afterMount = created;
+    expect(afterMount).toBeGreaterThan(0);
+
+    rerender(tree("b"));
+    rerender(tree("c"));
+    fireEvent.keyDown(getInput(), { key: "ArrowDown" });
+    fireEvent.keyDown(getInput(), { key: "ArrowUp" });
+
+    expect(created).toBe(afterMount);
+  });
+});
+
 describe("empty results", () => {
   it("shows CommandEmpty when every row scores zero", () => {
     render(

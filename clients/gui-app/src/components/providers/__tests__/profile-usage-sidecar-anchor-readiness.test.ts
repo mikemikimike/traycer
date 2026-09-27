@@ -274,6 +274,37 @@ describe("waitForAnchorPlacement", () => {
     expect(resolved).toBe(true);
   });
 
+  it.each([
+    "select-positioner",
+    "context-menu-positioner",
+    "menubar-positioner",
+    "hover-card-positioner",
+    "tooltip-positioner",
+  ])(
+    "waits for an unplaced %s wrapper, not only dropdown and popover",
+    async (slot) => {
+      const { wrapper, anchor } = mountWrapperAndAnchor();
+      wrapper.setAttribute("data-slot", slot);
+
+      let resolved = false;
+      const wait = waitForAnchorPlacement(
+        anchor,
+        new AbortController().signal,
+      ).then(() => {
+        resolved = true;
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      markPlaced(wrapper);
+
+      await wait;
+      expect(resolved).toBe(true);
+    },
+  );
+
   it("waits for an unplaced inner wrapper nested inside a placed outer wrapper", async () => {
     const outerWrapper = document.createElement("div");
     outerWrapper.setAttribute("data-slot", "popover-positioner");

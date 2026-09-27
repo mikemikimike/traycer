@@ -94,9 +94,7 @@ export function SystemTabModalSurface(
       onOpenChange={(next, details) => {
         if (next) return;
         if (
-          (editingTheme &&
-            (details.reason === "outside-press" ||
-              details.reason === "focus-out")) ||
+          (editingTheme && details.reason !== "close-press") ||
           (details.reason === "escape-key" && overlayConsumesEscape(active))
         )
           details.cancel();

@@ -240,14 +240,18 @@ function Command({
     return () =>
       setGroups((current) => current.filter((item) => item.id !== group.id));
   }, []);
-  const { scores, ranked, enabled } = commandCollection({
-    rows,
-    groups,
-    query,
-    shouldFilter,
-    scoreItem,
-    sourcePositions,
-  });
+  const { scores, ranked, enabled } = React.useMemo(
+    () =>
+      commandCollection({
+        rows,
+        groups,
+        query,
+        shouldFilter,
+        scoreItem,
+        sourcePositions,
+      }),
+    [rows, groups, query, shouldFilter, scoreItem, sourcePositions],
+  );
   const currentValue = highlightedValue ?? active;
   const selected =
     enabled.find((row) => row.id === activeRowId && row.key === currentValue) ??
@@ -316,7 +320,7 @@ function Command({
     if (listRef.current)
       observer.observe(listRef.current, { childList: true, subtree: true });
     return () => observer.disconnect();
-  });
+  }, [rows, groups, query, shouldFilter, scoreItem]);
   React.useLayoutEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
   }, [query]);
@@ -649,6 +653,11 @@ function CommandItem({
   const element = React.useRef<HTMLDivElement>(null);
   const anchor = React.useRef<HTMLTemplateElement>(null);
   const { registerRow } = context;
+  const [inferredText, setInferredText] = React.useState("");
+  React.useLayoutEffect(() => {
+    if (searchText === undefined && itemKey === undefined)
+      setInferredText(element.current?.textContent ?? "");
+  }, [children, itemKey, searchText]);
   const keywordKey = JSON.stringify(keywords);
   const keywordsRef = React.useRef(keywords);
   React.useLayoutEffect(() => {
@@ -656,7 +665,7 @@ function CommandItem({
   });
   React.useLayoutEffect(() => {
     if (!element.current || !anchor.current) return;
-    const text = searchText ?? itemKey ?? element.current.textContent;
+    const text = searchText ?? itemKey ?? inferredText;
     return registerRow({
       id,
       key: itemKey ?? text,
@@ -667,7 +676,16 @@ function CommandItem({
       element: element.current,
       anchor: anchor.current,
     });
-  }, [id, itemKey, searchText, keywordKey, disabled, group, registerRow]);
+  }, [
+    id,
+    itemKey,
+    searchText,
+    inferredText,
+    keywordKey,
+    disabled,
+    group,
+    registerRow,
+  ]);
   const selected = context.activeId === id;
   const hidden = context.scores.has(id) && context.scores.get(id) === 0;
   return (

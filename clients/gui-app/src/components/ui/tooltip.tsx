@@ -8,7 +8,7 @@ import { useSafeAreaCollisionPadding } from "@/components/ui/safe-area-collision
 import { usePortalConcealed } from "@/components/ui/portal-concealment-context";
 
 const OPEN_POPUP_TRIGGER =
-  '[data-popup-open], [aria-haspopup]:not([aria-haspopup="false"])[aria-expanded="true"]';
+  '[aria-haspopup]:not([aria-haspopup="false"]):is([data-popup-open], [aria-expanded="true"])';
 
 const TooltipProviderPresence = React.createContext(false);
 // Base 1.8 supplies hover behavior but no tooltip role or description link.

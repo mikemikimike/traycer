@@ -10,10 +10,12 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { createServer } from "vite";
 import {
+  connect,
+  installPresentationProbes,
   findChrome,
   launchChromeWithDevTools,
   terminateProcessTree,
-} from "./chrome-launcher.mjs";
+} from "./gate-browser-support.mjs";
 
 const project = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -38,7 +40,11 @@ try {
     new URL("/json/new?about:blank", chrome.devtoolsHttpUrl),
     { method: "PUT" },
   );
-  client = await connect((await response.json()).webSocketDebuggerUrl);
+  client = await connect(
+    (await response.json()).webSocketDebuggerUrl,
+    exceptions,
+    45000,
+  );
   await client.send("Page.enable", {});
   await client.send("Runtime.enable", {});
   await client.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -1949,193 +1955,4 @@ async function key(key, modifiers) {
     windowsVirtualKeyCode: codes[key],
     modifiers,
   });
-}
-function connect(url) {
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url),
-      pending = new Map();
-    let next = 0;
-    const timer = setTimeout(
-      () => reject(new Error("CDP connection timed out")),
-      15000,
-    );
-    const fail = (error) => {
-      clearTimeout(timer);
-      reject(error);
-      for (const item of pending.values()) {
-        clearTimeout(item.timer);
-        item.reject(error);
-      }
-      pending.clear();
-    };
-    socket.addEventListener("error", () => fail(new Error("CDP socket error")));
-    socket.addEventListener("close", () =>
-      fail(new Error("CDP socket closed")),
-    );
-    socket.addEventListener("message", (event) => {
-      const m = JSON.parse(String(event.data));
-      if (m.method === "Runtime.exceptionThrown")
-        exceptions.push(
-          m.params.exceptionDetails.exception?.description ??
-            m.params.exceptionDetails.text,
-        );
-      const item = pending.get(m.id);
-      if (!item) return;
-      pending.delete(m.id);
-      clearTimeout(item.timer);
-      if (m.error) item.reject(new Error(m.error.message));
-      else item.resolve(m.result);
-    });
-    socket.addEventListener("open", () => {
-      clearTimeout(timer);
-      resolve({
-        send(method, params) {
-          return new Promise((resolve, reject) => {
-            const id = ++next;
-            const timer = setTimeout(() => {
-              pending.delete(id);
-              reject(new Error(`CDP timeout: ${method}`));
-            }, 45000);
-            pending.set(id, { resolve, reject, timer });
-            socket.send(JSON.stringify({ id, method, params }));
-          });
-        },
-        close() {
-          socket.close();
-        },
-      });
-    });
-  });
-}
-
-function installPresentationProbes() {
-  window.gatePainted = (el) => {
-    if (!(el instanceof Element) || !el.isConnected) return false;
-    const r = el.getBoundingClientRect();
-    if (
-      !r.width ||
-      !r.height ||
-      r.bottom <= 0 ||
-      r.right <= 0 ||
-      r.top >= innerHeight ||
-      r.left >= innerWidth
-    )
-      return false;
-    for (let node = el; node; node = node.parentElement) {
-      const style = getComputedStyle(node);
-      if (
-        node.hidden ||
-        style.display === "none" ||
-        style.visibility !== "visible" ||
-        Number(style.opacity) === 0
-      )
-        return false;
-    }
-    return true;
-  };
-  window.gatePresented = (selector) =>
-    [...document.querySelectorAll(selector)].some((el) => {
-      if (
-        !window.gatePainted(el) ||
-        el.closest('[inert], [aria-hidden="true"]')
-      )
-        return false;
-      const r = el.getBoundingClientRect();
-      return [
-        [0.5, 0.5],
-        [0.1, 0.1],
-        [0.9, 0.9],
-      ].some(([x, y]) => {
-        const hit = document.elementFromPoint(
-          Math.max(0, Math.min(innerWidth - 1, r.x + r.width * x)),
-          Math.max(0, Math.min(innerHeight - 1, r.y + r.height * y)),
-        );
-        return hit && el.contains(hit);
-      });
-    });
-  // Select's SelectTrigger.js (`onFocus`) permanently sets `forceMount:
-  // true` after the trigger is first focused ("Saves a re-render on
-  // initial click: forceMount === true mounts the items before open ===
-  // true"), so a closed Select's popup DOM node is never removed once the
-  // trigger has been focused - `!document.querySelector(...)` never
-  // becomes true. SelectPositioner.js calls `usePositioner(...)` with
-  // `hidden: !mounted, inert: !open`, but `usePositioner.js` itself only
-  // ever turns `inert` into `style.pointerEvents = 'none'` - it never emits
-  // a real `inert` DOM attribute anywhere; `hidden` is the only one of the
-  // two that actually becomes a content attribute (spread straight into the
-  // rendered div's props), and only on the POSITIONER it renders, not on
-  // the Popup itself (SelectPopup.js has no hidden/inert handling of its
-  // own). So `closest('[hidden]')` on the Popup - not `.inert`, not even
-  // `closest('[inert]')` - is what actually proves this ancestor chain is
-  // closed. `isInert` is kept below purely as a diagnostic field (it will
-  // always read false with this Base version) - never gate `closed` on it.
-  window.gateUnreachable = (popupSelector, triggerSelector) => {
-    const popup = document.querySelector(popupSelector);
-    if (!popup)
-      return { closed: true, present: false, reason: "removed from DOM" };
-    const present = window.gatePresented(popupSelector);
-    const notPainted = !window.gatePainted(popup);
-    const isInert = !!popup.closest("[inert]");
-    const hasHiddenAncestor = !!popup.closest("[hidden]");
-    const excludedFromA11y =
-      hasHiddenAncestor ||
-      popup.getAttribute("aria-hidden") === "true" ||
-      !!popup.closest('[aria-hidden="true"]');
-    const before = document.activeElement;
-    const focusableDescendant = popup.querySelector(
-      '[tabindex], button, [href], input, select, textarea, [role="option"], [role="menuitem"], [role="menuitemcheckbox"]',
-    );
-    popup.focus?.({ preventScroll: true });
-    focusableDescendant?.focus?.({ preventScroll: true });
-    const tookFocus =
-      document.activeElement !== before &&
-      (document.activeElement === popup ||
-        popup.contains(document.activeElement));
-    if (tookFocus) before?.focus?.({ preventScroll: true });
-    const dupId = (id) =>
-      id ? document.querySelectorAll(`#${CSS.escape(id)}`).length > 1 : false;
-    const dupPopupId = dupId(popup.id);
-    const trigger = triggerSelector
-      ? document.querySelector(triggerSelector)
-      : null;
-    const dupControlsId = dupId(trigger?.getAttribute("aria-controls"));
-    const dupLabelledById = (trigger?.getAttribute("aria-labelledby") ?? "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .some(dupId);
-    return {
-      closed:
-        !present &&
-        notPainted &&
-        hasHiddenAncestor &&
-        excludedFromA11y &&
-        !tookFocus &&
-        !dupPopupId &&
-        !dupControlsId &&
-        !dupLabelledById,
-      present,
-      notPainted,
-      isInert,
-      hasHiddenAncestor,
-      excludedFromA11y,
-      tookFocus,
-      dupPopupId,
-      dupControlsId,
-      dupLabelledById,
-    };
-  };
-  // Side-effect-free version for a live MutationObserver callback (R1's
-  // race): `gateUnreachable`'s own focus-attempt probe would itself move
-  // focus and contaminate the exact race it is meant to observe neutrally.
-  // Observes the FINAL boundary (Positioner `hidden` flipping true, i.e.
-  // `mounted` becoming false once the exit transition actually finishes) -
-  // `usePositioner.js` never turns `inert` into a real DOM attribute at
-  // all (it only sets `style.pointerEvents = 'none'`), so `hidden` is the
-  // only real signal there is. "Closed" here: the popup is gone from the
-  // DOM entirely, or it has a hidden ancestor.
-  window.gateClosedPure = (popupSelector) => {
-    const popup = document.querySelector(popupSelector);
-    if (!popup) return true;
-    return !!popup.closest("[hidden]");
-  };
 }

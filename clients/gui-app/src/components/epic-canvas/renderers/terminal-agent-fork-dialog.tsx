@@ -695,11 +695,6 @@ function TerminalAgentForkDialogBody(props: TerminalAgentForkDialogProps) {
     >
       <DialogContent
         className="max-h-[92vh] w-[min(94vw,48rem)] sm:max-w-[min(94vw,48rem)]"
-        // Same portal rule as the worktree pickers: the host switcher's list
-        // mounts outside this dialog, so a click in it reads as an interaction
-        // from outside. Dismissing on that would throw away the form someone is
-        // in the middle of filling, for the crime of choosing a host in it.
-
         initialFocus={() => {
           if (intent !== "continue") return true;
           const section = profileSectionRef.current;
