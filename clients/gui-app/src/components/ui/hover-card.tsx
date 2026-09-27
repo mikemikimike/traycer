@@ -37,6 +37,7 @@ import { DismissableLayer } from "radix-ui/internal";
 
 import { HOVER_PREVIEW_SURFACE_CLASS } from "@/components/ui/hover-preview-surface";
 import { useAnyMenuOpen } from "@/components/ui/open-menus";
+import { TooltipsSuppressedContext } from "@/components/ui/tooltip-wrapper";
 import { usePortalConcealed } from "@/components/ui/portal-concealment-context";
 import { useSafeAreaCollisionPadding } from "@/components/ui/safe-area-collision-padding";
 import { useMotionEnabled } from "@/lib/animation/use-motion-enabled";
@@ -268,12 +269,20 @@ const TRANSFORM_ORIGIN: Record<Side, string> = {
   left: "right",
 };
 
+/**
+ * Whether no card may open: disabled, while any menu is open (the trigger's
+ * own or another's, since a non-modal menu leaves the rows beside it
+ * hoverable), or inside a scene that is shown rather than used.
+ */
+function useHoverCardSuppressed(enabled: boolean): boolean {
+  const menuOpen = useAnyMenuOpen();
+  const sceneSuppressed = use(TooltipsSuppressedContext);
+  return !enabled || menuOpen || sceneSuppressed;
+}
+
 export function HoverCard(props: HoverCardProps): ReactNode {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  // No card opens while any menu is open, the trigger's own or another's: a
-  // non-modal menu leaves the rows beside it hoverable.
-  const menuOpen = useAnyMenuOpen();
-  const suppressed = !props.enabled || menuOpen;
+  const suppressed = useHoverCardSuppressed(props.enabled);
   // A suppressed card is CLOSED, not hidden, so lifting the suppression shows
   // nothing until a new hover: it forgets its own open state, and a controlled
   // parent is told to drop its.

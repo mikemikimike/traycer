@@ -26,11 +26,11 @@ import {
  * the same degradation an empty `label` already takes - so the scene stops
  * paying for roots it must never open.
  *
- * Tooltips are the only hover-opened surface in the sample scene; hover cards
- * and focus-opened popovers have none there, and focus cannot rest in the
- * column anyway (the firewall's `focusin` bounce).
+ * `HoverCard` reads the same context, for the sample sidebar's rail labels;
+ * focus-opened popovers have none there, and focus cannot rest in the column
+ * anyway (the firewall's `focusin` bounce).
  */
-const TooltipsSuppressedContext = createContext(false);
+export const TooltipsSuppressedContext = createContext(false);
 
 export const TooltipsSuppressedProvider = TooltipsSuppressedContext.Provider;
 
