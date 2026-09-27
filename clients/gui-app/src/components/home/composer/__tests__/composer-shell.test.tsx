@@ -368,7 +368,7 @@ describe("ComposerShell phone expansion", () => {
     expect(notCancelled).toBe(false);
   });
 
-  it("puts the shell into its fixed sheet state when expanded on phone", () => {
+  it("puts the shell into its sheet state when expanded on phone", () => {
     viewportMock.phone = true;
     renderComposerShell(
       "images",
@@ -384,13 +384,17 @@ describe("ComposerShell phone expansion", () => {
     const editorFrame = editor.closest("[data-composer-editor-frame]");
 
     expect(shell?.hasAttribute("data-composer-expanded")).toBe(true);
-    expect(shell?.className).toContain("fixed");
+    // Not `fixed`: iOS draws no caret in a fixed sheet inside a chat tile.
+    expect(shell?.className).not.toContain("fixed");
     expect(classTokens(overlay)).toContain("hidden");
     expect(editorFrame?.className).toContain("overflow-y-auto");
     // The dim is a sibling painted before the sheet, not part of it.
     const backdrop = shell?.previousElementSibling;
     expect(backdrop?.hasAttribute("data-composer-sheet-backdrop")).toBe(true);
     expect(backdrop?.className).toContain("fixed");
+    expect(
+      backdrop?.querySelector("[data-composer-sheet-slot]"),
+    ).not.toBeNull();
   });
 
   it("keeps the shell in flow, collapsed, when not expanded on phone", () => {
