@@ -14,6 +14,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { NotificationActivationInput } from "@/hooks/notifications/use-notification-activation";
@@ -30,6 +31,7 @@ import { MockRunnerHost } from "@traycer-clients/shared/host-client/mock/mock-ru
 import type { IHostMessenger } from "@traycer-clients/shared/host-transport/host-messenger";
 import type { HostNotificationEntryV22 } from "@traycer/protocol/host/notifications/contracts";
 import { SideTabStrip } from "@/components/layout/tabs/side-strip/side-tab-strip";
+import { SampleSceneContext } from "@/components/sample-workspace/sample-scene-context";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   hostRpcRegistry,
@@ -239,6 +241,26 @@ function renderStrip(): void {
   );
 }
 
+/**
+ * The strip as the layout editor's canvas frames it: `SampleSceneContext`
+ * true, the way `SampleWorkspaceSurface` provides it for a live session
+ * (B1). `false` renders the identical tree the app's own window does -
+ * `renderStrip` above is a plain call of this with `false`, kept separate
+ * only because most of the file's cases have no reason to name the context
+ * at all.
+ */
+function renderStripInSampleScene(sample: boolean): void {
+  renderHarness(
+    <SampleSceneContext.Provider value={sample}>
+      <WindowsBridgeContext.Provider
+        value={{ bridge: null, hasHydrated: true }}
+      >
+        <SideTabStrip edge="left" ownsTitleBar={false} />
+      </WindowsBridgeContext.Provider>
+    </SampleSceneContext.Provider>,
+  );
+}
+
 describe("SideStripNeedsYou", () => {
   beforeEach(() => {
     resetSharedState();
@@ -327,5 +349,83 @@ describe("SideStripNeedsYou", () => {
       chatId: "chat-1",
     });
     expect(typeof input.onResult).toBe("function");
+  });
+});
+
+/**
+ * The layout editor's canvas frames the sample scene, never the person's own
+ * (B1): `SideStripNeedsYou` reads `useSampleScene()` and, while it is true,
+ * lists the sample's one prompt instead of the real feed and never mounts
+ * `useNeedsYouItems` or the real activation path. A real pending prompt is
+ * seeded in every case below, so a regression that dropped the `sample`
+ * branch would show the real row instead - failing every assertion here.
+ */
+describe("SideStripNeedsYou, framing the sample scene (B1)", () => {
+  beforeEach(() => {
+    resetSharedState();
+    signIn();
+    // Not reset by the harness (no global `clearMocks`): an earlier file's
+    // own click test leaves a call on this shared spy.
+    activateSpy.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    useAuthStore.getState().setSignedOut();
+    resetSharedState();
+  });
+
+  it("shows the sample prompt in place of a real one waiting, and only the sample's", async () => {
+    activateActivityView();
+    seedApprovals(1);
+    renderStripInSampleScene(true);
+    await screen.findByTestId("side-tab-strip");
+
+    const block = await screen.findByTestId("side-strip-needs-you");
+    const items = within(block).getAllByTestId("needs-you-item");
+    expect(items).toHaveLength(1);
+    expect(items[0].dataset.notificationId).toBe("sample-needs-you-1");
+    expect(items[0].dataset.needsYouReason).toBe("reply");
+    expect(items[0].textContent).toContain("Question waiting");
+    expect(items[0].textContent).toContain("Sample task · Plan the migration");
+
+    // The real, seeded approval's own identity never reaches the document.
+    expect(
+      document.querySelector('[data-notification-id="host:approval-0"]'),
+    ).toBeNull();
+    expect(document.body.textContent).not.toContain("Deploy checkout fix");
+  });
+
+  it("shows the real prompt instead, with no sample scene framing it", async () => {
+    activateActivityView();
+    seedApprovals(1);
+    renderStripInSampleScene(false);
+    await screen.findByTestId("side-tab-strip");
+
+    const block = await screen.findByTestId("side-strip-needs-you");
+    const items = within(block).getAllByTestId("needs-you-item");
+    expect(items).toHaveLength(1);
+    expect(items[0].dataset.notificationId).toBe("host:approval-0");
+
+    // The sample's own item never leaks into the real app.
+    expect(
+      document.querySelector('[data-notification-id="sample-needs-you-1"]'),
+    ).toBeNull();
+  });
+
+  it("activates nothing on a click, and never mounts the real activation path", async () => {
+    activateActivityView();
+    seedApprovals(1);
+    renderStripInSampleScene(true);
+    await screen.findByTestId("side-tab-strip");
+
+    const item = await screen.findByTestId("needs-you-item");
+    expect(item.dataset.notificationId).toBe("sample-needs-you-1");
+
+    fireEvent.click(item);
+
+    // Were the sample branch removed, this would resolve to the real,
+    // seeded row instead, and the click above would call `activateSpy`.
+    expect(activateSpy).not.toHaveBeenCalled();
   });
 });

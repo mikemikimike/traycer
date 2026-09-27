@@ -7,7 +7,15 @@ import {
   useMergedNotificationsActions,
   type MergedNotificationRow,
 } from "@/stores/notifications/merged-notifications";
-import { useNeedsYouItems } from "@/stores/notifications/needs-you-items";
+import {
+  useNeedsYouItems,
+  type NeedsYouItem as NeedsYouItemData,
+} from "@/stores/notifications/needs-you-items";
+import { useSampleScene } from "@/components/sample-workspace/sample-scene-context";
+import {
+  SAMPLE_NEEDS_YOU_ITEMS,
+  sampleNoop,
+} from "@/components/sample-workspace/sample-workspace-scene";
 import { useLiveAgentsInStrip } from "./live-agents-slot-store";
 import { SIDE_STRIP_SECTION_LABEL_CLASS } from "./side-strip-tokens";
 
@@ -16,12 +24,33 @@ import { SIDE_STRIP_SECTION_LABEL_CLASS } from "./side-strip-tokens";
  * the same items as the Notifications drawer's Needs you group, from the same selector, and
  * only while there is one. A row opens its chat on the pending card through
  * the notification's own activation; nothing is approved or answered here.
+ *
+ * On the layout editor's canvas the strip frames the sample scene, so the
+ * block lists the scene's prompts and the person's own are never read (B1).
  */
 export function SideStripNeedsYou(): ReactNode {
   const shown = useLiveAgentsInStrip();
+  const sample = useSampleScene();
+  if (!shown) return null;
+  if (sample)
+    return (
+      <NeedsYouBlock items={SAMPLE_NEEDS_YOU_ITEMS} onActivate={sampleNoop} />
+    );
+  return <LiveNeedsYou />;
+}
+
+function LiveNeedsYou(): ReactNode {
   const items = useNeedsYouItems();
   const activate = useNeedsYouActivation();
-  if (!shown || items.length === 0) return null;
+  return <NeedsYouBlock items={items} onActivate={activate} />;
+}
+
+function NeedsYouBlock(props: {
+  readonly items: ReadonlyArray<NeedsYouItemData>;
+  readonly onActivate: (row: MergedNotificationRow) => void;
+}): ReactNode {
+  const { items } = props;
+  if (items.length === 0) return null;
   return (
     <section aria-label="Needs you" data-testid="side-strip-needs-you">
       <div
@@ -39,7 +68,7 @@ export function SideStripNeedsYou(): ReactNode {
           <NeedsYouItem
             key={item.row.feedId}
             item={item}
-            onActivate={activate}
+            onActivate={props.onActivate}
           />
         ))}
       </div>
