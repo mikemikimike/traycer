@@ -323,7 +323,14 @@ try {
     encoding: "utf8",
   }).trim();
   if (out) await mkdir(out, { recursive: true });
-  async function load(family, state, mode, view, theme) {
+  async function load(
+    family,
+    state,
+    mode,
+    view,
+    theme,
+    retriedBlankFixture = false,
+  ) {
     current = `${mode}/${family}/${state}/${theme}/${view.name}`;
     exceptions.length = 0;
     await client.send("Emulation.setDeviceMetricsOverride", {
@@ -352,10 +359,28 @@ try {
       url.searchParams.set(k, v);
     url.searchParams.set("document", String(++documentSequence));
     await client.send("Page.navigate", { url: url.href });
-    await wait(
-      "fixture",
-      `location.href===${JSON.stringify(url.href)} && !!window.primitiveGate && !!document.querySelector('[data-gate-state]')`,
-    );
+    try {
+      await wait(
+        "fixture",
+        `location.href===${JSON.stringify(url.href)} && !!window.primitiveGate && !!document.querySelector('[data-gate-state]')`,
+      );
+    } catch (error) {
+      // A blank page after the full timeout is a wedged browser bootstrap,
+      // not a failed fixture assertion. Retry that one case in a fresh browser.
+      if (
+        retriedBlankFixture ||
+        !(error instanceof Error) ||
+        error.message.trim() !== "Timed out: fixture;"
+      )
+        throw error;
+      if (server.exitCode !== null || server.signalCode !== null)
+        throw new Error(`Vite exited during ${current}: ${serverError}`);
+      console.error(
+        `RETRY ${current}: blank fixture - restarting browser once`,
+      );
+      await restartBrowser();
+      return load(family, state, mode, view, theme, true);
+    }
     await evaluate(`(async()=>{
    const insets=${JSON.stringify(view.insets)};['top','right','bottom','left'].forEach((edge,i)=>document.documentElement.style.setProperty('--safe-area-inset-'+edge,insets[i]+'px'));window.dispatchEvent(new Event('resize'));
    await Promise.all([400,500,600,700].map(w=>document.fonts.load(w+' 14px "Figtree Variable"','Project settings')));await document.fonts.ready;
