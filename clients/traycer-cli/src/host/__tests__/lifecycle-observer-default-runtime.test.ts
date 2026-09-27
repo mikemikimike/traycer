@@ -1,5 +1,11 @@
-import { mkdirSync, rmSync, writeFileSync, type FSWatcher } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  type FSWatcher,
+  type WatchListener,
+} from "node:fs";
+import { basename, join } from "node:path";
 import {
   afterAll,
   afterEach,
@@ -133,6 +139,8 @@ describe("defaultLifecycleObserverRuntime.scheduleTicks", () => {
 });
 
 describe("defaultLifecycleObserverRuntime.watchHostHome", () => {
+  // A 10 s timeout: the worst case below is 3 s of policy-write attempts,
+  // the two settles and the 5 s presence deadline.
   it("ignores host.log writes but reacts to the policy and presence files", async () => {
     const { defaultLifecycleObserverRuntime } =
       await import("../lifecycle-observer");
@@ -152,13 +160,24 @@ describe("defaultLifecycleObserverRuntime.watchHostHome", () => {
     );
     expect(watch).not.toBeNull();
     try {
-      // Positive control: writing the policy file DOES notify. A generous
-      // deadline: under load (a full-suite run, not this file alone) macOS
-      // FSEvents coalescing can push a directory-watch notification out well
-      // past what a quiet machine sees.
-      writeFileSync(hostLifecyclePolicyPath(home), "policy-write");
-      await waitFor(() => changes >= 1, 5_000);
-      expect(changes).toBe(1);
+      // Positive control: writing the policy file DOES notify. On macOS
+      // `fs.watch` can return before its FSEvents stream is live, and a write
+      // in that window is never reported (in production the observer's poll
+      // picks it up), so the write repeats until the first notification
+      // proves the watch is live. Each attempt waits 250 ms, generous against
+      // FSEvents coalescing under load.
+      const policyPath = hostLifecyclePolicyPath(home);
+      for (let attempt = 1; changes === 0; attempt += 1) {
+        if (attempt > 12) {
+          throw new Error("the watch never reported a policy-file write");
+        }
+        writeFileSync(policyPath, "policy-write");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      // One write can surface as two events on Linux (create plus modify);
+      // let a late second event drain, then measure against that baseline.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const baseline = changes;
 
       // Negative, checked in a settle window after the positive control
       // above already proved the watch is live: host.log must NOT notify.
@@ -166,12 +185,60 @@ describe("defaultLifecycleObserverRuntime.watchHostHome", () => {
       // without turning a real regression into a multi-second wait.
       writeFileSync(join(home, "host.log"), "log-line\n");
       await new Promise((resolve) => setTimeout(resolve, 1_000));
-      expect(changes).toBe(1);
+      expect(changes).toBe(baseline);
 
       // The presence file notifies too.
       writeFileSync(desktopPresencePath(home), "presence-write");
-      await waitFor(() => changes >= 2, 5_000);
-      expect(changes).toBe(2);
+      await waitFor(() => changes > baseline, 5_000);
+    } finally {
+      watch?.close();
+    }
+  }, 10_000);
+
+  // One write that creates a file can surface as two watch events on Linux
+  // (create plus modify), so the contract is at least one notification per
+  // write, not exactly one.
+  it("a write that surfaces as two events notifies at least once; host.log never notifies; an unnamed event does", async () => {
+    let listener: WatchListener<string> | undefined;
+    vi.doMock("node:fs", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs")>();
+      return {
+        ...actual,
+        watch: (...args: Parameters<typeof actual.watch>) => {
+          const watcher = actual.watch(...args);
+          listener = args[1];
+          return watcher;
+        },
+      };
+    });
+    const { defaultLifecycleObserverRuntime } =
+      await import("../lifecycle-observer");
+    const { hostLifecyclePolicyPath } =
+      await import("@traycer/protocol/config/host-lifecycle-policy");
+    const home = hostHomeDir(ENVIRONMENT);
+    mkdirSync(home, { recursive: true });
+    let changes = 0;
+    const watch = defaultLifecycleObserverRuntime.watchHostHome(
+      ENVIRONMENT,
+      () => {
+        changes += 1;
+      },
+    );
+    try {
+      if (listener === undefined) throw new Error("watch() was not called");
+      const policy = basename(hostLifecyclePolicyPath(home));
+      // Linux's shape for one write that creates the policy file.
+      listener("rename", policy);
+      listener("change", policy);
+      expect(changes).toBeGreaterThanOrEqual(1);
+
+      const beforeLog = changes;
+      listener("rename", "host.log");
+      listener("change", "host.log");
+      expect(changes).toBe(beforeLog);
+
+      listener("change", null);
+      expect(changes).toBeGreaterThan(beforeLog);
     } finally {
       watch?.close();
     }

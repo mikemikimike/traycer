@@ -1318,6 +1318,9 @@ describe("rendered root/parent/leaf --help (CLI command audit regression suite)"
         "traycer host service start --lifecycle-origin",
         "traycer host restart --lifecycle-origin",
         "traycer host stop --lifecycle-origin",
+        // `host uninstall` starts nothing but refuses a desktop request over
+        // a host a person started in a terminal, so it carries the flag too.
+        "traycer host uninstall --lifecycle-origin",
         "traycer host free-port-and-restart --lifecycle-origin",
       ].sort(),
     );

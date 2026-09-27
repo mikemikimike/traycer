@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   WINDOWS_KILL_CONVERGENCE_ROUNDS,
   WINDOWS_PROCESS_KILL_TIMEOUT_MS,
@@ -463,6 +471,17 @@ interface WriteCallCounter {
   readonly mock: { readonly calls: readonly unknown[][] };
 }
 let stdoutWriteSpy: WriteCallCounter;
+
+// The first import of `host-restart` and the runner transforms their whole
+// module graph: seconds of real time on a cold worker, against a few tens of
+// milliseconds for each row's own run. It is paid here, once, and not inside
+// the budget of whichever row happens to run first. `vi.resetModules()` below
+// re-evaluates the modules for each test but keeps them transformed, so each
+// row's own import is then warm.
+beforeAll(async () => {
+  await import("../host-restart");
+  await import("../../runner/runner");
+});
 
 beforeEach(() => {
   recoveryAction.current = "restart-current";

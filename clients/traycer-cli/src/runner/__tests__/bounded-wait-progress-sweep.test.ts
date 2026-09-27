@@ -55,10 +55,12 @@ vi.mock("../../store/process-identity", async (importOriginal) => {
   };
 });
 
-// s2 only: real fs I/O (readHostInstallRecord/readHostStagedRecord) settles
-// through the real event loop's I/O completion, which fake timers do not
-// drive - so, per the review's guidance, these two reads are stubbed directly
-// instead of exercised against a real (if empty) HOME.
+// s2 only: real fs I/O settles through the real event loop's I/O completion,
+// which fake timers do not drive. The two record reads
+// (readHostInstallRecord/readHostStagedRecord) are stubbed directly instead of
+// exercised against a real (if empty) HOME. The `lstat` that proves the staged
+// record's absence (`pathAbsentOrUnreadable`) stays real I/O; the pump yields
+// real macrotasks while no fake timer is pending so it can complete.
 const installRecordMock = vi.hoisted(() => ({ fn: vi.fn(async () => null) }));
 vi.mock("../../manifest/host-install", async (importOriginal) => {
   const actual =
@@ -72,10 +74,37 @@ vi.mock("../../manifest/host-staged", async (importOriginal) => {
   return { ...actual, readHostStagedRecord: stagedRecordMock.fn };
 });
 
+// The real `setTimeout` and clock, captured before any test installs fake
+// timers, so the pump below and the held `lstat` can still wait on the real
+// event loop and read real time.
+const realTimers = vi.hoisted(() => ({
+  setTimeout: globalThis.setTimeout,
+  now: Date.now.bind(Date),
+}));
+
 const renameMock = vi.hoisted(() => ({ fn: vi.fn() }));
+// (s2-io) only: while `hold` is set, `lstat` stays pending until the FAKE
+// clock has moved more than `ceilingMs` past the call, or 200 ms of REAL time
+// has passed, then runs the real `lstat`.
+const lstatHold = vi.hoisted(() => ({ hold: false, ceilingMs: 0 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, rename: renameMock.fn };
+  return {
+    ...actual,
+    rename: renameMock.fn,
+    lstat: async (path: string) => {
+      if (lstatHold.hold) {
+        const calledAtFake = Date.now();
+        for (let polls = 0; polls < 20; polls += 1) {
+          if (Date.now() - calledAtFake > lstatHold.ceilingMs) break;
+          await new Promise<void>((resolve) => {
+            realTimers.setTimeout(resolve, 10);
+          });
+        }
+      }
+      return actual.lstat(path);
+    },
+  };
 });
 
 import type { ProgressInfo } from "../output";
@@ -100,19 +129,28 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Under vitest's default 5 s test timeout, so a run that never settles fails
+// with the pump's own message rather than a bare timeout.
+const PUMP_REAL_DEADLINE_MS = 4_000;
+
+function yieldRealMacrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    realTimers.setTimeout(resolve, 0);
+  });
+}
+
 /**
- * Drive `run` to completion under fake timers, interleaving a microtask
- * flush with a bounded timer advance, repeatedly.
+ * Drive `run` to completion under fake timers.
  *
- * A single `advanceTimersByTimeAsync`/`runAllTimersAsync` call only advances
- * what is scheduled at the moment it starts. Several of this suite's chains
- * hop through several mocked promises (readInstalledObservation ->
- * readStagedObservation -> readRunningObservation -> the RPC mock's own
- * `setTimeout`) before the FIRST real timer even exists, and s2's two
- * sequential RPC reads repeat that hand-off a second time after the first
- * timer fires. Awaiting a bare `Promise.resolve()` between advances drains
- * one more microtask hop each pass, so a real timer created only after
- * several such hops still gets discovered on a later iteration.
+ * Each pass looks at whether a fake timer is pending. If one is, the clock
+ * moves to exactly that timer (`advanceTimersToNextTimerAsync`), which also
+ * flushes the microtasks around it. If none is, the fake clock is left alone
+ * and one REAL macrotask is yielded instead, so any real, unmocked I/O the
+ * chain is waiting on (s2's `lstat`) can complete and the chain can schedule
+ * its next timer. The fake clock therefore moves only to a timer the chain
+ * has already scheduled, and never while the chain's only pending work is
+ * real I/O. The loop is bounded by a real-time deadline, not an iteration
+ * count, and throws if it is hit.
  */
 async function pumpFakeTimersUntilSettled(
   run: Promise<unknown>,
@@ -126,9 +164,18 @@ async function pumpFakeTimersUntilSettled(
       settled = true;
     },
   );
-  for (let i = 0; i < 200 && !settled; i += 1) {
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(50_000);
+  const deadline = realTimers.now() + PUMP_REAL_DEADLINE_MS;
+  while (!settled) {
+    if (realTimers.now() > deadline) {
+      throw new Error(
+        `pumpFakeTimersUntilSettled: run still pending after ${PUMP_REAL_DEADLINE_MS}ms of real time`,
+      );
+    }
+    if (vi.getTimerCount() > 0) {
+      await vi.advanceTimersToNextTimerAsync();
+    } else {
+      await yieldRealMacrotask();
+    }
   }
 }
 
@@ -254,6 +301,64 @@ describe("bounded-wait-progress sweep (§5.4, R-E)", () => {
 
     await pumpFakeTimersUntilSettled(run);
     await run;
+
+    const maxGap = maxConsecutiveGap(timeline);
+    expect(maxGap, `observed max gap ${maxGap}ms`).toBeLessThanOrEqual(
+      CEILING_MS,
+    );
+  });
+
+  it("(s2-io) recovery evidence with the real lstat held pending: the fake clock must not run ahead of pending real I/O", async () => {
+    const RPC_MS = 225_600;
+    const CEILING_MS = 225_600;
+    lstatHold.hold = true;
+    lstatHold.ceilingMs = CEILING_MS;
+
+    const timeline: number[] = [];
+    const environment = "production";
+    const version = "2.0.0";
+    const websocketUrl = "ws://127.0.0.1:54999/rpc";
+    pidMetadataMock.fn.mockResolvedValue({
+      pid: 4242,
+      hostId: "sweep-host",
+      version,
+      websocketUrl,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      processStartIdentity: "sweep-stamp",
+      processStartIdentityRead: "present",
+      layer0: null,
+      layer0Slot: null,
+    });
+    processIdentityMock.fn.mockResolvedValue("current");
+    hostRpcMock.fn.mockImplementation(async () => {
+      await sleep(RPC_MS);
+      return { ready: true, hostVersion: version };
+    });
+
+    const run = withBoundedWaitProgress(recorderInto(timeline), async () => {
+      timeline.push(Date.now());
+      await observeAttemptRecoveryEvidence(
+        environment,
+        hostHomeDir(environment),
+        "identity-required",
+      );
+      timeline.push(Date.now());
+    });
+
+    try {
+      // A pump bounded by an iteration count can return while the held
+      // `lstat` is still pending. The real pause lets that `lstat` finish and
+      // the second pass drives the rest, so such a pump fails on the gap
+      // below rather than on the test timeout.
+      await pumpFakeTimersUntilSettled(run);
+      await new Promise<void>((resolve) => {
+        realTimers.setTimeout(resolve, 300);
+      });
+      await pumpFakeTimersUntilSettled(run);
+      await run;
+    } finally {
+      lstatHold.hold = false;
+    }
 
     const maxGap = maxConsecutiveGap(timeline);
     expect(maxGap, `observed max gap ${maxGap}ms`).toBeLessThanOrEqual(

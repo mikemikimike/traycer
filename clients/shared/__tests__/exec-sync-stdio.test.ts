@@ -11,7 +11,7 @@ import {
 // `execFileSync`/`execSync` copy a failing child's stderr straight into THIS
 // process's stderr unless the caller passes an `stdio` option - on Windows
 // that meant raw PowerShell "InvokeMethodOnNull" text landing in the CLI's
-// own stderr. The 12 runtime call sites across `clients/shared/host-lock/
+// own stderr. The 11 runtime call sites across `clients/shared/host-lock/
 // process-identity.ts`, `clients/traycer-cli/src/doctor/engine.ts`,
 // `clients/traycer-cli/src/service/platforms/windows.ts`,
 // `clients/desktop/src/electron-main/app/updater.ts` and
@@ -59,18 +59,21 @@ describe("execFileSync/execSync must always pass an `stdio` option", () => {
   // clean tree does - passing for a reason that proves nothing. Assert the
   // scan actually SAW production call sites, and that it saw the exact count
   // this batch hardened: 6 in `process-identity.ts`, 2 in `engine.ts`, 1 in
-  // `windows.ts`, 1 in `updater.ts`, 2 in `credentials-lock.ts` = 12. This is
-  // a census, in the same spirit as `protocol/scripts/compat/__tests__/
-  // eager-schema-census.test.ts`: a future PR that adds a 13th guarded call
-  // site elsewhere in scope must bump this number deliberately, so the
-  // review sees the new call site rather than the count silently drifting.
-  it("is not vacuous: it sees more than zero call sites, and exactly the 12 known ones carry `stdio`", () => {
+  // `windows.ts`, 1 in `updater.ts`, 1 in `credentials-lock.ts` = 11. (The
+  // lock's holder-liveness probe is not among them: it is the asynchronous
+  // `probeProcessLivenessAsync`, so a contended lock's polling never blocks
+  // the event loop.) This is a census, in the same spirit as
+  // `protocol/scripts/compat/__tests__/eager-schema-census.test.ts`: a
+  // future PR that adds a 12th guarded call site elsewhere in scope must
+  // bump this number deliberately, so the review sees the new call site
+  // rather than the count silently drifting.
+  it("is not vacuous: it sees more than zero call sites, and exactly the 11 known ones carry `stdio`", () => {
     const result = scanned();
     expect(result.filesScanned).toBeGreaterThan(0);
     expect(result.totalCallSites).toBeGreaterThan(0);
-    expect(result.callSitesWithStdio).toBe(12);
+    expect(result.callSitesWithStdio).toBe(11);
     // With zero violations (asserted above) every call site found IS one
-    // with `stdio`, so this also pins the total to 12 - stated separately so
+    // with `stdio`, so this also pins the total to 11 - stated separately so
     // a future violation reads as "N missing `stdio`" rather than just
     // moving this number.
     expect(result.totalCallSites).toBe(result.callSitesWithStdio);
