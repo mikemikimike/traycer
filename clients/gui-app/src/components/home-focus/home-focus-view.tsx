@@ -426,6 +426,7 @@ export function HomeFocusView(): ReactNode {
         <HomeStatusTable
           rows={statusBoard.rows}
           now={statusBoard.now}
+          thresholds={statusBoard.thresholds}
           onDismiss={statusBoard.dismiss}
           onOpenAgent={actions.openAgent}
         />

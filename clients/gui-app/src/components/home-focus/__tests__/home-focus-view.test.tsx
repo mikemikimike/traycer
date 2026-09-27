@@ -23,6 +23,7 @@ import { ROW_CLASS } from "@/components/home-focus/home-focus-row-style";
 import { DEFAULT_EPIC_NODE_ICON_COLORS } from "@/lib/artifacts/node-display";
 import { useSettingsStore } from "@/stores/settings/settings-store";
 import type { HomeStatusRow } from "@traycer/protocol/notifications/home-status-room";
+import type { HomeStatusThresholds } from "@/lib/home-focus/home-status-thresholds";
 import {
   useAuthStore,
   type AuthStatus,
@@ -50,11 +51,19 @@ vi.mock("@/hooks/home-focus/use-focus-actions", () => ({
 
 /** The status board as the page reads it. Empty by default, which is what
  * every suite that is not about the board expects. */
-const statusBoardMock = vi.hoisted(() => ({
-  rows: [] as HomeStatusRow[],
-  now: 0,
-  dismiss: vi.fn(),
-}));
+const statusBoardMock = vi.hoisted(() => {
+  const thresholds: HomeStatusThresholds = {
+    inProgressStaleAfterMs: 2 * 60 * 60 * 1000,
+    needsYouStaleAfterMs: null,
+    doneHideAfterMs: 24 * 60 * 60 * 1000,
+  };
+  return {
+    rows: [] as HomeStatusRow[],
+    now: 0,
+    thresholds,
+    dismiss: vi.fn(),
+  };
+});
 vi.mock("@/hooks/home-focus/use-home-status-board", () => ({
   useHomeStatusBoard: () => statusBoardMock,
 }));

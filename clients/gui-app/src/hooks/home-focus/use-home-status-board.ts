@@ -2,23 +2,31 @@ import { useMemo, useSyncExternalStore } from "react";
 import type * as Y from "yjs";
 import {
   getHomeStatusMap,
-  isHomeStatusRowExpired,
   readHomeStatusRows,
   sortHomeStatusRows,
   type HomeStatusRow,
 } from "@traycer/protocol/notifications/home-status-room";
+import {
+  isHomeStatusRowHiddenFor,
+  resolveHomeStatusThresholds,
+  type HomeStatusThresholds,
+} from "@/lib/home-focus/home-status-thresholds";
 import { useSampledNow } from "@/lib/relative-time";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 import {
   useNotificationsReplicaOpen,
   useNotificationsStore,
 } from "@/stores/notifications/notifications-store";
 
 export interface HomeStatusBoard {
-  /** Valid, unexpired rows in board order. Empty while the room is not open. */
+  /** Valid rows this device still shows, in board order. Empty while the room
+   * is not open. */
   readonly rows: ReadonlyArray<HomeStatusRow>;
   /** The shared minute clock's sample the rows were filtered against, for
    * the per-row stale check. */
   readonly now: number;
+  /** This device's display thresholds, which the rows were filtered by. */
+  readonly thresholds: HomeStatusThresholds;
   readonly dismiss: (key: string) => void;
 }
 
@@ -71,8 +79,8 @@ function homeStatusSourceFor(doc: Y.Doc): HomeStatusSource {
  * the room opens in cloud mode and in cloud-authorized local mode, and in
  * neither of the others is the doc the account's live board.
  *
- * Re-filters on the shared 60s clock, so a `done` row past its TTL leaves the
- * table without a write to the room.
+ * Re-filters on the shared 60s clock, so a `done` row past this device's hide
+ * time leaves the table without a write to the room.
  */
 export function useHomeStatusBoard(): HomeStatusBoard {
   const doc = useNotificationsStore((state) => state.doc);
@@ -81,14 +89,37 @@ export function useHomeStatusBoard(): HomeStatusBoard {
   const source = useMemo(() => homeStatusSourceFor(doc), [doc]);
   const stored = useSyncExternalStore(source.subscribe, source.getSnapshot);
   const now = useSampledNow();
+  const inProgressStaleAfter = useSettingsStore(
+    (state) => state.homeStatusInProgressStaleAfter,
+  );
+  const needsYouStaleAfter = useSettingsStore(
+    (state) => state.homeStatusNeedsYouStaleAfter,
+  );
+  const doneHideAfter = useSettingsStore(
+    (state) => state.homeStatusDoneHideAfter,
+  );
+  const thresholds = useMemo(
+    () =>
+      resolveHomeStatusThresholds(
+        inProgressStaleAfter,
+        needsYouStaleAfter,
+        doneHideAfter,
+      ),
+    [inProgressStaleAfter, needsYouStaleAfter, doneHideAfter],
+  );
   const rows = useMemo(
     () =>
       replicaOpen
         ? sortHomeStatusRows(
-            stored.filter((row) => !isHomeStatusRowExpired(row, now)),
+            stored.filter(
+              (row) => !isHomeStatusRowHiddenFor(row, now, thresholds),
+            ),
           )
         : NO_ROWS,
-    [replicaOpen, stored, now],
+    [replicaOpen, stored, now, thresholds],
   );
-  return useMemo(() => ({ rows, now, dismiss }), [rows, now, dismiss]);
+  return useMemo(
+    () => ({ rows, now, thresholds, dismiss }),
+    [rows, now, thresholds, dismiss],
+  );
 }

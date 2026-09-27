@@ -14,6 +14,7 @@ import {
   openNotificationsStream,
   useNotificationsStore,
 } from "@/stores/notifications/notifications-store";
+import { useSettingsStore } from "@/stores/settings/settings-store";
 
 const reconnectEngine = createHostReconnectEngine();
 
@@ -99,6 +100,7 @@ function keysOf(rows: ReadonlyArray<HomeStatusRow>): string[] {
 
 beforeEach(() => {
   __resetNotificationsStoreForTests();
+  useSettingsStore.setState({ homeStatusDoneHideAfter: "24h" });
 });
 
 afterEach(() => {
@@ -151,6 +153,27 @@ describe("useHomeStatusBoard", () => {
     host.writeRaw("bad", { status: "nope" });
     const { result } = renderHook(() => useHomeStatusBoard());
     expect(keysOf(result.current.rows)).toEqual(["fresh-done"]);
+    host.dispose();
+  });
+
+  it("hides done rows past this device's Done setting, re-filtering when it changes", () => {
+    const host = openLane();
+    host.write([
+      row({
+        key: "done-90m",
+        status: "done",
+        updatedAt: Date.now() - 90 * 60 * 1000,
+      }),
+      row({ key: "work", status: "in-progress" }),
+    ]);
+    const { result } = renderHook(() => useHomeStatusBoard());
+    expect(keysOf(result.current.rows)).toEqual(["work", "done-90m"]);
+
+    act(() => {
+      useSettingsStore.getState().setHomeStatusDoneHideAfter("1h");
+    });
+    expect(keysOf(result.current.rows)).toEqual(["work"]);
+    expect(result.current.thresholds.doneHideAfterMs).toBe(60 * 60 * 1000);
     host.dispose();
   });
 

@@ -19,10 +19,9 @@
  */
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
-import {
-  isHomeStatusRowStale,
-  type HomeStatus,
-  type HomeStatusRow,
+import type {
+  HomeStatus,
+  HomeStatusRow,
 } from "@traycer/protocol/notifications/home-status-room";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +29,10 @@ import { normalizeProviderId } from "@/components/home/data/landing-options";
 import { HarnessIcon } from "@/components/home/pickers/harness-icon";
 import { TooltipWrapper } from "@/components/ui/tooltip-wrapper";
 import { useRegisteredEpicAgentActivityTiers } from "@/lib/epic-selectors";
+import {
+  isHomeStatusRowStaleFor,
+  type HomeStatusThresholds,
+} from "@/lib/home-focus/home-status-thresholds";
 import { useCompactRelativeTime } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { TraycerMarkdown } from "@/markdown/traycer-markdown";
@@ -86,6 +89,8 @@ const FOLDED_BODY_CELL = "@max-[36rem]:col-start-2 @max-[36rem]:p-0";
 export interface HomeStatusTableProps {
   readonly rows: ReadonlyArray<HomeStatusRow>;
   readonly now: number;
+  /** When a row reads as stale, per status - this device's setting. */
+  readonly thresholds: HomeStatusThresholds;
   readonly onDismiss: (key: string) => void;
   readonly onOpenAgent: (
     epicId: string,
@@ -95,7 +100,7 @@ export interface HomeStatusTableProps {
 }
 
 export function HomeStatusTable(props: HomeStatusTableProps): ReactNode {
-  const { rows, now, onDismiss, onOpenAgent } = props;
+  const { rows, now, thresholds, onDismiss, onOpenAgent } = props;
   if (rows.length === 0) return null;
   return (
     <section
@@ -137,7 +142,7 @@ export function HomeStatusTable(props: HomeStatusTableProps): ReactNode {
             <HomeStatusTableRow
               key={row.key}
               row={row}
-              stale={isHomeStatusRowStale(row, now)}
+              stale={isHomeStatusRowStaleFor(row, now, thresholds)}
               onDismiss={onDismiss}
               onOpenAgent={onOpenAgent}
             />

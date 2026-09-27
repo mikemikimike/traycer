@@ -8,6 +8,11 @@ import {
 } from "@traycer/protocol/notifications/home-status-room";
 import { HomeStatusTable } from "@/components/home-focus/home-status-table";
 import {
+  DEFAULT_HOME_STATUS_THRESHOLDS,
+  resolveHomeStatusThresholds,
+  type HomeStatusThresholds,
+} from "@/lib/home-focus/home-status-thresholds";
+import {
   __resetAgentActivityStoreForTests,
   __setAgentActivityPlaneAnsweringForTests,
   __setAgentActivityStateForTests,
@@ -32,6 +37,13 @@ function row(overrides: Partial<HomeStatusRow>): HomeStatusRow {
 }
 
 function renderTable(rows: ReadonlyArray<HomeStatusRow>) {
+  return renderTableWith(rows, DEFAULT_HOME_STATUS_THRESHOLDS);
+}
+
+function renderTableWith(
+  rows: ReadonlyArray<HomeStatusRow>,
+  thresholds: HomeStatusThresholds,
+) {
   const onDismiss = vi.fn();
   const onOpenAgent = vi.fn();
   const view = render(
@@ -40,6 +52,7 @@ function renderTable(rows: ReadonlyArray<HomeStatusRow>) {
       <HomeStatusTable
         rows={rows}
         now={NOW}
+        thresholds={thresholds}
         onDismiss={onDismiss}
         onOpenAgent={onOpenAgent}
       />
@@ -172,6 +185,53 @@ describe("HomeStatusTable", () => {
     );
     expect(fresh.dataset["stale"]).toBeUndefined();
     expect(fresh.classList.contains("opacity-60")).toBe(false);
+  });
+
+  it("uses the configured in-progress threshold: 1 h makes a 90-minute-old row stale", () => {
+    const ninetyMinutesAgo = NOW - 90 * 60 * 1000;
+    renderTableWith(
+      [row({ key: "a", status: "in-progress", updatedAt: ninetyMinutesAgo })],
+      resolveHomeStatusThresholds("1h", "never", "24h"),
+    );
+    expect(rowAt(0).dataset["stale"]).toBe("true");
+    cleanup();
+
+    renderTable([
+      row({ key: "a", status: "in-progress", updatedAt: ninetyMinutesAgo }),
+    ]);
+    expect(rowAt(0).dataset["stale"]).toBeUndefined();
+  });
+
+  it("marks nothing stale when both thresholds are Never", () => {
+    const weekOld = NOW - 6 * 24 * 60 * 60 * 1000;
+    renderTableWith(
+      [
+        row({ key: "a", status: "in-progress", updatedAt: weekOld }),
+        row({ key: "b", status: "needs-you", updatedAt: weekOld }),
+      ],
+      resolveHomeStatusThresholds("never", "never", "24h"),
+    );
+    expect(screen.queryByTestId("home-status-stale")).toBeNull();
+    expect(
+      renderedRows().filter((tr) => tr.dataset["stale"] === "true"),
+    ).toEqual([]);
+  });
+
+  it("dims a needs-you row past its own configured threshold", () => {
+    renderTableWith(
+      [
+        row({
+          key: "a",
+          status: "needs-you",
+          updatedAt: NOW - 90 * 60 * 1000,
+        }),
+      ],
+      resolveHomeStatusThresholds("2h", "1h", "24h"),
+    );
+    expect(rowAt(0).dataset["stale"]).toBe("true");
+    expect(within(rowAt(0)).getByTestId("home-status-stale").textContent).toBe(
+      "stale",
+    );
   });
 
   it("opens the writing agent's chat on its own host", async () => {
