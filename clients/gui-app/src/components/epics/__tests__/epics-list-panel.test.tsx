@@ -91,6 +91,7 @@ import { setDesktopEpicOwnershipBridge } from "@/lib/windows/desktop-epic-owners
 import type { DesktopWindowsBridge } from "@/lib/windows/types";
 import type { WorktreeHostEntryV12 } from "@traycer/protocol/host/worktree-schemas";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { epicMutationKeys } from "@/lib/query-keys/epic-mutation-keys";
 import { __resetTabNavigationControllerForTesting } from "@/lib/tab-navigation";
 
 import {
@@ -285,13 +286,23 @@ vi.mock("@/hooks/home/use-history-query", () => ({
   }),
 }));
 
-vi.mock("@/hooks/epic/use-epic-batch-delete-mutation", () => ({
-  useEpicBatchDelete: () => ({
-    isPending: false,
-    mutate: testState.mutate,
-  }),
-  usePendingDeleteEpicIds: () => testState.pendingDeleteEpicIds,
-}));
+vi.mock(
+  "@/hooks/epic/use-epic-batch-delete-mutation",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/hooks/epic/use-epic-batch-delete-mutation")
+      >();
+    return {
+      ...actual,
+      useEpicBatchDelete: () => ({
+        isPending: false,
+        mutate: testState.mutate,
+      }),
+      usePendingDeleteEpicIds: () => testState.pendingDeleteEpicIds,
+    };
+  },
+);
 
 vi.mock("@/hooks/epic/use-task-delete-worktree-candidates-query", () => ({
   useTaskDeleteWorktreeCandidates: () => ({
@@ -2895,6 +2906,10 @@ describe("<EpicsListPanel />", () => {
         screen.getByRole("button", { name: "Select all" }).matches(":disabled"),
       ).toBe(true);
     });
+    const showMore = screen.getByTestId("epics-list-show-more");
+    expect(showMore.matches(":disabled")).toBe(true);
+    fireEvent.click(showMore);
+    expect(testState.fetchNextPage).not.toHaveBeenCalled();
 
     testState.items = [
       historyItem({}),
@@ -2925,6 +2940,52 @@ describe("<EpicsListPanel />", () => {
     expect(testState.mutate).toHaveBeenCalledWith({
       ids: ["epic-from-history", "epic-two"],
       worktreeCleanup: null,
+    });
+  });
+
+  it("does not select a task whose deletion starts during Select all", async () => {
+    testState.hasNextPage = true;
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    renderPanel("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+
+    let resolveDelete: (() => void) | undefined;
+    const pendingDelete = queryClient
+      .getMutationCache()
+      .build(queryClient, {
+        mutationKey: epicMutationKeys.batchDelete(),
+        mutationFn: () =>
+          new Promise<void>((resolve) => {
+            resolveDelete = resolve;
+          }),
+      })
+      .execute({ ids: ["epic-from-history"] });
+    await waitFor(() => expect(resolveDelete).toBeDefined());
+
+    await act(async () => {
+      complete?.(testState.items);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
+    ).toBe("false");
+    await act(async () => {
+      resolveDelete?.();
+      await pendingDelete;
     });
   });
 

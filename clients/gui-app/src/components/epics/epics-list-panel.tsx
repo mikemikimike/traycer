@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -43,6 +43,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  readPendingDeleteEpicIds,
   useEpicBatchDelete,
   usePendingDeleteEpicIds,
 } from "@/hooks/epic/use-epic-batch-delete-mutation";
@@ -582,6 +583,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   // `epic.batchDelete` for the same id. Excluded here so the row action, the
   // bulk selection and the confirm re-filter all refuse it from one set.
   const pendingDeleteEpicIds = usePendingDeleteEpicIds();
+  const queryClient = useQueryClient();
   const selectableItemIds = useMemo(
     () =>
       items
@@ -602,13 +604,14 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
       fetchAllItems(controller.signal),
     onSuccess: (loadedItems, controller) => {
       if (loadedItems === null || controller.signal.aborted) return;
+      const currentPendingDeleteEpicIds = readPendingDeleteEpicIds(queryClient);
       setSelectedIds(
         new Set(
           withInProgressFirst(inProgress, loadedItems)
             .filter(
               (item) =>
                 canDeleteHistoryItem(item, cloudAuthorized) &&
-                !pendingDeleteEpicIds.has(item.epicId),
+                !currentPendingDeleteEpicIds.has(item.epicId),
             )
             .map((item) => item.epicId),
         ),
@@ -897,6 +900,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
         <NotificationIndicatorsProvider indicators={notificationIndicators}>
           <HistoryListBody
             isCountPending={isCountPending}
+            isBulkSelectionPending={selectAllPending}
             scope={selectionMode ? "tasks" : props.scope}
             onScopeChange={selectionMode ? () => {} : props.onScopeChange}
             pageSearch={pageSearch}
@@ -1283,6 +1287,7 @@ function HistoryListBody(props: HistoryListBodyProps): ReactNode {
           pendingSetPinnedEpicIds={props.pendingSetPinnedEpicIds}
           hasNextPage={props.hasNextPage}
           isFetchingNextPage={props.isFetchingNextPage}
+          isBulkSelectionPending={props.isBulkSelectionPending}
           onLoadMore={props.onLoadMore}
           onOpenItem={openHistoryItem}
           onRefresh={props.onRefresh}
@@ -1315,6 +1320,7 @@ function HistoryListBody(props: HistoryListBodyProps): ReactNode {
       pendingSetPinnedEpicIds={props.pendingSetPinnedEpicIds}
       hasNextPage={props.hasNextPage}
       isFetchingNextPage={props.isFetchingNextPage}
+      isBulkSelectionPending={props.isBulkSelectionPending}
       onLoadMore={props.onLoadMore}
       onSelectEpic={props.onSelectEpic}
       onOpenItem={props.onOpenItem}
@@ -1398,6 +1404,7 @@ interface EpicsListBodyProps {
   readonly pendingSetPinnedEpicIds: ReadonlySet<string>;
   readonly hasNextPage: boolean;
   readonly isFetchingNextPage: boolean;
+  readonly isBulkSelectionPending: boolean;
   readonly onLoadMore: () => void;
   readonly onSelectEpic: ((epicId: string) => void) | null;
   readonly onOpenItem: ((item: HistoryItem) => void) | null;
@@ -1441,6 +1448,7 @@ function EpicsListBody(props: EpicsListBodyProps): ReactNode {
     pendingSetPinnedEpicIds,
     hasNextPage,
     isFetchingNextPage,
+    isBulkSelectionPending,
     onLoadMore,
     onSelectEpic,
     onOpenItem,
@@ -1497,6 +1505,7 @@ function EpicsListBody(props: EpicsListBodyProps): ReactNode {
         onRetry={onRetry}
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
+        isBulkSelectionPending={isBulkSelectionPending}
         onLoadMore={onLoadMore}
       />
     );
@@ -1581,6 +1590,7 @@ function EpicsListBody(props: EpicsListBodyProps): ReactNode {
       <EpicsListShowMore
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
+        isBulkSelectionPending={isBulkSelectionPending}
         onLoadMore={onLoadMore}
       />
     </>
