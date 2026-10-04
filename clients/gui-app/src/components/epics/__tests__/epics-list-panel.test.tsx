@@ -31,6 +31,32 @@ vi.mock("@/hooks/notifications/use-host-notification-indicators-query", () => ({
   }),
 }));
 
+const pullToRefreshTest = vi.hoisted(() => ({
+  onRefresh: null as (() => Promise<unknown>) | null,
+}));
+
+vi.mock("@/hooks/ui/use-mobile-viewport", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/ui/use-mobile-viewport")>();
+  return {
+    ...actual,
+    useIsMobileViewport: () => testState.mobileViewport,
+  };
+});
+
+vi.mock("@/components/epics/mobile/use-pull-to-refresh", () => ({
+  PULL_INDICATOR_REST_PX: (128 * 64) / 192,
+  usePullToRefresh: (args: { readonly onRefresh: () => Promise<unknown> }) => {
+    pullToRefreshTest.onRefresh = args.onRefresh;
+    return {
+      pullPx: 0,
+      isPulling: false,
+      isRefreshing: false,
+      isArmed: false,
+    };
+  },
+}));
+
 vi.mock("@/hooks/organization/organization-context", async (importOriginal) => {
   const actual =
     await importOriginal<
@@ -212,6 +238,7 @@ const testState = vi.hoisted(() => ({
     ownershipScopes: [] as HistoryFacets["ownershipScopes"],
   },
   isFetching: false,
+  mobileViewport: false,
   cloudPagePending: false,
   completeness: null as ListTasksCompleteness | null,
   bridge: null as DesktopWindowsBridge | null,
@@ -592,6 +619,7 @@ describe("<EpicsListPanel />", () => {
     };
     testState.isFetching = false;
     testState.cloudPagePending = false;
+    testState.mobileViewport = false;
     testState.completeness = null;
     testState.bridge = null;
     testState.worktreeCandidates = [];
@@ -3031,6 +3059,62 @@ describe("<EpicsListPanel />", () => {
       screen.getByRole("button", { name: "Select all" }).matches(":disabled"),
     ).toBe(false);
     expect(screen.queryByRole("button", { name: "Deselect all" })).toBeNull();
+  });
+
+  it("keeps Select all available when only later pages may contain eligible items", async () => {
+    testState.items = [];
+    testState.hasNextPage = true;
+    testState.fetchAllItems.mockResolvedValue([]);
+    renderPanel("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    const selectAll = screen.getByRole("button", { name: "Select all" });
+    expect(selectAll.matches(":disabled")).toBe(false);
+
+    fireEvent.click(selectAll);
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+  });
+
+  it("aborts bulk selection when refresh starts", async () => {
+    testState.mobileViewport = true;
+    testState.hasNextPage = true;
+    testState.refetch.mockResolvedValue(undefined);
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    renderPanel("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+    const refresh = pullToRefreshTest.onRefresh;
+    expect(refresh).not.toBeNull();
+
+    await act(async () => {
+      await refresh?.();
+    });
+
+    expect(testState.fetchAllItems.mock.calls[0]?.[0].aborted).toBe(true);
+    expect(testState.refetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      complete?.(testState.items);
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
+    ).toBe("false");
   });
 
   it.each(["search changes", "unmount"])(

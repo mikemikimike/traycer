@@ -389,10 +389,18 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   // rather than re-attaching a non-passive touch handler whenever the query
   // hands back a fresh `refetch`.
   const refetchRef = useRef(refetch);
+  const selectAllController = useRef<AbortController | null>(null);
+  const abortSelectAll = useCallback(() => {
+    selectAllController.current?.abort();
+    selectAllController.current = null;
+  }, []);
   useEffect(() => {
     refetchRef.current = refetch;
   });
-  const refreshHistory = useCallback(() => refetchRef.current(), []);
+  const refreshHistory = useCallback(() => {
+    abortSelectAll();
+    return refetchRef.current();
+  }, [abortSelectAll]);
 
   // One read of the fetch result rather than six independent `data?.x ?? d`
   // sites: the empty-state defaults belong together (they all describe "no
@@ -454,11 +462,6 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     () => new Set(),
   );
   const [selectionMode, setSelectionMode] = useState(false);
-  const selectAllController = useRef<AbortController | null>(null);
-  const abortSelectAll = useCallback(() => {
-    selectAllController.current?.abort();
-    selectAllController.current = null;
-  }, []);
   useEffect(
     () => abortSelectAll,
     [abortSelectAll, search, hostId, currentUserId],
@@ -788,7 +791,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     clearSearch();
   };
   const handleRetry = () => {
-    void refetch();
+    void refreshHistory();
   };
 
   const showPageSearch = variant === "page";
@@ -842,7 +845,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
       ? {
           kind: "active",
           canSelect:
-            selectableItemIds.length > 0 &&
+            (selectableItemIds.length > 0 || hasUnloadedItems) &&
             ![isCountPending, cloudPagePending, isFetchingNextPage].some(
               Boolean,
             ),
@@ -870,7 +873,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
         }
       : {
           kind: "idle",
-          canSelect: selectableItemIds.length > 0,
+          canSelect: selectableItemIds.length > 0 || hasUnloadedItems,
           onStart: enterSelectionMode,
         },
     sort: search.sort,
@@ -883,7 +886,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     onSearchChange: updateSearch,
     facets: facets,
     chatHostFilterSupported: chatHostFilterSupported,
-    refresh: { isFetching, hostId, onRefetch: refetch },
+    refresh: { isFetching, hostId, onRefetch: refreshHistory },
   };
 
   return (
