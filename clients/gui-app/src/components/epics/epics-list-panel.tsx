@@ -691,7 +691,9 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     )
       return;
     if (selectAllController.current !== null) return;
-    if (!hasUnloadedItems) {
+    // Cloud tails are unavailable after authorization is withdrawn, while
+    // loaded local-home tasks remain selectable without a cloud request.
+    if (!hasUnloadedItems || !cloudAuthorized) {
       setSelectedIds(new Set(selectableItemIds));
       return;
     }
@@ -701,6 +703,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   }, [
     selectAll,
     hasUnloadedItems,
+    cloudAuthorized,
     isFetchingNextPage,
     isCountPending,
     cloudPagePending,

@@ -2912,6 +2912,23 @@ describe("<EpicsListPanel />", () => {
     expect(screen.getByRole("button", { name: "Select all" })).not.toBeNull();
   });
 
+  it("selects loaded local-home tasks when cloud authorization is unavailable", async () => {
+    testState.items = [historyItem({ isLocalHome: true })];
+    testState.hasNextPage = true;
+    useAuthStore.setState({ status: "unverified" });
+    renderPanel("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+
+    expect(testState.fetchAllItems).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   it("loads every history page before selecting all matching tasks", async () => {
     testState.hasNextPage = true;
     let complete: ((items: readonly HistoryItem[]) => void) | undefined;
