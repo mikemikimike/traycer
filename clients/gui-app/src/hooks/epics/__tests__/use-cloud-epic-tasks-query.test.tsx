@@ -354,9 +354,7 @@ describe("useCloudEpicTasksQuery", () => {
         expect(await allPages).toBeNull();
       });
       expect(listTasksCalls()).toHaveLength(2);
-      if (transition !== "authorization withdrawn") {
-        expect(taskLightIds(result.current.tasks)).toEqual(["first"]);
-      }
+      expect(taskLightIds(result.current.tasks)).toEqual(["first"]);
     },
   );
 

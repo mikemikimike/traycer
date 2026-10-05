@@ -392,7 +392,12 @@ export function useCloudEpicTasksQuery(
       return page;
     },
     onSuccess: (page, variables) => {
-      if (variables.signal?.aborted) return;
+      if (
+        variables.signal?.aborted ||
+        !authorizesCloudCapability(useAuthStore.getState().status)
+      ) {
+        return;
+      }
       appendPage(variables.identity, variables.generation, page);
     },
     onError: (error, variables) => {
