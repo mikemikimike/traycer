@@ -84,7 +84,11 @@ export interface UseHistoryQueryResult {
    * backfill), never an authorization to spend the cloud capability.
    */
   readonly currentUserId: string | null;
+  /** Canonical request identity for scoped activity reconciliation. */
+  readonly activityRefreshScope: string;
   refetch: () => Promise<unknown>;
+  /** Refresh only the task page when reconciling a chat activity edge. */
+  refetchTasks: () => Promise<unknown>;
   fetchNextPage: () => void;
   fetchAllItems: (
     signal: AbortSignal,
@@ -155,6 +159,10 @@ export function useHistoryQuery(
     });
     return listCloudTasksRequestForHistorySearch(search);
   }, [debouncedQuery, params.search]);
+  const activityRefreshScope = useMemo(
+    () => JSON.stringify(request),
+    [request],
+  );
   const {
     hostId,
     currentUserId,
@@ -495,7 +503,9 @@ export function useHistoryQuery(
       taskContexts.error,
     hostId,
     currentUserId,
+    activityRefreshScope,
     refetch,
+    refetchTasks: refetchCloudTasks,
     fetchNextPage,
     fetchAllItems,
     hasUnloadedItems,
@@ -617,6 +627,10 @@ function settledHistoryItems(
   sort: HistorySortOption,
   query: string,
 ): ReadonlyArray<HistoryItem> {
+  // Host-synthesized local homes belong on page one, while later cloud pages
+  // remain cloud-owned. Sort the loaded union by the durable key even when a
+  // filter or picker disables the optimistic active-row overlay.
+  if (sort === "recent") return sortProjectedHistoryItems(items, sort, query);
   if (contextExtrasCount > 0) {
     return sortProjectedHistoryItems(items, sort, query);
   }
@@ -629,12 +643,23 @@ function projectHistoryItems(
 ): ReadonlyArray<HistoryItem> {
   const filtered = filterHistoryItemsLocally(items, search);
   const query = search.query.trim();
-  const searched =
-    query.length === 0
-      ? filtered
-      : new Fuse(filtered, LOCAL_FUSE_OPTIONS)
-          .search(query)
-          .map((result) => result.item);
+  let searched: ReadonlyArray<HistoryItem> = filtered;
+  if (query.length > 0) {
+    const matches = new Fuse(filtered, LOCAL_FUSE_OPTIONS)
+      .search(query)
+      .map((result) => result.item);
+    if (
+      search.sort === "recent" &&
+      filtered.some((item) => item.recentAtMs === undefined)
+    ) {
+      // Fuse supplies fuzzy membership while a previous page is displayed,
+      // but its relevance order must not replace the old peer's Recent order.
+      const matchIds = new Set(matches.map((item) => item.id));
+      searched = filtered.filter((item) => matchIds.has(item.id));
+    } else {
+      searched = matches;
+    }
+  }
   return sortProjectedHistoryItems(searched, search.sort, query);
 }
 
@@ -748,6 +773,15 @@ function sortProjectedHistoryItems(
   query: string,
 ): ReadonlyArray<HistoryItem> {
   if ((sort === "relevance" && query.length > 0) || sort === "last-viewed") {
+    return prioritizePinnedHistoryItems(items);
+  }
+  // A pre-1.7 peer strips the activity key after ordering its page. Falling
+  // back to task edits here would reverse that authoritative server order.
+  // With no common key, preserve the loaded sequence within pin partitions.
+  if (
+    (sort === "recent" || sort === "relevance") &&
+    items.some((item) => item.recentAtMs === undefined)
+  ) {
     return prioritizePinnedHistoryItems(items);
   }
   return sortHistoryItems(items, sort);

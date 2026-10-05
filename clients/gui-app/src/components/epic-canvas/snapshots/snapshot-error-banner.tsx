@@ -6,10 +6,7 @@ import { useLocalStoreRebindMutation } from "@/hooks/local-store/use-local-store
 import { useEpicSessionHostId } from "@/hooks/epic/use-epic-session-host-id";
 import { useHostSupportsMethod } from "@/hooks/host/use-host-supports-method";
 import { ReportIssueAction } from "@/components/report-issue/report-issue-action";
-import { AgentSpinningDots } from "@/components/ui/agent-spinning-dots";
-import { useOpenLinkWithPending } from "@/lib/links/open-link";
 import { useEpicRequestFreshSnapshot } from "@/lib/epic-selectors";
-import { resolvePlatformBaseUrl } from "@/lib/auth/platform-base-url";
 import { getClientAppVersion } from "@/lib/app-version";
 import { describeVersionSkew } from "@/lib/host/version-skew-copy";
 import { useServerClockSkew } from "@/lib/clock/use-server-clock-skew";
@@ -19,7 +16,6 @@ import {
 } from "@traycer-clients/shared/clock/server-time-offset-tracker";
 import { cn } from "@/lib/utils";
 import { createReportIssueContext } from "@/lib/report-issue-context";
-import { useRunnerHost } from "@/providers/use-runner-host";
 import type { SnapshotFetchError } from "@/stores/epics/open-epic/store";
 
 interface SnapshotErrorBannerProps {
@@ -82,9 +78,6 @@ export function SnapshotErrorBanner(props: SnapshotErrorBannerProps) {
           <LocalStoreRepair error={props.error} />
         ) : null}
         <div className="flex flex-wrap justify-center gap-2">
-          {props.error.code === "ENTITLEMENT_REQUIRED" ? (
-            <UpgradeButton />
-          ) : null}
           <Button
             type="button"
             size="sm"
@@ -207,35 +200,6 @@ function LocalStoreRepair(props: { readonly error: SnapshotFetchError }) {
         }}
       />
     </>
-  );
-}
-
-function UpgradeButton() {
-  const runnerHost = useRunnerHost();
-  const { isPending, openLink } = useOpenLinkWithPending();
-  return (
-    <Button
-      type="button"
-      size="sm"
-      data-testid="snapshot-error-upgrade"
-      disabled={isPending}
-      onClick={() => {
-        void openLink(
-          resolvePlatformBaseUrl(runnerHost.signInUrl),
-          "auth",
-          null,
-        );
-      }}
-    >
-      Upgrade
-      {isPending ? (
-        <AgentSpinningDots
-          className="size-3"
-          testId={undefined}
-          variant={undefined}
-        />
-      ) : null}
-    </Button>
   );
 }
 

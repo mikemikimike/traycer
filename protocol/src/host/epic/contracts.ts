@@ -16,6 +16,8 @@ import {
   createChatRequestSchemaV12,
   createChatResponseSchema,
   createChatResponseSchemaV12,
+  continueSubagentRequestSchema,
+  continueSubagentResponseSchema,
   createCommentThreadRequestSchema,
   createCommentThreadResponseSchema,
   createEpicRequestSchema,
@@ -56,6 +58,7 @@ import {
   listEpicCollaboratorsResponseSchema,
   getTaskContextsRequestSchema,
   getTaskContextsResponseSchema,
+  getTaskContextsResponseSchemaPre14,
   getTaskContextsResponseSchemaPre12,
   getTaskContextsResponseSchemaV10,
   getTaskContextsResponseSchemaPre13,
@@ -70,6 +73,7 @@ import {
   listTasksResponseSchemaPre14,
   listTasksResponseSchemaPre15,
   listTasksResponseSchemaPre16,
+  listTasksResponseSchemaPre17,
   prepareArtifactImageRequestSchema,
   prepareArtifactImageResponseSchema,
   removeEpicRepoRequestSchema,
@@ -346,7 +350,7 @@ export const epicListTasksV16 = defineRpcContract({
   method: "epic.listTasks",
   schemaVersion: { major: 1, minor: 6 } as const,
   requestSchema: listTasksRequestSchema,
-  responseSchema: listTasksResponseSchema,
+  responseSchema: listTasksResponseSchemaPre17,
 });
 
 export const epicListTasksUpgradeV15ToV16 = defineUpgradePath<
@@ -359,6 +363,25 @@ export const epicListTasksUpgradeV15ToV16 = defineUpgradePath<
   // An older host cannot have returned a local-first page. Do not manufacture
   // `pending`: its absence continues to mean the released single-response
   // behaviour, exactly as a 1.5 renderer already reads it.
+  upgradeResponse: (response) => response,
+});
+
+// The per-viewer activity key is additive and optional. A 1.6 peer keeps its
+// frozen row schema, so it cannot accidentally claim to know Recent activity.
+export const epicListTasksV17 = defineRpcContract({
+  method: "epic.listTasks",
+  schemaVersion: { major: 1, minor: 7 } as const,
+  requestSchema: listTasksRequestSchema,
+  responseSchema: listTasksResponseSchema,
+});
+
+export const epicListTasksUpgradeV16ToV17 = defineUpgradePath<
+  typeof epicListTasksV16,
+  typeof epicListTasksV17
+>({
+  from: epicListTasksV16.schemaVersion,
+  to: epicListTasksV17.schemaVersion,
+  upgradeRequest: (request) => request,
   upgradeResponse: (response) => response,
 });
 
@@ -488,7 +511,7 @@ export const epicGetTaskContextsV13 = defineRpcContract({
   method: "epic.getTaskContexts",
   schemaVersion: { major: 1, minor: 3 } as const,
   requestSchema: getTaskContextsRequestSchema,
-  responseSchema: getTaskContextsResponseSchema,
+  responseSchema: getTaskContextsResponseSchemaPre14,
 });
 
 export const epicGetTaskContextsUpgradeV12ToV13 = defineUpgradePath<
@@ -502,6 +525,25 @@ export const epicGetTaskContextsUpgradeV12ToV13 = defineUpgradePath<
   // question, and absence already means "cloud or unknown" - which is the
   // reading that keeps the pin action enabled, so inventing an id list here
   // would be indistinguishable from the defect.
+  upgradeResponse: (response) => response,
+});
+
+// `@1.4` adds a sibling activity map. The `tasks` record value remains the
+// frozen @1.2 shape; a negotiated older peer strips the new sibling.
+export const epicGetTaskContextsV14 = defineRpcContract({
+  method: "epic.getTaskContexts",
+  schemaVersion: { major: 1, minor: 4 } as const,
+  requestSchema: getTaskContextsRequestSchema,
+  responseSchema: getTaskContextsResponseSchema,
+});
+
+export const epicGetTaskContextsUpgradeV13ToV14 = defineUpgradePath<
+  typeof epicGetTaskContextsV13,
+  typeof epicGetTaskContextsV14
+>({
+  from: epicGetTaskContextsV13.schemaVersion,
+  to: epicGetTaskContextsV14.schemaVersion,
+  upgradeRequest: (request) => request,
   upgradeResponse: (response) => response,
 });
 
@@ -1669,6 +1711,16 @@ export const epicGetChatRunSettingsBatchV10 = defineRpcContract({
 // `lane-unaries.ts` - the `tui-agent-records.ts` and `communication-graph.ts`
 // arrangement, not this file's. They are exported through the epic index, not
 // re-exported here, so `export *` consumers see exactly one binding.
+
+// A native subagent's conversation carried on as its own chat, through
+// session import (see `continueSubagentRequestSchema`). New method, first
+// minor: nothing released carries it, so there is nothing to upgrade from.
+export const epicContinueSubagentV10 = defineRpcContract({
+  method: "epic.continueSubagent",
+  schemaVersion: { major: 1, minor: 0 } as const,
+  requestSchema: continueSubagentRequestSchema,
+  responseSchema: continueSubagentResponseSchema,
+});
 
 export {
   epicSubscribeV10,

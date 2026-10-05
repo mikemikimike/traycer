@@ -43,6 +43,20 @@ bunx nx run @traycer-clients/traycer-cli:build
 | `clients/gui-app/`     | GUI renderer                                    |
 | `clients/desktop/`     | Electron shell                                  |
 
+## Config targets and releases
+
+Each client's `src/config.ts` holds the **dev** values in source. Release
+builds run that client's `scripts/set-deploy-target.cjs` to stamp staging or
+production values into the file, then restore it, so those values are never
+committed. The CLI's source config already trusts Traycer's production
+host-signing key, so a build from source verifies released hosts;
+`~/.traycer/cli/host-trusted-pubkeys` can add keys without a rebuild.
+
+Releases are built and signed in Traycer's internal repository and published
+to this repo's [Releases](https://github.com/traycerai/traycer/releases).
+Signing secrets never enter this repository, so you need no secrets to build
+or test the code here.
+
 ## Pre-commit hooks
 
 We use [pre-commit](https://pre-commit.com) for hygiene and local workspace
@@ -55,17 +69,30 @@ pipx install pre-commit   # or: brew install pre-commit
 pre-commit install
 ```
 
+If you installed the hooks before October 2026, run `pre-commit install` once
+more: it now also installs the `commit-msg` hook that checks the DCO sign-off,
+and for a maintainer pull request into `main` that hook is the only check of
+it.
+
 The hooks then run on every commit; run them on demand with
 `pre-commit run --all-files`. Tests are intentionally excluded from the hook
 and run as separate CI checks. Run a targeted test locally when it helps your
 development loop; the full suite does not need to run before each commit.
+
+## When CI runs
+
+A pull request from a fork runs every CI check, and so does a pull request
+from a bot or into any branch other than `main`. A pull request into `main`
+from a branch in this repository (maintainers') runs none, the protocol
+governance tripwire included: the full suite runs on the merged commit instead. Maintainers can test a branch before merging by
+running a workflow on it (`gh workflow run test.yml --ref <branch>`).
 
 ## Pull requests
 
 1. Fork and branch from `main`.
 2. Keep changes focused; add or update tests where it makes sense.
 3. Commit normally; pre-commit runs the affected static checks, and CI runs the
-   test suites separately.
+   test suites separately on your pull request.
 4. Open a PR with the template and link any related issue.
 
 ## Developer Certificate of Origin (DCO)

@@ -59,6 +59,12 @@ export const landingTerminalsKey = (identity: string | null): string =>
 export const surfaceHostSelectionKey = (identity: string | null): string =>
   scopedPersistKey("surface-host-selection", scopeBucket(identity));
 
+// Profile-copy operation handles started from this window (T6). Identity-scoped
+// like the pins above: a handle names an account's source host and operation,
+// and another account must never reopen - or see - a copy it did not start.
+export const profileCopyOperationsKey = (identity: string | null): string =>
+  scopedPersistKey("profile-copy-operations", scopeBucket(identity));
+
 // Arg order is `(identity, epicId)` but the emitted string keeps today's
 // `…:open-epic:{identityBucket}:{epicId}` order (the current store's local
 // `persistKey(epicId, userId)` emitted exactly this).
@@ -202,7 +208,7 @@ export interface PersistStoreEntry {
 }
 
 export const PERSIST_STORES = [
-  // ── Scoped zustand stores (10) ───────────────────────────────────────────
+  // ── Scoped zustand stores (11) ───────────────────────────────────────────
   {
     camelName: "composerRunSettings",
     leaf: "composer-run-settings",
@@ -233,6 +239,11 @@ export const PERSIST_STORES = [
   {
     camelName: "surfaceHostSelection",
     leaf: "surface-host-selection",
+    kind: "scoped",
+  },
+  {
+    camelName: "profileCopyOperations",
+    leaf: "profile-copy-operations",
     kind: "scoped",
   },
   {
@@ -339,6 +350,25 @@ export const PERSIST_STORES = [
   // display preferences, same tier as theme and font size, so machine-local
   // rather than identity-scoped.
   { camelName: "layout", leaf: "layout", kind: "static" },
+  // The layout editor's single-window lease: which window currently holds the
+  // editor open. Registered here, unlike the lease it replaces, so the
+  // module-load uniqueness assertion below can see it.
+  {
+    camelName: "layoutEditorLease",
+    leaf: "layout-editor-lease",
+    kind: "static",
+  },
+  // Where the layout inspector is docked (right, left or floating) and where
+  // a floating panel was last dragged to. Per device, like the layout itself.
+  { camelName: "layoutEditorDock", leaf: "layout-editor-dock", kind: "static" },
+  // The vertical tab strip's width and whether it is collapsed to a rail.
+  // Global across windows and kept outside the layout arrangement, so a drag
+  // of the handle is not a layout change.
+  { camelName: "sideTabStrip", leaf: "side-tab-strip", kind: "static" },
+  // When this device last sent the `layout_snapshot` analytics event. Read and
+  // written as one synchronous compare-and-set, so two windows launching
+  // together cannot both count the same device (L-54).
+  { camelName: "layoutSnapshot", leaf: "layout-snapshot", kind: "static" },
   // The one host every usage/resource surface READS
   // (`watch-host-store.ts`). Machine-local for the same reason the two picks
   // it replaces were: it names a machine to watch, not an account.
