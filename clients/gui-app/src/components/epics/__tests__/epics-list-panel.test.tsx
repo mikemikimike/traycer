@@ -35,6 +35,17 @@ vi.mock("@/hooks/notifications/use-host-notification-indicators-query", () => ({
   }),
 }));
 
+// Organization context is only present in tests that exercise its dialog.
+const organizationState = vi.hoisted(() => ({
+  value: null as {
+    readonly supported: boolean;
+    readonly userId: string | null;
+    readonly view: undefined;
+    readonly openDialog: (dialog: OrganizationDialog) => void;
+  } | null,
+  openDialog: vi.fn<(dialog: OrganizationDialog) => void>(),
+}));
+
 const pullToRefreshTest = vi.hoisted(() => ({
   onRefresh: null as (() => Promise<unknown>) | null,
 }));
@@ -333,7 +344,6 @@ vi.mock(
         isPending: false,
         mutate: testState.mutate,
       }),
-      usePendingDeleteEpicIds: () => testState.pendingDeleteEpicIds,
     };
   },
 );

@@ -597,7 +597,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
       const currentPendingDeleteEpicIds = readPendingDeleteEpicIds(queryClient);
       setSelectedIds(
         new Set(
-          withInProgressFirst(inProgress, loadedItems)
+          loadedItems
             .filter(
               (item) =>
                 canDeleteHistoryItem(item, cloudAuthorized) &&

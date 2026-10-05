@@ -100,7 +100,7 @@ export interface CloudEpicTasksQueryResult {
   /** Fetch every remaining cursor page for an explicit bulk-selection action. */
   readonly fetchAllPages: (
     signal: AbortSignal,
-  ) => Promise<readonly ListTaskLightPre15[] | null>;
+  ) => Promise<readonly ListTaskLight[] | null>;
   readonly hasNextPage: boolean;
   /** Rows remain even if their cursor is unusable or cloud access is refused. */
   readonly hasUnloadedItems: boolean;
@@ -646,9 +646,7 @@ export function useCloudEpicTasksQuery(
   ]);
 
   const fetchAllPages = useCallback(
-    async (
-      signal: AbortSignal,
-    ): Promise<readonly ListTaskLightPre15[] | null> => {
+    async (signal: AbortSignal): Promise<readonly ListTaskLight[] | null> => {
       if (
         isFetchingNextPage ||
         isPlaceholderData ||
@@ -746,7 +744,7 @@ export function useCloudEpicTasksQuery(
 
 function collectPageTasks(
   pages: readonly ListTasksResponse[],
-): readonly ListTaskLightPre15[] {
+): readonly ListTaskLight[] {
   const seen = new Set<string>();
   return pages
     .flatMap((page) => page.tasks)
