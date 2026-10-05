@@ -1,18 +1,21 @@
 import { defineRpcContract } from "../framework/index";
-import * as schemas from "./profile-sync-schemas";
+import * as schemas from "./profile-sync-link-schemas";
 
-export const PROFILE_SYNC_RPC_METHODS = {
-  "providers.profileCopy.sync.preview": {
+/** Profile sync: the app asks the source host for statuses and intent; the
+ * three `host.*` methods carry a sign-in between two linked hosts of one
+ * user and never answer an app. */
+export const PROFILE_SYNC_LINK_RPC_METHODS = {
+  "providers.profileSync.overview": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "providers.profileCopy.sync.preview",
+            method: "providers.profileSync.overview",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncSelectionSchema,
-            responseSchema: schemas.profileSyncPreviewSchema,
+            requestSchema: schemas.profileSyncOverviewRequestSchema,
+            responseSchema: schemas.profileSyncOverviewSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
@@ -20,17 +23,17 @@ export const PROFILE_SYNC_RPC_METHODS = {
       downgradePathsFromLatest: {},
     },
   },
-  "providers.profileCopy.sync.start": {
+  "providers.profileSync.syncNow": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "providers.profileCopy.sync.start",
+            method: "providers.profileSync.syncNow",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncStartSchema,
-            responseSchema: schemas.profileSyncBatchSchema,
+            requestSchema: schemas.profileSyncNowRequestSchema,
+            responseSchema: schemas.profileSyncOverviewSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
@@ -38,17 +41,17 @@ export const PROFILE_SYNC_RPC_METHODS = {
       downgradePathsFromLatest: {},
     },
   },
-  "providers.profileCopy.sync.list": {
+  "providers.profileSync.setKeepInSync": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "providers.profileCopy.sync.list",
+            method: "providers.profileSync.setKeepInSync",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncSourceRequestSchema,
-            responseSchema: schemas.profileSyncListSchema,
+            requestSchema: schemas.profileSyncKeepInSyncRequestSchema,
+            responseSchema: schemas.profileSyncOverviewSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
@@ -56,17 +59,17 @@ export const PROFILE_SYNC_RPC_METHODS = {
       downgradePathsFromLatest: {},
     },
   },
-  "providers.profileCopy.sync.saveRule": {
+  "providers.profileSync.acceptAccount": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "providers.profileCopy.sync.saveRule",
+            method: "providers.profileSync.acceptAccount",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncSaveRuleSchema,
-            responseSchema: schemas.profileSyncRuleSchema,
+            requestSchema: schemas.profileSyncAcceptAccountRequestSchema,
+            responseSchema: schemas.profileSyncOverviewSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
@@ -74,17 +77,17 @@ export const PROFILE_SYNC_RPC_METHODS = {
       downgradePathsFromLatest: {},
     },
   },
-  "providers.profileCopy.sync.stopRule": {
+  "host.profileSync.apply": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "providers.profileCopy.sync.stopRule",
+            method: "host.profileSync.apply",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncStopRuleSchema,
-            responseSchema: schemas.profileSyncListSchema,
+            requestSchema: schemas.hostProfileSyncApplyRequestSchema,
+            responseSchema: schemas.hostProfileSyncApplyResponseSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
@@ -92,17 +95,17 @@ export const PROFILE_SYNC_RPC_METHODS = {
       downgradePathsFromLatest: {},
     },
   },
-  "providers.profileCopy.sync.resolve": {
+  "host.profileSync.offerCredential": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "providers.profileCopy.sync.resolve",
+            method: "host.profileSync.offerCredential",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncResolveSchema,
-            responseSchema: schemas.profileSyncBatchSchema,
+            requestSchema: schemas.hostProfileSyncOfferRequestSchema,
+            responseSchema: schemas.hostProfileSyncOfferResponseSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
@@ -110,17 +113,17 @@ export const PROFILE_SYNC_RPC_METHODS = {
       downgradePathsFromLatest: {},
     },
   },
-  "host.profileCopy.applySync": {
+  "host.profileSync.fetchCredential": {
     degrade: { kind: "unsupported" },
     1: {
       latestMinor: 0,
       versions: {
         0: {
           contract: defineRpcContract({
-            method: "host.profileCopy.applySync",
+            method: "host.profileSync.fetchCredential",
             schemaVersion: { major: 1, minor: 0 },
-            requestSchema: schemas.profileSyncApplySchema,
-            responseSchema: schemas.profileSyncApplyResultSchema,
+            requestSchema: schemas.hostProfileSyncFetchRequestSchema,
+            responseSchema: schemas.hostProfileSyncFetchResponseSchema,
           }),
           upgradeFromPreviousVersion: null,
         },
