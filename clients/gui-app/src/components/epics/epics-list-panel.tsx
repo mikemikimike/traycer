@@ -135,6 +135,29 @@ const EMPTY_WORKTREES_BY_EPIC: ReadonlyMap<
   string,
   readonly WorktreeHostEntryV12[]
 > = new Map();
+interface SelectAllControllerSlot {
+  current: AbortController | null;
+}
+
+function abortSelectAllController(slot: SelectAllControllerSlot): void {
+  slot.current?.abort();
+  slot.current = null;
+}
+
+function setSelectAllController(
+  slot: SelectAllControllerSlot,
+  controller: AbortController,
+): void {
+  slot.current = controller;
+}
+
+function clearSelectAllController(
+  slot: SelectAllControllerSlot,
+  controller: AbortController,
+): void {
+  if (slot.current === controller) slot.current = null;
+}
+
 const VIEWER_DELETE_TOOLTIP = "Viewers cannot select task for deletion.";
 const NO_DELETE_PERMISSION_TOOLTIP =
   "You don't have permission to delete this task.";
@@ -391,8 +414,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   const refetchRef = useRef(refetch);
   const selectAllController = useRef<AbortController | null>(null);
   const abortSelectAll = useCallback(() => {
-    selectAllController.current?.abort();
-    selectAllController.current = null;
+    abortSelectAllController(selectAllController);
   }, []);
   useEffect(() => {
     refetchRef.current = refetch;
@@ -453,6 +475,9 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     () => abortSelectAll,
     [abortSelectAll, search, hostId, currentUserId],
   );
+  useEffect(() => {
+    if (isFetching) abortSelectAll();
+  }, [abortSelectAll, isFetching]);
   const [pendingDeleteIds, setPendingDeleteIds] =
     useState<ReadonlyArray<string> | null>(null);
   // Explicit user overrides of the per-worktree checkbox. Absent entries fall
@@ -552,6 +577,21 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   // candidate.
   const [sweepEpicIds, setSweepEpicIds] =
     useState<ReadonlyArray<string> | null>(null);
+  const previousScope = useRef({ search, hostId, currentUserId });
+  useEffect(() => {
+    if (
+      previousScope.current.search === search &&
+      previousScope.current.hostId === hostId &&
+      previousScope.current.currentUserId === currentUserId
+    )
+      return;
+    previousScope.current = { search, hostId, currentUserId };
+    abortSelectAll();
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+    closeDeleteDialog();
+    setSweepEpicIds(null);
+  }, [abortSelectAll, closeDeleteDialog, currentUserId, hostId, search]);
   const sweepHostClient = useHostClientForHostId(null);
   const requestSweep = useCallback(
     (epicId: string) => {
@@ -608,9 +648,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
       );
     },
     onSettled: (_data, _error, controller) => {
-      if (selectAllController.current === controller) {
-        selectAllController.current = null;
-      }
+      clearSelectAllController(selectAllController, controller);
     },
   });
   const selectAllPending = selectAllMutation.isPending;
@@ -686,7 +724,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
       return;
     }
     const controller = new AbortController();
-    selectAllController.current = controller;
+    setSelectAllController(selectAllController, controller);
     selectAll(controller);
   }, [
     selectAll,
@@ -838,9 +876,12 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
           canSelect:
             (selectableItemIds.length > 0 || hasUnloadedItems) &&
             (!hasUnloadedItems || hasNextPage) &&
-            ![isCountPending, cloudPagePending, isFetchingNextPage].some(
-              Boolean,
-            ),
+            ![
+              isFetching,
+              isCountPending,
+              cloudPagePending,
+              isFetchingNextPage,
+            ].some(Boolean),
           selectedCount,
           isSelectAllPending: selectAllPending,
           allVisibleSelected:
@@ -866,7 +907,9 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
       : {
           kind: "idle",
           canSelect:
-            selectableItemIds.length > 0 || (hasUnloadedItems && hasNextPage),
+            (selectableItemIds.length > 0 ||
+              (hasUnloadedItems && hasNextPage)) &&
+            !isFetching,
           onStart: enterSelectionMode,
         },
     sort: search.sort,

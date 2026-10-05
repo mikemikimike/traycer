@@ -273,6 +273,7 @@ const testState = vi.hoisted(() => ({
   hasUnloadedItems: undefined as boolean | undefined,
   isFetchingNextPage: false,
   hostId: "host-test" as string | null,
+  currentUserId: "user-test" as string | null,
   // The message-hit section's two inputs. A `null` client is the no-host-runtime
   // reading every case in this file predates, under which the section is not
   // mounted at all - so only the cases that set both see it.
@@ -321,6 +322,7 @@ vi.mock("@/hooks/home/use-history-query", () => ({
     cloudPagePending: testState.cloudPagePending,
     error: null,
     hostId: testState.hostId,
+    currentUserId: testState.currentUserId,
     refetch: testState.refetch,
     refetchTasks: testState.refetch,
     fetchNextPage: testState.fetchNextPage,
@@ -666,6 +668,7 @@ describe("<EpicsListPanel />", () => {
     testState.hasNextPage = false;
     testState.isFetchingNextPage = false;
     testState.hostId = "host-test";
+    testState.currentUserId = "user-test";
     testState.chatSearchClient = null;
     testState.chatSearchHits = { kind: "absent" };
     testState.activityByEpicId.clear();
@@ -3412,6 +3415,40 @@ describe("<EpicsListPanel />", () => {
     expect(testState.fetchAllItems.mock.calls[0]?.[0].aborted).toBe(true);
   });
 
+  it("aborts Select all when a history refresh starts", async () => {
+    testState.hasNextPage = true;
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    renderPanel("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+
+    testState.isFetching = true;
+    useAuthStore.setState({ status: "unverified" });
+    await waitFor(() =>
+      expect(testState.fetchAllItems.mock.calls[0]?.[0].aborted).toBe(true),
+    );
+
+    await act(async () => {
+      complete?.(testState.items);
+      await Promise.resolve();
+    });
+    useAuthStore.setState({ status: "signed-in" });
+    expect(
+      screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
+    ).toBe("false");
+  });
   it("keeps Select all available when only the loaded page is selected", async () => {
     testState.hasNextPage = true;
     renderPanel("page", "/");
@@ -3598,6 +3635,57 @@ describe("<EpicsListPanel />", () => {
     });
   });
 
+  it("allows selecting all when a later page contains the only deletable task", async () => {
+    const viewer = historyItem({
+      ownership: "shared",
+      permissionRole: "viewer",
+    });
+    const laterTask = historyItem({
+      id: "history-later-task",
+      epicId: "epic-later-task",
+      title: "Later deletable task",
+    });
+    testState.items = [viewer];
+    testState.hasNextPage = true;
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const view = renderPanelView("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Select all" }).matches(":disabled"),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+
+    testState.items = [viewer, laterTask];
+    testState.hasNextPage = false;
+    view.rerender(<RouterProvider router={view.router} />);
+    await act(async () => {
+      complete?.(testState.items);
+      await Promise.resolve();
+    });
+
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Select Open from landing" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(
+      screen
+        .getByRole("checkbox", { name: "Select Later deletable task" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
   it("disables history selection when every visible row is viewer-only", async () => {
     testState.items = [
       historyItem({
@@ -3616,6 +3704,84 @@ describe("<EpicsListPanel />", () => {
     );
   });
 
+  it.each(["search changes", "host changes", "user changes"])(
+    "closes an open delete target and clears its overrides when %s",
+    async (transition) => {
+      testState.worktreeCandidates = [
+        {
+          worktreePath: "/wt/proven",
+          repoLabel: "owner/repo",
+          branch: "feat/proven",
+          uncommittedCount: 0,
+          branchStatus: { ahead: 0, behind: 0, mergedIntoDefault: true },
+          ownerEpicIds: ["epic-from-history"],
+          provenRemovable: true,
+        },
+      ];
+      const view = renderPanelView("page", "/");
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Select history items" }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+      fireEvent.click(screen.getByTestId("epics-list-delete-selected"));
+      await screen.findByTestId("delete-tasks-worktree-cleanup");
+      const checkbox = screen.getByTestId("delete-tasks-worktree-checkbox");
+      expect(checkbox.getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(checkbox);
+      expect(checkbox.getAttribute("aria-checked")).toBe("false");
+
+      if (transition === "search changes") {
+        useHistorySearchStore.setState({
+          search: { ...DEFAULT_HISTORY_SEARCH, query: "new scope" },
+        });
+      } else if (transition === "host changes") {
+        testState.hostId = "another-host";
+        useAuthStore.setState({ status: "unverified" });
+      } else {
+        testState.currentUserId = "another-user";
+        useAuthStore.setState({ status: "unverified" });
+      }
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("delete-tasks-dialog")).toBeNull();
+        expect(
+          screen.queryByTestId("delete-tasks-worktree-checkbox"),
+        ).toBeNull();
+      });
+      expect(screen.queryByTestId("epics-list-delete-selected")).toBeNull();
+      expect(testState.mutate).not.toHaveBeenCalled();
+
+      useAuthStore.setState({ status: "signed-in" });
+      fireEvent.click(await screen.findByTestId("epics-list-row-delete"));
+      expect(
+        screen
+          .getByTestId("delete-tasks-worktree-checkbox")
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+    },
+  );
+
+  it("closes an open Sweep target when the current user changes", async () => {
+    testState.worktreesByEpicId = new Map([
+      ["epic-from-history", [historyWorktree()]],
+    ]);
+    const view = renderPanelView("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    fireEvent.click(screen.getByTestId("epics-list-sweep-selected"));
+    expect(screen.getByTestId("sweep-worktrees-dialog")).not.toBeNull();
+
+    testState.currentUserId = "another-user";
+    useAuthStore.setState({ status: "unverified" });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("sweep-worktrees-dialog")).toBeNull(),
+    );
+  });
   it("deletes selected history rows from selection mode", async () => {
     testState.items = [
       historyItem({}),
