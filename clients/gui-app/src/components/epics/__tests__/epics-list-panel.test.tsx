@@ -255,6 +255,7 @@ const testState = vi.hoisted(() => ({
   fetchAllItems:
     vi.fn<(signal: AbortSignal) => Promise<readonly HistoryItem[] | null>>(),
   hasNextPage: false,
+  hasUnloadedItems: undefined as boolean | undefined,
   isFetchingNextPage: false,
   hostId: "host-test" as string | null,
   // The message-hit section's two inputs. A `null` client is the no-host-runtime
@@ -308,6 +309,7 @@ vi.mock("@/hooks/home/use-history-query", () => ({
     refetch: testState.refetch,
     fetchNextPage: testState.fetchNextPage,
     fetchAllItems: testState.fetchAllItems,
+    hasUnloadedItems: testState.hasUnloadedItems ?? testState.hasNextPage,
     hasNextPage: testState.hasNextPage,
     isFetchingNextPage: testState.isFetchingNextPage,
   }),
@@ -634,6 +636,7 @@ describe("<EpicsListPanel />", () => {
     testState.refetch.mockReset();
     testState.fetchNextPage.mockReset();
     testState.fetchAllItems.mockReset();
+    testState.hasUnloadedItems = undefined;
     testState.hasNextPage = false;
     testState.isFetchingNextPage = false;
     testState.hostId = "host-test";
@@ -2912,18 +2915,21 @@ describe("<EpicsListPanel />", () => {
     expect(screen.getByRole("button", { name: "Select all" })).not.toBeNull();
   });
 
-  it("selects loaded local-home tasks when cloud authorization is unavailable", async () => {
+  it("disables Select all when retained cloud pages cannot be fetched", async () => {
     testState.items = [historyItem({ isLocalHome: true })];
-    testState.hasNextPage = true;
+    testState.hasUnloadedItems = true;
+    testState.hasNextPage = false;
     useAuthStore.setState({ status: "unverified" });
     renderPanel("page", "/");
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Select history items" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    const selectAll = screen.getByRole("button", { name: "Select all" });
+    expect(selectAll.matches(":disabled")).toBe(true);
 
     expect(testState.fetchAllItems).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("epics-list-row-select"));
     expect(
       screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
     ).toBe("true");

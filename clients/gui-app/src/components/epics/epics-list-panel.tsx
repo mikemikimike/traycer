@@ -691,9 +691,10 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     )
       return;
     if (selectAllController.current !== null) return;
-    // Cloud tails are unavailable after authorization is withdrawn, while
-    // loaded local-home tasks remain selectable without a cloud request.
-    if (!hasUnloadedItems || !cloudAuthorized) {
+    // Bulk selection requires every retained page to be fetchable.
+    // Individual loaded rows remain selectable when paging is blocked.
+    if (hasUnloadedItems && !hasNextPage) return;
+    if (!hasUnloadedItems) {
       setSelectedIds(new Set(selectableItemIds));
       return;
     }
@@ -703,7 +704,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   }, [
     selectAll,
     hasUnloadedItems,
-    cloudAuthorized,
+    hasNextPage,
     isFetchingNextPage,
     isCountPending,
     cloudPagePending,
@@ -849,6 +850,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
           kind: "active",
           canSelect:
             (selectableItemIds.length > 0 || hasUnloadedItems) &&
+            (!hasUnloadedItems || hasNextPage) &&
             ![isCountPending, cloudPagePending, isFetchingNextPage].some(
               Boolean,
             ),
@@ -876,7 +878,8 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
         }
       : {
           kind: "idle",
-          canSelect: selectableItemIds.length > 0 || hasUnloadedItems,
+          canSelect:
+            selectableItemIds.length > 0 || (hasUnloadedItems && hasNextPage),
           onStart: enterSelectionMode,
         },
     sort: search.sort,
