@@ -402,6 +402,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
     cloudPagePending,
     isCountPending,
     currentUserId,
+    localContextMatchKey,
     activityRefreshScope,
   } = useHistoryQuery({
     search,
@@ -473,7 +474,7 @@ function EpicsListPanelBody(props: EpicsListPanelBodyProps): ReactNode {
   const [selectionMode, setSelectionMode] = useState(false);
   useEffect(
     () => abortSelectAll,
-    [abortSelectAll, search, hostId, currentUserId],
+    [abortSelectAll, search, hostId, currentUserId, localContextMatchKey],
   );
   useEffect(() => {
     if (isFetching) abortSelectAll();

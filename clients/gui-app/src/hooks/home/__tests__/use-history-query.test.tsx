@@ -341,6 +341,7 @@ describe("useHistoryQuery", () => {
         nowMs: Date.now(),
       }),
     );
+    expect(result.current.localContextMatchKey).toBe('["epic-alpha","local"]');
     const controller = new AbortController();
     await act(async () => {
       const items = await result.current.fetchAllItems(controller.signal);

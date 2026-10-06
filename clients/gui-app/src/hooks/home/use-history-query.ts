@@ -84,6 +84,8 @@ export interface UseHistoryQueryResult {
    * backfill), never an authorization to spend the cloud capability.
    */
   readonly currentUserId: string | null;
+  /** Stable identity for local worktree/PR matches captured by bulk fetches. */
+  readonly localContextMatchKey: string;
   /** Canonical request identity for scoped activity reconciliation. */
   readonly activityRefreshScope: string;
   refetch: () => Promise<unknown>;
@@ -503,6 +505,7 @@ export function useHistoryQuery(
       taskContexts.error,
     hostId,
     currentUserId,
+    localContextMatchKey: JSON.stringify(localTaskIds),
     activityRefreshScope,
     refetch,
     refetchTasks: refetchCloudTasks,

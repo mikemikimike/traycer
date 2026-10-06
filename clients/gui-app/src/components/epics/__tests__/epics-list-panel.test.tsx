@@ -274,6 +274,7 @@ const testState = vi.hoisted(() => ({
   isFetchingNextPage: false,
   hostId: "host-test" as string | null,
   currentUserId: "user-test" as string | null,
+  localContextMatchKey: "[]",
   // The message-hit section's two inputs. A `null` client is the no-host-runtime
   // reading every case in this file predates, under which the section is not
   // mounted at all - so only the cases that set both see it.
@@ -323,6 +324,7 @@ vi.mock("@/hooks/home/use-history-query", () => ({
     error: null,
     hostId: testState.hostId,
     currentUserId: testState.currentUserId,
+    localContextMatchKey: testState.localContextMatchKey,
     refetch: testState.refetch,
     refetchTasks: testState.refetch,
     fetchNextPage: testState.fetchNextPage,
@@ -669,6 +671,7 @@ describe("<EpicsListPanel />", () => {
     testState.isFetchingNextPage = false;
     testState.hostId = "host-test";
     testState.currentUserId = "user-test";
+    testState.localContextMatchKey = "[]";
     testState.chatSearchClient = null;
     testState.chatSearchHits = { kind: "absent" };
     testState.activityByEpicId.clear();
@@ -3516,6 +3519,52 @@ describe("<EpicsListPanel />", () => {
     expect(
       screen.getByTestId("epics-list-row-select").getAttribute("aria-checked"),
     ).toBe("false");
+  });
+
+  it("aborts Select all when local worktree matches change", async () => {
+    testState.hasNextPage = true;
+    let complete: ((items: readonly HistoryItem[]) => void) | undefined;
+    testState.fetchAllItems.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    renderPanelView("page", "/");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select history items" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+    await waitFor(() =>
+      expect(testState.fetchAllItems).toHaveBeenCalledTimes(1),
+    );
+
+    const firstItem = testState.items[0];
+    testState.items = [
+      firstItem,
+      historyItem({
+        id: "history-local-match",
+        epicId: "epic-local-match",
+        title: "New local worktree match",
+      }),
+    ];
+    testState.localContextMatchKey = '["epic-local-match"]';
+    act(() => useAuthStore.setState({ status: "unverified" }));
+
+    await waitFor(() =>
+      expect(testState.fetchAllItems.mock.calls[0]?.[0].aborted).toBe(true),
+    );
+    await act(async () => {
+      complete?.([firstItem]);
+      await Promise.resolve();
+    });
+    act(() => useAuthStore.setState({ status: "signed-in" }));
+    expect(
+      screen
+        .getAllByTestId("epics-list-row-select")
+        .every((checkbox) => checkbox.getAttribute("aria-checked") === "false"),
+    ).toBe(true);
   });
 
   it.each(["search changes", "unmount"])(
